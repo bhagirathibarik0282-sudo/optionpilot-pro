@@ -1,0 +1,12 @@
+{
+  "name": "optionpilot-pro",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.tsx"
+  },
+  "dependencies": {
+    "hono": "latest"
+  }
+}

@@ -4,9 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node index.tsx"
+    "start": "tsx server.ts"
   },
   "dependencies": {
-    "hono": "latest"
+    "@hono/node-server": "latest",
+    "hono": "latest",
+    "tsx": "latest"
   }
 }

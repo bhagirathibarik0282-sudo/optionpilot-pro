@@ -111,13 +111,19 @@ const INDEX_NAMES = {
   SENSEX: "SENSEX",
 };
 
+// Exchange codes for options
+const EXCHANGE_CODES = {
+  NIFTY: "NFO",
+  BANKNIFTY: "NFO",
+  SENSEX: "BFO",
+};
+
 // Strike gap for each index (NIFTY=50, others=100)
 const STRIKE_STEP = {
   NIFTY: 50,
   BANKNIFTY: 100,
   SENSEX: 100,
 };
-
 
 // Generate login URL
 function getKiteLoginUrl(): string {
@@ -490,7 +496,8 @@ async function fetchIndexData(
     baseMetrics.spot = spotQuote.last_price || 0;
     baseMetrics.pdh = spotQuote.ohlc?.high || spotQuote.last_price || 0;
     baseMetrics.pdl = spotQuote.ohlc?.low || spotQuote.last_price || 0;
- const strikeStep = STRIKE_STEP[symbol as keyof typeof STRIKE_STEP] || 100;
+
+    const strikeStep = STRIKE_STEP[symbol as keyof typeof STRIKE_STEP] || 100;
     baseMetrics.atmStrike = Math.round(baseMetrics.spot / strikeStep) * strikeStep;
 
     console.log(
@@ -540,7 +547,8 @@ async function fetchIndexData(
       console.log(`========== [${symbol}] END (ERROR) ==========\n`);
       return baseMetrics;
     }
-// Select current week, next week, and monthly expiries
+
+    // Select current week, next week, and monthly expiries
     const currentWeekExpiry = availableExpiries[0] || null;
     const nextWeekExpiry = availableExpiries[1] || null;
 
@@ -563,7 +571,7 @@ async function fetchIndexData(
       // Sensex has no monthly view (per Bhagirathi's spec)
       ...(symbol !== "SENSEX" ? { Monthly: monthlyExpiry } : {}),
     };
-    
+
     // Fetch option premiums for available expiries
     for (const [expiryName, expiryDate] of Object.entries(expiryMap)) {
       if (!expiryDate) {

@@ -111,12 +111,13 @@ const INDEX_NAMES = {
   SENSEX: "SENSEX",
 };
 
-// Exchange codes for options
-const EXCHANGE_CODES = {
-  NIFTY: "NFO",
-  BANKNIFTY: "NFO",
-  SENSEX: "BFO",
+// Strike gap for each index (NIFTY=50, others=100)
+const STRIKE_STEP = {
+  NIFTY: 50,
+  BANKNIFTY: 100,
+  SENSEX: 100,
 };
+
 
 // Generate login URL
 function getKiteLoginUrl(): string {
@@ -489,7 +490,8 @@ async function fetchIndexData(
     baseMetrics.spot = spotQuote.last_price || 0;
     baseMetrics.pdh = spotQuote.ohlc?.high || spotQuote.last_price || 0;
     baseMetrics.pdl = spotQuote.ohlc?.low || spotQuote.last_price || 0;
-    baseMetrics.atmStrike = Math.round(baseMetrics.spot / 100) * 100;
+ const strikeStep = STRIKE_STEP[symbol as keyof typeof STRIKE_STEP] || 100;
+    baseMetrics.atmStrike = Math.round(baseMetrics.spot / strikeStep) * strikeStep;
 
     console.log(
       `[${symbol}] Spot: ${baseMetrics.current}, ATM Strike: ${baseMetrics.atmStrike}`
@@ -538,14 +540,30 @@ async function fetchIndexData(
       console.log(`========== [${symbol}] END (ERROR) ==========\n`);
       return baseMetrics;
     }
+// Select current week, next week, and monthly expiries
+    const currentWeekExpiry = availableExpiries[0] || null;
+    const nextWeekExpiry = availableExpiries[1] || null;
 
-    // Select current week, next week, and monthly expiries
+    // "Monthly" = the last expiry within the current week's calendar month
+    let monthlyExpiry: string | null = null;
+    if (currentWeekExpiry) {
+      const currentMonth = currentWeekExpiry.slice(0, 7); // "YYYY-MM"
+      const sameMonthExpiries = availableExpiries.filter((e) => e.startsWith(currentMonth));
+      monthlyExpiry = sameMonthExpiries[sameMonthExpiries.length - 1] || null;
+    }
+
+    // If current week's expiry IS the monthly expiry, don't show it twice
+    if (monthlyExpiry === currentWeekExpiry) {
+      monthlyExpiry = null;
+    }
+
     const expiryMap: Record<string, string | null> = {
-      "Current Week": availableExpiries[0] || null,
-      "Next Week": availableExpiries[1] || null,
-      "Monthly": availableExpiries[availableExpiries.length - 1] || null,
+      "Current Week": currentWeekExpiry,
+      "Next Week": nextWeekExpiry,
+      // Sensex has no monthly view (per Bhagirathi's spec)
+      ...(symbol !== "SENSEX" ? { Monthly: monthlyExpiry } : {}),
     };
-
+    
     // Fetch option premiums for available expiries
     for (const [expiryName, expiryDate] of Object.entries(expiryMap)) {
       if (!expiryDate) {

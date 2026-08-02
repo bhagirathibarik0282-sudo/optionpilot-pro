@@ -41,6 +41,22 @@ interface PremiumData {
   pdc: number; // previous day close (Kite's ohlc.close)
 }
 
+interface GapScoreComponents {
+  gapDirection: -1 | 0 | 1;
+  vwapPosition: -1 | 0 | 1;
+  pdhPdlStatus: -1 | 0 | 1;
+  oiTilt: -1 | 0 | 1;
+  sectorBreadth: -1 | 0 | 1;
+}
+
+interface GapScore {
+  score: number; // -100..100
+  verdict: "Continuation" | "Fade Risk" | "Sideways";
+  trend: "Strengthening" | "Weakening" | "Flat";
+  fullChainPcr: number | null;
+  components: GapScoreComponents;
+}
+
 interface IndexMetrics {
   symbol: string;
   current: number;
@@ -59,6 +75,8 @@ interface IndexMetrics {
   volumePcr: number | null;
   vwapSource: string;
   signal: "BUY" | "SELL" | "WAIT";
+  futuresVwapBias: "UP" | "DOWN" | "UNKNOWN";
+  gapScore?: GapScore;
   expiries: ExpiryData[];
   error?: string;
   timestamp?: string;
@@ -79,6 +97,7 @@ interface KiteSession {
     BANKNIFTY?: { spot: number; pcr: number | null };
     SENSEX?: { spot: number; pcr: number | null };
   }>;
+  gapScoreHistory?: Record<string, number[]>; // symbol -> recent scores, most recent last
 }
 
 // In-memory session store (use Redis in production)
@@ -343,10 +362,11 @@ interface OptionChainStats {
   oiPcr: number | null;
   volumePcr: number | null;
   maxPain: number;
+  fullChainPcr: number | null;
 }
 
-// OI PCR and Volume PCR use ATM ±7 strikes. Max Pain uses every quoted strike
-// available for the selected expiry and minimizes aggregate option-writer payout.
+// OI PCR and Volume PCR use ATM ±7 strikes. Max Pain and full-chain PCR use
+// every quoted strike available for the selected expiry.
 async function fetchOptionChainStats(
   accessToken: string,
   optionMap: Map<string, Instrument>,
@@ -368,10 +388,10 @@ async function fetchOptionChainStats(
 
   const allInstruments = Array.from(optionMap.values());
   const allSymbols = allInstruments.map((inst) => `${optExchange}:${inst.tradingsymbol}`);
-  if (allSymbols.length === 0) return { oiPcr: null, volumePcr: null, maxPain: 0 };
+  if (allSymbols.length === 0) return { oiPcr: null, volumePcr: null, maxPain: 0, fullChainPcr: null };
 
   const quotes = await fetchKiteQuoteBatched(accessToken, allSymbols);
-  if (!quotes) return { oiPcr: null, volumePcr: null, maxPain: 0 };
+  if (!quotes) return { oiPcr: null, volumePcr: null, maxPain: 0, fullChainPcr: null };
 
   let totalCallOI = 0;
   let totalPutOI = 0;
@@ -384,6 +404,17 @@ async function fetchOptionChainStats(
   for (const s of bandPeSymbols) {
     totalPutOI += quotes[s]?.oi || 0;
     totalPutVolume += quotes[s]?.volume || 0;
+  }
+
+  // Full-chain OI PCR: every strike on this expiry, not just the ATM band.
+  let fullChainCallOI = 0;
+  let fullChainPutOI = 0;
+  for (const inst of allInstruments) {
+    const q = quotes[`${optExchange}:${inst.tradingsymbol}`];
+    const oi = q?.oi || 0;
+    if (!oi) continue;
+    if (inst.instrument_type === "CE") fullChainCallOI += oi;
+    else if (inst.instrument_type === "PE") fullChainPutOI += oi;
   }
 
   const strikes = Array.from(new Set(allInstruments.map((inst) => inst.strike))).sort(
@@ -413,6 +444,7 @@ async function fetchOptionChainStats(
     oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : null,
     volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : null,
     maxPain,
+    fullChainPcr: fullChainCallOI > 0 ? fullChainPutOI / fullChainCallOI : null,
   };
 }
 
@@ -948,6 +980,99 @@ async function fetchCommodityData(
   }
 }
 
+// ============== SECTOR BREADTH (used by Gap Confirmation Score) ==============
+// Live % change for the same sector universe used by /api/sectors, reused
+// here so the Gap Score can factor in how broad-based the market move is.
+const BREADTH_SYMBOLS: Record<string, string> = {
+  "Nifty PSU Bank": "NSE:NIFTY PSU BANK",
+  "Nifty Smallcap 100": "NSE:NIFTY SMLCAP 100",
+  "Nifty Midcap 100": "NSE:NIFTY MIDCAP 100",
+  "Nifty IT": "NSE:NIFTY IT",
+  "Nifty Oil & Gas": "NSE:NIFTY OIL AND GAS",
+  "Nifty Financial Services": "NSE:NIFTY FIN SERVICE",
+  "Nifty Auto": "NSE:NIFTY AUTO",
+  "Nifty FMCG": "NSE:NIFTY FMCG",
+};
+
+async function fetchSectorBreadthPct(accessToken: string): Promise<number | null> {
+  try {
+    const symbols = Object.values(BREADTH_SYMBOLS);
+    const quotes = await fetchKiteQuote(accessToken, symbols);
+    if (!quotes) return null;
+    let green = 0;
+    let counted = 0;
+    for (const sym of symbols) {
+      const q = quotes[sym];
+      if (!q || !q.ohlc?.close) continue;
+      counted++;
+      const pct = ((q.last_price - q.ohlc.close) / q.ohlc.close) * 100;
+      if (pct >= 0) green++;
+    }
+    if (counted === 0) return null;
+    return (green / counted) * 100;
+  } catch (err) {
+    console.error("[BREADTH] Sector breadth error:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+// ============== GAP CONFIRMATION SCORE ==============
+// Combines: gap direction (change vs prev close, proxy for opening-range
+// breakout since we don't separately capture today's open), VWAP position,
+// PDH/PDL reclaim/break status, full-chain OI PCR tilt, and sector breadth.
+// Each component contributes -1 / 0 / +1; the sum is scaled to -100..100.
+function computeGapScore(
+  metrics: IndexMetrics,
+  fullChainPcr: number | null,
+  sectorBreadthPct: number | null,
+  previousScore: number | undefined
+): GapScore {
+  const gapDirection: -1 | 0 | 1 =
+    metrics.changePercent > 0.15 ? 1 : metrics.changePercent < -0.15 ? -1 : 0;
+
+  const vwapPosition: -1 | 0 | 1 =
+    metrics.vwap > 0 && metrics.current > metrics.vwap
+      ? 1
+      : metrics.vwap > 0 && metrics.current < metrics.vwap
+        ? -1
+        : 0;
+
+  const pdhPdlStatus: -1 | 0 | 1 =
+    metrics.signal === "BUY" ? 1 : metrics.signal === "SELL" ? -1 : 0;
+
+  const oiTilt: -1 | 0 | 1 =
+    fullChainPcr != null ? (fullChainPcr > 1.1 ? 1 : fullChainPcr < 0.85 ? -1 : 0) : 0;
+
+  const sectorBreadth: -1 | 0 | 1 =
+    sectorBreadthPct != null ? (sectorBreadthPct >= 60 ? 1 : sectorBreadthPct <= 40 ? -1 : 0) : 0;
+
+  const sum = gapDirection + vwapPosition + pdhPdlStatus + oiTilt + sectorBreadth;
+  const score = Math.round((sum / 5) * 100);
+
+  let verdict: GapScore["verdict"] = "Sideways";
+  if (gapDirection !== 0 && Math.sign(sum) === gapDirection && Math.abs(sum) >= 2) {
+    verdict = "Continuation";
+  } else if (gapDirection !== 0 && Math.sign(sum) !== 0 && Math.sign(sum) !== gapDirection) {
+    verdict = "Fade Risk";
+  } else if (gapDirection === 0 && Math.abs(sum) < 2) {
+    verdict = "Sideways";
+  }
+
+  let trend: GapScore["trend"] = "Flat";
+  if (previousScore != null) {
+    if (score > previousScore + 5) trend = "Strengthening";
+    else if (score < previousScore - 5) trend = "Weakening";
+  }
+
+  return {
+    score,
+    verdict,
+    trend,
+    fullChainPcr,
+    components: { gapDirection, vwapPosition, pdhPdlStatus, oiTilt, sectorBreadth },
+  };
+}
+
 // Fetch all index data from Kite
 async function fetchIndexData(
   accessToken: string,
@@ -972,6 +1097,7 @@ async function fetchIndexData(
     volumePcr: null,
     vwapSource: "Unavailable",
     signal: "WAIT",
+    futuresVwapBias: "UNKNOWN",
     expiries: [],
     timestamp,
   };
@@ -1074,6 +1200,7 @@ async function fetchIndexData(
               : "UNKNOWN";
       }
     }
+    baseMetrics.futuresVwapBias = futuresVwapBias;
 
     if (
       baseMetrics.pdh > 0 &&
@@ -1122,7 +1249,9 @@ async function fetchIndexData(
     };
 
     // PCR from real Kite OI: total Put OI / total Call OI across a strike
-    // band around ATM, on the current-week expiry.
+    // band around ATM, on the current-week expiry. Also captures full-chain
+    // PCR (every strike) for the Gap Confirmation Score.
+    let fullChainPcr: number | null = null;
     if (currentWeekExpiry) {
       try {
         const optionMap = buildOptionMap(instruments, symbol, currentWeekExpiry);
@@ -1137,12 +1266,22 @@ async function fetchIndexData(
         baseMetrics.pcr = chainStats.oiPcr;
         baseMetrics.volumePcr = chainStats.volumePcr;
         baseMetrics.maxPain = chainStats.maxPain;
+        fullChainPcr = chainStats.fullChainPcr;
         console.log(
-          `[${symbol}] OI PCR: ${baseMetrics.pcr}, Volume PCR: ${baseMetrics.volumePcr}, Max Pain: ${baseMetrics.maxPain}`
+          `[${symbol}] OI PCR: ${baseMetrics.pcr}, Volume PCR: ${baseMetrics.volumePcr}, Max Pain: ${baseMetrics.maxPain}, Full-chain PCR: ${fullChainPcr}`
         );
       } catch (err) {
         console.error(`[${symbol}] PCR calc error:`, err instanceof Error ? err.message : err);
       }
+    }
+
+    // Sector breadth for the Gap Confirmation Score (shared computation, kept
+    // local to this function's scope so callers don't need extra plumbing).
+    let sectorBreadthPct: number | null = null;
+    try {
+      sectorBreadthPct = await fetchSectorBreadthPct(accessToken);
+    } catch (err) {
+      console.error(`[${symbol}] Sector breadth error:`, err instanceof Error ? err.message : err);
     }
 
     // Fetch option premiums for available expiries
@@ -1277,6 +1416,11 @@ async function fetchIndexData(
       baseMetrics.expiries.push(expiry);
     }
 
+    // Attach Gap Confirmation Score last, once all inputs are known. Trend is
+    // filled in by the caller (refreshMarketSnapshot), which has access to
+    // the session's score history.
+    baseMetrics.gapScore = computeGapScore(baseMetrics, fullChainPcr, sectorBreadthPct, undefined);
+
     console.log(
       `[${symbol}] Successfully fetched data with ${baseMetrics.expiries.length} expiries`
     );
@@ -1332,6 +1476,25 @@ async function refreshMarketSnapshot(
       BANKNIFTY: results[1],
       SENSEX: results[2],
     };
+
+    // Fill in Gap Score trend using this session's score history, then
+    // record the new scores for next time.
+    session.gapScoreHistory ||= {};
+    for (const sym of Object.keys(snapshot)) {
+      const m = snapshot[sym];
+      if (!m.gapScore) continue;
+      const hist = session.gapScoreHistory[sym] || [];
+      const previousScore = hist.length > 0 ? hist[hist.length - 1] : undefined;
+      if (previousScore != null) {
+        if (m.gapScore.score > previousScore + 5) m.gapScore.trend = "Strengthening";
+        else if (m.gapScore.score < previousScore - 5) m.gapScore.trend = "Weakening";
+        else m.gapScore.trend = "Flat";
+      }
+      hist.push(m.gapScore.score);
+      if (hist.length > 50) hist.shift();
+      session.gapScoreHistory[sym] = hist;
+    }
+
     session.marketSnapshot = snapshot;
     session.snapshotTime = Date.now();
     session.snapshotHistory ||= [];
@@ -1916,6 +2079,58 @@ app.get("/", (c) => {
       margin-left: 10px;
       font-family: var(--font-mono);
     }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-weight: 700;
+      font-family: var(--font-display);
+      font-size: 0.85rem;
+    }
+
+    .gap-score-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 20px;
+    }
+
+    .gap-score-bar-track {
+      width: 100%;
+      height: 10px;
+      border-radius: 6px;
+      background: var(--panel-alt);
+      overflow: hidden;
+      margin: 10px 0;
+      position: relative;
+    }
+
+    .gap-score-bar-fill {
+      height: 100%;
+      border-radius: 6px;
+      transition: width 0.3s ease;
+    }
+
+    .gap-score-components {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .gap-score-chip {
+      font-size: 0.7rem;
+      font-family: var(--font-mono);
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -2201,6 +2416,24 @@ app.get("/", (c) => {
       }
     }
 
+    // Find the intraday swing-low and swing-high points in a PCR history
+    // array, and the % change from each of those points to the latest value.
+    function computePcrSwing(hist) {
+      if (!hist || hist.length === 0) return null;
+      let lowIdx = 0;
+      let highIdx = 0;
+      for (let i = 1; i < hist.length; i++) {
+        if (hist[i].pcr < hist[lowIdx].pcr) lowIdx = i;
+        if (hist[i].pcr > hist[highIdx].pcr) highIdx = i;
+      }
+      const current = hist[hist.length - 1];
+      const low = hist[lowIdx];
+      const high = hist[highIdx];
+      const fromLowPct = low.pcr !== 0 ? ((current.pcr - low.pcr) / low.pcr) * 100 : null;
+      const fromHighPct = high.pcr !== 0 ? ((current.pcr - high.pcr) / high.pcr) * 100 : null;
+      return { low, high, lowIdx, highIdx, current, fromLowPct, fromHighPct };
+    }
+
     function drawPcrChart(symbol) {
       const canvas = document.getElementById('chart-' + symbol);
       if (!canvas || typeof Chart === 'undefined') return;
@@ -2215,6 +2448,15 @@ app.get("/", (c) => {
       const labels = hist.map(p => p.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       const spotData = hist.map(p => p.spot);
       const pcrData = hist.map(p => p.pcr);
+
+      const swing = computePcrSwing(hist);
+      const pointRadius = hist.map((_, i) => (swing && (i === swing.lowIdx || i === swing.highIdx)) ? 6 : 0);
+      const pointBackgroundColor = hist.map((_, i) => {
+        if (!swing) return 'transparent';
+        if (i === swing.lowIdx) return '#E5484D';
+        if (i === swing.highIdx) return '#22B26B';
+        return 'transparent';
+      });
 
       pcrCharts[symbol] = new Chart(canvas.getContext('2d'), {
         type: 'line',
@@ -2233,13 +2475,15 @@ app.get("/", (c) => {
               fill: true,
             },
             {
-              label: 'PCR',
+              label: 'PCR (● low ● high)',
               data: pcrData,
               borderColor: '#5B8DEF',
               backgroundColor: 'transparent',
               yAxisID: 'yPcr',
               tension: 0.3,
-              pointRadius: 0,
+              pointRadius: pointRadius,
+              pointBackgroundColor: pointBackgroundColor,
+              pointBorderColor: pointBackgroundColor,
               borderWidth: 1.5,
               borderDash: [4, 3],
             },
@@ -2274,6 +2518,90 @@ app.get("/", (c) => {
           },
         },
       });
+    }
+
+    function renderPcrSwingSummary(symbol) {
+      const hist = pcrHistory[symbol];
+      const swing = computePcrSwing(hist);
+      if (!swing) return '';
+
+      const lowTime = swing.low.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const highTime = swing.high.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const lowArrow = swing.fromLowPct != null && swing.fromLowPct >= 0 ? '▲' : '▼';
+      const highArrow = swing.fromHighPct != null && swing.fromHighPct >= 0 ? '▲' : '▼';
+
+      let html = '<div class="premium-card" style="margin-bottom:20px;">';
+      html += '<div class="card-title">PCR Swing Low / Swing High Tracker (today)</div>';
+      html += '<div class="card-row">';
+
+      html += '<div class="card-item" style="flex-direction:column; align-items:flex-start; gap:4px; background: rgba(229,72,77,0.08); border: 1px solid var(--red); border-radius: 8px; padding: 8px 10px;">';
+      html += '<span class="card-label">Swing Low (' + lowTime + ')</span>';
+      html += '<span class="card-value" style="font-size:1rem;">' + swing.low.pcr.toFixed(3) + '</span>';
+      html += '<span style="color: ' + (swing.fromLowPct != null && swing.fromLowPct >= 0 ? 'var(--green)' : 'var(--red)') + '; font-family: var(--font-mono); font-size:0.75rem;">' + lowArrow + ' ' + (swing.fromLowPct != null ? (swing.fromLowPct >= 0 ? '+' : '') + swing.fromLowPct.toFixed(1) + '% since low' : 'N/A') + '</span>';
+      html += '</div>';
+
+      html += '<div class="card-item" style="flex-direction:column; align-items:flex-start; gap:4px; background: rgba(34,178,107,0.08); border: 1px solid var(--green); border-radius: 8px; padding: 8px 10px;">';
+      html += '<span class="card-label">Swing High (' + highTime + ')</span>';
+      html += '<span class="card-value" style="font-size:1rem;">' + swing.high.pcr.toFixed(3) + '</span>';
+      html += '<span style="color: ' + (swing.fromHighPct != null && swing.fromHighPct >= 0 ? 'var(--green)' : 'var(--red)') + '; font-family: var(--font-mono); font-size:0.75rem;">' + highArrow + ' ' + (swing.fromHighPct != null ? (swing.fromHighPct >= 0 ? '+' : '') + swing.fromHighPct.toFixed(1) + '% since high' : 'N/A') + '</span>';
+      html += '</div>';
+
+      html += '</div></div>';
+      return html;
+    }
+
+    function renderGapScoreCard(indexData) {
+      const gs = indexData && indexData.gapScore;
+      if (!gs) return '';
+
+      const verdictColor = gs.verdict === 'Continuation' ? 'var(--green)' : gs.verdict === 'Fade Risk' ? 'var(--red)' : 'var(--muted)';
+      const barPct = Math.max(0, Math.min(100, (gs.score + 100) / 2));
+      const trendArrow = gs.trend === 'Strengthening' ? '▲' : gs.trend === 'Weakening' ? '▼' : '●';
+      const trendColor = gs.trend === 'Strengthening' ? 'var(--green)' : gs.trend === 'Weakening' ? 'var(--red)' : 'var(--muted)';
+
+      function chip(label, val) {
+        const color = val > 0 ? 'var(--green)' : val < 0 ? 'var(--red)' : 'var(--muted)';
+        const arrow = val > 0 ? '▲' : val < 0 ? '▼' : '●';
+        return '<div class="gap-score-chip"><div style="color:var(--muted-dim); margin-bottom:3px;">' + label + '</div><div style="color:' + color + '; font-weight:700;">' + arrow + '</div></div>';
+      }
+
+      let html = '<div class="gap-score-card">';
+      html += '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">';
+      html += '<div class="card-title" style="margin-bottom:0;">Gap Confirmation Score</div>';
+      html += '<span class="badge-pill" style="background: rgba(0,0,0,0.2); color:' + verdictColor + ';">' + gs.verdict + '</span>';
+      html += '</div>';
+
+      html += '<div class="gap-score-bar-track"><div class="gap-score-bar-fill" style="width:' + barPct + '%; background:' + verdictColor + ';"></div></div>';
+
+      html += '<div style="display:flex; justify-content:space-between; font-family: var(--font-mono); font-size:0.8rem; color: var(--muted);">';
+      html += '<span>Score: <span style="color:' + verdictColor + '; font-weight:700;">' + gs.score + '</span></span>';
+      html += '<span>Trend: <span style="color:' + trendColor + '; font-weight:700;">' + trendArrow + ' ' + gs.trend + '</span></span>';
+      html += '<span>Full-chain PCR: <span style="color: var(--text); font-weight:700;">' + (gs.fullChainPcr != null ? gs.fullChainPcr.toFixed(3) : 'N/A') + '</span></span>';
+      html += '</div>';
+
+      html += '<div class="gap-score-components">';
+      html += chip('Gap Dir.', gs.components.gapDirection);
+      html += chip('VWAP', gs.components.vwapPosition);
+      html += chip('PDH/PDL', gs.components.pdhPdlStatus);
+      html += chip('OI Tilt', gs.components.oiTilt);
+      html += chip('Breadth', gs.components.sectorBreadth);
+      html += '</div>';
+      html += '</div>';
+      return html;
+    }
+
+    function renderAlignmentBadge() {
+      if (!data || !data.NIFTY || !data.BANKNIFTY) return '';
+      const n = data.NIFTY.futuresVwapBias;
+      const b = data.BANKNIFTY.futuresVwapBias;
+      if (!n || !b || n === 'UNKNOWN' || b === 'UNKNOWN') {
+        return '<div style="margin-bottom:16px;"><span class="badge-pill" style="background: rgba(124,138,165,0.14); color: var(--muted);">⏳ Alignment: Waiting for VWAP data</span></div>';
+      }
+      if (n === b) {
+        const bull = n === 'UP';
+        return '<div style="margin-bottom:16px;"><span class="badge-pill" style="background: ' + (bull ? 'rgba(34,178,107,0.14)' : 'rgba(229,72,77,0.14)') + '; color: ' + (bull ? 'var(--green)' : 'var(--red)') + ';">' + (bull ? '✓ Aligned Bullish' : '✓ Aligned Bearish') + ' — NIFTY &amp; BANKNIFTY futures agree</span></div>';
+      }
+      return '<div style="margin-bottom:16px;"><span class="badge-pill" style="background: rgba(201,162,39,0.14); color: var(--gold);">⚠ Diverging — Caution (NIFTY ' + n + ' / BANKNIFTY ' + b + ')</span></div>';
     }
 
     function updateUI() {
@@ -2322,6 +2650,13 @@ app.get("/", (c) => {
       const tickKey = indexData.symbol + '-' + Date.now();
 
       let html = '<div style="margin-bottom:12px;">' + renderSignalBadge(indexData.signal) + '</div>';
+
+      if (indexData.symbol === 'NIFTY' || indexData.symbol === 'BANKNIFTY') {
+        html += renderAlignmentBadge();
+      }
+
+      html += renderGapScoreCard(indexData);
+
       html += '<div class="metrics-grid">';
       html += '<div class="metric-card"><div class="metric-label">Current Price</div>';
       html += '<div class="metric-value">' + (indexData.current ? indexData.current.toFixed(2) : 'N/A') +
@@ -2378,6 +2713,8 @@ app.get("/", (c) => {
       html += '<div class="card-title">Spot vs PCR — Intraday (this session)</div>';
       html += '<canvas id="chart-' + indexData.symbol + '" height="130"></canvas>';
       html += '</div>';
+
+      html += renderPcrSwingSummary(indexData.symbol);
 
       if (indexData.expiries && indexData.expiries.length > 0) {
         for (let i = 0; i < indexData.expiries.length; i++) {
@@ -2586,6 +2923,8 @@ app.get("/", (c) => {
         return '<div class="loading">Loading swing tracker...</div>';
       }
 
+      let html = renderAlignmentBadge();
+
       const symbols = ['NIFTY', 'BANKNIFTY', 'SENSEX'];
       const watchExpiries = ['Next Expiry', 'Next of Next Expiry', 'Monthly'];
       const rows = [];
@@ -2622,10 +2961,10 @@ app.get("/", (c) => {
       });
 
       if (rows.length === 0) {
-        return '<div class="loading">No swing data yet — waiting for expiries to load.</div>';
+        return html + '<div class="loading">No swing data yet — waiting for expiries to load.</div>';
       }
 
-      let html = '<div class="premium-card">';
+      html += '<div class="premium-card">';
       html += '<div class="card-title">Swing Tracker — ATM Premiums Continuously Closing Up From PDL, Above PDC</div>';
       html += '<div class="table-scroll"><table style="width:100%; min-width:840px; font-family: var(--font-mono); font-size: 0.72rem; border-collapse: collapse;">';
       html += '<thead><tr style="color: var(--muted-dim);">' +

@@ -3481,8 +3481,8 @@ app.get("/", (c) => {
       html += '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">';
       html += '<div class="card-title" style="margin-bottom:0;">🚦 NIFTY Weekly Expiry Sentiment Board</div>';
       html += '<div class="toggle-btn-group">';
-      html += '<button class="' + (sentimentSide === 'CE' ? 'active' : '') + '" onclick="toggleSentimentSide(\'CE\')">CE</button>';
-      html += '<button class="' + (sentimentSide === 'PE' ? 'active' : '') + '" onclick="toggleSentimentSide(\'PE\')">PE</button>';
+      html += '<button class="' + (sentimentSide === 'CE' ? 'active' : '') + '" onclick="toggleSentimentSide(\\'CE\\')">CE</button>';
+      html += '<button class="' + (sentimentSide === 'PE' ? 'active' : '') + '" onclick="toggleSentimentSide(\\'PE\\')">PE</button>';
       html += '</div>';
       html += '</div>';
 

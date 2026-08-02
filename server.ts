@@ -2909,6 +2909,37 @@ app.get("/", (c) => {
       return currentOi > prev ? { arrow: '▲', cls: 'up' } : { arrow: '▼', cls: 'down' };
     }
 
+    // Tracks the last-seen LTP per strike (same key scheme as lastOi) so we
+    // can classify OI buildup type (needs both price direction and OI direction).
+    const lastStrikePrice = {};
+
+    function priceDirection(key, currentPrice) {
+      const prev = lastStrikePrice[key];
+      lastStrikePrice[key] = currentPrice;
+      if (prev == null || currentPrice === prev) return 'flat';
+      return currentPrice > prev ? 'up' : 'down';
+    }
+
+    // Classic OI-buildup classification, used to generate a per-strike
+    // BUY/SELL/WAIT verdict: Long Buildup (price up + OI up) = fresh buying,
+    // Short Buildup (price down + OI up) = fresh selling, OI down in either
+    // direction = covering/unwinding = weak/no-buildup signal.
+    function classifyBuildup(priceDir, oiDir) {
+      if (priceDir === 'up' && oiDir === 'up') {
+        return { label: 'Long Buildup', verdict: 'BUY', color: 'var(--green)' };
+      }
+      if (priceDir === 'down' && oiDir === 'up') {
+        return { label: 'Short Buildup', verdict: 'SELL', color: 'var(--red)' };
+      }
+      if (oiDir === 'down' && priceDir === 'up') {
+        return { label: 'Short Covering', verdict: 'WAIT', color: 'var(--muted)' };
+      }
+      if (oiDir === 'down' && priceDir === 'down') {
+        return { label: 'Long Unwinding', verdict: 'WAIT', color: 'var(--muted)' };
+      }
+      return { label: 'No Data Yet', verdict: 'WAIT', color: 'var(--muted-dim)' };
+    }
+
     function renderStrikeBand(title, strikes, errorMsg, keyPrefix) {
       let html = '<div class="premium-card">';
       html += '<div class="card-title">' + title + '</div>';
@@ -2919,7 +2950,7 @@ app.get("/", (c) => {
         return html;
       }
 
-      html += '<div class="table-scroll"><table style="width:100%; min-width:560px; font-family: var(--font-mono); font-size: 0.7rem; border-collapse: collapse;">';
+      html += '<div class="table-scroll"><table style="width:100%; min-width:700px; font-family: var(--font-mono); font-size: 0.7rem; border-collapse: collapse;">';
       html += '<thead><tr style="color: var(--muted-dim);">' +
         '<th style="text-align:left; padding: 3px 2px;">Strike</th>' +
         '<th style="text-align:right; padding: 3px 2px;">LTP</th>' +
@@ -2928,13 +2959,16 @@ app.get("/", (c) => {
         '<th style="text-align:right; padding: 3px 2px;">Day L</th>' +
         '<th style="text-align:right; padding: 3px 2px;">PDH</th>' +
         '<th style="text-align:right; padding: 3px 2px;">PDL</th>' +
+        '<th style="text-align:center; padding: 3px 2px;">Signal</th>' +
         '</tr></thead><tbody>';
 
       for (const s of strikes) {
         const rowStyle = s.isAtm ? 'background: rgba(201,162,39,0.08); border-top: 1px solid var(--gold-soft); border-bottom: 1px solid var(--gold-soft);' : 'border-top: 1px solid var(--border);';
-        const oiKey = (keyPrefix || '') + '_' + s.strike;
-        const oiInfo = oiArrowInfo(oiKey, s.oi);
+        const strikeKey = (keyPrefix || '') + '_' + s.strike;
+        const oiInfo = oiArrowInfo(strikeKey, s.oi);
         const oiColor = oiInfo.cls === 'up' ? 'var(--green)' : oiInfo.cls === 'down' ? 'var(--red)' : 'var(--muted)';
+        const priceDir = priceDirection(strikeKey + '_price', s.lastPrice);
+        const buildup = classifyBuildup(priceDir, oiInfo.cls);
         const atPdh = s.pdh ? s.lastPrice >= s.pdh * 0.98 : false;
         const atPdl = s.pdl ? s.lastPrice <= s.pdl * 1.02 : false;
         html += '<tr style="' + rowStyle + '">';
@@ -2945,6 +2979,7 @@ app.get("/", (c) => {
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (s.atDayLow ? 'var(--green)' : 'var(--muted)') + '; font-weight: ' + (s.atDayLow ? '700' : '400') + ';"><span class="flash">' + (s.dayLow ? s.dayLow.toFixed(2) : '—') + (s.atDayLow ? ' ⚠' : '') + '</span></td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (atPdh ? 'var(--red)' : 'var(--muted-dim)') + '; font-weight: ' + (atPdh ? '700' : '400') + ';">' + (s.pdh ? s.pdh.toFixed(2) : '—') + (atPdh ? ' ⚠' : '') + '</td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (atPdl ? 'var(--green)' : 'var(--muted-dim)') + '; font-weight: ' + (atPdl ? '700' : '400') + ';">' + (s.pdl ? s.pdl.toFixed(2) : '—') + (atPdl ? ' ⚠' : '') + '</td>';
+        html += '<td style="padding: 4px 2px; text-align:center;"><div style="color:' + buildup.color + '; font-weight:700;">' + buildup.verdict + '</div><div style="color:var(--muted-dim); font-size:0.62rem;">' + buildup.label + (atPdh ? ' · at PDH' : '') + (atPdl ? ' · at PDL' : '') + '</div></td>';
         html += '</tr>';
       }
 
@@ -3144,7 +3179,10 @@ app.get("/", (c) => {
               symbol, expiryName, optType,
               strike: atm.strike,
               lastPrice: atm.lastPrice,
+              oi: atm.oi,
               dayLow: atm.dayLow,
+              pdh: atm.pdh,
+              pdl: atm.pdl,
               pdc: atm.pdc,
               upFromLowPct, vsPdcPct,
               bullishContinuation,
@@ -3158,16 +3196,19 @@ app.get("/", (c) => {
       }
 
       html += '<div class="premium-card">';
-      html += '<div class="card-title">Swing Tracker — ATM Premiums Continuously Closing Up From PDL, Above PDC</div>';
-      html += '<div class="table-scroll"><table style="width:100%; min-width:840px; font-family: var(--font-mono); font-size: 0.72rem; border-collapse: collapse;">';
+      html += '<div class="card-title">Swing Tracker — ATM Premiums Continuously Closing Up From Day Low, Above PDC</div>';
+      html += '<div class="table-scroll"><table style="width:100%; min-width:1180px; font-family: var(--font-mono); font-size: 0.72rem; border-collapse: collapse;">';
       html += '<thead><tr style="color: var(--muted-dim);">' +
         '<th style="text-align:left; padding: 4px 3px;">Symbol</th>' +
         '<th style="text-align:left; padding: 4px 3px;">Expiry</th>' +
         '<th style="text-align:left; padding: 4px 3px;">Type</th>' +
         '<th style="text-align:right; padding: 4px 3px;">Strike</th>' +
         '<th style="text-align:right; padding: 4px 3px;">LTP</th>' +
+        '<th style="text-align:right; padding: 4px 3px;">OI</th>' +
+        '<th style="text-align:right; padding: 4px 3px;">Day L</th>' +
         '<th style="text-align:right; padding: 4px 3px;">PDL</th>' +
-        '<th style="text-align:right; padding: 4px 3px;">%Up/Low</th>' +
+        '<th style="text-align:right; padding: 4px 3px;">PDH</th>' +
+        '<th style="text-align:right; padding: 4px 3px;">%Up/DayL</th>' +
         '<th style="text-align:right; padding: 4px 3px;">PDC</th>' +
         '<th style="text-align:right; padding: 4px 3px;">%vs PDC</th>' +
         '<th style="text-align:center; padding: 4px 3px;">Signal</th>' +
@@ -3175,22 +3216,34 @@ app.get("/", (c) => {
 
       rows.forEach((r) => {
         const rowStyle = r.bullishContinuation ? 'background: rgba(34,178,107,0.10); border-top: 1px solid var(--green);' : 'border-top: 1px solid var(--border);';
+        // Uses its own key (suffixed _swing) rather than sharing renderStrikeBand's
+        // key — otherwise this would always read "flat" since the strike-band
+        // table for the same expiry/strike already updates lastOi first in the
+        // same render cycle.
+        const oiKey = r.symbol + '_' + r.expiryName + '_' + r.optType + '_' + r.strike + '_swing';
+        const oiInfo = oiArrowInfo(oiKey, r.oi);
+        const oiColor = oiInfo.cls === 'up' ? 'var(--green)' : oiInfo.cls === 'down' ? 'var(--red)' : 'var(--muted)';
+        const priceDir = priceDirection(oiKey + '_price', r.lastPrice);
+        const buildup = classifyBuildup(priceDir, oiInfo.cls);
         html += '<tr style="' + rowStyle + '">';
         html += '<td style="padding: 4px 3px; color: var(--gold); font-weight:600;">' + r.symbol + '</td>';
         html += '<td style="padding: 4px 3px; color: var(--muted);">' + r.expiryName + '</td>';
         html += '<td style="padding: 4px 3px; color: var(--text);">' + r.optType + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--text);">' + r.strike + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--text); font-weight:600;"><span class="flash">' + r.lastPrice.toFixed(2) + '</span></td>';
+        html += '<td style="padding: 4px 3px; text-align:right; color: ' + oiColor + ';"><span class="flash">' + (r.oi != null ? r.oi.toLocaleString('en-IN') : '—') + ' <span style="font-weight:700;">' + oiInfo.arrow + '</span></span></td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted);">' + (r.dayLow ? r.dayLow.toFixed(2) : '—') + '</td>';
+        html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted-dim);">' + (r.pdl ? r.pdl.toFixed(2) : '—') + '</td>';
+        html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted-dim);">' + (r.pdh ? r.pdh.toFixed(2) : '—') + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: ' + (r.upFromLowPct != null && r.upFromLowPct > 0 ? 'var(--green)' : 'var(--muted)') + ';">' + (r.upFromLowPct != null ? (r.upFromLowPct >= 0 ? '+' : '') + r.upFromLowPct.toFixed(2) + '%' : '—') + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted);">' + (r.pdc ? r.pdc.toFixed(2) : '—') + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: ' + (r.vsPdcPct != null && r.vsPdcPct > 0 ? 'var(--green)' : 'var(--red)') + ';">' + (r.vsPdcPct != null ? (r.vsPdcPct >= 0 ? '+' : '') + r.vsPdcPct.toFixed(2) + '%' : '—') + '</td>';
-        html += '<td style="padding: 4px 3px; text-align:center;">' + (r.bullishContinuation ? '<span style="color: var(--green); font-weight:700;">▲ SWING</span>' : '<span style="color: var(--muted-dim);">—</span>') + '</td>';
+        html += '<td style="padding: 4px 3px; text-align:center;"><div style="color:' + buildup.color + '; font-weight:700;">' + buildup.verdict + '</div><div style="color:var(--muted-dim); font-size:0.62rem;">' + buildup.label + (r.bullishContinuation ? ' · ▲SWING' : '') + '</div></td>';
         html += '</tr>';
       });
 
       html += '</tbody></table></div>';
-      html += '<div class="timestamp">SWING = LTP above both PDC (prev. close) and &gt;1% up from PDL (day low) — a continuation setup, not investment advice.</div>';
+      html += '<div class="timestamp">SWING = LTP above both PDC (prev. close) and &gt;1% up from Day Low. "Day L" is the intraday low for today; "PDL"/"PDH" are the previous trading day low/high. Not investment advice.</div>';
       html += '</div>';
       return html;
     }

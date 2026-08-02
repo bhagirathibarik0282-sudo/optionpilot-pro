@@ -2233,6 +2233,122 @@ app.get("/", (c) => {
       text-align: center;
       border: 1px solid var(--border);
     }
+
+    .straddle-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 20px;
+    }
+
+    .straddle-strip {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      perspective: 600px;
+    }
+
+    .straddle-box {
+      flex: 1;
+      min-width: 78px;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 6px;
+      text-align: center;
+    }
+
+    .straddle-box.atm {
+      background: rgba(201,162,39,0.10);
+      border: 2px solid var(--gold);
+    }
+
+    .straddle-strike-label {
+      font-size: 0.65rem;
+      color: var(--muted-dim);
+      font-family: var(--font-mono);
+      margin-bottom: 4px;
+    }
+
+    .straddle-value {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text);
+      font-family: var(--font-mono);
+    }
+
+    .straddle-box.atm .straddle-value {
+      color: var(--gold);
+      font-size: 1.2rem;
+    }
+
+    .straddle-arrow {
+      font-size: 0.7rem;
+      margin-top: 3px;
+      font-weight: 700;
+    }
+
+    @keyframes straddleTilt {
+      0%, 100% { transform: rotateY(0deg) translateY(0); }
+      50% { transform: rotateY(8deg) translateY(-2px); }
+    }
+
+    @keyframes straddleTiltAtm {
+      0%, 100% { transform: rotateY(0deg) translateY(0) scale(1); }
+      50% { transform: rotateY(12deg) translateY(-4px) scale(1.03); }
+    }
+
+    .straddle-box {
+      transform-style: preserve-3d;
+      animation: straddleTilt 3s ease-in-out infinite;
+    }
+
+    .straddle-box.atm {
+      animation: straddleTiltAtm 3s ease-in-out infinite;
+    }
+
+    .align-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 4px;
+      border-top: 1px solid var(--border);
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .align-row:first-child {
+      border-top: none;
+    }
+
+    .align-name {
+      color: var(--text);
+      font-weight: 600;
+      font-size: 0.85rem;
+      min-width: 110px;
+    }
+
+    .align-meta {
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+
+    .action-plan-footer {
+      background: var(--panel-alt);
+      border: 1px solid var(--gold-soft);
+      border-radius: 10px;
+      padding: 14px;
+      margin-top: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
   </style>
 </head>
 <body>
@@ -2268,6 +2384,7 @@ app.get("/", (c) => {
       <button class="tab-btn" onclick="switchTab('HEATMAP')">🗺️ Heatmap</button>
       <button class="tab-btn" onclick="switchTab('COMMODITIES')">🛢️ Commodities</button>
       <button class="tab-btn" onclick="switchTab('SWING')">📊 Swing Tracker</button>
+      <button class="tab-btn" onclick="switchTab('ALIGNMENT')">🧭 Alignment</button>
       <button class="tab-btn" onclick="switchTab('VIXCORR')">📉 VIX Correlation</button>
       <button class="tab-btn" onclick="switchTab('NEWS')">📰 News</button>
       <button class="tab-btn" onclick="switchTab('HOLIDAYS')">📅 Holidays</button>
@@ -2279,6 +2396,7 @@ app.get("/", (c) => {
     <div id="HEATMAP" class="tab-content"></div>
     <div id="COMMODITIES" class="tab-content"></div>
     <div id="SWING" class="tab-content"></div>
+    <div id="ALIGNMENT" class="tab-content"></div>
     <div id="VIXCORR" class="tab-content"></div>
     <div id="NEWS" class="tab-content"></div>
     <div id="HOLIDAYS" class="tab-content"></div>
@@ -2446,6 +2564,24 @@ app.get("/", (c) => {
       } catch (err) {
         console.error('Failed to load commodities:', err);
         commoditiesData = { error: err.message };
+      }
+    }
+
+    let alignmentData = null;
+    async function loadAlignment() {
+      if (!kiteConnected) return;
+      try {
+        const response = await fetch('/api/alignment');
+        const json = await response.json();
+        if (!response.ok || json.error) {
+          alignmentData = { error: json.error || 'Failed to load alignment data' };
+        } else {
+          alignmentData = json;
+        }
+        updateUI();
+      } catch (err) {
+        console.error('Failed to load alignment data:', err);
+        alignmentData = { error: err.message };
       }
     }
 
@@ -2695,6 +2831,73 @@ app.get("/", (c) => {
     // "Bias Check Before Entry": combines three independent signals —
     // Gap Confirmation Score, PDH/PDL Signal, and Futures Alignment — and
     // requires at least 2 of 3 to agree before calling a bias confirmed.
+    // Tracks the last-seen straddle (CE+PE) value per strike, so the small
+    // arrow can show direction without needing every underlying number.
+    const lastStraddle = {};
+
+    function straddleArrow(key, currentValue) {
+      const prev = lastStraddle[key];
+      lastStraddle[key] = currentValue;
+      if (prev == null || currentValue === prev) return { arrow: '●', color: 'var(--muted)' };
+      return currentValue > prev
+        ? { arrow: '▲', color: 'var(--green)' }
+        : { arrow: '▼', color: 'var(--red)' };
+    }
+
+    // A deliberately low-clutter card: one big number per strike (CE+PE
+    // straddle) instead of a dense grid of bid/ask/IV/OI/day-high/day-low.
+    // Only shown for NIFTY and SENSEX (BankNifty is excluded from CE/PE
+    // premium tracking per the dashboard spec), using the current week expiry.
+    function renderStraddlePcrCard(indexData) {
+      if (!indexData || (indexData.symbol !== 'NIFTY' && indexData.symbol !== 'SENSEX')) return '';
+      if (indexData.error || !indexData.expiries) return '';
+
+      const exp = indexData.expiries.find((e) => e.expiry === 'Current Expiry');
+      if (!exp || !exp.ceStrikes || !exp.peStrikes) return '';
+
+      const strikeMap = new Map();
+      exp.ceStrikes.forEach((s) => {
+        strikeMap.set(s.strike, { strike: s.strike, isAtm: s.isAtm, ce: s.lastPrice, pe: null });
+      });
+      exp.peStrikes.forEach((s) => {
+        const existing = strikeMap.get(s.strike);
+        if (existing) existing.pe = s.lastPrice;
+        else strikeMap.set(s.strike, { strike: s.strike, isAtm: s.isAtm, ce: null, pe: s.lastPrice });
+      });
+
+      const rows = Array.from(strikeMap.values())
+        .filter((r) => r.ce != null && r.pe != null)
+        .sort((a, b) => a.strike - b.strike);
+      if (rows.length === 0) return '';
+
+      const pcrTilt = indexData.pcr != null
+        ? (indexData.pcr > 1.1 ? { label: 'Bullish Tilt', color: 'var(--green)' } : indexData.pcr < 0.85 ? { label: 'Bearish Tilt', color: 'var(--red)' } : { label: 'Neutral', color: 'var(--muted)' })
+        : { label: 'N/A', color: 'var(--muted)' };
+
+      let html = '<div class="straddle-card">';
+      html += '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">';
+      html += '<div class="card-title" style="margin-bottom:0;">Straddle (CE+PE) — Current Week, ATM ±2</div>';
+      html += '<span class="badge-pill" style="background: rgba(0,0,0,0.2); color:' + pcrTilt.color + ';">PCR ' + (indexData.pcr != null ? indexData.pcr.toFixed(2) : 'N/A') + ' — ' + pcrTilt.label + '</span>';
+      html += '</div>';
+
+      html += '<div class="straddle-strip">';
+      rows.forEach((r, idx) => {
+        const straddleValue = r.ce + r.pe;
+        const key = indexData.symbol + '_straddle_' + r.strike;
+        const arrowInfo = straddleArrow(key, straddleValue);
+        html += '<div class="straddle-box' + (r.isAtm ? ' atm' : '') + '" style="animation-delay:' + (idx * 0.15) + 's;">';
+        html += '<div class="straddle-strike-label">' + r.strike + (r.isAtm ? ' ATM' : '') + '</div>';
+        html += '<div class="straddle-value flash">' + straddleValue.toFixed(0) + '</div>';
+        html += '<div class="straddle-arrow" style="color:' + arrowInfo.color + ';">' + arrowInfo.arrow + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+
+      html += '<div class="timestamp" style="margin-top:8px;">Straddle = CE LTP + PE LTP at each strike. Rising straddle = market pricing in bigger moves either way; PCR tilt hints at which side options writers favor.</div>';
+      html += '</div>';
+      return html;
+    }
+
     function renderBiasCheckWidget(indexData) {
       if (!indexData) return '';
 
@@ -2798,6 +3001,7 @@ app.get("/", (c) => {
       document.getElementById('HEATMAP').innerHTML = renderHeatmap();
       document.getElementById('COMMODITIES').innerHTML = renderCommodities();
       document.getElementById('SWING').innerHTML = renderSwingTracker();
+      document.getElementById('ALIGNMENT').innerHTML = renderAlignment();
       document.getElementById('VIXCORR').innerHTML = renderVixCorrelation();
       drawVixCorrChart();
 
@@ -2837,6 +3041,8 @@ app.get("/", (c) => {
       html += renderGapScoreCard(indexData);
 
       html += renderBiasCheckWidget(indexData);
+
+      html += renderStraddlePcrCard(indexData);
 
       html += '<div class="metrics-grid">';
       html += '<div class="metric-card"><div class="metric-label">Current Price</div>';
@@ -2919,8 +3125,12 @@ app.get("/", (c) => {
     function oiArrowInfo(key, currentOi) {
       const prev = lastOi[key];
       lastOi[key] = currentOi;
-      if (prev == null || currentOi === prev) return { arrow: '●', cls: 'flat' };
-      return currentOi > prev ? { arrow: '▲', cls: 'up' } : { arrow: '▼', cls: 'down' };
+      if (prev == null) return { arrow: '●', cls: 'flat', delta: null };
+      const delta = currentOi - prev;
+      if (delta === 0) return { arrow: '●', cls: 'flat', delta: 0 };
+      return delta > 0
+        ? { arrow: '▲', cls: 'up', delta }
+        : { arrow: '▼', cls: 'down', delta };
     }
 
     // Tracks the last-seen LTP per strike (same key scheme as lastOi) so we
@@ -2988,7 +3198,7 @@ app.get("/", (c) => {
         html += '<tr style="' + rowStyle + '">';
         html += '<td style="padding: 4px 2px; color: ' + (s.isAtm ? 'var(--gold)' : 'var(--text)') + '; font-weight: ' + (s.isAtm ? '700' : '500') + ';">' + s.strike + (s.isAtm ? ' (ATM)' : '') + '</td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: var(--text);"><span class="flash">' + s.lastPrice.toFixed(2) + '</span></td>';
-        html += '<td style="padding: 4px 2px; text-align:right; color: ' + oiColor + ';"><span class="flash">' + (s.oi != null ? s.oi.toLocaleString('en-IN') : '—') + ' <span style="font-weight:700;">' + oiInfo.arrow + '</span></span></td>';
+        html += '<td style="padding: 4px 2px; text-align:right; color: ' + oiColor + ';"><div class="flash">' + (s.oi != null ? s.oi.toLocaleString('en-IN') : '—') + ' <span style="font-weight:700;">' + oiInfo.arrow + '</span></div>' + (oiInfo.delta ? '<div style="font-size:0.62rem; color:' + oiColor + ';">' + (oiInfo.delta > 0 ? '+' : '') + oiInfo.delta.toLocaleString('en-IN') + '</div>' : '') + '</td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (s.atDayHigh ? 'var(--red)' : 'var(--muted)') + '; font-weight: ' + (s.atDayHigh ? '700' : '400') + ';"><span class="flash">' + (s.dayHigh ? s.dayHigh.toFixed(2) : '—') + (s.atDayHigh ? ' ⚠' : '') + '</span></td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (s.atDayLow ? 'var(--green)' : 'var(--muted)') + '; font-weight: ' + (s.atDayLow ? '700' : '400') + ';"><span class="flash">' + (s.dayLow ? s.dayLow.toFixed(2) : '—') + (s.atDayLow ? ' ⚠' : '') + '</span></td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (atPdh ? 'var(--red)' : 'var(--muted-dim)') + '; font-weight: ' + (atPdh ? '700' : '400') + ';">' + (s.pdh ? s.pdh.toFixed(2) : '—') + (atPdh ? ' ⚠' : '') + '</td>';
@@ -3146,6 +3356,84 @@ app.get("/", (c) => {
       return html;
     }
 
+    function biasColor(color) {
+      return color === 'bullish' ? 'var(--green)' : color === 'bearish' ? 'var(--red)' : 'var(--muted)';
+    }
+
+    function formatVolume(v) {
+      if (v == null) return '—';
+      if (v >= 10000000) return (v / 10000000).toFixed(2) + ' Cr';
+      if (v >= 100000) return (v / 100000).toFixed(2) + ' L';
+      return v.toLocaleString('en-IN');
+    }
+
+    function renderAlignRow(name, valueText, label, color) {
+      return '<div class="align-row">' +
+        '<span class="align-name">' + escapeHtml(name) + '</span>' +
+        '<span class="align-meta">' + escapeHtml(valueText) + '</span>' +
+        '<span class="badge-pill" style="background: rgba(0,0,0,0.2); color:' + biasColor(color) + '; font-size:0.75rem; padding:4px 10px;">' + escapeHtml(label) + '</span>' +
+        '</div>';
+    }
+
+    function renderAlignment() {
+      if (!alignmentData) {
+        return '<div class="loading">Loading market alignment...</div>';
+      }
+      if (alignmentData.error) {
+        return '<div class="error">⚠️ ' + escapeHtml(alignmentData.error) + '</div>';
+      }
+
+      let html = '';
+
+      html += '<div class="premium-card" style="margin-bottom:16px;">';
+      html += '<div class="card-title">1. Index Alignment</div>';
+      alignmentData.indices.forEach((idx) => {
+        const valueText = idx.spot != null ? idx.spot.toFixed(2) + ' (' + (idx.changePercent >= 0 ? '+' : '') + idx.changePercent.toFixed(2) + '%)' : 'N/A';
+        html += renderAlignRow(idx.name, valueText, idx.label, idx.color);
+      });
+      html += '</div>';
+
+      html += '<div class="premium-card" style="margin-bottom:16px;">';
+      html += '<div class="card-title">2. Heavy-Weight Sector Strength</div>';
+      alignmentData.sectors.forEach((s) => {
+        const valueText = s.change != null ? (s.change >= 0 ? '+' : '') + s.change.toFixed(2) + '%' : 'N/A';
+        html += renderAlignRow(s.name, valueText, s.label, s.color);
+      });
+      html += '</div>';
+
+      html += '<div class="premium-card" style="margin-bottom:16px;">';
+      html += '<div class="card-title">3. PCR Alignment</div>';
+      alignmentData.pcrAlignment.forEach((p) => {
+        const valueText = p.pcr != null ? 'PCR ' + p.pcr.toFixed(2) : 'N/A';
+        html += renderAlignRow(p.name, valueText, p.label, p.color);
+      });
+      html += '</div>';
+
+      html += '<div class="premium-card" style="margin-bottom:16px;">';
+      html += '<div class="card-title">4. Cash Stocks — Price + Volume (no futures)</div>';
+      alignmentData.stocks.forEach((s) => {
+        const priceText = s.price != null ? s.price.toFixed(2) : 'N/A';
+        const changeText = s.change != null ? (s.change >= 0 ? '+' : '') + s.change.toFixed(2) + '%' : '';
+        const valueText = priceText + ' ' + changeText + ' · Vol ' + formatVolume(s.volume);
+        html += renderAlignRow(s.name, valueText, s.label, s.color);
+      });
+      html += '</div>';
+
+      const biasColorMain = alignmentData.overallBias === 'BULLISH' ? 'var(--green)' : alignmentData.overallBias === 'BEARISH' ? 'var(--red)' : 'var(--gold)';
+      html += '<div class="action-plan-footer">';
+      html += '<div>';
+      html += '<div style="color: var(--muted); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px;">5. Action Plan</div>';
+      html += '<div style="color:' + biasColorMain + '; font-size:1.3rem; font-weight:700; font-family: var(--font-display);">' + escapeHtml(alignmentData.overallBias) + '</div>';
+      html += '<div style="color: var(--text); font-size:0.85rem; margin-top:2px;">Strategy: ' + escapeHtml(alignmentData.strategy) + '</div>';
+      html += '</div>';
+      html += '<div style="text-align:right; font-family: var(--font-mono); font-size:0.75rem; color: var(--muted);">' + alignmentData.bullishCount + ' bullish · ' + alignmentData.bearishCount + ' bearish · ' + alignmentData.totalCount + ' total signals</div>';
+      html += '</div>';
+
+      html += '<div class="timestamp">Cash-market stocks only — no futures OI here by design. PCR convention matches the rest of this dashboard (PCR &gt; 1.1 = bullish tilt). Not investment advice.</div>';
+
+      return html;
+    }
+
     function renderCommodities() {
       if (!commoditiesData) {
         return '<div class="loading">Loading commodities...</div>';
@@ -3245,7 +3533,7 @@ app.get("/", (c) => {
         html += '<td style="padding: 4px 3px; color: var(--text);">' + r.optType + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--text);">' + r.strike + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--text); font-weight:600;"><span class="flash">' + r.lastPrice.toFixed(2) + '</span></td>';
-        html += '<td style="padding: 4px 3px; text-align:right; color: ' + oiColor + ';"><span class="flash">' + (r.oi != null ? r.oi.toLocaleString('en-IN') : '—') + ' <span style="font-weight:700;">' + oiInfo.arrow + '</span></span></td>';
+        html += '<td style="padding: 4px 3px; text-align:right; color: ' + oiColor + ';"><div class="flash">' + (r.oi != null ? r.oi.toLocaleString('en-IN') : '—') + ' <span style="font-weight:700;">' + oiInfo.arrow + '</span></div>' + (oiInfo.delta ? '<div style="font-size:0.62rem; color:' + oiColor + ';">' + (oiInfo.delta > 0 ? '+' : '') + oiInfo.delta.toLocaleString('en-IN') + '</div>' : '') + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted);">' + (r.dayLow ? r.dayLow.toFixed(2) : '—') + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted-dim);">' + (r.pdl ? r.pdl.toFixed(2) : '—') + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted-dim);">' + (r.pdh ? r.pdh.toFixed(2) : '—') + '</td>';
@@ -3446,9 +3734,9 @@ app.get("/", (c) => {
       await checkKiteStatus();
       await Promise.all([loadNews(), loadHolidays()]);
       if (kiteConnected) {
-        await Promise.all([fetchData(), loadHeatmap(), loadCommodities()]);
+        await Promise.all([fetchData(), loadHeatmap(), loadCommodities(), loadAlignment()]);
       } else {
-        ['NIFTY', 'BANKNIFTY', 'SENSEX', 'HEATMAP', 'COMMODITIES', 'SWING', 'VIXCORR']
+        ['NIFTY', 'BANKNIFTY', 'SENSEX', 'HEATMAP', 'COMMODITIES', 'SWING', 'VIXCORR', 'ALIGNMENT']
           .forEach((id) => {
             document.getElementById(id).innerHTML =
               '<div class="loading">Connect Kite to load verified live market data.</div>';
@@ -3464,6 +3752,7 @@ app.get("/", (c) => {
     setInterval(loadNews, 20 * 60 * 1000);
     setInterval(loadHeatmap, 3 * 60 * 1000);
     setInterval(loadCommodities, 3 * 60 * 1000);
+    setInterval(loadAlignment, 3 * 60 * 1000);
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && kiteConnected) refreshData();
@@ -3559,7 +3848,12 @@ const HEATMAP_STOCKS: Record<string, string> = {
   "HDFC Bank": "NSE:HDFCBANK",
   "Reliance": "NSE:RELIANCE",
   "SBI": "NSE:SBIN",
+  "ICICI Bank": "NSE:ICICIBANK",
 };
+
+// Heavier-weight sectors highlighted on the Market Alignment card — a subset
+// of HEATMAP_SECTORS the user specifically wants front and center.
+const ALIGNMENT_HEAVY_SECTORS = ["Nifty PSU Bank", "Nifty IT", "Nifty Smallcap 100", "Nifty Midcap 100"];
 
 app.get("/api/sectors", async (c) => {
   try {
@@ -3594,6 +3888,132 @@ app.get("/api/sectors", async (c) => {
   } catch (err) {
     console.error("[API] Sectors fetch error:", err instanceof Error ? err.message : err);
     return c.json({ error: err instanceof Error ? err.message : "Failed to fetch sector data" }, 500);
+  }
+});
+
+// Market Alignment — a single glance card combining:
+// 1) Index alignment (NIFTY/BANKNIFTY/SENSEX bias from spot + VWAP + signal)
+// 2) Heavy-weight sector strength (PSU Bank, IT, Smallcap, Midcap)
+// 3) PCR alignment per index
+// 4) Cash-market stocks with volume (deliberately NOT futures OI, per request)
+// 5) An overall action-plan bias derived from the above
+function classifyIndexBias(changePercent: number, vwapBias: string): { label: string; color: "bullish" | "bearish" | "neutral" } {
+  if (changePercent > 1 && vwapBias === "UP") return { label: "Strong Bullish", color: "bullish" };
+  if (changePercent > 0.2) return { label: "Bullish", color: "bullish" };
+  if (changePercent < -1 && vwapBias === "DOWN") return { label: "Strong Bearish", color: "bearish" };
+  if (changePercent < -0.2) return { label: "Bearish", color: "bearish" };
+  return { label: "Neutral", color: "neutral" };
+}
+
+function classifyPctBias(changePercent: number | null): { label: string; color: "bullish" | "bearish" | "neutral" } {
+  if (changePercent == null) return { label: "N/A", color: "neutral" };
+  if (changePercent >= 0.5) return { label: "Bullish", color: "bullish" };
+  if (changePercent <= -0.5) return { label: "Bearish", color: "bearish" };
+  return { label: "Neutral", color: "neutral" };
+}
+
+// Note: this app's PCR convention (used consistently elsewhere in the
+// dashboard) is PCR > 1.1 = more puts written = bullish tilt, PCR < 0.85 =
+// bearish tilt — the opposite of "low PCR = bullish" seen on some other
+// tools, so numbers here match the rest of this app rather than that one.
+function classifyPcrBias(pcr: number | null): { label: string; color: "bullish" | "bearish" | "neutral" } {
+  if (pcr == null) return { label: "N/A", color: "neutral" };
+  if (pcr > 1.1) return { label: "Bullish Tilt", color: "bullish" };
+  if (pcr < 0.85) return { label: "Bearish Tilt", color: "bearish" };
+  return { label: "Neutral", color: "neutral" };
+}
+
+app.get("/api/alignment", async (c) => {
+  try {
+    const session = getSession(c);
+    if (!session) {
+      return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+    }
+
+    const isFresh =
+      session.marketSnapshot &&
+      session.snapshotTime &&
+      Date.now() - session.snapshotTime < SNAPSHOT_TTL_MS;
+    const snapshot = isFresh ? session.marketSnapshot! : await refreshMarketSnapshot(session);
+
+    const indices = (["NIFTY", "BANKNIFTY", "SENSEX"] as const).map((sym) => {
+      const m = snapshot[sym];
+      if (!m || m.error) return { name: sym, spot: null, changePercent: null, label: "N/A", color: "neutral" as const };
+      const bias = classifyIndexBias(m.changePercent, m.futuresVwapBias);
+      return { name: sym, spot: m.current, changePercent: m.changePercent, label: bias.label, color: bias.color };
+    });
+
+    const pcrAlignment = (["NIFTY", "BANKNIFTY", "SENSEX"] as const).map((sym) => {
+      const m = snapshot[sym];
+      const bias = classifyPcrBias(m?.pcr ?? null);
+      return { name: sym, pcr: m?.pcr ?? null, label: bias.label, color: bias.color };
+    });
+
+    const sectorSymbols = ALIGNMENT_HEAVY_SECTORS.map((name) => HEATMAP_SECTORS[name]);
+    const stockSymbols = Object.values(HEATMAP_STOCKS);
+    const quotes = await fetchKiteQuote(session.accessToken, [...sectorSymbols, ...stockSymbols]);
+    if (!quotes) {
+      return c.json({ error: "Failed to fetch sector/stock quotes from Kite" }, 500);
+    }
+
+    function pctChange(kiteSymbol: string): number | null {
+      const q = quotes[kiteSymbol];
+      if (!q || !q.ohlc?.close) return null;
+      return ((q.last_price - q.ohlc.close) / q.ohlc.close) * 100;
+    }
+
+    const sectors = ALIGNMENT_HEAVY_SECTORS.map((name) => {
+      const change = pctChange(HEATMAP_SECTORS[name]);
+      const bias = classifyPctBias(change);
+      return { name, change, label: bias.label, color: bias.color };
+    });
+
+    const stocks = Object.entries(HEATMAP_STOCKS).map(([name, kiteSymbol]) => {
+      const q = quotes[kiteSymbol];
+      const change = pctChange(kiteSymbol);
+      const bias = classifyPctBias(change);
+      return {
+        name,
+        price: q?.last_price ?? null,
+        change,
+        volume: q?.volume ?? null,
+        label: bias.label,
+        color: bias.color,
+      };
+    });
+
+    // Overall bias: simple majority vote across every component above.
+    const allComponents = [...indices, ...pcrAlignment, ...sectors, ...stocks];
+    const bullishCount = allComponents.filter((x) => x.color === "bullish").length;
+    const bearishCount = allComponents.filter((x) => x.color === "bearish").length;
+    let overallBias: string;
+    let strategy: string;
+    if (bullishCount > bearishCount * 1.5) {
+      overallBias = "BULLISH";
+      strategy = "Prefer CE on dips";
+    } else if (bearishCount > bullishCount * 1.5) {
+      overallBias = "BEARISH";
+      strategy = "Prefer PE on rises";
+    } else {
+      overallBias = "MIXED";
+      strategy = "Wait for clarity";
+    }
+
+    return c.json({
+      indices,
+      sectors,
+      pcrAlignment,
+      stocks,
+      overallBias,
+      strategy,
+      bullishCount,
+      bearishCount,
+      totalCount: allComponents.length,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("[API] Alignment fetch error:", err instanceof Error ? err.message : err);
+    return c.json({ error: err instanceof Error ? err.message : "Failed to fetch alignment data" }, 500);
   }
 });
 

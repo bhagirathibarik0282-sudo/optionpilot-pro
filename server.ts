@@ -127,6 +127,140 @@ interface FiiDiiEntry {
 const fiiDiiEntries: FiiDiiEntry[] = [];
 const FII_DII_MAX_ENTRIES = 60;
 
+// ============== DAILY SUMMARY / RESPECT CHECKLIST (auto-generated from Kite data) ==============
+// Unlike FII/DII, this is built automatically from the same live data already
+// being fetched — no manual entry needed. Still in-memory only (lost on
+// redeploy), same caveat as everything else that isn't a real database.
+interface DailyChecklistItem {
+  label: string;
+  pass: boolean;
+  color: "bullish" | "bearish" | "neutral";
+}
+
+interface DailyIndexSummary {
+  sentence: string;
+  checklist: DailyChecklistItem[];
+}
+
+interface DailyJournalSnapshot {
+  time: string; // "HH:MM" IST
+  summaries: Record<string, DailyIndexSummary>;
+}
+
+interface DailyJournalEntry {
+  date: string;
+  snapshots: DailyJournalSnapshot[];
+  conclusion: string | null; // filled once market has effectively closed for the day
+  createdAt: string;
+}
+
+const dailyJournal: DailyJournalEntry[] = [];
+const DAILY_JOURNAL_MAX = 30;
+const DAILY_JOURNAL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes between intraday checkpoints
+
+function buildIndexChecklist(m: IndexMetrics): DailyChecklistItem[] {
+  return [
+    { label: "Above VWAP", pass: m.vwap > 0 && m.current > m.vwap, color: "bullish" },
+    { label: "Below VWAP", pass: m.vwap > 0 && m.current < m.vwap, color: "bearish" },
+    { label: "PDH Broken", pass: m.pdh > 0 && m.current > m.pdh, color: "bullish" },
+    { label: "PDL Broken", pass: m.pdl > 0 && m.current < m.pdl, color: "bearish" },
+    { label: "Gap Score Bullish", pass: !!m.gapScore && m.gapScore.score > 10, color: "bullish" },
+    { label: "Gap Score Bearish", pass: !!m.gapScore && m.gapScore.score < -10, color: "bearish" },
+    { label: "PCR Bullish Tilt", pass: m.pcr != null && m.pcr > 1.1, color: "bullish" },
+    { label: "PCR Bearish Tilt", pass: m.pcr != null && m.pcr < 0.85, color: "bearish" },
+    { label: "Signal Confirmed", pass: m.signal === "BUY" || m.signal === "SELL", color: m.signal === "BUY" ? "bullish" : m.signal === "SELL" ? "bearish" : "neutral" },
+  ];
+}
+
+function buildIndexSentence(symbol: string, m: IndexMetrics): string {
+  const parts: string[] = [];
+  if (m.vwap > 0) parts.push(m.current > m.vwap ? "stayed above VWAP" : "stayed below VWAP");
+  if (m.pdh > 0 && m.current > m.pdh) parts.push("broke above PDH");
+  if (m.pdl > 0 && m.current < m.pdl) parts.push("broke below PDL");
+  if (m.gapScore) parts.push("Gap Score " + m.gapScore.verdict.toLowerCase() + " (" + m.gapScore.score + ")");
+  if (m.pcr != null) parts.push("PCR " + m.pcr.toFixed(2));
+  if (m.signal !== "WAIT") parts.push("signal: " + m.signal);
+  return symbol + " " + (parts.length ? parts.join(", ") : "no clear signals yet") + ".";
+}
+
+function indiaTimeHHMM(): string {
+  const indiaNow = new Date(Date.now() + INDIA_OFFSET_MS);
+  const hh = String(indiaNow.getUTCHours()).padStart(2, "0");
+  const mm = String(indiaNow.getUTCMinutes()).padStart(2, "0");
+  return hh + ":" + mm;
+}
+
+// Builds a "what to stick with / what not to" conclusion from the day's
+// 30-minute checkpoints — majority direction per index, plus a caution note
+// if the day was choppy (checkpoints disagreed a lot).
+function buildDayEndConclusion(entry: DailyJournalEntry): string {
+  const lines: string[] = [];
+  for (const sym of ["NIFTY", "BANKNIFTY", "SENSEX"]) {
+    const points = entry.snapshots.map((s) => s.summaries[sym]).filter(Boolean) as DailyIndexSummary[];
+    if (points.length === 0) continue;
+    let bullish = 0;
+    let bearish = 0;
+    points.forEach((p) => {
+      const signalItem = p.checklist.find((c) => c.label === "Signal Confirmed");
+      if (signalItem?.pass) {
+        if (signalItem.color === "bullish") bullish++;
+        else if (signalItem.color === "bearish") bearish++;
+      }
+    });
+    const total = points.length;
+    if (bullish > bearish && bullish >= total * 0.5) {
+      lines.push(sym + ": leaned BULLISH most of the day (" + bullish + "/" + total + " checkpoints) — stick with bullish bias unless there's a gap-down tomorrow.");
+    } else if (bearish > bullish && bearish >= total * 0.5) {
+      lines.push(sym + ": leaned BEARISH most of the day (" + bearish + "/" + total + " checkpoints) — stick with bearish bias unless there's a gap-up tomorrow.");
+    } else {
+      lines.push(sym + ": choppy/mixed all day (" + bullish + " bullish vs " + bearish + " bearish checkpoints of " + total + ") — avoid chasing either direction, wait for a clearer confirmed break tomorrow.");
+    }
+  }
+  return lines.join(" ");
+}
+
+function recordDailyJournal(snapshot: Record<string, IndexMetrics>) {
+  const today = indiaDate();
+  const summaries: Record<string, DailyIndexSummary> = {};
+  for (const sym of ["NIFTY", "BANKNIFTY", "SENSEX"]) {
+    const m = snapshot[sym];
+    if (!m || m.error) continue;
+    summaries[sym] = { sentence: buildIndexSentence(sym, m), checklist: buildIndexChecklist(m) };
+  }
+
+  let entry = dailyJournal.find((e) => e.date === today);
+  if (!entry) {
+    entry = { date: today, snapshots: [], conclusion: null, createdAt: new Date().toISOString() };
+    dailyJournal.push(entry);
+    if (dailyJournal.length > DAILY_JOURNAL_MAX) dailyJournal.shift();
+  }
+
+  const lastSnapshot = entry.snapshots[entry.snapshots.length - 1];
+  const nowMs = Date.now();
+  // Gate new checkpoints on elapsed wall-clock time since the last one,
+  // tracked via a plain timestamp stashed on the entry object.
+  const lastCheckpointTime = (entry as any)._lastCheckpointMs || 0;
+  if (!lastSnapshot || nowMs - lastCheckpointTime >= DAILY_JOURNAL_INTERVAL_MS) {
+    entry.snapshots.push({ time: indiaTimeHHMM(), summaries });
+    (entry as any)._lastCheckpointMs = nowMs;
+    if (entry.snapshots.length > 20) entry.snapshots.shift();
+  } else {
+    // Still update the most recent checkpoint's data in place so the "latest"
+    // view stays live between 30-minute boundaries, without adding a new row.
+    entry.snapshots[entry.snapshots.length - 1] = { time: indiaTimeHHMM(), summaries };
+  }
+
+  // India market closes at 15:30 IST — once we see a snapshot at or after
+  // that time, lock in the day's conclusion (only computed once per day).
+  const indiaNow = new Date(Date.now() + INDIA_OFFSET_MS);
+  const hh = indiaNow.getUTCHours();
+  const mm = indiaNow.getUTCMinutes();
+  if (!entry.conclusion && (hh > 15 || (hh === 15 && mm >= 30))) {
+    entry.conclusion = buildDayEndConclusion(entry);
+  }
+}
+
+
 
 // In-memory instruments cache (fetched once per app startup)
 let instrumentsCache: Instrument[] = [];
@@ -1606,6 +1740,9 @@ async function refreshMarketSnapshot(
       SENSEX: { spot: snapshot.SENSEX.current, pcr: snapshot.SENSEX.pcr },
     });
     if (session.snapshotHistory.length > 200) session.snapshotHistory.shift();
+
+    recordDailyJournal(snapshot);
+
     return snapshot;
   })();
 
@@ -2408,6 +2545,68 @@ app.get("/", (c) => {
       margin: 14px 0 4px;
       font-family: var(--font-display);
     }
+
+    @keyframes tickBlink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .checklist-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 4px;
+      border-top: 1px solid var(--border);
+      font-size: 0.8rem;
+    }
+
+    .checklist-item:first-child {
+      border-top: none;
+    }
+
+    .checklist-tick {
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+
+    .checklist-tick.on {
+      animation: tickBlink 1.4s ease-in-out infinite;
+    }
+
+    .journal-sentence {
+      background: var(--panel-alt);
+      border-left: 3px solid var(--gold);
+      border-radius: 0 8px 8px 0;
+      padding: 8px 12px;
+      margin-top: 8px;
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+
+    .ticker-wrap {
+      background: var(--panel);
+      border: 1px solid var(--gold-soft);
+      border-radius: 8px;
+      padding: 8px 0;
+      margin-bottom: 16px;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .ticker-track {
+      display: inline-block;
+      padding-left: 100%;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--gold);
+      font-weight: 600;
+      animation: tickerScroll 22s linear infinite;
+    }
+
+    @keyframes tickerScroll {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-100%); }
+    }
   </style>
 </head>
 <body>
@@ -2437,7 +2636,8 @@ app.get("/", (c) => {
     <div id="successContainer"></div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('NIFTY')">NIFTY</button>
+      <button class="tab-btn active" onclick="switchTab('DAILYSUMMARY')">⭐ Summary</button>
+      <button class="tab-btn" onclick="switchTab('NIFTY')">NIFTY</button>
       <button class="tab-btn" onclick="switchTab('BANKNIFTY')">BANKNIFTY</button>
       <button class="tab-btn" onclick="switchTab('SENSEX')">SENSEX</button>
       <button class="tab-btn" onclick="switchTab('HEATMAP')">🗺️ Heatmap</button>
@@ -2450,7 +2650,7 @@ app.get("/", (c) => {
       <button class="tab-btn" onclick="switchTab('HOLIDAYS')">📅 Holidays</button>
     </div>
 
-    <div id="NIFTY" class="tab-content active"></div>
+    <div id="NIFTY" class="tab-content"></div>
     <div id="BANKNIFTY" class="tab-content"></div>
     <div id="SENSEX" class="tab-content"></div>
     <div id="HEATMAP" class="tab-content"></div>
@@ -2458,6 +2658,7 @@ app.get("/", (c) => {
     <div id="SWING" class="tab-content"></div>
     <div id="ALIGNMENT" class="tab-content"></div>
     <div id="FIIDII" class="tab-content"></div>
+    <div id="DAILYSUMMARY" class="tab-content active"></div>
     <div id="VIXCORR" class="tab-content"></div>
     <div id="NEWS" class="tab-content"></div>
     <div id="HOLIDAYS" class="tab-content"></div>
@@ -2656,6 +2857,20 @@ app.get("/", (c) => {
       } catch (err) {
         console.error('Failed to load FII/DII data:', err);
         fiiDiiData = { error: err.message };
+      }
+    }
+
+    let dailySummaryData = null;
+    async function loadDailySummary() {
+      if (!kiteConnected) return;
+      try {
+        const response = await fetch('/api/daily-summary');
+        const json = await response.json();
+        dailySummaryData = response.ok ? json : { error: json.error || 'Failed to load daily summary' };
+        updateUI();
+      } catch (err) {
+        console.error('Failed to load daily summary:', err);
+        dailySummaryData = { error: err.message };
       }
     }
 
@@ -3141,6 +3356,7 @@ app.get("/", (c) => {
       document.getElementById('SWING').innerHTML = renderSwingTracker();
       document.getElementById('ALIGNMENT').innerHTML = renderAlignment();
       document.getElementById('FIIDII').innerHTML = renderFiiDii();
+      document.getElementById('DAILYSUMMARY').innerHTML = renderDailySummary();
       document.getElementById('VIXCORR').innerHTML = renderVixCorrelation();
       drawVixCorrChart();
 
@@ -3678,6 +3894,114 @@ app.get("/", (c) => {
       return html;
     }
 
+    function renderTickerContent(latestSummaries) {
+      const parts = [];
+      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => {
+        const s = latestSummaries[sym];
+        if (!s) return;
+        const signalItem = s.checklist.find((c) => c.label === 'Signal Confirmed');
+        const dir = signalItem && signalItem.pass ? (signalItem.color === 'bullish' ? 'BUY ▲' : 'SELL ▼') : 'WAIT ●';
+        parts.push(sym + ': ' + dir);
+      });
+      if (fiiDiiData && fiiDiiData.entries && fiiDiiData.entries.length > 0) {
+        const last = fiiDiiData.entries[fiiDiiData.entries.length - 1];
+        parts.push('FII ' + (last.fiiCashCr >= 0 ? '+' : '') + last.fiiCashCr.toFixed(0) + ' Cr');
+        parts.push('DII ' + (last.diiCashCr >= 0 ? '+' : '') + last.diiCashCr.toFixed(0) + ' Cr');
+      }
+      if (alignmentData && alignmentData.overallBias) {
+        parts.push('Alignment: ' + alignmentData.overallBias);
+      }
+      return parts.join('   •   ');
+    }
+
+    function renderIndexChecklistCard(symbol, summary) {
+      let html = '<div class="premium-card" style="margin-bottom:16px;">';
+      html += '<div class="card-title">' + symbol + ' — Today\u2019s Respect Checklist</div>';
+      summary.checklist.forEach((item) => {
+        const color = item.pass ? biasColor(item.color) : 'var(--muted-dim)';
+        const tick = item.pass ? '✓' : '—';
+        html += '<div class="checklist-item">';
+        html += '<span style="color: var(--text);">' + escapeHtml(item.label) + '</span>';
+        html += '<span class="checklist-tick' + (item.pass ? ' on' : '') + '" style="color:' + color + ';">' + tick + '</span>';
+        html += '</div>';
+      });
+      html += '<div class="journal-sentence">' + escapeHtml(summary.sentence) + '</div>';
+      html += '</div>';
+      return html;
+    }
+
+    function renderDailySummary() {
+      if (!dailySummaryData) {
+        return '<div class="loading">Loading daily summary...</div>';
+      }
+      if (dailySummaryData.error) {
+        return '<div class="error">⚠️ ' + escapeHtml(dailySummaryData.error) + '</div>';
+      }
+
+      const entries = dailySummaryData.entries || [];
+      if (entries.length === 0 || !entries[entries.length - 1].snapshots || entries[entries.length - 1].snapshots.length === 0) {
+        return '<div class="loading">No checkpoints yet — refresh data at least once to start today\u2019s timeline.</div>';
+      }
+
+      const today = entries[entries.length - 1];
+      const latestSnapshot = today.snapshots[today.snapshots.length - 1];
+      let html = '';
+
+      const tickerText = renderTickerContent(latestSnapshot.summaries);
+      if (tickerText) {
+        html += '<div class="ticker-wrap"><div class="ticker-track">' + escapeHtml(tickerText) + '   •   ' + escapeHtml(tickerText) + '</div></div>';
+      }
+
+      if (today.conclusion) {
+        html += '<div class="premium-card" style="margin-bottom:16px; border: 2px solid var(--gold);">';
+        html += '<div class="card-title">📌 Day-End Conclusion (' + today.date + ')</div>';
+        html += '<div style="color: var(--text); font-size:0.88rem; line-height:1.5;">' + escapeHtml(today.conclusion) + '</div>';
+        html += '</div>';
+      }
+
+      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => {
+        if (latestSnapshot.summaries && latestSnapshot.summaries[sym]) {
+          html += renderIndexChecklistCard(sym, latestSnapshot.summaries[sym]);
+        }
+      });
+
+      if (today.snapshots.length > 1) {
+        html += '<div class="premium-card" style="margin-bottom:16px;">';
+        html += '<div class="card-title">Today\u2019s Timeline (every ~30 min)</div>';
+        today.snapshots.slice().reverse().forEach((snap) => {
+          html += '<div class="fii-section-label" style="margin-top:8px;">' + snap.time + ' IST</div>';
+          ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => {
+            if (snap.summaries && snap.summaries[sym]) {
+              html += '<div style="color: var(--muted); font-size:0.76rem; padding:1px 0;">' + escapeHtml(snap.summaries[sym].sentence) + '</div>';
+            }
+          });
+        });
+        html += '</div>';
+      }
+
+      if (entries.length > 1) {
+        html += '<div class="premium-card" style="margin-bottom:16px;">';
+        html += '<div class="card-title">Previous Days</div>';
+        entries.slice(0, -1).reverse().forEach((e) => {
+          html += '<div class="fii-section-label" style="margin-top:10px;">' + e.date + '</div>';
+          if (e.conclusion) {
+            html += '<div style="color: var(--gold); font-size:0.78rem; padding:2px 0;">' + escapeHtml(e.conclusion) + '</div>';
+          } else if (e.snapshots && e.snapshots.length > 0) {
+            const last = e.snapshots[e.snapshots.length - 1];
+            ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => {
+              if (last.summaries && last.summaries[sym]) {
+                html += '<div style="color: var(--muted); font-size:0.76rem; padding:1px 0;">' + escapeHtml(last.summaries[sym].sentence) + '</div>';
+              }
+            });
+          }
+        });
+        html += '</div>';
+      }
+
+      html += '<div class="timestamp">Checkpoints recorded every ~30 minutes; day-end conclusion locks in after 3:30 PM IST. Auto-generated from live Kite data — stored in server memory only, lost on redeploy.</div>';
+      return html;
+    }
+
     function renderCommodities() {
       if (!commoditiesData) {
         return '<div class="loading">Loading commodities...</div>';
@@ -3930,7 +4254,8 @@ app.get("/", (c) => {
       document.getElementById(symbol).classList.add('active');
       const btns = document.querySelectorAll('button[class*="tab-btn"]');
       for (let i = 0; i < btns.length; i++) {
-        if (btns[i].textContent.includes(symbol)) {
+        const onclickAttr = btns[i].getAttribute('onclick') || '';
+        if (onclickAttr.indexOf("'" + symbol + "'") !== -1) {
           btns[i].classList.add('active');
         }
       }
@@ -3985,9 +4310,9 @@ app.get("/", (c) => {
       await checkKiteStatus();
       await Promise.all([loadNews(), loadHolidays(), loadFiiDii()]);
       if (kiteConnected) {
-        await Promise.all([fetchData(), loadHeatmap(), loadCommodities(), loadAlignment()]);
+        await Promise.all([fetchData(), loadHeatmap(), loadCommodities(), loadAlignment(), loadDailySummary()]);
       } else {
-        ['NIFTY', 'BANKNIFTY', 'SENSEX', 'HEATMAP', 'COMMODITIES', 'SWING', 'VIXCORR', 'ALIGNMENT']
+        ['NIFTY', 'BANKNIFTY', 'SENSEX', 'HEATMAP', 'COMMODITIES', 'SWING', 'VIXCORR', 'ALIGNMENT', 'DAILYSUMMARY']
           .forEach((id) => {
             document.getElementById(id).innerHTML =
               '<div class="loading">Connect Kite to load verified live market data.</div>';
@@ -4004,6 +4329,7 @@ app.get("/", (c) => {
     setInterval(loadHeatmap, 3 * 60 * 1000);
     setInterval(loadCommodities, 3 * 60 * 1000);
     setInterval(loadAlignment, 3 * 60 * 1000);
+    setInterval(loadDailySummary, 3 * 60 * 1000);
 
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible' && kiteConnected) refreshData();
@@ -4119,6 +4445,11 @@ app.post("/api/fii-dii", async (c) => {
 // FII/DII manual entry — list recent entries (most recent last)
 app.get("/api/fii-dii", (c) => {
   return c.json({ entries: fiiDiiEntries.slice(-30) });
+});
+
+// Daily Summary / Respect Checklist — auto-generated, no manual entry needed
+app.get("/api/daily-summary", (c) => {
+  return c.json({ entries: dailyJournal.slice(-14) });
 });
 
 // Sector + stock heatmap — live % change from Kite, colour-coded on the frontend

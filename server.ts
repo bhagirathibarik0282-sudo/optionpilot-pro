@@ -36,9 +36,11 @@ interface PremiumData {
   oi: number;
   atDayHigh: boolean;
   atDayLow: boolean;
-  dayHigh: number;
-  dayLow: number;
+  dayHigh: number; // today's intraday high (Kite's ohlc.high)
+  dayLow: number; // today's intraday low (Kite's ohlc.low)
   pdc: number; // previous day close (Kite's ohlc.close)
+  pdh: number; // previous trading day's high, for this specific strike's premium
+  pdl: number; // previous trading day's low, for this specific strike's premium
 }
 
 interface GapScoreComponents {
@@ -701,6 +703,44 @@ async function fetchPreviousTradingCandle(
   return candles.length > 0 ? candles[candles.length - 1] : null;
 }
 
+// ============== PER-STRIKE PDH/PDL (previous day high/low of each option) ==============
+// Previous-day levels for a given option contract don't change during the
+// trading day, so results are cached in-memory (shared across all sessions)
+// to avoid re-hitting Kite's historical endpoint on every 3-minute refresh.
+const optionPrevDayCache = new Map<number, { pdh: number; pdl: number; cachedAt: number }>();
+const OPTION_PDHPDL_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours — well within one trading day
+
+async function getOptionPrevDayLevelsBatch(
+  accessToken: string,
+  instrumentTokens: number[]
+): Promise<Map<number, { pdh: number; pdl: number }>> {
+  const result = new Map<number, { pdh: number; pdl: number }>();
+  const toFetch: number[] = [];
+
+  for (const token of instrumentTokens) {
+    const cached = optionPrevDayCache.get(token);
+    if (cached && Date.now() - cached.cachedAt < OPTION_PDHPDL_CACHE_TTL) {
+      result.set(token, { pdh: cached.pdh, pdl: cached.pdl });
+    } else {
+      toFetch.push(token);
+    }
+  }
+
+  if (toFetch.length > 0) {
+    const fetched = await Promise.all(
+      toFetch.map((token) => fetchPreviousTradingCandle(accessToken, token))
+    );
+    toFetch.forEach((token, i) => {
+      const candle = fetched[i];
+      const levels = { pdh: candle?.high || 0, pdl: candle?.low || 0 };
+      optionPrevDayCache.set(token, { ...levels, cachedAt: Date.now() });
+      result.set(token, levels);
+    });
+  }
+
+  return result;
+}
+
 function findActiveIndexFuture(
   instruments: Instrument[],
   symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"
@@ -920,6 +960,12 @@ async function fetchCommodityData(
 
     const optionQuotes = await fetchKiteQuote(accessToken, symbolsToFetch);
     if (optionQuotes) {
+      const allOptionInstruments = [...Object.values(ceInstruments), ...Object.values(peInstruments)];
+      const pdhPdlMap = await getOptionPrevDayLevelsBatch(
+        accessToken,
+        allOptionInstruments.map((inst) => inst.instrument_token)
+      );
+
       for (const strike of strikeList) {
         const isAtm = strike === baseMetrics.atmStrike;
 
@@ -929,6 +975,7 @@ async function fetchCommodityData(
           if (oq) {
             const dayHigh = oq.ohlc?.high || oq.last_price;
             const dayLow = oq.ohlc?.low || oq.last_price;
+            const levels = pdhPdlMap.get(ceInst.instrument_token) || { pdh: 0, pdl: 0 };
             baseMetrics.ceStrikes.push({
               strike,
               isAtm,
@@ -943,6 +990,8 @@ async function fetchCommodityData(
               dayHigh: dayHigh || 0,
               dayLow: dayLow || 0,
               pdc: oq.ohlc?.close || 0,
+              pdh: levels.pdh,
+              pdl: levels.pdl,
             });
           }
         }
@@ -953,6 +1002,7 @@ async function fetchCommodityData(
           if (oq) {
             const dayHigh = oq.ohlc?.high || oq.last_price;
             const dayLow = oq.ohlc?.low || oq.last_price;
+            const levels = pdhPdlMap.get(peInst.instrument_token) || { pdh: 0, pdl: 0 };
             baseMetrics.peStrikes.push({
               strike,
               isAtm,
@@ -967,6 +1017,8 @@ async function fetchCommodityData(
               dayHigh: dayHigh || 0,
               dayLow: dayLow || 0,
               pdc: oq.ohlc?.close || 0,
+              pdh: levels.pdh,
+              pdl: levels.pdl,
             });
           }
         }
@@ -1341,6 +1393,12 @@ async function fetchIndexData(
         const optionQuotes = await fetchKiteQuote(accessToken, symbolsToFetch);
 
         if (optionQuotes) {
+          const allOptionInstruments = [...Object.values(ceInstruments), ...Object.values(peInstruments)];
+          const pdhPdlMap = await getOptionPrevDayLevelsBatch(
+            accessToken,
+            allOptionInstruments.map((inst) => inst.instrument_token)
+          );
+
           for (const strike of strikeList) {
             const isAtm = strike === baseMetrics.atmStrike;
 
@@ -1350,6 +1408,7 @@ async function fetchIndexData(
               if (q) {
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
+                const levels = pdhPdlMap.get(ceInst.instrument_token) || { pdh: 0, pdl: 0 };
                 expiry.ceStrikes.push({
                   strike,
                   isAtm,
@@ -1364,6 +1423,8 @@ async function fetchIndexData(
                   dayHigh: dayHigh || 0,
                   dayLow: dayLow || 0,
                   pdc: q.ohlc?.close || 0,
+                  pdh: levels.pdh,
+                  pdl: levels.pdl,
                 });
               }
             }
@@ -1374,6 +1435,7 @@ async function fetchIndexData(
               if (q) {
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
+                const levels = pdhPdlMap.get(peInst.instrument_token) || { pdh: 0, pdl: 0 };
                 expiry.peStrikes.push({
                   strike,
                   isAtm,
@@ -1388,6 +1450,8 @@ async function fetchIndexData(
                   dayHigh: dayHigh || 0,
                   dayLow: dayLow || 0,
                   pdc: q.ohlc?.close || 0,
+                  pdh: levels.pdh,
+                  pdl: levels.pdl,
                 });
               }
             }
@@ -2131,6 +2195,30 @@ app.get("/", (c) => {
       border: 1px solid var(--border);
       text-align: center;
     }
+
+    .bias-check-card {
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 20px;
+      border: 2px solid var(--border);
+    }
+
+    .bias-check-signals {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .bias-check-signal {
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      padding: 8px;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.15);
+      text-align: center;
+      border: 1px solid var(--border);
+    }
   </style>
 </head>
 <body>
@@ -2590,6 +2678,83 @@ app.get("/", (c) => {
       return html;
     }
 
+    // "Bias Check Before Entry": combines three independent signals —
+    // Gap Confirmation Score, PDH/PDL Signal, and Futures Alignment — and
+    // requires at least 2 of 3 to agree before calling a bias confirmed.
+    function renderBiasCheckWidget(indexData) {
+      if (!indexData) return '';
+
+      const signals = [];
+
+      // Signal 1: Gap Confirmation Score
+      const gs = indexData.gapScore;
+      if (gs) {
+        const dir = gs.score > 10 ? 'bullish' : gs.score < -10 ? 'bearish' : 'neutral';
+        signals.push({ name: 'Gap Score', dir, detail: gs.verdict });
+      } else {
+        signals.push({ name: 'Gap Score', dir: 'neutral', detail: 'N/A' });
+      }
+
+      // Signal 2: PDH/PDL Signal (BUY/SELL/WAIT)
+      const pdhDir = indexData.signal === 'BUY' ? 'bullish' : indexData.signal === 'SELL' ? 'bearish' : 'neutral';
+      signals.push({ name: 'PDH/PDL', dir: pdhDir, detail: indexData.signal });
+
+      // Signal 3: Futures Alignment — NIFTY vs BANKNIFTY agreement for those two,
+      // or this index's own futures VWAP bias as a proxy for SENSEX/others.
+      let alignDir = 'neutral';
+      let alignDetail = 'N/A';
+      if ((indexData.symbol === 'NIFTY' || indexData.symbol === 'BANKNIFTY') && data && data.NIFTY && data.BANKNIFTY) {
+        const n = data.NIFTY.futuresVwapBias;
+        const b = data.BANKNIFTY.futuresVwapBias;
+        if (n && b && n !== 'UNKNOWN' && b !== 'UNKNOWN' && n === b) {
+          alignDir = n === 'UP' ? 'bullish' : 'bearish';
+          alignDetail = 'Aligned';
+        } else if (n && b && n !== 'UNKNOWN' && b !== 'UNKNOWN') {
+          alignDetail = 'Diverging';
+        }
+      } else if (indexData.futuresVwapBias && indexData.futuresVwapBias !== 'UNKNOWN') {
+        alignDir = indexData.futuresVwapBias === 'UP' ? 'bullish' : 'bearish';
+        alignDetail = 'Futures ' + indexData.futuresVwapBias;
+      }
+      signals.push({ name: 'Alignment', dir: alignDir, detail: alignDetail });
+
+      const bullishCount = signals.filter((s) => s.dir === 'bullish').length;
+      const bearishCount = signals.filter((s) => s.dir === 'bearish').length;
+
+      let verdictLabel, verdictColor, borderColor;
+      if (bullishCount >= 2) {
+        verdictLabel = '✓ Entry Bias Confirmed: BULLISH (' + bullishCount + '/3)';
+        verdictColor = 'var(--green)';
+        borderColor = 'var(--green)';
+      } else if (bearishCount >= 2) {
+        verdictLabel = '✓ Entry Bias Confirmed: BEARISH (' + bearishCount + '/3)';
+        verdictColor = 'var(--red)';
+        borderColor = 'var(--red)';
+      } else {
+        verdictLabel = '⏳ WAIT — Signals Not Aligned (best ' + Math.max(bullishCount, bearishCount) + '/3)';
+        verdictColor = 'var(--muted)';
+        borderColor = 'var(--border)';
+      }
+
+      let html = '<div class="bias-check-card" style="background: var(--panel); border-color:' + borderColor + ';">';
+      html += '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">';
+      html += '<div class="card-title" style="margin-bottom:0;">Bias Check Before Entry</div>';
+      html += '<span class="badge-pill" style="background: rgba(0,0,0,0.2); color:' + verdictColor + ';">' + verdictLabel + '</span>';
+      html += '</div>';
+
+      html += '<div class="bias-check-signals">';
+      for (const s of signals) {
+        const color = s.dir === 'bullish' ? 'var(--green)' : s.dir === 'bearish' ? 'var(--red)' : 'var(--muted)';
+        const arrow = s.dir === 'bullish' ? '▲' : s.dir === 'bearish' ? '▼' : '●';
+        html += '<div class="bias-check-signal"><div style="color:var(--muted-dim); margin-bottom:3px;">' + s.name + '</div><div style="color:' + color + '; font-weight:700;">' + arrow + ' ' + escapeHtml(s.detail) + '</div></div>';
+      }
+      html += '</div>';
+
+      html += '<div class="timestamp" style="margin-top:8px;">Needs 2 of 3 signals to agree before treating a directional entry as confirmed — not investment advice.</div>';
+      html += '</div>';
+      return html;
+    }
+
     function renderAlignmentBadge() {
       if (!data || !data.NIFTY || !data.BANKNIFTY) return '';
       const n = data.NIFTY.futuresVwapBias;
@@ -2657,6 +2822,8 @@ app.get("/", (c) => {
 
       html += renderGapScoreCard(indexData);
 
+      html += renderBiasCheckWidget(indexData);
+
       html += '<div class="metrics-grid">';
       html += '<div class="metric-card"><div class="metric-label">Current Price</div>';
       html += '<div class="metric-value">' + (indexData.current ? indexData.current.toFixed(2) : 'N/A') +
@@ -2722,8 +2889,8 @@ app.get("/", (c) => {
           html += '<div class="expiry-section">';
           html += '<div class="expiry-title">' + exp.expiry + ' Expiry — ATM ±2 Strikes</div>';
           html += '<div class="card-row">';
-          html += renderStrikeBand('📈 Call (CE)', exp.ceStrikes, exp.ceError);
-          html += renderStrikeBand('📉 Put (PE)', exp.peStrikes, exp.peError);
+          html += renderStrikeBand('📈 Call (CE)', exp.ceStrikes, exp.ceError, indexData.symbol + '_' + exp.expiry + '_CE');
+          html += renderStrikeBand('📉 Put (PE)', exp.peStrikes, exp.peError, indexData.symbol + '_' + exp.expiry + '_PE');
           html += '</div></div>';
         }
       }
@@ -2731,7 +2898,18 @@ app.get("/", (c) => {
       return html;
     }
 
-    function renderStrikeBand(title, strikes, errorMsg) {
+    // Tracks the last-seen OI per strike (keyed by a stable composite key) so
+    // the OI column can show an up/down arrow versus the previous refresh.
+    const lastOi = {};
+
+    function oiArrowInfo(key, currentOi) {
+      const prev = lastOi[key];
+      lastOi[key] = currentOi;
+      if (prev == null || currentOi === prev) return { arrow: '●', cls: 'flat' };
+      return currentOi > prev ? { arrow: '▲', cls: 'up' } : { arrow: '▼', cls: 'down' };
+    }
+
+    function renderStrikeBand(title, strikes, errorMsg, keyPrefix) {
       let html = '<div class="premium-card">';
       html += '<div class="card-title">' + title + '</div>';
 
@@ -2741,21 +2919,32 @@ app.get("/", (c) => {
         return html;
       }
 
-      html += '<div class="table-scroll"><table style="width:100%; min-width:310px; font-family: var(--font-mono); font-size: 0.7rem; border-collapse: collapse;">';
+      html += '<div class="table-scroll"><table style="width:100%; min-width:560px; font-family: var(--font-mono); font-size: 0.7rem; border-collapse: collapse;">';
       html += '<thead><tr style="color: var(--muted-dim);">' +
         '<th style="text-align:left; padding: 3px 2px;">Strike</th>' +
         '<th style="text-align:right; padding: 3px 2px;">LTP</th>' +
+        '<th style="text-align:right; padding: 3px 2px;">OI</th>' +
         '<th style="text-align:right; padding: 3px 2px;">Day H</th>' +
         '<th style="text-align:right; padding: 3px 2px;">Day L</th>' +
+        '<th style="text-align:right; padding: 3px 2px;">PDH</th>' +
+        '<th style="text-align:right; padding: 3px 2px;">PDL</th>' +
         '</tr></thead><tbody>';
 
       for (const s of strikes) {
         const rowStyle = s.isAtm ? 'background: rgba(201,162,39,0.08); border-top: 1px solid var(--gold-soft); border-bottom: 1px solid var(--gold-soft);' : 'border-top: 1px solid var(--border);';
+        const oiKey = (keyPrefix || '') + '_' + s.strike;
+        const oiInfo = oiArrowInfo(oiKey, s.oi);
+        const oiColor = oiInfo.cls === 'up' ? 'var(--green)' : oiInfo.cls === 'down' ? 'var(--red)' : 'var(--muted)';
+        const atPdh = s.pdh ? s.lastPrice >= s.pdh * 0.98 : false;
+        const atPdl = s.pdl ? s.lastPrice <= s.pdl * 1.02 : false;
         html += '<tr style="' + rowStyle + '">';
         html += '<td style="padding: 4px 2px; color: ' + (s.isAtm ? 'var(--gold)' : 'var(--text)') + '; font-weight: ' + (s.isAtm ? '700' : '500') + ';">' + s.strike + (s.isAtm ? ' (ATM)' : '') + '</td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: var(--text);"><span class="flash">' + s.lastPrice.toFixed(2) + '</span></td>';
+        html += '<td style="padding: 4px 2px; text-align:right; color: ' + oiColor + ';"><span class="flash">' + (s.oi != null ? s.oi.toLocaleString('en-IN') : '—') + ' <span style="font-weight:700;">' + oiInfo.arrow + '</span></span></td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (s.atDayHigh ? 'var(--red)' : 'var(--muted)') + '; font-weight: ' + (s.atDayHigh ? '700' : '400') + ';"><span class="flash">' + (s.dayHigh ? s.dayHigh.toFixed(2) : '—') + (s.atDayHigh ? ' ⚠' : '') + '</span></td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (s.atDayLow ? 'var(--green)' : 'var(--muted)') + '; font-weight: ' + (s.atDayLow ? '700' : '400') + ';"><span class="flash">' + (s.dayLow ? s.dayLow.toFixed(2) : '—') + (s.atDayLow ? ' ⚠' : '') + '</span></td>';
+        html += '<td style="padding: 4px 2px; text-align:right; color: ' + (atPdh ? 'var(--red)' : 'var(--muted-dim)') + '; font-weight: ' + (atPdh ? '700' : '400') + ';">' + (s.pdh ? s.pdh.toFixed(2) : '—') + (atPdh ? ' ⚠' : '') + '</td>';
+        html += '<td style="padding: 4px 2px; text-align:right; color: ' + (atPdl ? 'var(--green)' : 'var(--muted-dim)') + '; font-weight: ' + (atPdl ? '700' : '400') + ';">' + (s.pdl ? s.pdl.toFixed(2) : '—') + (atPdl ? ' ⚠' : '') + '</td>';
         html += '</tr>';
       }
 
@@ -2763,9 +2952,13 @@ app.get("/", (c) => {
 
       const resistanceStrikes = strikes.filter(s => s.atDayHigh).map(s => s.strike);
       const supportStrikes = strikes.filter(s => s.atDayLow).map(s => s.strike);
+      const pdhStrikes = strikes.filter(s => s.pdh && s.lastPrice >= s.pdh * 0.98).map(s => s.strike);
+      const pdlStrikes = strikes.filter(s => s.pdl && s.lastPrice <= s.pdl * 1.02).map(s => s.strike);
       html += '<div style="margin-top:8px; font-size:0.7rem; font-family: var(--font-mono);">';
       html += '<div style="color: ' + (resistanceStrikes.length ? 'var(--red)' : 'var(--muted-dim)') + ';">Near current Day High: ' + (resistanceStrikes.length ? resistanceStrikes.join(', ') : 'none') + '</div>';
       html += '<div style="color: ' + (supportStrikes.length ? 'var(--green)' : 'var(--muted-dim)') + ';">Near current Day Low: ' + (supportStrikes.length ? supportStrikes.join(', ') : 'none') + '</div>';
+      html += '<div style="color: ' + (pdhStrikes.length ? 'var(--red)' : 'var(--muted-dim)') + ';">Near Previous Day High: ' + (pdhStrikes.length ? pdhStrikes.join(', ') : 'none') + '</div>';
+      html += '<div style="color: ' + (pdlStrikes.length ? 'var(--green)' : 'var(--muted-dim)') + ';">Near Previous Day Low: ' + (pdlStrikes.length ? pdlStrikes.join(', ') : 'none') + '</div>';
       html += '</div>';
 
       html += '</div>';
@@ -2896,8 +3089,8 @@ app.get("/", (c) => {
       html += '</div>';
 
       html += '<div class="card-row">';
-      html += renderStrikeBand('📈 Call (CE)', cData.ceStrikes, 'No CE data');
-      html += renderStrikeBand('📉 Put (PE)', cData.peStrikes, 'No PE data');
+      html += renderStrikeBand('📈 Call (CE)', cData.ceStrikes, 'No CE data', cData.symbol + '_CE');
+      html += renderStrikeBand('📉 Put (PE)', cData.peStrikes, 'No PE data', cData.symbol + '_PE');
       html += '</div>';
 
       html += '</div>';

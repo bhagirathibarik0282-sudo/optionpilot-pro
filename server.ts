@@ -116,18 +116,11 @@ interface FiiDiiDerivative {
   bias: "Long Buildup" | "Short Buildup" | "Long Unwinding" | "Short Covering";
 }
 
-interface FiiDiiSectorEntry {
-  sector: string;
-  oiChangePct: number;
-  bias: "Long" | "Short";
-}
-
 interface FiiDiiEntry {
   date: string; // YYYY-MM-DD
   fiiCashCr: number;
   diiCashCr: number;
   derivatives: FiiDiiDerivative[];
-  sectors: FiiDiiSectorEntry[];
   createdAt: string;
 }
 
@@ -2666,8 +2659,42 @@ app.get("/", (c) => {
       }
     }
 
-    const FII_DII_SECTORS = ['Banking', 'IT', 'Auto', 'Metal', 'Pharma', 'FMCG', 'Energy', 'Realty'];
     const FII_DII_DERIVATIVE_CATEGORIES = ['Index Futures', 'Stock Futures', 'Index Options (Call)', 'Index Options (Put)'];
+
+    const FII_DII_PASTE_LABEL_MAP = {
+      'Date': 'fdDate',
+      'FII Cash': 'fdFiiCash',
+      'DII Cash': 'fdDiiCash',
+      'Index Futures OI': 'fdDeriv0Val',
+      'Index Futures Bias': 'fdDeriv0Bias',
+      'Stock Futures OI': 'fdDeriv1Val',
+      'Stock Futures Bias': 'fdDeriv1Bias',
+      'Index Options Call OI': 'fdDeriv2Val',
+      'Index Options Call Bias': 'fdDeriv2Bias',
+      'Index Options Put OI': 'fdDeriv3Val',
+      'Index Options Put Bias': 'fdDeriv3Bias',
+    };
+
+    function parseFiiDiiPaste() {
+      const box = document.getElementById('fdPasteBox');
+      const lines = (box.value || '').split('\\n');
+      let filled = 0;
+      lines.forEach((line) => {
+        const idx = line.indexOf(':');
+        if (idx === -1) return;
+        const label = line.slice(0, idx).trim();
+        const value = line.slice(idx + 1).trim();
+        const fieldId = FII_DII_PASTE_LABEL_MAP[label];
+        if (!fieldId) return;
+        const el = document.getElementById(fieldId);
+        if (el) { el.value = value; filled++; }
+      });
+      if (filled > 0) {
+        showSuccess('✓ Filled ' + filled + ' fields from pasted text — check and hit Save Entry');
+      } else {
+        showError('Could not recognize the pasted format. Use lines like "FII Cash: 277.48"');
+      }
+    }
 
     async function saveFiiDii() {
       const getVal = (id) => document.getElementById(id).value;
@@ -2681,17 +2708,11 @@ app.get("/", (c) => {
         bias: getVal('fdDeriv' + i + 'Bias'),
       }));
 
-      const sectors = FII_DII_SECTORS.map((sec, i) => ({
-        sector: sec,
-        oiChangePct: parseFloat(getVal('fdSector' + i + 'Val')) || 0,
-        bias: getVal('fdSector' + i + 'Bias'),
-      }));
-
       try {
         const response = await fetch('/api/fii-dii', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date, fiiCashCr, diiCashCr, derivatives, sectors }),
+          body: JSON.stringify({ date, fiiCashCr, diiCashCr, derivatives }),
         });
         if (!response.ok) throw new Error('Save failed');
         showSuccess('✓ FII/DII entry saved for ' + date);
@@ -3588,6 +3609,10 @@ app.get("/", (c) => {
       let html = '<div class="premium-card" style="margin-bottom:16px;">';
       html += '<div class="card-title">Add / Update Today\u2019s Entry</div>';
 
+      html += '<div class="fii-section-label">Paste &amp; Fill (optional)</div>';
+      html += '<textarea id="fdPasteBox" placeholder="Paste lines like:&#10;Date: 2026-07-31&#10;FII Cash: 277.48&#10;DII Cash: 2260.37&#10;Index Futures OI: 13499&#10;Index Futures Bias: Short Covering" style="width:100%; min-height:80px; background: var(--panel-alt); border:1px solid var(--border); color: var(--text); border-radius:6px; padding:8px; font-size:0.75rem; font-family: var(--font-mono);"></textarea>';
+      html += '<button class="btn" style="margin-top:6px; margin-bottom:10px;" onclick="parseFiiDiiPaste()">📋 Parse &amp; Fill</button>';
+
       html += '<div class="fii-form-grid">';
       html += '<div class="fii-field"><label>Date</label><input type="date" id="fdDate" value="' + today + '"></div>';
       html += '<div class="fii-field"><label>FII Cash Net (Cr)</label><input type="number" id="fdFiiCash" step="0.01" placeholder="e.g. 1250 or -800"></div>';
@@ -3600,16 +3625,6 @@ app.get("/", (c) => {
         html += '<div class="fii-field"><label>' + cat + '</label>';
         html += '<input type="number" id="fdDeriv' + i + 'Val" step="0.01" placeholder="OI chg" style="margin-bottom:4px;">';
         html += '<select id="fdDeriv' + i + 'Bias"><option>Long Buildup</option><option>Short Buildup</option><option>Long Unwinding</option><option>Short Covering</option></select>';
-        html += '</div>';
-      });
-      html += '</div>';
-
-      html += '<div class="fii-section-label">Sector OI Change</div>';
-      html += '<div class="fii-form-grid">';
-      FII_DII_SECTORS.forEach((sec, i) => {
-        html += '<div class="fii-field"><label>' + sec + ' (%)</label>';
-        html += '<input type="number" id="fdSector' + i + 'Val" step="0.01" placeholder="0.0" style="margin-bottom:4px;">';
-        html += '<select id="fdSector' + i + 'Bias"><option>Long</option><option>Short</option></select>';
         html += '</div>';
       });
       html += '</div>';
@@ -3654,15 +3669,6 @@ app.get("/", (c) => {
           html += '<div class="card-title">Latest Derivatives (' + latest.date + ')</div>';
           latest.derivatives.forEach((d) => {
             html += renderAlignRow(d.category, (d.oiChange >= 0 ? '+' : '') + d.oiChange, d.bias, fiiDiiBiasColor(d.bias) === 'var(--green)' ? 'bullish' : fiiDiiBiasColor(d.bias) === 'var(--red)' ? 'bearish' : 'neutral');
-          });
-          html += '</div>';
-        }
-
-        if (latest.sectors && latest.sectors.length > 0) {
-          html += '<div class="premium-card" style="margin-bottom:16px;">';
-          html += '<div class="card-title">Latest Sector OI (' + latest.date + ')</div>';
-          latest.sectors.forEach((s) => {
-            html += renderAlignRow(s.sector, (s.oiChangePct >= 0 ? '+' : '') + s.oiChangePct.toFixed(2) + '%', s.bias, s.bias === 'Long' ? 'bullish' : 'bearish');
           });
           html += '</div>';
         }
@@ -4092,13 +4098,6 @@ app.post("/api/fii-dii", async (c) => {
             category: String(d.category || ""),
             oiChange: Number(d.oiChange) || 0,
             bias: d.bias === "Short Buildup" || d.bias === "Long Unwinding" || d.bias === "Short Covering" ? d.bias : "Long Buildup",
-          }))
-        : [],
-      sectors: Array.isArray(body.sectors)
-        ? body.sectors.map((s: any) => ({
-            sector: String(s.sector || ""),
-            oiChangePct: Number(s.oiChangePct) || 0,
-            bias: s.bias === "Short" ? "Short" : "Long",
           }))
         : [],
       createdAt: new Date().toISOString(),

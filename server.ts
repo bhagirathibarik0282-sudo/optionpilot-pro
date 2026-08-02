@@ -41,6 +41,8 @@ interface PremiumData {
   pdc: number; // previous day close (Kite's ohlc.close)
   pdh: number; // previous trading day's high, for this specific strike's premium
   pdl: number; // previous trading day's low, for this specific strike's premium
+  vega: number; // Black-Scholes estimate — NOT from Kite (Kite doesn't publish Greeks)
+  theta: number; // Black-Scholes estimate, per-day decay — NOT from Kite
 }
 
 interface GapScoreComponents {
@@ -79,6 +81,7 @@ interface IndexMetrics {
   signal: "BUY" | "SELL" | "WAIT";
   futuresVwapBias: "UP" | "DOWN" | "UNKNOWN";
   gapScore?: GapScore;
+  atr14: number | null; // Average True Range (14-day), computed from historical daily candles — NOT from Kite directly
   expiries: ExpiryData[];
   error?: string;
   timestamp?: string;
@@ -912,6 +915,88 @@ async function getOptionPrevDayLevelsBatch(
   return result;
 }
 
+// ============== BLACK-SCHOLES GREEKS (Vega/Theta) — estimated, NOT from Kite ==============
+// Kite's quote API does not publish option Greeks. These are computed
+// locally from spot, strike, IV, and days-to-expiry using the standard
+// Black-Scholes model with an assumed risk-free rate — a reasonable
+// estimate, not an exchange-published figure.
+const BS_RISK_FREE_RATE = 0.07; // approx. India short-term rate, for Greeks estimation only
+
+function normPdf(x: number): number {
+  return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+}
+
+function normCdf(x: number): number {
+  // Abramowitz & Stegun approximation
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x) / Math.sqrt(2);
+  const t = 1 / (1 + 0.3275911 * ax);
+  const y =
+    1 -
+    (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-ax * ax);
+  return 0.5 * (1 + sign * y);
+}
+
+function calcVegaTheta(
+  spot: number,
+  strike: number,
+  ivPercent: number,
+  daysToExpiry: number,
+  isCall: boolean
+): { vega: number; theta: number } {
+  if (spot <= 0 || strike <= 0 || ivPercent <= 0 || daysToExpiry <= 0) return { vega: 0, theta: 0 };
+  const sigma = ivPercent / 100;
+  const T = daysToExpiry / 365;
+  const r = BS_RISK_FREE_RATE;
+  const sqrtT = Math.sqrt(T);
+  const d1 = (Math.log(spot / strike) + (r + (sigma * sigma) / 2) * T) / (sigma * sqrtT);
+  const d2 = d1 - sigma * sqrtT;
+
+  const vega = (spot * normPdf(d1) * sqrtT) / 100; // change in premium per 1% IV move
+
+  let thetaAnnual: number;
+  if (isCall) {
+    thetaAnnual =
+      -(spot * normPdf(d1) * sigma) / (2 * sqrtT) - r * strike * Math.exp(-r * T) * normCdf(d2);
+  } else {
+    thetaAnnual =
+      -(spot * normPdf(d1) * sigma) / (2 * sqrtT) + r * strike * Math.exp(-r * T) * normCdf(-d2);
+  }
+  const thetaPerDay = thetaAnnual / 365;
+
+  return { vega, theta: thetaPerDay };
+}
+
+// ============== ATR (Average True Range) — computed from historical daily candles ==============
+const atrCache = new Map<number, { atr14: number | null; cachedAt: number }>();
+const ATR_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
+
+function computeATR(candles: DailyCandle[], period = 14): number | null {
+  if (candles.length < period + 1) return null;
+  const trueRanges: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const cur = candles[i];
+    const prevClose = candles[i - 1].close;
+    const tr = Math.max(cur.high - cur.low, Math.abs(cur.high - prevClose), Math.abs(cur.low - prevClose));
+    trueRanges.push(tr);
+  }
+  const recent = trueRanges.slice(-period);
+  return recent.reduce((a, b) => a + b, 0) / recent.length;
+}
+
+async function getAtr14Cached(accessToken: string, instrumentToken: number): Promise<number | null> {
+  const cached = atrCache.get(instrumentToken);
+  if (cached && Date.now() - cached.cachedAt < ATR_CACHE_TTL) return cached.atr14;
+
+  const candles = await fetchHistoricalDaily(accessToken, instrumentToken, indiaDate(-30), indiaDate(-1));
+  const atr14 = computeATR(candles, 14);
+  atrCache.set(instrumentToken, { atr14, cachedAt: Date.now() });
+  return atr14;
+}
+
+
 function findActiveIndexFuture(
   instruments: Instrument[],
   symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"
@@ -1106,6 +1191,10 @@ async function fetchCommodityData(
     const optionMap = buildCommodityOptionMap(instruments, commodityName, expiry);
     const offsets = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
     const strikeList = offsets.map((o) => baseMetrics.atmStrike + o * step);
+    const commodityExpiryDate = parseExpiryDate(expiry);
+    const commodityDaysToExpiry = commodityExpiryDate
+      ? Math.max(0, (commodityExpiryDate.getTime() - Date.now()) / 86_400_000)
+      : 0;
 
     const ceInstruments: Record<number, Instrument> = {};
     const peInstruments: Record<number, Instrument> = {};
@@ -1147,6 +1236,7 @@ async function fetchCommodityData(
             const dayHigh = oq.ohlc?.high || oq.last_price;
             const dayLow = oq.ohlc?.low || oq.last_price;
             const levels = pdhPdlMap.get(ceInst.instrument_token) || { pdh: 0, pdl: 0 };
+            const greeks = calcVegaTheta(baseMetrics.current, strike, oq.iv || 0, commodityDaysToExpiry, true);
             baseMetrics.ceStrikes.push({
               strike,
               isAtm,
@@ -1163,6 +1253,8 @@ async function fetchCommodityData(
               pdc: oq.ohlc?.close || 0,
               pdh: levels.pdh,
               pdl: levels.pdl,
+              vega: greeks.vega,
+              theta: greeks.theta,
             });
           }
         }
@@ -1174,6 +1266,7 @@ async function fetchCommodityData(
             const dayHigh = oq.ohlc?.high || oq.last_price;
             const dayLow = oq.ohlc?.low || oq.last_price;
             const levels = pdhPdlMap.get(peInst.instrument_token) || { pdh: 0, pdl: 0 };
+            const greeks = calcVegaTheta(baseMetrics.current, strike, oq.iv || 0, commodityDaysToExpiry, false);
             baseMetrics.peStrikes.push({
               strike,
               isAtm,
@@ -1190,6 +1283,8 @@ async function fetchCommodityData(
               pdc: oq.ohlc?.close || 0,
               pdh: levels.pdh,
               pdl: levels.pdl,
+              vega: greeks.vega,
+              theta: greeks.theta,
             });
           }
         }
@@ -1321,6 +1416,7 @@ async function fetchIndexData(
     vwapSource: "Unavailable",
     signal: "WAIT",
     futuresVwapBias: "UNKNOWN",
+    atr14: null,
     expiries: [],
     timestamp,
   };
@@ -1404,6 +1500,7 @@ async function fetchIndexData(
       const previousCandle = await fetchPreviousTradingCandle(accessToken, indexToken);
       baseMetrics.pdh = previousCandle?.high || 0;
       baseMetrics.pdl = previousCandle?.low || 0;
+      baseMetrics.atr14 = await getAtr14Cached(accessToken, indexToken);
     }
 
     let futuresVwapBias: "UP" | "DOWN" | "UNKNOWN" = "UNKNOWN";
@@ -1580,6 +1677,8 @@ async function fetchIndexData(
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
                 const levels = pdhPdlMap.get(ceInst.instrument_token) || { pdh: 0, pdl: 0 };
+                const daysToExpiry = Math.max(0, (expiry.expiryDate.getTime() - Date.now()) / 86_400_000);
+                const greeks = calcVegaTheta(baseMetrics.current, strike, q.iv || 0, daysToExpiry, true);
                 expiry.ceStrikes.push({
                   strike,
                   isAtm,
@@ -1596,6 +1695,8 @@ async function fetchIndexData(
                   pdc: q.ohlc?.close || 0,
                   pdh: levels.pdh,
                   pdl: levels.pdl,
+                  vega: greeks.vega,
+                  theta: greeks.theta,
                 });
               }
             }
@@ -1607,6 +1708,8 @@ async function fetchIndexData(
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
                 const levels = pdhPdlMap.get(peInst.instrument_token) || { pdh: 0, pdl: 0 };
+                const daysToExpiry = Math.max(0, (expiry.expiryDate.getTime() - Date.now()) / 86_400_000);
+                const greeks = calcVegaTheta(baseMetrics.current, strike, q.iv || 0, daysToExpiry, false);
                 expiry.peStrikes.push({
                   strike,
                   isAtm,
@@ -1623,6 +1726,8 @@ async function fetchIndexData(
                   pdc: q.ohlc?.close || 0,
                   pdh: levels.pdh,
                   pdl: levels.pdl,
+                  vega: greeks.vega,
+                  theta: greeks.theta,
                 });
               }
             }
@@ -2607,6 +2712,72 @@ app.get("/", (c) => {
       0% { transform: translateX(0); }
       100% { transform: translateX(-100%); }
     }
+
+    @keyframes trafficBlink {
+      0%, 100% { opacity: 1; box-shadow: 0 0 8px currentColor; }
+      50% { opacity: 0.35; box-shadow: none; }
+    }
+
+    .traffic-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      display: inline-block;
+      animation: trafficBlink 1.2s ease-in-out infinite;
+    }
+
+    .sentiment-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 4px;
+      border-top: 1px solid var(--border);
+      gap: 10px;
+    }
+
+    .sentiment-row:first-child {
+      border-top: none;
+    }
+
+    .toggle-btn-group {
+      display: inline-flex;
+      border: 1px solid var(--gold-soft);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .toggle-btn-group button {
+      background: var(--panel-alt);
+      color: var(--muted);
+      border: none;
+      padding: 6px 16px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    .toggle-btn-group button.active {
+      background: var(--gold);
+      color: var(--bg);
+    }
+
+    .greek-chip-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .greek-chip {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 6px;
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+    }
   </style>
 </head>
 <body>
@@ -2625,9 +2796,17 @@ app.get("/", (c) => {
           <button class="btn" id="manualRefresh" onclick="refreshData()">🔄 Refresh</button>
           <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem;">
             <input type="checkbox" id="autoRefreshToggle" checked onchange="toggleAutoRefresh()">
-            <span>Auto (3m)</span>
+            <span>Auto</span>
           </label>
+          <select id="refreshIntervalSelect" onchange="changeRefreshInterval()" style="background: var(--panel-alt); border:1px solid var(--border); color:var(--text); border-radius:6px; padding:4px 6px; font-size:0.8rem; font-family: var(--font-mono);">
+            <option value="3">3m</option>
+            <option value="5">5m</option>
+            <option value="10">10m</option>
+            <option value="15">15m</option>
+            <option value="30">30m</option>
+          </select>
           <div class="refresh-status" id="refreshStatus">Last: Just now</div>
+          <div class="refresh-status" id="refreshCountdown" style="color: var(--gold);">Next: 3:00</div>
         </div>
       </div>
     </div>
@@ -2827,6 +3006,12 @@ app.get("/", (c) => {
         console.error('Failed to load commodities:', err);
         commoditiesData = { error: err.message };
       }
+    }
+
+    let sentimentSide = 'CE';
+    function toggleSentimentSide(side) {
+      sentimentSide = side;
+      updateUI();
     }
 
     let alignmentData = null;
@@ -3251,6 +3436,83 @@ app.get("/", (c) => {
       return html;
     }
 
+    // NIFTY Weekly Expiry Sentiment Board — traffic lights (red/yellow/green,
+    // continuously blinking) per weekly expiry, reusing the same OI+Price+IV
+    // buildup classification already used elsewhere, plus Black-Scholes
+    // Vega/Theta estimates and the index's ATR(14) as extra context.
+    function renderSentimentBoard(indexData) {
+      if (!indexData || indexData.symbol !== 'NIFTY' || indexData.error || !indexData.expiries) return '';
+
+      const expiryOrder = ['Current Expiry', 'Next Expiry', 'Next of Next Expiry', 'Monthly'];
+      const boardRows = [];
+
+      expiryOrder.forEach((expiryName) => {
+        const exp = indexData.expiries.find((e) => e.expiry === expiryName);
+        if (!exp) return;
+        const strikes = sentimentSide === 'CE' ? exp.ceStrikes : exp.peStrikes;
+        const atm = (strikes || []).find((s) => s.isAtm);
+        if (!atm || !atm.lastPrice) return;
+
+        const key = 'NIFTY_' + expiryName + '_' + sentimentSide + '_sentimentboard';
+        const oiInfo = oiArrowInfo(key, atm.oi);
+        const priceDir = priceDirection(key + '_price', atm.lastPrice);
+        const ivDir = ivDirection(key + '_iv', atm.iv);
+        const buildup = classifyBuildup(priceDir, oiInfo.cls, ivDir);
+
+        let dotColor;
+        if (buildup.verdict === 'BUY') dotColor = 'var(--green)';
+        else if (buildup.verdict === 'SELL') dotColor = 'var(--red)';
+        else dotColor = 'var(--gold)'; // halting / WAIT
+
+        boardRows.push({ expiryName, atm, buildup, dotColor });
+      });
+
+      if (boardRows.length === 0) return '';
+
+      const greenCount = boardRows.filter((r) => r.buildup.verdict === 'BUY').length;
+      const redCount = boardRows.filter((r) => r.buildup.verdict === 'SELL').length;
+      const total = boardRows.length;
+      let scoreLabel, scoreColor, scorePct;
+      if (greenCount > redCount) { scoreLabel = 'Bullish (' + greenCount + '/' + total + ' green)'; scoreColor = 'var(--green)'; scorePct = (greenCount / total) * 100; }
+      else if (redCount > greenCount) { scoreLabel = 'Bearish (' + redCount + '/' + total + ' red)'; scoreColor = 'var(--red)'; scorePct = (redCount / total) * 100; }
+      else { scoreLabel = 'Halting / Mixed'; scoreColor = 'var(--gold)'; scorePct = 50; }
+
+      let html = '<div class="premium-card" style="margin-bottom:16px; border: 2px solid var(--gold-soft);">';
+      html += '<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:8px;">';
+      html += '<div class="card-title" style="margin-bottom:0;">🚦 NIFTY Weekly Expiry Sentiment Board</div>';
+      html += '<div class="toggle-btn-group">';
+      html += '<button class="' + (sentimentSide === 'CE' ? 'active' : '') + '" onclick="toggleSentimentSide(\'CE\')">CE</button>';
+      html += '<button class="' + (sentimentSide === 'PE' ? 'active' : '') + '" onclick="toggleSentimentSide(\'PE\')">PE</button>';
+      html += '</div>';
+      html += '</div>';
+
+      boardRows.forEach((r) => {
+        html += '<div class="sentiment-row">';
+        html += '<span class="traffic-dot" style="background:' + r.dotColor + '; color:' + r.dotColor + ';"></span>';
+        html += '<span style="color: var(--text); flex:1; font-size:0.82rem;">' + r.expiryName + ' (' + r.atm.strike + ')</span>';
+        html += '<span style="color:' + r.dotColor + '; font-weight:700; font-size:0.78rem;">' + r.buildup.label + '</span>';
+        html += '</div>';
+      });
+
+      html += '<div class="gap-score-bar-track" style="margin-top:10px;"><div class="gap-score-bar-fill" style="width:' + scorePct + '%; background:' + scoreColor + ';"></div></div>';
+      html += '<div style="text-align:center; color:' + scoreColor + '; font-weight:700; font-size:0.85rem; margin-top:4px;">Sentiment Score: ' + scoreLabel + '</div>';
+
+      const nearest = boardRows[0];
+      if (nearest) {
+        html += '<div class="greek-chip-row">';
+        html += '<div class="greek-chip"><div style="color:var(--muted-dim);">IV</div><div style="color:var(--text); font-weight:700;">' + (nearest.atm.iv ? nearest.atm.iv.toFixed(1) : '—') + '</div></div>';
+        html += '<div class="greek-chip"><div style="color:var(--muted-dim);">Vega</div><div style="color:var(--text); font-weight:700;">' + (nearest.atm.vega ? nearest.atm.vega.toFixed(2) : '—') + '</div></div>';
+        html += '<div class="greek-chip"><div style="color:var(--muted-dim);">Theta/day</div><div style="color:var(--red); font-weight:700;">' + (nearest.atm.theta ? nearest.atm.theta.toFixed(2) : '—') + '</div></div>';
+        html += '<div class="greek-chip"><div style="color:var(--muted-dim);">OI</div><div style="color:var(--text); font-weight:700;">' + (nearest.atm.oi != null ? nearest.atm.oi.toLocaleString('en-IN') : '—') + '</div></div>';
+        html += '<div class="greek-chip"><div style="color:var(--muted-dim);">ATR(14)</div><div style="color:var(--gold); font-weight:700;">' + (indexData.atr14 != null ? indexData.atr14.toFixed(1) : '—') + '</div></div>';
+        html += '</div>';
+      }
+
+      html += '<div class="timestamp">Vega/Theta are Black-Scholes estimates (spot, strike, IV, days-to-expiry) — Kite does not publish Greeks directly. ATR(14) computed from historical daily candles. Not investment advice.</div>';
+      html += '</div>';
+      return html;
+    }
+
     function renderBiasCheckWidget(indexData) {
       if (!indexData) return '';
 
@@ -3398,6 +3660,8 @@ app.get("/", (c) => {
       html += renderBiasCheckWidget(indexData);
 
       html += renderStraddlePcrCard(indexData);
+
+      html += renderSentimentBoard(indexData);
 
       html += '<div class="metrics-grid">';
       html += '<div class="metric-card"><div class="metric-label">Current Price</div>';
@@ -4327,9 +4591,37 @@ app.get("/", (c) => {
       if (!kiteConnected) return;
       document.getElementById('manualRefresh').disabled = true;
       await fetchData();
+      if (document.getElementById('autoRefreshToggle').checked) resetCountdown();
       setTimeout(() => {
         document.getElementById('manualRefresh').disabled = false;
       }, 500);
+    }
+
+    let refreshIntervalMinutes = 3;
+    let countdownSeconds = refreshIntervalMinutes * 60;
+    let countdownTimerId = null;
+
+    function updateCountdownDisplay() {
+      const el = document.getElementById('refreshCountdown');
+      if (!el) return;
+      if (!document.getElementById('autoRefreshToggle').checked) {
+        el.textContent = 'Auto off';
+        return;
+      }
+      const m = Math.floor(countdownSeconds / 60);
+      const s = countdownSeconds % 60;
+      el.textContent = 'Next: ' + m + ':' + String(s).padStart(2, '0');
+    }
+
+    function resetCountdown() {
+      countdownSeconds = refreshIntervalMinutes * 60;
+      updateCountdownDisplay();
+    }
+
+    function changeRefreshInterval() {
+      refreshIntervalMinutes = parseInt(document.getElementById('refreshIntervalSelect').value, 10) || 3;
+      resetCountdown();
+      toggleAutoRefresh();
     }
 
     function toggleAutoRefresh() {
@@ -4338,8 +4630,22 @@ app.get("/", (c) => {
         clearInterval(autoRefreshInterval);
         autoRefreshInterval = null;
       }
+      if (countdownTimerId) {
+        clearInterval(countdownTimerId);
+        countdownTimerId = null;
+      }
       if (toggle) {
-        autoRefreshInterval = setInterval(refreshData, 3 * 60 * 1000);
+        resetCountdown();
+        autoRefreshInterval = setInterval(() => {
+          refreshData();
+          resetCountdown();
+        }, refreshIntervalMinutes * 60 * 1000);
+        countdownTimerId = setInterval(() => {
+          countdownSeconds = Math.max(0, countdownSeconds - 1);
+          updateCountdownDisplay();
+        }, 1000);
+      } else {
+        updateCountdownDisplay();
       }
     }
 

@@ -2587,6 +2587,7 @@ app.get("/", (c) => {
 
     let vixCorrData = null;
     let vixCorrChart = null;
+    let vixCorrChartBank = null;
     let vixCorrLoaded = false;
     let vixCorrLoading = false;
     async function loadVixCorrelation() {
@@ -3558,6 +3559,13 @@ app.get("/", (c) => {
       return (r < 0 ? 'Weak inverse' : 'Weak direct');
     }
 
+    function corrSentence(r, indexName) {
+      if (r == null) return 'Not enough data yet.';
+      if (r <= -0.4) return 'When VIX rises, ' + indexName + ' tends to fall — a fairly reliable inverse link.';
+      if (r >= 0.4) return indexName + ' and VIX have been moving in the same direction lately — less typical.';
+      return indexName + ' and VIX show a weak link right now — VIX alone is not a strong signal here.';
+    }
+
     function renderVixCorrelation() {
       if (!vixCorrLoaded) {
         loadVixCorrelation();
@@ -3570,107 +3578,107 @@ app.get("/", (c) => {
         return '<div class="error">⚠️ ' + escapeHtml(vixCorrData.error) + '</div>';
       }
 
-      let html = '<div class="metrics-grid" style="margin-bottom:16px;">';
-      html += '<div class="metric-card"><div class="metric-label">NIFTY vs VIX</div>';
-      html += '<div class="metric-value" style="font-size:1rem;">' + (vixCorrData.niftyVixCorrelation != null ? vixCorrData.niftyVixCorrelation.toFixed(2) : 'N/A') + '</div>';
-      html += '<div class="metric-change">' + corrLabel(vixCorrData.niftyVixCorrelation) + '</div></div>';
-      html += '<div class="metric-card"><div class="metric-label">BANKNIFTY vs VIX</div>';
-      html += '<div class="metric-value" style="font-size:1rem;">' + (vixCorrData.bankNiftyVixCorrelation != null ? vixCorrData.bankNiftyVixCorrelation.toFixed(2) : 'N/A') + '</div>';
-      html += '<div class="metric-change">' + corrLabel(vixCorrData.bankNiftyVixCorrelation) + '</div></div>';
-      html += '<div class="metric-card"><div class="metric-label">Data Points</div>';
-      html += '<div class="metric-value" style="font-size:1rem;">' + vixCorrData.dataPoints + '</div>';
-      html += '<div class="metric-change">Trading days</div></div>';
+      function sentenceCard(label, r) {
+        const strength = r == null ? 'N/A' : Math.abs(r) >= 0.7 ? 'Strong' : Math.abs(r) >= 0.4 ? 'Moderate' : 'Weak';
+        const color = r == null ? 'var(--muted)' : r <= -0.4 ? 'var(--green)' : r >= 0.4 ? 'var(--red)' : 'var(--muted)';
+        let html = '<div class="premium-card" style="margin-bottom:12px;">';
+        html += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">';
+        html += '<span class="card-title" style="margin-bottom:0;">' + label + ' vs India VIX</span>';
+        html += '<span class="badge-pill" style="background: rgba(0,0,0,0.2); color:' + color + '; font-size:0.75rem;">' + strength + (r != null ? ' (' + r.toFixed(2) + ')' : '') + '</span>';
+        html += '</div>';
+        html += '<div style="color: var(--text); font-size:0.85rem;">' + escapeHtml(corrSentence(r, label)) + '</div>';
+        html += '</div>';
+        return html;
+      }
+
+      let html = sentenceCard('NIFTY', vixCorrData.niftyVixCorrelation);
+      html += sentenceCard('BANKNIFTY', vixCorrData.bankNiftyVixCorrelation);
+
+      html += '<div class="premium-card" style="margin-bottom:12px;">';
+      html += '<div class="card-title">NIFTY vs India VIX — last 90 trading days</div>';
+      html += '<canvas id="chart-vixcorr" height="150"></canvas>';
       html += '</div>';
 
-      html += '<div class="premium-card">';
-      html += '<div class="card-title">NIFTY &amp; BANKNIFTY (% change) vs India VIX — 1 year</div>';
-      html += '<canvas id="chart-vixcorr" height="220"></canvas>';
+      html += '<div class="premium-card" style="margin-bottom:12px;">';
+      html += '<div class="card-title">BANKNIFTY vs India VIX — last 90 trading days</div>';
+      html += '<canvas id="chart-vixcorr-bank" height="150"></canvas>';
       html += '</div>';
 
-      html += '<div class="timestamp">Correlation is daily-returns based (Pearson r, -1 to +1). Negative = VIX tends to rise when the index falls, and vice versa.</div>';
+      html += '<div class="timestamp">Correlation number (r) is calculated over 1 year of daily returns, from -1 to +1. Charts below show only the most recent 90 days so the shape is easier to read.</div>';
       return html;
     }
 
     function drawVixCorrChart() {
-      const canvas = document.getElementById('chart-vixcorr');
-      if (!canvas || typeof Chart === 'undefined' || !vixCorrData || vixCorrData.error) return;
+      if (typeof Chart === 'undefined' || !vixCorrData || vixCorrData.error) return;
 
-      if (vixCorrChart) {
-        vixCorrChart.destroy();
-        vixCorrChart = null;
+      const fullSeries = vixCorrData.series || [];
+      if (fullSeries.length === 0) return;
+      const series = fullSeries.slice(-90);
+      const labels = series.map((p) => p.date.slice(5));
+
+      function buildChart(existingChart, canvasId, pctKey, pctLabel, pctColor) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return existingChart;
+        if (existingChart) existingChart.destroy();
+        return new Chart(canvas.getContext('2d'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: pctLabel,
+                data: series.map((p) => p[pctKey]),
+                borderColor: pctColor,
+                backgroundColor: 'transparent',
+                yAxisID: 'yPct',
+                tension: 0.2,
+                pointRadius: 0,
+                borderWidth: 1.5,
+              },
+              {
+                label: 'India VIX',
+                data: series.map((p) => p.vix),
+                borderColor: '#E5484D',
+                backgroundColor: 'rgba(229,72,77,0.06)',
+                yAxisID: 'yVix',
+                tension: 0.2,
+                pointRadius: 0,
+                borderWidth: 1.5,
+                fill: true,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            animation: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: {
+                labels: { color: '#7C8AA5', font: { family: 'IBM Plex Mono', size: 10 } },
+              },
+            },
+            scales: {
+              x: {
+                ticks: { color: '#4E5B78', font: { size: 8 }, maxTicksLimit: 6 },
+                grid: { display: false },
+              },
+              yPct: {
+                position: 'left',
+                ticks: { color: '#7C8AA5', font: { size: 9 }, callback: (v) => v + '%' },
+                grid: { color: '#1E2B4A' },
+              },
+              yVix: {
+                position: 'right',
+                ticks: { color: '#7C8AA5', font: { size: 9 } },
+                grid: { display: false },
+              },
+            },
+          },
+        });
       }
 
-      const series = vixCorrData.series || [];
-      if (series.length === 0) return;
-
-      // Thin labels so the x-axis doesn't get crowded over a year of daily points
-      const labels = series.map((p) => p.date);
-
-      vixCorrChart = new Chart(canvas.getContext('2d'), {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [
-            {
-              label: 'NIFTY % change',
-              data: series.map((p) => p.niftyPct),
-              borderColor: '#C9A227',
-              backgroundColor: 'transparent',
-              yAxisID: 'yPct',
-              tension: 0.15,
-              pointRadius: 0,
-              borderWidth: 1.5,
-            },
-            {
-              label: 'BANKNIFTY % change',
-              data: series.map((p) => p.bankNiftyPct),
-              borderColor: '#5B8DEF',
-              backgroundColor: 'transparent',
-              yAxisID: 'yPct',
-              tension: 0.15,
-              pointRadius: 0,
-              borderWidth: 1.5,
-            },
-            {
-              label: 'India VIX',
-              data: series.map((p) => p.vix),
-              borderColor: '#E5484D',
-              backgroundColor: 'rgba(229,72,77,0.08)',
-              yAxisID: 'yVix',
-              tension: 0.15,
-              pointRadius: 0,
-              borderWidth: 1.5,
-              fill: true,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          animation: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: {
-              labels: { color: '#7C8AA5', font: { family: 'IBM Plex Mono', size: 10 } },
-            },
-          },
-          scales: {
-            x: {
-              ticks: { color: '#4E5B78', font: { size: 8 }, maxTicksLimit: 10 },
-              grid: { color: '#1E2B4A' },
-            },
-            yPct: {
-              position: 'left',
-              ticks: { color: '#7C8AA5', font: { size: 9 }, callback: (v) => v + '%' },
-              grid: { color: '#1E2B4A' },
-            },
-            yVix: {
-              position: 'right',
-              ticks: { color: '#7C8AA5', font: { size: 9 } },
-              grid: { display: false },
-            },
-          },
-        },
-      });
+      vixCorrChart = buildChart(vixCorrChart, 'chart-vixcorr', 'niftyPct', 'NIFTY % change', '#C9A227');
+      vixCorrChartBank = buildChart(vixCorrChartBank, 'chart-vixcorr-bank', 'bankNiftyPct', 'BANKNIFTY % change', '#5B8DEF');
     }
 
     function switchTab(symbol) {

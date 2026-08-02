@@ -3499,24 +3499,46 @@ app.get("/", (c) => {
       return currentPrice > prev ? 'up' : 'down';
     }
 
+    // Tracks the last-seen IV per strike (same key scheme as OI/price) so
+    // buildup signals can be weighted by whether IV is confirming the move.
+    const lastIv = {};
+
+    function ivDirection(key, currentIv) {
+      const prev = lastIv[key];
+      lastIv[key] = currentIv;
+      if (prev == null || currentIv === prev) return 'flat';
+      return currentIv > prev ? 'up' : 'down';
+    }
+
     // Classic OI-buildup classification, used to generate a per-strike
     // BUY/SELL/WAIT verdict: Long Buildup (price up + OI up) = fresh buying,
     // Short Buildup (price down + OI up) = fresh selling, OI down in either
     // direction = covering/unwinding = weak/no-buildup signal.
-    function classifyBuildup(priceDir, oiDir) {
+    function classifyBuildup(priceDir, oiDir, ivDir) {
+      let base;
       if (priceDir === 'up' && oiDir === 'up') {
-        return { label: 'Long Buildup', verdict: 'BUY', color: 'var(--green)' };
+        base = { label: 'Long Buildup', verdict: 'BUY', color: 'var(--green)' };
+      } else if (priceDir === 'down' && oiDir === 'up') {
+        base = { label: 'Short Buildup', verdict: 'SELL', color: 'var(--red)' };
+      } else if (oiDir === 'down' && priceDir === 'up') {
+        base = { label: 'Short Covering', verdict: 'WAIT', color: 'var(--muted)' };
+      } else if (oiDir === 'down' && priceDir === 'down') {
+        base = { label: 'Long Unwinding', verdict: 'WAIT', color: 'var(--muted)' };
+      } else {
+        base = { label: 'No Data Yet', verdict: 'WAIT', color: 'var(--muted-dim)' };
       }
-      if (priceDir === 'down' && oiDir === 'up') {
-        return { label: 'Short Buildup', verdict: 'SELL', color: 'var(--red)' };
+
+      // IV confirmation: rising IV alongside a fresh buildup (Long/Short)
+      // means real conviction (bigger move being priced in) — "Strong".
+      // Falling IV during a buildup suggests it may fizzle — "Low Conviction".
+      if (ivDir && ivDir !== 'flat' && (base.label === 'Long Buildup' || base.label === 'Short Buildup')) {
+        if (ivDir === 'up') {
+          base = { ...base, label: 'Strong ' + base.label };
+        } else {
+          base = { ...base, label: base.label + ' (Low Conviction)', verdict: 'WAIT' };
+        }
       }
-      if (oiDir === 'down' && priceDir === 'up') {
-        return { label: 'Short Covering', verdict: 'WAIT', color: 'var(--muted)' };
-      }
-      if (oiDir === 'down' && priceDir === 'down') {
-        return { label: 'Long Unwinding', verdict: 'WAIT', color: 'var(--muted)' };
-      }
-      return { label: 'No Data Yet', verdict: 'WAIT', color: 'var(--muted-dim)' };
+      return base;
     }
 
     function renderStrikeBand(title, strikes, errorMsg, keyPrefix) {
@@ -3529,11 +3551,12 @@ app.get("/", (c) => {
         return html;
       }
 
-      html += '<div class="table-scroll"><table style="width:100%; min-width:700px; font-family: var(--font-mono); font-size: 0.7rem; border-collapse: collapse;">';
+      html += '<div class="table-scroll"><table style="width:100%; min-width:790px; font-family: var(--font-mono); font-size: 0.7rem; border-collapse: collapse;">';
       html += '<thead><tr style="color: var(--muted-dim);">' +
         '<th style="text-align:left; padding: 3px 2px;">Strike</th>' +
         '<th style="text-align:right; padding: 3px 2px;">LTP</th>' +
         '<th style="text-align:right; padding: 3px 2px;">OI</th>' +
+        '<th style="text-align:right; padding: 3px 2px;">IV</th>' +
         '<th style="text-align:right; padding: 3px 2px;">Day H</th>' +
         '<th style="text-align:right; padding: 3px 2px;">Day L</th>' +
         '<th style="text-align:right; padding: 3px 2px;">PDH</th>' +
@@ -3547,13 +3570,16 @@ app.get("/", (c) => {
         const oiInfo = oiArrowInfo(strikeKey, s.oi);
         const oiColor = oiInfo.cls === 'up' ? 'var(--green)' : oiInfo.cls === 'down' ? 'var(--red)' : 'var(--muted)';
         const priceDir = priceDirection(strikeKey + '_price', s.lastPrice);
-        const buildup = classifyBuildup(priceDir, oiInfo.cls);
+        const ivDir = ivDirection(strikeKey + '_iv', s.iv);
+        const ivColor = ivDir === 'up' ? 'var(--green)' : ivDir === 'down' ? 'var(--red)' : 'var(--muted)';
+        const buildup = classifyBuildup(priceDir, oiInfo.cls, ivDir);
         const atPdh = s.pdh ? s.lastPrice >= s.pdh * 0.98 : false;
         const atPdl = s.pdl ? s.lastPrice <= s.pdl * 1.02 : false;
         html += '<tr style="' + rowStyle + '">';
         html += '<td style="padding: 4px 2px; color: ' + (s.isAtm ? 'var(--gold)' : 'var(--text)') + '; font-weight: ' + (s.isAtm ? '700' : '500') + ';">' + s.strike + (s.isAtm ? ' (ATM)' : '') + '</td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: var(--text);"><span class="flash">' + s.lastPrice.toFixed(2) + '</span></td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + oiColor + ';"><div class="flash">' + (s.oi != null ? s.oi.toLocaleString('en-IN') : '—') + ' <span style="font-weight:700;">' + oiInfo.arrow + '</span></div>' + (oiInfo.delta ? '<div style="font-size:0.62rem; color:' + oiColor + ';">' + (oiInfo.delta > 0 ? '+' : '') + oiInfo.delta.toLocaleString('en-IN') + '</div>' : '') + '</td>';
+        html += '<td style="padding: 4px 2px; text-align:right; color: ' + ivColor + ';">' + (s.iv ? s.iv.toFixed(1) : '—') + (s.iv && ivDir === 'up' ? ' ▲' : s.iv && ivDir === 'down' ? ' ▼' : '') + '</td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (s.atDayHigh ? 'var(--red)' : 'var(--muted)') + '; font-weight: ' + (s.atDayHigh ? '700' : '400') + ';"><span class="flash">' + (s.dayHigh ? s.dayHigh.toFixed(2) : '—') + (s.atDayHigh ? ' ⚠' : '') + '</span></td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (s.atDayLow ? 'var(--green)' : 'var(--muted)') + '; font-weight: ' + (s.atDayLow ? '700' : '400') + ';"><span class="flash">' + (s.dayLow ? s.dayLow.toFixed(2) : '—') + (s.atDayLow ? ' ⚠' : '') + '</span></td>';
         html += '<td style="padding: 4px 2px; text-align:right; color: ' + (atPdh ? 'var(--red)' : 'var(--muted-dim)') + '; font-weight: ' + (atPdh ? '700' : '400') + ';">' + (s.pdh ? s.pdh.toFixed(2) : '—') + (atPdh ? ' ⚠' : '') + '</td>';
@@ -4045,17 +4071,29 @@ app.get("/", (c) => {
             const vsPdcPct = atm.pdc ? ((atm.lastPrice - atm.pdc) / atm.pdc) * 100 : null;
             const bullishContinuation = atm.pdc > 0 && atm.lastPrice > atm.pdc && upFromLowPct != null && upFromLowPct > 1;
 
+            // Computed once here (not again at render time) — calling
+            // priceDirection/oiArrowInfo twice per render would corrupt the
+            // "previous value" comparison, since the second call would see
+            // the first call's fresh value as "previous".
+            const oiKey = symbol + '_' + expiryName + '_' + optType + '_' + atm.strike + '_swing';
+            const oiInfo = oiArrowInfo(oiKey, atm.oi);
+            const priceDir = priceDirection(oiKey + '_price', atm.lastPrice);
+            const ivDir = ivDirection(oiKey + '_iv', atm.iv);
+            const buildup = classifyBuildup(priceDir, oiInfo.cls, ivDir);
+
             rows.push({
               symbol, expiryName, optType,
               strike: atm.strike,
               lastPrice: atm.lastPrice,
               oi: atm.oi,
+              iv: atm.iv,
               dayLow: atm.dayLow,
               pdh: atm.pdh,
               pdl: atm.pdl,
               pdc: atm.pdc,
               upFromLowPct, vsPdcPct,
               bullishContinuation,
+              oiInfo, priceDir, ivDir, buildup,
             });
           });
         });
@@ -4065,9 +4103,29 @@ app.get("/", (c) => {
         return html + '<div class="loading">No swing data yet — waiting for expiries to load.</div>';
       }
 
+      // Aggregate CE/PE breadth across every expiry of every index — an
+      // at-a-glance "are premiums broadly rising or falling" signal.
+      const ceRows = rows.filter((r) => r.optType === 'CE');
+      const peRows = rows.filter((r) => r.optType === 'PE');
+      function breadthLine(label, typeRows) {
+        const rising = typeRows.filter((r) => r.priceDir === 'up').length;
+        const falling = typeRows.filter((r) => r.priceDir === 'down').length;
+        const total = typeRows.length;
+        let text, color;
+        if (rising > total / 2) { text = label + ': RISING across expiries (' + rising + '/' + total + ')'; color = 'var(--green)'; }
+        else if (falling > total / 2) { text = label + ': FALLING across expiries (' + falling + '/' + total + ')'; color = 'var(--red)'; }
+        else { text = label + ': MIXED / HALTING (' + rising + ' up, ' + falling + ' down of ' + total + ')'; color = 'var(--gold)'; }
+        return '<div class="checklist-tick on" style="color:' + color + '; font-size:0.85rem; text-align:center; padding:6px 0;">' + text + '</div>';
+      }
+      html += '<div class="premium-card" style="margin-bottom:16px; border: 2px solid var(--gold-soft);">';
+      html += '<div class="card-title">⚡ Premium Breadth — All Expiries, All Indices</div>';
+      html += breadthLine('CALLS (CE)', ceRows);
+      html += breadthLine('PUTS (PE)', peRows);
+      html += '</div>';
+
       html += '<div class="premium-card">';
       html += '<div class="card-title">Swing Tracker — ATM Premiums Continuously Closing Up From Day Low, Above PDC</div>';
-      html += '<div class="table-scroll"><table style="width:100%; min-width:1180px; font-family: var(--font-mono); font-size: 0.72rem; border-collapse: collapse;">';
+      html += '<div class="table-scroll"><table style="width:100%; min-width:1260px; font-family: var(--font-mono); font-size: 0.72rem; border-collapse: collapse;">';
       html += '<thead><tr style="color: var(--muted-dim);">' +
         '<th style="text-align:left; padding: 4px 3px;">Symbol</th>' +
         '<th style="text-align:left; padding: 4px 3px;">Expiry</th>' +
@@ -4075,6 +4133,7 @@ app.get("/", (c) => {
         '<th style="text-align:right; padding: 4px 3px;">Strike</th>' +
         '<th style="text-align:right; padding: 4px 3px;">LTP</th>' +
         '<th style="text-align:right; padding: 4px 3px;">OI</th>' +
+        '<th style="text-align:right; padding: 4px 3px;">IV</th>' +
         '<th style="text-align:right; padding: 4px 3px;">Day L</th>' +
         '<th style="text-align:right; padding: 4px 3px;">PDL</th>' +
         '<th style="text-align:right; padding: 4px 3px;">PDH</th>' +
@@ -4086,15 +4145,9 @@ app.get("/", (c) => {
 
       rows.forEach((r) => {
         const rowStyle = r.bullishContinuation ? 'background: rgba(34,178,107,0.10); border-top: 1px solid var(--green);' : 'border-top: 1px solid var(--border);';
-        // Uses its own key (suffixed _swing) rather than sharing renderStrikeBand's
-        // key — otherwise this would always read "flat" since the strike-band
-        // table for the same expiry/strike already updates lastOi first in the
-        // same render cycle.
-        const oiKey = r.symbol + '_' + r.expiryName + '_' + r.optType + '_' + r.strike + '_swing';
-        const oiInfo = oiArrowInfo(oiKey, r.oi);
+        const oiInfo = r.oiInfo;
         const oiColor = oiInfo.cls === 'up' ? 'var(--green)' : oiInfo.cls === 'down' ? 'var(--red)' : 'var(--muted)';
-        const priceDir = priceDirection(oiKey + '_price', r.lastPrice);
-        const buildup = classifyBuildup(priceDir, oiInfo.cls);
+        const buildup = r.buildup;
         html += '<tr style="' + rowStyle + '">';
         html += '<td style="padding: 4px 3px; color: var(--gold); font-weight:600;">' + r.symbol + '</td>';
         html += '<td style="padding: 4px 3px; color: var(--muted);">' + r.expiryName + '</td>';
@@ -4102,6 +4155,7 @@ app.get("/", (c) => {
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--text);">' + r.strike + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--text); font-weight:600;"><span class="flash">' + r.lastPrice.toFixed(2) + '</span></td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: ' + oiColor + ';"><div class="flash">' + (r.oi != null ? r.oi.toLocaleString('en-IN') : '—') + ' <span style="font-weight:700;">' + oiInfo.arrow + '</span></div>' + (oiInfo.delta ? '<div style="font-size:0.62rem; color:' + oiColor + ';">' + (oiInfo.delta > 0 ? '+' : '') + oiInfo.delta.toLocaleString('en-IN') + '</div>' : '') + '</td>';
+        html += '<td style="padding: 4px 3px; text-align:right; color: ' + (r.ivDir === 'up' ? 'var(--green)' : r.ivDir === 'down' ? 'var(--red)' : 'var(--muted)') + ';">' + (r.iv ? r.iv.toFixed(1) : '—') + (r.iv && r.ivDir === 'up' ? ' ▲' : r.iv && r.ivDir === 'down' ? ' ▼' : '') + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted);">' + (r.dayLow ? r.dayLow.toFixed(2) : '—') + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted-dim);">' + (r.pdl ? r.pdl.toFixed(2) : '—') + '</td>';
         html += '<td style="padding: 4px 3px; text-align:right; color: var(--muted-dim);">' + (r.pdh ? r.pdh.toFixed(2) : '—') + '</td>';

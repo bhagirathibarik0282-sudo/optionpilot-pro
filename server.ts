@@ -727,9 +727,23 @@ async function getOptionPrevDayLevelsBatch(
   }
 
   if (toFetch.length > 0) {
-    const fetched = await Promise.all(
-      toFetch.map((token) => fetchPreviousTradingCandle(accessToken, token))
-    );
+    // Kite's historical-candle endpoint has a low rate limit (~3 req/sec).
+    // Fetching every strike's PDH/PDL concurrently on the first refresh of
+    // the day could trip 429 errors, so we throttle to small chunks with a
+    // short pause between them. Subsequent refreshes are cheap (cache hit).
+    const CHUNK_SIZE = 1;
+    const CHUNK_DELAY_MS = 350;
+    const fetched: (DailyCandle | null)[] = [];
+    for (let i = 0; i < toFetch.length; i += CHUNK_SIZE) {
+      const chunk = toFetch.slice(i, i + CHUNK_SIZE);
+      const chunkResults = await Promise.all(
+        chunk.map((token) => fetchPreviousTradingCandle(accessToken, token))
+      );
+      fetched.push(...chunkResults);
+      if (i + CHUNK_SIZE < toFetch.length) {
+        await new Promise((resolve) => setTimeout(resolve, CHUNK_DELAY_MS));
+      }
+    }
     toFetch.forEach((token, i) => {
       const candle = fetched[i];
       const levels = { pdh: candle?.high || 0, pdl: candle?.low || 0 };

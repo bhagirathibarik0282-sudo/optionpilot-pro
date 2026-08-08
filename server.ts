@@ -5204,7 +5204,7 @@ app.get("/", (c) => {
       { id: 'call_put_wall' },
       { id: 'max_pain', existsElsewhere: null },
       { id: 'india_vix', existsElsewhere: null },
-      { id: 'atm_oi_buildup', existsElsewhere: 'Premium Pair interpretation labels (BUYING/WRITING-DOMINANT).' },
+      { id: 'atm_oi_buildup' },
       { id: 'futures_oi_buildup', existsElsewhere: null },
       { id: 'fii_dii_5day', existsElsewhere: 'FII/DII 5-Day Verdict module.' },
       { id: 'sector_heatmap' },
@@ -5235,6 +5235,10 @@ app.get("/", (c) => {
       // comparison on the second call. runRuleEngine reads the cached
       // result off the validation object instead of recomputing it.
       const step5bResult = computeStep5BConclusion(symbol, m);
+      // Computed ONCE here too, same reasoning as step5bResult above \u2014
+      // uses its own '_atmoi_' tracker keys so it doesn't collide with
+      // Step 5B's, but still must not be called twice per cycle.
+      const atmOiBuildupValue = computeAtmOiBuildupValue(symbol, m);
       const rawValues = {
         futures_vwap: (contract && m.vwap > 0) ? m.vwap : null,
         pdh_pdl: (m.pdh > 0 && m.pdl > 0) ? 1 : null,
@@ -5247,6 +5251,7 @@ app.get("/", (c) => {
         sector_heatmap: computeSectorBreadthValue(),
         pcr_trend: computePcrTrendValue(symbol),
         call_put_wall: computeCallPutWallValue(symbol, m),
+        atm_oi_buildup: atmOiBuildupValue,
       };
 
       HAIKU_SIGNAL_CATALOG.forEach((s) => {
@@ -5280,7 +5285,7 @@ app.get("/", (c) => {
       const blockingFailures = results.filter((r) => r.status === 'NULL' || r.status === 'STALE');
       const overallValid = blockingFailures.length === 0;
 
-      return { symbol, overallValid, signals: results, blockingFailureCount: blockingFailures.length, timestamp: new Date().toISOString(), _step5bResult: step5bResult };
+      return { symbol, overallValid, signals: results, blockingFailureCount: blockingFailures.length, timestamp: new Date().toISOString(), _step5bResult: step5bResult, _atmOiBuildupValue: atmOiBuildupValue };
     }
 
     // ============== HAIKU VERDICT SYSTEM — STEP 3: runRuleEngine() ==============
@@ -5291,7 +5296,7 @@ app.get("/", (c) => {
     // (0) among counted signals, which would misrepresent how much real
     // evidence went into the number.
     //
-    // Honesty disclosure: only 11 of the 16 signals are wired today (see
+    // Honesty disclosure: only 12 of the 16 signals are wired today (see
     // Step 2's card), so the achievable score ceiling is far below the
     // document's full ±20.5 scale. The document's own verdict thresholds
     // (±14 for Strong, etc.) are applied UNCHANGED — meaning Strong
@@ -5387,6 +5392,12 @@ app.get("/", (c) => {
         if (wallValue != null) {
           add('call_put_wall', wallValue, 1.5);
         }
+      }
+      if (availableSignals.has('atm_oi_buildup') && validation._atmOiBuildupValue != null) {
+        // Reuses the SAME value validateData() already computed this
+        // cycle \u2014 never recomputed, to avoid corrupting the '_atmoi_'
+        // tracker's up/down comparison on a second call.
+        add('atm_oi_buildup', validation._atmOiBuildupValue, 1);
       }
 
       // Overrides — only the ones honestly checkable today.
@@ -7685,6 +7696,36 @@ app.get("/", (c) => {
       if (priceDir === 'up' && oiDir === 'down') return 'WRITER-COVERING INTERPRETATION';
       if (priceDir === 'down' && oiDir === 'down') return 'BUYER-UNWINDING INTERPRETATION';
       return 'UNCONFIRMED';
+    }
+
+    // atm_oi_buildup signal for the rule engine (Step 5, wired
+    // 2026-08-08). Uses its OWN tracker key namespace ('_atmoi_') \u2014
+    // deliberately separate from Step 5B's ('_step5b_') and every other
+    // consumer of priceDirection/oiArrowInfo, so this never corrupts
+    // their up/down comparisons and they never corrupt this one. Like
+    // Step 5B, priceDirection/oiArrowInfo mutate shared state on every
+    // call, so this must be called exactly ONCE per refresh cycle \u2014
+    // validateData() computes it once and caches the VALUE (not just
+    // the function) for runRuleEngine to reuse.
+    function computeAtmOiBuildupValue(symbol, m) {
+      if (!m || !m.expiries || !m.expiries[0]) return null;
+      const exp = m.expiries[0];
+      const atmCe = (exp.ceStrikes || []).find((s) => s.isAtm);
+      const atmPe = (exp.peStrikes || []).find((s) => s.isAtm);
+      if (!atmCe || !atmPe) return null;
+      const ceKey = symbol + '_atmoi_' + exp.expiry + '_CE_' + atmCe.strike;
+      const peKey = symbol + '_atmoi_' + exp.expiry + '_PE_' + atmPe.strike;
+      const ceInterp = classifyInterpretation(priceDirection(ceKey, atmCe.lastPrice), oiArrowInfo(ceKey, atmCe.oi).cls);
+      const peInterp = classifyInterpretation(priceDirection(peKey, atmPe.lastPrice), oiArrowInfo(peKey, atmPe.oi).cls);
+      if (ceInterp === 'UNCONFIRMED' && peInterp === 'UNCONFIRMED') return null;
+      let value = 0;
+      if (ceInterp === 'BUYING-DOMINANT INTERPRETATION') value += 1; // calls being bought \u2192 bullish
+      else if (ceInterp === 'WRITING-DOMINANT INTERPRETATION') value -= 1; // calls being written \u2192 resistance/bearish
+      if (peInterp === 'WRITING-DOMINANT INTERPRETATION') value += 1; // puts being written \u2192 support/bullish
+      else if (peInterp === 'BUYING-DOMINANT INTERPRETATION') value -= 1; // puts being bought \u2192 bearish
+      if (value > 0) return 1;
+      if (value < 0) return -1;
+      return 0;
     }
 
     // Rule 2: track previous ATM per index (continuity check only — does

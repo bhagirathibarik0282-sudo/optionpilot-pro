@@ -4271,6 +4271,18 @@ app.get("/", (c) => {
       const color = ruleEngineVerdictColor(result.verdict);
 
       let html = '<div class="premium-card" style="margin-bottom:10px; border-color:' + color + ';">';
+
+      // High-Priority Structure Alert \u2014 shown ABOVE the card title,
+      // highest visual priority, only when it fires (see
+      // computeStructureAlert above). Display-only, not scored.
+      const structureAlert = computeStructureAlert(validation._step5bResult);
+      if (structureAlert) {
+        const alertColor = structureAlert.direction === 'CE' ? 'var(--green)' : 'var(--red)';
+        html += '<div style="background:' + alertColor + '; color:#0A0F1C; border-radius:6px; padding:8px 10px; margin-bottom:8px; font-weight:800; font-size:0.78rem; text-align:center; box-shadow:0 0 14px ' + alertColor + ';">';
+        html += '\u26a0\ufe0f ' + (structureAlert.isStrong ? 'STRONG ' : '') + structureAlert.direction + ' STRUCTURE: Cross-Expiry Aligned + Premium ' + escapeHtml(structureAlert.rangeState);
+        html += '</div>';
+      }
+
       html += '<div class="card-title">Rule Engine Verdict (Step 3\u20134) \u2014 ' + symbol + '</div>';
 
       if (result.verdict === 'DATA UNAVAILABLE') {
@@ -8031,6 +8043,35 @@ app.get("/", (c) => {
       else if (pct <= 100) state = 'NEAR PDH';
       else state = 'PDH BREAKOUT';
       return { pct: pct, state: state };
+    }
+
+    // High-Priority Structure Alert (user-approved 2026-08-08): fires
+    // when cross-expiry ITM alignment (Step 5B) AND that same side's own
+    // ATM premium range position are BOTH at an extreme simultaneously
+    // \u2014 e.g. CE side aligned across expiries AND CE premium sitting at
+    // NEAR PDH/PDH BREAKOUT (or NEAR PDL/BELOW PDL). This is a display
+    // banner only, NOT a scored signal \u2014 it does not touch the
+    // rule engine's score/maxScore, it just surfaces an already-computed
+    // combination the person would otherwise have to notice by eye.
+    // Reads the SAME step5bResult validateData() already cached \u2014
+    // never recomputes computeStep5BConclusion().
+    function computeStructureAlert(step5bResult) {
+      if (!step5bResult || step5bResult.blocked) return null;
+      const fs = step5bResult.finalStatus;
+      const isCeAlignment = fs.indexOf('CE ALIGNMENT') !== -1 || fs === 'CURRENT ATM CE SUPPORTIVE' || fs === 'CURRENT 1-ITM CE PREFERRED';
+      const isPeAlignment = fs.indexOf('PE ALIGNMENT') !== -1 || fs === 'CURRENT ATM PE SUPPORTIVE' || fs === 'CURRENT 1-ITM PE PREFERRED';
+      const extremeStates = ['NEAR PDH', 'PDH BREAKOUT', 'NEAR PDL', 'BELOW PDL'];
+      const ceRange = step5bResult.ceRange;
+      const peRange = step5bResult.peRange;
+      const ceExtreme = ceRange && extremeStates.indexOf(ceRange.state) !== -1;
+      const peExtreme = peRange && extremeStates.indexOf(peRange.state) !== -1;
+      if (isCeAlignment && ceExtreme) {
+        return { direction: 'CE', alignmentStatus: fs, rangeState: ceRange.state, isStrong: fs.indexOf('STRONG') === 0 };
+      }
+      if (isPeAlignment && peExtreme) {
+        return { direction: 'PE', alignmentStatus: fs, rangeState: peRange.state, isStrong: fs.indexOf('STRONG') === 0 };
+      }
+      return null;
     }
 
     // H/I. Per-expiry CE or PE state — PROVISIONAL scored heuristic (not

@@ -11342,7 +11342,11 @@ async function runRecoveryCycle(): Promise<void> {
     const active = findActiveRecovery(m.moduleName);
 
     if (m.status === "HEALTHY") {
-      if (active && active.status === "RETRYING") active.status = "RECOVERED";
+      // Bug fix (2026-08-08, user-reported): this used to only clear
+      // RETRYING \u2192 RECOVERED. MANUAL_ACTION_REQUIRED entries never
+      // got cleared even after the module genuinely recovered, so they
+      // sat stale forever until the next redeploy wiped memory.
+      if (active && (active.status === "RETRYING" || active.status === "MANUAL_ACTION_REQUIRED")) active.status = "RECOVERED";
       continue;
     }
 
@@ -11364,8 +11368,16 @@ async function runRecoveryCycle(): Promise<void> {
     }
 
     // Google Drive Super Brain: the only auto-recoverable path.
+    // Bug fix (2026-08-08, user-reported): the old condition
+    // `!attemptRecord || attemptRecord.status === "MANUAL_ACTION_REQUIRED"`
+    // pushed a BRAND NEW record every 60s while Drive stayed
+    // disconnected, since it never reused the existing
+    // MANUAL_ACTION_REQUIRED record \u2014 duplicating it every cycle
+    // forever. Now only creates a record when none exists at all;
+    // an existing MANUAL_ACTION_REQUIRED one is reused and flipped
+    // back to RETRYING only once Drive is actually reconnected.
     let attemptRecord = active;
-    if (!attemptRecord || attemptRecord.status === "MANUAL_ACTION_REQUIRED") {
+    if (!attemptRecord) {
       attemptRecord = {
         recoveryId: `rec-${Date.now()}-${randomBytes(3).toString("hex")}`,
         moduleName: m.moduleName,
@@ -11378,6 +11390,11 @@ async function runRecoveryCycle(): Promise<void> {
         lastAttemptAt: null,
       };
       recoveryAttempts.push(attemptRecord);
+    } else if (attemptRecord.status === "MANUAL_ACTION_REQUIRED" && driveSession.refreshTokenEncrypted) {
+      attemptRecord.status = "RETRYING";
+      attemptRecord.attempt = 0;
+      attemptRecord.nextRetryAt = new Date().toISOString();
+      attemptRecord.reason = "Google Drive is DEGRADED (last archive attempt failed) \u2014 automatically retrying with exponential backoff.";
     }
 
     if (attemptRecord.status !== "RETRYING") continue;
@@ -11397,6 +11414,7 @@ async function runRecoveryCycle(): Promise<void> {
       attemptRecord.status = "EXHAUSTED";
       continue;
     }
+
 
     const result = await performDriveArchive();
     // Module 11 (Event Bus): additive publish, existing logic below is unchanged.

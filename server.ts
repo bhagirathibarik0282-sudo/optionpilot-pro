@@ -5201,7 +5201,7 @@ app.get("/", (c) => {
       { id: 'fib_pivot', existsElsewhere: null, note: 'No daily Fibonacci/Camarilla pivot computation exists anywhere in this codebase yet \u2014 genuinely missing, not just unwired.' },
       { id: 'oi_pcr', existsElsewhere: null },
       { id: 'pcr_trend' },
-      { id: 'call_put_wall', existsElsewhere: 'Step 6B (PCR + Call Wall/Put Wall Alignment card).' },
+      { id: 'call_put_wall' },
       { id: 'max_pain', existsElsewhere: null },
       { id: 'india_vix', existsElsewhere: null },
       { id: 'atm_oi_buildup', existsElsewhere: 'Premium Pair interpretation labels (BUYING/WRITING-DOMINANT).' },
@@ -5246,6 +5246,7 @@ app.get("/", (c) => {
         expiry_alignment: step5bResult.blocked ? null : step5bResult.finalStatus,
         sector_heatmap: computeSectorBreadthValue(),
         pcr_trend: computePcrTrendValue(symbol),
+        call_put_wall: computeCallPutWallValue(symbol, m),
       };
 
       HAIKU_SIGNAL_CATALOG.forEach((s) => {
@@ -5290,7 +5291,7 @@ app.get("/", (c) => {
     // (0) among counted signals, which would misrepresent how much real
     // evidence went into the number.
     //
-    // Honesty disclosure: only 10 of the 16 signals are wired today (see
+    // Honesty disclosure: only 11 of the 16 signals are wired today (see
     // Step 2's card), so the achievable score ceiling is far below the
     // document's full ±20.5 scale. The document's own verdict thresholds
     // (±14 for Strong, etc.) are applied UNCHANGED — meaning Strong
@@ -5379,6 +5380,12 @@ app.get("/", (c) => {
         const trendValue = computePcrTrendValue(symbol);
         if (trendValue != null) {
           add('pcr_trend', trendValue, 1);
+        }
+      }
+      if (availableSignals.has('call_put_wall')) {
+        const wallValue = computeCallPutWallValue(symbol, m);
+        if (wallValue != null) {
+          add('call_put_wall', wallValue, 1.5);
         }
       }
 
@@ -8735,6 +8742,21 @@ app.get("/", (c) => {
         futuresLabel: futuresLabel, premiumPairFinal: ppFinal, straddleState: straddleState,
         finalStatus: finalStatus, crossCheck: crossCheck, isExpiryDay: isExpiryDay,
       };
+    }
+
+    // call_put_wall signal for the rule engine (Step 5, wired 2026-08-08).
+    // Reuses Step 6B's own finalStatus \u2014 note this recomputes
+    // computeStep6BConclusion() (which mutates wallHistoryTracker's
+    // persistCount), same as this file's other existing call sites for
+    // it (renderStep6BCard etc.) already do multiple times per refresh;
+    // not a new risk category, just consistent with current behaviour.
+    function computeCallPutWallValue(symbol, m) {
+      const result = computeStep6BConclusion(symbol, m);
+      if (result.blocked) return null;
+      if (result.finalStatus === 'PARTIAL DATA' || result.finalStatus.indexOf('EXPIRY-DAY') === 0) return null;
+      if (result.finalStatus === 'PCR + WALLS BULLISH SUPPORTIVE') return 1;
+      if (result.finalStatus === 'PCR + WALLS BEARISH SUPPORTIVE') return -1;
+      return 0; // RANGE RISK, VOLATILITY EXPANSION, CONFLICT, TRAPPED, UNCONFIRMED
     }
 
     function renderStep6BCard(symbol, m) {

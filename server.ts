@@ -5341,7 +5341,21 @@ app.get("/", (c) => {
       if (minutesSinceMidnight >= 555 && minutesSinceMidnight < 570) {
         overrides.push('First 15 minutes of session (9:15\u20139:30 IST) \u2014 forced WAIT per Override Rule 6');
       }
-      overrides.push('3-index misalignment, expiry split, gap-fill-in-progress, VIX spike, and straddle-expansion overrides are NOT YET CHECKED (need Step 5B/6A wiring, not part of Step 3).');
+      // NIFTY/BankNifty futures OI buildup alignment override (user-approved
+      // 2026-08-08). Only checked for NIFTY/BANKNIFTY (Sensex has no
+      // comparable second index to align against). Reuses the SAME
+      // classifySimpleFutures() the existing futures_oi_buildup signal
+      // already uses \u2014 no new state tracker, no double-counting risk.
+      if (symbol === 'NIFTY' || symbol === 'BANKNIFTY') {
+        const niftyFut = classifySimpleFutures('NIFTY');
+        const bankFut = classifySimpleFutures('BANKNIFTY');
+        const niftyDir = niftyFut === 'FRESH LONG BUILD-UP' ? 'up' : niftyFut === 'FRESH SHORT BUILD-UP' ? 'down' : null;
+        const bankDir = bankFut === 'FRESH LONG BUILD-UP' ? 'up' : bankFut === 'FRESH SHORT BUILD-UP' ? 'down' : null;
+        if (niftyDir && bankDir && niftyDir !== bankDir) {
+          overrides.push('NIFTY/BankNifty futures OI buildup misaligned (NIFTY: ' + niftyFut + ', BankNifty: ' + bankFut + ') \u2014 forced WAIT');
+        }
+      }
+      overrides.push('Expiry split, gap-fill-in-progress, VIX spike, straddle-expansion, and full 3-index (incl. Sensex) misalignment overrides are NOT YET CHECKED (need Step 6A wiring). NIFTY/BankNifty futures buildup misalignment IS checked above.');
 
       let verdict;
       if (overrides.length > 1 || (overrides.length === 1 && overrides[0].indexOf('First 15') === 0)) {

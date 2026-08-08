@@ -4004,6 +4004,50 @@ app.get("/", (c) => {
       return 'DISCONNECTED';
     }
 
+    // Step 5: Haiku explanation state. Keyed by symbol. The real
+    // cost-guard lives server-side (haikuCache in server.ts) \u2014 this
+    // client-side check only avoids firing a pointless network request
+    // when we already know the server will just hand back the cache.
+    let haikuExplanations = {};
+
+    async function triggerHaikuVerdicts() {
+      for (const sym of ['NIFTY', 'BANKNIFTY', 'SENSEX']) {
+        const m = data[sym];
+        if (!m || m.error) continue;
+        const validation = validateData(sym, m);
+        const result = runRuleEngine(sym, m, validation);
+        if (result.verdict === 'DATA UNAVAILABLE') continue;
+
+        const existing = haikuExplanations[sym];
+        if (existing && existing.loading) continue;
+        const verdictChanged = !existing || existing.verdict !== result.verdict;
+        const guardWindowPassed = !existing || (Date.now() - (existing.calledAt || 0)) >= 15 * 60 * 1000;
+        if (!verdictChanged && !guardWindowPassed) continue;
+
+        haikuExplanations[sym] = Object.assign({}, existing, { loading: true });
+        try {
+          const resp = await fetch('/api/haiku-verdict', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              symbol: sym, verdict: result.verdict, score: result.score, maxScore: result.maxScore,
+              confidence: result.confidence, contributions: result.contributions, overrides: result.overrides,
+              suggestion: result.suggestion,
+            }),
+          });
+          const json = await resp.json();
+          if (!resp.ok || json.error) {
+            haikuExplanations[sym] = { verdict: result.verdict, error: json.error || ('HTTP ' + resp.status), loading: false };
+          } else {
+            haikuExplanations[sym] = { verdict: result.verdict, explanation: json.explanation, fromCache: json.fromCache, calledAt: Date.now(), loading: false };
+          }
+        } catch (err) {
+          haikuExplanations[sym] = { verdict: result.verdict, error: err.message, loading: false };
+        }
+        updateUI();
+      }
+    }
+
     async function fetchData(isRetry) {
       if (!kiteConnected) return;
       try {
@@ -4027,6 +4071,7 @@ app.get("/", (c) => {
         updateUI();
         updateRefreshStatus();
         clearError();
+        triggerHaikuVerdicts();
       } catch (err) {
         consecutiveFetchFailures++;
         connectionState = computeConnectionState();
@@ -4220,11 +4265,38 @@ app.get("/", (c) => {
       html += '</div>';
 
       if (result.suggestion) {
+        const sug = result.suggestion;
+        const sideColor = sug.side === 'CE' ? 'var(--green)' : 'var(--red)';
         html += '<div style="border-top:1px solid var(--border); margin-top:8px; padding-top:8px;">';
-        html += '<div style="color:var(--muted); font-size:0.7rem;">Suggested: <strong style="color:var(--text);">' + result.suggestion.strike + '</strong></div>';
-        html += '<div style="color:var(--muted); font-size:0.7rem;">Entry: \u20b9' + result.suggestion.entry.toFixed(2) + ' | SL: <span style="color:var(--gold);">' + escapeHtml(result.suggestion.slNote) + '</span></div>';
+        html += '<div style="text-align:center; margin-bottom:6px;"><span style="background:' + sideColor + '; color:#0A0F1C; font-weight:800; font-size:0.85rem; padding:2px 12px; border-radius:4px;">' + escapeHtml(sug.side || '') + '</span> <strong style="color:var(--text); font-size:0.95rem;">' + escapeHtml(sug.strike) + '</strong></div>';
+        if (sug.sl != null) {
+          html += '<div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-top:2px;"><span style="color:var(--muted);">Entry</span><strong style="color:var(--text);">\u20b9' + sug.entry.toFixed(2) + '</strong></div>';
+          html += '<div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-top:2px;"><span style="color:var(--muted);">SL</span><strong style="color:var(--red);">\u20b9' + sug.sl.toFixed(2) + '</strong></div>';
+          html += '<div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-top:2px;"><span style="color:var(--muted);">T1</span><strong style="color:var(--green);">\u20b9' + sug.t1.toFixed(2) + '</strong></div>';
+          html += '<div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-top:2px;"><span style="color:var(--muted);">T2</span><strong style="color:var(--green);">\u20b9' + sug.t2.toFixed(2) + '</strong></div>';
+        } else {
+          html += '<div style="color:var(--muted); font-size:0.7rem;">Entry: \u20b9' + sug.entry.toFixed(2) + '</div>';
+        }
+        html += '<div style="color:var(--muted); font-size:0.65rem; margin-top:4px;">' + escapeHtml(sug.slNote) + '</div>';
         html += '</div>';
       }
+
+      // Step 5: Haiku's plain-language explanation of the verdict above.
+      // Haiku never changes the verdict/score/levels \u2014 only explains them.
+      const haiku = haikuExplanations[symbol];
+      html += '<div style="border-top:1px solid var(--border); margin-top:8px; padding-top:8px;">';
+      html += '<div style="color:var(--gold); font-size:0.66rem; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Why (AI Explanation)</div>';
+      if (!haiku) {
+        html += '<div style="color:var(--muted); font-size:0.7rem; margin-top:3px;">Not generated yet.</div>';
+      } else if (haiku.loading) {
+        html += '<div style="color:var(--muted); font-size:0.7rem; margin-top:3px;">Generating explanation\u2026</div>';
+      } else if (haiku.error) {
+        html += '<div style="color:var(--red); font-size:0.68rem; margin-top:3px;">' + escapeHtml(haiku.error) + '</div>';
+      } else {
+        html += '<div style="color:var(--text); font-size:0.75rem; margin-top:3px; line-height:1.4;">' + escapeHtml(haiku.explanation) + '</div>';
+        html += '<div style="color:var(--muted); font-size:0.6rem; margin-top:4px;">' + (haiku.fromCache ? 'Cached (cost-guard: same verdict &lt; 15min)' : 'Fresh Haiku call') + ' \u2022 ' + escapeHtml(new Date(haiku.calledAt).toLocaleTimeString()) + '</div>';
+      }
+      html += '</div>';
 
       html += '<details style="margin-top:8px;"><summary style="color:var(--gold); font-size:0.68rem; cursor:pointer;">Overrides &amp; Notes</summary><div style="margin-top:4px;">';
       result.overrides.forEach((o) => { html += '<div style="color:var(--gold); font-size:0.68rem; margin-top:2px;">\u2022 ' + escapeHtml(o) + '</div>'; });
@@ -5107,7 +5179,7 @@ app.get("/", (c) => {
       { id: 'futures_oi_buildup', existsElsewhere: null },
       { id: 'fii_dii_5day', existsElsewhere: 'FII/DII 5-Day Verdict module.' },
       { id: 'sector_heatmap', existsElsewhere: 'Commodities/sector symbol data is fetched but not aggregated into a breadth score accessible here.' },
-      { id: 'expiry_alignment', existsElsewhere: 'Step 5B (Cross-Expiry ITM Alignment).' },
+      { id: 'expiry_alignment' },
       { id: 'gap_type', existsElsewhere: null },
       { id: 'option_premium_vwap', existsElsewhere: 'Per-leg VWAP proxy exists (Premium Pair card) but not aggregated CE-vs-PE for this signal.' },
       { id: 'straddle_behaviour', existsElsewhere: 'Step 6A (ATM Straddle Alignment).' },
@@ -5127,6 +5199,13 @@ app.get("/", (c) => {
       const isStale = ageMs == null || ageMs > STALE_THRESHOLD_MS_HAIKU;
 
       const contract = m.futuresContracts && m.futuresContracts[0];
+      // Computed ONCE here (never again in runRuleEngine) — Step 5B's
+      // internal trackers (priceDirection/oiArrowInfo/futuresDirection)
+      // mutate shared last-seen state on every call, so calling this
+      // twice in the same refresh cycle would corrupt the up/down
+      // comparison on the second call. runRuleEngine reads the cached
+      // result off the validation object instead of recomputing it.
+      const step5bResult = computeStep5BConclusion(symbol, m);
       const rawValues = {
         futures_vwap: (contract && m.vwap > 0) ? m.vwap : null,
         pdh_pdl: (m.pdh > 0 && m.pdl > 0) ? 1 : null,
@@ -5135,6 +5214,7 @@ app.get("/", (c) => {
         india_vix: m.vix,
         futures_oi_buildup: contract ? contract.oi : null,
         gap_type: m.gapScore ? 1 : null,
+        expiry_alignment: step5bResult.blocked ? null : step5bResult.finalStatus,
       };
 
       HAIKU_SIGNAL_CATALOG.forEach((s) => {
@@ -5165,7 +5245,7 @@ app.get("/", (c) => {
       const blockingFailures = results.filter((r) => r.status === 'NULL' || r.status === 'STALE');
       const overallValid = blockingFailures.length === 0;
 
-      return { symbol, overallValid, signals: results, blockingFailureCount: blockingFailures.length, timestamp: new Date().toISOString() };
+      return { symbol, overallValid, signals: results, blockingFailureCount: blockingFailures.length, timestamp: new Date().toISOString(), _step5bResult: step5bResult };
     }
 
     // ============== HAIKU VERDICT SYSTEM — STEP 3: runRuleEngine() ==============
@@ -5176,7 +5256,7 @@ app.get("/", (c) => {
     // (0) among counted signals, which would misrepresent how much real
     // evidence went into the number.
     //
-    // Honesty disclosure: only 7 of the 16 signals are wired today (see
+    // Honesty disclosure: only 8 of the 16 signals are wired today (see
     // Step 2's card), so the achievable score ceiling is far below the
     // document's full ±20.5 scale. The document's own verdict thresholds
     // (±14 for Strong, etc.) are applied UNCHANGED — meaning Strong
@@ -5237,6 +5317,21 @@ app.get("/", (c) => {
         const bigGap = gapPercent != null && Math.abs(gapPercent) > 0.8;
         add('gap_type', bigGap ? base * 1.5 : base, bigGap ? 3 : 2);
       }
+      if (availableSignals.has('expiry_alignment') && validation._step5bResult) {
+        // Cross-Expiry ITM Alignment (Step 5B), reusing the SAME result
+        // validateData() already computed this cycle — never recomputed,
+        // to avoid corrupting Step 5B's internal up/down trackers.
+        const fs = validation._step5bResult.finalStatus;
+        let ealValue = 0;
+        if (fs === 'STRONG CROSS-EXPIRY ITM CE ALIGNMENT') ealValue = 1.5;
+        else if (fs === 'CROSS-EXPIRY ITM CE ALIGNMENT' || fs === 'CURRENT ATM CE SUPPORTIVE' || fs === 'CURRENT 1-ITM CE PREFERRED') ealValue = 1;
+        else if (fs === 'STRONG CROSS-EXPIRY ITM PE ALIGNMENT') ealValue = -1.5;
+        else if (fs === 'CROSS-EXPIRY ITM PE ALIGNMENT' || fs === 'CURRENT ATM PE SUPPORTIVE' || fs === 'CURRENT 1-ITM PE PREFERRED') ealValue = -1;
+        // LONGER-EXPIRY CONFLICT, OPPOSITE PREMIUM NOT WEAK, ITM\u2013FUTURES
+        // CONFLICT, and CURRENT-EXPIRY-ONLY MOVE all stay 0 \u2014 genuine
+        // conflict/noise signals, not a directional read.
+        add('expiry_alignment', ealValue, 1.5);
+      }
 
       // Overrides — only the ones honestly checkable today.
       const overrides = [];
@@ -5259,18 +5354,29 @@ app.get("/", (c) => {
 
       const confidence = maxScore >= 6 && Math.abs(score) >= maxScore * 0.7 ? 'Medium' : 'Low';
 
-      // ATM CE/PE suggestion: strike + real current premium as Entry,
-      // per Section 2's output format. SL is deliberately left
-      // unspecified — the source document shows the OUTPUT format but
-      // never states an SL formula, and inventing one would be exactly
-      // the kind of fabricated number this system is built to avoid.
+      // ATM CE/PE suggestion: strike + real current premium as Entry.
+      // SL/T1/T2 use a simple, disclosed percentage-of-premium formula
+      // (user-approved 2026-08-08, since the source document never
+      // defined one): SL = Entry −30%, T1 = Entry +50% (partial),
+      // T2 = Entry +100% (full). Fixed rule — not Haiku-generated.
       let suggestion = null;
       const dir3 = verdict.indexOf('Bullish') !== -1 ? 'CE' : verdict.indexOf('Bearish') !== -1 ? 'PE' : null;
       if (dir3 && m.expiries && m.expiries[0]) {
         const legs = dir3 === 'CE' ? m.expiries[0].ceStrikes : m.expiries[0].peStrikes;
         const atmLeg = legs && legs.find((s) => s.isAtm);
-        if (atmLeg) {
-          suggestion = { strike: atmLeg.strike + ' ' + dir3, entry: atmLeg.lastPrice, sl: null, slNote: 'NOT SPECIFIED \u2014 source document does not define an SL formula' };
+        if (atmLeg && atmLeg.lastPrice > 0) {
+          const entry = atmLeg.lastPrice;
+          suggestion = {
+            strike: atmLeg.strike + ' ' + dir3,
+            side: dir3,
+            entry,
+            sl: Math.round(entry * 0.7 * 100) / 100,
+            t1: Math.round(entry * 1.5 * 100) / 100,
+            t2: Math.round(entry * 2.0 * 100) / 100,
+            slNote: 'SL = Entry −30% | T1 = Entry +50% (partial) | T2 = Entry +100% (full) — fixed percentage rule, not from Haiku',
+          };
+        } else if (atmLeg) {
+          suggestion = { strike: atmLeg.strike + ' ' + dir3, side: dir3, entry: atmLeg.lastPrice, sl: null, t1: null, t2: null, slNote: 'Entry premium is 0/unavailable — cannot compute SL/T1/T2 from it' };
         }
       }
 
@@ -10502,6 +10608,99 @@ app.post("/api/research/query", async (c) => {
   return c.json(report);
 });
 
+// Step 5: Haiku explanation layer. The client sends the deterministic
+// verdict it already computed (runRuleEngine, Step 3) \u2014 this endpoint
+// never decides the verdict, only explains it, and only calls Haiku
+// when the cost guard allows it.
+app.post("/api/haiku-verdict", async (c) => {
+  let body: {
+    symbol?: string;
+    verdict?: string;
+    score?: number;
+    maxScore?: number;
+    confidence?: string;
+    contributions?: Record<string, number>;
+    overrides?: string[];
+    suggestion?: { side?: string; strike?: string; entry?: number; sl?: number | null; t1?: number | null; t2?: number | null } | null;
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid request body \u2014 expected JSON." }, 400);
+  }
+  const symbol = body.symbol;
+  const verdict = body.verdict;
+  if (!symbol || !verdict) return c.json({ error: "symbol and verdict are required" }, 400);
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return c.json({ error: "ANTHROPIC_API_KEY is not configured on the server" }, 500);
+
+  const now = Date.now();
+  const cached = haikuCache.get(symbol);
+  const verdictChanged = !cached || cached.verdict !== verdict;
+  const guardWindowPassed = !cached || (now - cached.calledAt) >= HAIKU_COST_GUARD_MS;
+
+  // Cost guard: reuse the cached explanation unless the verdict changed
+  // or 15+ minutes have passed \u2014 never call Haiku on every poll.
+  if (cached && !verdictChanged && !guardWindowPassed) {
+    return c.json({
+      explanation: cached.explanation,
+      fromCache: true,
+      symbol, verdict,
+      calledAt: new Date(cached.calledAt).toISOString(),
+    });
+  }
+
+  const lines: string[] = [];
+  lines.push(`Verdict: ${verdict} (Score ${(body.score != null && body.score >= 0) ? "+" : ""}${body.score} / ${body.maxScore}, Confidence: ${body.confidence})`);
+  lines.push("Signal contributions:");
+  Object.entries(body.contributions || {}).forEach(([sig, v]) => {
+    lines.push(`- ${sig}: ${v >= 0 ? "+" : ""}${v}`);
+  });
+  if (body.overrides && body.overrides.length > 0) {
+    lines.push("Overrides / notes:");
+    body.overrides.forEach((o) => lines.push(`- ${o}`));
+  }
+  if (body.suggestion && body.suggestion.side) {
+    const s = body.suggestion;
+    lines.push(`Suggested trade: ${s.side} ${s.strike}, Entry \u20b9${s.entry}${s.sl != null ? `, SL \u20b9${s.sl}, T1 \u20b9${s.t1}, T2 \u20b9${s.t2}` : ""}`);
+  }
+  lines.push("");
+  lines.push("Explain this verdict in 2\u20133 short sentences for a retail options trader reading on their phone. Only explain WHY the numbers above point that way \u2014 do NOT change the verdict, score, or any level, and do NOT invent data not given above.");
+  const prompt = lines.join("\n");
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 300,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return c.json({ error: `Anthropic API error ${response.status}: ${errText}` }, 502);
+    }
+
+    const json: any = await response.json();
+    const textBlock = Array.isArray(json.content) ? json.content.find((b: any) => b.type === "text") : null;
+    const explanation = textBlock ? textBlock.text : "No explanation returned.";
+
+    haikuCache.set(symbol, { verdict, explanation, calledAt: now });
+
+    return c.json({ explanation, fromCache: false, symbol, verdict, calledAt: new Date(now).toISOString() });
+  } catch (err: any) {
+    return c.json({ error: `Haiku call failed: ${err.message}` }, 500);
+  }
+});
+
 app.get("/api/recovery/active", (c) => {
   const active = recoveryAttempts.filter((r) => r.status === "RETRYING" || r.status === "MANUAL_ACTION_REQUIRED");
   return c.json({ active, allAttempts: recoveryAttempts.length });
@@ -10881,6 +11080,26 @@ interface RecoveryAttempt {
 const recoveryAttempts: RecoveryAttempt[] = [];
 const RECOVERY_MAX_ATTEMPTS = 5; // PROVISIONAL, not backtested
 const RECOVERY_BASE_DELAY_MS = 30 * 1000; // PROVISIONAL \u2014 30s base, doubling each attempt
+
+// ============== HAIKU VERDICT SYSTEM \u2014 STEP 5: Haiku explanation layer ==============
+// Haiku NEVER computes the verdict \u2014 the deterministic runRuleEngine()
+// (Step 3, client-side) already decided verdict/score/suggestion before
+// this is ever called. Haiku only turns that already-decided result into
+// a short plain-language explanation. Server-side only, because
+// ANTHROPIC_API_KEY must never reach the browser.
+//
+// Cost guard (user-approved 2026-08-08): only call Haiku when the
+// verdict actually changed since the last call for this symbol, OR at
+// least 15 minutes have passed since the last call \u2014 never on every
+// ~3-minute poll. In-memory cache, so a Railway redeploy resets it
+// (acceptable \u2014 worst case is one extra Haiku call after a deploy).
+interface HaikuCacheEntry {
+  verdict: string;
+  explanation: string;
+  calledAt: number; // epoch ms
+}
+const haikuCache = new Map<string, HaikuCacheEntry>();
+const HAIKU_COST_GUARD_MS = 15 * 60 * 1000; // 15 minutes
 
 // The only module with a genuine automatic recovery strategy today: a
 // failed Drive archive can be safely retried (same idempotent action,

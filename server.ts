@@ -4171,6 +4171,19 @@ app.get("/", (c) => {
       return html;
     }
 
+    // Sector Heatmap breadth score for the rule engine (Step 5\u2019s
+    // sector_heatmap signal, wired 2026-08-08). Market-wide, not tied to
+    // any one index\u2019s own data freshness \u2014 validity depends only on
+    // whether the heatmap itself loaded, not the per-index staleness
+    // clock. Safe to call multiple times per refresh (reads a snapshot,
+    // mutates no tracker state), unlike Step 5B.
+    function computeSectorBreadthValue() {
+      if (!sectorHeatmapData || sectorHeatmapData.error || !Array.isArray(sectorHeatmapData.sectors) || sectorHeatmapData.sectors.length === 0) return null;
+      const green = sectorHeatmapData.sectors.filter((s) => s.category === 'green').length;
+      const red = sectorHeatmapData.sectors.filter((s) => s.category === 'red').length;
+      return green - red; // 0 is a genuine neutral reading, not "no data"
+    }
+
     let commoditiesData = null;
     async function loadCommodities() {
       if (!kiteConnected) return;
@@ -5178,7 +5191,7 @@ app.get("/", (c) => {
       { id: 'atm_oi_buildup', existsElsewhere: 'Premium Pair interpretation labels (BUYING/WRITING-DOMINANT).' },
       { id: 'futures_oi_buildup', existsElsewhere: null },
       { id: 'fii_dii_5day', existsElsewhere: 'FII/DII 5-Day Verdict module.' },
-      { id: 'sector_heatmap', existsElsewhere: 'Commodities/sector symbol data is fetched but not aggregated into a breadth score accessible here.' },
+      { id: 'sector_heatmap' },
       { id: 'expiry_alignment' },
       { id: 'gap_type', existsElsewhere: null },
       { id: 'option_premium_vwap', existsElsewhere: 'Per-leg VWAP proxy exists (Premium Pair card) but not aggregated CE-vs-PE for this signal.' },
@@ -5215,6 +5228,7 @@ app.get("/", (c) => {
         futures_oi_buildup: contract ? contract.oi : null,
         gap_type: m.gapScore ? 1 : null,
         expiry_alignment: step5bResult.blocked ? null : step5bResult.finalStatus,
+        sector_heatmap: computeSectorBreadthValue(),
       };
 
       HAIKU_SIGNAL_CATALOG.forEach((s) => {
@@ -5226,7 +5240,10 @@ app.get("/", (c) => {
           results.push({ signal: s.id, status: 'NOT_AVAILABLE', reason: s.note });
           return;
         }
-        if (isStale) {
+        // sector_heatmap is market-wide, not scoped to this index's own
+        // quote timestamp \u2014 it has its own load/error state instead of
+        // riding the per-index isStale clock.
+        if (s.id !== 'sector_heatmap' && isStale) {
           results.push({ signal: s.id, status: 'STALE', reason: 'data age ' + (ageMs != null ? Math.round(ageMs / 1000) + 's' : 'unknown') + ' exceeds 3min threshold' });
           return;
         }
@@ -5256,7 +5273,7 @@ app.get("/", (c) => {
     // (0) among counted signals, which would misrepresent how much real
     // evidence went into the number.
     //
-    // Honesty disclosure: only 8 of the 16 signals are wired today (see
+    // Honesty disclosure: only 9 of the 16 signals are wired today (see
     // Step 2's card), so the achievable score ceiling is far below the
     // document's full ±20.5 scale. The document's own verdict thresholds
     // (±14 for Strong, etc.) are applied UNCHANGED — meaning Strong
@@ -5331,6 +5348,14 @@ app.get("/", (c) => {
         // CONFLICT, and CURRENT-EXPIRY-ONLY MOVE all stay 0 \u2014 genuine
         // conflict/noise signals, not a directional read.
         add('expiry_alignment', ealValue, 1.5);
+      }
+      if (availableSignals.has('sector_heatmap')) {
+        // Reads the same market-wide breadth snapshot validateData()
+        // just validated \u2014 safe to recompute (no tracker mutation).
+        const breadth = computeSectorBreadthValue();
+        if (breadth != null) {
+          add('sector_heatmap', breadth > 0 ? 1 : breadth < 0 ? -1 : 0, 1);
+        }
       }
 
       // Overrides — only the ones honestly checkable today.

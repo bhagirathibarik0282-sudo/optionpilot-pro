@@ -5211,7 +5211,7 @@ app.get("/", (c) => {
       { id: 'expiry_alignment' },
       { id: 'gap_type', existsElsewhere: null },
       { id: 'option_premium_vwap', existsElsewhere: 'Per-leg VWAP proxy exists (Premium Pair card) but not aggregated CE-vs-PE for this signal.' },
-      { id: 'straddle_behaviour', existsElsewhere: 'Step 6A (ATM Straddle Alignment).' },
+      { id: 'straddle_behaviour' },
     ];
 
     function validateData(symbol, m) {
@@ -5252,6 +5252,7 @@ app.get("/", (c) => {
         pcr_trend: computePcrTrendValue(symbol),
         call_put_wall: computeCallPutWallValue(symbol, m),
         atm_oi_buildup: atmOiBuildupValue,
+        straddle_behaviour: computeStraddleBehaviourValue(symbol, m),
       };
 
       HAIKU_SIGNAL_CATALOG.forEach((s) => {
@@ -5296,7 +5297,7 @@ app.get("/", (c) => {
     // (0) among counted signals, which would misrepresent how much real
     // evidence went into the number.
     //
-    // Honesty disclosure: only 12 of the 16 signals are wired today (see
+    // Honesty disclosure: only 13 of the 16 signals are wired today (see
     // Step 2's card), so the achievable score ceiling is far below the
     // document's full ±20.5 scale. The document's own verdict thresholds
     // (±14 for Strong, etc.) are applied UNCHANGED — meaning Strong
@@ -5398,6 +5399,12 @@ app.get("/", (c) => {
         // cycle \u2014 never recomputed, to avoid corrupting the '_atmoi_'
         // tracker's up/down comparison on a second call.
         add('atm_oi_buildup', validation._atmOiBuildupValue, 1);
+      }
+      if (availableSignals.has('straddle_behaviour')) {
+        const straddleValue = computeStraddleBehaviourValue(symbol, m);
+        if (straddleValue != null) {
+          add('straddle_behaviour', straddleValue, 1.5);
+        }
       }
 
       // Overrides — only the ones honestly checkable today.
@@ -8798,6 +8805,21 @@ app.get("/", (c) => {
       if (result.finalStatus === 'PCR + WALLS BULLISH SUPPORTIVE') return 1;
       if (result.finalStatus === 'PCR + WALLS BEARISH SUPPORTIVE') return -1;
       return 0; // RANGE RISK, VOLATILITY EXPANSION, CONFLICT, TRAPPED, UNCONFIRMED
+    }
+
+    // straddle_behaviour signal for the rule engine (Step 5, wired
+    // 2026-08-08). Reuses Step 6A's own straddleState \u2014 same
+    // already-established pattern as call_put_wall (Step 6B), which
+    // this codebase already calls multiple times per refresh at
+    // several existing call sites; not a new risk category.
+    function computeStraddleBehaviourValue(symbol, m) {
+      const result = computeStep6AConclusion(symbol, m);
+      if (result.blocked) return null;
+      const s = result.straddleState;
+      if (s === 'DATA INSUFFICIENT' || s === 'EXPIRY-DAY DISTORTION' || s === 'ATM SHIFT DISTORTION') return null;
+      if (s === 'DIRECTIONAL CE EXPANSION') return 1;
+      if (s === 'DIRECTIONAL PE EXPANSION') return -1;
+      return 0; // BOTH SIDES EXPANDING/WEAKENING, STRADDLE EXPANDING/CONTRACTING/STABLE
     }
 
     function renderStep6BCard(symbol, m) {

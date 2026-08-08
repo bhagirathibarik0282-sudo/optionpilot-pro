@@ -4283,6 +4283,24 @@ app.get("/", (c) => {
         html += '</div>';
       }
 
+      // BankNifty round-number + ATM OI buildup combo alert
+      // (user-approved 2026-08-08). BankNifty is monthly-only, so "this
+      // month's expiry" IS m.expiries[0] here \u2014 the same ATM leg
+      // computeAtmOiBuildupValue already read this cycle, reused via
+      // validation._atmOiBuildupDetail (never recomputed).
+      if (symbol === 'BANKNIFTY' && m && m.current) {
+        const thousandProximity = computeThousandProximity(m.current);
+        const oiDetail = validation._atmOiBuildupDetail;
+        if (thousandProximity && oiDetail) {
+          html += '<div style="background:rgba(201,162,39,0.16); border:2px solid var(--gold); border-radius:6px; padding:8px 10px; margin-bottom:8px;">';
+          html += '<div style="color:var(--gold); font-weight:800; font-size:0.78rem; text-align:center;">\u26a0\ufe0f BANKNIFTY AT ROUND NUMBER ' + thousandProximity.level + ' + ATM OI BUILDUP (' + oiDetail.atmStrike + ')</div>';
+          html += '<div style="display:flex; justify-content:space-between; margin-top:4px; font-size:0.72rem;"><span style="color:var(--muted);">CE \u26a0\ufe0f</span><strong style="color:var(--text);">' + escapeHtml(oiDetail.ceInterp) + '</strong></div>';
+          html += '<div style="display:flex; justify-content:space-between; margin-top:2px; font-size:0.72rem;"><span style="color:var(--muted);">PE \u26a0\ufe0f</span><strong style="color:var(--text);">' + escapeHtml(oiDetail.peInterp) + '</strong></div>';
+          html += '<div style="color:var(--muted); font-size:0.6rem; margin-top:4px;">Round numbers are often reversal/resistance zones \u2014 trade with extra caution here, this is not a directional call.</div>';
+          html += '</div>';
+        }
+      }
+
       html += '<div class="card-title">Rule Engine Verdict (Step 3\u20134) \u2014 ' + symbol + '</div>';
 
       if (result.verdict === 'DATA UNAVAILABLE') {
@@ -5250,7 +5268,8 @@ app.get("/", (c) => {
       // Computed ONCE here too, same reasoning as step5bResult above \u2014
       // uses its own '_atmoi_' tracker keys so it doesn't collide with
       // Step 5B's, but still must not be called twice per cycle.
-      const atmOiBuildupValue = computeAtmOiBuildupValue(symbol, m);
+      const atmOiBuildupDetail = computeAtmOiBuildupValue(symbol, m);
+      const atmOiBuildupValue = atmOiBuildupDetail ? atmOiBuildupDetail.value : null;
       const rawValues = {
         futures_vwap: (contract && m.vwap > 0) ? m.vwap : null,
         pdh_pdl: (m.pdh > 0 && m.pdl > 0) ? 1 : null,
@@ -5298,7 +5317,7 @@ app.get("/", (c) => {
       const blockingFailures = results.filter((r) => r.status === 'NULL' || r.status === 'STALE');
       const overallValid = blockingFailures.length === 0;
 
-      return { symbol, overallValid, signals: results, blockingFailureCount: blockingFailures.length, timestamp: new Date().toISOString(), _step5bResult: step5bResult, _atmOiBuildupValue: atmOiBuildupValue };
+      return { symbol, overallValid, signals: results, blockingFailureCount: blockingFailures.length, timestamp: new Date().toISOString(), _step5bResult: step5bResult, _atmOiBuildupValue: atmOiBuildupValue, _atmOiBuildupDetail: atmOiBuildupDetail };
     }
 
     // ============== HAIKU VERDICT SYSTEM — STEP 3: runRuleEngine() ==============
@@ -5747,6 +5766,19 @@ app.get("/", (c) => {
     // (minor) or 500-level (major, more psychologically significant),
     // tagged with OI sentiment and PDH/PDL proximity.
     const lastBankNiftyRoundLevel = { value: null };
+
+    // BankNifty "at a thousand round number right now" check (distinct
+    // from checkRoundCross above, which only fires on the moment of
+    // crossing) \u2014 user-approved 2026-08-08, for the round-number + ATM
+    // OI buildup combo alert. Within 0.15% of a 1000-multiple counts as
+    // "at" that level.
+    function computeThousandProximity(current) {
+      if (!(current > 0)) return null;
+      const nearest = Math.round(current / 1000) * 1000;
+      const distPct = Math.abs(current - nearest) / nearest * 100;
+      if (distPct > 0.15) return null;
+      return { level: nearest, distPct };
+    }
 
     function checkRoundCross(prev, current, step) {
       const prevLevel = Math.floor(prev / step) * step;
@@ -7742,9 +7774,11 @@ app.get("/", (c) => {
       else if (ceInterp === 'WRITING-DOMINANT INTERPRETATION') value -= 1; // calls being written \u2192 resistance/bearish
       if (peInterp === 'WRITING-DOMINANT INTERPRETATION') value += 1; // puts being written \u2192 support/bullish
       else if (peInterp === 'BUYING-DOMINANT INTERPRETATION') value -= 1; // puts being bought \u2192 bearish
-      if (value > 0) return 1;
-      if (value < 0) return -1;
-      return 0;
+      const scoreValue = value > 0 ? 1 : value < 0 ? -1 : 0;
+      // Returns the detail object (ceInterp/peInterp included) so the
+      // BankNifty round-number combo alert can reuse the SAME single
+      // computation \u2014 never a second call (see caching note above).
+      return { value: scoreValue, ceInterp, peInterp, atmStrike: atmCe.strike };
     }
 
     // Rule 2: track previous ATM per index (continuity check only — does

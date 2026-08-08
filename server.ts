@@ -3905,6 +3905,22 @@ app.get("/", (c) => {
       return { state, spotDir, pcrDir, sampleCount: recent.length, spotChange: recent[recent.length - 1].spot - recent[0].spot, pcrChange: recent[recent.length - 1].pcr - recent[0].pcr };
     }
 
+    // pcr_trend signal for the rule engine (Step 5, wired 2026-08-08).
+    // Reuses computePcrDivergence()'s own read \u2014 not a duplicate/
+    // competing calculation \u2014 since a genuine spot-vs-PCR divergence
+    // IS the trend signal the 16-signal document is asking for.
+    // BULLISH DIVERGENCE (spot falling, PCR rising \u2014 puts being written,
+    // contrarian support) \u2192 +1. BEARISH DIVERGENCE \u2192 \u22121.
+    // ALIGNED/NO CLEAR DIVERGENCE \u2192 0 (real reading, not missing data).
+    // INSUFFICIENT DATA (session just started) \u2192 null, excluded.
+    function computePcrTrendValue(symbol) {
+      const divergence = computePcrDivergence(symbol);
+      if (divergence.state === 'INSUFFICIENT DATA') return null;
+      if (divergence.state.indexOf('BULLISH DIVERGENCE') === 0) return 1;
+      if (divergence.state.indexOf('BEARISH DIVERGENCE') === 0) return -1;
+      return 0;
+    }
+
     function renderPcrRefinementCard(symbol) {
       const range = computeSessionPcrRange(symbol);
       const divergence = computePcrDivergence(symbol);
@@ -5184,7 +5200,7 @@ app.get("/", (c) => {
       { id: 'pdh_pdl', existsElsewhere: null },
       { id: 'fib_pivot', existsElsewhere: null, note: 'No daily Fibonacci/Camarilla pivot computation exists anywhere in this codebase yet \u2014 genuinely missing, not just unwired.' },
       { id: 'oi_pcr', existsElsewhere: null },
-      { id: 'pcr_trend', existsElsewhere: 'PCR Refinement card (session high/low + divergence) computes a related but not identical trend read.' },
+      { id: 'pcr_trend' },
       { id: 'call_put_wall', existsElsewhere: 'Step 6B (PCR + Call Wall/Put Wall Alignment card).' },
       { id: 'max_pain', existsElsewhere: null },
       { id: 'india_vix', existsElsewhere: null },
@@ -5229,6 +5245,7 @@ app.get("/", (c) => {
         gap_type: m.gapScore ? 1 : null,
         expiry_alignment: step5bResult.blocked ? null : step5bResult.finalStatus,
         sector_heatmap: computeSectorBreadthValue(),
+        pcr_trend: computePcrTrendValue(symbol),
       };
 
       HAIKU_SIGNAL_CATALOG.forEach((s) => {
@@ -5240,10 +5257,10 @@ app.get("/", (c) => {
           results.push({ signal: s.id, status: 'NOT_AVAILABLE', reason: s.note });
           return;
         }
-        // sector_heatmap is market-wide, not scoped to this index's own
-        // quote timestamp \u2014 it has its own load/error state instead of
-        // riding the per-index isStale clock.
-        if (s.id !== 'sector_heatmap' && isStale) {
+        // sector_heatmap and pcr_trend are their own freshness sources
+        // (heatmap load state / session PCR history) \u2014 neither rides
+        // the per-index isStale clock.
+        if (s.id !== 'sector_heatmap' && s.id !== 'pcr_trend' && isStale) {
           results.push({ signal: s.id, status: 'STALE', reason: 'data age ' + (ageMs != null ? Math.round(ageMs / 1000) + 's' : 'unknown') + ' exceeds 3min threshold' });
           return;
         }
@@ -5273,7 +5290,7 @@ app.get("/", (c) => {
     // (0) among counted signals, which would misrepresent how much real
     // evidence went into the number.
     //
-    // Honesty disclosure: only 9 of the 16 signals are wired today (see
+    // Honesty disclosure: only 10 of the 16 signals are wired today (see
     // Step 2's card), so the achievable score ceiling is far below the
     // document's full ±20.5 scale. The document's own verdict thresholds
     // (±14 for Strong, etc.) are applied UNCHANGED — meaning Strong
@@ -5355,6 +5372,13 @@ app.get("/", (c) => {
         const breadth = computeSectorBreadthValue();
         if (breadth != null) {
           add('sector_heatmap', breadth > 0 ? 1 : breadth < 0 ? -1 : 0, 1);
+        }
+      }
+      if (availableSignals.has('pcr_trend')) {
+        // Reads pcrHistory (read-only) \u2014 safe to recompute.
+        const trendValue = computePcrTrendValue(symbol);
+        if (trendValue != null) {
+          add('pcr_trend', trendValue, 1);
         }
       }
 

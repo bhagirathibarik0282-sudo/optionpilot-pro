@@ -8007,12 +8007,27 @@ app.get("/", (c) => {
       return html;
     }
 
+    let optionsAccordionOpen = 'premium_composition';
+    function toggleOptionsAccordion(id) {
+      optionsAccordionOpen = (optionsAccordionOpen === id) ? null : id;
+      updateUI();
+    }
+
     function renderOptionsTab(symbol, m) {
-      let html = renderPremiumPairCard(symbol, m);
-      html += renderOptionCompositionCard(symbol, m);
-      html += renderStep6ACard(symbol, m);
-      html += renderStep6BCard(symbol, m);
-      html += renderPcrRefinementCard(symbol);
+      // Dashboard reform (user-approved 2026-08-09), 4th of 5 designs.
+      // These 5 cards used to always render in full regardless of which
+      // PREMIUM/CHAIN/EXPIRY/WALLS&PCR sub-tab was selected below \u2014 the
+      // exact "too much stacked at once" complaint. Grouped into 2
+      // chapters; the existing chip-nav sub-tab content is untouched.
+      const premiumCompositionContent = renderPremiumPairCard(symbol, m) + renderOptionCompositionCard(symbol, m);
+      let html = renderAccordionChapter('premium_composition', '01', 'Premium & composition', { text: 'ATM CE/PE', color: 'var(--gold)' },
+        'Current ATM premium pair, plus the intrinsic-vs-time-value breakdown for ITM/ATM/OTM.', premiumCompositionContent,
+        optionsAccordionOpen === 'premium_composition', 'toggleOptionsAccordion');
+
+      const straddleWallContent = renderStep6ACard(symbol, m) + renderStep6BCard(symbol, m) + renderPcrRefinementCard(symbol);
+      html += renderAccordionChapter('straddle_wall', '02', 'Straddle & wall/PCR alignment', { text: 'Step 6A/6B', color: 'var(--muted)' },
+        'Whether the ATM straddle and the Call/Put wall + PCR readings agree with each other.', straddleWallContent,
+        optionsAccordionOpen === 'straddle_wall', 'toggleOptionsAccordion');
 
       const subs = [
         { key: 'PREMIUM', label: 'PREMIUM' },

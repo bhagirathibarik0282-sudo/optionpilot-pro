@@ -1608,13 +1608,12 @@ async function getOptionPrevDayLevelsBatch(
 
   if (toFetch.length > 0) {
     // Kite's historical-candle endpoint has a low rate limit (~3 req/sec).
-    // Fetching every strike's PDH/PDL concurrently on the first refresh of
-    // the day could trip 429 errors, so we throttle to small chunks with a
-    // short pause between them. Subsequent refreshes are cheap (cache hit,
-    // now valid for the WHOLE trading day \u2014 see tradingDate-keyed note
-    // on optionPrevDayCache above).
-    const CHUNK_SIZE = 1;
-    const CHUNK_DELAY_MS = 350;
+    // 3 concurrent requests per chunk + a 1000ms pause keeps the average
+    // rate at or below that limit (user-approved 2026-08-09, widened
+    // from CHUNK_SIZE=1/350ms after the tradingDate-keyed cache fix made
+    // this the only place a cold-start's wall-clock time is still spent).
+    const CHUNK_SIZE = 3;
+    const CHUNK_DELAY_MS = 1000;
     const fetched: (DailyCandle | null)[] = [];
     for (let i = 0; i < toFetch.length; i += CHUNK_SIZE) {
       const chunk = toFetch.slice(i, i + CHUNK_SIZE);
@@ -1629,7 +1628,16 @@ async function getOptionPrevDayLevelsBatch(
     toFetch.forEach((token, i) => {
       const candle = fetched[i];
       const levels = sanitizePdhPdl(candle?.high || 0, candle?.low || 0);
-      optionPrevDayCache.set(token, { ...levels, tradingDate: today });
+      // Bug fix (2026-08-09): only cache a GENUINE result. The cache is
+      // now valid for the whole trading day (see note above) \u2014 if a
+      // transient fetch failure (network error, or a 429 slipping
+      // through) were cached as-is, a one-time hiccup would silently
+      // poison this strike's PDH/PDL as "no data" for the rest of the
+      // day, with no retry until tomorrow. Leaving it uncached means
+      // the NEXT call (e.g. the next 3-min poll) naturally retries it.
+      if (levels.pdh > 0 && levels.pdl > 0) {
+        optionPrevDayCache.set(token, { ...levels, tradingDate: today });
+      }
       result.set(token, levels);
     });
   }

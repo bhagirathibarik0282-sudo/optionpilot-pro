@@ -7620,14 +7620,13 @@ app.get("/", (c) => {
         if (!leg) return '<span style="color:var(--muted-dim);">—</span>';
         const dir = leg.change > 0 ? 'up' : leg.change < 0 ? 'down' : 'flat';
         const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '●';
-        // Unconditional red/green (user-approved 2026-08-09, "strictly"):
-        // DH/PDH always green (the high-water reference), DL/PDL always
-        // red (the low-water reference) — not conditional on proximity
-        // to current LTP anymore, so the color is consistent on every row.
-        return '<span class="tick-arrow ' + dir + '">' + arrow + '</span> DH ' + (leg.dayHigh > 0 ? '<span style="color:var(--green);">' + leg.dayHigh.toFixed(2) + '</span>' : '—') +
-          ' / DL ' + (leg.dayLow > 0 ? '<span style="color:var(--red);">' + leg.dayLow.toFixed(2) + '</span>' : '—') +
-          ' · PDH ' + (leg.pdh > 0 ? '<span style="color:var(--green);">' + leg.pdh.toFixed(2) + '</span>' : '—') +
-          ' / PDL ' + (leg.pdl > 0 ? '<span style="color:var(--red);">' + leg.pdl.toFixed(2) + '</span>' : '—');
+        // Unconditional red/green (user-approved 2026-08-09, corrected/
+        // swapped per explicit follow-up instruction): DH/PDH always RED,
+        // DL/PDL always GREEN.
+        return '<span class="tick-arrow ' + dir + '">' + arrow + '</span> DH ' + (leg.dayHigh > 0 ? '<span style="color:var(--red);">' + leg.dayHigh.toFixed(2) + '</span>' : '—') +
+          ' / DL ' + (leg.dayLow > 0 ? '<span style="color:var(--green);">' + leg.dayLow.toFixed(2) + '</span>' : '—') +
+          ' · PDH ' + (leg.pdh > 0 ? '<span style="color:var(--red);">' + leg.pdh.toFixed(2) + '</span>' : '—') +
+          ' / PDL ' + (leg.pdl > 0 ? '<span style="color:var(--green);">' + leg.pdl.toFixed(2) + '</span>' : '—');
       }
 
       // Intrinsic / Extrinsic (time value) per strike, with an up/down

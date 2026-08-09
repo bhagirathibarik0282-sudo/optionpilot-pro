@@ -1,0 +1,235 @@
+{
+  "project": "OptionPilot Pro",
+  "document": "System Architecture Document",
+  "version": "1.0 Draft for review",
+  "owner": "Bhagirathi Barik",
+  "date": "2026-08-08",
+  "reference": "docs/vision.md",
+  "systemOverview": "OptionPilot Pro is structured as a pipeline: raw market data flows through validation, feature extraction, and a set of purpose-built engines, until it reaches a single deterministic decision, which is then explained (never altered) by an AI layer and recorded for future reference. Deterministic engines decide, the Haiku layer only explains, and no layer is permitted to present stale or fabricated data as if it were current and real. Not every layer described here exists yet; this document defines the target architecture, and each layer's current build status is disclosed explicitly.",
+  "dataFlowDiagramOrder": [
+    "Market Data Sources",
+    "Data Ingestion",
+    "Data Validation",
+    "Feature Extraction",
+    "Indicator / Signal Engine",
+    "Scoring Engine",
+    "Market Regime Engine",
+    "Probability Engine",
+    "Strategy Engine",
+    "Risk Engine",
+    "Decision Engine",
+    "Haiku Explanation Layer",
+    "Validation / Outcome Engine",
+    "Historical Journal",
+    "Dashboard / UI"
+  ],
+  "layerStatusSummary": [
+    { "layer": "Market Data Sources", "status": "Built" },
+    { "layer": "Data Ingestion", "status": "Built" },
+    { "layer": "Data Validation", "status": "Built" },
+    { "layer": "Feature Extraction", "status": "Built" },
+    { "layer": "Indicator / Signal Engine", "status": "Built (14 of 16 documented signals wired)" },
+    { "layer": "Scoring Engine", "status": "Built" },
+    { "layer": "Market Regime Engine", "status": "Not yet built" },
+    { "layer": "Probability Engine", "status": "Not yet built" },
+    { "layer": "Strategy Engine", "status": "Not yet built (fixed single-strategy rule only)" },
+    { "layer": "Risk Engine", "status": "Partially built (SL/T1/T2 formula only; no position sizing)" },
+    { "layer": "Decision Engine", "status": "Partially built (verdict + override logic exists; not a separated module)" },
+    { "layer": "Haiku Explanation Layer", "status": "Built" },
+    { "layer": "Validation / Outcome Engine", "status": "Not yet built" },
+    { "layer": "Historical Journal", "status": "Built" },
+    { "layer": "Dashboard / UI", "status": "Built" }
+  ],
+  "components": [
+    {
+      "layer": "Market Data Sources",
+      "status": "Built",
+      "purpose": "Supply all raw external data the system depends on.",
+      "inputs": "None (external boundary).",
+      "outputs": "Live quotes, option chains, futures data, OHLC (Zerodha Kite); manually entered FII/DII figures (user, via Paste & Fill).",
+      "dependencies": "Zerodha Kite API/session; user-entered data has no automated source.",
+      "dataFlow": "\u2192 Data Ingestion.",
+      "failureHandling": "A lost Kite session or missing FII/DII entry is a source-level failure, surfaced by the Recovery Engine, not silently substituted."
+    },
+    {
+      "layer": "Data Ingestion",
+      "status": "Built",
+      "purpose": "Pull raw data from sources into the system on a fixed cadence.",
+      "inputs": "Kite REST/WebSocket responses; manual FII/DII form submissions.",
+      "outputs": "Raw per-symbol snapshots (NIFTY/BANKNIFTY/SENSEX) with a receipt timestamp.",
+      "dependencies": "Kite session (OAuth), instruments cache, rate-limit-aware batching/retry.",
+      "dataFlow": "Market Data Sources \u2192 Data Ingestion \u2192 Data Validation.",
+      "failureHandling": "Rate-limit (429) responses are retried with backoff; a broken session routes to Recovery Engine as MANUAL_ACTION_REQUIRED (credential renewal is never automated)."
+    },
+    {
+      "layer": "Data Validation",
+      "status": "Built",
+      "purpose": "Confirm incoming data is present, fresh, and internally consistent before anything downstream trusts it.",
+      "inputs": "Raw snapshots from Data Ingestion.",
+      "outputs": "A pass/fail verdict per signal (OK / NULL / STALE / NOT_AVAILABLE), with an overall validity flag.",
+      "dependencies": "Per-index freshness threshold; per-signal null checks.",
+      "dataFlow": "Data Ingestion \u2192 Data Validation \u2192 Feature Extraction (only for validated data).",
+      "failureHandling": "Anything not OK is excluded from scoring, not estimated. Downstream layers only ever see explicitly validated values."
+    },
+    {
+      "layer": "Feature Extraction",
+      "status": "Built",
+      "purpose": "Turn raw fields (LTP, OI, volume, timestamps) into the derived quantities the signal engine needs \u2014 PCR, gap %, range position vs. PDH/PDL, OI-buildup direction, etc.",
+      "inputs": "Validated raw snapshot.",
+      "outputs": "Derived features per symbol/strike/expiry.",
+      "dependencies": "Data Validation output only (never raw, unvalidated data).",
+      "dataFlow": "Data Validation \u2192 Feature Extraction \u2192 Indicator/Signal Engine.",
+      "failureHandling": "A feature that cannot be derived (e.g. missing OI history for a direction comparison) is passed downstream as unavailable, not defaulted."
+    },
+    {
+      "layer": "Indicator / Signal Engine",
+      "status": "Built (14 of 16 documented signals wired)",
+      "purpose": "Compute each of the documented signals (futures VWAP, PDH/PDL, OI PCR, Max Pain, India VIX, futures OI buildup, gap type, cross-expiry ITM alignment, sector heatmap breadth, PCR trend/divergence, call/put wall alignment, ATM OI buildup, straddle behaviour, and NIFTY/BankNifty futures alignment as an override).",
+      "inputs": "Extracted features.",
+      "outputs": "A directional value (+1/0/\u22121, or a weighted equivalent) per signal, or null if the signal's own preconditions aren't met.",
+      "dependencies": "Feature Extraction; some signals depend on stateful trackers (price/OI direction history) that must be computed exactly once per refresh cycle to avoid self-corruption.",
+      "dataFlow": "Feature Extraction \u2192 Indicator/Signal Engine \u2192 Scoring Engine.",
+      "failureHandling": "An unwired or data-insufficient signal returns null and is excluded from the score entirely \u2014 it does not silently count as neutral."
+    },
+    {
+      "layer": "Scoring Engine",
+      "status": "Built",
+      "purpose": "Combine all available signal values into a single weighted score and a verdict.",
+      "inputs": "Signal values from the Indicator/Signal Engine.",
+      "outputs": "Score, max achievable score (given how many signals are actually available), confidence tier, verdict label, and any active overrides.",
+      "dependencies": "Indicator/Signal Engine; documented per-signal weights.",
+      "dataFlow": "Indicator/Signal Engine \u2192 Scoring Engine \u2192 Decision Engine.",
+      "failureHandling": "If too few signals are available, confidence is downgraded rather than the verdict being presented with false certainty."
+    },
+    {
+      "layer": "Market Regime Engine",
+      "status": "Not yet built",
+      "purpose": "(Target) Classify the prevailing market condition (trending / ranging / high-volatility / event-driven) so downstream engines can weight signals contextually.",
+      "inputs": "(Target) Scoring Engine output, VIX, historical range data.",
+      "outputs": "(Target) A regime label.",
+      "dependencies": "(Target) Sufficient historical data to define regime thresholds.",
+      "dataFlow": "(Target) Scoring Engine \u2192 Market Regime Engine \u2192 Strategy Engine.",
+      "failureHandling": "(Target) Absent regime data defaults to \"regime unknown,\" never to an assumed regime."
+    },
+    {
+      "layer": "Probability Engine",
+      "status": "Not yet built",
+      "purpose": "(Target) Attach a measured, backtested probability to a given verdict, based on historical outcomes of similar setups.",
+      "inputs": "(Target) Historical Journal + Validation/Outcome Engine records.",
+      "outputs": "(Target) A probability/confidence figure grounded in actual past performance, not a heuristic.",
+      "dependencies": "(Target) A working Validation/Outcome Engine with enough recorded history.",
+      "dataFlow": "(Target) Historical Journal \u2192 Probability Engine \u2192 Strategy Engine / Decision Engine.",
+      "failureHandling": "(Target) Until enough history exists, this layer reports \"Historical Support: DATA UNAVAILABLE\" rather than a fabricated probability \u2014 this is already the documented behaviour of the current Decision layer."
+    },
+    {
+      "layer": "Strategy Engine",
+      "status": "Not yet built (fixed single-strategy rule only)",
+      "purpose": "(Target) Select among multiple possible trade structures (not just the current single ATM CE/PE buy) based on regime, probability, and verdict.",
+      "inputs": "(Target) Market Regime Engine, Probability Engine, Scoring Engine.",
+      "outputs": "(Target) A chosen strategy type and its parameters.",
+      "dependencies": "(Target) Market Regime Engine, Probability Engine.",
+      "dataFlow": "(Target) \u2192 Strategy Engine \u2192 Risk Engine \u2192 Decision Engine.",
+      "failureHandling": "(Target) No qualifying strategy \u2192 no trade suggestion, not a forced default.",
+      "currentState": "The system today only ever proposes a single fixed structure \u2014 ATM CE or PE in the direction of the verdict \u2014 computed directly inside the Scoring Engine's output, not by a separate Strategy Engine."
+    },
+    {
+      "layer": "Risk Engine",
+      "status": "Partially built",
+      "purpose": "Determine position sizing and exit levels for a proposed trade.",
+      "inputs": "Suggested entry (current ATM premium).",
+      "outputs": "SL, T1 (partial), T2 (full) \u2014 currently a fixed, disclosed percentage-of-premium formula (SL = Entry \u221230%, T1 = +50%, T2 = +100%).",
+      "dependencies": "Entry price only, today; position-sizing/account-risk logic is not yet built.",
+      "dataFlow": "Scoring Engine output \u2192 Risk Engine \u2192 Decision Engine.",
+      "failureHandling": "If entry premium is zero/unavailable, no SL/T1/T2 is computed or guessed \u2014 the suggestion is marked unavailable."
+    },
+    {
+      "layer": "Decision Engine",
+      "status": "Partially built",
+      "purpose": "Produce the single, final, presentable verdict \u2014 combining score, overrides, and (in future) regime/strategy/risk output.",
+      "inputs": "Scoring Engine output, override checks (e.g. first-15-minutes rule, NIFTY/BankNifty futures misalignment).",
+      "outputs": "Final verdict, confidence, and trade suggestion.",
+      "dependencies": "Scoring Engine; override rules.",
+      "dataFlow": "Scoring Engine \u2192 Decision Engine \u2192 Haiku Explanation Layer + Dashboard/UI.",
+      "failureHandling": "Any active override forces a WAIT verdict rather than presenting a directional call the system isn't confident in.",
+      "currentState": "This logic lives inside the rule-engine function today rather than as a physically separate module; it is functionally present but not yet architecturally isolated."
+    },
+    {
+      "layer": "Haiku Explanation Layer",
+      "status": "Built",
+      "purpose": "Turn an already-decided verdict into a short, plain-language explanation for the user.",
+      "inputs": "Verdict, score, signal contributions, overrides, and suggestion \u2014 all already computed by the Decision Engine.",
+      "outputs": "A 2\u20133 sentence explanation.",
+      "dependencies": "Anthropic API (server-side only; the key never reaches the browser); a cost-guard cache keyed by symbol.",
+      "dataFlow": "Decision Engine \u2192 Haiku Explanation Layer \u2192 Dashboard/UI.",
+      "failureHandling": "Haiku is never called when the verdict is unavailable (stale/invalid data); the layer is skipped, not guessed around. Haiku is also gated to fire only on verdict change or after 15 minutes, and is contractually forbidden from altering the verdict/score/levels it's given."
+    },
+    {
+      "layer": "Validation / Outcome Engine",
+      "status": "Not yet built",
+      "purpose": "(Target) Compare each recorded verdict against what the market actually did afterward, to measure real signal and verdict accuracy.",
+      "inputs": "(Target) Historical Journal entries + subsequent market data.",
+      "outputs": "(Target) Per-verdict and per-signal accuracy statistics.",
+      "dependencies": "(Target) Historical Journal; a defined outcome-measurement window (e.g. price N minutes/hours after the verdict).",
+      "dataFlow": "(Target) Historical Journal \u2192 Validation/Outcome Engine \u2192 Probability Engine.",
+      "failureHandling": "(Target) Incomplete outcome windows are excluded from statistics, not interpolated.",
+      "note": "This is the current single biggest gap between 'Data Collection' (done) and 'Backtesting' (the Vision document's next stage) \u2014 without it, no probability figure can be honestly claimed."
+    },
+    {
+      "layer": "Historical Journal",
+      "status": "Built",
+      "purpose": "Record verdicts and market conditions for later review.",
+      "inputs": "Decision Engine output, rolling 3M/15M/30M verdicts, an 'Important Note' engine.",
+      "outputs": "Plain-text and formatted HTML journal entries, archived to Google Drive.",
+      "dependencies": "Google Drive OAuth connection.",
+      "dataFlow": "Decision Engine \u2192 Historical Journal \u2192 Google Drive; Historical Journal \u2192 (future) Validation/Outcome Engine.",
+      "failureHandling": "A failed Drive archive is the one auto-recoverable failure mode in the system (retried with backoff); if Drive isn't connected at all, this is MANUAL_ACTION_REQUIRED."
+    },
+    {
+      "layer": "Dashboard / UI",
+      "status": "Built",
+      "purpose": "Present all of the above to the user on a mobile-first interface.",
+      "inputs": "Live data (all layers), validation status, verdicts, explanations, system health.",
+      "outputs": "Rendered cards, alerts, and tabs (Overview, Futures, Options, Alignment, Verdict, System, etc.).",
+      "dependencies": "All upstream layers; degrades gracefully when any of them report unavailable data.",
+      "dataFlow": "All layers \u2192 Dashboard/UI (read-only; the UI does not feed back into scoring).",
+      "failureHandling": "Missing/stale data is displayed as explicitly missing/stale \u2014 never hidden or replaced with a plausible-looking placeholder."
+    }
+  ],
+  "dataFlowSummary": [
+    "Market Data Sources push raw quotes/chains/FII-DII data into Data Ingestion.",
+    "Data Validation accepts or rejects each field for freshness and completeness.",
+    "Feature Extraction derives the working quantities (PCR, gap %, range position, etc.) from validated data only.",
+    "The Indicator/Signal Engine turns features into directional signal values.",
+    "The Scoring Engine combines available signals into a score, confidence, and verdict.",
+    "(Target) The Market Regime Engine, Probability Engine, and Strategy Engine would add context, historical grounding, and trade-structure selection.",
+    "The Risk Engine attaches SL/T1/T2 to any suggested trade.",
+    "The Decision Engine finalizes the verdict, applying overrides.",
+    "The Haiku Explanation Layer explains \u2014 never edits \u2014 that decision.",
+    "The Historical Journal records the decision for later review; the (target) Validation/Outcome Engine will eventually score it against real outcomes.",
+    "The Dashboard/UI renders all of the above for the user."
+  ],
+  "failureAndRecoveryFlow": {
+    "principle": "Every layer treats missing/stale/invalid input as a first-class outcome, not an exception to work around.",
+    "recoveryEngine": "The Recovery Engine (Module 13) monitors module health (Truth Engine, Recorder Engine, Google Drive, Daily Journal, Market DNA Engine) independently of the main data pipeline.",
+    "autoRecoverable": "Exactly one failure mode is auto-recoverable today: a failed Google Drive archive (retried with exponential backoff, capped at 5 attempts).",
+    "manualActionRequired": "Every other failure mode \u2014 a lost Kite session, a disconnected Google Drive account \u2014 is intentionally MANUAL_ACTION_REQUIRED: the system will never attempt to log in on the user's behalf.",
+    "recoveryClearing": "A module that recovers on its own is reflected as RECOVERED, clearing any prior manual-action flag rather than leaving stale alerts behind."
+  },
+  "aiBoundary": {
+    "summary": "The Haiku Explanation Layer operates under a hard boundary, enforced structurally, not just by convention.",
+    "rules": [
+      "It receives the verdict, score, signal contributions, overrides, and suggested trade after the Decision Engine has already finalized them.",
+      "It is prompted explicitly not to change any of those values \u2014 only to explain them.",
+      "It runs server-side only; the API key never reaches the client, and the client cannot call the AI provider directly.",
+      "It is cost-guarded: called only on a verdict change or after a 15-minute window, never on every data refresh.",
+      "It is skipped entirely when the underlying data is invalid or stale \u2014 there is no 'explain anyway' path."
+    ],
+    "note": "No other AI involvement exists anywhere else in the pipeline today. If future engines (e.g. Probability Engine) ever incorporate a model-based estimate, that estimate must be clearly labeled as such and kept separate from the deterministic score, per the Vision document's core principles."
+  },
+  "futureExtensibility": [
+    "Broker abstraction: Data Ingestion is designed around Kite today, but the layer boundary (raw external data \u2192 validated internal snapshot) is where a future second broker/data source would plug in, without requiring changes to any layer above Data Validation. No such abstraction is implemented yet \u2014 this is a placeholder for future architecture work, not a current capability.",
+    "Additional signals: The Indicator/Signal Engine is built to accept new signals independently (each with its own validation, weight, and null-handling) \u2014 the remaining two documented signals (FII/DII 5-day trend, Fibonacci pivot) slot into the same pattern already used for the 14 that exist.",
+    "Regime/Probability/Strategy/Risk maturity: These layers are designed for but not yet implemented; each depends on the Validation/Outcome Engine existing first, since none of them can be built honestly without measured historical accuracy to ground them.",
+    "Multi-user/shared deployments: Not addressed by this architecture; today's system assumes a single user's Kite/Google credentials."
+  ]
+}

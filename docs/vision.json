@@ -1,0 +1,78 @@
+{
+  "project": "OptionPilot Pro",
+  "document": "Vision Document",
+  "status": "Draft for review",
+  "owner": "Bhagirathi Barik",
+  "date": "2026-08-08",
+  "mission": "Transform OptionPilot Pro from a passive market-information display into a reliable, explainable AI-powered decision-support engine for Indian index options (NIFTY, Bank Nifty, Sensex) \u2014 one that tells the user not just what the market is doing, but why, using verifiable data and disclosed logic rather than black-box predictions.",
+  "longTermVision": {
+    "summary": "A single mobile-first dashboard that takes a trader from raw market data to a disciplined, evidence-backed trading decision \u2014 and over time, from manual research to a system whose historical accuracy has actually been measured.",
+    "trajectory": [
+      "Data Collection",
+      "Backtesting",
+      "Semi-Automatic Assistance",
+      "Automatic Execution"
+    ],
+    "note": "Each stage only begins once the prior stage has produced enough verified history to justify it. No stage is skipped on the basis of confidence alone."
+  },
+  "coreObjectives": [
+    "Honesty over completeness: every verdict must be traceable to real, live data; unavailable signals are marked unavailable, never estimated.",
+    "Explainability: every verdict is accompanied by a plain-language explanation of why, generated only from the data the deterministic engine already used.",
+    "Deterministic decisions, AI explanations: the rule engine always decides the verdict, score, and any suggested trade levels; the AI layer (Haiku) explains, it never decides.",
+    "Progressive reliability: move from display tool, to decision-support tool, to a backtested semi-automated assistant \u2014 only as each layer earns that trust through real market confirmation.",
+    "Mobile-first, non-technical usability: every workflow must be usable end-to-end from a phone, with no code or server management required."
+  ],
+  "problemsToSolve": [
+    "Raw option-chain and OI data is hard to read quickly under time pressure while trading.",
+    "Existing tools show data but not a synthesized, confidence-rated verdict.",
+    "Manual cross-checking of PCR, OI buildup, walls, straddle behaviour, and cross-expiry alignment is slow and error-prone across three indices at once.",
+    "No institutional memory: past verdicts and outcomes are not systematically recorded, so decisions cannot be improved from experience.",
+    "Automated systems risk fabricating confidence on incomplete or stale data; this project treats that as a safety problem, not a UX inconvenience."
+  ],
+  "targetUser": {
+    "profile": "Retail Indian index-options trader (option buying, trend-following, swing and select intraday setups).",
+    "traits": [
+      "Trades primarily from a mobile phone.",
+      "Is not comfortable with code, command-line tools, or manual API configuration.",
+      "Wants a second opinion grounded in real data, not a black-box signal.",
+      "Is building trading discipline and wants a system that enforces it (SL/target discipline, verdict traceability, historical review)."
+    ]
+  },
+  "corePrinciples": [
+    "No fabricated confidence: stale, missing, or unverified signal data is disclosed as such, never filled with a plausible-sounding guess.",
+    "Separation of decision and explanation: the rule engine decides; the AI (Haiku) explains an already-made decision and cannot alter verdict, score, or levels.",
+    "Disclosed formulas only: any calculated level (SL, target, thresholds) is either from an agreed documented formula, or explicitly marked as not yet defined.",
+    "Cost-aware AI use: AI calls are gated (e.g. only on verdict change or after a time window), never spent on redundant recomputation.",
+    "Credential safety: no credential (Kite, Google, or otherwise) is ever automated around; reconnection is always a manual, user-initiated action.",
+    "One reliable step at a time: features are built, verified (syntax and, separately, live-market), and shipped incrementally, not in large unverified batches."
+  ],
+  "scope": [
+    "NIFTY, Bank Nifty, and Sensex index options (option buying focus).",
+    "Live market data via Zerodha Kite.",
+    "A deterministic, disclosed rule engine producing a verdict, confidence, and (where available) a suggested trade with SL/T1/T2.",
+    "An AI (Haiku) layer that explains \u2014 but does not compute \u2014 verdicts.",
+    "A daily journal / historical record of verdicts and market conditions.",
+    "Manual FII/DII data entry integrated into the signal set.",
+    "System health and recovery visibility for the underlying data pipeline."
+  ],
+  "outOfScope": [
+    "Fully automatic order placement or execution (until Backtesting and Semi-Automatic stages are completed and verified).",
+    "Finnifty or any instrument beyond NIFTY, Bank Nifty, and Sensex.",
+    "Any AI-generated verdict, score, or trade level not first produced by the deterministic rule engine.",
+    "Automated credential renewal (Kite/Google login) without explicit user action.",
+    "Speculative signals built on data sources whose reliability has not been verified (e.g. unverified 'VWAP' proxies) until disclosed and approved."
+  ],
+  "successCriteria": [
+    "Every signal shown on the dashboard is either live-verified against real market data or explicitly labeled as not yet available, with zero fabricated values.",
+    "The rule engine's signal coverage approaches the full documented 16-signal set, each traceable to a real computation.",
+    "Verdicts and their AI explanations are reproducible: the same underlying data always produces the same verdict.",
+    "A running history of verdicts vs. actual market outcomes exists and can be reviewed (the foundation for backtesting).",
+    "The user can operate the entire system \u2014 review, trade, and provide feedback \u2014 from a mobile phone without needing to read or edit code."
+  ],
+  "futureDirection": [
+    "Complete the remaining signals (FII/DII 5-day trend, Fibonacci pivots) once their data sources are confirmed reliable.",
+    "Build the Backtesting stage: replay recorded verdicts against actual subsequent price action to measure real accuracy per signal and per verdict type.",
+    "Once backtested accuracy is established, introduce Semi-Automatic Assistance (e.g. one-tap trade placement from a verdict the user reviews and approves).",
+    "Only after Semi-Automatic Assistance has a proven track record does Automatic Execution become a candidate \u2014 gated on demonstrated, measured reliability, not on confidence alone."
+  ]
+}

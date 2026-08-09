@@ -1,0 +1,91 @@
+{
+  "project": "OptionPilot Pro",
+  "document": "Scoring Rules Document",
+  "version": "1.0",
+  "status": "Complete \u2014 values double-checked directly against runRuleEngine() in server.ts (verified 2026-08-09)",
+  "owner": "Bhagirathi Barik",
+  "reference": ["docs/vision.md", "docs/architecture.md (defers this document, layer 6 'Scoring Engine')"],
+  "purpose": "Single source of truth for exactly how the Scoring Engine turns available signals into a score, verdict, and confidence tier, and how the Risk Engine turns that verdict into SL/T1/T2. Every number was read directly from the live runRuleEngine() function, not recalled from memory or estimated.",
+  "scoringFormula": {
+    "description": "For each AVAILABLE signal (passed Data Validation as OK), the engine adds a signed value to a running score, and adds that signal's weight to a running maxScore.",
+    "formula": "score += signal_value (positive, negative, or 0); maxScore += signal_weight (always positive)",
+    "note": "maxScore reflects only the signals actually available this cycle \u2014 it is NOT a fixed constant. A cycle with fewer available signals has a lower maxScore than one with all 13 currently-wired signals available."
+  },
+  "signalWeights": [
+    { "n": 1, "signal": "futures_vwap", "weight": 1, "rule": "0 if |LTP\u2212VWAP|/VWAP \u2264 0.1%; else +1 if LTP > VWAP, \u22121 if below" },
+    { "n": 2, "signal": "pdh_pdl", "weight": 1, "rule": "+1 if spot > PDH; \u22121 if spot < PDL; else 0" },
+    { "n": 3, "signal": "oi_pcr", "weight": 1, "rule": "+1 if PCR > 1.2; \u22121 if PCR < 0.8; else 0" },
+    { "n": 4, "signal": "max_pain", "weight": 0.5, "rule": "+0.5 if spot < Max Pain; \u22120.5 if spot > Max Pain; else 0" },
+    { "n": 5, "signal": "india_vix", "weight": 1, "rule": "+1 if VIX change < 0; \u22121 if VIX change > 0; else 0" },
+    { "n": 6, "signal": "futures_oi_buildup", "weight": 1, "rule": "+1 Fresh Long Build-up; \u22121 Fresh Short Build-up; else 0" },
+    { "n": 7, "signal": "gap_type", "weight": "2 (3 if gap > 0.8%)", "rule": "0 unless the gap is confirmed as a Continuation; if so, direction \u00d7 2, further \u00d7 1.5 when the gap itself is > 0.8% (value can reach \u00b13, matching the weight)" },
+    { "n": 8, "signal": "expiry_alignment", "weight": 1.5, "rule": "+1.5 Strong CE cross-expiry alignment; +1 CE alignment/ATM-CE-supportive/1-ITM-CE-preferred; \u22121.5/\u22121 mirrored for PE; 0 for any conflict/noise state" },
+    { "n": 9, "signal": "sector_heatmap", "weight": 1, "rule": "+1 if more green sectors than red; \u22121 if more red than green; 0 if equal" },
+    { "n": 10, "signal": "pcr_trend", "weight": 1, "rule": "+1 Bullish Divergence (spot falling, PCR rising); \u22121 Bearish Divergence; 0 for aligned/no-clear-divergence" },
+    { "n": 11, "signal": "call_put_wall", "weight": 1.5, "rule": "+1 'PCR + Walls Bullish Supportive'; \u22121 '...Bearish Supportive'; 0 for range-risk/volatility-expansion/conflict/trapped/unconfirmed states" },
+    { "n": 12, "signal": "atm_oi_buildup", "weight": 1, "rule": "+1/\u22121/0, from combining ATM CE and PE BUYING/WRITING-DOMINANT interpretations (CE bought or PE written \u2192 bullish; CE written or PE bought \u2192 bearish)" },
+    { "n": 13, "signal": "straddle_behaviour", "weight": 1.5, "rule": "+1 Directional CE Expansion; \u22121 Directional PE Expansion; 0 for both-sides-expanding/weakening or stable/contracting states" },
+    { "n": 14, "signal": "fib_pivot", "weight": null, "rule": "Not yet built. No Fibonacci pivot computation exists anywhere in the codebase today." },
+    { "n": 15, "signal": "fii_dii_5day", "weight": null, "rule": "Not yet wired. FII/DII data is captured (manual entry) but not yet turned into a 5-day-trend signal for the engine." },
+    { "n": 16, "signal": "option_premium_vwap", "weight": null, "rule": "Deliberately not wired (user decision, 2026-08-08). Kite's per-leg 'VWAP' is actually its average_price field, explicitly unverified as true VWAP \u2014 wiring it would attach a real score weight to data whose meaning isn't confirmed." }
+  ],
+  "maxTheoreticalScore": {
+    "value": 16.0,
+    "note": "Sum of the 13 currently-wired weights at their most extreme values, including the big-gap 3-point case (1+1+1+0.5+1+1+3+1.5+1+1+1.5+1+1.5 = 16). This is a coincidental match to the '16 signals' name, not a designed constant. Real-cycle maxScore is typically lower since not every signal is available every cycle."
+  },
+  "verdictThresholds": [
+    { "condition": "score >= 14", "verdict": "Strong Bullish" },
+    { "condition": "7.5 <= score < 14", "verdict": "Bullish Biased" },
+    { "condition": "-7 < score < 7.5", "verdict": "Mixed / Sideways (WAIT)" },
+    { "condition": "-14 < score <= -7", "verdict": "Bearish Biased" },
+    { "condition": "score <= -14", "verdict": "Strong Bearish" }
+  ],
+  "verdictThresholdNote": "Disclosed as-is, not corrected: the neutral/WAIT band is ASYMMETRIC \u2014 it runs from \u22127 up to (but not including) 7.5, not a symmetric \u00b17 or \u00b17.5. This is what the live code does today. Per the hard rule not to change existing verdict logic while building the Outcome Engine, this document records the asymmetry rather than silently smoothing it out. Whether to correct it is a separate decision for the person, not something this document should decide.",
+  "confidenceFormula": {
+    "medium": "maxScore >= 6 AND |score| >= maxScore * 0.7",
+    "low": "otherwise",
+    "note": "Only two tiers exist today \u2014 Medium and Low. There is no 'High' tier in the current code, regardless of how strong the score is, as long as it clears the Medium bar. Confidence is gated on maxScore first: even a maximal score is only ever 'Low' confidence if fewer than 6 points worth of signals were actually available that cycle."
+  },
+  "overrides": {
+    "description": "Overrides bypass the score-based verdict thresholds entirely and force Mixed / Sideways (WAIT), regardless of score.",
+    "active": [
+      "First 15 minutes of session (9:15\u20139:30 IST) \u2014 Override Rule 6.",
+      "NIFTY/BankNifty futures OI buildup misalignment \u2014 only checked for NIFTY and BankNifty (Sensex has no second index to align against); fires when one shows Fresh Long Build-up and the other Fresh Short Build-up simultaneously."
+    ],
+    "notYetChecked": [
+      "Expiry split",
+      "Gap-fill-in-progress",
+      "VIX spike",
+      "Straddle-expansion",
+      "Full 3-index (including Sensex) misalignment"
+    ]
+  },
+  "suggestedTradeLevels": {
+    "description": "Only computed when the verdict is directional (Bullish or Bearish) AND a valid ATM premium exists. Fixed, disclosed percentage-of-premium rule \u2014 not Haiku-generated or statistically derived.",
+    "entry": "Current ATM CE (bullish) or PE (bearish) last traded price",
+    "sl": "Entry \u00d7 0.70 (\u221230%)",
+    "t1": "Entry \u00d7 1.50 (+50%, partial booking)",
+    "t2": "Entry \u00d7 2.00 (+100%, full target)",
+    "unavailableCase": "If the ATM premium is 0 or unavailable, no SL/T1/T2 is computed or estimated \u2014 the suggestion is marked unavailable instead."
+  },
+  "displayOnlyAlerts": {
+    "description": "Surface in the UI but do NOT add to score or maxScore, and are not signals in the 16-signal set above.",
+    "alerts": [
+      {
+        "name": "High-Priority Structure Alert",
+        "trigger": "Fires when cross-expiry ITM alignment (signal 8) and the same side's own ATM premium range position (near/at PDH or PDL) are both extreme simultaneously.",
+        "effect": "Purely a visual banner."
+      },
+      {
+        "name": "BankNifty Round-Number + ATM OI Combo Alert",
+        "trigger": "Fires when BankNifty is within 0.15% of a 1000-point level and ATM OI buildup is detected.",
+        "effect": "Shows CE/PE bias with a caution marker; does not alter score or verdict."
+      }
+    ]
+  },
+  "knownLimitations": [
+    "All specific numeric thresholds in this document (0.1% VWAP band, PCR 1.2/0.8, gap 0.8%, SL/T1/T2 percentages, confidence's 6-point/70% bar, 1000-level BankNifty band) are PROVISIONAL \u2014 chosen for reasonableness, not backtested against historical outcomes. The Validation/Outcome Engine (built 2026-08-08) exists specifically to eventually measure whether these thresholds hold up.",
+    "The verdict-threshold asymmetry is a live discrepancy, disclosed rather than silently fixed.",
+    "3 of the 16 documented signals are not yet contributing to the score at all (fib_pivot, fii_dii_5day, option_premium_vwap)."
+  ]
+}

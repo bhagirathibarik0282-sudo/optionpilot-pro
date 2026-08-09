@@ -1,0 +1,87 @@
+{
+  "project": "OptionPilot Pro",
+  "task": "Build the Validation / Outcome Engine (P0) \u2014 FINAL STATUS",
+  "date": "2026-08-09",
+  "overall_status": "COMPLETE, LOCAL ONLY \u2014 NOT YET PUSHED TO GITHUB / NOT YET LIVE ON RAILWAY",
+
+  "files_changed": [
+    "outcome-engine.ts (new) \u2014 standalone deterministic module: createOutcomeRecord, evaluateOutcome, computeOutcomeStats",
+    "test/outcome-engine.test.ts (new) \u2014 16 unit tests, node:test, zero new dependencies",
+    "server.ts \u2014 in-memory outcomeRecords store, 60s evaluation cycle, 4 endpoints (POST /api/outcome/record, GET /api/outcome/list, GET /api/outcome/stats, GET /api/outcome/by-trading-date/:date), client-side recordOutcomeIfNewVerdict() trigger, minimal dashboard card (renderOutcomeEngineCard)",
+    "package.json \u2014 added \"test\" script"
+  ],
+
+  "tests_run": {
+    "command": "npm test",
+    "result": "16/16 PASSING",
+    "list": [
+      "PENDING while window open",
+      "TARGET_T1_HIT",
+      "TARGET_T2_HIT (gap through T1)",
+      "STOP_HIT",
+      "NEITHER_HIT (window closes, nothing crossed)",
+      "INCOMPLETE_WINDOW (zero snapshots)",
+      "INCOMPLETE_STRIKE_SHIFTED",
+      "INCOMPLETE_NO_ENTRY_DATA (missing suggestion)",
+      "INCOMPLETE_NO_ENTRY_DATA (entry = 0)",
+      "immutability of evaluateOutcome's input",
+      "idempotency (terminal record never re-evaluated)",
+      "computeOutcomeStats excludes non-determinate records",
+      "computeOutcomeStats per-signal sufficientSample gating",
+      "tradingDate carried through on the record",
+      "eviction rule prefers terminal record over PENDING",
+      "eviction rule falls back to oldest PENDING only if nothing is terminal"
+    ]
+  },
+
+  "also_verified_live": [
+    "npx tsc --noEmit (server.ts + outcome-engine.ts) \u2014 0 errors",
+    "node --check server.ts \u2014 passes",
+    "esbuild bundle check \u2014 passes",
+    "Local server boot \u2014 clean, /health returns 200",
+    "curl POST /api/outcome/record (no suggestion) \u2192 INCOMPLETE_NO_ENTRY_DATA, correct",
+    "curl POST /api/outcome/record (valid suggestion) \u2192 PENDING with correct tradingDate, correct",
+    "curl GET /api/outcome/by-trading-date/:date \u2192 correctly joins that day's outcome records + journal entries, correct"
+  ],
+
+  "assumptions_made": [
+    "Outcome window default: 60 minutes, configurable via OUTCOME_WINDOW_MINUTES env var \u2014 PROVISIONAL, not backtested.",
+    "Recording trigger: once per new verdict episode (verdict change), not on every ~3-min poll and not tied to Haiku's 15-min re-fire.",
+    "Minimum sample size before a per-signal stat is shown: 5 \u2014 PROVISIONAL floor, not backtested.",
+    "Journal cross-reference by tradingDate (not a literal read-from-Journal trigger) \u2014 chosen because JournalEntry lacks the entry/SL/T1/T2/signal-contribution data the Outcome Engine needs to function; a literal integration would have broken its core purpose."
+  ],
+
+  "known_limitations_disclosed_in_code": [
+    "Records live in memory only \u2014 reset on Railway redeploy (same disclosed pattern as Recorder Engine).",
+    "Outcome matching depends on the Recorder Engine's per-snapshot ATM CE/PE premium; if the ATM strike shifts away before the window completes, the record is marked INCOMPLETE_STRIKE_SHIFTED rather than guessed.",
+    "No Probability Engine \u2014 correctly out of scope for this task."
+  ],
+
+  "gaps_found_during_verification_and_fixed": [
+    {
+      "gap": "Architecture-documented data flow 'Historical Journal \u2192 Validation/Outcome Engine' was not actually implemented \u2014 the two systems ran fully in parallel.",
+      "fix": "Added tradingDate field to every OutcomeRecord + new GET /api/outcome/by-trading-date/:date endpoint that joins a day's outcome records with that day's Journal entries.",
+      "status": "FIXED, verified live"
+    },
+    {
+      "gap": "500-record cap evicted the OLDEST record unconditionally, which could silently drop a still-PENDING record before it ever reached a terminal outcome.",
+      "fix": "Eviction now prefers the oldest already-terminal (non-PENDING) record; only falls back to the oldest PENDING record if every record in the buffer is still PENDING.",
+      "status": "FIXED, covered by 2 new unit tests"
+    }
+  ],
+
+  "remaining_gaps_not_yet_addressed": [
+    {
+      "gap": "No automated integration/server-level tests \u2014 only the pure functions in outcome-engine.ts are unit-tested. snapshotsForOutcome(), runOutcomeEvaluationCycle(), and the four HTTP endpoints are only verified manually (curl), not by an automated test.",
+      "recommended_action": "Add a lightweight integration test that boots the server and exercises the endpoints, if/when this becomes a priority \u2014 not blocking for this P0 task."
+    }
+  ],
+
+  "not_touched": [
+    "runRuleEngine() \u2014 verdict thresholds, confidence formula, overrides, SL/T1/T2 formula all unchanged (re-verified via git diff and direct re-grep)",
+    "Probability Engine \u2014 not built, as instructed",
+    "Existing Haiku explanation layer, Recovery Engine (beyond its own prior bugfix), Recorder Engine, Historical Journal write logic"
+  ],
+
+  "ready_for": "GitHub push \u2192 Railway auto-deploy, pending final go-ahead."
+}

@@ -1,0 +1,163 @@
+{
+  "project": "OptionPilot Pro",
+  "task": "Verify the existing Validation / Outcome Engine before making any changes",
+  "verified_at": "2026-08-09 (re-inspected directly from repository code, not from memory)",
+  "implementation_status": "PARTIALLY_BUILT",
+  "implementation_status_summary": "The core deterministic outcome-evaluation logic (outcome-engine.ts) is VERIFIED_BUILT, correct, and well-tested in isolation. The server-side wiring (endpoints, evaluation cycle) is VERIFIED_BUILT and works end-to-end when exercised directly. However, the ARCHITECTURE-DOCUMENTED data flow 'Historical Journal -> Validation/Outcome Engine' is NOT what was actually built: the engine never reads from the Historical Journal. It is instead fed independently, client-side, at the moment a new verdict is computed. This is a real compliance gap against docs/architecture.md, not a hidden success.",
+
+  "files_inspected": [
+    "outcome-engine.ts (full file)",
+    "test/outcome-engine.test.ts (full file)",
+    "server.ts lines 1-10 (imports)",
+    "server.ts ~4030-4070 (client trigger: recordOutcomeIfNewVerdict, triggerHaikuVerdicts)",
+    "server.ts ~4590-4655 (dashboard card: renderOutcomeEngineCard, loadOutcomeStats)",
+    "server.ts ~5421-5583 (runRuleEngine - confirmed untouched)",
+    "server.ts ~11530-11636 (server wiring: outcomeRecords store, snapshotsForOutcome, runOutcomeEvaluationCycle, /api/outcome/* endpoints)",
+    "server.ts Historical Journal functions (appendJournalEntry, JournalEntry, deriveRollingVerdict, buildJournalText, buildJournalHtml) - searched for any reference to outcomeRecords or /api/outcome - NONE found",
+    "package.json (test script)",
+    "git show 2baa8a4 --stat and diff (confirmed runRuleEngine was not modified by the Outcome Engine commit)",
+    "live boot test + curl against /api/outcome/record, /api/outcome/list, /api/outcome/stats",
+    "npx tsc --noEmit (server.ts + outcome-engine.ts together) - 0 errors",
+    "npx tsx test/outcome-engine.test.ts - 13/13 passing, re-run just now"
+  ],
+
+  "verified_working": [
+    {
+      "item": "Pure evaluation logic (evaluateOutcome)",
+      "status": "VERIFIED_BUILT",
+      "evidence": "outcome-engine.ts; matches T1/T2/SL comparison order against record fields; 13 unit tests exercise target hit, stop hit, neither hit, incomplete window, strike-shift, zero/missing entry, immutability, idempotency - all passing on re-run."
+    },
+    {
+      "item": "Configurable, deterministic outcome window",
+      "status": "VERIFIED_BUILT",
+      "evidence": "server.ts: const OUTCOME_WINDOW_MINUTES = Number.parseInt(process.env.OUTCOME_WINDOW_MINUTES || \"60\", 10) - single definition, used consistently, not hard-coded per-call."
+    },
+    {
+      "item": "Incomplete outcome windows excluded from statistics, never interpolated",
+      "status": "VERIFIED_BUILT",
+      "evidence": "computeOutcomeStats() filters to only TARGET_T1_HIT/TARGET_T2_HIT/STOP_HIT/NEITHER_HIT before aggregating; confirmed by unit test 'excludes PENDING and INCOMPLETE_* from statistics'."
+    },
+    {
+      "item": "Stale/missing/invalid/unavailable data handled explicitly",
+      "status": "VERIFIED_BUILT",
+      "evidence": "Distinct terminal statuses exist for each case: INCOMPLETE_NO_ENTRY_DATA (no suggestion), INCOMPLETE_WINDOW (no snapshots at all), INCOMPLETE_STRIKE_SHIFTED (ATM moved, premium untrackable). Live curl test confirmed INCOMPLETE_NO_ENTRY_DATA fires correctly on a request with no suggestion."
+    },
+    {
+      "item": "Original recorded verdict/score/levels are immutable",
+      "status": "VERIFIED_BUILT",
+      "evidence": "evaluateOutcome always returns a new object via spread ({...record, ...}); never assigns into the input. Unit test 'evaluateOutcome never mutates the input record' passes. However, see architecture_compliance below - this immutability is trivially true partly BECAUSE the engine never touches the actual Historical Journal verdicts at all."
+    },
+    {
+      "item": "Per-verdict and per-signal accuracy metrics",
+      "status": "VERIFIED_BUILT",
+      "evidence": "computeOutcomeStats() returns byVerdict (target/stop/neither counts per verdict label) and bySignal (bucketed by signal:sign, with a minimum-sample-size flag). Confirmed by 2 dedicated unit tests."
+    },
+    {
+      "item": "runRuleEngine() scoring/verdict/confidence/overrides/Risk Engine formulas unchanged",
+      "status": "VERIFIED_BUILT",
+      "evidence": "git show 2baa8a4 -- server.ts confirms runRuleEngine's definition was not part of the Outcome Engine diff. Re-grepped current server.ts directly: verdict thresholds (score>=14 / >=7.5 / >-7 / >-14), confidence formula (maxScore>=6 && |score|>=maxScore*0.7), and SL/T1/T2 formula all match docs/scoring-rules.md exactly, unmodified."
+    },
+    {
+      "item": "Live endpoint behavior",
+      "status": "VERIFIED_BUILT",
+      "evidence": "Direct curl test this session: POST /api/outcome/record with no suggestion -> INCOMPLETE_NO_ENTRY_DATA; with a valid suggestion -> PENDING; GET /api/outcome/list and /api/outcome/stats returned correct, consistent data reflecting both records."
+    }
+  ],
+
+  "partially_working": [
+    {
+      "item": "Architecture-documented data flow: Historical Journal -> Validation/Outcome Engine",
+      "status": "PARTIALLY_BUILT",
+      "evidence": "docs/architecture.md, section 3.13, states the target data flow as 'Historical Journal \u2192 Validation/Outcome Engine \u2192 Probability Engine'. Grepped server.ts for any reference to outcomeRecords or /api/outcome inside the Journal functions (appendJournalEntry, JournalEntry type, deriveRollingVerdict, buildJournalText, buildJournalHtml) - found NONE. What was actually built instead: the client calls POST /api/outcome/record directly from triggerHaikuVerdicts() at the moment a NEW verdict is computed in the browser, entirely independent of whether/how that verdict is ever written to the Historical Journal. The two systems currently run in parallel, not in the documented sequence.",
+      "why_this_happened": "The P0 task's own instructions described the SAME data contract (verdict timestamp, symbol, verdict, score, confidence, suggested entry, SL/T1/T2, signal state) as what the client already computes and could send directly - which is simpler and was implemented that way. The architecture document's Journal-sourced version was not re-checked against the implementation before this verification pass."
+    }
+  ],
+
+  "missing": [
+    {
+      "item": "Probability Engine",
+      "status": "MISSING",
+      "evidence": "Not built - correctly out of scope per this task's own instruction ('Do not build the Probability Engine in this task')."
+    },
+    {
+      "item": "Integration/server-level tests",
+      "status": "MISSING",
+      "evidence": "test/outcome-engine.test.ts only exercises the pure functions in outcome-engine.ts. No test exists for: snapshotsForOutcome() (server.ts's Recorder-to-SnapshotForOutcome mapping), runOutcomeEvaluationCycle(), the three /api/outcome/* endpoints as HTTP handlers, or the client-side recordOutcomeIfNewVerdict() trigger logic. The live curl test performed during this verification was manual, not an automated test."
+    },
+    {
+      "item": "Journal-sourced outcome recording",
+      "status": "MISSING",
+      "evidence": "As described in partially_working above - no code path reads a Historical Journal entry and creates a matching outcome record from it."
+    }
+  ],
+
+  "incorrect_or_risky": [
+    {
+      "item": "Bounded record array can silently drop an unevaluated PENDING record",
+      "status": "BROKEN",
+      "evidence": "server.ts: if (outcomeRecords.length > OUTCOME_MAX_RECORDS) outcomeRecords.shift(); - this evicts the OLDEST record regardless of its status. If the array reaches 500 entries, a still-PENDING record (one whose outcome window hasn't completed yet) can be silently discarded before ever reaching a terminal status - it simply vanishes rather than being marked INCOMPLETE_* or logged. At current recording cadence (once per verdict-change episode per symbol, not per poll), this would take a long time to trigger in practice, but it is a real, unaddressed edge case, not a hypothetical one.",
+      "severity": "Low likelihood given current volume, but a genuine correctness gap against the 'incomplete windows are excluded rather than guessed' principle - a silently vanished PENDING record is arguably worse than an explicit INCOMPLETE status, since it leaves no trace at all."
+    }
+  ],
+
+  "tests_found": {
+    "file": "test/outcome-engine.test.ts",
+    "framework": "node:test (built-in, zero new dependencies)",
+    "run_command": "npm test (tsx test/outcome-engine.test.ts)",
+    "result_this_verification": "13/13 passing (re-run just now)",
+    "coverage": [
+      "PENDING while window open",
+      "TARGET_T1_HIT",
+      "TARGET_T2_HIT (gap through T1)",
+      "STOP_HIT",
+      "NEITHER_HIT (window closes, nothing crossed)",
+      "INCOMPLETE_WINDOW (zero snapshots)",
+      "INCOMPLETE_STRIKE_SHIFTED",
+      "INCOMPLETE_NO_ENTRY_DATA (missing suggestion)",
+      "INCOMPLETE_NO_ENTRY_DATA (entry = 0)",
+      "immutability of evaluateOutcome's input",
+      "idempotency (terminal record never re-evaluated)",
+      "computeOutcomeStats excludes non-determinate records",
+      "computeOutcomeStats per-signal sufficientSample gating"
+    ]
+  },
+
+  "tests_missing": [
+    "snapshotsForOutcome() mapping from RecorderSnapshot to SnapshotForOutcome",
+    "runOutcomeEvaluationCycle() end-to-end against a populated recorderSession.snapshots array",
+    "POST /api/outcome/record - strike-string parsing edge cases (e.g. malformed strike label)",
+    "GET /api/outcome/list and /api/outcome/stats as HTTP handlers",
+    "The 500-record eviction behavior flagged above in incorrect_or_risky",
+    "Client-side recordOutcomeIfNewVerdict() gating logic (verdict-changed-only trigger)"
+  ],
+
+  "architecture_compliance": {
+    "overall": "PARTIALLY_COMPLIANT",
+    "compliant_points": [
+      "Deterministic only - confirmed, zero AI/Haiku references anywhere in outcome-engine.ts (grepped).",
+      "Never modifies the original verdict/score - confirmed via immutability tests and the fact that runRuleEngine itself is untouched.",
+      "Modular / independently testable - confirmed: outcome-engine.ts has zero import from server.ts.",
+      "Failure handling as first-class outcome - confirmed via the INCOMPLETE_* status set."
+    ],
+    "non_compliant_points": [
+      "Documented data flow 'Historical Journal -> Validation/Outcome Engine' is NOT implemented - see partially_working above. This is the single most important finding of this verification."
+    ]
+  },
+
+  "scoring_rules_compliance": {
+    "overall": "COMPLIANT - verified by direct re-inspection, not assumed",
+    "checks_performed": [
+      "Dynamic maxScore: confirmed - maxScore is accumulated only from available signals each cycle (add() function increments both score and maxScore together per signal), never a fixed constant.",
+      "Asymmetric verdict band (-7 < score < 7.5): confirmed present unchanged in current server.ts, lines re-grepped this session.",
+      "Medium/Low confidence formula (maxScore>=6 && |score|>=maxScore*0.7): confirmed present unchanged.",
+      "Overrides (first-15-min, NIFTY/BankNifty futures misalignment): confirmed present unchanged, both still force the WAIT verdict via the same overrides.length check.",
+      "ATM entry/SL(-30%)/T1(+50%)/T2(+100%) formula: confirmed present unchanged in runRuleEngine's suggestion block."
+    ]
+  },
+
+  "recommended_next_action": {
+    "smallest_necessary_fix": "Wire the Outcome Engine's recording trigger to fire from the Historical Journal write path (appendJournalEntry / the journal-verdict derivation) instead of - or in addition to - the current client-side verdict-change trigger, so the actual documented data flow (Historical Journal -> Validation/Outcome Engine) is real rather than just described. This is the one change needed to close the architecture-compliance gap; everything else (evaluation logic, statuses, statistics, tests) is already sound and would not need to change.",
+    "secondary_fix": "Change the 500-record cap eviction to skip/protect still-PENDING records (e.g. evict the oldest DETERMINATE/INCOMPLETE record first, or raise the cap), so a record can never silently disappear before reaching a terminal status.",
+    "not_recommended_yet": "Building the Probability Engine - correctly deferred, since even after the above fix, real historical sample size will still be small; Probability Engine work should wait until the Journal-linked recording has been live long enough to accumulate a meaningful determinate-record count (see MIN_SAMPLE_SIZE = 5 in outcome-engine.ts, and note actual production data will need far more than that for a genuinely useful probability figure)."
+  }
+}

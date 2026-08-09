@@ -7852,8 +7852,81 @@ app.get("/", (c) => {
       return html;
     }
 
+    // Intrinsic vs Time Value composition (Phase 1 of the user-approved
+    // Intrinsic/Time-Value roadmap, 2026-08-09). Zerodha Varsity formula:
+    // CE intrinsic = max(spot-strike,0); PE intrinsic = max(strike-spot,0).
+    // OBSERVATION-ONLY per the roadmap \u2014 does not feed runRuleEngine's
+    // score, does not compute ITM/OTM/high-intrinsic as bullish/bearish
+    // (per the roadmap's own "do not infer" rules). Pure, stateless
+    // functions \u2014 safe to call as often as needed.
+    function computeIntrinsicValue(side, spot, strike) {
+      return side === 'CE' ? Math.max(spot - strike, 0) : Math.max(strike - spot, 0);
+    }
+
+    function renderOptionCompositionCard(symbol, m) {
+      if (!m || !m.expiries || !m.expiries[0]) return '';
+      const exp = m.expiries[0];
+      const ceStrikes = exp.ceStrikes || [];
+      const peStrikes = exp.peStrikes || [];
+      const spot = m.current;
+      if (!(spot > 0) || ceStrikes.length === 0 || peStrikes.length === 0) return '';
+
+      function pickRows(strikes, side) {
+        const atmIdx = strikes.findIndex((s) => s.isAtm);
+        if (atmIdx === -1) return [];
+        const itmIdx = side === 'CE' ? atmIdx - 1 : atmIdx + 1;
+        const otmIdx = side === 'CE' ? atmIdx + 1 : atmIdx - 1;
+        const picks = [];
+        if (strikes[itmIdx]) picks.push({ leg: strikes[itmIdx], tag: 'ITM' });
+        picks.push({ leg: strikes[atmIdx], tag: 'ATM' });
+        if (strikes[otmIdx]) picks.push({ leg: strikes[otmIdx], tag: 'OTM' });
+        return picks;
+      }
+
+      function rowsHtml(picks, side) {
+        let html = '';
+        picks.forEach(function (p) {
+          const leg = p.leg, tag = p.tag;
+          const premium = leg.lastPrice || 0;
+          const intrinsic = computeIntrinsicValue(side, spot, leg.strike);
+          const timeValue = Math.max(premium - intrinsic, 0);
+          const intrinsicPct = premium > 0 ? (intrinsic / premium * 100) : null;
+          const timeValuePct = premium > 0 ? (timeValue / premium * 100) : null;
+          const tagColor = tag === 'ITM' ? 'var(--green)' : tag === 'OTM' ? 'var(--muted)' : 'var(--gold)';
+          html += '<div style="border-top:1px solid var(--border); padding:6px 0;">';
+          html += '<div style="display:flex; justify-content:space-between; align-items:center;">';
+          html += '<span style="color:var(--text); font-size:0.75rem; font-weight:600;">' + leg.strike + ' ' + side + '</span>';
+          html += '<span style="color:' + tagColor + '; font-size:0.6rem; background:rgba(255,255,255,0.06); padding:1px 6px; border-radius:4px;">' + tag + '</span>';
+          html += '</div>';
+          if (premium > 0) {
+            html += '<div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-top:3px;"><span style="color:var(--muted);">LTP</span><span style="color:var(--text);">\u20b9' + premium.toFixed(2) + '</span></div>';
+            html += '<div style="display:flex; justify-content:space-between; font-size:0.68rem;"><span style="color:var(--muted);">Intrinsic</span><span style="color:var(--text);">\u20b9' + intrinsic.toFixed(2) + (intrinsicPct != null ? ' (' + intrinsicPct.toFixed(0) + '%)' : '') + '</span></div>';
+            html += '<div style="display:flex; justify-content:space-between; font-size:0.68rem;"><span style="color:var(--muted);">Time Value</span><span style="color:var(--text);">\u20b9' + timeValue.toFixed(2) + (timeValuePct != null ? ' (' + timeValuePct.toFixed(0) + '%)' : '') + '</span></div>';
+            if (leg.theta) {
+              html += '<div style="display:flex; justify-content:space-between; font-size:0.62rem;"><span style="color:var(--muted-dim);">Theta / Vega</span><span style="color:var(--muted-dim);">' + leg.theta.toFixed(2) + ' / ' + (leg.vega ? leg.vega.toFixed(2) : '\u2014') + '</span></div>';
+            }
+          } else {
+            html += '<div style="color:var(--muted); font-size:0.65rem; margin-top:3px;">DATA UNAVAILABLE</div>';
+          }
+          html += '</div>';
+        });
+        return html;
+      }
+
+      let html = '<div class="premium-card" style="margin-bottom:10px;">';
+      html += '<div class="card-title">Option Composition \u2014 Intrinsic vs Time Value</div>';
+      html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">';
+      html += '<div><div style="color:var(--green); font-size:0.65rem; font-weight:700; text-transform:uppercase; margin-bottom:4px;">CE</div>' + rowsHtml(pickRows(ceStrikes, 'CE'), 'CE') + '</div>';
+      html += '<div><div style="color:var(--red); font-size:0.65rem; font-weight:700; text-transform:uppercase; margin-bottom:4px;">PE</div>' + rowsHtml(pickRows(peStrikes, 'PE'), 'PE') + '</div>';
+      html += '</div>';
+      html += '<div class="timestamp">Observation-only (Phase 1) \u2014 does not feed the rule engine score. Intrinsic = max(Spot\u2212Strike,0) for CE, max(Strike\u2212Spot,0) for PE (Zerodha Varsity formula). High intrinsic is NOT automatically bullish/bearish \u2014 a deep ITM PE can occur in a bearish market just as easily as a bullish one.</div>';
+      html += '</div>';
+      return html;
+    }
+
     function renderOptionsTab(symbol, m) {
       let html = renderPremiumPairCard(symbol, m);
+      html += renderOptionCompositionCard(symbol, m);
       html += renderStep6ACard(symbol, m);
       html += renderStep6BCard(symbol, m);
       html += renderPcrRefinementCard(symbol);

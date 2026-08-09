@@ -6741,15 +6741,25 @@ app.get("/", (c) => {
         return html + '<div class="loading">Loading verdict...</div>';
       }
 
-      // Rule 12 hierarchy: 3. mandatory alignment, 4. SENSEX confirmation,
-      // 5. compact index cards, 6. trade readiness, 7. recorder mini-bar.
-      html += renderMandatoryAlignmentBar();
-      html += renderSensexConfirmationBar();
-      html += renderCompactIndexCard('NIFTY', data.NIFTY, false);
-      html += renderCompactIndexCard('BANKNIFTY', data.BANKNIFTY, false);
-      html += renderCompactIndexCard('SENSEX', data.SENSEX, true);
-      html += renderConsolidatedReadinessCard();
-      html += renderRecorderMiniBar();
+      // Dashboard reform (user-approved 2026-08-09), same book-index
+      // accordion pattern as the System tab, own toggle state
+      // (verdictAccordionOpen) so it doesn't collide with System tab's.
+      // Final Verdict card stays always visible above (it's the headline
+      // answer, not detail) \u2014 everything else collapses into 2 chapters.
+      const alignmentContent = renderMandatoryAlignmentBar() + renderSensexConfirmationBar();
+      html += renderAccordionChapter('index_alignment', '01', 'Index alignment', { text: '3 indices', color: 'var(--gold)' },
+        'Whether NIFTY, BankNifty, and Sensex agree on direction \u2014 a mandatory check before the verdict is trusted.', alignmentContent,
+        verdictAccordionOpen === 'index_alignment', 'toggleVerdictAccordion');
+
+      const perIndexContent = renderCompactIndexCard('NIFTY', data.NIFTY, false) + renderCompactIndexCard('BANKNIFTY', data.BANKNIFTY, false) + renderCompactIndexCard('SENSEX', data.SENSEX, true);
+      html += renderAccordionChapter('per_index', '02', 'Per-index detail', { text: '3 cards', color: 'var(--muted)' },
+        'Spot, PCR, and structure for each index individually.', perIndexContent,
+        verdictAccordionOpen === 'per_index', 'toggleVerdictAccordion');
+
+      const readinessContent = renderConsolidatedReadinessCard() + renderRecorderMiniBar();
+      html += renderAccordionChapter('trade_readiness', '03', 'Trade readiness + recorder', { text: 'detail', color: 'var(--muted)' },
+        'Whether conditions are complete enough to act on, and the background snapshot recorder\\'s status.', readinessContent,
+        verdictAccordionOpen === 'trade_readiness', 'toggleVerdictAccordion');
 
       // Advanced Diagnostics moved to the dedicated System tab (2026-08-08
       // redesign, Phase 1) — no longer buried inside VERDICT. See
@@ -6768,10 +6778,14 @@ app.get("/", (c) => {
       systemAccordionOpen = (systemAccordionOpen === id) ? null : id;
       updateUI();
     }
-    function renderAccordionChapter(id, number, title, badge, meansText, contentHtml) {
-      const isOpen = systemAccordionOpen === id;
+    let verdictAccordionOpen = null;
+    function toggleVerdictAccordion(id) {
+      verdictAccordionOpen = (verdictAccordionOpen === id) ? null : id;
+      updateUI();
+    }
+    function renderAccordionChapter(id, number, title, badge, meansText, contentHtml, isOpen, toggleFnName) {
       let html = '<div style="background:var(--panel); border:1px solid var(--border); border-radius:8px; margin-bottom:8px; overflow:hidden;">';
-      html += '<div onclick="toggleSystemAccordion(\\'' + id + '\\')" style="display:flex; align-items:center; gap:8px; padding:10px 12px; cursor:pointer;">';
+      html += '<div onclick="' + toggleFnName + '(\\'' + id + '\\')" style="display:flex; align-items:center; gap:8px; padding:10px 12px; cursor:pointer;">';
       html += '<span style="color:var(--muted); font-size:0.7rem; width:16px;">' + number + '</span>';
       html += '<span style="color:var(--text); font-size:0.8rem; flex:1;">' + escapeHtml(title) + '</span>';
       html += '<span style="color:' + badge.color + '; font-size:0.62rem; background:rgba(255,255,255,0.06); padding:2px 7px; border-radius:6px;">' + escapeHtml(badge.text) + '</span>';
@@ -6858,14 +6872,16 @@ app.get("/", (c) => {
       ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { dataIntegrityContent += renderRuleEngineCard(sym, data[sym]); });
       dataIntegrityContent += renderTruthEngineCard() + renderMarketDnaCard();
       html += renderAccordionChapter('data_integrity', '01', 'Data integrity + rule engine', dataIntegrityBadge,
-        'Signals with stale or missing data right now, plus the deterministic verdict for each index.', dataIntegrityContent);
+        'Signals with stale or missing data right now, plus the deterministic verdict for each index.', dataIntegrityContent,
+        systemAccordionOpen === 'data_integrity', 'toggleSystemAccordion');
 
       // --- Chapter 2: Platform Health (Recovery + Outcome + Health + Event Bus + Signal Lock) ---
       const platformBadge = recoveryActiveCount > 0 ? { text: recoveryActiveCount + ' action', color: 'var(--red)' } : { text: 'healthy', color: 'var(--green)' };
       let platformContent = renderSystemHealthCard() + renderRecoveryEngineCard() + renderOutcomeEngineCard() + renderEventBusCard();
       ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { platformContent += renderSignalLockCard(sym, data[sym]); });
       html += renderAccordionChapter('platform_health', '02', 'Platform health', platformBadge,
-        'Whether the underlying data pipeline (Kite session, Google Drive, background jobs) is working, and what to fix if not.', platformContent);
+        'Whether the underlying data pipeline (Kite session, Google Drive, background jobs) is working, and what to fix if not.', platformContent,
+        systemAccordionOpen === 'platform_health', 'toggleSystemAccordion');
 
       html += '<div class="verdict-overall-card">';
       html += '<div style="color:var(--muted); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px;">Three-Index Alignment</div>';

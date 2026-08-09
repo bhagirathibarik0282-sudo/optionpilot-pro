@@ -7620,14 +7620,31 @@ app.get("/", (c) => {
         if (!leg) return '<span style="color:var(--muted-dim);">—</span>';
         const dir = leg.change > 0 ? 'up' : leg.change < 0 ? 'down' : 'flat';
         const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '●';
-        const dayHColor = leg.dayHigh > 0 && leg.lastPrice >= leg.dayHigh * 0.98 ? 'var(--green)' : 'var(--muted-dim)';
-        const dayLColor = leg.dayLow > 0 && leg.lastPrice <= leg.dayLow * 1.02 ? 'var(--red)' : 'var(--muted-dim)';
-        const pdhColor = leg.pdh > 0 && leg.lastPrice >= leg.pdh * 0.98 ? 'var(--green)' : 'var(--muted-dim)';
-        const pdlColor = leg.pdl > 0 && leg.lastPrice <= leg.pdl * 1.02 ? 'var(--red)' : 'var(--muted-dim)';
-        return '<span class="tick-arrow ' + dir + '">' + arrow + '</span> DH ' + (leg.dayHigh > 0 ? '<span style="color:' + dayHColor + ';">' + leg.dayHigh.toFixed(2) + '</span>' : '—') +
-          ' / DL ' + (leg.dayLow > 0 ? '<span style="color:' + dayLColor + ';">' + leg.dayLow.toFixed(2) + '</span>' : '—') +
-          ' · PDH ' + (leg.pdh > 0 ? '<span style="color:' + pdhColor + ';">' + leg.pdh.toFixed(2) + '</span>' : '—') +
-          ' / PDL ' + (leg.pdl > 0 ? '<span style="color:' + pdlColor + ';">' + leg.pdl.toFixed(2) + '</span>' : '—');
+        // Unconditional red/green (user-approved 2026-08-09, "strictly"):
+        // DH/PDH always green (the high-water reference), DL/PDL always
+        // red (the low-water reference) — not conditional on proximity
+        // to current LTP anymore, so the color is consistent on every row.
+        return '<span class="tick-arrow ' + dir + '">' + arrow + '</span> DH ' + (leg.dayHigh > 0 ? '<span style="color:var(--green);">' + leg.dayHigh.toFixed(2) + '</span>' : '—') +
+          ' / DL ' + (leg.dayLow > 0 ? '<span style="color:var(--red);">' + leg.dayLow.toFixed(2) + '</span>' : '—') +
+          ' · PDH ' + (leg.pdh > 0 ? '<span style="color:var(--green);">' + leg.pdh.toFixed(2) + '</span>' : '—') +
+          ' / PDL ' + (leg.pdl > 0 ? '<span style="color:var(--red);">' + leg.pdl.toFixed(2) + '</span>' : '—');
+      }
+
+      // Intrinsic / Extrinsic (time value) per strike, with an up/down
+      // arrow (user-approved 2026-08-09, all 3 indices). Intrinsic uses
+      // the same Zerodha Varsity formula already used elsewhere
+      // (computeIntrinsicValue, stateless, safe to call per-strike).
+      // The arrow needs its OWN tracker key namespace ('_chainintrinsic_')
+      // distinct from the buildup trackers below ('_chain_') so neither
+      // corrupts the other's up/down comparison.
+      function intrinsicLine(side, leg) {
+        if (!leg || !(leg.lastPrice > 0) || !(m.current > 0)) return '<span style="color:var(--muted-dim);">—</span>';
+        const intrinsic = computeIntrinsicValue(side, m.current, leg.strike);
+        const extrinsic = Math.max(leg.lastPrice - intrinsic, 0);
+        const key = symbol + '_chainintrinsic_' + side + '_' + leg.strike;
+        const dir = priceDirection(key, intrinsic);
+        const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '●';
+        return '<span class="tick-arrow ' + dir + '">' + arrow + '</span> Intr ' + intrinsic.toFixed(2) + ' / Ext ' + extrinsic.toFixed(2);
       }
 
       strikes.forEach((strike) => {
@@ -7645,12 +7662,13 @@ app.get("/", (c) => {
         html += '<td style="text-align:right; padding:3px; color:' + (strike === maxPutOiStrike ? 'var(--green)' : 'var(--text)') + ';">' + (pe ? pe.lastPrice.toFixed(2) : '—') + '</td>';
         html += '</tr>';
 
-        // Requested 2026-08-08: extra Day H/L + PDH/PDL info row, NIFTY
-        // and SENSEX only. Reuses fields already populated per strike
-        // (Kite's ohlc.high/low/close) — no new data fetch. Reuses the
-        // existing .tick-arrow blink-once animation.
-        if ((symbol === 'NIFTY' || symbol === 'SENSEX') && (ce || pe)) {
-          html += '<tr style="border-top:none;"><td colspan="3" style="padding:1px 3px 4px; font-size:0.6rem; text-align:left;">' + levelLine(ce) + '</td><td></td><td colspan="3" style="padding:1px 3px 4px; font-size:0.6rem; text-align:right;">' + levelLine(pe) + '</td></tr>';
+        // Day H/L + PDH/PDL info row — now ALL 3 indices (user-approved
+        // 2026-08-09; was NIFTY/SENSEX-only before). Reuses fields
+        // already populated per strike (Kite's ohlc.high/low/close) —
+        // no new data fetch.
+        if (ce || pe) {
+          html += '<tr style="border-top:none;"><td colspan="3" style="padding:1px 3px 0; font-size:0.6rem; text-align:left;">' + levelLine(ce) + '</td><td></td><td colspan="3" style="padding:1px 3px 0; font-size:0.6rem; text-align:right;">' + levelLine(pe) + '</td></tr>';
+          html += '<tr style="border-top:none;"><td colspan="3" style="padding:0 3px 4px; font-size:0.6rem; text-align:left; color:var(--muted-dim);">' + intrinsicLine('CE', ce) + '</td><td></td><td colspan="3" style="padding:0 3px 4px; font-size:0.6rem; text-align:right; color:var(--muted-dim);">' + intrinsicLine('PE', pe) + '</td></tr>';
         }
       });
       html += '</tbody></table></div>';

@@ -6758,6 +6758,35 @@ app.get("/", (c) => {
       return html;
     }
 
+    // Dashboard reform pilot (user-approved 2026-08-09), System tab only.
+    // A book-index-style chapter: collapsed by default, shows a numbered
+    // header + status badge; tapping expands the SAME existing card HTML
+    // inline (no navigation, no new page) and shows a one-line "Means:"
+    // plain-language explainer. Only one chapter open at a time.
+    let systemAccordionOpen = 'data_integrity';
+    function toggleSystemAccordion(id) {
+      systemAccordionOpen = (systemAccordionOpen === id) ? null : id;
+      updateUI();
+    }
+    function renderAccordionChapter(id, number, title, badge, meansText, contentHtml) {
+      const isOpen = systemAccordionOpen === id;
+      let html = '<div style="background:var(--panel); border:1px solid var(--border); border-radius:8px; margin-bottom:8px; overflow:hidden;">';
+      html += '<div onclick="toggleSystemAccordion(\\'' + id + '\\')" style="display:flex; align-items:center; gap:8px; padding:10px 12px; cursor:pointer;">';
+      html += '<span style="color:var(--muted); font-size:0.7rem; width:16px;">' + number + '</span>';
+      html += '<span style="color:var(--text); font-size:0.8rem; flex:1;">' + escapeHtml(title) + '</span>';
+      html += '<span style="color:' + badge.color + '; font-size:0.62rem; background:rgba(255,255,255,0.06); padding:2px 7px; border-radius:6px;">' + escapeHtml(badge.text) + '</span>';
+      html += '<span style="color:var(--muted); font-size:0.65rem;">' + (isOpen ? '\u25b2' : '\u25bc') + '</span>';
+      html += '</div>';
+      if (isOpen) {
+        html += '<div style="padding:0 12px 12px;">';
+        html += '<div style="color:var(--muted-dim); font-size:0.65rem; margin-bottom:8px;">Means: ' + escapeHtml(meansText) + '</div>';
+        html += contentHtml;
+        html += '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
     function renderSystemTab() {
       let html = '';
       if (!data) {
@@ -6784,19 +6813,59 @@ app.get("/", (c) => {
         status.indexOf('BEARISH') !== -1 ? 'var(--red)' :
         (status.indexOf('CONFLICT') !== -1 || status === 'DATA INCOMPLETE') ? 'var(--gold)' : 'var(--muted)';
 
-      html += '<div style="color:var(--gold); font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin:4px 0 8px;">Data Integrity</div>';
-      html += renderDataReliabilityCard();
-      html += renderHaikuValidationCard();
-      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { html += renderRuleEngineCard(sym, data[sym]); });
-      html += renderTruthEngineCard();
-      html += renderMarketDnaCard();
+      // ===== Reform pilot (user-approved 2026-08-09): System tab reorganized
+      // into a book-style index with inline-expanding chapters, a priority
+      // banner, and a headline stat row. Only Data Integrity + Platform
+      // Health are reformed this pass \u2014 everything from Three-Index
+      // Alignment downward is untouched, unreformed, same as before. This
+      // wraps EXISTING render*Card() output (none of their internals were
+      // touched) inside a collapsible shell, to keep the risk small.
 
-      html += '<div style="color:var(--gold); font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin:16px 0 8px;">Platform Health</div>';
-      html += renderSystemHealthCard();
-      html += renderRecoveryEngineCard();
-      html += renderOutcomeEngineCard();
-      html += renderEventBusCard();
-      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { html += renderSignalLockCard(sym, data[sym]); });
+      // --- Priority banner: only the most urgent thing, if anything is. ---
+      const blockedSignalCounts = { NIFTY: 0, BANKNIFTY: 0, SENSEX: 0 };
+      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => {
+        if (data[sym] && !data[sym].error) {
+          const v = validateData(sym, data[sym]);
+          blockedSignalCounts[sym] = v.blockingFailureCount;
+        }
+      });
+      const totalBlocked = blockedSignalCounts.NIFTY + blockedSignalCounts.BANKNIFTY + blockedSignalCounts.SENSEX;
+      const recoveryActiveCount = (recoveryData && recoveryData.active) ? recoveryData.active.length : 0;
+
+      let priorityText = null;
+      if (recoveryActiveCount > 0) {
+        const manual = recoveryData.active.find((r) => r.status === 'MANUAL_ACTION_REQUIRED');
+        priorityText = manual ? (manual.moduleName + ' needs reconnecting.') : (recoveryActiveCount + ' module(s) recovering.');
+      } else if (totalBlocked > 0) {
+        priorityText = totalBlocked + ' signal(s) blocked across indices \u2014 see Data Integrity.';
+      }
+      if (priorityText) {
+        html += '<div style="display:flex; gap:8px; padding:8px 10px; background:rgba(229,72,77,0.14); border:1px solid var(--red); border-radius:8px; margin-bottom:10px;">';
+        html += '<span style="color:var(--red); font-size:0.8rem;">\u26a0\ufe0f</span>';
+        html += '<span style="color:var(--red); font-size:0.75rem; flex:1;">' + escapeHtml(priorityText) + '</span>';
+        html += '</div>';
+      }
+
+      // --- Headline stat row ---
+      html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">';
+      html += '<div style="background:var(--panel); border-radius:8px; padding:10px 12px;"><div style="color:var(--muted); font-size:0.65rem;">Signals wired</div><div style="color:var(--text); font-size:1.3rem; font-weight:700;">14<span style="color:var(--muted); font-size:0.8rem;"> / 16</span></div></div>';
+      html += '<div style="background:var(--panel); border-radius:8px; padding:10px 12px;"><div style="color:var(--muted); font-size:0.65rem;">Data integrity</div><div style="color:' + (totalBlocked > 0 ? 'var(--gold)' : 'var(--green)') + '; font-size:1.3rem; font-weight:700;">' + totalBlocked + '<span style="color:var(--muted); font-size:0.8rem;"> blocked</span></div></div>';
+      html += '</div>';
+
+      // --- Chapter 1: Data Integrity ---
+      const dataIntegrityBadge = totalBlocked > 0 ? { text: totalBlocked + ' blocked', color: 'var(--gold)' } : { text: 'clear', color: 'var(--green)' };
+      let dataIntegrityContent = renderDataReliabilityCard() + renderHaikuValidationCard();
+      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { dataIntegrityContent += renderRuleEngineCard(sym, data[sym]); });
+      dataIntegrityContent += renderTruthEngineCard() + renderMarketDnaCard();
+      html += renderAccordionChapter('data_integrity', '01', 'Data integrity + rule engine', dataIntegrityBadge,
+        'Signals with stale or missing data right now, plus the deterministic verdict for each index.', dataIntegrityContent);
+
+      // --- Chapter 2: Platform Health (Recovery + Outcome + Health + Event Bus + Signal Lock) ---
+      const platformBadge = recoveryActiveCount > 0 ? { text: recoveryActiveCount + ' action', color: 'var(--red)' } : { text: 'healthy', color: 'var(--green)' };
+      let platformContent = renderSystemHealthCard() + renderRecoveryEngineCard() + renderOutcomeEngineCard() + renderEventBusCard();
+      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { platformContent += renderSignalLockCard(sym, data[sym]); });
+      html += renderAccordionChapter('platform_health', '02', 'Platform health', platformBadge,
+        'Whether the underlying data pipeline (Kite session, Google Drive, background jobs) is working, and what to fix if not.', platformContent);
 
       html += '<div class="verdict-overall-card">';
       html += '<div style="color:var(--muted); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.5px;">Three-Index Alignment</div>';

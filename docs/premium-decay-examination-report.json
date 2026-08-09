@@ -1,0 +1,123 @@
+{
+  "task": "EXAMINE_ONLY",
+  "project": "OptionPilot Pro",
+  "objective": "Examine how monthly option premium decay and expiry-time behaviour should be modeled as a market-context intelligence feature",
+  "note": "No files were modified for this task. All findings below were verified by reading server.ts directly (grep + line-by-line inspection), not recalled from memory.",
+
+  "current_implementation_findings": [
+    {
+      "requirement": "How monthly option premiums are currently recorded/calculated",
+      "verified": "PremiumData (server.ts line 29) stores strike, isAtm, bid/ask, lastPrice, change, iv, oi, volume, vwap(+honesty flag), quoteTimestamp, atDayHigh/atDayLow, dayHigh/dayLow, pdc (previous day close), pdh/pdl (previous day high/low FOR THIS OPTION'S PREMIUM), and vega/theta/delta.",
+      "correction_to_task_framing": "Contrary to an older project decision (recorded 2026-07-25) to skip Greeks as 'too complex,' Greeks WERE later implemented. calcImpliedVolatility() (bisection method solving for IV from market price) and calcGreeks() (full Black-Scholes vega/delta/theta) both exist and are actively called for ATM CE/PE. This is a correction to prior assumptions, not new work."
+    },
+    {
+      "requirement": "Whether the system tracks premium from an initial reference (e.g. ₹900/₹700) and computes absolute/percentage loss",
+      "verified": "NOT PRESENT. pdh/pdl track the PREVIOUS TRADING DAY's high/low for that strike's premium (one-day lookback), not a decay-from-entry tracker. The only 'entry reference' concept anywhere in the codebase is the Rule Engine's suggested trade (Entry/SL/T1/T2, percentage-of-premium formula, built 2026-08-08) and the new Validation/Outcome Engine that evaluates THAT specific suggestion against SL/T1/T2 \u2014 neither is a general-purpose 'track this contract's decay since day 1 of the month' feature."
+    },
+    {
+      "requirement": "How remaining time to monthly expiry is represented",
+      "verified": "daysToExpiry = (expiry.expiryDate.getTime() - Date.now()) / 86_400_000 (lines 2576, 2614) \u2014 a raw millisecond difference converted to days. This is CALENDAR time, fed directly into the Black-Scholes T = daysToExpiry/365 term."
+    },
+    {
+      "requirement": "Calendar days vs actual trading days to expiry",
+      "verified": "NOT DISTINGUISHED. Only calendar-day arithmetic exists; there is no trading-day-count function anywhere in the codebase."
+    },
+    {
+      "requirement": "Final 1\u20132 weeks acceleration effect / can the system detect accelerating decay",
+      "verified": "NOT PRESENT. theta is computed as an instantaneous Black-Scholes snapshot (today's rate), not tracked over time, so there is no mechanism to observe or flag that decay is accelerating as expiry nears. The Black-Scholes formula itself mathematically implies faster time-decay as T\u21920, but nothing in the code surfaces this as a signal, alert, or trend."
+    },
+    {
+      "requirement": "Market holidays / non-trading days before expiry",
+      "verified": "NOT IMPLEMENTED. GET /api/holidays (line 10997) is a hardcoded stub: `return c.json([]);` \u2014 it always returns an empty array. The Holidays tab UI exists (renderHolidays) but has no real data source. This means no holiday-awareness exists anywhere, which is also why trading-day-vs-calendar-day cannot currently be computed \u2014 there is no holiday list to subtract."
+    },
+    {
+      "requirement": "Separating decay into intrinsic value, extrinsic/time value, IV changes, and underlying price movement",
+      "verified": "PARTIALLY SUPPORTED, NOT ASSEMBLED. iv (via calcImpliedVolatility) and vega/theta/delta (via calcGreeks) ARE computed per ATM leg. But: (a) intrinsic value is NEVER computed anywhere \u2014 the word 'intrinsic' does not appear in the codebase at all; (b) there is no function that decomposes a premium CHANGE into 'this much was intrinsic (spot movement), this much was time decay, this much was an IV shift' \u2014 each Greek exists as an independent snapshot number, not combined into an attribution/decomposition."
+    },
+    {
+      "requirement": "ITM/ATM/OTM status and its effect on remaining value \u2014 do not assume expiry value is always zero",
+      "verified": "Only isAtm: boolean exists on PremiumData. There is no isItm/isOtm flag or classification function. ITM/OTM status is not pre-computed anywhere; it would need to be derived ad hoc by comparing strike vs spot at read time. No code anywhere asserts or assumes a monthly option goes to zero \u2014 but nothing currently models what an ITM contract's terminal (expiry) value should be either (i.e. intrinsic value at expiry), since intrinsic value isn't computed at all (see above)."
+    },
+    {
+      "requirement": "Relating decay to Market Context (trending/sideways/gap-up/gap-down/reversal/continuation/volatility)",
+      "verified": "computeGapScore() (line 2180) already classifies each day into Continuation / Fade Risk / Sideways (GapScore interface, line 63), combining gap direction, VWAP position, PDH/PDL status, OI tilt, and sector breadth. This is the closest existing 'market regime' concept in the codebase. There is no explicit reversal-vs-continuation-over-multiple-days classifier, and no volatility-regime (high-IV vs low-IV environment) classifier beyond the raw india_vix level already used as a rule-engine signal."
+    }
+  ],
+
+  "existing_modules_functions_data_fields_involved": [
+    "PremiumData interface (server.ts ~line 29) \u2014 per-strike data, including iv/vega/theta/delta",
+    "calcImpliedVolatility() (~line 1685) \u2014 bisection-method IV solver",
+    "calcGreeks() (~line 1705) \u2014 Black-Scholes vega/delta/theta",
+    "daysToExpiry calculation (~lines 2576, 2614) \u2014 calendar-day only",
+    "pdh/pdl/pdc fields on PremiumData \u2014 previous-day levels for THIS strike's premium (1-day lookback, not month-long tracking)",
+    "computeGapScore() / GapScore interface (~lines 63, 2180) \u2014 existing market-context classifier (Continuation/Fade Risk/Sideways)",
+    "GET /api/holidays (~line 10997) \u2014 stub, returns []",
+    "Rule Engine's suggestion block (runRuleEngine, built 2026-08-08) \u2014 Entry/SL/T1/T2 percentage formula, the closest existing 'reference value' concept",
+    "Validation/Outcome Engine (outcome-engine.ts, built 2026-08-08/09) \u2014 evaluates a SPECIFIC suggested trade against SL/T1/T2 within a configurable window; architecturally the closest existing pattern for 'track value over time from a reference point', though scoped to the Rule Engine's own suggestions, not general monthly-contract decay",
+    "renderAtmDetailCard or equivalent (~lines 7456\u20137466) \u2014 the only place Greeks are currently displayed (ATM CE/PE, instantaneous values, no history)"
+  ],
+
+  "what_is_already_supported": [
+    "IV computation (implied, solved from market price)",
+    "Full Black-Scholes vega/theta/delta for ATM CE/PE (instantaneous snapshot)",
+    "Previous-day (1-day) high/low/close for any strike's premium",
+    "A market-context/gap classifier (Continuation/Fade Risk/Sideways) that a decay feature could plug into",
+    "A percentage-of-premium reference-and-target pattern (Rule Engine's SL/T1/T2), architecturally reusable as a template",
+    "A 'measure something against a reference over a time window, exclude incomplete data' pattern (Validation/Outcome Engine), architecturally reusable as a template"
+  ],
+
+  "what_is_missing": [
+    "Any tracking of a contract's premium against an INITIAL/entry reference value over the life of the contract (only 1-day PDH/PDL exists, not month-long)",
+    "Trading-day-aware time-to-expiry (only calendar days exist; T=daysToExpiry/365 feeds Black-Scholes with calendar time)",
+    "A real holiday list (the endpoint is a stub returning [])",
+    "Any decay-acceleration detection or alert (theta is a snapshot, not a trend)",
+    "Intrinsic value computation (does not exist anywhere in the codebase)",
+    "A decomposition of a premium change into intrinsic-move vs time-decay vs IV-shift components",
+    "An explicit ITM/OTM classification flag (only isAtm exists)",
+    "Any explicit link between decay rate/pattern and the existing Gap/market-context classifier \u2014 they are currently two unconnected concepts"
+  ],
+
+  "recommended_architecture": {
+    "fits_existing_layer": "Feature Extraction (System Architecture v1.0, layer 4) for the deterministic calculations (intrinsic/extrinsic split, trading-days-to-expiry, decay-rate-vs-reference); Indicator/Signal Engine (layer 5) IF a decay-based signal is wanted for the rule engine's score; a NEW lightweight 'Premium Behaviour' read-model for the reference-tracking/percentage-loss/decay-acceleration view, since nothing existing does that job.",
+    "new_engine_vs_extension": "Recommend an EXTENSION, not a new top-level engine. The pieces needed (intrinsic-value calc, trading-day count, decay-rate-vs-reference) are Feature Extraction-level calculations that belong alongside the existing Greeks computation, not a standalone 'engine' with its own architectural layer. A genuinely new engine would only be justified if this needed its own scoring/verdict/decision logic separate from the Rule Engine \u2014 nothing examined here requires that.",
+    "reuse_over_new_module": "Two existing patterns are directly reusable rather than reinvented: (1) the Rule Engine's percentage-of-premium reference pattern (Entry/SL/T1/T2) generalizes naturally to 'track % change from a chosen reference premium'; (2) the Outcome Engine's window-based tracking-with-honest-incompleteness pattern generalizes to 'track a contract's value over the remaining life of the month, marking gaps/incompleteness explicitly rather than interpolating.'"
+  },
+
+  "recommended_deterministic_calculations": [
+    "Intrinsic value: max(spot \u2212 strike, 0) for CE, max(strike \u2212 spot, 0) for PE \u2014 currently entirely missing, cheapest and highest-value addition.",
+    "Extrinsic/time value: premium \u2212 intrinsic value \u2014 trivial once intrinsic exists.",
+    "Trading-days-to-expiry: requires a REAL holiday list first (the current /api/holidays stub must be filled with actual NSE holiday dates \u2014 this is a prerequisite, not optional, since 'distinguish calendar from trading days' is impossible without it).",
+    "Decay-rate-vs-reference: % change = (currentPremium \u2212 referencePremium) / referencePremium, where referencePremium is either a user-chosen entry point or, for a general 'monthly behaviour' view, the first recorded premium after the monthly contract became the front-month/current contract.",
+    "Decay-acceleration flag: compare today's per-day extrinsic-value change to the trailing N-day average \u2014 deterministic, no new external data needed, but needs several days of history to be meaningful (same 'don't fabricate confidence on too little data' principle already established for the Outcome Engine's MIN_SAMPLE_SIZE)."
+  ],
+
+  "recommended_market_context_relationships": [
+    "Reuse computeGapScore()'s existing Continuation/Fade Risk/Sideways label as the market-context tag attached to each day's decay reading \u2014 do not build a second, competing classifier.",
+    "Relate decay rate to IV level/trend (already computed via calcImpliedVolatility) \u2014 e.g. 'time value eroding while IV also falling' vs 'time value eroding while IV rising' are different, useful distinctions, and the raw ingredients already exist.",
+    "Do NOT build a new 'trending/reversal' multi-day classifier for this feature specifically \u2014 that would duplicate the Market Regime Engine already deferred in docs/architecture.md pending real Outcome Engine data; reuse or wait for that instead of a parallel one-off."
+  ],
+
+  "how_haiku_should_consume_this": {
+    "principle": "Same boundary already established for the Rule Engine (docs/architecture.md, section 6, AI Boundary): Haiku explains a decision, it does not compute one. This feature is entirely deterministic (intrinsic/extrinsic split, trading-day count, % change from reference, acceleration flag) \u2014 Haiku's only role would be to turn an already-computed structured result into a plain-language sentence, e.g. 'This contract has lost 42% of its value in 12 trading days, mostly from time decay rather than the underlying moving against it, and that decay is accelerating as expiry approaches.'",
+    "structured_input_haiku_would_receive": "verdict-style object: { referencePremium, currentPremium, pctChange, intrinsicValue, extrinsicValue, tradingDaysToExpiry, decayAccelerating: bool, marketContext: <existing GapScore verdict> } \u2014 the same pattern already used for the Rule Engine's Haiku call, extended with these new fields.",
+    "hard_constraint": "Haiku must never be allowed to state a premium's expected future value, a probability of expiring worthless, or a recommendation to hold/exit \u2014 those would cross from explanation into computation/advice, violating the same boundary already enforced elsewhere."
+  },
+
+  "potential_risks_or_misleading_interpretations": [
+    "Calendar-day Black-Scholes T already slightly OVERSTATES time value on the calculation side (since it includes non-trading days as if they contributed to decay uncertainty) \u2014 not a new risk from this feature, but worth knowing before layering a 'trading-day-aware' decay display on top of a calendar-day-based theta, since the two would use inconsistent time bases unless reconciled.",
+    "Presenting a raw % premium loss WITHOUT the intrinsic/extrinsic split would be actively misleading for an ITM contract \u2014 a large % move in TOTAL premium can be almost entirely intrinsic (i.e. just the underlying moving against the position), not decay at all. This is exactly the confusion the person's original question was probing, and is the strongest argument for building the intrinsic/extrinsic split before anything else in this list.",
+    "A 'decay acceleration' flag built on too few days of history would repeat the exact mistake already avoided in the Outcome Engine (MIN_SAMPLE_SIZE) \u2014 must not fire confidently on 2\u20133 days of data.",
+    "Holidays must be sourced from an authoritative NSE/BSE calendar, not hand-maintained, or the trading-day count will silently drift wrong across sessions/redeploys (same class of risk as the FII/DII manual-entry data, but higher-stakes since it feeds a time-value calculation directly).",
+    "None of this should be assumed to make Black-Scholes 'accurate' for Indian index options \u2014 the model's assumptions (constant volatility, European exercise \u2014 which does hold for NSE index options, log-normal returns) are simplifications; treating computed Greeks/IV as precise rather than model-estimated (as the code already honestly comments them) must be preserved, not eroded, by any new feature built on top."
+  ],
+
+  "implementation_plan_no_code_yet": [
+    "Step 1 (prerequisite, blocking): populate GET /api/holidays with a real NSE/BSE trading holiday calendar. Nothing trading-day-aware can be built honestly before this.",
+    "Step 2: add intrinsic/extrinsic value computation (pure function, no new data source needed \u2014 uses existing spot + strike + premium).",
+    "Step 3: add a trading-days-to-expiry function using the Step 1 holiday list, alongside (not replacing) the existing calendar-day daysToExpiry used by Black-Scholes.",
+    "Step 4: add reference-premium tracking \u2014 needs a decision from the person on what 'reference' means (first day of the month? a user-chosen entry price? the Rule Engine's own suggested entry?) before this can be scoped further.",
+    "Step 5: add the decay-acceleration comparison, gated on a minimum history length (mirroring MIN_SAMPLE_SIZE's honesty principle).",
+    "Step 6: wire the existing GapScore verdict alongside the decay reading for market-context, and only then consider whether a Haiku explanation layer for this feature is wanted.",
+    "Each step should be its own reviewed, tested, deployed increment \u2014 not a single large change \u2014 consistent with how the Outcome Engine and every signal this session were built."
+  ]
+}

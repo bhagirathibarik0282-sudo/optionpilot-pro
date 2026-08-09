@@ -1,0 +1,87 @@
+{
+  "document": "Zerodha Varsity Decay Research vs OptionPilot Pro Dashboard \u2014 Concept Comparison",
+  "date": "2026-08-09",
+  "method": "Every 'dashboard_status' entry below was verified by reading server.ts directly (grep + line inspection), not recalled from memory. Every 'varsity_teaches' entry is paraphrased from Zerodha Varsity Module 5 (Theta, Moneyness, Vega chapters) \u2014 not copied verbatim, per copyright limits.",
+
+  "comparison": [
+    {
+      "concept": "Premium composition",
+      "varsity_teaches": "Premium = Intrinsic Value + Time Value. These are the only two components of any option's price.",
+      "dashboard_status": "NOT COMPUTED. PremiumData stores the raw premium (lastPrice) but never splits it into intrinsic vs. time value.",
+      "match": "MISSING",
+      "implication": "The dashboard currently cannot tell the user how much of a 700\u2013900 premium is 'real' (intrinsic) vs. 'decaying' (time value) \u2014 the exact gap that started this whole conversation."
+    },
+    {
+      "concept": "Intrinsic value formula",
+      "varsity_teaches": "CE intrinsic = Spot \u2212 Strike (floored at 0). PE intrinsic = Strike \u2212 Spot (floored at 0). Never negative.",
+      "dashboard_status": "NOT COMPUTED anywhere in the codebase. Spot and strike are both already available on every PremiumData record, so this is trivial to add.",
+      "match": "MISSING, LOW EFFORT TO CLOSE",
+      "implication": "Single highest-value, lowest-risk addition identified across both research passes."
+    },
+    {
+      "concept": "Moneyness classification (ITM / ATM / OTM)",
+      "varsity_teaches": "Any strike with intrinsic value > 0 is ITM; zero intrinsic value is OTM; strike \u2248 spot is ATM. For calls, ITM strikes are below ATM; for puts, ITM strikes are above ATM.",
+      "dashboard_status": "PARTIAL. Only isAtm: boolean exists on PremiumData. No isItm/isOtm flag or classification function exists \u2014 would need to be derived ad hoc from spot vs. strike at read time.",
+      "match": "PARTIAL",
+      "implication": "The dashboard can already tell you what's ATM, but not systematically what's ITM/OTM or how deep."
+    },
+    {
+      "concept": "Theta (time decay rate)",
+      "varsity_teaches": "Theta is the ₹ (or points) an option loses per day, all else equal. It's a real, computable per-day rate.",
+      "dashboard_status": "PRESENT. calcGreeks() computes full Black-Scholes theta per ATM CE/PE leg, displayed in the Premium Pair card ('Vega / Theta' row).",
+      "match": "MATCH",
+      "implication": "This part of the Varsity framework was already built \u2014 no gap here, contrary to this session's earlier assumption (from an outdated 2026-07-25 decision) that Greeks were skipped entirely."
+    },
+    {
+      "concept": "Decay curve shape (non-linear, accelerates near expiry)",
+      "varsity_teaches": "Decay is flat with many days left and accelerates sharply in the final stretch \u2014 Varsity's own worked example: 20 points lost over 20 days at 120\u2192100 DTE, a small early-series move.",
+      "dashboard_status": "NOT SURFACED. The underlying Black-Scholes formula mathematically implies this (theta grows as time-to-expiry shrinks), but theta is read fresh each cycle as an instantaneous snapshot \u2014 nothing compares it to its own recent history or flags 'decay is accelerating.'",
+      "match": "IMPLIED BY MATH, NOT SURFACED AS A FEATURE",
+      "implication": "A genuine decay-acceleration alert would need history tracking that doesn't exist yet \u2014 flagged in the earlier examination report as a recommended future step, gated on enough history to avoid false alarms (same principle as the Outcome Engine's MIN_SAMPLE_SIZE)."
+    },
+    {
+      "concept": "Vega (IV sensitivity) and IV crush",
+      "varsity_teaches": "Vega measures premium change per 1-point IV move, independent of spot. Around known events, IV rises beforehand and often crushes afterward \u2014 this alone can move a premium sharply even with a correct directional call.",
+      "dashboard_status": "PRESENT for vega itself (calcGreeks() computes it per leg, displayed alongside theta). IV crush as a NAMED, TRACKED EVENT is NOT present \u2014 nothing flags 'IV just dropped sharply' as distinct from a normal theta-driven move.",
+      "match": "PARTIAL \u2014 raw ingredient present, event-detection missing",
+      "implication": "A user watching a premium fall could currently not tell, from the dashboard alone, whether it was theta, an IV crush, or the underlying moving against them \u2014 all three look the same on a raw price line."
+    },
+    {
+      "concept": "Delta/Gamma affect intrinsic; Theta/Vega affect extrinsic",
+      "varsity_teaches": "This exact split was confirmed directly by Varsity's own author: Delta and Gamma move the intrinsic portion (they respond to spot); Theta and Vega move the extrinsic/time portion.",
+      "dashboard_status": "All four Greeks (delta, vega, theta \u2014 gamma is NOT separately computed) exist as numbers, but nothing in the code groups them this way or uses the grouping to decompose a premium change.",
+      "match": "INGREDIENTS PRESENT, GROUPING/DECOMPOSITION MISSING",
+      "implication": "This is exactly the three-way decomposition (intrinsic \u0394, theta \u0394, vega/IV \u0394) recommended in the research note \u2014 achievable by combining existing numbers, no new data source needed. Note gamma itself isn't currently computed (only vega/theta/delta), though it isn't required for this specific decomposition."
+    },
+    {
+      "concept": "European-style exercise (no early exercise)",
+      "varsity_teaches": "Indian index options are European \u2014 a buyer can only square off before expiry or let the contract settle at expiry, never exercise early.",
+      "dashboard_status": "Correctly assumed throughout \u2014 no early-exercise logic exists anywhere, consistent with this fact.",
+      "match": "MATCH",
+      "implication": "No gap, no action needed."
+    },
+    {
+      "concept": "Time-to-expiry input for Black-Scholes",
+      "varsity_teaches": "Varsity's own worked examples use plain calendar-day counts divided by 365 for the T term \u2014 no special trading-day adjustment shown in the core theory chapters.",
+      "dashboard_status": "daysToExpiry = (expiryDate \u2212 now) / 86,400,000ms \u2014 calendar-day only, matching Varsity's own textbook convention.",
+      "match": "MATCH (textbook-consistent), THOUGH TRADING-DAY AWARENESS REMAINS A VALID REFINEMENT",
+      "implication": "The earlier examination report's Step 1 (real holiday list \u2192 trading-day count) is not 'fixing an error' \u2014 it would be a refinement beyond what Varsity's own basic theory chapters model, useful but not urgent on textbook-correctness grounds alone."
+    },
+    {
+      "concept": "Buyer's condition for profit at expiry",
+      "varsity_teaches": "An option must expire ITM for the buyer to have gained anything \u2014 confirmed directly by Varsity's author correcting a reader who suggested ATM/OTM could work.",
+      "dashboard_status": "No feature currently states or reinforces this to the user \u2014 the dashboard shows current moneyness-adjacent data (isAtm) but doesn't frame 'buyer needs ITM at expiry' as an explicit takeaway anywhere.",
+      "match": "MISSING AS AN EXPLICIT DASHBOARD MESSAGE",
+      "implication": "Once isItm/isOtm exists (see row 3), a simple derived message becomes possible: e.g. 'this contract is currently OTM \u2014 needs spot to move X points to reach breakeven by expiry,' directly grounded in Varsity's own framing."
+    }
+  ],
+
+  "summary_counts": {
+    "match": 3,
+    "partial_or_ingredients_present_grouping_missing": 3,
+    "missing": 3,
+    "total_concepts_compared": 9
+  },
+
+  "single_highest_priority_gap": "Intrinsic/Extrinsic value split (rows 1 and 2) \u2014 zero new data required, directly closes the exact confusion (700\u2013900 premium meaning different things depending on ITM vs ATM) that prompted this entire research thread."
+}

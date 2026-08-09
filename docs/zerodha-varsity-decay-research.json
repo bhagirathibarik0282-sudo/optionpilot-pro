@@ -1,0 +1,86 @@
+{
+  "document": "Premium Decay & Moneyness \u2014 Research Note (Zerodha Varsity-grounded)",
+  "purpose": "Ground the earlier Premium Decay examination (docs/premium-decay-examination-report.json) against Zerodha Varsity's own Options Theory material \u2014 the same educational source millions of Indian traders (including Kite users) learn from \u2014 so any future implementation uses definitions and formulas consistent with what the person already trusts and half-remembers from Varsity, not a competing convention.",
+  "sources": [
+    "Zerodha Varsity, Module 5 'Options Theory for Professional Trading' \u2014 Theta chapter (zerodha.com/varsity/chapter/theta-2/)",
+    "Zerodha Varsity, Module 5 \u2014 Moneyness of Options chapter (zerodha.com/varsity/chapter/moneyness-of-option/)",
+    "Zerodha Varsity, Module 5 \u2014 Vega chapter and its comment thread (zerodha.com/varsity/chapter/vega-2/)"
+  ],
+  "copyright_note": "Reproduction of Varsity's own material/text/images is restricted by Zerodha's own copyright notice on those pages; all content below is paraphrased in original wording, not copied verbatim.",
+
+  "section1_theta": {
+    "title": "What Varsity teaches about Theta (time decay)",
+    "points": [
+      "All options lose value as expiration approaches; theta is the rate of that value loss per day, all else held equal.",
+      "Premium = Intrinsic Value + Time Value; all else equal, an option loses some value every day purely because of theta.",
+      "Time decay is non-linear: early in a series (many days left) an option barely loses value day to day; as expiry nears, decay accelerates sharply. Varsity's own illustration: at 120 days to expiry a premium was around 350, but by 100 days to expiry (just 20 days later) it had only fallen to around 300 \u2014 a small move for a large chunk of calendar time.",
+      "A short (seller) position benefits from theta \u2014 the seller's objective is to hold and pocket premium while it erodes in their favour daily.",
+      "Consequence: writing early in a series pockets large time-value premium but erosion is slow; writing close to expiry starts from a smaller premium but erodes fast. Mirror image for a buyer (this person's actual side): a fresh monthly (many days left) is a structurally gentler entry than the last week of the same contract, independent of direction.",
+      "Indian index options are European-style: a buyer cannot exercise early, only square off before expiry or let it settle at expiry (confirmed directly by Varsity's author in the page's comment thread)."
+    ]
+  },
+
+  "section1_5_vega_iv_crush": {
+    "title": "What Varsity teaches about Vega and IV crush \u2014 the THIRD source of premium loss",
+    "note": "This is the piece most retail traders conflate with theta, and it directly matters for a 700\u2013900 premium contract.",
+    "points": [
+      "Vega measures how much an option's premium moves per 1-point change in implied volatility (IV) \u2014 independent of whether the underlying spot moves at all.",
+      "Delta/Gamma affect the INTRINSIC portion of a premium (driven by spot movement); Theta/Vega affect the EXTRINSIC/time portion \u2014 this split was directly confirmed by Varsity's own author in the Vega chapter's comment thread.",
+      "Around known events (RBI policy, Union Budget, elections, company earnings), IV typically rises beforehand pricing in uncertainty, then collapses sharply afterward once the event resolves \u2014 commonly called 'IV crush.' A premium can fall sharply on IV crush alone, even with zero net theta decay and even if the underlying moved in the buyer's predicted direction, because the vega-driven loss can outweigh the delta-driven gain.",
+      "Practical implication for a 700\u2013900 ITM premium: a drop over a few days could be theta (expected), vega/IV crush (event-driven, sudden), intrinsic loss (spot moved against the position), or a mix of all three \u2014 and without decomposing the change, these three look identical on a raw price chart."
+    ]
+  },
+
+  "section2_moneyness": {
+    "title": "What Varsity teaches about Moneyness (ITM/ATM/OTM) and Intrinsic Value",
+    "points": [
+      "Intrinsic value is the amount an option buyer would make if they exercised the contract right now; it can never be negative.",
+      "CE intrinsic value = Spot Price \u2212 Strike Price. PE intrinsic value = Strike Price \u2212 Spot Price.",
+      "An option carrying intrinsic value is ITM (In the Money); one with none is OTM (Out of the Money); a strike close to spot is ATM (At the Money).",
+      "For calls: every strike below ATM is ITM, every strike above is OTM. For puts: reversed \u2014 strikes above ATM are ITM, strikes below are OTM.",
+      "Very large intrinsic value = Deep ITM; minimal intrinsic value (opposite side) = Deep OTM.",
+      "ITM premiums are always higher than OTM premiums for the same underlying/expiry, since ITM carries intrinsic value on top of remaining time value.",
+      "For a buyer's terminal outcome: Varsity's author directly corrected a reader \u2014 an option should expire ITM for the buyer to have actually gained anything (not ATM or OTM)."
+    ]
+  },
+
+  "section3_codebase_crossreference": {
+    "title": "Cross-reference against the OptionPilot Pro codebase (verified 2026-08-09)",
+    "table": [
+      { "varsityConcept": "Premium = Intrinsic + Time value", "codebaseStatus": "MISSING \u2014 PremiumData has no intrinsic/extrinsic split at all." },
+      { "varsityConcept": "Intrinsic value formula (Spot\u2212Strike for CE, Strike\u2212Spot for PE)", "codebaseStatus": "MISSING, but trivial to add \u2014 spot and strike are both already on every PremiumData record." },
+      { "varsityConcept": "ITM/ATM/OTM classification", "codebaseStatus": "PARTIALLY PRESENT \u2014 only isAtm boolean exists; no isItm/isOtm flag, though derivable once intrinsic value exists." },
+      { "varsityConcept": "Theta (instantaneous decay rate)", "codebaseStatus": "PRESENT \u2014 calcGreeks() computes full Black-Scholes theta per leg." },
+      { "varsityConcept": "Non-linear decay curve / acceleration near expiry", "codebaseStatus": "NOT SURFACED \u2014 implied by the Black-Scholes math itself, but theta is read as a snapshot each cycle, never compared to its own recent history." },
+      { "varsityConcept": "European-style, no early exercise", "codebaseStatus": "Confirmed already correctly assumed throughout \u2014 no exercise-related logic anywhere." },
+      { "varsityConcept": "Days to expiry feeding Black-Scholes T", "codebaseStatus": "PRESENT but calendar-day only \u2014 Varsity's own worked examples also use plain calendar-day T, so this is a textbook-consistent simplification, not an error; trading-day awareness remains a worthwhile refinement." },
+      { "varsityConcept": "Vega (IV sensitivity)", "codebaseStatus": "PRESENT \u2014 calcGreeks() already computes vega per leg." }
+    ]
+  },
+
+  "section4_refined_recommendation": {
+    "title": "Refined recommendation (adds precision to the earlier examination report, changes nothing else)",
+    "basic_formula": {
+      "intrinsicValueCE": "max(spot - strike, 0)",
+      "intrinsicValuePE": "max(strike - spot, 0)",
+      "extrinsicValue": "premium - intrinsicValue",
+      "isItm": "intrinsicValue > 0"
+    },
+    "why_this_matters": "This is a direct, citable, textbook-grounded formula, not a guess \u2014 the single highest-value, lowest-risk addition from both the earlier examination and this research pass. It's the one piece of missing math that would have prevented the exact confusion this conversation started from: a large \u20b9 premium (700\u2013900) looking identical on the dashboard whether it's mostly intrinsic (ITM, low decay risk) or mostly time value (ATM, full decay exposure).",
+    "extended_three_way_decomposition": {
+      "note": "From section 1.5's Vega/IV-crush finding \u2014 a genuinely complete 'why did this premium move' answer needs three components, not two.",
+      "components": {
+        "intrinsicValueChange": "driven by spot movement (delta/gamma)",
+        "thetaChange": "expected, time-based decay (already computed via calcGreeks)",
+        "vegaIvShiftChange": "event-driven, can be large and sudden (IV already computed via calcImpliedVolatility)"
+      },
+      "implementation_note": "All three inputs (intrinsic formula, existing theta, existing vega \u00d7 \u0394IV) are already available or trivially addable \u2014 this decomposition doesn't require any new data source, only combining pieces that already exist separately in the codebase."
+    }
+  },
+
+  "section5_what_this_does_not_change": [
+    "Does not alter the earlier report's finding that a real holiday list (Step 1) is the blocking prerequisite for trading-day-aware calculations.",
+    "Does not introduce any new 'engine' \u2014 Varsity's own framing (Theta, Moneyness, Intrinsic/Time value) maps cleanly onto Feature Extraction-level calculations, consistent with the earlier architecture recommendation.",
+    "Does not change the AI boundary \u2014 none of this is Haiku's job to compute; it would only ever explain an already-computed intrinsic/extrinsic/vega split, same as every other deterministic signal in this system."
+  ]
+}

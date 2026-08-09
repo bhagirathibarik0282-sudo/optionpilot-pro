@@ -20,7 +20,7 @@ score    += signal_value      (can be positive, negative, or 0)
 maxScore += signal_weight     (always positive — the signal's max possible pull)
 ```
 
-`maxScore` therefore reflects only the signals that were actually available this cycle — it is **not** a fixed constant. A cycle with only 6 signals available has a lower `maxScore` than one with all 13 currently-wired signals available.
+`maxScore` therefore reflects only the signals that were actually available this cycle — it is **not** a fixed constant. A cycle with only 6 signals available has a lower `maxScore` than one with all 14 currently-wired signals available.
 
 ## 3. Signal Weights — Double-Checked Against Code
 
@@ -39,11 +39,11 @@ maxScore += signal_weight     (always positive — the signal's max possible pul
 | 11 | `call_put_wall` | 1.5 | `+1` "PCR + Walls Bullish Supportive"; `−1` "...Bearish Supportive"; `0` for range-risk/volatility-expansion/conflict/trapped/unconfirmed states |
 | 12 | `atm_oi_buildup` | 1 | `+1`/`−1`/`0`, from combining ATM CE and PE BUYING/WRITING-DOMINANT interpretations (CE bought or PE written → bullish; CE written or PE bought → bearish) |
 | 13 | `straddle_behaviour` | 1.5 | `+1` Directional CE Expansion; `−1` Directional PE Expansion; `0` for both-sides-expanding/weakening or stable/contracting states |
-| 14 | `fib_pivot` | — | **Not yet built.** No Fibonacci pivot computation exists anywhere in the codebase today. |
+| 14 | `fib_pivot` | 1 | Daily Standard Fibonacci Pivot: PP=(PDH+PDL+PDC)/3, R1/S1=PP±0.382×(PDH−PDL), R2/S2=PP±0.618×(...), R3/S3=PP±1.000×(...). `+1` if spot > R1; `−1` if spot < S1; else `0`. PDH/PDL/PDC (previous-day close) are all read from the SAME historical candle on the backend, deliberately not mixed with the separate live-quote API's close field — one shared code path computes this identically for NIFTY, BankNifty, and Sensex. **Weekly** Fibonacci Pivot remains not built (needs a previous WEEK's H/L/C, which no code path computes yet) — deliberately deferred as a separate, larger task. |
 | 15 | `fii_dii_5day` | — | **Not yet wired.** FII/DII data is captured (manual entry) but not yet turned into a 5-day-trend signal for the engine. |
 | 16 | `option_premium_vwap` | — | **Deliberately not wired** (user decision, 2026-08-08). Kite's per-leg "VWAP" is actually its `average_price` field, explicitly unverified as true VWAP — wiring it would attach a real score weight to data whose meaning isn't confirmed. |
 
-**Maximum theoretical score** (all 13 wired signals available, every one at its most extreme value, including the big-gap 3-point case): **16.0**. This is a coincidental match to the "16 signals" name — it is the sum of the 13 currently-wired weights (1+1+1+0.5+1+1+3+1.5+1+1+1.5+1+1.5 = 16), not a designed constant. `maxScore` in any real cycle will typically be lower, since not every signal is available every cycle.
+**Maximum theoretical score** (all 14 wired signals available, every one at its most extreme value, including the big-gap 3-point case): **17.0**. This is the sum of the 14 currently-wired weights (1+1+1+0.5+1+1+3+1.5+1+1+1.5+1+1.5+1 = 17), not a designed constant — it grew from 16.0 to 17.0 when `fib_pivot` (weight 1) was wired on 2026-08-09. `maxScore` in any real cycle will typically be lower, since not every signal is available every cycle.
 
 ## 4. Verdict Thresholds
 
@@ -101,4 +101,4 @@ These surface in the UI but do **not** add to `score` or `maxScore`, and are not
 
 - All specific numeric thresholds in this document (0.1% VWAP band, PCR 1.2/0.8, gap 0.8%, SL/T1/T2 percentages, confidence's 6-point/70% bar, 1000-level BankNifty band) are **PROVISIONAL** — chosen for reasonableness, not backtested against historical outcomes. The Validation/Outcome Engine (built 2026-08-08) exists specifically to eventually measure whether these thresholds hold up.
 - The verdict-threshold asymmetry (Section 4) is a live discrepancy, disclosed rather than silently fixed.
-- 3 of the 16 documented signals are not yet contributing to the score at all (Section 3, rows 14–16).
+- 2 of the 16 documented signals are not yet contributing to the score at all (Section 3, rows 15–16). `fib_pivot` (row 14) was wired 2026-08-09.

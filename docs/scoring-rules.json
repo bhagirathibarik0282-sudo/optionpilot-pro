@@ -25,13 +25,13 @@
     { "n": 11, "signal": "call_put_wall", "weight": 1.5, "rule": "+1 'PCR + Walls Bullish Supportive'; \u22121 '...Bearish Supportive'; 0 for range-risk/volatility-expansion/conflict/trapped/unconfirmed states" },
     { "n": 12, "signal": "atm_oi_buildup", "weight": 1, "rule": "+1/\u22121/0, from combining ATM CE and PE BUYING/WRITING-DOMINANT interpretations (CE bought or PE written \u2192 bullish; CE written or PE bought \u2192 bearish)" },
     { "n": 13, "signal": "straddle_behaviour", "weight": 1.5, "rule": "+1 Directional CE Expansion; \u22121 Directional PE Expansion; 0 for both-sides-expanding/weakening or stable/contracting states" },
-    { "n": 14, "signal": "fib_pivot", "weight": null, "rule": "Not yet built. No Fibonacci pivot computation exists anywhere in the codebase today." },
+    { "n": 14, "signal": "fib_pivot", "weight": 1, "rule": "Daily Standard Fibonacci Pivot: PP=(PDH+PDL+PDC)/3, R1/S1=PP\u00b10.382\u00d7(PDH\u2212PDL), R2/S2=PP\u00b10.618\u00d7(...), R3/S3=PP\u00b11.000\u00d7(...). +1 if spot > R1; \u22121 if spot < S1; else 0. PDH/PDL/PDC (previous-day close) all read from the SAME historical candle on the backend, deliberately not mixed with the separate live-quote API's close field \u2014 one shared code path computes this identically for NIFTY, BankNifty, and Sensex. Weekly Fibonacci Pivot remains not built (needs a previous WEEK's H/L/C, no code path computes that yet) \u2014 deliberately deferred as a separate, larger task." },
     { "n": 15, "signal": "fii_dii_5day", "weight": null, "rule": "Not yet wired. FII/DII data is captured (manual entry) but not yet turned into a 5-day-trend signal for the engine." },
     { "n": 16, "signal": "option_premium_vwap", "weight": null, "rule": "Deliberately not wired (user decision, 2026-08-08). Kite's per-leg 'VWAP' is actually its average_price field, explicitly unverified as true VWAP \u2014 wiring it would attach a real score weight to data whose meaning isn't confirmed." }
   ],
   "maxTheoreticalScore": {
-    "value": 16.0,
-    "note": "Sum of the 13 currently-wired weights at their most extreme values, including the big-gap 3-point case (1+1+1+0.5+1+1+3+1.5+1+1+1.5+1+1.5 = 16). This is a coincidental match to the '16 signals' name, not a designed constant. Real-cycle maxScore is typically lower since not every signal is available every cycle."
+    "value": 17.0,
+    "note": "Sum of the 14 currently-wired weights at their most extreme values, including the big-gap 3-point case (1+1+1+0.5+1+1+3+1.5+1+1+1.5+1+1.5+1 = 17). Grew from 16.0 to 17.0 when fib_pivot (weight 1) was wired on 2026-08-09. Real-cycle maxScore is typically lower since not every signal is available every cycle."
   },
   "verdictThresholds": [
     { "condition": "score >= 14", "verdict": "Strong Bullish" },
@@ -86,6 +86,6 @@
   "knownLimitations": [
     "All specific numeric thresholds in this document (0.1% VWAP band, PCR 1.2/0.8, gap 0.8%, SL/T1/T2 percentages, confidence's 6-point/70% bar, 1000-level BankNifty band) are PROVISIONAL \u2014 chosen for reasonableness, not backtested against historical outcomes. The Validation/Outcome Engine (built 2026-08-08) exists specifically to eventually measure whether these thresholds hold up.",
     "The verdict-threshold asymmetry is a live discrepancy, disclosed rather than silently fixed.",
-    "3 of the 16 documented signals are not yet contributing to the score at all (fib_pivot, fii_dii_5day, option_premium_vwap)."
+    "2 of the 16 documented signals are not yet contributing to the score at all (fii_dii_5day, option_premium_vwap). fib_pivot was wired 2026-08-09."
   ]
 }

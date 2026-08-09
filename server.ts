@@ -11934,6 +11934,7 @@ app.get("/api/drive/status", (c) => {
     lastError: driveSession.lastError,
     targetFolder: "OptionPilot Pro Journal/Year/Month/Trading Date",
     lastArchive: driveArchives.length > 0 ? driveArchives[driveArchives.length - 1] : null,
+    autoArchive: { scheduledAfter: "15:35 IST (5 min after market close)", lastAutoArchiveDate },
   });
 });
 
@@ -12197,6 +12198,53 @@ app.post("/api/drive/archive", async (c) => {
   if (!result.success) return c.json({ success: false, error: result.error }, result.error === "Google Drive not connected or token refresh failed" ? 400 : 500);
   return c.json({ success: true, record: result.record });
 });
+
+// ============================================================================
+// Automatic scheduled archive (user-approved 2026-08-09). Previously
+// archiving was 100% manual (the "Archive Now" button) \u2014 since
+// recorderSession/journalEntries/outcomeRecords are all in-memory only
+// and reset on every Railway redeploy or restart, a day's data could be
+// silently lost if the person forgot to click Archive Now before a
+// redeploy happened mid-day (which this project's own workflow does
+// fairly often).
+//
+// Deliberately ONCE PER DAY, right after market close, not periodic
+// throughout the day: uploadFileToDrive() always creates a NEW file
+// rather than updating an existing one (checked directly in the code,
+// no update-in-place exists), so archiving every N minutes would fill
+// Drive with duplicate same-day files. A true intraday-safe periodic
+// archive would need an overwrite/update fix first \u2014 that's a
+// separate, larger task, not silently bundled into this one.
+let lastAutoArchiveDate: string | null = null;
+
+setInterval(() => {
+  try {
+    const indiaNow = new Date(Date.now() + INDIA_OFFSET_MS);
+    const minutesSinceMidnight = indiaNow.getUTCHours() * 60 + indiaNow.getUTCMinutes();
+    const marketCloseBuffer = 15 * 60 + 35; // 3:35 PM IST \u2014 5 min after close, so the last snapshot is captured
+    if (minutesSinceMidnight < marketCloseBuffer) return;
+
+    const today = recorderSession.tradingDate || indiaTradingDate();
+    if (lastAutoArchiveDate === today) return; // already archived today
+    if (recorderSession.snapshots.length === 0) return; // nothing to archive
+    if (!driveSession.refreshTokenEncrypted) return; // not connected \u2014 Recovery Engine already surfaces this as MANUAL_ACTION_REQUIRED
+
+    lastAutoArchiveDate = today; // set BEFORE the await, so a slow/failed archive can't fire twice in the same minute
+    performDriveArchive()
+      .then((result) => {
+        if (!result.success) {
+          console.error("[Auto-Archive] scheduled archive failed:", result.error);
+          lastAutoArchiveDate = null; // allow a retry on a later tick today, since it didn't actually succeed
+        }
+      })
+      .catch((err) => {
+        console.error("[Auto-Archive] scheduled archive threw:", err instanceof Error ? err.message : err);
+        lastAutoArchiveDate = null;
+      });
+  } catch (err) {
+    console.error("[Auto-Archive] scheduler error:", err instanceof Error ? err.message : err);
+  }
+}, 5 * 60 * 1000); // check every 5 minutes \u2014 cheap, and the date-guard above prevents any duplicate archive
 
 // Key stocks per index for the ALIGNMENT tab. Kite does not publish live
 // index constituent weights, so this dashboard does not hardcode a weight

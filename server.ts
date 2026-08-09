@@ -7913,13 +7913,61 @@ app.get("/", (c) => {
         return html;
       }
 
+      // Phase 2 (Checklist Cross-View, user-approved 2026-08-09): compare
+      // the intrinsic/time-value composition above against OTHER already-
+      // fetched, STATELESS raw fields (m.vwap, m.pdh/m.pdl, m.pcr). This
+      // deliberately does NOT call any of the stateful classifier
+      // functions (classifySimpleFutures, computePcrTrendValue, etc.) a
+      // second time \u2014 those are already called once elsewhere this same
+      // cycle, and calling them again would corrupt their internal
+      // up/down trackers (same risk class documented on atm_oi_buildup
+      // and Step 5B earlier). Only raw number comparisons here, safe to
+      // repeat any number of times. Scoped to what's honestly achievable
+      // WITHOUT history: "Underlying-confirmed expansion" and "Expiry
+      // decay trap" from the roadmap need a time series (intrinsic
+      // RISING) that doesn't exist yet \u2014 deferred to Phase 3. This
+      // section only builds "Checklist Conflict": does today's snapshot
+      // of VWAP/PDH-PDL/PCR agree with which side (CE/PE) is ITM?
+      const contract = m.futuresContracts && m.futuresContracts[0];
+      const vwapBias = (contract && m.vwap > 0) ? (m.current > m.vwap ? 1 : m.current < m.vwap ? -1 : 0) : null;
+      const pdhPdlBias = (m.pdh > 0 && m.pdl > 0) ? (m.current > m.pdh ? 1 : m.current < m.pdl ? -1 : 0) : null;
+      const pcrBias = (m.pcr != null) ? (m.pcr > 1.2 ? 1 : m.pcr < 0.8 ? -1 : 0) : null;
+      const biasInputs = [vwapBias, pdhPdlBias, pcrBias].filter((v) => v != null);
+      const structuralBias = biasInputs.length > 0 ? biasInputs.reduce((a, b) => a + b, 0) : null;
+
+      const atmCe = ceStrikes.find((s) => s.isAtm);
+      const atmPe = peStrikes.find((s) => s.isAtm);
+      let crossCheckHtml = '';
+      if (structuralBias != null && biasInputs.length >= 2) {
+        const structuralLabel = structuralBias > 0 ? 'Bullish' : structuralBias < 0 ? 'Bearish' : 'Neutral';
+        const structuralColor = structuralBias > 0 ? 'var(--green)' : structuralBias < 0 ? 'var(--red)' : 'var(--muted)';
+        crossCheckHtml += '<div style="border-top:1px solid var(--border); margin-top:8px; padding-top:8px;">';
+        crossCheckHtml += '<div style="color:var(--gold); font-size:0.66rem; font-weight:700; text-transform:uppercase; margin-bottom:4px;">Checklist Cross-Check (Phase 2)</div>';
+        crossCheckHtml += '<div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px;"><span style="color:var(--muted);">Spot vs VWAP</span><span style="color:var(--text);">' + (vwapBias == null ? '\u2014' : vwapBias > 0 ? 'Above (bullish)' : vwapBias < 0 ? 'Below (bearish)' : 'At VWAP') + '</span></div>';
+        crossCheckHtml += '<div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:2px;"><span style="color:var(--muted);">Spot vs PDH/PDL</span><span style="color:var(--text);">' + (pdhPdlBias == null ? '\u2014' : pdhPdlBias > 0 ? 'Above PDH' : pdhPdlBias < 0 ? 'Below PDL' : 'Inside range') + '</span></div>';
+        crossCheckHtml += '<div style="display:flex; justify-content:space-between; font-size:0.68rem; margin-bottom:4px;"><span style="color:var(--muted);">OI PCR (' + (m.pcr != null ? m.pcr.toFixed(2) : '\u2014') + ')</span><span style="color:var(--text);">' + (pcrBias == null ? '\u2014' : pcrBias > 0 ? 'Bullish (&gt;1.2)' : pcrBias < 0 ? 'Bearish (&lt;0.8)' : 'Neutral') + '</span></div>';
+        crossCheckHtml += '<div style="display:flex; justify-content:space-between; font-size:0.7rem; font-weight:700;"><span style="color:var(--muted);">Structural read</span><span style="color:' + structuralColor + ';">' + structuralLabel + '</span></div>';
+
+        // Conflict flag: CE is ITM (structural bullish signal from the option chain itself) while the raw structural read above is Bearish, or vice versa for PE.
+        const ceIntrinsic = atmCe ? computeIntrinsicValue('CE', spot, atmCe.strike) : 0;
+        const peIntrinsic = atmPe ? computeIntrinsicValue('PE', spot, atmPe.strike) : 0;
+        let conflictMsg = null;
+        if (structuralBias < 0 && ceIntrinsic > peIntrinsic && ceIntrinsic > 0) conflictMsg = 'CE side carries more intrinsic value, but VWAP/PDH-PDL/PCR read Bearish \u2014 conflicting context, not a clean confirmation.';
+        else if (structuralBias > 0 && peIntrinsic > ceIntrinsic && peIntrinsic > 0) conflictMsg = 'PE side carries more intrinsic value, but VWAP/PDH-PDL/PCR read Bullish \u2014 conflicting context, not a clean confirmation.';
+        if (conflictMsg) {
+          crossCheckHtml += '<div style="background:rgba(201,162,39,0.14); border:1px solid var(--gold); border-radius:6px; padding:6px 8px; margin-top:6px; color:var(--gold); font-size:0.65rem;">\u26a0\ufe0f Checklist Conflict: ' + conflictMsg + '</div>';
+        }
+        crossCheckHtml += '</div>';
+      }
+
       let html = '<div class="premium-card" style="margin-bottom:10px;">';
       html += '<div class="card-title">Option Composition \u2014 Intrinsic vs Time Value</div>';
       html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">';
       html += '<div><div style="color:var(--green); font-size:0.65rem; font-weight:700; text-transform:uppercase; margin-bottom:4px;">CE</div>' + rowsHtml(pickRows(ceStrikes, 'CE'), 'CE') + '</div>';
       html += '<div><div style="color:var(--red); font-size:0.65rem; font-weight:700; text-transform:uppercase; margin-bottom:4px;">PE</div>' + rowsHtml(pickRows(peStrikes, 'PE'), 'PE') + '</div>';
       html += '</div>';
-      html += '<div class="timestamp">Observation-only (Phase 1) \u2014 does not feed the rule engine score. Intrinsic = max(Spot\u2212Strike,0) for CE, max(Strike\u2212Spot,0) for PE (Zerodha Varsity formula). High intrinsic is NOT automatically bullish/bearish \u2014 a deep ITM PE can occur in a bearish market just as easily as a bullish one.</div>';
+      html += crossCheckHtml;
+      html += '<div class="timestamp">Observation-only (Phase 1+2) \u2014 does not feed the rule engine score. Intrinsic = max(Spot\u2212Strike,0) for CE, max(Strike\u2212Spot,0) for PE (Zerodha Varsity formula). High intrinsic is NOT automatically bullish/bearish \u2014 a deep ITM PE can occur in a bearish market just as easily as a bullish one. Cross-check uses today\\'s snapshot only, not a trend \u2014 "expanding/rising" pattern detection needs history (Phase 3, not yet built).</div>';
       html += '</div>';
       return html;
     }

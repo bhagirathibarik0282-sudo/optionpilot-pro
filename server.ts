@@ -7365,6 +7365,12 @@ app.get("/", (c) => {
       return html;
     }
 
+    let overviewAccordionOpen = 'spot_levels';
+    function toggleOverviewAccordion(id) {
+      overviewAccordionOpen = (overviewAccordionOpen === id) ? null : id;
+      updateUI();
+    }
+
     function renderOverviewTab(symbol, m) {
       const prevClose = m.current - m.change;
       const distVwap = m.vwap > 0 ? m.current - m.vwap : null;
@@ -7398,44 +7404,57 @@ app.get("/", (c) => {
         else if (m.current < m.pdl) structureText += ' · Breakdown';
       }
 
-      let html = '<div class="premium-card" style="margin-bottom:12px;">';
-      html += '<div class="card-title">Spot & Change</div>';
-      html += rowLine('Spot LTP', m.current.toFixed(2));
-      html += rowLine('Change', (m.change >= 0 ? '+' : '') + m.change.toFixed(2) + ' (' + (m.changePercent >= 0 ? '+' : '') + m.changePercent.toFixed(2) + '%)');
-      html += rowLine('Previous Close', prevClose.toFixed(2));
-      html += '</div>';
+      // Dashboard reform (user-approved 2026-08-09), 3rd of 5 designs,
+      // same book-index accordion pattern, own toggle state
+      // (overviewAccordionOpen, shared across NIFTY/BankNifty/Sensex
+      // since only one is visible at a time via the top-level tab).
+      const spotChangeBadge = { text: (m.changePercent >= 0 ? '+' : '') + m.changePercent.toFixed(2) + '%', color: m.changePercent >= 0 ? 'var(--green)' : 'var(--red)' };
+      let spotLevelsContent = '<div class="premium-card" style="margin-bottom:12px;">';
+      spotLevelsContent += '<div class="card-title">Spot & Change</div>';
+      spotLevelsContent += rowLine('Spot LTP', m.current.toFixed(2));
+      spotLevelsContent += rowLine('Change', (m.change >= 0 ? '+' : '') + m.change.toFixed(2) + ' (' + (m.changePercent >= 0 ? '+' : '') + m.changePercent.toFixed(2) + '%)');
+      spotLevelsContent += rowLine('Previous Close', prevClose.toFixed(2));
+      spotLevelsContent += '</div>';
 
-      html += '<div class="premium-card" style="margin-bottom:12px;">';
-      html += '<div class="card-title">Levels</div>';
-      html += rowLine('PDH', m.pdh ? m.pdh.toFixed(2) : 'DATA UNAVAILABLE');
-      html += rowLine('PDL', m.pdl ? m.pdl.toFixed(2) : 'DATA UNAVAILABLE');
-      html += rowLine('Futures-Derived VWAP Proxy', m.vwap ? m.vwap.toFixed(2) + ' (' + m.vwapSource + ')' : 'DATA UNAVAILABLE');
-      html += rowLine('Spot\u2013Futures Basis', distVwap != null ? (distVwap >= 0 ? '+' : '') + distVwap.toFixed(2) + ' (informational only)' : 'DATA UNAVAILABLE');
-      html += rowLine('Distance from PDH', distPdh != null ? (distPdh >= 0 ? '+' : '') + distPdh.toFixed(2) : 'DATA UNAVAILABLE');
-      html += rowLine('Distance from PDL', distPdl != null ? (distPdl >= 0 ? '+' : '') + distPdl.toFixed(2) : 'DATA UNAVAILABLE');
-      html += '</div>';
+      spotLevelsContent += '<div class="premium-card" style="margin-bottom:12px;">';
+      spotLevelsContent += '<div class="card-title">Levels</div>';
+      spotLevelsContent += rowLine('PDH', m.pdh ? m.pdh.toFixed(2) : 'DATA UNAVAILABLE');
+      spotLevelsContent += rowLine('PDL', m.pdl ? m.pdl.toFixed(2) : 'DATA UNAVAILABLE');
+      spotLevelsContent += rowLine('Futures-Derived VWAP Proxy', m.vwap ? m.vwap.toFixed(2) + ' (' + m.vwapSource + ')' : 'DATA UNAVAILABLE');
+      spotLevelsContent += rowLine('Spot\u2013Futures Basis', distVwap != null ? (distVwap >= 0 ? '+' : '') + distVwap.toFixed(2) + ' (informational only)' : 'DATA UNAVAILABLE');
+      spotLevelsContent += rowLine('Distance from PDH', distPdh != null ? (distPdh >= 0 ? '+' : '') + distPdh.toFixed(2) : 'DATA UNAVAILABLE');
+      spotLevelsContent += rowLine('Distance from PDL', distPdl != null ? (distPdl >= 0 ? '+' : '') + distPdl.toFixed(2) : 'DATA UNAVAILABLE');
+      spotLevelsContent += '</div>';
 
-      html += '<div class="premium-card" style="margin-bottom:12px;">';
-      html += '<div class="card-title">Gap & Structure</div>';
-      html += rowLine('Gap Direction', gapDir);
-      html += rowLine('Gap %', gapPctText);
-      html += rowLine('Day Open / High / Low', m.dayOpen ? m.dayOpen.toFixed(2) + ' / ' + m.dayHigh.toFixed(2) + ' / ' + m.dayLow.toFixed(2) : 'DATA UNAVAILABLE');
-      html += rowLine('Market Structure', structureText);
-      html += rowLine('First 15m High / Low', m.first15High > 0 ? m.first15High.toFixed(2) + ' / ' + m.first15Low.toFixed(2) + ' (sampled, not tick-level)' : 'DATA UNAVAILABLE');
-      html += rowLine('15m / 30m / 1h Trend', renderTimeframeTrendRow(symbol));
-      html += '</div>';
+      spotLevelsContent += '<div class="premium-card" style="margin-bottom:12px;">';
+      spotLevelsContent += '<div class="card-title">Gap & Structure</div>';
+      spotLevelsContent += rowLine('Gap Direction', gapDir);
+      spotLevelsContent += rowLine('Gap %', gapPctText);
+      spotLevelsContent += rowLine('Day Open / High / Low', m.dayOpen ? m.dayOpen.toFixed(2) + ' / ' + m.dayHigh.toFixed(2) + ' / ' + m.dayLow.toFixed(2) : 'DATA UNAVAILABLE');
+      spotLevelsContent += rowLine('Market Structure', structureText);
+      spotLevelsContent += rowLine('First 15m High / Low', m.first15High > 0 ? m.first15High.toFixed(2) + ' / ' + m.first15Low.toFixed(2) + ' (sampled, not tick-level)' : 'DATA UNAVAILABLE');
+      spotLevelsContent += rowLine('15m / 30m / 1h Trend', renderTimeframeTrendRow(symbol));
+      spotLevelsContent += '</div>';
 
-      html += '<div class="premium-card" style="margin-bottom:12px;">';
-      html += '<div class="card-title">Volatility & Verdict</div>';
-      html += rowLine('India VIX', m.vix ? m.vix.toFixed(2) + ' (' + (m.vixChangePercent >= 0 ? '+' : '') + m.vixChangePercent.toFixed(2) + '%)' : 'DATA UNAVAILABLE');
-      html += rowLine('Immediate Support', m.pdl ? m.pdl.toFixed(2) + ' (PDL proxy)' : 'DATA UNAVAILABLE');
-      html += rowLine('Immediate Resistance', m.pdh ? m.pdh.toFixed(2) + ' (PDH proxy)' : 'DATA UNAVAILABLE');
-      html += rowLine('Current Verdict', classifyIndexOverallBias(m));
-      html += '</div>';
+      let html = renderAccordionChapter('spot_levels', '01', 'Spot, levels & structure', spotChangeBadge,
+        'Current price, previous-day levels, and today\\'s gap/structure vs. yesterday.', spotLevelsContent,
+        overviewAccordionOpen === 'spot_levels', 'toggleOverviewAccordion');
 
-      html += renderCorrelationStrip();
+      const verdictNow = classifyIndexOverallBias(m);
+      const verdictBadgeColor = verdictNow === 'BULLISH' ? 'var(--green)' : verdictNow === 'BEARISH' ? 'var(--red)' : 'var(--muted)';
+      let volVerdictContent = '<div class="premium-card" style="margin-bottom:12px;">';
+      volVerdictContent += '<div class="card-title">Volatility & Verdict</div>';
+      volVerdictContent += rowLine('India VIX', m.vix ? m.vix.toFixed(2) + ' (' + (m.vixChangePercent >= 0 ? '+' : '') + m.vixChangePercent.toFixed(2) + '%)' : 'DATA UNAVAILABLE');
+      volVerdictContent += rowLine('Immediate Support', m.pdl ? m.pdl.toFixed(2) + ' (PDL proxy)' : 'DATA UNAVAILABLE');
+      volVerdictContent += rowLine('Immediate Resistance', m.pdh ? m.pdh.toFixed(2) + ' (PDH proxy)' : 'DATA UNAVAILABLE');
+      volVerdictContent += rowLine('Current Verdict', verdictNow);
+      volVerdictContent += '</div>';
+      volVerdictContent += renderCorrelationStrip();
+      volVerdictContent += renderPriceLocationCard(symbol, m);
 
-      html += renderPriceLocationCard(symbol, m);
+      html += renderAccordionChapter('vol_verdict', '02', 'Volatility, verdict & correlation', { text: verdictNow, color: verdictBadgeColor },
+        'India VIX, a quick directional read, and how this index correlates with the other two right now.', volVerdictContent,
+        overviewAccordionOpen === 'vol_verdict', 'toggleOverviewAccordion');
 
       html += '<div class="timestamp">First-15m High/Low is sampled at whatever refresh cadence is running (typically every few minutes), not true tick-by-tick data — treat as approximate. Gap % thresholds are PROVISIONAL — REQUIRES BACKTEST. 15m/30m/1h trend uses this session\u2019s accumulated spot history — shows DATA UNAVAILABLE until enough history builds up (up to 1 hour after the dashboard is first opened each day).</div>';
       return html;

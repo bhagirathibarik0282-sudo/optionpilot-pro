@@ -97,6 +97,7 @@ interface IndexMetrics {
   vwap: number;
   pdh: number;
   pdl: number;
+  pdcClose: number; // previous trading day's CLOSE, from the SAME historical candle as pdh/pdl (not a separate quote-API field) \u2014 so Daily Fibonacci Pivot (pdh+pdl+pdcClose)/3 never mixes two different data sources for "previous day"
   maxPain: number;
   pcr: number | null;
   volumePcr: number | null;
@@ -2227,6 +2228,7 @@ async function fetchIndexData(
     vwap: 0,
     pdh: 0,
     pdl: 0,
+    pdcClose: 0,
     maxPain: 0,
     pcr: null,
     volumePcr: null,
@@ -2341,6 +2343,10 @@ async function fetchIndexData(
       const indexPdhPdl = sanitizePdhPdl(previousCandle?.high || 0, previousCandle?.low || 0);
       baseMetrics.pdh = indexPdhPdl.pdh;
       baseMetrics.pdl = indexPdhPdl.pdl;
+      // Same candle as pdh/pdl above \u2014 deliberately NOT the quote API's
+      // separate ohlc.close field, so Daily Fibonacci Pivot never mixes
+      // two different "previous day" sources for one calculation.
+      baseMetrics.pdcClose = (indexPdhPdl.pdh > 0 && indexPdhPdl.pdl > 0) ? (previousCandle?.close || 0) : 0;
     }
 
     let futuresVwapBias: "UP" | "DOWN" | "UNKNOWN" = "UNKNOWN";
@@ -5311,7 +5317,7 @@ app.get("/", (c) => {
     const HAIKU_SIGNAL_CATALOG = [
       { id: 'futures_vwap', existsElsewhere: null },
       { id: 'pdh_pdl', existsElsewhere: null },
-      { id: 'fib_pivot', existsElsewhere: null, note: 'No daily Fibonacci/Camarilla pivot computation exists anywhere in this codebase yet \u2014 genuinely missing, not just unwired.' },
+      { id: 'fib_pivot' },
       { id: 'oi_pcr', existsElsewhere: null },
       { id: 'pcr_trend' },
       { id: 'call_put_wall' },
@@ -5367,6 +5373,7 @@ app.get("/", (c) => {
         call_put_wall: computeCallPutWallValue(symbol, m),
         atm_oi_buildup: atmOiBuildupValue,
         straddle_behaviour: computeStraddleBehaviourValue(symbol, m),
+        fib_pivot: computeFibPivotValue(m),
       };
 
       HAIKU_SIGNAL_CATALOG.forEach((s) => {
@@ -5411,7 +5418,7 @@ app.get("/", (c) => {
     // (0) among counted signals, which would misrepresent how much real
     // evidence went into the number.
     //
-    // Honesty disclosure: only 13 of the 16 signals are wired today (see
+    // Honesty disclosure: only 14 of the 16 signals are wired today (see
     // Step 2's card), so the achievable score ceiling is far below the
     // document's full ±20.5 scale. The document's own verdict thresholds
     // (±14 for Strong, etc.) are applied UNCHANGED — meaning Strong
@@ -5518,6 +5525,12 @@ app.get("/", (c) => {
         const straddleValue = computeStraddleBehaviourValue(symbol, m);
         if (straddleValue != null) {
           add('straddle_behaviour', straddleValue, 1.5);
+        }
+      }
+      if (availableSignals.has('fib_pivot')) {
+        const fibValue = computeFibPivotValue(m);
+        if (fibValue != null) {
+          add('fib_pivot', fibValue, 1);
         }
       }
 
@@ -8161,6 +8174,45 @@ app.get("/", (c) => {
       else if (pct <= 100) state = 'NEAR PDH';
       else state = 'PDH BREAKOUT';
       return { pct: pct, state: state };
+    }
+
+    // Daily Standard Fibonacci Pivot (wired 2026-08-09, user-approved).
+    // Formula: PP = (H+L+C)/3; R1/S1 = PP \u00b1 0.382*(H-L);
+    // R2/S2 = PP \u00b1 0.618*(H-L); R3/S3 = PP \u00b1 1.000*(H-L).
+    // H, L, C are m.pdh/m.pdl/m.pdcClose \u2014 all three sourced from the
+    // SAME previous-day historical candle on the backend (not mixed with
+    // the separate live-quote API's close field), and this exact same
+    // code path runs identically for NIFTY, BankNifty, and Sensex \u2014
+    // no per-index special-casing, so all three are treated identically.
+    // Weekly Fibonacci Pivot is NOT built \u2014 it needs a previous WEEK's
+    // H/L/C, which no code path currently computes; deliberately
+    // deferred as a separate, larger task (would need to aggregate
+    // multiple daily candles from Kite's historical API).
+    function computeDailyFibPivot(m) {
+      const H = m.pdh, L = m.pdl, C = m.pdcClose;
+      if (!(H > 0) || !(L > 0) || !(C > 0) || H <= L) return null;
+      const range = H - L;
+      const pp = (H + L + C) / 3;
+      return {
+        pp,
+        r1: pp + 0.382 * range,
+        r2: pp + 0.618 * range,
+        r3: pp + 1.000 * range,
+        s1: pp - 0.382 * range,
+        s2: pp - 0.618 * range,
+        s3: pp - 1.000 * range,
+      };
+    }
+
+    // fib_pivot signal value: spot above R1 \u2192 bullish; below S1 \u2192
+    // bearish; between S1 and R1 (including sitting on PP) \u2192 neutral.
+    // Mirrors the existing pdh_pdl signal's three-state simplicity.
+    function computeFibPivotValue(m) {
+      const levels = computeDailyFibPivot(m);
+      if (!levels || !(m.current > 0)) return null;
+      if (m.current > levels.r1) return 1;
+      if (m.current < levels.s1) return -1;
+      return 0;
     }
 
     // High-Priority Structure Alert (user-approved 2026-08-08): fires

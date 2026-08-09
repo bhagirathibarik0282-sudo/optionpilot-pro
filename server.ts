@@ -7074,10 +7074,19 @@ app.get("/", (c) => {
       return html;
     }
 
+    let alignmentAccordionOpen = 'readiness';
+    function toggleAlignmentAccordion(id) {
+      alignmentAccordionOpen = (alignmentAccordionOpen === id) ? null : id;
+      updateUI();
+    }
+
     function renderAlignmentTab(symbol, m) {
-      let html = renderOrchestratorCard(symbol, m);
-      html += renderTrackerReadiness(symbol, m);
-      html += renderStep5BCard(symbol, m);
+      // Dashboard reform (user-approved 2026-08-09), last of 5 designs.
+      const readinessContent = renderOrchestratorCard(symbol, m) + renderTrackerReadiness(symbol, m) + renderStep5BCard(symbol, m);
+      let html = renderAccordionChapter('readiness', '01', 'Orchestrator, readiness & cross-expiry', { text: 'Step 5B', color: 'var(--gold)' },
+        'Whether the alignment pipeline has enough data yet, and how ITM alignment looks across expiries.', readinessContent,
+        alignmentAccordionOpen === 'readiness', 'toggleAlignmentAccordion');
+
       if (!indexStocksData[symbol]) {
         loadIndexStocks(symbol);
         return html + '<div class="loading">Loading constituent data...</div>';
@@ -7085,15 +7094,17 @@ app.get("/", (c) => {
       if (indexStocksData[symbol].error) {
         return html + '<div class="error">⚠️ ' + escapeHtml(indexStocksData[symbol].error) + '</div>';
       }
-      html += '<div class="premium-card" style="margin-bottom:12px;">';
-      html += '<div class="card-title">Key Stocks (unweighted)</div>';
+      let stocksContent = '';
       indexStocksData[symbol].stocks.forEach((s) => {
         const color = s.change == null ? 'var(--muted)' : s.change >= 0.5 ? 'var(--green)' : s.change <= -0.5 ? 'var(--red)' : 'var(--muted)';
         const label = s.change == null ? 'DATA UNAVAILABLE' : s.change >= 0.5 ? 'Bullish' : s.change <= -0.5 ? 'Bearish' : 'Neutral';
         const valueText = (s.price != null ? s.price.toFixed(2) : 'DATA UNAVAILABLE') + (s.change != null ? ' (' + (s.change >= 0 ? '+' : '') + s.change.toFixed(2) + '%)' : '') + ' · Vol ' + (s.volume != null ? formatVolume(s.volume) : 'DATA UNAVAILABLE');
-        html += renderAlignRow(s.name, valueText, label, s.change == null ? 'neutral' : s.change >= 0.5 ? 'bullish' : s.change <= -0.5 ? 'bearish' : 'neutral');
+        stocksContent += renderAlignRow(s.name, valueText, label, s.change == null ? 'neutral' : s.change >= 0.5 ? 'bullish' : s.change <= -0.5 ? 'bearish' : 'neutral');
       });
-      html += '</div>';
+      html += renderAccordionChapter('key_stocks', '02', 'Key stocks (unweighted)', { text: indexStocksData[symbol].stocks.length + ' stocks', color: 'var(--muted)' },
+        'How the index\\'s heaviest constituents are moving individually \u2014 unweighted, so this is directional context, not a computed index contribution.', stocksContent,
+        alignmentAccordionOpen === 'key_stocks', 'toggleAlignmentAccordion');
+
       html += '<div class="timestamp">Contribution Impact (Stock Return \u00d7 Index Weight) is not shown — Kite does not publish live constituent weights, and this dashboard does not hardcode them per the spec\u2019s own rule. Advance/decline and volume participation across the full constituent list are not yet tracked — DATA UNAVAILABLE for those.</div>';
       return html;
     }

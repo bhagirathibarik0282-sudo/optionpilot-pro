@@ -9,6 +9,7 @@ const BASE_MS = new Date("2026-08-10T04:00:00.000Z").getTime(); // ~9:30 IST
 function baseInput(overrides: Partial<Parameters<typeof createOutcomeRecord>[0]> = {}) {
   return createOutcomeRecord({
     symbol: "NIFTY",
+    tradingDate: "2026-08-10",
     verdict: "Bullish Biased",
     score: 8.5,
     maxScore: 12.5,
@@ -144,3 +145,31 @@ test("computeOutcomeStats: per-signal stats flag insufficient sample size below 
   assert.equal(stats.bySignal[key].total, 2);
   assert.equal(stats.bySignal[key].sufficientSample, false); // below MIN_SAMPLE_SIZE (5)
 });
+
+test("tradingDate is carried through on the record for Journal cross-referencing", () => {
+  const rec = baseInput({ tradingDate: "2026-08-11" });
+  assert.equal(rec.tradingDate, "2026-08-11");
+});
+
+// Mirrors the eviction fix in server.ts (POST /api/outcome/record):
+// evict the oldest NON-PENDING record first; only fall back to the
+// oldest PENDING record if literally every record is still PENDING.
+// The actual server-side array logic isn't imported here (it's a thin
+// wrapper around outcomeRecords, not part of this pure module) \u2014 this
+// test exercises the same selection rule in isolation as a stand-in,
+// since a full server-level integration test is still a disclosed gap.
+function pickEvictionIndex(records: { status: string }[]): number {
+  const idx = records.findIndex((r) => r.status !== "PENDING");
+  return idx === -1 ? 0 : idx;
+}
+
+test("eviction rule: prefers evicting a terminal record over a PENDING one", () => {
+  const records = [{ status: "PENDING" }, { status: "TARGET_T1_HIT" }, { status: "PENDING" }];
+  assert.equal(pickEvictionIndex(records), 1); // the terminal one, not index 0
+});
+
+test("eviction rule: falls back to oldest PENDING only if nothing is terminal yet", () => {
+  const records = [{ status: "PENDING" }, { status: "PENDING" }];
+  assert.equal(pickEvictionIndex(records), 0);
+});
+

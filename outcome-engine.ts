@@ -40,6 +40,7 @@ export interface OutcomeRecord {
   outcomeId: string;
   recordedAt: string; // ISO
   recordedAtMs: number;
+  tradingDate: string; // YYYY-MM-DD, Asia/Kolkata — links this record to that day's Historical Journal entries
   symbol: IndexSymbol;
   verdict: string;
   score: number | null;
@@ -72,6 +73,7 @@ export interface SnapshotForOutcome {
 
 export interface CreateOutcomeRecordInput {
   symbol: IndexSymbol;
+  tradingDate: string;
   verdict: string;
   score: number | null;
   maxScore: number | null;
@@ -95,6 +97,7 @@ export function createOutcomeRecord(input: CreateOutcomeRecordInput): OutcomeRec
     outcomeId: `oc-${recordedAtMs}-${input.idSuffix}`,
     recordedAt: new Date(recordedAtMs).toISOString(),
     recordedAtMs,
+    tradingDate: input.tradingDate,
     symbol: input.symbol,
     verdict: input.verdict,
     score: input.score,

@@ -11603,6 +11603,7 @@ app.post("/api/outcome/record", async (c) => {
 
   const record = createOutcomeRecord({
     symbol: body.symbol,
+    tradingDate: recorderSession.tradingDate || indiaTradingDate(),
     verdict: body.verdict,
     score: body.score ?? null,
     maxScore: body.maxScore ?? null,
@@ -11620,7 +11621,18 @@ app.post("/api/outcome/record", async (c) => {
   });
 
   outcomeRecords.push(record);
-  if (outcomeRecords.length > OUTCOME_MAX_RECORDS) outcomeRecords.shift();
+  if (outcomeRecords.length > OUTCOME_MAX_RECORDS) {
+    // Bug fix (2026-08-09, user-reported via verification report): a
+    // plain .shift() evicted the OLDEST record regardless of status,
+    // which could silently discard a still-PENDING record before it
+    // ever reached a terminal outcome \u2014 losing that observation with
+    // no trace at all, worse than an explicit INCOMPLETE_* status.
+    // Now evicts the oldest NON-PENDING (already-terminal) record
+    // first; only falls back to evicting the oldest PENDING record if
+    // every record in the buffer is somehow still PENDING.
+    const nonPendingIdx = outcomeRecords.findIndex((r) => r.status !== "PENDING");
+    outcomeRecords.splice(nonPendingIdx === -1 ? 0 : nonPendingIdx, 1);
+  }
 
   return c.json({ outcomeId: record.outcomeId, status: record.status, windowEndsAt: new Date(record.windowEndsAtMs).toISOString() });
 });
@@ -11633,6 +11645,23 @@ app.get("/api/outcome/list", (c) => {
 
 app.get("/api/outcome/stats", (c) => {
   return c.json(computeOutcomeStats(outcomeRecords));
+});
+
+// Real Historical-Journal cross-reference (fix for the architecture
+// compliance gap found 2026-08-09): outcome records can't be built
+// FROM journal entries (JournalEntry has no entry/SL/T1/T2/signal-
+// contribution data \u2014 only simple CE/PE bias labels derived
+// server-side from raw Recorder snapshots, a different verdict
+// vocabulary entirely from the rule engine's). So instead, this joins
+// them by tradingDate: for a given day, return that day's outcome
+// records alongside that day's journal entries side by side, so a
+// person (or a future Probability Engine) can actually cross-reference
+// the two without either system losing the data only it has.
+app.get("/api/outcome/by-trading-date/:date", (c) => {
+  const date = c.req.param("date");
+  const records = outcomeRecords.filter((r) => r.tradingDate === date);
+  const journal = journalEntries.filter((j) => (j.timestamp || "").slice(0, 10) === date);
+  return c.json({ tradingDate: date, outcomeRecords: records, journalEntries: journal });
 });
 
 // Module 3 dependency on the Recorder Engine (Module 2) and its

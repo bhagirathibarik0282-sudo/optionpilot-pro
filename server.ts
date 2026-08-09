@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { createOutcomeRecord, evaluateOutcome, computeOutcomeStats, type OutcomeRecord, type SnapshotForOutcome, type Side as OutcomeSide, type IndexSymbol as OutcomeIndexSymbol } from "./outcome-engine.js";
 
 interface Instrument {
   instrument_token: number;
@@ -4026,6 +4027,33 @@ app.get("/", (c) => {
     // when we already know the server will just hand back the cache.
     let haikuExplanations = {};
 
+    // Step: Validation/Outcome Engine client trigger. Fires ONLY on a
+    // genuine verdict change (not on Haiku's 15-min re-fire, and not
+    // when there's no suggestion to evaluate) \u2014 one outcome record per
+    // verdict episode, not a repeating poll. This never reads from or
+    // writes to haikuExplanations; it is wired independently, reusing
+    // only the already-computed result the deterministic engine
+    // produced this cycle.
+    let lastRecordedOutcomeVerdict = {};
+
+    async function recordOutcomeIfNewVerdict(sym, result) {
+      if (!result.suggestion || !result.suggestion.side || !(result.suggestion.entry > 0)) return; // nothing to evaluate
+      if (lastRecordedOutcomeVerdict[sym] === result.verdict) return; // same episode, already recorded
+      lastRecordedOutcomeVerdict[sym] = result.verdict;
+      try {
+        await fetch('/api/outcome/record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: sym, verdict: result.verdict, score: result.score, maxScore: result.maxScore,
+            confidence: result.confidence, suggestion: result.suggestion, signalContributions: result.contributions,
+          }),
+        });
+      } catch (err) {
+        console.error('[Outcome Engine] record failed:', err);
+      }
+    }
+
     async function triggerHaikuVerdicts() {
       for (const sym of ['NIFTY', 'BANKNIFTY', 'SENSEX']) {
         const m = data[sym];
@@ -4033,6 +4061,8 @@ app.get("/", (c) => {
         const validation = validateData(sym, m);
         const result = runRuleEngine(sym, m, validation);
         if (result.verdict === 'DATA UNAVAILABLE') continue;
+
+        recordOutcomeIfNewVerdict(sym, result);
 
         const existing = haikuExplanations[sym];
         if (existing && existing.loading) continue;
@@ -4570,6 +4600,59 @@ app.get("/", (c) => {
       }
     }
     setInterval(loadRecoveryStatus, 60 * 1000);
+
+    // Validation/Outcome Engine (System Architecture v1.0, layer 13) \u2014
+    // minimal dashboard view. Read-only: this never feeds back into the
+    // rule engine or Haiku layer, per the architecture's data-flow rules.
+    let outcomeStatsData = null;
+    async function loadOutcomeStats() {
+      try {
+        const response = await fetch('/api/outcome/stats');
+        const json = await response.json();
+        outcomeStatsData = response.ok ? json : { error: json.error || 'Failed to load outcome stats' };
+        updateUI();
+      } catch (err) {
+        console.error('Failed to load outcome stats:', err);
+        outcomeStatsData = { error: err.message };
+      }
+    }
+    setInterval(loadOutcomeStats, 60 * 1000);
+
+    function renderOutcomeEngineCard() {
+      let html = '<div class="premium-card" style="margin-bottom:10px;">';
+      html += '<div class="card-title">Validation / Outcome Engine (Layer 13)</div>';
+      if (!outcomeStatsData) {
+        html += '<div class="loading">Loading outcome stats\u2026</div></div>';
+        return html;
+      }
+      if (outcomeStatsData.error) {
+        html += '<div class="error">\u26a0\ufe0f ' + escapeHtml(outcomeStatsData.error) + '</div></div>';
+        return html;
+      }
+      const s = outcomeStatsData;
+      html += '<div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:4px;"><span style="color:var(--muted);">Total recorded</span><strong style="color:var(--text);">' + s.totalRecords + '</strong></div>';
+      html += '<div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:8px;"><span style="color:var(--muted);">Determinate (usable in stats)</span><strong style="color:var(--text);">' + s.determinateRecords + '</strong></div>';
+      const statusEntries = Object.entries(s.byStatus || {});
+      if (statusEntries.length > 0) {
+        html += '<div style="color:var(--gold); font-size:0.66rem; font-weight:700; text-transform:uppercase; margin-bottom:4px;">By Status</div>';
+        statusEntries.forEach(([status, count]) => {
+          html += '<div style="display:flex; justify-content:space-between; font-size:0.7rem; margin-bottom:2px;"><span style="color:var(--muted);">' + escapeHtml(status) + '</span><strong style="color:var(--text);">' + count + '</strong></div>';
+        });
+      }
+      const verdictEntries = Object.entries(s.byVerdict || {});
+      if (verdictEntries.length > 0) {
+        html += '<div style="color:var(--gold); font-size:0.66rem; font-weight:700; text-transform:uppercase; margin:8px 0 4px;">By Verdict (target vs stop)</div>';
+        verdictEntries.forEach(([verdict, v]) => {
+          html += '<div style="display:flex; justify-content:space-between; font-size:0.7rem; margin-bottom:2px;"><span style="color:var(--muted);">' + escapeHtml(verdict) + '</span><strong style="color:var(--text);">' + v.targetHit + ' target / ' + v.stopHit + ' stop / ' + v.neither + ' neither (n=' + v.total + ')</strong></div>';
+        });
+      }
+      if (s.determinateRecords < s.minSampleSize) {
+        html += '<div style="color:var(--muted); font-size:0.65rem; margin-top:6px;">Sample size below ' + s.minSampleSize + ' \u2014 too early for any statistic here to be meaningful.</div>';
+      }
+      html += '<div class="timestamp">Deterministic only \u2014 no AI/Haiku involvement. Outcome window: ' + (s.windowMinutes || '\u2014') + ' min (configurable via OUTCOME_WINDOW_MINUTES). PENDING and INCOMPLETE_* records are excluded from all statistics, never interpolated. Records live in memory only and reset on redeploy (same disclosed limitation as the Recorder Engine).</div>';
+      html += '</div>';
+      return html;
+    }
 
     async function manualRetryRecovery(recoveryId) {
       try {
@@ -6678,6 +6761,7 @@ app.get("/", (c) => {
       html += '<div style="color:var(--gold); font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin:16px 0 8px;">Platform Health</div>';
       html += renderSystemHealthCard();
       html += renderRecoveryEngineCard();
+      html += renderOutcomeEngineCard();
       html += renderEventBusCard();
       ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { html += renderSignalLockCard(sym, data[sym]); });
 
@@ -10654,7 +10738,7 @@ app.get("/", (c) => {
 
     async function initialize() {
       await checkKiteStatus();
-      await Promise.all([loadNews(), loadHolidays(), loadFiiDii(), loadRecorderStatus(), loadDriveStatus(), loadJournalData(), loadTruthStatus(), loadHealthStatus(), loadRecoveryStatus(), loadEventBusStatus()]);
+      await Promise.all([loadNews(), loadHolidays(), loadFiiDii(), loadRecorderStatus(), loadDriveStatus(), loadJournalData(), loadTruthStatus(), loadHealthStatus(), loadRecoveryStatus(), loadEventBusStatus(), loadOutcomeStats()]);
       await loadDnaStatus();
       if (kiteConnected) {
         await Promise.all([fetchData(), loadCommodities(), loadSectorHeatmap()]);
@@ -11432,6 +11516,124 @@ async function runRecoveryCycle(): Promise<void> {
 setInterval(() => {
   runRecoveryCycle().catch((err) => console.error("[Recovery Engine] cycle error:", err instanceof Error ? err.message : err));
 }, 60 * 1000);
+
+// ============================================================================
+// Validation / Outcome Engine (System Architecture v1.0, layer 13).
+// Built 2026-08-08, P0. Deterministic only \u2014 no AI/Haiku involvement.
+// The evaluation logic itself lives in outcome-engine.ts (independently
+// unit-tested); this section is just the server-side wiring: in-memory
+// store, the configurable outcome window, recording/list/stats
+// endpoints, and the periodic evaluation cycle.
+//
+// Phase-1 limitation (same disclosure pattern as Recorder/Recovery):
+// records live only in this process's memory and reset on redeploy.
+// ============================================================================
+
+const outcomeRecords: OutcomeRecord[] = [];
+const OUTCOME_MAX_RECORDS = 500;
+
+// Configurable, not hard-coded through the file \u2014 override via Railway
+// variable OUTCOME_WINDOW_MINUTES if a different window is ever wanted.
+// Default of 60 minutes is PROVISIONAL, not backtested.
+const OUTCOME_WINDOW_MINUTES = Number.parseInt(process.env.OUTCOME_WINDOW_MINUTES || "60", 10);
+
+function snapshotsForOutcome(symbol: OutcomeIndexSymbol): SnapshotForOutcome[] {
+  return recorderSession.snapshots
+    .map((s) => {
+      const idx = s[symbol];
+      if (!idx) return null;
+      return {
+        backendTimestamp: s.backendTimestamp,
+        atmStrike: idx.atmStrike,
+        ceLtp: idx.ceLtp,
+        peLtp: idx.peLtp,
+      } as SnapshotForOutcome;
+    })
+    .filter((s): s is SnapshotForOutcome => s !== null);
+}
+
+function runOutcomeEvaluationCycle(): void {
+  const nowMs = Date.now();
+  for (let i = 0; i < outcomeRecords.length; i++) {
+    const rec = outcomeRecords[i];
+    if (rec.status !== "PENDING") continue;
+    const snaps = snapshotsForOutcome(rec.symbol);
+    outcomeRecords[i] = evaluateOutcome(rec, snaps, nowMs);
+  }
+}
+
+setInterval(() => {
+  try {
+    runOutcomeEvaluationCycle();
+  } catch (err) {
+    console.error("[Outcome Engine] evaluation cycle error:", err instanceof Error ? err.message : err);
+  }
+}, 60 * 1000);
+
+// Client calls this once per NEW verdict that carries a suggestion
+// (i.e. the same "verdict changed" moment the client already uses to
+// gate its Haiku call) \u2014 never on every 3-min poll. This endpoint only
+// RECORDS what the deterministic rule engine already decided; it does
+// not compute, alter, or validate the verdict itself.
+app.post("/api/outcome/record", async (c) => {
+  let body: {
+    symbol?: OutcomeIndexSymbol;
+    verdict?: string;
+    score?: number | null;
+    maxScore?: number | null;
+    confidence?: string | null;
+    suggestion?: { side?: OutcomeSide; strike?: string; entry?: number; sl?: number | null; t1?: number | null; t2?: number | null } | null;
+    signalContributions?: Record<string, number> | null;
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid request body \u2014 expected JSON." }, 400);
+  }
+  if (!body.symbol || !body.verdict) return c.json({ error: "symbol and verdict are required" }, 400);
+
+  // Suggestion.strike is a display label like "24600 CE" \u2014 the numeric
+  // strike is parsed out; if that fails, treat as no strike (honest
+  // INCOMPLETE_NO_ENTRY_DATA rather than guessing a number).
+  let numericStrike: number | null = null;
+  if (body.suggestion?.strike) {
+    const parsed = Number.parseFloat(body.suggestion.strike);
+    numericStrike = Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const record = createOutcomeRecord({
+    symbol: body.symbol,
+    verdict: body.verdict,
+    score: body.score ?? null,
+    maxScore: body.maxScore ?? null,
+    confidence: body.confidence ?? null,
+    side: body.suggestion?.side ?? null,
+    strike: numericStrike,
+    entry: body.suggestion?.entry ?? null,
+    sl: body.suggestion?.sl ?? null,
+    t1: body.suggestion?.t1 ?? null,
+    t2: body.suggestion?.t2 ?? null,
+    signalContributions: body.signalContributions ?? null,
+    windowMinutes: OUTCOME_WINDOW_MINUTES,
+    nowMs: Date.now(),
+    idSuffix: randomBytes(3).toString("hex"),
+  });
+
+  outcomeRecords.push(record);
+  if (outcomeRecords.length > OUTCOME_MAX_RECORDS) outcomeRecords.shift();
+
+  return c.json({ outcomeId: record.outcomeId, status: record.status, windowEndsAt: new Date(record.windowEndsAtMs).toISOString() });
+});
+
+app.get("/api/outcome/list", (c) => {
+  const symbol = c.req.query("symbol");
+  const filtered = symbol ? outcomeRecords.filter((r) => r.symbol === symbol) : outcomeRecords;
+  return c.json({ records: filtered.slice(-100), total: outcomeRecords.length, windowMinutes: OUTCOME_WINDOW_MINUTES });
+});
+
+app.get("/api/outcome/stats", (c) => {
+  return c.json(computeOutcomeStats(outcomeRecords));
+});
 
 // Module 3 dependency on the Recorder Engine (Module 2) and its
 // Truth-validated snapshots: derives descriptive tags for a day's

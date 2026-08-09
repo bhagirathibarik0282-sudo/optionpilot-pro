@@ -1577,8 +1577,17 @@ function updateFirst15MinRange(symbol: string, current: number) {
   }
 }
 
-const optionPrevDayCache = new Map<number, { pdh: number; pdl: number; cachedAt: number }>();
-const OPTION_PDHPDL_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours — well within one trading day
+// PDH/PDL genuinely represents ONE specific "previous trading day" and
+// stays exactly correct for the entire current trading day \u2014 it does
+// NOT go stale on a rolling timer, it goes stale exactly when the
+// trading date itself changes (since "previous day" then shifts
+// forward by one day). Keyed by tradingDate rather than a TTL
+// (user-approved fix, 2026-08-09): more correct than a fixed duration,
+// and as a side effect stops the unnecessary ~60-80s cold re-fetch
+// that a 6-hour TTL caused mid-session (this was the root cause of the
+// "2-3 minute" delay reported after Kite login).
+const optionPrevDayCache = new Map<number, { pdh: number; pdl: number; tradingDate: string }>();
+// (No fixed TTL constant \u2014 see tradingDate-keyed cache note above.)
 
 async function getOptionPrevDayLevelsBatch(
   accessToken: string,
@@ -1586,10 +1595,11 @@ async function getOptionPrevDayLevelsBatch(
 ): Promise<Map<number, { pdh: number; pdl: number }>> {
   const result = new Map<number, { pdh: number; pdl: number }>();
   const toFetch: number[] = [];
+  const today = indiaTradingDate();
 
   for (const token of instrumentTokens) {
     const cached = optionPrevDayCache.get(token);
-    if (cached && Date.now() - cached.cachedAt < OPTION_PDHPDL_CACHE_TTL) {
+    if (cached && cached.tradingDate === today) {
       result.set(token, { pdh: cached.pdh, pdl: cached.pdl });
     } else {
       toFetch.push(token);
@@ -1600,7 +1610,9 @@ async function getOptionPrevDayLevelsBatch(
     // Kite's historical-candle endpoint has a low rate limit (~3 req/sec).
     // Fetching every strike's PDH/PDL concurrently on the first refresh of
     // the day could trip 429 errors, so we throttle to small chunks with a
-    // short pause between them. Subsequent refreshes are cheap (cache hit).
+    // short pause between them. Subsequent refreshes are cheap (cache hit,
+    // now valid for the WHOLE trading day \u2014 see tradingDate-keyed note
+    // on optionPrevDayCache above).
     const CHUNK_SIZE = 1;
     const CHUNK_DELAY_MS = 350;
     const fetched: (DailyCandle | null)[] = [];
@@ -1617,7 +1629,7 @@ async function getOptionPrevDayLevelsBatch(
     toFetch.forEach((token, i) => {
       const candle = fetched[i];
       const levels = sanitizePdhPdl(candle?.high || 0, candle?.low || 0);
-      optionPrevDayCache.set(token, { ...levels, cachedAt: Date.now() });
+      optionPrevDayCache.set(token, { ...levels, tradingDate: today });
       result.set(token, levels);
     });
   }

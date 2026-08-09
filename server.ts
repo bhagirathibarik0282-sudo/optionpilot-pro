@@ -4080,12 +4080,20 @@ app.get("/", (c) => {
       }
     }
 
+    // Cache of the LATEST runRuleEngine() result per symbol, refreshed
+    // every poll cycle (NOT gated by Haiku's cost-guard, since this is
+    // used by the Premium Diagnostic layer below to read already-
+    // computed signal contributions without ever recomputing any
+    // stateful classifier a second time this cycle).
+    let lastRuleEngineResult = {};
+
     async function triggerHaikuVerdicts() {
       for (const sym of ['NIFTY', 'BANKNIFTY', 'SENSEX']) {
         const m = data[sym];
         if (!m || m.error) continue;
         const validation = validateData(sym, m);
         const result = runRuleEngine(sym, m, validation);
+        lastRuleEngineResult[sym] = result;
         if (result.verdict === 'DATA UNAVAILABLE') continue;
 
         recordOutcomeIfNewVerdict(sym, result);
@@ -7909,6 +7917,202 @@ app.get("/", (c) => {
       return side === 'CE' ? Math.max(spot - strike, 0) : Math.max(strike - spot, 0);
     }
 
+    // ============================================================
+    // PREMIUM DIAGNOSTIC LAYER (user-approved 2026-08-09, HIGH priority
+    // spec). Observation-only, deterministic. Explains WHY a premium
+    // looks the way it does by decomposing it and cross-checking against
+    // the SAME signal contributions the real rule engine already
+    // computed this cycle (read from lastRuleEngineResult, NEVER
+    // recomputed \u2014 avoids the exact stateful-tracker corruption risk
+    // documented throughout this file for Step 5B/6A/6B/atm_oi_buildup).
+    //
+    // HONESTY LIMIT, disclosed rather than faked: several of the spec's
+    // named patterns (underlying_confirmed_ce/pe, time_value_driven_
+    // expansion, direction_correct_but_premium_weak) require knowing
+    // whether premium/intrinsic is RISING \u2014 a trend, which needs price
+    // history this function does not have access to (that's the
+    // Outcome Engine's job, Phase 3, not yet built). This function only
+    // ever reasons from a SINGLE snapshot: current premium/intrinsic
+    // composition cross-checked against current signal reads. It never
+    // claims a trend it cannot see.
+    function computeDaysToExpiry(exp) {
+      if (!exp || !exp.expiryDate) return null;
+      return Math.max(0, (new Date(exp.expiryDate).getTime() - Date.now()) / 86400000);
+    }
+
+    function computePremiumDiagnostic(symbol, m, side, leg) {
+      const premium = leg.lastPrice || 0;
+      const intrinsic = computeIntrinsicValue(side, m.current, leg.strike);
+      const timeValue = Math.max(premium - intrinsic, 0);
+      const intrinsicPct = premium > 0 ? (intrinsic / premium * 100) : null;
+      const timeValuePct = premium > 0 ? (timeValue / premium * 100) : null;
+      const moneyness = leg.isAtm ? 'ATM' : intrinsic > 0 ? 'ITM' : 'OTM';
+      const daysToExpiry = computeDaysToExpiry(m.expiries && m.expiries[0]);
+      const theta = (leg.theta != null && leg.theta !== 0) ? leg.theta : null;
+      const vega = (leg.vega != null && leg.vega !== 0) ? leg.vega : null;
+
+      // ATM/OTM has no meaningful "intrinsic-implied direction" to
+      // confirm against (intrinsic is 0 or near-0 by definition) \u2014
+      // only a genuine ITM leg gives a direction worth cross-checking.
+      const impliedDirection = moneyness === 'ITM' ? (side === 'CE' ? 'bullish' : 'bearish') : null;
+
+      const supportingFactors = [];
+      const conflictingFactors = [];
+
+      if (impliedDirection) {
+        // Stateless snapshot checks (safe to compute fresh every time).
+        const contract = m.futuresContracts && m.futuresContracts[0];
+        if (contract && m.vwap > 0) {
+          const vwapDir = m.current > m.vwap ? 'bullish' : m.current < m.vwap ? 'bearish' : null;
+          if (vwapDir) (vwapDir === impliedDirection ? supportingFactors : conflictingFactors).push('Spot vs VWAP');
+        }
+        if (m.pdh > 0 && m.pdl > 0) {
+          const pdhPdlDir = m.current > m.pdh ? 'bullish' : m.current < m.pdl ? 'bearish' : null;
+          if (pdhPdlDir) (pdhPdlDir === impliedDirection ? supportingFactors : conflictingFactors).push('Spot vs PDH/PDL');
+        }
+
+        // Already-computed signal contributions from THIS cycle's real
+        // rule-engine run \u2014 never recomputed. Positive contribution =
+        // bullish read, negative = bearish, per runRuleEngine's own
+        // convention (see docs/scoring-rules.md).
+        const cached = lastRuleEngineResult[symbol];
+        const contributionChecks = [
+          ['oi_pcr', 'OI PCR'],
+          ['pcr_trend', 'PCR Trend/Divergence'],
+          ['call_put_wall', 'Call/Put Wall Alignment'],
+          ['futures_oi_buildup', 'Futures OI Buildup'],
+          ['expiry_alignment', 'Cross-Expiry Alignment'],
+          ['straddle_behaviour', 'Straddle Behaviour'],
+          ['sector_heatmap', 'Sector Breadth'],
+        ];
+        if (cached && cached.contributions) {
+          contributionChecks.forEach(function (pair) {
+            const val = cached.contributions[pair[0]];
+            if (val == null || val === 0) return; // not available or genuinely neutral this cycle \u2014 not counted either way
+            const dir = val > 0 ? 'bullish' : 'bearish';
+            (dir === impliedDirection ? supportingFactors : conflictingFactors).push(pair[1]);
+          });
+        }
+      }
+
+      // Decay risk \u2014 purely from CURRENT snapshot values (time-value %,
+      // days to expiry, theta magnitude), no trend needed, so this one
+      // is safe to state plainly rather than as INSUFFICIENT_DATA.
+      let decayRisk = 'LOW';
+      if (timeValuePct != null && daysToExpiry != null) {
+        if (timeValuePct >= 60 && daysToExpiry <= 3) decayRisk = 'HIGH';
+        else if (timeValuePct >= 40 && daysToExpiry <= 7) decayRisk = 'MODERATE';
+      } else {
+        decayRisk = 'INSUFFICIENT_DATA';
+      }
+
+      // Volatility note \u2014 deliberately hedged language per the spec's
+      // language_rules. Never claims "IV crush" (that needs IV HISTORY,
+      // which isn't tracked anywhere in this codebase yet \u2014 only a
+      // point-in-time IV/vega snapshot exists).
+      let volatilityNote = null;
+      if (vega != null && timeValuePct != null && timeValuePct >= 30) {
+        const vixDir = m.vixChangePercent > 0.5 ? 'rising' : m.vixChangePercent < -0.5 ? 'falling' : null;
+        if (vixDir) {
+          volatilityNote = 'India VIX is ' + vixDir + ' today \u2014 part of this premium\\'s time value may be associated with that, but this cannot be confirmed as the cause without tracked option-specific IV history (not yet built).';
+        } else {
+          volatilityNote = 'This premium carries a meaningful time-value component; some of its movement may be volatility-related, but option-specific IV history is not yet tracked to confirm.';
+        }
+      }
+
+      // Final diagnostic_state \u2014 deterministic, from counts only.
+      let diagnosticState;
+      if (!impliedDirection) {
+        diagnosticState = 'INSUFFICIENT_DATA';
+      } else {
+        const total = supportingFactors.length + conflictingFactors.length;
+        if (total < 2) diagnosticState = 'INSUFFICIENT_DATA';
+        else if (conflictingFactors.length === 0 && supportingFactors.length >= 3) diagnosticState = 'CONFIRMED';
+        else if (conflictingFactors.length === 0) diagnosticState = 'PARTIALLY_CONFIRMED';
+        else if (conflictingFactors.length >= supportingFactors.length) diagnosticState = 'CONFLICT';
+        else diagnosticState = 'MIXED';
+      }
+
+      // Plain-English diagnosis \u2014 deterministic templating, never BUY/SELL
+      // language, never claims a trend this function cannot see.
+      let plainEnglish;
+      if (!impliedDirection) {
+        plainEnglish = moneyness + ' ' + side + ': no ITM intrinsic direction to confirm against this strike \u2014 showing composition and decay context only, not a directional read.';
+      } else if (diagnosticState === 'INSUFFICIENT_DATA') {
+        plainEnglish = moneyness + ' ' + side + ' carries intrinsic value (' + impliedDirection + '-implied), but too few of the checklist factors are available right now to confirm or conflict.';
+      } else {
+        const supportText = supportingFactors.length > 0 ? supportingFactors.join(', ') : 'none';
+        const conflictText = conflictingFactors.length > 0 ? conflictingFactors.join(', ') : 'none';
+        plainEnglish = moneyness + ' ' + side + ' (' + impliedDirection + '-implied by its intrinsic value) is ' + diagnosticState.replace('_', ' ').toLowerCase() + ' by the current checklist \u2014 supporting: ' + supportText + '; conflicting: ' + conflictText + '.';
+      }
+      if (decayRisk === 'HIGH') plainEnglish += ' Time-decay exposure is currently HIGH for this leg (large time-value share, few days to expiry).';
+      else if (decayRisk === 'MODERATE') plainEnglish += ' Time-decay exposure is MODERATE for this leg.';
+
+      return {
+        diagnostic_state: diagnosticState,
+        option_side: side,
+        strike: leg.strike,
+        premium: premium,
+        intrinsic_value: intrinsic,
+        time_value: timeValue,
+        intrinsic_percentage: intrinsicPct,
+        time_value_percentage: timeValuePct,
+        moneyness: moneyness,
+        days_to_expiry: daysToExpiry,
+        theta: theta,
+        supporting_factors: supportingFactors,
+        conflicting_factors: conflictingFactors,
+        decay_risk: decayRisk,
+        volatility_note: volatilityNote,
+        plain_english_diagnosis: plainEnglish,
+      };
+    }
+
+    function renderPremiumDiagnosticCard(symbol, m) {
+      if (!m || !m.expiries || !m.expiries[0]) return '';
+      const exp = m.expiries[0];
+      const atmCe = (exp.ceStrikes || []).find(function (s) { return s.isAtm; });
+      const atmPe = (exp.peStrikes || []).find(function (s) { return s.isAtm; });
+      if (!atmCe && !atmPe) return '';
+
+      function renderOneSide(side, leg) {
+        if (!leg || !(leg.lastPrice > 0)) {
+          return '<div style="color:var(--muted); font-size:0.68rem;">DATA UNAVAILABLE</div>';
+        }
+        const diag = computePremiumDiagnostic(symbol, m, side, leg);
+        const stateColor = diag.diagnostic_state === 'CONFIRMED' ? 'var(--green)' :
+          diag.diagnostic_state === 'CONFLICT' ? 'var(--red)' :
+          diag.diagnostic_state === 'PARTIALLY_CONFIRMED' ? 'var(--gold)' :
+          diag.diagnostic_state === 'MIXED' ? 'var(--gold)' : 'var(--muted)';
+        let html = '<div style="border-top:1px solid var(--border); padding-top:6px; margin-top:6px;">';
+        html += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">';
+        html += '<span style="color:var(--text); font-size:0.72rem; font-weight:600;">' + diag.strike + ' ' + side + ' (' + diag.moneyness + ')</span>';
+        html += '<span style="color:' + stateColor + '; font-size:0.6rem; background:rgba(255,255,255,0.06); padding:1px 6px; border-radius:4px;">' + escapeHtml(diag.diagnostic_state) + '</span>';
+        html += '</div>';
+        html += '<div style="font-size:0.65rem; color:var(--muted); line-height:1.4;">' + escapeHtml(diag.plain_english_diagnosis) + '</div>';
+        if (diag.volatility_note) {
+          html += '<div style="font-size:0.6rem; color:var(--muted-dim); margin-top:3px; font-style:italic;">' + escapeHtml(diag.volatility_note) + '</div>';
+        }
+        html += '<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; margin-top:4px; font-size:0.62rem; color:var(--muted-dim);">';
+        html += '<div>Decay: <span style="color:' + (diag.decay_risk === 'HIGH' ? 'var(--red)' : diag.decay_risk === 'MODERATE' ? 'var(--gold)' : 'var(--text)') + ';">' + diag.decay_risk + '</span></div>';
+        html += '<div>DTE: ' + (diag.days_to_expiry != null ? diag.days_to_expiry.toFixed(1) : '\u2014') + '</div>';
+        html += '<div>Theta: ' + (diag.theta != null ? diag.theta.toFixed(2) : '\u2014') + '</div>';
+        html += '</div>';
+        html += '</div>';
+        return html;
+      }
+
+      let html = '<div class="premium-card" style="margin-bottom:10px; border-color:var(--gold);">';
+      html += '<div class="card-title">Premium Diagnostic (Beta)</div>';
+      html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">';
+      html += '<div><div style="color:var(--green); font-size:0.65rem; font-weight:700; text-transform:uppercase; margin-bottom:2px;">CE</div>' + renderOneSide('CE', atmCe) + '</div>';
+      html += '<div><div style="color:var(--red); font-size:0.65rem; font-weight:700; text-transform:uppercase; margin-bottom:2px;">PE</div>' + renderOneSide('PE', atmPe) + '</div>';
+      html += '</div>';
+      html += '<div class="timestamp">Observation-only \u2014 does NOT feed the rule engine score, verdict, or confidence (unchanged, verified). Cross-checks reuse the SAME signal contributions the real verdict already computed this cycle, never recomputed. This reads only a single snapshot \u2014 it cannot see whether premium/intrinsic is rising or falling over time (that needs the Outcome Engine\\'s history, not yet built), so it never claims a trend. "May"/"possible" language is used wherever the data cannot prove causation \u2014 never states IV crush without tracked IV history.</div>';
+      html += '</div>';
+      return html;
+    }
+
     function renderOptionCompositionCard(symbol, m) {
       if (!m || !m.expiries || !m.expiries[0]) return '';
       const exp = m.expiries[0];
@@ -8039,6 +8243,14 @@ app.get("/", (c) => {
       html += renderAccordionChapter('straddle_wall', '02', 'Straddle & wall/PCR alignment', { text: 'Step 6A/6B', color: 'var(--muted)' },
         'Whether the ATM straddle and the Call/Put wall + PCR readings agree with each other.', straddleWallContent,
         optionsAccordionOpen === 'straddle_wall', 'toggleOptionsAccordion');
+
+      // Premium Diagnostic Layer (user-approved 2026-08-09, HIGH
+      // priority spec) \u2014 deliberately its OWN chapter, visually
+      // separate from the Scoring Engine content above, per the spec's
+      // own UI requirement not to clutter those cards.
+      html += renderAccordionChapter('premium_diagnostic', '03', 'Premium diagnostic (beta)', { text: 'observation-only', color: 'var(--gold)' },
+        'Explains WHY the ATM premium looks the way it does \u2014 cross-checked against the same signals the verdict already used, but never feeds back into the verdict itself.', renderPremiumDiagnosticCard(symbol, m),
+        optionsAccordionOpen === 'premium_diagnostic', 'toggleOptionsAccordion');
 
       const subs = [
         { key: 'PREMIUM', label: 'PREMIUM' },

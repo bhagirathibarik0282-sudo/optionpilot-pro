@@ -355,6 +355,12 @@ interface RecorderIndexSnapshot {
   peVega: number | null;
   ceDelta: number | null;
   peDelta: number | null;
+  // Added 2026-08-10 (user-approved, second pass): ATM\u00b13 strike data,
+  // current-week expiry only for now (multi-expiry deferred, disclosed
+  // in the capture function below). Mirrors the same Truth-gated
+  // pattern as the ATM fields above.
+  ceStrikesNear: { strike: number; ltp: number | null; iv: number | null; theta: number | null; vega: number | null; delta: number | null; oi: number | null }[] | null;
+  peStrikesNear: { strike: number; ltp: number | null; iv: number | null; theta: number | null; vega: number | null; delta: number | null; oi: number | null }[] | null;
   exchangeTimestamp: string | null;
   snapshotId: string | null;
 }
@@ -391,6 +397,20 @@ let recorderSession: RecorderSession = {
   snapshots: [],
   lastErrorRedacted: null,
 };
+
+// Extracts ATM\u00b1range strikes' LTP/IV/Theta/Vega/Delta/OI from an
+// already-sorted ceStrikes/peStrikes array (stateless, safe to call any
+// number of times \u2014 pure read, no tracker mutation).
+function extractNearStrikes(strikes: PremiumData[] | undefined, range: number): { strike: number; ltp: number | null; iv: number | null; theta: number | null; vega: number | null; delta: number | null; oi: number | null }[] | null {
+  if (!strikes || strikes.length === 0) return null;
+  const atmIdx = strikes.findIndex((s) => s.isAtm);
+  if (atmIdx === -1) return null;
+  const start = Math.max(0, atmIdx - range);
+  const end = Math.min(strikes.length, atmIdx + range + 1);
+  return strikes.slice(start, end).map((s) => ({
+    strike: s.strike, ltp: s.lastPrice > 0 ? s.lastPrice : null, iv: s.iv, theta: s.theta, vega: s.vega, delta: s.delta, oi: s.oi,
+  }));
+}
 
 // Module 2 (Recorder Engine) dependency on Module 1 (Truth Engine), per
 // the approved Architecture Specification: "Never records a raw
@@ -431,6 +451,8 @@ function toTruthValidatedRecorderIndexSnapshot(m: IndexMetrics | undefined, trut
     peVega: peOk && atmPe ? atmPe.vega : null,
     ceDelta: ceOk && atmCe ? atmCe.delta : null,
     peDelta: peOk && atmPe ? atmPe.delta : null,
+    ceStrikesNear: ceOk ? extractNearStrikes(exp?.ceStrikes, 3) : null,
+    peStrikesNear: peOk ? extractNearStrikes(exp?.peStrikes, 3) : null,
     exchangeTimestamp: spotOk ? m.exchangeTimestamp || null : null,
     snapshotId: m.snapshotId || null,
   };
@@ -465,6 +487,8 @@ function toRecorderIndexSnapshot(m: IndexMetrics | undefined): RecorderIndexSnap
     peVega: atmPe ? atmPe.vega : null,
     ceDelta: atmCe ? atmCe.delta : null,
     peDelta: atmPe ? atmPe.delta : null,
+    ceStrikesNear: extractNearStrikes(exp?.ceStrikes, 3),
+    peStrikesNear: extractNearStrikes(exp?.peStrikes, 3),
     exchangeTimestamp: m.exchangeTimestamp || null,
     snapshotId: m.snapshotId || null,
   };
@@ -12953,7 +12977,7 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
     if (journalHtmlResult && journalHtmlResult.size > 0) record.fileIds.journalHtml = journalHtmlResult.id;
 
     const csvRows = [
-      "snapshot_id,backend_timestamp,reason,snapshot_status,truth_verdict,symbol,spot,change,pdh,pdl,vwap,futures_ltp,futures_oi,atm_strike,ce_ltp,pe_ltp,ce_oi,pe_oi,exchange_timestamp,snapshot_sync_id,fii_cash_cr,dii_cash_cr",
+      "snapshot_id,backend_timestamp,reason,snapshot_status,truth_verdict,symbol,spot,change,pdh,pdl,vwap,futures_ltp,futures_oi,atm_strike,ce_ltp,pe_ltp,ce_oi,pe_oi,ce_iv,pe_iv,ce_theta,pe_theta,ce_vega,pe_vega,ce_delta,pe_delta,exchange_timestamp,snapshot_sync_id,fii_cash_cr,dii_cash_cr",
     ];
     const esc = (v: unknown) => {
       if (v == null) return "";
@@ -12969,6 +12993,7 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
             idx?.spot, idx?.change, idx?.pdh, idx?.pdl, idx?.vwap,
             idx?.futuresLtp, idx?.futuresOi, idx?.atmStrike,
             idx?.ceLtp, idx?.peLtp, idx?.ceOi, idx?.peOi,
+            idx?.ceIv, idx?.peIv, idx?.ceTheta, idx?.peTheta, idx?.ceVega, idx?.peVega, idx?.ceDelta, idx?.peDelta,
             idx?.exchangeTimestamp, idx?.snapshotId,
             snap.fiiCashCr, snap.diiCashCr,
           ].map(esc).join(",")
@@ -12989,6 +13014,16 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
     const summaryResult = await uploadFileToDrive(`OptionPilot_${tradingDate}_Summary.json`, "application/json", JSON.stringify(summary, null, 2), dateId, token);
     if (!summaryResult) throw new Error("Summary JSON upload failed");
     record.fileIds.summary = summaryResult.id;
+
+    // Premium Diagnostic (Haiku 15-min window) results (user-approved
+    // 2026-08-10): these were previously ONLY in-memory (capped at last
+    // 20, PILOT: NIFTY only) and lost on every redeploy, same as
+    // Recorder snapshots would have been before this daily archive
+    // existed. Archived here so a full day's worth of Haiku diagnostics
+    // survives, not just the most recent 20.
+    const premiumDiagnosticJson = JSON.stringify(premiumDiagnosticResults, null, 2);
+    const premiumDiagnosticResult = await uploadFileToDrive(`OptionPilot_${tradingDate}_PremiumDiagnostics.json`, "application/json", premiumDiagnosticJson, dateId, token);
+    if (premiumDiagnosticResult && premiumDiagnosticResult.size > 0) record.fileIds.premiumDiagnostics = premiumDiagnosticResult.id;
 
     for (const [key, fileId] of Object.entries(record.fileIds)) {
       const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,size`, {

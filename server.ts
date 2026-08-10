@@ -1427,9 +1427,16 @@ async function fetchKiteQuote(
       },
     });
 
-    if (response.status === 429 && retriesLeft > 0) {
+    // Bug fix (2026-08-10, user-reported, verified against a full-day
+    // archive: SENSEX futures_ltp/futures_oi were blank in 21.4% of
+    // today's snapshots vs 0% for NIFTY/BankNifty). Root cause: this
+    // only retried on 429 -- any 5xx or network-level failure on the
+    // small, separate SENSEX futures quote call failed immediately
+    // with no retry, unlike the option-chain batching path which
+    // already had this resilience. Now retries 429 AND 5xx the same way.
+    if ((response.status === 429 || response.status >= 500) && retriesLeft > 0) {
       const delayMs = 250 * (3 - retriesLeft); // 250ms, then 500ms
-      console.warn(`[KITE] 429 rate-limited, retrying in ${delayMs}ms (${retriesLeft} attempt(s) left) for ${symbols.length} symbols`);
+      console.warn(`[KITE] HTTP ${response.status}, retrying in ${delayMs}ms (${retriesLeft} attempt(s) left) for ${symbols.length} symbols`);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       return fetchKiteQuote(accessToken, symbols, retriesLeft - 1);
     }
@@ -1453,7 +1460,17 @@ async function fetchKiteQuote(
     console.error("[KITE] Quote returned non-success status", data);
     return null;
   } catch (err) {
-    console.error("[KITE] Quote fetch error:", err instanceof Error ? err.message : err);
+    // Same bug fix: network-level failures (timeout, connection reset,
+    // DNS blip) previously failed immediately too -- these are exactly
+    // the kind of transient error the archived data pointed to. Retry
+    // with the same backoff as the 429/5xx path above.
+    if (retriesLeft > 0) {
+      const delayMs = 250 * (3 - retriesLeft);
+      console.warn(`[KITE] Quote fetch threw (${err instanceof Error ? err.message : err}), retrying in ${delayMs}ms (${retriesLeft} attempt(s) left) for ${symbols.length} symbols`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return fetchKiteQuote(accessToken, symbols, retriesLeft - 1);
+    }
+    console.error("[KITE] Quote fetch error (out of retries):", err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -13024,6 +13041,17 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
     const premiumDiagnosticJson = JSON.stringify(premiumDiagnosticResults, null, 2);
     const premiumDiagnosticResult = await uploadFileToDrive(`OptionPilot_${tradingDate}_PremiumDiagnostics.json`, "application/json", premiumDiagnosticJson, dateId, token);
     if (premiumDiagnosticResult && premiumDiagnosticResult.size > 0) record.fileIds.premiumDiagnostics = premiumDiagnosticResult.id;
+
+    // FII/DII manual entries (user-reported gap, fixed 2026-08-10):
+    // fiiDiiEntries was also in-memory-only and never archived -- same
+    // risk class as premiumDiagnosticResults above, just found later.
+    // Does NOT wire fii_dii_5day into the rule engine score (that
+    // remains a separate, deliberately deferred decision) -- this only
+    // makes sure entered data survives a redeploy instead of being
+    // silently lost, whenever the person does start entering it.
+    const fiiDiiJson = JSON.stringify(fiiDiiEntries, null, 2);
+    const fiiDiiResult = await uploadFileToDrive(`OptionPilot_${tradingDate}_FiiDii.json`, "application/json", fiiDiiJson, dateId, token);
+    if (fiiDiiResult && fiiDiiResult.size > 0) record.fileIds.fiiDii = fiiDiiResult.id;
 
     for (const [key, fileId] of Object.entries(record.fileIds)) {
       const metaRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,size`, {

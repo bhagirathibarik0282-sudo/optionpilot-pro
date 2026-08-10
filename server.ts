@@ -398,6 +398,237 @@ let recorderSession: RecorderSession = {
   lastErrorRedacted: null,
 };
 
+
+// ============================================================================
+// V2 MODULE 1 — PREMIUM COMPOSITION HISTORY ENGINE
+// Added as an observation-only, additive layer. It derives composition/history
+// exclusively from already-recorded 3-minute Recorder snapshots; it does NOT
+// fetch Kite, mutate raw Recorder data, call AI, or change runRuleEngine().
+//
+// Important design boundary:
+// - Current expiry / ATM±3 only, because that is what Recorder currently stores.
+// - Compare the SAME side + SAME strike across snapshots. Never compare by array
+//   position when ATM rolls.
+// - LIVE and PARTIAL snapshots may contribute when the specific required fields
+//   exist. STALE/INVALID snapshots are excluded.
+// ============================================================================
+
+type V2PremiumSymbol = "NIFTY" | "BANKNIFTY" | "SENSEX";
+type V2PremiumSide = "CE" | "PE";
+type V2CompositionState =
+  | "INTRINSIC_EXPANSION"
+  | "INTRINSIC_CONTRACTION"
+  | "EXTRINSIC_EXPANSION"
+  | "EXTRINSIC_CONTRACTION"
+  | "BOTH_EXPANDING"
+  | "BOTH_CONTRACTING"
+  | "INTRINSIC_UP_EXTRINSIC_DOWN"
+  | "INTRINSIC_DOWN_EXTRINSIC_UP"
+  | "NO_MEANINGFUL_CHANGE"
+  | "INSUFFICIENT_HISTORY";
+
+type V2DataQuality = "OK" | "PARTIAL" | "INSUFFICIENT";
+
+interface V2PremiumLegPoint {
+  timestamp: string;
+  snapshotId: string;
+  snapshotStatus: RecorderSnapshot["snapshotStatus"];
+  symbol: V2PremiumSymbol;
+  side: V2PremiumSide;
+  strike: number;
+  atmStrike: number | null;
+  moneyness: "ITM" | "ATM" | "OTM";
+  premium: number;
+  intrinsic: number;
+  extrinsic: number;
+  intrinsicPct: number | null;
+  extrinsicPct: number | null;
+  iv: number | null;
+  theta: number | null;
+  vega: number | null;
+  delta: number | null;
+  oi: number | null;
+}
+
+interface V2NumericChange {
+  amount: number | null;
+  pct: number | null;
+}
+
+interface V2PremiumCompositionComparison {
+  symbol: V2PremiumSymbol;
+  side: V2PremiumSide;
+  strike: number;
+  timestamp: string;
+  previousTimestamp: string | null;
+  moneyness: "ITM" | "ATM" | "OTM";
+  current: V2PremiumLegPoint;
+  previous: V2PremiumLegPoint | null;
+  change: {
+    premium: V2NumericChange;
+    intrinsic: V2NumericChange;
+    extrinsic: V2NumericChange;
+    iv: V2NumericChange;
+    theta: V2NumericChange;
+    vega: V2NumericChange;
+    delta: V2NumericChange;
+    oi: V2NumericChange;
+  };
+  compositionState: V2CompositionState;
+  dataQuality: V2DataQuality;
+}
+
+function v2ComputeIntrinsicValue(side: V2PremiumSide, spot: number, strike: number): number {
+  return side === "CE" ? Math.max(spot - strike, 0) : Math.max(strike - spot, 0);
+}
+
+function v2PctPart(part: number, total: number): number | null {
+  return total > 0 ? (part / total) * 100 : null;
+}
+
+function v2Change(current: number | null, previous: number | null): V2NumericChange {
+  if (current == null || previous == null || !Number.isFinite(current) || !Number.isFinite(previous)) {
+    return { amount: null, pct: null };
+  }
+  const amount = current - previous;
+  return { amount, pct: previous !== 0 ? (amount / Math.abs(previous)) * 100 : null };
+}
+
+function v2CompositionState(current: V2PremiumLegPoint, previous: V2PremiumLegPoint | null): V2CompositionState {
+  if (!previous) return "INSUFFICIENT_HISTORY";
+  // Numerical epsilon only; this is not a market/scoring threshold.
+  const EPS = 1e-9;
+  const i = current.intrinsic - previous.intrinsic;
+  const e = current.extrinsic - previous.extrinsic;
+  const iUp = i > EPS, iDown = i < -EPS;
+  const eUp = e > EPS, eDown = e < -EPS;
+  if (iUp && eUp) return "BOTH_EXPANDING";
+  if (iDown && eDown) return "BOTH_CONTRACTING";
+  if (iUp && eDown) return "INTRINSIC_UP_EXTRINSIC_DOWN";
+  if (iDown && eUp) return "INTRINSIC_DOWN_EXTRINSIC_UP";
+  if (iUp) return "INTRINSIC_EXPANSION";
+  if (iDown) return "INTRINSIC_CONTRACTION";
+  if (eUp) return "EXTRINSIC_EXPANSION";
+  if (eDown) return "EXTRINSIC_CONTRACTION";
+  return "NO_MEANINGFUL_CHANGE";
+}
+
+function v2RecorderLegPoint(
+  snap: RecorderSnapshot,
+  symbol: V2PremiumSymbol,
+  side: V2PremiumSide,
+  strike: number
+): V2PremiumLegPoint | null {
+  if (snap.snapshotStatus === "STALE" || snap.snapshotStatus === "INVALID") return null;
+  const idx = snap[symbol];
+  if (!idx || !(idx.spot != null && idx.spot > 0)) return null;
+  const legs = side === "CE" ? idx.ceStrikesNear : idx.peStrikesNear;
+  const leg = legs?.find((x) => x.strike === strike);
+  if (!leg || !(leg.ltp != null && leg.ltp > 0)) return null;
+
+  const intrinsic = v2ComputeIntrinsicValue(side, idx.spot, strike);
+  const extrinsic = Math.max(leg.ltp - intrinsic, 0);
+  const moneyness: "ITM" | "ATM" | "OTM" =
+    idx.atmStrike === strike ? "ATM" : intrinsic > 0 ? "ITM" : "OTM";
+
+  return {
+    timestamp: snap.backendTimestamp,
+    snapshotId: snap.snapshotId,
+    snapshotStatus: snap.snapshotStatus,
+    symbol,
+    side,
+    strike,
+    atmStrike: idx.atmStrike,
+    moneyness,
+    premium: leg.ltp,
+    intrinsic,
+    extrinsic,
+    intrinsicPct: v2PctPart(intrinsic, leg.ltp),
+    extrinsicPct: v2PctPart(extrinsic, leg.ltp),
+    iv: leg.iv,
+    theta: leg.theta,
+    vega: leg.vega,
+    delta: leg.delta,
+    oi: leg.oi,
+  };
+}
+
+function v2BuildComparison(current: V2PremiumLegPoint, previous: V2PremiumLegPoint | null): V2PremiumCompositionComparison {
+  const requiredCurrentOk = Number.isFinite(current.premium) && Number.isFinite(current.intrinsic) && Number.isFinite(current.extrinsic);
+  const optionalMissing = [current.iv, current.theta, current.vega, current.delta, current.oi].some((v) => v == null);
+  const dataQuality: V2DataQuality = !requiredCurrentOk ? "INSUFFICIENT" : !previous ? "INSUFFICIENT" : optionalMissing ? "PARTIAL" : "OK";
+
+  return {
+    symbol: current.symbol,
+    side: current.side,
+    strike: current.strike,
+    timestamp: current.timestamp,
+    previousTimestamp: previous?.timestamp || null,
+    moneyness: current.moneyness,
+    current,
+    previous,
+    change: {
+      premium: v2Change(current.premium, previous?.premium ?? null),
+      intrinsic: v2Change(current.intrinsic, previous?.intrinsic ?? null),
+      extrinsic: v2Change(current.extrinsic, previous?.extrinsic ?? null),
+      iv: v2Change(current.iv, previous?.iv ?? null),
+      theta: v2Change(current.theta, previous?.theta ?? null),
+      vega: v2Change(current.vega, previous?.vega ?? null),
+      delta: v2Change(current.delta, previous?.delta ?? null),
+      oi: v2Change(current.oi, previous?.oi ?? null),
+    },
+    compositionState: v2CompositionState(current, previous),
+    dataQuality,
+  };
+}
+
+function buildV2PremiumCompositionHistory(symbol: V2PremiumSymbol, maxSnapshots = 20) {
+  const eligible = recorderSession.snapshots
+    .filter((s) => s.snapshotStatus !== "STALE" && s.snapshotStatus !== "INVALID" && s[symbol] != null)
+    .slice(-Math.max(2, Math.min(maxSnapshots, RECORDER_MAX_SNAPSHOTS)));
+
+  if (eligible.length === 0) {
+    return { symbol, generatedAt: new Date().toISOString(), snapshotCount: 0, comparisons: [], dataQuality: "INSUFFICIENT" as V2DataQuality };
+  }
+
+  const currentSnap = eligible[eligible.length - 1];
+  const currentIdx = currentSnap[symbol]!;
+  const targets: { side: V2PremiumSide; strike: number }[] = [];
+  for (const leg of currentIdx.ceStrikesNear || []) targets.push({ side: "CE", strike: leg.strike });
+  for (const leg of currentIdx.peStrikesNear || []) targets.push({ side: "PE", strike: leg.strike });
+
+  const comparisons: V2PremiumCompositionComparison[] = [];
+  for (const target of targets) {
+    const current = v2RecorderLegPoint(currentSnap, symbol, target.side, target.strike);
+    if (!current) continue;
+    let previous: V2PremiumLegPoint | null = null;
+    for (let i = eligible.length - 2; i >= 0; i--) {
+      previous = v2RecorderLegPoint(eligible[i], symbol, target.side, target.strike);
+      if (previous) break;
+    }
+    comparisons.push(v2BuildComparison(current, previous));
+  }
+
+  const overallQuality: V2DataQuality = comparisons.length === 0
+    ? "INSUFFICIENT"
+    : comparisons.every((x) => x.dataQuality === "OK")
+      ? "OK"
+      : comparisons.some((x) => x.dataQuality === "OK" || x.dataQuality === "PARTIAL")
+        ? "PARTIAL"
+        : "INSUFFICIENT";
+
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    latestSnapshotAt: currentSnap.backendTimestamp,
+    source: "Recorder 3-minute Truth-gated snapshots; current expiry ATM±3 only",
+    scoringImpact: "NONE",
+    snapshotCount: eligible.length,
+    dataQuality: overallQuality,
+    comparisons,
+  };
+}
+
 // Extracts ATM\u00b1range strikes' LTP/IV/Theta/Vega/Delta/OI from an
 // already-sorted ceStrikes/peStrikes array (stateless, safe to call any
 // number of times \u2014 pure read, no tracker mutation).
@@ -12120,6 +12351,18 @@ app.get("/api/recorder/status", (c) => {
 
 app.get("/api/recorder/session.json", (c) => {
   return c.json(recorderSession);
+});
+
+
+// V2 Module 1 diagnostic API — observation/history only. No Rule Engine impact.
+app.get("/api/v2/premium-composition-history", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  return c.json(buildV2PremiumCompositionHistory(rawSymbol as V2PremiumSymbol, limit));
 });
 
 app.get("/api/recorder/session.csv", (c) => {

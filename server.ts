@@ -353,6 +353,8 @@ interface RecorderIndexSnapshot {
   peTheta: number | null;
   ceVega: number | null;
   peVega: number | null;
+  ceDelta: number | null;
+  peDelta: number | null;
   exchangeTimestamp: string | null;
   snapshotId: string | null;
 }
@@ -427,6 +429,8 @@ function toTruthValidatedRecorderIndexSnapshot(m: IndexMetrics | undefined, trut
     peTheta: peOk && atmPe ? atmPe.theta : null,
     ceVega: ceOk && atmCe ? atmCe.vega : null,
     peVega: peOk && atmPe ? atmPe.vega : null,
+    ceDelta: ceOk && atmCe ? atmCe.delta : null,
+    peDelta: peOk && atmPe ? atmPe.delta : null,
     exchangeTimestamp: spotOk ? m.exchangeTimestamp || null : null,
     snapshotId: m.snapshotId || null,
   };
@@ -459,6 +463,8 @@ function toRecorderIndexSnapshot(m: IndexMetrics | undefined): RecorderIndexSnap
     peTheta: atmPe ? atmPe.theta : null,
     ceVega: atmCe ? atmCe.vega : null,
     peVega: atmPe ? atmPe.vega : null,
+    ceDelta: atmCe ? atmCe.delta : null,
+    peDelta: atmPe ? atmPe.delta : null,
     exchangeTimestamp: m.exchangeTimestamp || null,
     snapshotId: m.snapshotId || null,
   };

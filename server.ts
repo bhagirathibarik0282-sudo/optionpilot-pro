@@ -6747,6 +6747,23 @@ app.get("/", (c) => {
         return { status: 'DATA UNAVAILABLE', perIndex: null, oldestAgeSec: null, snapshotId: null, lockReason: 'DATA UNAVAILABLE — SIGNAL LOCKED' };
       }
 
+      // Bug fix (2026-08-10, user-reported: 'LIVE — AGE Xs' was showing
+      // even at 10:13 PM, hours after market close). Root cause: this
+      // function never checked isMarketOpenNow() at all. Index quotes
+      // have no real exchange last-trade-time (confirmed: 100% blank
+      // in today's archive), so getEffectiveTimestamp() falls back to
+      // backend RECEIPT time -- which resets to ~now on every poll the
+      // client fires, regardless of whether the underlying price is
+      // genuinely moving or frozen after hours. Without a market-open
+      // gate, that made stale/closed-market data look perpetually
+      // "LIVE" for as long as auto-refresh kept polling. Now checked
+      // FIRST, before any staleness/spread computation, matching the
+      // same isMarketOpenNow() pattern already used correctly elsewhere
+      // (e.g. computeCardStatus's PREVIOUS SESSION CONTEXT).
+      if (!isMarketOpenNow()) {
+        return { status: 'PREVIOUS SESSION CONTEXT \u2014 LIVE INTERPRETATION DISABLED', perIndex: null, oldestAgeSec: null, snapshotId: null, lockReason: 'MARKET NOT OPEN \u2014 LIVE SIGNAL DISABLED (data shown elsewhere is from the last session, not real-time)' };
+      }
+
       const indices = ['NIFTY', 'BANKNIFTY', 'SENSEX'];
       const perIndex = {};
       let anyMissing = false;
@@ -6806,7 +6823,7 @@ app.get("/", (c) => {
       const statusColor =
         r.status === 'LIVE AND SYNCHRONIZED' ? 'var(--green)' :
         (r.status === 'LIVE BUT TIMESTAMP MISMATCH' || r.status === 'DELAYED DATA') ? 'var(--gold)' :
-        r.status.indexOf('PRE-MARKET') === 0 ? 'var(--muted)' :
+        (r.status.indexOf('PRE-MARKET') === 0 || r.status.indexOf('PREVIOUS SESSION CONTEXT') === 0) ? 'var(--muted)' :
         'var(--red)';
 
       let html = '<div class="verdict-overall-card" style="border-color:' + statusColor + '; margin-bottom:10px;">';

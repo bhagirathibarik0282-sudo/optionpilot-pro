@@ -4087,6 +4087,64 @@ app.get("/", (c) => {
     // stateful classifier a second time this cycle).
     let lastRuleEngineResult = {};
 
+    // Premium Diagnostic Layer client snapshot poster (user-approved
+    // 2026-08-09/10, PILOT: NIFTY / current-week ATM only). Fires every
+    // ~3-min poll (same cadence as everything else) \u2014 the server buffers
+    // these into 15-min windows and only calls Haiku once a window
+    // completes, not on every snapshot. Reuses lastRuleEngineResult's
+    // contributions (already computed this cycle) for cross-signal
+    // context \u2014 never recomputes any stateful classifier.
+    function postPremiumDiagnosticSnapshot(sym, m, result) {
+      if (sym !== 'NIFTY') return; // pilot scope
+      if (!m.expiries || !m.expiries[0]) return;
+      const exp = m.expiries[0];
+      const atmCe = (exp.ceStrikes || []).find((s) => s.isAtm);
+      const atmPe = (exp.peStrikes || []).find((s) => s.isAtm);
+      if (!atmCe || !atmPe || !(m.current > 0)) return;
+
+      function legPayload(side, leg) {
+        if (!leg || !(leg.lastPrice > 0)) return null;
+        const intrinsic = computeIntrinsicValue(side, m.current, leg.strike);
+        const extrinsic = Math.max(leg.lastPrice - intrinsic, 0);
+        return {
+          side, strike: leg.strike, premium: leg.lastPrice,
+          intrinsic, extrinsic,
+          IV: leg.iv || null, theta: leg.theta || null, vega: leg.vega || null, delta: leg.delta || null,
+          DTE: computeDaysToExpiry(exp), OI: leg.oi || null, volume: leg.volume || null,
+        };
+      }
+
+      function contribLabel(sig) {
+        const v = result.contributions ? result.contributions[sig] : null;
+        if (v == null) return null;
+        return v > 0 ? 'positive' : v < 0 ? 'negative' : 'neutral';
+      }
+
+      const snapshot = {
+        timestamp: new Date().toISOString(),
+        atmCe: legPayload('CE', atmCe),
+        atmPe: legPayload('PE', atmPe),
+        spot: m.current,
+        spotChange: m.change,
+        vwapRelation: (m.futuresContracts && m.futuresContracts[0] && m.vwap > 0) ? (m.current > m.vwap ? 'above VWAP' : m.current < m.vwap ? 'below VWAP' : 'at VWAP') : null,
+        pdhPdlRelation: (m.pdh > 0 && m.pdl > 0) ? (m.current > m.pdh ? 'above PDH' : m.current < m.pdl ? 'below PDL' : 'inside PDH-PDL range') : null,
+        pcr: m.pcr, pcrChange: null,
+        vix: m.vix, vixChange: m.vixChangePercent,
+        futuresOiBuildup: contribLabel('futures_oi_buildup'),
+        callPutWalls: contribLabel('call_put_wall'),
+        atmOiBuildup: contribLabel('atm_oi_buildup'),
+        straddleBehaviour: contribLabel('straddle_behaviour'),
+        sectorHeatmap: contribLabel('sector_heatmap'),
+        structuralBias: classifyIndexOverallBias(m),
+      };
+
+      fetch('/api/premium-diagnostic/snapshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: sym, snapshot }),
+      }).catch((err) => console.error('[Premium Diagnostic] snapshot post failed:', err));
+    }
+
     async function triggerHaikuVerdicts() {
       for (const sym of ['NIFTY', 'BANKNIFTY', 'SENSEX']) {
         const m = data[sym];
@@ -4097,6 +4155,7 @@ app.get("/", (c) => {
         if (result.verdict === 'DATA UNAVAILABLE') continue;
 
         recordOutcomeIfNewVerdict(sym, result);
+        postPremiumDiagnosticSnapshot(sym, m, result);
 
         const existing = haikuExplanations[sym];
         if (existing && existing.loading) continue;
@@ -4651,6 +4710,67 @@ app.get("/", (c) => {
       }
     }
     setInterval(loadOutcomeStats, 60 * 1000);
+
+    // Premium Diagnostic 15-min window results (pilot: NIFTY only).
+    let premiumDiagnostic15Min = null;
+    async function loadPremiumDiagnostic15Min() {
+      try {
+        const response = await fetch('/api/premium-diagnostic/latest?symbol=NIFTY');
+        const json = await response.json();
+        premiumDiagnostic15Min = response.ok ? json : { error: json.error || 'Failed to load' };
+        updateUI();
+      } catch (err) {
+        console.error('Failed to load Premium Diagnostic (15-min):', err);
+        premiumDiagnostic15Min = { error: err.message };
+      }
+    }
+    setInterval(loadPremiumDiagnostic15Min, 60 * 1000);
+
+    function renderPremiumDiagnostic15MinCard() {
+      let html = '<div class="premium-card" style="margin-bottom:10px;">';
+      html += '<div class="card-title">Premium Diagnostic \u2014 15-min Windows (pilot)</div>';
+      if (!premiumDiagnostic15Min) {
+        html += '<div class="loading">Loading\u2026</div></div>';
+        return html;
+      }
+      if (premiumDiagnostic15Min.error) {
+        html += '<div class="error">\u26a0\ufe0f ' + escapeHtml(premiumDiagnostic15Min.error) + '</div></div>';
+        return html;
+      }
+      const results = premiumDiagnostic15Min.results || [];
+      if (results.length === 0) {
+        html += '<div style="color:var(--muted); font-size:0.75rem;">No completed 15-min window has been diagnosed yet today. Windows are 09:15\u201309:30, 09:30\u201309:45, etc. \u2014 the first one appears shortly after 09:30 IST.</div>';
+        html += '</div>';
+        return html;
+      }
+      const latest = results[results.length - 1];
+      html += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">';
+      html += '<span style="color:var(--text); font-size:0.78rem; font-weight:600;">' + escapeHtml(latest.windowStart) + '\u2013' + escapeHtml(latest.windowEnd) + ' IST</span>';
+      const dq = latest.diagnostic ? latest.diagnostic.data_quality : null;
+      html += '<span style="color:' + (dq === 'OK' ? 'var(--green)' : dq === 'PARTIAL' ? 'var(--gold)' : 'var(--red)') + '; font-size:0.62rem; background:rgba(255,255,255,0.06); padding:1px 6px; border-radius:4px;">' + escapeHtml(dq || (latest.error ? 'ERROR' : 'PENDING')) + '</span>';
+      html += '</div>';
+      if (latest.error) {
+        html += '<div style="color:var(--red); font-size:0.7rem;">' + escapeHtml(latest.error) + '</div>';
+      } else if (latest.diagnostic) {
+        const d = latest.diagnostic;
+        if (d.window_summary) html += '<div style="color:var(--text); font-size:0.72rem; margin-bottom:6px; line-height:1.4;">' + escapeHtml(d.window_summary) + '</div>';
+        if (d.intrinsic_extrinsic_analysis) html += '<div style="margin-bottom:4px;"><span style="color:var(--gold); font-size:0.62rem; font-weight:700; text-transform:uppercase;">Intrinsic/Extrinsic</span><div style="color:var(--muted); font-size:0.68rem; line-height:1.4;">' + escapeHtml(d.intrinsic_extrinsic_analysis) + '</div></div>';
+        if (d.iv_analysis) html += '<div style="margin-bottom:4px;"><span style="color:var(--gold); font-size:0.62rem; font-weight:700; text-transform:uppercase;">IV</span><div style="color:var(--muted); font-size:0.68rem; line-height:1.4;">' + escapeHtml(d.iv_analysis) + '</div></div>';
+        if (Array.isArray(d.confirmed_observations) && d.confirmed_observations.length > 0) {
+          html += '<div style="margin-bottom:4px;"><span style="color:var(--green); font-size:0.62rem; font-weight:700; text-transform:uppercase;">Confirmed</span>';
+          d.confirmed_observations.forEach((o) => { html += '<div style="color:var(--muted); font-size:0.66rem;">\u2022 ' + escapeHtml(o) + '</div>'; });
+          html += '</div>';
+        }
+        if (Array.isArray(d.conflicts) && d.conflicts.length > 0) {
+          html += '<div style="margin-bottom:4px;"><span style="color:var(--red); font-size:0.62rem; font-weight:700; text-transform:uppercase;">Conflicts</span>';
+          d.conflicts.forEach((o) => { html += '<div style="color:var(--muted); font-size:0.66rem;">\u2022 ' + escapeHtml(o) + '</div>'; });
+          html += '</div>';
+        }
+      }
+      html += '<div class="timestamp">Snapshots: ' + latest.snapshotCount + ' \u2022 Generated ' + escapeHtml(new Date(latest.generatedAt).toLocaleTimeString()) + ' \u2022 PILOT: NIFTY, current-week ATM only. No database \u2014 resets on redeploy. Multi-timeframe context not available (only 3-min snapshots exist), disclosed as such to Haiku rather than fabricated.</div>';
+      html += '</div>';
+      return html;
+    }
 
     function renderOutcomeEngineCard() {
       let html = '<div class="premium-card" style="margin-bottom:10px;">';
@@ -8268,6 +8388,12 @@ app.get("/", (c) => {
       html += renderAccordionChapter('premium_diagnostic', '03', 'Premium diagnostic (beta)', { text: 'observation-only', color: 'var(--gold)' },
         'Explains WHY the ATM premium looks the way it does \u2014 cross-checked against the same signals the verdict already used, but never feeds back into the verdict itself.', renderPremiumDiagnosticCard(symbol, m),
         optionsAccordionOpen === 'premium_diagnostic', 'toggleOptionsAccordion');
+
+      if (symbol === 'NIFTY') {
+        html += renderAccordionChapter('premium_diagnostic_15min', '04', '15-min window diagnostic (pilot)', { text: 'NIFTY only', color: 'var(--muted)' },
+          'Explains how premium/intrinsic/extrinsic/IV behaved across each completed 15-minute window today, using the 3-min snapshots inside it.', renderPremiumDiagnostic15MinCard(),
+          optionsAccordionOpen === 'premium_diagnostic_15min', 'toggleOptionsAccordion');
+      }
 
       const subs = [
         { key: 'PREMIUM', label: 'PREMIUM' },
@@ -12745,6 +12871,200 @@ setInterval(() => {
     console.error("[Auto-Archive] scheduler error:", err instanceof Error ? err.message : err);
   }
 }, 5 * 60 * 1000); // check every 5 minutes \u2014 cheap, and the date-guard above prevents any duplicate archive
+
+// ============================================================================
+// Premium Diagnostic Layer \u2014 15-minute window Haiku diagnostic (user-
+// approved 2026-08-09/10, PILOT SCOPE: NIFTY only, current-week ATM CE/PE
+// only). Explains how premium/intrinsic/extrinsic/IV behaved during each
+// completed fixed 15-min market window. Deterministic-only for data
+// collection; Haiku only explains, per the same AI boundary as the Rule
+// Engine's Haiku layer (Section 6 of docs/architecture.md).
+//
+// DISCLOSED PILOT LIMITATIONS (not silently omitted):
+// - No database exists in this codebase (same as Recorder/Outcome Engine)
+//   \u2014 results live in memory only and reset on every Railway redeploy.
+// - Multi-timeframe context (1m/3m/5m/...125m/1D) is NOT available \u2014
+//   this codebase only has 3-min snapshots and 1-day PDH/PDL, not the
+//   9 timeframes the full spec describes. Sent as explicitly
+//   "not_available" rather than fabricated.
+// - Scoped to NIFTY / current-week / ATM only for this pilot, not the
+//   full ATM\u00b13 \u00d7 4-expiry \u00d7 3-index grid \u2014 to validate the mechanism
+//   safely before scaling cost and complexity.
+// ============================================================================
+
+function get15MinWindowStart(date: Date): string {
+  const indiaNow = new Date(date.getTime() + INDIA_OFFSET_MS);
+  const minutes = indiaNow.getUTCMinutes();
+  const flooredMinutes = Math.floor(minutes / 15) * 15;
+  const windowStart = new Date(Date.UTC(
+    indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate(),
+    indiaNow.getUTCHours(), flooredMinutes, 0
+  ));
+  // Format as "HH:MM" in IST for a human-readable, stable window id (combined with the date).
+  const hh = String(windowStart.getUTCHours()).padStart(2, "0");
+  const mm = String(windowStart.getUTCMinutes()).padStart(2, "0");
+  const dateStr = `${windowStart.getUTCFullYear()}-${String(windowStart.getUTCMonth() + 1).padStart(2, "0")}-${String(windowStart.getUTCDate()).padStart(2, "0")}`;
+  return `${dateStr}T${hh}:${mm}`;
+}
+
+interface PremiumDiagnosticSnapshot {
+  timestamp: string;
+  atmCe: Record<string, number | null>;
+  atmPe: Record<string, number | null>;
+  spot: number;
+  spotChange: number;
+  vwapRelation: string | null;
+  pdhPdlRelation: string | null;
+  pcr: number | null;
+  pcrChange: number | null;
+  vix: number | null;
+  vixChange: number | null;
+  futuresOiBuildup: string | null;
+  callPutWalls: string | null;
+  atmOiBuildup: string | null;
+  straddleBehaviour: string | null;
+  sectorHeatmap: string | null;
+  structuralBias: string | null;
+}
+
+interface PremiumDiagnosticResult {
+  windowId: string;
+  windowStart: string;
+  windowEnd: string;
+  symbol: string;
+  snapshotCount: number;
+  generatedAt: string;
+  diagnostic: any;
+  error?: string;
+}
+
+const premiumDiagnosticBuffer = new Map<string, PremiumDiagnosticSnapshot[]>(); // key: symbol_windowId
+const premiumDiagnosticDiagnosed = new Set<string>(); // key: symbol_windowId, already processed
+const premiumDiagnosticResults: Record<string, PremiumDiagnosticResult[]> = { NIFTY: [] }; // pilot: NIFTY only
+const PREMIUM_DIAGNOSTIC_MAX_RESULTS = 20;
+const PREMIUM_DIAGNOSTIC_SYMBOLS = ["NIFTY"]; // pilot scope \u2014 not BANKNIFTY/SENSEX yet
+
+app.post("/api/premium-diagnostic/snapshot", async (c) => {
+  let body: { symbol?: string; snapshot?: PremiumDiagnosticSnapshot };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid request body" }, 400);
+  }
+  if (!body.symbol || !PREMIUM_DIAGNOSTIC_SYMBOLS.includes(body.symbol) || !body.snapshot) {
+    return c.json({ ok: false, reason: "symbol not in pilot scope or snapshot missing" });
+  }
+  const windowId = get15MinWindowStart(new Date());
+  const key = body.symbol + "_" + windowId;
+  if (!premiumDiagnosticBuffer.has(key)) premiumDiagnosticBuffer.set(key, []);
+  premiumDiagnosticBuffer.get(key)!.push(body.snapshot);
+  return c.json({ ok: true, windowId, bufferedCount: premiumDiagnosticBuffer.get(key)!.length });
+});
+
+app.get("/api/premium-diagnostic/latest", (c) => {
+  const symbol = c.req.query("symbol") || "NIFTY";
+  const results = premiumDiagnosticResults[symbol] || [];
+  return c.json({ symbol, results: results.slice(-5), totalGenerated: results.length });
+});
+
+async function runPremiumDiagnosticForWindow(symbol: string, windowId: string, snapshots: PremiumDiagnosticSnapshot[]): Promise<void> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const windowStartLocal = windowId.split("T")[1];
+  const [wh, wm] = windowStartLocal.split(":").map(Number);
+  const windowEndTotalMin = wh * 60 + wm + 15;
+  const windowEndLocal = `${String(Math.floor(windowEndTotalMin / 60)).padStart(2, "0")}:${String(windowEndTotalMin % 60).padStart(2, "0")}`;
+
+  if (!apiKey) {
+    premiumDiagnosticResults[symbol] = premiumDiagnosticResults[symbol] || [];
+    premiumDiagnosticResults[symbol].push({
+      windowId, windowStart: windowStartLocal, windowEnd: windowEndLocal, symbol,
+      snapshotCount: snapshots.length, generatedAt: new Date().toISOString(),
+      diagnostic: null, error: "ANTHROPIC_API_KEY not configured on the server",
+    });
+    return;
+  }
+  if (snapshots.length === 0) return; // nothing to diagnose
+
+  const inputPayload = {
+    window: { window_id: windowId, start_time: windowStartLocal, end_time: windowEndLocal, timezone: "Asia/Kolkata", duration_minutes: 15, window_status: "COMPLETED" },
+    snapshots,
+    snapshot_count: snapshots.length,
+    minimum_expected: 5,
+    note_if_incomplete: snapshots.length < 5 ? "Fewer than 5 snapshots were captured this window \u2014 report as PARTIAL or INSUFFICIENT data_quality, do not invent the missing ones." : null,
+    multi_timeframe: "not_available \u2014 this system does not yet compute 1m/3m/5m/15m/30m/45m/75m/125m/1D context; do not fabricate it.",
+    scope_note: "PILOT: NIFTY, current-week ATM CE/PE only \u2014 ATM\u00b13 strikes and other expiries/indices are not yet included.",
+  };
+
+  const systemPrompt = "You are the Premium Diagnostic and Market-Behaviour Explanation Layer for OptionPilot Pro. You explain verified calculations and observations supplied below for one completed 15-minute market window. You do NOT calculate a Rule Engine score, create a trading verdict (Bullish/Bearish/WAIT), change risk levels, override deterministic logic, or make unsupported predictions. Premium = Intrinsic + Extrinsic/Time Value. CE intrinsic = max(Spot-Strike,0). PE intrinsic = max(Strike-Spot,0). Intrinsic value alone is never bullish or bearish by itself \u2014 it only reflects spot-backed moneyness. IV affects the extrinsic component, not intrinsic. Never claim IV crush unless the supplied IV history explicitly shows a sharp decline \u2014 otherwise say 'possible volatility effect'. Never invent a number, price, IV, OI, or timeframe not supplied \u2014 if multi_timeframe is 'not_available', say so, do not guess it. Compare the start and end of the window using the snapshots to see if the path was persistent, gradual, sudden, reversing, or oscillating. Clearly separate confirmed observations (\"the data shows\") from possible explanations (\"may indicate\", \"is consistent with\"). Respond with ONLY a JSON object, no markdown, no extra text, matching this schema: {\"data_quality\": \"OK|PARTIAL|INSUFFICIENT\", \"window_summary\": string, \"intrinsic_extrinsic_analysis\": string, \"iv_analysis\": string, \"theta_decay_analysis\": string, \"oi_volume_pcr_analysis\": string, \"vwap_vix_analysis\": string, \"market_behaviour_observed\": string, \"confirmed_observations\": [string], \"possible_explanations\": [string], \"conflicts\": [string], \"missing_data\": [string]}.";
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 900,
+        system: systemPrompt,
+        messages: [{ role: "user", content: JSON.stringify(inputPayload) }],
+      }),
+    });
+
+    let diagnostic: any = null;
+    let error: string | undefined;
+    if (!response.ok) {
+      error = `Anthropic API error ${response.status}: ${await response.text()}`;
+    } else {
+      const json: any = await response.json();
+      const textBlock = Array.isArray(json.content) ? json.content.find((b: any) => b.type === "text") : null;
+      const raw = textBlock ? textBlock.text : null;
+      if (raw) {
+        try {
+          diagnostic = JSON.parse(raw.replace(/```json|```/g, "").trim());
+        } catch {
+          error = "Haiku response was not valid JSON";
+        }
+      } else {
+        error = "No text content in Haiku response";
+      }
+    }
+
+    premiumDiagnosticResults[symbol] = premiumDiagnosticResults[symbol] || [];
+    premiumDiagnosticResults[symbol].push({
+      windowId, windowStart: windowStartLocal, windowEnd: windowEndLocal, symbol,
+      snapshotCount: snapshots.length, generatedAt: new Date().toISOString(), diagnostic, error,
+    });
+    if (premiumDiagnosticResults[symbol].length > PREMIUM_DIAGNOSTIC_MAX_RESULTS) premiumDiagnosticResults[symbol].shift();
+  } catch (err: any) {
+    premiumDiagnosticResults[symbol] = premiumDiagnosticResults[symbol] || [];
+    premiumDiagnosticResults[symbol].push({
+      windowId, windowStart: windowStartLocal, windowEnd: windowEndLocal, symbol,
+      snapshotCount: snapshots.length, generatedAt: new Date().toISOString(),
+      diagnostic: null, error: `Request failed: ${err.message}`,
+    });
+  }
+}
+
+setInterval(() => {
+  try {
+    const now = new Date();
+    const currentWindowId = get15MinWindowStart(now);
+    for (const symbol of PREMIUM_DIAGNOSTIC_SYMBOLS) {
+      for (const [key, snapshots] of premiumDiagnosticBuffer.entries()) {
+        if (!key.startsWith(symbol + "_")) continue;
+        const windowId = key.slice(symbol.length + 1);
+        if (windowId === currentWindowId) continue; // still the active window, not completed yet
+        if (premiumDiagnosticDiagnosed.has(key)) continue; // already processed
+        premiumDiagnosticDiagnosed.add(key);
+        void runPremiumDiagnosticForWindow(symbol, windowId, snapshots).catch((err) => {
+          console.error("[Premium Diagnostic] window run failed:", err instanceof Error ? err.message : err);
+        });
+        premiumDiagnosticBuffer.delete(key);
+      }
+    }
+  } catch (err) {
+    console.error("[Premium Diagnostic] scheduler error:", err instanceof Error ? err.message : err);
+  }
+}, 60 * 1000); // check every minute for a just-completed 15-min window
 
 // Key stocks per index for the ALIGNMENT tab. Kite does not publish live
 // index constituent weights, so this dashboard does not hardcode a weight

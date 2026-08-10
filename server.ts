@@ -5035,6 +5035,8 @@ app.get("/", (c) => {
 
     let researchReportData = null;
     let researchLoading = false;
+    let researchAskAnswer = null;
+    let researchAskLoading = false;
     async function submitResearchQuery() {
       const dateEl = document.getElementById('researchDate');
       const indexEl = document.getElementById('researchIndex');
@@ -5058,6 +5060,34 @@ app.get("/", (c) => {
         researchReportData = { error: err.message };
       } finally {
         researchLoading = false;
+        updateUI();
+      }
+    }
+
+    async function submitResearchAsk() {
+      const dateEl = document.getElementById('researchAskDate');
+      const indexEl = document.getElementById('researchAskIndex');
+      const questionEl = document.getElementById('researchAskQuestion');
+      const date = dateEl ? dateEl.value : '';
+      const index = indexEl ? indexEl.value : 'NIFTY';
+      const question = questionEl ? questionEl.value.trim() : '';
+      if (!date) { showError('Pick a date first.'); return; }
+      if (!question) { showError('Type a question first.'); return; }
+      researchAskLoading = true;
+      updateUI();
+      try {
+        const response = await fetch('/api/research/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date, index, question }),
+        });
+        const json = await response.json();
+        if (!response.ok && !json.answer) throw new Error(json.error || 'Ask failed');
+        researchAskAnswer = json;
+      } catch (err) {
+        researchAskAnswer = { error: err.message };
+      } finally {
+        researchAskLoading = false;
         updateUI();
       }
     }
@@ -5103,6 +5133,38 @@ app.get("/", (c) => {
         }
         html += '</div>';
       }
+
+      // Past-Date Q&A (user-approved 2026-08-10): free-form question,
+      // answered by Haiku from the actual archived snapshots for that
+      // date \u2014 never a verdict, never fabricated data. Separate from
+      // the structured query above; both read the same underlying data.
+      html += '<div class="premium-card" style="margin-top:12px;">';
+      html += '<div class="card-title">Ask About a Past Date</div>';
+      html += '<div style="color:var(--muted); font-size:0.75rem; margin-bottom:10px;">Pick a date, ask anything in plain words (e.g. "why did the ATM CE premium fall around 11am?") \u2014 Haiku answers using only that day\u2019s actually recorded data, never a guess.</div>';
+      html += '<div style="display:flex; flex-direction:column; gap:8px;">';
+      html += '<label style="color:var(--muted); font-size:0.7rem;">Date<input type="date" id="researchAskDate" value="' + today + '" style="width:100%; padding:6px; margin-top:2px; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:6px; color:var(--text);"></label>';
+      html += '<label style="color:var(--muted); font-size:0.7rem;">Index<select id="researchAskIndex" style="width:100%; padding:6px; margin-top:2px; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:6px; color:var(--text);">';
+      html += '<option value="NIFTY">NIFTY</option><option value="BANKNIFTY">BANKNIFTY</option><option value="SENSEX">SENSEX</option>';
+      html += '</select></label>';
+      html += '<label style="color:var(--muted); font-size:0.7rem;">Question<textarea id="researchAskQuestion" rows="2" style="width:100%; padding:6px; margin-top:2px; background:rgba(0,0,0,0.2); border:1px solid var(--border); border-radius:6px; color:var(--text); font-family:inherit; resize:vertical;"></textarea></label>';
+      html += '<button onclick="submitResearchAsk()" style="background:var(--gold); color:#1a1a2e; font-weight:700; padding:8px; border-radius:6px; border:none; cursor:pointer; font-size:0.8rem;">' + (researchAskLoading ? 'Asking\u2026' : 'Ask') + '</button>';
+      html += '</div>';
+      if (researchAskAnswer) {
+        html += '<div style="border-top:1px solid var(--border); margin-top:10px; padding-top:10px;">';
+        if (researchAskAnswer.error) {
+          html += '<div class="error">\u26a0\ufe0f ' + escapeHtml(researchAskAnswer.error) + '</div>';
+        } else {
+          const dq = researchAskAnswer.data_quality;
+          html += '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">';
+          html += '<span style="color:var(--muted); font-size:0.68rem;">' + escapeHtml(researchAskAnswer.date) + ' \u2022 ' + escapeHtml(researchAskAnswer.symbol) + (researchAskAnswer.snapshotCount ? ' \u2022 ' + researchAskAnswer.snapshotCount + ' snapshots' : '') + '</span>';
+          html += '<span style="color:' + (dq === 'OK' ? 'var(--green)' : dq === 'PARTIAL' ? 'var(--gold)' : 'var(--red)') + '; font-size:0.6rem; background:rgba(255,255,255,0.06); padding:1px 6px; border-radius:4px;">' + escapeHtml(dq || '\u2014') + '</span>';
+          html += '</div>';
+          html += '<div style="color:var(--text); font-size:0.78rem; line-height:1.5;">' + escapeHtml(researchAskAnswer.answer || 'No answer.') + '</div>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+
       return html;
     }
 
@@ -11624,6 +11686,110 @@ app.post("/api/research/query", async (c) => {
   const symbol: "NIFTY" | "BANKNIFTY" | "SENSEX" = body.index === "BANKNIFTY" ? "BANKNIFTY" : body.index === "SENSEX" ? "SENSEX" : "NIFTY";
   const report = await computeResearchReport(date, symbol, body.eventType || null);
   return c.json(report);
+});
+
+// Past-Date Q&A (user-approved 2026-08-10): free-form question about an
+// archived (or today's live) date, answered by Haiku using ONLY the
+// actual archived snapshots (spot, ATM CE/PE premium/OI/IV/theta/vega/
+// delta, journal notes/verdict-changes) \u2014 never a trading verdict, never
+// fabricated data. Deterministic data retrieval (fetchArchivedDayData /
+// recorderSession, same as the structured Research query above);
+// Haiku is purely an explanation layer on top of what was actually
+// recorded, same AI boundary as every other Haiku use in this system.
+app.post("/api/research/ask", async (c) => {
+  let body: { date?: string; index?: string; question?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid request body \u2014 expected JSON with date, index, and question." }, 400);
+  }
+  const date = body.date;
+  const question = (body.question || "").trim();
+  if (!date) return c.json({ error: "date is required (YYYY-MM-DD)" }, 400);
+  if (!question) return c.json({ error: "question is required" }, 400);
+  const symbol: "NIFTY" | "BANKNIFTY" | "SENSEX" = body.index === "BANKNIFTY" ? "BANKNIFTY" : body.index === "SENSEX" ? "SENSEX" : "NIFTY";
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return c.json({ error: "ANTHROPIC_API_KEY is not configured on the server" }, 500);
+
+  const today = recorderSession.tradingDate || indiaTradingDate();
+  let snapshots: RecorderSnapshot[];
+  let journalForDay: JournalEntry[];
+  if (date === today) {
+    snapshots = recorderSession.snapshots;
+    journalForDay = journalEntries;
+  } else {
+    const archived = await fetchArchivedDayData(date);
+    if ("error" in archived) {
+      return c.json({
+        date, symbol, question,
+        data_quality: "INSUFFICIENT",
+        answer: `No archived data could be found for ${date}: ${archived.error}`,
+      });
+    }
+    snapshots = archived.snapshots;
+    journalForDay = archived.journalEntries;
+  }
+
+  const symbolSnapshots = snapshots
+    .map((s) => {
+      const leg = s[symbol];
+      if (!leg) return null;
+      return { timestamp: s.backendTimestamp, status: s.snapshotStatus, ...leg };
+    })
+    .filter((s) => s !== null);
+
+  if (symbolSnapshots.length === 0) {
+    return c.json({
+      date, symbol, question,
+      data_quality: "INSUFFICIENT",
+      answer: `No recorded snapshots exist for ${symbol} on ${date} \u2014 either the market was closed, the Recorder wasn't running, or that day wasn't archived. Nothing to analyze.`,
+    });
+  }
+
+  const relevantJournal = journalForDay
+    .filter((e) => symbol !== "BANKNIFTY") // Daily Journal covers NIFTY/SENSEX only, per its own spec
+    .map((e) => ({ timestamp: e.timestamp, verdictChanged: e.verdictChanged, previousVerdict: e.previousVerdict, currentVerdict: e.currentVerdict, notes: e.notes }));
+
+  const systemPrompt = "You are answering a specific question about ONE already-recorded trading day for OptionPilot Pro. You will be given the ACTUAL recorded 3-minute snapshots for that day (spot, ATM CE/PE premium, OI, IV, theta, vega, delta \u2014 whichever were captured; fields absent from the data were not recorded, do not guess them) and any Daily Journal entries. Answer the user's question using ONLY this supplied data. Never invent a number, price, IV, OI, or timestamp not present in the data. Never state a trading verdict (Bullish/Bearish/WAIT) or a BUY/SELL recommendation \u2014 you are explaining what already happened, not advising on what to do. Intrinsic value (Spot\u2212Strike for calls, Strike\u2212Spot for puts) is spot-driven; extrinsic/time value is affected by theta decay and IV \u2014 keep this distinction when relevant. If the data doesn't cover what's being asked (e.g. a specific time not captured, or a field that wasn't recorded that day), say so plainly rather than filling the gap. Distinguish 'the data shows' (confirmed) from 'this may indicate' (interpretation). Respond in plain, direct prose \u2014 a few sentences, not a report. Respond with ONLY a JSON object: {\"data_quality\": \"OK|PARTIAL|INSUFFICIENT\", \"answer\": string}.";
+
+  const userPayload = {
+    date, symbol, question,
+    snapshot_count: symbolSnapshots.length,
+    snapshots: symbolSnapshots,
+    journal_entries: relevantJournal,
+  };
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 500,
+        system: systemPrompt,
+        messages: [{ role: "user", content: JSON.stringify(userPayload) }],
+      }),
+    });
+
+    if (!response.ok) {
+      return c.json({ date, symbol, question, data_quality: "INSUFFICIENT", answer: null, error: `Anthropic API error ${response.status}: ${await response.text()}` }, 502);
+    }
+    const json: any = await response.json();
+    const textBlock = Array.isArray(json.content) ? json.content.find((b: any) => b.type === "text") : null;
+    const raw = textBlock ? textBlock.text : null;
+    let parsed: any = null;
+    if (raw) {
+      try {
+        parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
+      } catch {
+        parsed = { data_quality: "PARTIAL", answer: raw }; // fall back to raw text if not clean JSON, rather than failing outright
+      }
+    }
+    return c.json({ date, symbol, question, snapshotCount: symbolSnapshots.length, data_quality: parsed?.data_quality || "PARTIAL", answer: parsed?.answer || "No answer returned." });
+  } catch (err: any) {
+    return c.json({ date, symbol, question, data_quality: "INSUFFICIENT", answer: null, error: `Request failed: ${err.message}` }, 500);
+  }
 });
 
 // Step 5: Haiku explanation layer. The client sends the deterministic

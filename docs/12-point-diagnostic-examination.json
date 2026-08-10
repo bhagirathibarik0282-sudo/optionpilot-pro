@@ -1,0 +1,106 @@
+{
+  "document": "OptionPilot Pro \u2014 12 Advanced Diagnostic Points \u2014 Rigorous Codebase Examination",
+  "date": "2026-08-10",
+  "method": "Every finding below was verified by reading server.ts directly (grep + line inspection), not recalled from memory. No code was changed for this examination.",
+  "major_finding": "IV, Delta, Theta, Vega are ALREADY computed for EVERY strike (ATM\u00b110 for NIFTY/SENSEX, ATM\u00b16 for BankNifty) across ALL 4 expiries (Current/Next/Next-of-Next/Monthly), and already sent to the client as part of each expiry's ceStrikes/peStrikes arrays. This is a much stronger foundation than assumed earlier today \u2014 most of these 12 points need only NEW COMPUTATION/AGGREGATION logic, not new Kite data fetches.",
+
+  "points": [
+    {
+      "id": 1, "name": "Volatility Regime Engine",
+      "status": "PARTIALLY_BUILT",
+      "have": "Spot change, ATM IV (all 4 expiries), VIX + VIX change, Straddle state (Step 6A) \u2014 all already available.",
+      "missing": "Realized volatility \u2014 needs a rolling historical daily-return series, which does not exist anywhere in this codebase (only intraday snapshots + 1-day PDH/PDL).",
+      "buildable_now": "Volatility expansion/compression/stable classification using IV+VIX+Straddle only (skip realized vol, or approximate later)."
+    },
+    {
+      "id": 2, "name": "IV\u2013Intrinsic\u2013Extrinsic Cause Detector",
+      "status": "VERIFIED_BUILT (foundation) / new aggregation needed",
+      "have": "Premium, Intrinsic (computeIntrinsicValue), Extrinsic, IV, Spot \u2014 ALL already available for every strike/expiry.",
+      "missing": "Nothing data-wise. Just needs the classification logic (spot-driven vs volatility-supported vs mixed) written.",
+      "buildable_now": "Yes, immediately, ATM\u00b13 across all 4 expiries, no new data needed."
+    },
+    {
+      "id": 3, "name": "CE\u2013PE Volatility Battle / IV Skew",
+      "status": "VERIFIED_BUILT (foundation)",
+      "have": "CE IV and PE IV both already computed per strike per expiry. Skew = CE_IV \u2212 PE_IV is a one-line calculation.",
+      "missing": "Nothing. Only the skew-tracking/labeling logic.",
+      "buildable_now": "Yes, immediately."
+    },
+    {
+      "id": 4, "name": "IV Term-Structure Shock Detector",
+      "status": "VERIFIED_BUILT (foundation)",
+      "have": "ATM IV for Current/Next/Next-of-Next/Monthly all directly readable from m.expiries[0..3].",
+      "missing": "Nothing for a single-snapshot term structure. A 'shock' (sudden change) needs a previous-value comparison \u2014 same tracker pattern already used elsewhere (own key namespace, stateless-safe)."
+    },
+    {
+      "id": 5, "name": "Premium Migration",
+      "status": "PARTIALLY_BUILT",
+      "have": "Premium/Intrinsic/Extrinsic/IV across all 4 expiries, single snapshot.",
+      "missing": "'Migration' implies a TIME dimension (is premium concentration shifting toward later expiries over time) \u2014 needs a new per-expiry historical tracker; the just-built Premium Diagnostic 15-min buffer is a reusable template for this, currently NIFTY/current-week/ATM only."
+    },
+    {
+      "id": 6, "name": "OI + IV Matrix",
+      "status": "PARTIALLY_BUILT",
+      "have": "OI, IV, Volume, Premium \u2014 all current-snapshot values available.",
+      "missing": "OI change / IV change need a previous-value reference. The existing chain-level intrinsic arrow tracker (added earlier today, '_chainintrinsic_' namespace) is a direct template \u2014 same pattern extends cleanly to IV/OI with a new, separate key namespace."
+    },
+    {
+      "id": 7, "name": "Straddle\u2013IV Divergence",
+      "status": "PARTIALLY_BUILT",
+      "have": "ATM CE/PE premium, Step 6A's straddleState, ATM IV, spot movement \u2014 available.",
+      "missing": "'Divergence' needs straddle-vs-IV trend comparison over time \u2014 same tracker-extension need as points 5/6."
+    },
+    {
+      "id": 8, "name": "Volatility Compression \u2192 Expansion Detector",
+      "status": "MISSING (needs real historical store)",
+      "have": "3-min Recorder snapshots exist, but do NOT include IV/theta/vega/straddle \u2014 checked RecorderIndexSnapshot directly, it only has spot/PDH-PDL/VWAP/futures LTP+OI/ATM CE+PE LTP+OI.",
+      "missing": "Sequential IV/straddle history. Two options: (a) extend RecorderIndexSnapshot with IV/straddle fields (small, safe addition, mirrors existing fields), or (b) reuse/extend the just-built Premium Diagnostic 15-min buffer (already collects this per-snapshot, just needs the fields added and a compression/expansion classifier on top).",
+      "note": "The spec's own 'avoid future leakage' rule is already satisfied by design in the 15-min buffer pattern (only completed windows are diagnosed)."
+    },
+    {
+      "id": 9, "name": "Time-Decay Pressure Map",
+      "status": "VERIFIED_BUILT (foundation)",
+      "have": "Extrinsic value/%, Theta, DTE (computeDaysToExpiry), IV \u2014 ALL already available per strike per expiry. This is essentially the same data already used in the existing Premium Diagnostic card (chapter 03).",
+      "missing": "Nothing. Just needs the decay-exposure classification extended across ATM\u00b13 and all 4 expiries instead of ATM-only."
+    },
+    {
+      "id": 10, "name": "Premium Quality / Composition",
+      "status": "VERIFIED_BUILT (foundation)",
+      "have": "Intrinsic %, Extrinsic % already computed. Intrinsic-heavy/Extrinsic-heavy/Balanced is a trivial threshold classification on top.",
+      "missing": "Nothing. Easiest point on the list to fully implement."
+    },
+    {
+      "id": 11, "name": "Multi-Expiry Agreement Engine",
+      "status": "PARTIALLY_BUILT",
+      "have": "Intrinsic/Extrinsic/IV/OI/Volume all available across all 4 expiries for a single snapshot \u2014 single-snapshot agreement/divergence IS buildable now.",
+      "missing": "Skew comparison needs point 3 built first (trivial). 'Agreement over time' (not just this instant) needs the same historical tracker extension as points 5/6/7."
+    },
+    {
+      "id": 12, "name": "Market Story vs Option Story",
+      "status": "PARTIALLY_BUILT (synthesis point)",
+      "have": "Market-story signals (spot/futures/OI/PCR/VIX/sector/gap/structure) are ALL already computed elsewhere in the codebase and reusable via lastRuleEngineResult contributions (same pattern already used in the existing Premium Diagnostic Layer, chapter 03) \u2014 no new stateful calls needed. Option-story signals depend on points 2\u201310 above.",
+      "missing": "This is a synthesis/aggregation layer over the other 11 points \u2014 should be built LAST, after those exist."
+    }
+  ],
+
+  "cross_cutting_findings": [
+    "6 of 12 points (2, 3, 4, 9, 10, and the single-snapshot part of 12) are buildable IMMEDIATELY with zero new data \u2014 only new computation/aggregation logic on data already fetched and already sent to the client.",
+    "6 of 12 points (1 partially, 5, 6, 7, 8, 11 partially) need a NEW historical/time-series tracking layer for 'change over time' or 'divergence' \u2014 this does not exist yet for IV/Greeks/straddle (only for LTP/OI, and only for ATM/current-week in the just-built Premium Diagnostic 15-min buffer).",
+    "The just-built Premium Diagnostic 15-min window infrastructure (buffer + scheduler + Haiku call, NIFTY-pilot) is DIRECTLY reusable as the historical-tracking foundation these 6 points need \u2014 recommend extending IT rather than building a second, parallel history mechanism.",
+    "Realized Volatility (point 1) is the one item with no existing foundation at all and no obvious reuse path \u2014 would need a genuinely new daily-return calculation from stored daily closes, which aren't tracked long-term either (no database, resets on redeploy, same disclosed limitation as Recorder/Outcome Engine all day today)."
+  ],
+
+  "recommended_build_order": [
+    "Phase A (no new data, build immediately): Points 2, 3, 4 (single-snapshot), 9, 10 \u2014 pure aggregation of already-available IV/Greeks/Intrinsic/Extrinsic across ATM\u00b13 and all 4 expiries.",
+    "Phase B (extend the existing 15-min buffer with IV/OI/straddle fields): Points 1 (partial), 5, 6, 7, 8, 4 (shock/change part), 11 (time part) \u2014 all share the same missing ingredient (historical IV/Greeks/straddle series) and the same reusable infrastructure.",
+    "Phase C (synthesis, build last): Point 12, combining Phase A + Phase B outputs with existing market-story signals."
+  ],
+
+  "hard_rules_preserved": [
+    "None of this touches runRuleEngine(), scoring, verdict, or confidence \u2014 confirmed, no changes proposed to those functions.",
+    "All 12 points remain 'score: 0, status: Diagnostic only' per the spec's own final_rule \u2014 not proposing to add scoring weight.",
+    "Per the user's explicit correction to the spec's own default ('we will not observe it, we will add it'): this report treats 'add' as 'implement the diagnostic layer in code, as a real feature' \u2014 not merely produce a written explanation \u2014 while still respecting the spec's separate, unrelated rule about not adding these to the deterministic score."
+  ],
+
+  "final_instruction_needed_from_user": "Confirm Phase A / B / C build order, or specify a different starting subset, before any code is written."
+}

@@ -338,6 +338,21 @@ interface RecorderIndexSnapshot {
   peLtp: number | null;
   ceOi: number | null;
   peOi: number | null;
+  // Added 2026-08-10 (user-approved): start building the historical
+  // IV/Greeks series NOW, via the existing daily Drive archive, so
+  // future diagnostics (12-point spec, Phase B: term-structure shock,
+  // OI+IV matrix, straddle-IV divergence, etc.) have real day-over-day
+  // history to work with after enough days/weeks accumulate. Deliberately
+  // ATM-only, current-week-expiry-only for now (matches Phase A/B scope
+  // already agreed) — the atmCe/atmPe objects already carry these
+  // fields server-side (calcGreeks/calcImpliedVolatility), so this is
+  // pure pass-through, not a new computation.
+  ceIv: number | null;
+  peIv: number | null;
+  ceTheta: number | null;
+  peTheta: number | null;
+  ceVega: number | null;
+  peVega: number | null;
   exchangeTimestamp: string | null;
   snapshotId: string | null;
 }
@@ -406,6 +421,12 @@ function toTruthValidatedRecorderIndexSnapshot(m: IndexMetrics | undefined, trut
     peLtp: peOk && atmPe && atmPe.lastPrice > 0 ? atmPe.lastPrice : null,
     ceOi: ceOk && atmCe ? atmCe.oi : null,
     peOi: peOk && atmPe ? atmPe.oi : null,
+    ceIv: ceOk && atmCe ? atmCe.iv : null,
+    peIv: peOk && atmPe ? atmPe.iv : null,
+    ceTheta: ceOk && atmCe ? atmCe.theta : null,
+    peTheta: peOk && atmPe ? atmPe.theta : null,
+    ceVega: ceOk && atmCe ? atmCe.vega : null,
+    peVega: peOk && atmPe ? atmPe.vega : null,
     exchangeTimestamp: spotOk ? m.exchangeTimestamp || null : null,
     snapshotId: m.snapshotId || null,
   };
@@ -432,6 +453,12 @@ function toRecorderIndexSnapshot(m: IndexMetrics | undefined): RecorderIndexSnap
     peLtp: atmPe && atmPe.lastPrice > 0 ? atmPe.lastPrice : null,
     ceOi: atmCe ? atmCe.oi : null,
     peOi: atmPe ? atmPe.oi : null,
+    ceIv: atmCe ? atmCe.iv : null,
+    peIv: atmPe ? atmPe.iv : null,
+    ceTheta: atmCe ? atmCe.theta : null,
+    peTheta: atmPe ? atmPe.theta : null,
+    ceVega: atmCe ? atmCe.vega : null,
+    peVega: atmPe ? atmPe.vega : null,
     exchangeTimestamp: m.exchangeTimestamp || null,
     snapshotId: m.snapshotId || null,
   };

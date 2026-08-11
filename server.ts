@@ -21039,7 +21039,7 @@ app.get("/api/audit/dhan-expired-options-check", async (c) => {
     securityId: mapping.underlyingScrip,
     instrument: "OPTIDX",
     expiryFlag: "WEEK",
-    expiryCode: 0,
+    expiryCode: 1, // Dhan DH-905 "expiryCode is required" when 0 was sent — 1-indexed nearest expiry, confirmed by live probe on 2026-08-11
     strike: "ATM",
     drvOptionType: "CALL",
     requiredData: ["open", "high", "low", "close", "volume", "oi", "implied_volatility", "spot"],

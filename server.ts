@@ -1933,6 +1933,24 @@ function isMarketOpenNowServer(): boolean {
   return minutesSinceMidnight >= 9 * 60 + 15 && minutesSinceMidnight <= 15 * 60 + 30;
 }
 
+type V2MarketPhase = "WEEKEND" | "PREMARKET" | "OPENING_GRACE" | "LIVE_SESSION" | "POSTMARKET";
+
+function v2MarketPhaseNow(): V2MarketPhase {
+  const now = new Date();
+  const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+  const ist = new Date(istString);
+  const day = ist.getDay();
+  if (day === 0 || day === 6) return "WEEKEND";
+  const minutes = ist.getHours() * 60 + ist.getMinutes();
+  if (minutes < 9 * 60 + 15) return "PREMARKET";
+  // Give the 3-minute recorder/quote pipeline two cycles to initialize after 09:15.
+  // This avoids false CRITICAL alerts during normal startup without weakening any
+  // live-session freshness or candidate data-quality gate.
+  if (minutes < 9 * 60 + 21) return "OPENING_GRACE";
+  if (minutes <= 15 * 60 + 30) return "LIVE_SESSION";
+  return "POSTMARKET";
+}
+
 function indiaTradingDate(): string {
   const now = new Date();
   const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
@@ -16089,7 +16107,8 @@ type V2WatchdogSnapshot = {
   architectureRole: "H9_OBSERVABILITY_AI_DIAGNOSTIC_WATCHDOG";
   generatedAt: string;
   tradingDate: string;
-  overallStatus: "HEALTHY" | "DEGRADED" | "CRITICAL";
+  overallStatus: "STANDBY" | "HEALTHY" | "DEGRADED" | "CRITICAL";
+  marketPhase: V2MarketPhase;
   issues: V2WatchdogIssue[];
   systemHealth: ReturnType<typeof computeSystemHealth>;
   recorder: {
@@ -16139,7 +16158,8 @@ function buildV2DiagnosticWatchdogSnapshot(): V2WatchdogSnapshot {
   const health = computeSystemHealth();
   const latestBySymbol = v2LatestShadowBySymbol();
   const issues: V2WatchdogIssue[] = [];
-  const marketOpen = isMarketOpenNowServer();
+  const marketPhase = v2MarketPhaseNow();
+  const marketOpen = marketPhase === "LIVE_SESSION";
   const lastSnapshotAgeSec = recorderSession.lastSnapshotAt
     ? Math.max(0, Math.round((Date.now() - new Date(recorderSession.lastSnapshotAt).getTime()) / 1000))
     : null;
@@ -16276,13 +16296,16 @@ function buildV2DiagnosticWatchdogSnapshot(): V2WatchdogSnapshot {
     ? "CRITICAL"
     : issues.some((x) => x.severity === "WARNING")
       ? "DEGRADED"
-      : "HEALTHY";
+      : marketPhase === "LIVE_SESSION"
+        ? "HEALTHY"
+        : "STANDBY";
 
   return {
     architectureRole: "H9_OBSERVABILITY_AI_DIAGNOSTIC_WATCHDOG",
     generatedAt,
     tradingDate,
     overallStatus,
+    marketPhase,
     issues,
     systemHealth: health,
     recorder: {
@@ -16761,32 +16784,44 @@ interface ModuleHealth {
 }
 
 function healthOfTruthEngine(): ModuleHealth {
+  const marketPhase = v2MarketPhaseNow();
+  const requireLive = marketPhase === "LIVE_SESSION";
   let session: KiteSession | undefined;
   for (const s of sessions.values()) {
     if (s.expiresAt > Date.now()) { session = s; break; }
   }
   if (!session || !session.marketSnapshot) {
-    return { moduleName: "Truth Engine", status: "DOWN", metrics: { reason: "no_active_session_or_snapshot" }, sinceTimestamp: new Date().toISOString() };
+    return requireLive
+      ? { moduleName: "Truth Engine", status: "DOWN", metrics: { reason: "no_active_session_or_snapshot", marketPhase }, sinceTimestamp: new Date().toISOString() }
+      : { moduleName: "Truth Engine", status: "HEALTHY", metrics: { reason: "standby_outside_live_session", marketPhase }, sinceTimestamp: new Date().toISOString() };
   }
   const reports = (["NIFTY", "BANKNIFTY", "SENSEX"] as const).map((sym) => computeTruthReport(session!.marketSnapshot![sym]));
   const invalidCount = reports.filter((r) => r.overallVerdict === "INVALID").length;
   const trueCount = reports.filter((r) => r.overallVerdict === "TRUE").length;
-  const status: HealthStatus = invalidCount === 3 ? "DOWN" : invalidCount > 0 || trueCount < 3 ? "DEGRADED" : "HEALTHY";
+  const status: HealthStatus = !requireLive ? "HEALTHY" : invalidCount === 3 ? "DOWN" : invalidCount > 0 || trueCount < 3 ? "DEGRADED" : "HEALTHY";
   return {
     moduleName: "Truth Engine",
     status,
-    metrics: { trueCount, invalidCount, verdicts: { NIFTY: reports[0].overallVerdict, BANKNIFTY: reports[1].overallVerdict, SENSEX: reports[2].overallVerdict } },
+    metrics: { marketPhase, liveEvaluationRequired: requireLive, trueCount, invalidCount, verdicts: { NIFTY: reports[0].overallVerdict, BANKNIFTY: reports[1].overallVerdict, SENSEX: reports[2].overallVerdict } },
     sinceTimestamp: new Date().toISOString(),
   };
 }
 
 function healthOfRecorderEngine(): ModuleHealth {
-  const status: HealthStatus = recorderSession.status === "RECORDING" ? "HEALTHY" : recorderSession.status === "DEGRADED" ? "DEGRADED" : "DOWN";
+  const marketPhase = v2MarketPhaseNow();
+  const requireLive = marketPhase === "LIVE_SESSION";
+  const status: HealthStatus = !requireLive
+    ? "HEALTHY"
+    : recorderSession.status === "RECORDING"
+      ? "HEALTHY"
+      : recorderSession.status === "DEGRADED"
+        ? "DEGRADED"
+        : "DOWN";
   const ageSec = recorderSession.lastSnapshotAt ? Math.round((Date.now() - new Date(recorderSession.lastSnapshotAt).getTime()) / 1000) : null;
   return {
     moduleName: "Recorder Engine",
     status,
-    metrics: { recorderStatus: recorderSession.status, snapshotCount: recorderSession.snapshots.length, lastSnapshotAgeSec: ageSec, lastError: recorderSession.lastErrorRedacted },
+    metrics: { marketPhase, liveRecordingRequired: requireLive, recorderStatus: recorderSession.status, snapshotCount: recorderSession.snapshots.length, lastSnapshotAgeSec: ageSec, lastError: recorderSession.lastErrorRedacted },
     sinceTimestamp: recorderSession.lastSnapshotAt || new Date().toISOString(),
   };
 }
@@ -16795,7 +16830,7 @@ function healthOfGoogleDriveSuperBrain(): ModuleHealth {
   const connected = !!driveSession.refreshTokenEncrypted;
   const lastArchive = driveArchives.length > 0 ? driveArchives[driveArchives.length - 1] : null;
   let status: HealthStatus;
-  if (!connected) status = "DEGRADED"; // not connected is an expected, non-fatal state, not a DOWN condition
+  if (!connected) status = "DEGRADED"; // genuine persistence warning at any market phase
   else if (lastArchive && lastArchive.status === "ARCHIVE_FAILED") status = "DEGRADED";
   else status = "HEALTHY";
   return {
@@ -16807,19 +16842,23 @@ function healthOfGoogleDriveSuperBrain(): ModuleHealth {
 }
 
 function healthOfDailyJournal(): ModuleHealth {
+  const marketPhase = v2MarketPhaseNow();
+  const requireLive = marketPhase === "LIVE_SESSION";
   if (journalEntries.length === 0) {
-    return { moduleName: "Daily Journal", status: isMarketOpenNowServer() ? "DEGRADED" : "HEALTHY", metrics: { entryCount: 0, reason: isMarketOpenNowServer() ? "no_entries_yet_during_market_hours" : "market_closed" }, sinceTimestamp: new Date().toISOString() };
+    return { moduleName: "Daily Journal", status: requireLive ? "DEGRADED" : "HEALTHY", metrics: { entryCount: 0, marketPhase, reason: requireLive ? "no_entries_yet_during_live_session" : "standby_outside_live_session" }, sinceTimestamp: new Date().toISOString() };
   }
   const latest = journalEntries[journalEntries.length - 1];
   const ageSec = Math.round((Date.now() - new Date(latest.timestamp).getTime()) / 1000);
-  const status: HealthStatus = !isMarketOpenNowServer() ? "HEALTHY" : ageSec > 10 * 60 ? "DEGRADED" : "HEALTHY";
-  return { moduleName: "Daily Journal", status, metrics: { entryCount: journalEntries.length, lastEntryAgeSec: ageSec }, sinceTimestamp: latest.timestamp };
+  const status: HealthStatus = !requireLive ? "HEALTHY" : ageSec > 10 * 60 ? "DEGRADED" : "HEALTHY";
+  return { moduleName: "Daily Journal", status, metrics: { marketPhase, entryCount: journalEntries.length, lastEntryAgeSec: ageSec }, sinceTimestamp: latest.timestamp };
 }
 
 function healthOfMarketDnaEngine(): ModuleHealth {
+  const marketPhase = v2MarketPhaseNow();
+  const requireLive = marketPhase === "LIVE_SESSION";
   const count = recorderSession.snapshots.length;
-  const status: HealthStatus = count >= DNA_MIN_SNAPSHOTS ? "HEALTHY" : count > 0 ? "DEGRADED" : "DOWN";
-  return { moduleName: "Market DNA Engine", status, metrics: { availableSnapshots: count, minimumRequired: DNA_MIN_SNAPSHOTS }, sinceTimestamp: new Date().toISOString() };
+  const status: HealthStatus = !requireLive ? "HEALTHY" : count >= DNA_MIN_SNAPSHOTS ? "HEALTHY" : count > 0 ? "DEGRADED" : "DOWN";
+  return { moduleName: "Market DNA Engine", status, metrics: { marketPhase, liveEvaluationRequired: requireLive, availableSnapshots: count, minimumRequired: DNA_MIN_SNAPSHOTS }, sinceTimestamp: new Date().toISOString() };
 }
 
 let lastOverallHealthStatus: HealthStatus = "HEALTHY";

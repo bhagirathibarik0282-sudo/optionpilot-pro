@@ -21587,15 +21587,15 @@ app.get("/api/audit/dhan-bug02-iv-check", async (c) => {
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
   const mandatoryTests = [
-    { name: "ATM_CALL_CURRENT_OR_NEAR_EXPIRY", optionType: "CALL", expiryCode: 0 },
-    { name: "ATM_PUT_CURRENT_OR_NEAR_EXPIRY", optionType: "PUT", expiryCode: 0 },
-    { name: "ATM_CALL_NEXT_EXPIRY", optionType: "CALL", expiryCode: 1 },
-    { name: "ATM_PUT_NEXT_EXPIRY", optionType: "PUT", expiryCode: 1 },
+    { name: "ATM_CALL_CURRENT_OR_NEAR_EXPIRY", optionType: "CALL", expiryCode: 1 },
+    { name: "ATM_PUT_CURRENT_OR_NEAR_EXPIRY", optionType: "PUT", expiryCode: 1 },
+    { name: "ATM_CALL_NEXT_EXPIRY", optionType: "CALL", expiryCode: 2 },
+    { name: "ATM_PUT_NEXT_EXPIRY", optionType: "PUT", expiryCode: 2 },
   ] as const;
 
   const ivKeyPattern = /(\biv\b|implied[_]?volatility)/i;
   const timestampKeyPattern = /timestamp/i;
-  const oiKeyPattern = /(^oi$|open[_]?interest)/i;
+  const oiKeyPattern = /(\boi\b|open[_]?interest)/i;
   const spotKeyPattern = /spot/i;
 
   const testResults: any[] = [];

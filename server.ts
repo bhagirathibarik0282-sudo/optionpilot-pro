@@ -18916,6 +18916,376 @@ app.get("/api/dhan/live", async (c) => {
   }
 });
 
+// ============================================================================
+// DHAN MIGRATION — D4 NORMALIZED ADAPTER (READ-ONLY, DIAGNOSTIC ONLY)
+// Purpose: convert raw Dhan Option Chain payload into a provider-neutral
+// normalized shape, PARALLEL to (not replacing) the existing PremiumData /
+// IndexMetrics interfaces used by M1-M12B. This is intentionally a NEW,
+// separate type + route — it does not modify PremiumData/IndexMetrics, does
+// not touch refreshMarketSnapshot(), Kite, or any M1-M12B module wiring
+// (that integration is explicitly D6 scope, not this pass).
+//
+// Fields Dhan's Option Chain API cannot supply (tradingSymbol, lotSize,
+// tickSize — these require the separate instrument-master endpoint, not yet
+// fetched per D2's scope decision) are left null with an explicit reason,
+// never fabricated. Intrinsic/extrinsic and moneyness are computed here
+// from spot+strike, mirroring the existing platform convention.
+// ============================================================================
+
+interface DhanNormalizedLeg {
+  provider: "DHAN";
+  underlying: string;
+  exchangeSegment: string; // the underlying's segment (IDX_I) — the LEG's own
+                            // trading segment (e.g. NSE_FNO) is not confirmed
+                            // by the Option Chain API response and is left null
+  legExchangeSegment: null; // UNAVAILABLE_FROM_OPTIONCHAIN_API — requires instrument master
+  securityId: number | null;
+  tradingSymbol: null; // UNAVAILABLE_FROM_OPTIONCHAIN_API — requires instrument master
+  expiryDate: string;
+  strike: number;
+  optionType: "CE" | "PE";
+  moneyness: "ITM" | "ATM" | "OTM";
+  lotSize: null; // UNAVAILABLE_FROM_OPTIONCHAIN_API — requires instrument master
+  tickSize: null; // UNAVAILABLE_FROM_OPTIONCHAIN_API — requires instrument master
+  lastPrice: number | null;
+  bid: number | null;
+  ask: number | null;
+  volume: number | null;
+  oi: number | null;
+  previousOi: number | null;
+  previousClose: number | null;
+  change: number | null; // lastPrice - previousClose, null if either input missing
+  intrinsic: number | null;
+  extrinsic: number | null;
+  intrinsicPct: number | null;
+  extrinsicPct: number | null;
+  iv: number | null;
+  ivSuspect: boolean; // true when iv===0 AND lastPrice>0 — a known Dhan zero-DTE/deep-ITM quirk observed live 2026-08-11, not a genuine reading
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  greeksSource: "DHAN_NATIVE";
+  greeksSuspect: boolean; // true when all of delta/gamma/theta/vega are exactly 0 while lastPrice>0
+  averagePrice: number | null;
+  averagePriceSource: "UNVERIFIED AVERAGE PRICE — NOT VWAP"; // Dhan's average_price meaning has not been verified against a true session VWAP, same caution as the existing Kite-side convention
+  dayHigh: null; // UNAVAILABLE — requires separate OHLC/historical call, out of scope this pass
+  dayLow: null; // UNAVAILABLE — requires separate OHLC/historical call, out of scope this pass
+  pdh: null; // UNAVAILABLE — same reason
+  pdl: null; // UNAVAILABLE — same reason
+  quoteTimestamp: "UNAVAILABLE_FROM_PROVIDER";
+  contractRegime: "DHAN_OPTIONCHAIN_DERIVED"; // distinct from the Kite-side "LIVE_CONTRACT_MASTER" — this leg has NOT been cross-checked against Dhan's instrument master, only against the live Option Chain snapshot
+}
+
+function normalizeDhanLeg(params: {
+  underlying: string;
+  underlyingSeg: string;
+  expiry: string;
+  strike: number;
+  optionType: "CE" | "PE";
+  spot: number;
+  leg: any | undefined;
+}): DhanNormalizedLeg | null {
+  const { underlying, underlyingSeg, expiry, strike, optionType, spot, leg } = params;
+  if (!leg) return null;
+
+  const lastPrice = typeof leg.last_price === "number" ? leg.last_price : null;
+  const previousClose = typeof leg.previous_close_price === "number" ? leg.previous_close_price : null;
+  const change = lastPrice !== null && previousClose !== null ? lastPrice - previousClose : null;
+
+  let moneyness: "ITM" | "ATM" | "OTM";
+  if (strike === spot) moneyness = "ATM";
+  else if (optionType === "CE") moneyness = strike < spot ? "ITM" : "OTM";
+  else moneyness = strike > spot ? "ITM" : "OTM";
+
+  let intrinsic: number | null = null;
+  let extrinsic: number | null = null;
+  let intrinsicPct: number | null = null;
+  let extrinsicPct: number | null = null;
+  if (lastPrice !== null) {
+    intrinsic = optionType === "CE" ? Math.max(0, spot - strike) : Math.max(0, strike - spot);
+    extrinsic = Math.max(0, lastPrice - intrinsic);
+    if (lastPrice > 0) {
+      intrinsicPct = (intrinsic / lastPrice) * 100;
+      extrinsicPct = (extrinsic / lastPrice) * 100;
+    }
+  }
+
+  const iv = typeof leg.implied_volatility === "number" ? leg.implied_volatility : null;
+  const delta = leg.greeks && typeof leg.greeks.delta === "number" ? leg.greeks.delta : null;
+  const gamma = leg.greeks && typeof leg.greeks.gamma === "number" ? leg.greeks.gamma : null;
+  const theta = leg.greeks && typeof leg.greeks.theta === "number" ? leg.greeks.theta : null;
+  const vega = leg.greeks && typeof leg.greeks.vega === "number" ? leg.greeks.vega : null;
+
+  // Flag the exact quirk observed live 2026-08-11: deep-ITM/zero-DTE legs
+  // where Dhan returns iv=0 and all Greeks=0 despite a real nonzero
+  // lastPrice. This is NOT treated as a genuine zero — downstream must
+  // treat ivSuspect/greeksSuspect === true as UNAVAILABLE, not as data.
+  const ivSuspect = iv === 0 && lastPrice !== null && lastPrice > 0;
+  const greeksSuspect =
+    delta === 0 && gamma === 0 && theta === 0 && vega === 0 && lastPrice !== null && lastPrice > 0;
+
+  return {
+    provider: "DHAN",
+    underlying,
+    exchangeSegment: underlyingSeg,
+    legExchangeSegment: null,
+    securityId: typeof leg.security_id === "number" ? leg.security_id : null,
+    tradingSymbol: null,
+    expiryDate: expiry,
+    strike,
+    optionType,
+    moneyness,
+    lotSize: null,
+    tickSize: null,
+    lastPrice,
+    bid: typeof leg.top_bid_price === "number" ? leg.top_bid_price : null,
+    ask: typeof leg.top_ask_price === "number" ? leg.top_ask_price : null,
+    volume: typeof leg.volume === "number" ? leg.volume : null,
+    oi: typeof leg.oi === "number" ? leg.oi : null,
+    previousOi: typeof leg.previous_oi === "number" ? leg.previous_oi : null,
+    previousClose,
+    change,
+    intrinsic,
+    extrinsic,
+    intrinsicPct,
+    extrinsicPct,
+    iv,
+    ivSuspect,
+    delta,
+    gamma,
+    theta,
+    vega,
+    greeksSource: "DHAN_NATIVE",
+    greeksSuspect,
+    averagePrice: typeof leg.average_price === "number" ? leg.average_price : null,
+    averagePriceSource: "UNVERIFIED AVERAGE PRICE — NOT VWAP",
+    dayHigh: null,
+    dayLow: null,
+    pdh: null,
+    pdl: null,
+    quoteTimestamp: "UNAVAILABLE_FROM_PROVIDER",
+    contractRegime: "DHAN_OPTIONCHAIN_DERIVED",
+  };
+}
+
+app.get("/api/dhan/normalized", async (c) => {
+  const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
+  const rangeParam = parseInt(c.req.query("range") || "3", 10);
+  const range = Number.isFinite(rangeParam) && rangeParam > 0 && rangeParam <= 10 ? rangeParam : 3;
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+
+  if (!accessToken || !clientId) {
+    return c.json(
+      {
+        architectureRole: "D4_NORMALIZED_ADAPTER",
+        generatedAt: new Date().toISOString(),
+        status: "NOT_CONFIGURED",
+        error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+      },
+      503
+    );
+  }
+
+  const mapping = DHAN_UNDERLYING_MAP[symbolParam];
+  if (!mapping) {
+    return c.json(
+      {
+        architectureRole: "D4_NORMALIZED_ADAPTER",
+        generatedAt: new Date().toISOString(),
+        status: "NOT_YET_MAPPED",
+        symbol: symbolParam,
+        supportedSymbols: Object.keys(DHAN_UNDERLYING_MAP),
+      },
+      501
+    );
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    "access-token": accessToken,
+    "client-id": clientId,
+  };
+
+  try {
+    const expiryCacheKey = `expirylist_${symbolParam}`;
+    let expiries: string[];
+    const cachedExpiry = DHAN_LIVE_CACHE.get(expiryCacheKey);
+    if (cachedExpiry && Date.now() - cachedExpiry.fetchedAt < 5 * 60 * 1000) {
+      expiries = cachedExpiry.payload;
+    } else {
+      const expiryRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain/expirylist", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          UnderlyingScrip: mapping.underlyingScrip,
+          UnderlyingSeg: mapping.underlyingSeg,
+        }),
+      });
+      const raw = await expiryRes.text();
+      let parsed: any = null;
+      try {
+        parsed = raw ? JSON.parse(raw) : null;
+      } catch {
+        parsed = null;
+      }
+      if (!expiryRes.ok || !parsed || !Array.isArray(parsed.data) || parsed.data.length === 0) {
+        return c.json(
+          {
+            architectureRole: "D4_NORMALIZED_ADAPTER",
+            generatedAt: new Date().toISOString(),
+            status: "FAIL",
+            symbol: symbolParam,
+            step: "expirylist",
+            httpStatus: expiryRes.status,
+          },
+          502
+        );
+      }
+      expiries = parsed.data;
+      DHAN_LIVE_CACHE.set(expiryCacheKey, { fetchedAt: Date.now(), payload: expiries });
+    }
+
+    const expiryQuery = c.req.query("expiry");
+    const targetExpiry = expiryQuery && expiries.includes(expiryQuery) ? expiryQuery : expiries[0];
+
+    const chainCacheKey = `optionchain_${symbolParam}_${targetExpiry}`;
+    let chainPayload: any;
+    const cachedChain = DHAN_LIVE_CACHE.get(chainCacheKey);
+    if (cachedChain && Date.now() - cachedChain.fetchedAt < DHAN_LIVE_CACHE_TTL_MS) {
+      chainPayload = cachedChain.payload;
+    } else {
+      const chainRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          UnderlyingScrip: mapping.underlyingScrip,
+          UnderlyingSeg: mapping.underlyingSeg,
+          Expiry: targetExpiry,
+        }),
+      });
+      const raw = await chainRes.text();
+      let parsed: any = null;
+      try {
+        parsed = raw ? JSON.parse(raw) : null;
+      } catch {
+        parsed = null;
+      }
+      if (!chainRes.ok || !parsed || !parsed.data || typeof parsed.data.oc !== "object") {
+        return c.json(
+          {
+            architectureRole: "D4_NORMALIZED_ADAPTER",
+            generatedAt: new Date().toISOString(),
+            status: "FAIL",
+            symbol: symbolParam,
+            step: "optionchain",
+            httpStatus: chainRes.status,
+          },
+          502
+        );
+      }
+      chainPayload = parsed;
+      DHAN_LIVE_CACHE.set(chainCacheKey, { fetchedAt: Date.now(), payload: chainPayload });
+    }
+
+    const spot: number | null =
+      typeof chainPayload.data.last_price === "number" ? chainPayload.data.last_price : null;
+    const oc: Record<string, { ce?: any; pe?: any }> = chainPayload.data.oc;
+    const allStrikes = Object.keys(oc)
+      .map((s) => ({ raw: s, val: parseFloat(s) }))
+      .filter((x) => !Number.isNaN(x.val))
+      .sort((a, b) => a.val - b.val);
+
+    if (spot === null || allStrikes.length === 0) {
+      return c.json(
+        {
+          architectureRole: "D4_NORMALIZED_ADAPTER",
+          generatedAt: new Date().toISOString(),
+          status: "FAIL",
+          symbol: symbolParam,
+          error: "spot or strikes UNAVAILABLE from provider — fail-closed",
+        },
+        502
+      );
+    }
+
+    let atmIndex = 0;
+    let atmDiff = Math.abs(allStrikes[0].val - spot);
+    for (let i = 1; i < allStrikes.length; i++) {
+      const diff = Math.abs(allStrikes[i].val - spot);
+      if (diff < atmDiff) {
+        atmDiff = diff;
+        atmIndex = i;
+      }
+    }
+    const lo = Math.max(0, atmIndex - range);
+    const hi = Math.min(allStrikes.length - 1, atmIndex + range);
+    const selected = allStrikes.slice(lo, hi + 1);
+
+    const normalized: { strike: number; ce: DhanNormalizedLeg | null; pe: DhanNormalizedLeg | null }[] = [];
+    let suspectCount = 0;
+    for (const s of selected) {
+      const entry = oc[s.raw];
+      const ceNorm = normalizeDhanLeg({
+        underlying: symbolParam,
+        underlyingSeg: mapping.underlyingSeg,
+        expiry: targetExpiry,
+        strike: s.val,
+        optionType: "CE",
+        spot,
+        leg: entry?.ce,
+      });
+      const peNorm = normalizeDhanLeg({
+        underlying: symbolParam,
+        underlyingSeg: mapping.underlyingSeg,
+        expiry: targetExpiry,
+        strike: s.val,
+        optionType: "PE",
+        spot,
+        leg: entry?.pe,
+      });
+      if (ceNorm?.ivSuspect || ceNorm?.greeksSuspect) suspectCount++;
+      if (peNorm?.ivSuspect || peNorm?.greeksSuspect) suspectCount++;
+      normalized.push({ strike: s.val, ce: ceNorm, pe: peNorm });
+    }
+
+    return c.json({
+      architectureRole: "D4_NORMALIZED_ADAPTER",
+      generatedAt: new Date().toISOString(),
+      status: "PASS",
+      symbol: symbolParam,
+      expiry: targetExpiry,
+      spot,
+      atmStrike: allStrikes[atmIndex].val,
+      strikeCount: normalized.length,
+      suspectLegCount: suspectCount,
+      dataQualityNote:
+        suspectCount > 0
+          ? `${suspectCount} leg(s) have ivSuspect or greeksSuspect === true — Dhan returned literal 0 for IV/Greeks despite a real nonzero premium (known zero-DTE/deep-ITM quirk observed live 2026-08-11). Downstream consumers MUST treat these as UNAVAILABLE, not as genuine zero readings.`
+          : "No suspect legs detected in this snapshot.",
+      normalized,
+      schemaNote:
+        "This is a NEW, parallel type (DhanNormalizedLeg) — it does NOT modify or replace the existing PremiumData/IndexMetrics interfaces used by M1-M12B. Wiring normalized Dhan data into those modules is explicit D6 scope, not this pass. tradingSymbol/lotSize/tickSize are null — UNAVAILABLE_FROM_OPTIONCHAIN_API, require the separate instrument-master endpoint (not fetched in D1-D4).",
+      readOnlyMode: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    });
+  } catch (err) {
+    return c.json(
+      {
+        architectureRole: "D4_NORMALIZED_ADAPTER",
+        generatedAt: new Date().toISOString(),
+        status: "FAIL",
+        symbol: symbolParam,
+        step: "network-error",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      500
+    );
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

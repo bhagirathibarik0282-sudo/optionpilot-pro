@@ -18611,7 +18611,7 @@ app.get("/api/dhan/contracts", async (c) => {
       strikeRange: strikes.length > 0 ? { min: strikes[0], max: strikes[strikes.length - 1] } : null,
       sampleAtmCe: atmCePresent ? atmEntry.ce : null,
       sampleAtmPe: atmPePresent ? atmEntry.pe : null,
-      note: "This confirms contract IDENTITY (spot/expiry/strike/CE-PE presence) via the official Option Chain API. Per-strike Dhan security IDs (needed later for D3 WebSocket subscriptions) are NOT returned by this endpoint and require the separate /v2/instrument/{exchangeSegment} endpoint — out of scope for this D2 pass.",
+      note: "This confirms contract IDENTITY (spot/expiry/strike/CE-PE presence) via the official Option Chain API. CORRECTION (verified live 2026-08-11): unlike earlier assumed, the Option Chain API DOES return a per-strike security_id (see sampleAtmCe/sampleAtmPe above) — no separate /v2/instrument/{exchangeSegment} call is required for D3 WebSocket subscriptions.",
       readOnlyMode: true,
       orderAccessUsed: false,
       tokenExposed: false,
@@ -18631,6 +18631,290 @@ app.get("/api/dhan/contracts", async (c) => {
   }
 });
 
+
+// ============================================================================
+// DHAN MIGRATION — D3 LIVE ADAPTER (READ-ONLY)
+// Purpose: fetch live NIFTY/BANKNIFTY spot, nearest expiry, and ATM±N strike
+// option data (LTP, bid, ask, volume, OI, IV, native Greeks, security_id)
+// via the official Dhan Option Chain API — with rate-limit protection and
+// response caching so multiple modules can reuse one Dhan call instead of
+// each firing its own. Does NOT touch Zerodha, scoring, or the Rule Engine.
+//
+// Rate limit: Dhan allows 1 unique Option Chain request per 3 seconds.
+// "Unique" = same UnderlyingScrip+UnderlyingSeg+Expiry. This cache keys on
+// exactly that, so repeat calls within CACHE_TTL_MS are served from memory
+// and never re-hit Dhan, and calls for a NEW key are still spaced to respect
+// the rate limit rather than fired concurrently.
+//
+// SENSEX intentionally excluded — no officially-confirmed Dhan
+// UnderlyingScrip ID found for it (see D2 note above). Never fabricated.
+// ============================================================================
+
+interface DhanLiveCacheEntry {
+  fetchedAt: number;
+  payload: any;
+}
+
+const DHAN_LIVE_CACHE = new Map<string, DhanLiveCacheEntry>();
+const DHAN_LIVE_CACHE_TTL_MS = 30 * 1000; // matches the platform's live-refresh cadence elsewhere
+let dhanLastRequestAt = 0;
+const DHAN_MIN_REQUEST_GAP_MS = 3100; // Dhan's documented 1-req/3s limit, +100ms margin
+
+async function dhanRateLimitedFetch(url: string, init: RequestInit): Promise<Response> {
+  const now = Date.now();
+  const wait = dhanLastRequestAt + DHAN_MIN_REQUEST_GAP_MS - now;
+  if (wait > 0) await sleep(wait);
+  dhanLastRequestAt = Date.now();
+  return fetch(url, init);
+}
+
+app.get("/api/dhan/live", async (c) => {
+  const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
+  const rangeParam = parseInt(c.req.query("range") || "3", 10);
+  const range = Number.isFinite(rangeParam) && rangeParam > 0 && rangeParam <= 10 ? rangeParam : 3;
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+
+  if (!accessToken || !clientId) {
+    return c.json(
+      {
+        architectureRole: "D3_LIVE_ADAPTER",
+        generatedAt: new Date().toISOString(),
+        status: "NOT_CONFIGURED",
+        error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+      },
+      503
+    );
+  }
+
+  const mapping = DHAN_UNDERLYING_MAP[symbolParam];
+  if (!mapping) {
+    return c.json(
+      {
+        architectureRole: "D3_LIVE_ADAPTER",
+        generatedAt: new Date().toISOString(),
+        status: "NOT_YET_MAPPED",
+        symbol: symbolParam,
+        reason:
+          symbolParam === "SENSEX"
+            ? "No officially-confirmed Dhan UnderlyingScrip ID found for SENSEX. Left unmapped rather than guessed."
+            : "Symbol not in DHAN_UNDERLYING_MAP.",
+        supportedSymbols: Object.keys(DHAN_UNDERLYING_MAP),
+      },
+      501
+    );
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    "access-token": accessToken,
+    "client-id": clientId,
+  };
+
+  try {
+    // --- Expiry resolution (cached separately, longer TTL — expiry lists
+    // change at most once a week, never intraday) ---
+    const expiryCacheKey = `expirylist_${symbolParam}`;
+    let expiries: string[];
+    const cachedExpiry = DHAN_LIVE_CACHE.get(expiryCacheKey);
+    if (cachedExpiry && Date.now() - cachedExpiry.fetchedAt < 5 * 60 * 1000) {
+      expiries = cachedExpiry.payload;
+    } else {
+      const expiryRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain/expirylist", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          UnderlyingScrip: mapping.underlyingScrip,
+          UnderlyingSeg: mapping.underlyingSeg,
+        }),
+      });
+      const raw = await expiryRes.text();
+      let parsed: any = null;
+      try {
+        parsed = raw ? JSON.parse(raw) : null;
+      } catch {
+        parsed = null;
+      }
+      if (!expiryRes.ok || !parsed || !Array.isArray(parsed.data) || parsed.data.length === 0) {
+        return c.json(
+          {
+            architectureRole: "D3_LIVE_ADAPTER",
+            generatedAt: new Date().toISOString(),
+            status: "FAIL",
+            symbol: symbolParam,
+            step: "expirylist",
+            httpStatus: expiryRes.status,
+            providerResponse: parsed,
+          },
+          502
+        );
+      }
+      expiries = parsed.data;
+      DHAN_LIVE_CACHE.set(expiryCacheKey, { fetchedAt: Date.now(), payload: expiries });
+    }
+
+    const expiryQuery = c.req.query("expiry");
+    const targetExpiry = expiryQuery && expiries.includes(expiryQuery) ? expiryQuery : expiries[0];
+
+    // --- Option chain (cached per underlying+expiry, short TTL — this is
+    // the "live" data multiple modules can reuse instead of each calling
+    // Dhan separately) ---
+    const chainCacheKey = `optionchain_${symbolParam}_${targetExpiry}`;
+    let chainPayload: any;
+    let servedFromCache = false;
+    const cachedChain = DHAN_LIVE_CACHE.get(chainCacheKey);
+    if (cachedChain && Date.now() - cachedChain.fetchedAt < DHAN_LIVE_CACHE_TTL_MS) {
+      chainPayload = cachedChain.payload;
+      servedFromCache = true;
+    } else {
+      const chainRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          UnderlyingScrip: mapping.underlyingScrip,
+          UnderlyingSeg: mapping.underlyingSeg,
+          Expiry: targetExpiry,
+        }),
+      });
+      const raw = await chainRes.text();
+      let parsed: any = null;
+      try {
+        parsed = raw ? JSON.parse(raw) : null;
+      } catch {
+        parsed = null;
+      }
+      if (!chainRes.ok || !parsed || !parsed.data || typeof parsed.data.oc !== "object") {
+        return c.json(
+          {
+            architectureRole: "D3_LIVE_ADAPTER",
+            generatedAt: new Date().toISOString(),
+            status: "FAIL",
+            symbol: symbolParam,
+            step: "optionchain",
+            httpStatus: chainRes.status,
+            targetExpiry,
+            providerResponse: parsed,
+          },
+          502
+        );
+      }
+      chainPayload = parsed;
+      DHAN_LIVE_CACHE.set(chainCacheKey, { fetchedAt: Date.now(), payload: chainPayload });
+    }
+
+    const spot: number | null =
+      typeof chainPayload.data.last_price === "number" ? chainPayload.data.last_price : null;
+    const oc: Record<string, { ce?: any; pe?: any }> = chainPayload.data.oc;
+    const allStrikes = Object.keys(oc)
+      .map((s) => ({ raw: s, val: parseFloat(s) }))
+      .filter((x) => !Number.isNaN(x.val))
+      .sort((a, b) => a.val - b.val);
+
+    if (spot === null || allStrikes.length === 0) {
+      return c.json(
+        {
+          architectureRole: "D3_LIVE_ADAPTER",
+          generatedAt: new Date().toISOString(),
+          status: "FAIL",
+          symbol: symbolParam,
+          step: "identity",
+          error: "spot or strikes UNAVAILABLE from provider — fail-closed, not treating as zero",
+        },
+        502
+      );
+    }
+
+    let atmIndex = 0;
+    let atmDiff = Math.abs(allStrikes[0].val - spot);
+    for (let i = 1; i < allStrikes.length; i++) {
+      const diff = Math.abs(allStrikes[i].val - spot);
+      if (diff < atmDiff) {
+        atmDiff = diff;
+        atmIndex = i;
+      }
+    }
+
+    const lo = Math.max(0, atmIndex - range);
+    const hi = Math.min(allStrikes.length - 1, atmIndex + range);
+    const selected = allStrikes.slice(lo, hi + 1);
+
+    // Helper: pull a leg's fields WITHOUT ever substituting a fabricated
+    // zero for a missing value — null/UNAVAILABLE instead, per strict rule.
+    function extractLeg(leg: any | undefined) {
+      if (!leg) return null;
+      return {
+        securityId: typeof leg.security_id === "number" ? leg.security_id : null,
+        lastPrice: typeof leg.last_price === "number" ? leg.last_price : null,
+        bid: typeof leg.top_bid_price === "number" ? leg.top_bid_price : null,
+        bidQty: typeof leg.top_bid_quantity === "number" ? leg.top_bid_quantity : null,
+        ask: typeof leg.top_ask_price === "number" ? leg.top_ask_price : null,
+        askQty: typeof leg.top_ask_quantity === "number" ? leg.top_ask_quantity : null,
+        volume: typeof leg.volume === "number" ? leg.volume : null,
+        oi: typeof leg.oi === "number" ? leg.oi : null,
+        previousOi: typeof leg.previous_oi === "number" ? leg.previous_oi : null,
+        previousVolume: typeof leg.previous_volume === "number" ? leg.previous_volume : null,
+        previousClose: typeof leg.previous_close_price === "number" ? leg.previous_close_price : null,
+        iv: typeof leg.implied_volatility === "number" ? leg.implied_volatility : null,
+        delta: leg.greeks && typeof leg.greeks.delta === "number" ? leg.greeks.delta : null,
+        gamma: leg.greeks && typeof leg.greeks.gamma === "number" ? leg.greeks.gamma : null,
+        theta: leg.greeks && typeof leg.greeks.theta === "number" ? leg.greeks.theta : null,
+        vega: leg.greeks && typeof leg.greeks.vega === "number" ? leg.greeks.vega : null,
+        greeksSource: "DHAN_NATIVE", // per spec: use Dhan native Greeks, not Black-Scholes fallback
+      };
+    }
+
+    const atmStrikeValue = allStrikes[atmIndex].val;
+    const strikesOut = selected.map((s) => {
+      const entry = oc[s.raw];
+      const isAtm = s.val === atmStrikeValue;
+      return {
+        strike: s.val,
+        ceMoneyness: isAtm ? "ATM" : s.val < spot ? "ITM" : "OTM",
+        peMoneyness: isAtm ? "ATM" : s.val > spot ? "ITM" : "OTM",
+        ce: extractLeg(entry?.ce),
+        pe: extractLeg(entry?.pe),
+      };
+    });
+
+    return c.json({
+      architectureRole: "D3_LIVE_ADAPTER",
+      generatedAt: new Date().toISOString(),
+      status: "PASS",
+      symbol: symbolParam,
+      underlyingScrip: mapping.underlyingScrip,
+      underlyingSeg: mapping.underlyingSeg,
+      expiry: targetExpiry,
+      availableExpiries: expiries,
+      spot,
+      atmStrike: allStrikes[atmIndex].val,
+      strikeRangeRequested: range,
+      strikeCountReturned: strikesOut.length,
+      strikes: strikesOut,
+      providerTimestamp: "UNAVAILABLE_FROM_PROVIDER", // Dhan's Option Chain response does not include a per-quote exchange timestamp field — never fabricated
+      serverFetchTime: new Date(
+        servedFromCache ? DHAN_LIVE_CACHE.get(chainCacheKey)!.fetchedAt : Date.now()
+      ).toISOString(),
+      servedFromCache,
+      cacheTtlMs: DHAN_LIVE_CACHE_TTL_MS,
+      greeksSource: "DHAN_NATIVE",
+      readOnlyMode: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    });
+  } catch (err) {
+    return c.json(
+      {
+        architectureRole: "D3_LIVE_ADAPTER",
+        generatedAt: new Date().toISOString(),
+        status: "FAIL",
+        symbol: symbolParam,
+        step: "network-error",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      500
+    );
+  }
+});
 
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {

@@ -19286,6 +19286,293 @@ app.get("/api/dhan/normalized", async (c) => {
   }
 });
 
+// ============================================================================
+// DHAN MIGRATION — D5 CROSS-VALIDATION (READ-ONLY, DIAGNOSTIC ONLY)
+// Purpose: compare the LIVE Dhan feed (via the same fetch path as D3/D4)
+// against the CURRENTLY CACHED Zerodha/Kite snapshot for the same browser
+// session, on spot, ATM strike premium, and OI — before any decision is
+// made about removing Zerodha (that is explicitly D8, gated on D1-D7 PASS).
+//
+// This does NOT force a fresh Kite refresh and does NOT touch scoring,
+// the Rule Engine, or refreshMarketSnapshot(). It reads whatever Kite
+// snapshot is already cached on the requester's existing session cookie
+// (the same one the dashboard itself uses) and compares it, as-is, against
+// a fresh Dhan pull. If no Kite session/snapshot is available, this fails
+// closed with INSUFFICIENT_COMPARISON_DATA rather than fabricating a
+// comparison.
+//
+// Divergence thresholds below are PROVISIONAL (no historical evidence yet
+// to calibrate them) and only used to LABEL the comparison for a human to
+// read — they do not gate or feed any other module.
+// ============================================================================
+
+const DHAN_D5_MINOR_DIVERGENCE_PCT = 0.15; // provisional
+const DHAN_D5_MAJOR_DIVERGENCE_PCT = 0.5; // provisional
+
+function pctDiff(a: number, b: number): number | null {
+  if (a === 0 && b === 0) return 0;
+  const base = Math.abs(a) > Math.abs(b) ? Math.abs(a) : Math.abs(b);
+  if (base === 0) return null;
+  return (Math.abs(a - b) / base) * 100;
+}
+
+app.get("/api/dhan/cross-validate", async (c) => {
+  const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+
+  if (!accessToken || !clientId) {
+    return c.json(
+      {
+        architectureRole: "D5_CROSS_VALIDATION",
+        generatedAt: new Date().toISOString(),
+        status: "NOT_CONFIGURED",
+        error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+      },
+      503
+    );
+  }
+
+  const mapping = DHAN_UNDERLYING_MAP[symbolParam];
+  if (!mapping) {
+    return c.json(
+      {
+        architectureRole: "D5_CROSS_VALIDATION",
+        generatedAt: new Date().toISOString(),
+        status: "NOT_YET_MAPPED",
+        symbol: symbolParam,
+        supportedSymbols: Object.keys(DHAN_UNDERLYING_MAP),
+      },
+      501
+    );
+  }
+
+  // --- Zerodha/Kite side: read the EXISTING cached snapshot on this
+  // browser's session cookie. Never force a fresh Kite call from here. ---
+  const session = getSession(c);
+  const kiteSnapshot: IndexMetrics | undefined = session?.marketSnapshot?.[symbolParam];
+
+  if (!session || !kiteSnapshot) {
+    return c.json({
+      architectureRole: "D5_CROSS_VALIDATION",
+      generatedAt: new Date().toISOString(),
+      status: "INSUFFICIENT_COMPARISON_DATA",
+      symbol: symbolParam,
+      reason: !session
+        ? "No active Kite session cookie on this request. Open this URL in the SAME browser tab/session where the OptionPilot dashboard is logged into Kite, then retry."
+        : "Kite session found but has no cached market snapshot yet for this symbol — open the dashboard tab for this symbol first so it refreshes, then retry.",
+      readOnlyMode: true,
+    }, 200);
+  }
+
+  const kiteSnapshotAgeMs = session.snapshotTime ? Date.now() - session.snapshotTime : null;
+
+  // Pick Kite's nearest (soonest) expiry from its expiries array, sorted
+  // defensively rather than assuming array order.
+  const kiteExpiriesSorted = (kiteSnapshot.expiries || [])
+    .filter((e) => e && e.expiry)
+    .slice()
+    .sort((a, b) => a.expiryDate.getTime() - b.expiryDate.getTime());
+  const kiteNearestExpiry = kiteExpiriesSorted[0];
+
+  if (!kiteNearestExpiry) {
+    return c.json({
+      architectureRole: "D5_CROSS_VALIDATION",
+      generatedAt: new Date().toISOString(),
+      status: "INSUFFICIENT_COMPARISON_DATA",
+      symbol: symbolParam,
+      reason: "Kite snapshot has no expiries data for this symbol.",
+      readOnlyMode: true,
+    }, 200);
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    "access-token": accessToken,
+    "client-id": clientId,
+  };
+
+  try {
+    // --- Dhan side: same fetch path as D3/D4, using the cache so this
+    // doesn't burn an extra rate-limited call if D3/D4 was just hit. ---
+    const expiryCacheKey = `expirylist_${symbolParam}`;
+    let dhanExpiries: string[];
+    const cachedExpiry = DHAN_LIVE_CACHE.get(expiryCacheKey);
+    if (cachedExpiry && Date.now() - cachedExpiry.fetchedAt < 5 * 60 * 1000) {
+      dhanExpiries = cachedExpiry.payload;
+    } else {
+      const expiryRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain/expirylist", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ UnderlyingScrip: mapping.underlyingScrip, UnderlyingSeg: mapping.underlyingSeg }),
+      });
+      const raw = await expiryRes.text();
+      let parsed: any = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+      if (!expiryRes.ok || !parsed || !Array.isArray(parsed.data) || parsed.data.length === 0) {
+        return c.json({
+          architectureRole: "D5_CROSS_VALIDATION",
+          generatedAt: new Date().toISOString(),
+          status: "FAIL",
+          symbol: symbolParam,
+          step: "dhan-expirylist",
+          httpStatus: expiryRes.status,
+        }, 502);
+      }
+      dhanExpiries = parsed.data;
+      DHAN_LIVE_CACHE.set(expiryCacheKey, { fetchedAt: Date.now(), payload: dhanExpiries });
+    }
+
+    const dhanNearestExpiry = dhanExpiries[0];
+    const expiryMatch = dhanNearestExpiry === kiteNearestExpiry.expiry;
+
+    if (!expiryMatch) {
+      return c.json({
+        architectureRole: "D5_CROSS_VALIDATION",
+        generatedAt: new Date().toISOString(),
+        status: "CONTRACT_MAPPING_MISMATCH",
+        symbol: symbolParam,
+        kiteNearestExpiry: kiteNearestExpiry.expiry,
+        dhanNearestExpiry,
+        note: "Zerodha and Dhan disagree on which expiry is nearest for this symbol right now. Not comparing further until this is understood — could be a genuine listing difference or a stale side.",
+        kiteSnapshotAgeMs,
+        readOnlyMode: true,
+      }, 200);
+    }
+
+    const chainCacheKey = `optionchain_${symbolParam}_${dhanNearestExpiry}`;
+    let chainPayload: any;
+    const cachedChain = DHAN_LIVE_CACHE.get(chainCacheKey);
+    if (cachedChain && Date.now() - cachedChain.fetchedAt < DHAN_LIVE_CACHE_TTL_MS) {
+      chainPayload = cachedChain.payload;
+    } else {
+      const chainRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ UnderlyingScrip: mapping.underlyingScrip, UnderlyingSeg: mapping.underlyingSeg, Expiry: dhanNearestExpiry }),
+      });
+      const raw = await chainRes.text();
+      let parsed: any = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+      if (!chainRes.ok || !parsed || !parsed.data || typeof parsed.data.oc !== "object") {
+        return c.json({
+          architectureRole: "D5_CROSS_VALIDATION",
+          generatedAt: new Date().toISOString(),
+          status: "FAIL",
+          symbol: symbolParam,
+          step: "dhan-optionchain",
+          httpStatus: chainRes.status,
+        }, 502);
+      }
+      chainPayload = parsed;
+      DHAN_LIVE_CACHE.set(chainCacheKey, { fetchedAt: Date.now(), payload: chainPayload });
+    }
+
+    const dhanSpot: number | null = typeof chainPayload.data.last_price === "number" ? chainPayload.data.last_price : null;
+    const kiteSpot: number | null = typeof kiteSnapshot.spot === "number" ? kiteSnapshot.spot : null;
+
+    if (dhanSpot === null || kiteSpot === null) {
+      return c.json({
+        architectureRole: "D5_CROSS_VALIDATION",
+        generatedAt: new Date().toISOString(),
+        status: "INSUFFICIENT_COMPARISON_DATA",
+        symbol: symbolParam,
+        reason: "spot UNAVAILABLE from one or both providers",
+        kiteSpot, dhanSpot,
+      }, 200);
+    }
+
+    const spotDivergencePct = pctDiff(kiteSpot, dhanSpot);
+    const spotDivergenceAbs = Math.abs(kiteSpot - dhanSpot);
+
+    // --- ATM strike comparison: find Kite's ATM CE/PE for this expiry and
+    // the matching strike on the Dhan side. ---
+    const kiteAtmStrike = kiteSnapshot.atmStrike;
+    const kiteCe = kiteNearestExpiry.ceStrikes?.find((p) => p.strike === kiteAtmStrike);
+    const kitePe = kiteNearestExpiry.peStrikes?.find((p) => p.strike === kiteAtmStrike);
+
+    const dhanOc: Record<string, { ce?: any; pe?: any }> = chainPayload.data.oc;
+    const dhanAtmKey = Object.keys(dhanOc).find((k) => parseFloat(k) === kiteAtmStrike);
+    const dhanCe = dhanAtmKey ? dhanOc[dhanAtmKey]?.ce : undefined;
+    const dhanPe = dhanAtmKey ? dhanOc[dhanAtmKey]?.pe : undefined;
+
+    const legComparisons: any[] = [];
+    for (const [label, kiteLeg, dhanLeg] of [
+      ["CE", kiteCe, dhanCe],
+      ["PE", kitePe, dhanPe],
+    ] as const) {
+      if (!kiteLeg || !dhanLeg) {
+        legComparisons.push({
+          leg: label,
+          status: "INSUFFICIENT_COMPARISON_DATA",
+          kiteAvailable: !!kiteLeg,
+          dhanAvailable: !!dhanLeg,
+        });
+        continue;
+      }
+      const kiteLtp = typeof kiteLeg.lastPrice === "number" ? kiteLeg.lastPrice : null;
+      const dhanLtp = typeof dhanLeg.last_price === "number" ? dhanLeg.last_price : null;
+      const kiteOi = typeof kiteLeg.oi === "number" ? kiteLeg.oi : null;
+      const dhanOi = typeof dhanLeg.oi === "number" ? dhanLeg.oi : null;
+      const ltpDivergencePct = kiteLtp !== null && dhanLtp !== null ? pctDiff(kiteLtp, dhanLtp) : null;
+      const oiDivergencePct = kiteOi !== null && dhanOi !== null ? pctDiff(kiteOi, dhanOi) : null;
+      legComparisons.push({
+        leg: label,
+        kiteLtp, dhanLtp, ltpDivergencePct,
+        kiteOi, dhanOi, oiDivergencePct,
+        kiteIv: typeof kiteLeg.iv === "number" ? kiteLeg.iv : null,
+        dhanIv: typeof dhanLeg.implied_volatility === "number" ? dhanLeg.implied_volatility : null,
+        kiteDelta: typeof kiteLeg.delta === "number" ? kiteLeg.delta : null,
+        dhanDelta: dhanLeg.greeks && typeof dhanLeg.greeks.delta === "number" ? dhanLeg.greeks.delta : null,
+        note: "Kite delta/IV are Black-Scholes ESTIMATES (Kite doesn't publish Greeks); Dhan delta/IV are provider-native. A divergence here does not necessarily mean either is 'wrong'.",
+      });
+    }
+
+    let overallState: string;
+    if (spotDivergencePct === null) {
+      overallState = "INSUFFICIENT_COMPARISON_DATA";
+    } else if (spotDivergencePct >= DHAN_D5_MAJOR_DIVERGENCE_PCT) {
+      overallState = "SOURCE_MAJOR_DIVERGENCE";
+    } else if (spotDivergencePct >= DHAN_D5_MINOR_DIVERGENCE_PCT) {
+      overallState = "SOURCE_MINOR_DIVERGENCE";
+    } else {
+      overallState = "SOURCE_ALIGNED";
+    }
+
+    return c.json({
+      architectureRole: "D5_CROSS_VALIDATION",
+      generatedAt: new Date().toISOString(),
+      status: overallState,
+      symbol: symbolParam,
+      expiry: dhanNearestExpiry,
+      kiteSnapshotAgeMs,
+      kiteSnapshotAgeCaveat: kiteSnapshotAgeMs !== null && kiteSnapshotAgeMs > 6 * 60 * 1000
+        ? "Kite snapshot is >6min old — divergence below may partly reflect staleness, not a true source disagreement."
+        : null,
+      spot: { kite: kiteSpot, dhan: dhanSpot, divergenceAbs: spotDivergenceAbs, divergencePct: spotDivergencePct },
+      atmStrike: kiteAtmStrike,
+      legComparisons,
+      divergenceThresholds: {
+        minorPct: DHAN_D5_MINOR_DIVERGENCE_PCT,
+        majorPct: DHAN_D5_MAJOR_DIVERGENCE_PCT,
+        note: "PROVISIONAL — no historical evidence yet to calibrate these. For labeling only; does not gate any other module.",
+      },
+      readOnlyMode: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    });
+  } catch (err) {
+    return c.json({
+      architectureRole: "D5_CROSS_VALIDATION",
+      generatedAt: new Date().toISOString(),
+      status: "FAIL",
+      symbol: symbolParam,
+      step: "network-error",
+      error: err instanceof Error ? err.message : String(err),
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

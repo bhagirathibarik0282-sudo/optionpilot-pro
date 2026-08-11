@@ -20973,6 +20973,156 @@ app.get("/api/audit/dhan-raw-check", async (c) => {
   return c.json(result, 200);
 });
 
+
+// ============================================================================
+// V3-D STEP 1 (continued) — EXPIRED OPTIONS HISTORY AUDIT (READ-ONLY, DIAGNOSTIC ONLY)
+//
+// Purpose: probe Dhan's Rolling Option History API (POST
+// /v2/charts/rollingoption) for expired-options fields (OI, IV, OHLC,
+// volume, spot) on a small ATM-CALL/nearest-weekly sample. Read-only,
+// no writes, no scoring, no Kite fallback. Reuses D1-D5 Dhan credentials,
+// DHAN_UNDERLYING_MAP and the rate-limited fetch helper.
+//
+// Field names in requiredData ("oi", "implied_volatility", "spot") are our
+// best-effort read of Dhan's documentation summary, NOT a confirmed exact
+// schema — the response is audited key-by-key against whatever Dhan
+// actually returns, never against what we assumed it would return.
+//
+// Auth: requires ?key=<DHAN_AUDIT_KEY>, same gate as the spot_history probe.
+// ============================================================================
+
+app.get("/api/audit/dhan-expired-options-check", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const symbolParam = (c.req.query("symbol") || "NIFTY").toUpperCase();
+  const generatedAt = new Date().toISOString();
+  const mapping = DHAN_UNDERLYING_MAP[symbolParam];
+
+  if (!mapping) {
+    return c.json({
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol: symbolParam, dataField: "expired_options_history",
+      status: "ERROR",
+      error: "Symbol not in DHAN_UNDERLYING_MAP.",
+      supportedSymbols: Object.keys(DHAN_UNDERLYING_MAP),
+    }, 400);
+  }
+
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    return c.json({
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol: symbolParam, dataField: "expired_options_history",
+      status: "ERROR",
+      error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+    }, 503);
+  }
+
+  const toDate = new Date();
+  const fromDate = new Date(toDate.getTime() - 10 * 24 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  // NIFTY/BANKNIFTY trade on NSE_FNO; SENSEX trades on BSE_FNO. The
+  // DHAN_UNDERLYING_MAP segment (IDX_I) is the SPOT index segment, not the
+  // derivatives segment, so it is NOT reused here — never assume, map
+  // explicitly per exchange.
+  const optionsSegment = symbolParam === "SENSEX" ? "BSE_FNO" : "NSE_FNO";
+
+  const requestBody = {
+    exchangeSegment: optionsSegment,
+    interval: "1",
+    securityId: mapping.underlyingScrip,
+    instrument: "OPTIDX",
+    expiryFlag: "WEEK",
+    expiryCode: 0,
+    strike: "ATM",
+    drvOptionType: "CALL",
+    requiredData: ["open", "high", "low", "close", "volume", "oi", "implied_volatility", "spot"],
+    fromDate: fmt(fromDate),
+    toDate: fmt(toDate),
+  };
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/rollingoption", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const httpStatus = res.status;
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    if (!res.ok || !payload || typeof payload !== "object") {
+      return c.json({
+        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        generatedAt, symbol: symbolParam, dataField: "expired_options_history",
+        status: "ERROR",
+        httpStatus,
+        requestSent: requestBody,
+        providerError: payload && typeof payload === "object" ? {
+          errorType: payload.errorType ?? null,
+          errorCode: payload.errorCode ?? null,
+          errorMessage: payload.errorMessage ?? null,
+        } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `Dhan rollingoption returned HTTP ${httpStatus}` },
+        rawSnippet: raw.slice(0, 500),
+        readOnlyMode: true, tokenExposed: false,
+      }, 200);
+    }
+
+    // Schema NOT hardcoded in advance — audit exactly whatever keys came
+    // back, whatever they are, rather than checking for names we guessed.
+    const fieldAudit: Record<string, any> = {};
+    let presentCount = 0;
+    const keys = Object.keys(payload);
+    for (const k of keys) {
+      const val = payload[k];
+      const isArray = Array.isArray(val);
+      const len = isArray ? val.length : null;
+      const lastValue = isArray && len && len > 0 ? val[len - 1] : val;
+      const provenance = isArray && len === 0 ? "PRESENT_EMPTY" : "PRESENT_WITH_DATA";
+      if (provenance === "PRESENT_WITH_DATA") presentCount++;
+      fieldAudit[k] = { provenance, candleCount: len, sampleLastValue: lastValue };
+    }
+
+    return c.json({
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol: symbolParam, dataField: "expired_options_history",
+      status: keys.length > 0 ? "PASS" : "UNAVAILABLE",
+      httpStatus,
+      requestSent: requestBody,
+      responseKeysFound: keys,
+      fieldAudit,
+      provenanceRule: "DHAN_NATIVE fields only — nothing derived, nothing assumed. Every key above is exactly what Dhan returned, not what we requested.",
+      limitations: [
+        "Small (10-day) probe only, ATM CALL, nearest weekly expiry — not proof of the full 5-year / multi-strike / multi-expiry availability the final matrix needs.",
+        "requiredData field names (oi, implied_volatility, spot) were our best-effort read of Dhan's docs, not a confirmed schema — check fieldAudit for what actually came back.",
+      ],
+      v3StepGate: keys.length > 0 ? "SAFE_TO_PROCEED_TO_NEXT_FIELD_CHECK" : "HOLD — resolve this field before continuing V3-D Step 1",
+      readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol: symbolParam, dataField: "expired_options_history",
+      status: "ERROR",
+      error: err instanceof Error ? err.message : "Unknown Dhan rollingoption request failure",
+      readOnlyMode: true, tokenExposed: false,
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

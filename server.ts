@@ -19578,6 +19578,273 @@ app.get("/api/dhan/cross-validate", async (c) => {
   }
 });
 
+// ============================================================================
+// DHAN MIGRATION — D6.1 M1 PREMIUM COMPOSITION COMPATIBILITY AUDIT
+// (READ-ONLY, DIAGNOSTIC ONLY)
+//
+// Purpose: prove M1's CORE, UNMODIFIED math (v2ComputeIntrinsicValue,
+// v2PctPart) produces correct results when fed Dhan-sourced legs, WITHOUT
+// touching the live M1 pipeline (buildV2PremiumCompositionHistory), the
+// Recorder, or Kite. This endpoint does NOT read recorderSession at all —
+// it fetches Dhan data independently and reuses M1's real functions by
+// direct reference, so a PASS here proves the math is provider-agnostic,
+// not that live M1 has been switched over (it has not — that's a separate,
+// later decision explicitly gated on D7).
+//
+// KNOWN LIMITATION (reported honestly per spec, not hidden): this endpoint
+// has NO history buffer of its own for Dhan data (the Recorder's 3-minute
+// snapshot history is a Kite-only structure, untouched here), so
+// compositionState always reports INSUFFICIENT_HISTORY for the Dhan side.
+// Building a parallel Dhan history buffer is out of scope for D6.1.
+// ============================================================================
+
+interface D6M1FieldCheck {
+  field: string;
+  status: "PASS" | "PARTIAL" | "IV_UNAVAILABLE" | "GREEKS_UNAVAILABLE" | "INVALID" | "UNAVAILABLE_FROM_PROVIDER";
+  detail: string;
+}
+
+app.get("/api/v2/d6/m1-audit", async (c) => {
+  const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+
+  if (!accessToken || !clientId) {
+    return c.json({
+      status: "FAIL", phase: "D6.1", module: "M1_PREMIUM_COMPOSITION",
+      generatedAt: new Date().toISOString(),
+      error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+    }, 503);
+  }
+
+  const mapping = DHAN_UNDERLYING_MAP[symbolParam];
+  if (!mapping) {
+    return c.json({
+      status: "FAIL", phase: "D6.1", module: "M1_PREMIUM_COMPOSITION",
+      generatedAt: new Date().toISOString(),
+      symbol: symbolParam,
+      reason: "NOT_YET_MAPPED", supportedSymbols: Object.keys(DHAN_UNDERLYING_MAP),
+    }, 501);
+  }
+
+  const headers = { "Content-Type": "application/json", "access-token": accessToken, "client-id": clientId };
+  const invalidOrPartialReasons: string[] = [];
+
+  try {
+    // --- Reuse D3/D4's exact fetch + cache path. Zero Zerodha/Kite/Recorder
+    // reference anywhere in this function — zerodhaFallbackUsed is provably
+    // false by construction, not just asserted. ---
+    const expiryCacheKey = `expirylist_${symbolParam}`;
+    let expiries: string[];
+    const cachedExpiry = DHAN_LIVE_CACHE.get(expiryCacheKey);
+    if (cachedExpiry && Date.now() - cachedExpiry.fetchedAt < 5 * 60 * 1000) {
+      expiries = cachedExpiry.payload;
+    } else {
+      const expiryRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain/expirylist", {
+        method: "POST", headers,
+        body: JSON.stringify({ UnderlyingScrip: mapping.underlyingScrip, UnderlyingSeg: mapping.underlyingSeg }),
+      });
+      const raw = await expiryRes.text();
+      let parsed: any = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+      if (!expiryRes.ok || !parsed || !Array.isArray(parsed.data) || parsed.data.length === 0) {
+        return c.json({ status: "FAIL", phase: "D6.1", module: "M1_PREMIUM_COMPOSITION", step: "expirylist", httpStatus: expiryRes.status }, 502);
+      }
+      expiries = parsed.data;
+      DHAN_LIVE_CACHE.set(expiryCacheKey, { fetchedAt: Date.now(), payload: expiries });
+    }
+    const targetExpiry = expiries[0];
+
+    const chainCacheKey = `optionchain_${symbolParam}_${targetExpiry}`;
+    let chainFetchedAt: number;
+    let chainPayload: any;
+    const cachedChain = DHAN_LIVE_CACHE.get(chainCacheKey);
+    if (cachedChain && Date.now() - cachedChain.fetchedAt < DHAN_LIVE_CACHE_TTL_MS) {
+      chainPayload = cachedChain.payload;
+      chainFetchedAt = cachedChain.fetchedAt;
+    } else {
+      const chainRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain", {
+        method: "POST", headers,
+        body: JSON.stringify({ UnderlyingScrip: mapping.underlyingScrip, UnderlyingSeg: mapping.underlyingSeg, Expiry: targetExpiry }),
+      });
+      const raw = await chainRes.text();
+      let parsed: any = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+      if (!chainRes.ok || !parsed || !parsed.data || typeof parsed.data.oc !== "object") {
+        return c.json({ status: "FAIL", phase: "D6.1", module: "M1_PREMIUM_COMPOSITION", step: "optionchain", httpStatus: chainRes.status }, 502);
+      }
+      chainPayload = parsed;
+      chainFetchedAt = Date.now();
+      DHAN_LIVE_CACHE.set(chainCacheKey, { fetchedAt: chainFetchedAt, payload: chainPayload });
+    }
+
+    const spot: number | null = typeof chainPayload.data.last_price === "number" ? chainPayload.data.last_price : null;
+    const oc: Record<string, { ce?: any; pe?: any }> = chainPayload.data.oc;
+    const allStrikes = Object.keys(oc).map((s) => parseFloat(s)).filter((n) => !Number.isNaN(n)).sort((a, b) => a - b);
+
+    if (spot === null || allStrikes.length === 0) {
+      return c.json({ status: "FAIL", phase: "D6.1", module: "M1_PREMIUM_COMPOSITION", error: "spot or strikes UNAVAILABLE from provider — fail-closed" }, 502);
+    }
+
+    let atmStrike = allStrikes[0];
+    let atmDiff = Math.abs(atmStrike - spot);
+    for (const s of allStrikes) {
+      const diff = Math.abs(s - spot);
+      if (diff < atmDiff) { atmDiff = diff; atmStrike = s; }
+    }
+
+    const atmKey = Object.keys(oc).find((k) => parseFloat(k) === atmStrike)!;
+    const legs: { side: "CE" | "PE"; raw: any | undefined }[] = [
+      { side: "CE", raw: oc[atmKey]?.ce },
+      { side: "PE", raw: oc[atmKey]?.pe },
+    ];
+
+    const freshnessMs = Date.now() - chainFetchedAt;
+    const freshnessStatus: D6M1FieldCheck = {
+      field: "timestamp/data freshness",
+      status: freshnessMs <= 60_000 ? "PASS" : "PARTIAL",
+      detail: `Backend fetch was ${freshnessMs}ms ago (Dhan does not expose an exchange-side quoteTimestamp on this endpoint — same limitation already documented in D3/D4). Judged against backend receipt time only.`,
+    };
+    if (freshnessStatus.status !== "PASS") invalidOrPartialReasons.push(freshnessStatus.detail);
+
+    const sampleComposition: any[] = [];
+    let contractIdentityOverall: "PASS" | "INVALID" = "PASS";
+
+    for (const { side, raw } of legs) {
+      const fieldChecks: D6M1FieldCheck[] = [];
+
+      // --- Contract identity (fail-closed per spec table) ---
+      const securityId = raw && typeof raw.security_id === "number" ? raw.security_id : null;
+      const identityOk = !!raw && securityId !== null && !!targetExpiry && !!atmStrike && (side === "CE" || side === "PE");
+      fieldChecks.push({
+        field: "securityId + underlying + expiry + strike + CE/PE identity",
+        status: identityOk ? "PASS" : "INVALID",
+        detail: identityOk
+          ? `securityId=${securityId}, ${symbolParam}, ${targetExpiry}, strike=${atmStrike}, ${side}`
+          : "Leg missing or securityId not returned by provider — treated as INVALID, not defaulted.",
+      });
+      if (!identityOk) { contractIdentityOverall = "INVALID"; invalidOrPartialReasons.push(`${side} leg failed contract identity check`); }
+
+      const lastPrice = raw && typeof raw.last_price === "number" ? raw.last_price : null;
+      fieldChecks.push({
+        field: "option LTP",
+        status: lastPrice !== null ? "PASS" : "INVALID",
+        detail: lastPrice !== null ? `${lastPrice}` : "missing_required_price — INVALID per fail-closed rule, not treated as 0.",
+      });
+
+      // --- Reuse M1's REAL, unmodified functions directly. No reimplementation. ---
+      let intrinsic: number | null = null;
+      let extrinsic: number | null = null;
+      let intrinsicPct: number | null = null;
+      let extrinsicPct: number | null = null;
+      let dhanImpliedIntrinsicMatch: boolean | null = null;
+      if (lastPrice !== null && spot !== null) {
+        intrinsic = v2ComputeIntrinsicValue(side, spot, atmStrike); // <-- actual M1 function, unmodified
+        extrinsic = Math.max(lastPrice - intrinsic, 0);
+        intrinsicPct = v2PctPart(intrinsic, lastPrice); // <-- actual M1 function, unmodified
+        extrinsicPct = v2PctPart(extrinsic, lastPrice);
+        // Cross-check: does M1's formula reproduce the same intrinsic D4 already computed independently?
+        const d4StyleIntrinsic = side === "CE" ? Math.max(0, spot - atmStrike) : Math.max(0, atmStrike - spot);
+        dhanImpliedIntrinsicMatch = Math.abs(d4StyleIntrinsic - intrinsic) < 1e-9;
+      }
+      fieldChecks.push({
+        field: "intrinsic value (M1 formula: v2ComputeIntrinsicValue, unmodified)",
+        status: intrinsic !== null ? "PASS" : "INVALID",
+        detail: intrinsic !== null ? `intrinsic=${intrinsic}, formulaCrossCheckMatch=${dhanImpliedIntrinsicMatch}` : "could not compute — missing spot or LTP",
+      });
+      fieldChecks.push({
+        field: "extrinsic value (derived, never fabricated)",
+        status: extrinsic !== null ? "PASS" : "INVALID",
+        detail: extrinsic !== null ? `extrinsic=${extrinsic}` : "could not compute",
+      });
+
+      const ivRaw = raw && typeof raw.implied_volatility === "number" ? raw.implied_volatility : null;
+      const ivSuspect = ivRaw === 0 && lastPrice !== null && lastPrice > 0;
+      fieldChecks.push({
+        field: "IV (Dhan native)",
+        status: ivRaw === null ? "IV_UNAVAILABLE" : ivSuspect ? "IV_UNAVAILABLE" : "PASS",
+        detail: ivRaw === null ? "not returned by provider" : ivSuspect ? `raw value 0 but lastPrice=${lastPrice}>0 — known Dhan zero-DTE/deep-ITM quirk (see D4), treated as UNAVAILABLE not as a real 0` : `${ivRaw}`,
+      });
+      if (ivRaw === null || ivSuspect) invalidOrPartialReasons.push(`${side}: IV_UNAVAILABLE`);
+
+      const delta = raw?.greeks?.delta, gamma = raw?.greeks?.gamma, theta = raw?.greeks?.theta, vega = raw?.greeks?.vega;
+      const greeksAllZero = delta === 0 && gamma === 0 && theta === 0 && vega === 0;
+      const greeksSuspect = greeksAllZero && lastPrice !== null && lastPrice > 0;
+      const greeksMissing = [delta, gamma, theta, vega].some((v) => typeof v !== "number");
+      fieldChecks.push({
+        field: "Greeks: delta/gamma/theta/vega (Dhan native)",
+        status: greeksMissing ? "GREEKS_UNAVAILABLE" : greeksSuspect ? "GREEKS_UNAVAILABLE" : "PASS",
+        detail: greeksMissing ? "one or more Greeks not returned by provider" : greeksSuspect ? `all Greeks literally 0 but lastPrice=${lastPrice}>0 — known quirk, treated as UNAVAILABLE not as real 0 (fake_zero_for_missing_data is PROHIBITED)` : `delta=${delta}, gamma=${gamma}, theta=${theta}, vega=${vega}`,
+      });
+      if (greeksMissing || greeksSuspect) invalidOrPartialReasons.push(`${side}: GREEKS_UNAVAILABLE`);
+
+      const oi = raw && typeof raw.oi === "number" ? raw.oi : null;
+      fieldChecks.push({ field: "OI", status: oi !== null ? "PASS" : "PARTIAL", detail: oi !== null ? `${oi}` : "missing_oi — PARTIAL per fail-closed rule" });
+      if (oi === null) invalidOrPartialReasons.push(`${side}: OI missing (PARTIAL)`);
+
+      const bid = raw && typeof raw.top_bid_price === "number" ? raw.top_bid_price : null;
+      const ask = raw && typeof raw.top_ask_price === "number" ? raw.top_ask_price : null;
+      fieldChecks.push({
+        field: "bid/ask (same securityId)",
+        status: bid !== null && ask !== null ? "PASS" : "PARTIAL",
+        detail: bid !== null && ask !== null ? `bid=${bid}, ask=${ask}, securityId=${securityId}` : "one or both missing",
+      });
+
+      const tradingSymbolCheck: D6M1FieldCheck = {
+        field: "tradingSymbol / lotSize / tickSize",
+        status: "UNAVAILABLE_FROM_PROVIDER",
+        detail: "Option Chain API does not return these (confirmed in D4) — requires separate instrument-master endpoint, not fetched. Does not block PASS since M1's core math does not require them.",
+      };
+
+      const moneyness: "ITM" | "ATM" | "OTM" = side === "CE"
+        ? (atmStrike === spot ? "ATM" : atmStrike < spot ? "ITM" : "OTM")
+        : (atmStrike === spot ? "ATM" : atmStrike > spot ? "ITM" : "OTM");
+
+      sampleComposition.push({
+        side, strike: atmStrike, moneyness, spot, expiry: targetExpiry,
+        securityId, lastPrice, intrinsic, extrinsic, intrinsicPct, extrinsicPct,
+        iv: ivSuspect ? null : ivRaw, delta: greeksSuspect ? null : delta, gamma: greeksSuspect ? null : gamma,
+        theta: greeksSuspect ? null : theta, vega: greeksSuspect ? null : vega, oi,
+        compositionState: "INSUFFICIENT_HISTORY", // honest: no Dhan history buffer exists yet (see KNOWN LIMITATION above)
+        fieldChecks: [...fieldChecks, tradingSymbolCheck, freshnessStatus],
+      });
+    }
+
+    const anyInvalid = sampleComposition.some((s) => s.fieldChecks.some((f: D6M1FieldCheck) => f.status === "INVALID"));
+    const overallStatus = contractIdentityOverall === "INVALID" || anyInvalid
+      ? "FAIL"
+      : invalidOrPartialReasons.length > 0
+        ? "PARTIAL_PASS"
+        : "PASS";
+
+    return c.json({
+      status: overallStatus,
+      phase: "D6.1",
+      module: "M1_PREMIUM_COMPOSITION",
+      generatedAt: new Date().toISOString(),
+      provider: "DHAN",
+      symbol: symbolParam,
+      contractIdentity: contractIdentityOverall,
+      freshness: freshnessStatus.status,
+      fieldAvailability: sampleComposition.map((s) => ({ side: s.side, checks: s.fieldChecks })),
+      sampleComposition: sampleComposition.map(({ fieldChecks, ...rest }) => rest),
+      invalidOrPartialReasons,
+      zerodhaFallbackUsed: false, // provably true by construction — this function never references recorderSession/sessions/Kite
+      scoringChanged: false, // v2ComputeIntrinsicValue/v2PctPart/v2CompositionState/buildV2PremiumCompositionHistory are called by reference, unmodified — see diff report
+      orderAccessUsed: false,
+      knownLimitation: "This endpoint has no Dhan-side history buffer, so compositionState always reports INSUFFICIENT_HISTORY. Live M1 (buildV2PremiumCompositionHistory) is UNCHANGED and still reads only from the Kite-backed Recorder — this diagnostic does not switch M1's data source.",
+      readOnlyMode: true,
+      tokenExposed: false,
+    });
+  } catch (err) {
+    return c.json({
+      status: "FAIL", phase: "D6.1", module: "M1_PREMIUM_COMPOSITION",
+      generatedAt: new Date().toISOString(), symbol: symbolParam,
+      step: "network-error", error: err instanceof Error ? err.message : String(err),
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

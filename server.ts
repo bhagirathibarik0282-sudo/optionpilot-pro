@@ -7296,7 +7296,7 @@ app.get("/", (c) => {
     // silently reported as OK, and never confused with a signal that has
     // no computation anywhere yet (fib_pivot).
 
-    const STALE_THRESHOLD_MS_HAIKU = 3 * 60 * 1000; // per document Override Rule 7 (3 min), distinct from the platform's general 6-min staleness convention used elsewhere
+    const STALE_THRESHOLD_MS_HAIKU = 5 * 60 * 1000; // widened 2026-08-11 (user-approved): was 3 min, exactly equal to the 3-min auto-refresh interval, so data was routinely flagged stale by just 1-2 seconds right before each refresh landed (observed live: age 181s vs a 180s threshold). 5 min gives real margin above the refresh cadence while still catching genuinely stale data. Distinct from the platform's general 6-min staleness convention used elsewhere.
 
     const HAIKU_SIGNAL_CATALOG = [
       { id: 'futures_vwap', existsElsewhere: null },

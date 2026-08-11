@@ -2794,6 +2794,21 @@ function parseExpiryDate(expiryStr: string): Date | null {
   }
 }
 
+// V2.1 IV/Greeks integrity fix (2026-08-11): derivative expiry strings identify
+// the calendar date, not midnight. On Railway (UTC), subtracting Date.now()
+// from a midnight Date made same-day Tuesday NIFTY expiries look already
+// expired during the live session, forcing IV/Greeks to zero. NSE index
+// derivatives trade through the normal market close on expiry day, so use
+// 15:30 IST (= 10:00 UTC) as the model expiry instant for an expiry date.
+function daysToDerivativeExpiry(expiryStr: string, nowMs = Date.now()): number {
+  if (!expiryStr) return 0;
+  const parts = expiryStr.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((x) => !Number.isFinite(x))) return 0;
+  const [y, m, d] = parts;
+  const expiryCloseUtcMs = Date.UTC(y, m - 1, d, 10, 0, 0); // 15:30 IST
+  return Math.max(0, (expiryCloseUtcMs - nowMs) / 86_400_000);
+}
+
 // Fetch and cache Kite instruments list
 async function fetchInstruments(accessToken: string): Promise<Instrument[]> {
   if (instrumentsCache.length > 0 && Date.now() - instrumentsCacheTime < INSTRUMENTS_CACHE_TTL) {
@@ -3384,7 +3399,7 @@ async function getOptionPrevDayLevelsBatch(
 // locally from spot, strike, IV, and days-to-expiry using the standard
 // Black-Scholes model with an assumed risk-free rate — a reasonable
 // estimate, not an exchange-published figure.
-const BS_RISK_FREE_RATE = 0.07; // approx. India short-term rate, for Greeks estimation only
+const BS_RISK_FREE_RATE = 0.10; // NSE option-chain convention for displayed IV reference; model estimate only
 
 function normPdf(x: number): number {
   return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
@@ -3724,9 +3739,7 @@ async function fetchCommodityData(
     const offsets = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
     const strikeList = offsets.map((o) => baseMetrics.atmStrike + o * step);
     const commodityExpiryDate = parseExpiryDate(expiry);
-    const commodityDaysToExpiry = commodityExpiryDate
-      ? Math.max(0, (commodityExpiryDate.getTime() - Date.now()) / 86_400_000)
-      : 0;
+    const commodityDaysToExpiry = commodityExpiryDate ? daysToDerivativeExpiry(expiry) : 0;
 
     const ceInstruments: Record<number, Instrument> = {};
     const peInstruments: Record<number, Instrument> = {};
@@ -4327,7 +4340,7 @@ async function fetchIndexData(
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
                 const levels = pdhPdlMap.get(ceInst.instrument_token) || { pdh: 0, pdl: 0 };
-                const daysToExpiry = Math.max(0, (expiry.expiryDate.getTime() - Date.now()) / 86_400_000);
+                const daysToExpiry = daysToDerivativeExpiry(ceInst.expiry || expiryDate);
                 const computedIv = calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, true);
                 const greeks = calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true);
                 expiry.ceStrikes.push({
@@ -4375,7 +4388,7 @@ async function fetchIndexData(
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
                 const levels = pdhPdlMap.get(peInst.instrument_token) || { pdh: 0, pdl: 0 };
-                const daysToExpiry = Math.max(0, (expiry.expiryDate.getTime() - Date.now()) / 86_400_000);
+                const daysToExpiry = daysToDerivativeExpiry(peInst.expiry || expiryDate);
                 const computedIv = calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, false);
                 const greeks = calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false);
                 expiry.peStrikes.push({
@@ -7296,7 +7309,7 @@ app.get("/", (c) => {
     // silently reported as OK, and never confused with a signal that has
     // no computation anywhere yet (fib_pivot).
 
-    const STALE_THRESHOLD_MS_HAIKU = 5 * 60 * 1000; // widened 2026-08-11 (user-approved): was 3 min, exactly equal to the 3-min auto-refresh interval, so data was routinely flagged stale by just 1-2 seconds right before each refresh landed (observed live: age 181s vs a 180s threshold). 5 min gives real margin above the refresh cadence while still catching genuinely stale data. Distinct from the platform's general 6-min staleness convention used elsewhere.
+    const STALE_THRESHOLD_MS_HAIKU = 3 * 60 * 1000; // per document Override Rule 7 (3 min), distinct from the platform's general 6-min staleness convention used elsewhere
 
     const HAIKU_SIGNAL_CATALOG = [
       { id: 'futures_vwap', existsElsewhere: null },

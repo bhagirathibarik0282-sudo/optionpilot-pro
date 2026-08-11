@@ -598,7 +598,7 @@ function v2BuildComparison(current: V2PremiumLegPoint, previous: V2PremiumLegPoi
   };
 }
 
-function buildV2PremiumCompositionHistory(symbol: V2PremiumSymbol, maxSnapshots = 20) {
+function buildV2PremiumCompositionHistoryKite(symbol: V2PremiumSymbol, maxSnapshots = 20) {
   const eligible = recorderSession.snapshots
     .filter((s) => s.snapshotStatus !== "STALE" && s.snapshotStatus !== "INVALID" && s[symbol] != null)
     .slice(-Math.max(2, Math.min(maxSnapshots, RECORDER_MAX_SNAPSHOTS)));
@@ -19731,6 +19731,249 @@ function pushShadowSnapshot(key: string, point: DhanShadowSnapshotPoint) {
   DHAN_SHADOW_M1_HISTORY.set(key, arr);
 }
 
+// ============================================================================
+// DHAN MIGRATION — D6.1.2 PRODUCTION M1 CUTOVER
+//
+// CONFIRMED WITH USER, WITH EXPLICIT RISK ACKNOWLEDGEMENT: production M1
+// (buildV2PremiumCompositionHistory, called by M1/M6/M7 and the dashboard's
+// premium-composition card) now runs on DHAN-normalized data for NIFTY and
+// BANKNIFTY. SENSEX has NO confirmed Dhan security ID (see D2) and stays on
+// the original Kite path below — this is a deliberate fail-closed choice,
+// not an oversight. The original Kite logic is preserved byte-for-byte as
+// buildV2PremiumCompositionHistoryKite() for rollback.
+// ============================================================================
+
+interface DhanM1HistoryLeg {
+  provider: "DHAN";
+  fetchedAt: number;
+  securityId: number;
+  expiry: string;
+  strike: number;
+  optionType: "CE" | "PE";
+  spot: number;
+  atmStrike: number;
+  lastPrice: number;
+  intrinsic: number;
+  extrinsic: number;
+  iv: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  oi: number | null;
+  priceBoundAnomaly: boolean;
+}
+
+interface DhanM1Snapshot {
+  fetchedAt: number;
+  legs: DhanM1HistoryLeg[];
+}
+
+const DHAN_M1_PRODUCTION_HISTORY = new Map<"NIFTY" | "BANKNIFTY", DhanM1Snapshot[]>();
+const DHAN_M1_PRODUCTION_MAX_SNAPSHOTS = 200; // matches RECORDER_MAX_SNAPSHOTS
+const DHAN_M1_PRODUCTION_STRIKE_RANGE = 3; // ATM±3, matching the existing Recorder convention
+const DHAN_M1_PRODUCTION_REFRESH_MS = 3 * 60 * 1000; // matches existing 3-minute Recorder cadence
+const DHAN_M1_PRODUCTION_STALE_MS = 6 * 60 * 1000; // a snapshot older than 2 cycles is rejected as stale
+
+// Builds one production snapshot for a Dhan-mapped symbol, reusing the SAME
+// D3/D4 cache (DHAN_LIVE_CACHE) and rate-limited fetch — this does NOT add a
+// new/duplicate Dhan Option Chain call beyond what D3/D4/D5/shadow already
+// share when their TTL windows overlap.
+async function dhanM1BuildProductionSnapshot(symbol: "NIFTY" | "BANKNIFTY"): Promise<DhanM1Snapshot | null> {
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) return null;
+  const mapping = DHAN_UNDERLYING_MAP[symbol];
+  if (!mapping) return null;
+  const headers = { "Content-Type": "application/json", "access-token": accessToken, "client-id": clientId };
+
+  try {
+    const expiryCacheKey = `expirylist_${symbol}`;
+    let expiries: string[];
+    const cachedExpiry = DHAN_LIVE_CACHE.get(expiryCacheKey);
+    if (cachedExpiry && Date.now() - cachedExpiry.fetchedAt < 5 * 60 * 1000) {
+      expiries = cachedExpiry.payload;
+    } else {
+      const expiryRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain/expirylist", {
+        method: "POST", headers,
+        body: JSON.stringify({ UnderlyingScrip: mapping.underlyingScrip, UnderlyingSeg: mapping.underlyingSeg }),
+      });
+      const raw = await expiryRes.text();
+      let parsed: any = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+      if (!expiryRes.ok || !parsed || !Array.isArray(parsed.data) || parsed.data.length === 0) return null;
+      expiries = parsed.data;
+      DHAN_LIVE_CACHE.set(expiryCacheKey, { fetchedAt: Date.now(), payload: expiries });
+    }
+    const targetExpiry = expiries[0];
+
+    const chainCacheKey = `optionchain_${symbol}_${targetExpiry}`;
+    let chainPayload: any;
+    let chainFetchedAt: number;
+    const cachedChain = DHAN_LIVE_CACHE.get(chainCacheKey);
+    if (cachedChain && Date.now() - cachedChain.fetchedAt < DHAN_LIVE_CACHE_TTL_MS) {
+      chainPayload = cachedChain.payload;
+      chainFetchedAt = cachedChain.fetchedAt;
+    } else {
+      const chainRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain", {
+        method: "POST", headers,
+        body: JSON.stringify({ UnderlyingScrip: mapping.underlyingScrip, UnderlyingSeg: mapping.underlyingSeg, Expiry: targetExpiry }),
+      });
+      const raw = await chainRes.text();
+      let parsed: any = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+      if (!chainRes.ok || !parsed || !parsed.data || typeof parsed.data.oc !== "object") return null;
+      chainPayload = parsed;
+      chainFetchedAt = Date.now();
+      DHAN_LIVE_CACHE.set(chainCacheKey, { fetchedAt: chainFetchedAt, payload: chainPayload });
+    }
+
+    const spot: number | null = typeof chainPayload.data.last_price === "number" ? chainPayload.data.last_price : null;
+    const oc: Record<string, { ce?: any; pe?: any }> = chainPayload.data.oc;
+    const allStrikes = Object.keys(oc).map((s) => parseFloat(s)).filter((n) => !Number.isNaN(n)).sort((a, b) => a - b);
+    if (spot === null || allStrikes.length === 0) return null;
+
+    let atmStrike = allStrikes[0];
+    let atmDiff = Math.abs(atmStrike - spot);
+    for (const s of allStrikes) {
+      const diff = Math.abs(s - spot);
+      if (diff < atmDiff) { atmDiff = diff; atmStrike = s; }
+    }
+    const atmIndex = allStrikes.indexOf(atmStrike);
+    const lo = Math.max(0, atmIndex - DHAN_M1_PRODUCTION_STRIKE_RANGE);
+    const hi = Math.min(allStrikes.length - 1, atmIndex + DHAN_M1_PRODUCTION_STRIKE_RANGE);
+    const selected = allStrikes.slice(lo, hi + 1);
+
+    const legs: DhanM1HistoryLeg[] = [];
+    for (const strike of selected) {
+      const key = Object.keys(oc).find((k) => parseFloat(k) === strike)!;
+      for (const [optionType, raw] of [["CE", oc[key]?.ce], ["PE", oc[key]?.pe]] as const) {
+        if (!raw || typeof raw.security_id !== "number" || typeof raw.last_price !== "number") continue; // fail-closed: missing_required_price or identity = excluded, never fabricated
+        const lastPrice = raw.last_price;
+        const intrinsic = v2ComputeIntrinsicValue(optionType, spot, strike); // <-- M1's real, unmodified function
+        const extrinsicRaw = Math.max(lastPrice - intrinsic, 0);
+        const { anomaly: priceBoundAnomaly } = checkPriceBound(lastPrice, intrinsic);
+        const ivRaw = typeof raw.implied_volatility === "number" ? raw.implied_volatility : null;
+        const ivSuspect = ivRaw === 0 && lastPrice > 0;
+        const delta = raw.greeks?.delta, gamma = raw.greeks?.gamma, theta = raw.greeks?.theta, vega = raw.greeks?.vega;
+        const greeksAllZero = delta === 0 && gamma === 0 && theta === 0 && vega === 0;
+        const greeksSuspect = greeksAllZero && lastPrice > 0;
+        const greeksMissing = [delta, gamma, theta, vega].some((v) => typeof v !== "number");
+        legs.push({
+          provider: "DHAN", fetchedAt: chainFetchedAt, securityId: raw.security_id, expiry: targetExpiry,
+          strike, optionType, spot, atmStrike, lastPrice,
+          intrinsic, extrinsic: priceBoundAnomaly ? extrinsicRaw : extrinsicRaw, // extrinsic itself is still a real derived number; only intrinsicPct/extrinsicPct-as-evidence are suppressed downstream for anomalies
+          iv: ivSuspect ? null : ivRaw,
+          delta: greeksSuspect || greeksMissing ? null : delta,
+          gamma: greeksSuspect || greeksMissing ? null : gamma,
+          theta: greeksSuspect || greeksMissing ? null : theta,
+          vega: greeksSuspect || greeksMissing ? null : vega,
+          oi: typeof raw.oi === "number" ? raw.oi : null,
+          priceBoundAnomaly,
+        });
+      }
+    }
+    if (legs.length === 0) return null;
+    return { fetchedAt: chainFetchedAt, legs };
+  } catch (err) {
+    console.error(`[DHAN_M1] production snapshot fetch failed for ${symbol}:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+async function dhanM1ProductionRefreshCycle() {
+  for (const symbol of ["NIFTY", "BANKNIFTY"] as const) {
+    const snap = await dhanM1BuildProductionSnapshot(symbol);
+    if (!snap) continue;
+    const arr = DHAN_M1_PRODUCTION_HISTORY.get(symbol) || [];
+    arr.push(snap);
+    if (arr.length > DHAN_M1_PRODUCTION_MAX_SNAPSHOTS) arr.shift();
+    DHAN_M1_PRODUCTION_HISTORY.set(symbol, arr);
+  }
+}
+
+// Background cadence, independent of any inbound HTTP request — mirrors the
+// existing Recorder's 3-minute cadence concept. Guarded so it only runs when
+// Dhan credentials are configured, and never throws out of the interval.
+if (process.env.NODE_ENV !== "test" && process.env.DHAN_ACCESS_TOKEN && process.env.DHAN_CLIENT_ID) {
+  dhanM1ProductionRefreshCycle().catch((err) => console.error("[DHAN_M1] initial refresh failed:", err));
+  setInterval(() => {
+    dhanM1ProductionRefreshCycle().catch((err) => console.error("[DHAN_M1] scheduled refresh failed:", err));
+  }, DHAN_M1_PRODUCTION_REFRESH_MS);
+}
+
+function dhanM1LegPoint(snap: DhanM1Snapshot, symbol: "NIFTY" | "BANKNIFTY", side: "CE" | "PE", strike: number): V2PremiumLegPoint | null {
+  if (Date.now() - snap.fetchedAt > DHAN_M1_PRODUCTION_STALE_MS) return null; // fail-closed: stale snapshot rejected
+  const leg = snap.legs.find((l) => l.optionType === side && l.strike === strike);
+  if (!leg || leg.priceBoundAnomaly) return null; // fail-closed: PRICE_BOUND_ANOMALY excluded from valid evidence
+  const moneyness: "ITM" | "ATM" | "OTM" = leg.atmStrike === strike ? "ATM" : leg.intrinsic > 0 ? "ITM" : "OTM";
+  return {
+    timestamp: new Date(leg.fetchedAt).toISOString(),
+    snapshotId: `dhan_${symbol}_${leg.fetchedAt}`,
+    snapshotStatus: "OK" as RecorderSnapshot["snapshotStatus"],
+    symbol, side, strike, atmStrike: leg.atmStrike, spot: leg.spot, moneyness,
+    premium: leg.lastPrice, intrinsic: leg.intrinsic, extrinsic: leg.extrinsic,
+    intrinsicPct: v2PctPart(leg.intrinsic, leg.lastPrice), // <-- M1's real, unmodified function
+    extrinsicPct: v2PctPart(leg.extrinsic, leg.lastPrice),
+    iv: leg.iv, theta: leg.theta, vega: leg.vega, delta: leg.delta, oi: leg.oi,
+  };
+}
+
+function buildDhanM1CompositionHistory(symbol: "NIFTY" | "BANKNIFTY", maxSnapshots = 20) {
+  const all = DHAN_M1_PRODUCTION_HISTORY.get(symbol) || [];
+  const eligible = all.slice(-Math.max(2, Math.min(maxSnapshots, DHAN_M1_PRODUCTION_MAX_SNAPSHOTS)));
+
+  if (eligible.length === 0) {
+    return { symbol, provider: "DHAN" as const, generatedAt: new Date().toISOString(), snapshotCount: 0, comparisons: [], dataQuality: "INSUFFICIENT" as V2DataQuality };
+  }
+
+  const currentSnap = eligible[eligible.length - 1];
+  const strikes = [...new Set(currentSnap.legs.map((l) => l.strike))];
+  const targets: { side: V2PremiumSide; strike: number }[] = [];
+  for (const strike of strikes) {
+    if (currentSnap.legs.some((l) => l.strike === strike && l.optionType === "CE")) targets.push({ side: "CE", strike });
+    if (currentSnap.legs.some((l) => l.strike === strike && l.optionType === "PE")) targets.push({ side: "PE", strike });
+  }
+
+  const comparisons: V2PremiumCompositionComparison[] = [];
+  for (const target of targets) {
+    const current = dhanM1LegPoint(currentSnap, symbol, target.side, target.strike);
+    if (!current) continue;
+    let previous: V2PremiumLegPoint | null = null;
+    for (let i = eligible.length - 2; i >= 0; i--) {
+      previous = dhanM1LegPoint(eligible[i], symbol, target.side, target.strike);
+      if (previous) break;
+    }
+    comparisons.push(v2BuildComparison(current, previous)); // <-- M1's real, unmodified function
+  }
+
+  const overallQuality: V2DataQuality = comparisons.length === 0
+    ? "INSUFFICIENT"
+    : comparisons.every((x) => x.dataQuality === "OK") ? "OK"
+    : comparisons.some((x) => x.dataQuality === "OK" || x.dataQuality === "PARTIAL") ? "PARTIAL" : "INSUFFICIENT";
+
+  return {
+    symbol,
+    provider: "DHAN" as const,
+    generatedAt: new Date().toISOString(),
+    latestSnapshotAt: new Date(currentSnap.fetchedAt).toISOString(),
+    source: "Dhan normalized 3-minute production snapshots; current expiry ATM±3 only",
+    scoringImpact: "NONE",
+    snapshotCount: eligible.length,
+    dataQuality: overallQuality,
+    comparisons,
+  };
+}
+
+// Production router: NIFTY/BANKNIFTY -> Dhan, SENSEX -> Kite (rollback path,
+// deliberate fail-closed choice — Dhan has no confirmed security ID for it).
+function buildV2PremiumCompositionHistory(symbol: V2PremiumSymbol, maxSnapshots = 20) {
+  if (symbol === "NIFTY" || symbol === "BANKNIFTY") {
+    return buildDhanM1CompositionHistory(symbol, maxSnapshots);
+  }
+  return buildV2PremiumCompositionHistoryKite(symbol, maxSnapshots);
+}
+
 app.get("/api/v2/d6/m1-audit", async (c) => {
   const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
   const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
@@ -20023,19 +20266,30 @@ app.get("/api/v2/d6/m1-audit", async (c) => {
       count: (DHAN_SHADOW_M1_HISTORY.get(`${symbolParam}_${side}`) || []).length,
     }));
 
+    // --- D6.1.2: call the REAL production function (not a re-implementation)
+    // to prove the actual cutover, not just this diagnostic's own math. ---
+    const isDhanProductionSymbol = symbolParam === "NIFTY" || symbolParam === "BANKNIFTY";
+    const productionResult = isDhanProductionSymbol
+      ? buildV2PremiumCompositionHistory(symbolParam as V2PremiumSymbol, 20)
+      : null; // SENSEX: production still Kite-backed, not queried here (needs Kite session cookie, out of scope for this Dhan-only diagnostic)
+    const productionSnapshotCount = DHAN_M1_PRODUCTION_HISTORY.get(symbolParam as "NIFTY" | "BANKNIFTY")?.length || 0;
+
     return c.json({
       status: overallStatus,
-      phase: "D6.1.1",
+      phase: "D6.1.2",
       module: "M1_PREMIUM_COMPOSITION",
       generatedAt: new Date().toISOString(),
-      // Diagnostic path (this endpoint) is Dhan-backed:
+      // Diagnostic path (this endpoint's own legs) is Dhan-backed:
       provider: "DHAN",
       symbol: symbolParam,
-      // Live production dashboard is honestly reported as UNCHANGED — see
-      // "IMPORTANT SCOPE NOTE" above the route: this is a SHADOW pipeline,
-      // confirmed with the user, not a production cutover.
-      productionM1Provider: "KITE",
-      productionHistorySource: "KITE_RECORDER_UNCHANGED",
+      // PRODUCTION status — genuinely cut over for NIFTY/BANKNIFTY, confirmed
+      // by the user with explicit risk acknowledgement. SENSEX stays on Kite
+      // (no confirmed Dhan security ID — deliberate, not an oversight).
+      productionM1Provider: isDhanProductionSymbol ? "DHAN" : "KITE",
+      productionHistorySource: isDhanProductionSymbol ? "DHAN_NORMALIZED_SNAPSHOTS" : "KITE_RECORDER_UNCHANGED",
+      kiteRecorderUsedByM1: !isDhanProductionSymbol,
+      productionSnapshotCount,
+      productionResult, // actual output of the live buildV2PremiumCompositionHistory() call — same function the dashboard/M6/M7 call
       shadowM1Provider: "DHAN",
       shadowHistorySource: "DHAN_NORMALIZED_SNAPSHOTS",
       snapshotCount: snapshotCounts,
@@ -20058,10 +20312,12 @@ app.get("/api/v2/d6/m1-audit", async (c) => {
         legsTotal: sampleComposition.length,
       },
       invalidOrPartialReasons,
-      zerodhaFallbackUsed: false, // provably true by construction — this function never references recorderSession/sessions/Kite
-      scoringChanged: false, // v2ComputeIntrinsicValue/v2PctPart/v2CompositionState/buildV2PremiumCompositionHistory are called by reference, unmodified — see diff report
+      zerodhaFallbackUsed: false, // provably true for the Dhan production path — buildDhanM1CompositionHistory never references recorderSession
+      scoringChanged: false, // v2ComputeIntrinsicValue/v2PctPart/v2CompositionState/v2BuildComparison are called by reference, unmodified — see diff report
       orderAccessUsed: false,
-      scopeNote: "SHADOW pipeline only (Dhan → M1 math → shadow candidate), confirmed with user. Live production dashboard's buildV2PremiumCompositionHistory() is UNCHANGED and still reads only from the Kite-backed Recorder.",
+      scopeNote: isDhanProductionSymbol
+        ? "PRODUCTION CUTOVER LIVE for this symbol: buildV2PremiumCompositionHistory() now routes to Dhan for NIFTY/BANKNIFTY. Background refresh runs every 3 minutes independent of this request. SENSEX remains on the original Kite path (buildV2PremiumCompositionHistoryKite, unchanged) — no confirmed Dhan security ID exists for it."
+        : "This symbol (SENSEX) is NOT part of the Dhan cutover — production still reads the original Kite-backed function, unchanged.",
       readOnlyMode: true,
       tokenExposed: false,
     });

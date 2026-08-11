@@ -18407,6 +18407,231 @@ app.get("/api/dhan/health", async (c) => {
 
 export default app;
 
+// ============================================================================
+// DHAN MIGRATION — D2 SECURITY-ID / CONTRACT IDENTITY MAPPER (READ-ONLY)
+// Purpose: verify official Dhan Option Chain APIs (expirylist + optionchain)
+// resolve to a real, identifiable NIFTY/BANKNIFTY contract set — spot price,
+// nearest expiry, ATM strike, CE/PE presence — before any live adapter (D3)
+// is built. Does NOT touch Zerodha, scoring, or the Rule Engine.
+//
+// NOTE ON SENSEX: no officially-confirmed Dhan UnderlyingScrip ID was found
+// during this build. Per the strict "never fabricate identity fields" rule,
+// SENSEX is intentionally left NOT_YET_MAPPED here rather than guessed.
+//
+// Official endpoints (Dhan v2 docs):
+//   POST https://api.dhan.co/v2/optionchain/expirylist
+//   POST https://api.dhan.co/v2/optionchain
+// Rate limit: 1 request per 3 seconds (enforced below with a fixed delay).
+// ============================================================================
+
+const DHAN_UNDERLYING_MAP: Record<string, { underlyingScrip: number; underlyingSeg: string }> = {
+  NIFTY: { underlyingScrip: 13, underlyingSeg: "IDX_I" },
+  BANKNIFTY: { underlyingScrip: 25, underlyingSeg: "IDX_I" },
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+app.get("/api/dhan/contracts", async (c) => {
+  const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+
+  if (!accessToken || !clientId) {
+    return c.json(
+      {
+        architectureRole: "D2_SECURITY_ID_MAPPER",
+        generatedAt: new Date().toISOString(),
+        status: "NOT_CONFIGURED",
+        error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+      },
+      503
+    );
+  }
+
+  if (!symbolParam) {
+    return c.json(
+      {
+        architectureRole: "D2_SECURITY_ID_MAPPER",
+        generatedAt: new Date().toISOString(),
+        status: "BAD_REQUEST",
+        error: "Missing ?symbol= query param",
+        supportedSymbols: Object.keys(DHAN_UNDERLYING_MAP),
+      },
+      400
+    );
+  }
+
+  const mapping = DHAN_UNDERLYING_MAP[symbolParam];
+  if (!mapping) {
+    return c.json(
+      {
+        architectureRole: "D2_SECURITY_ID_MAPPER",
+        generatedAt: new Date().toISOString(),
+        status: "NOT_YET_MAPPED",
+        symbol: symbolParam,
+        reason:
+          symbolParam === "SENSEX"
+            ? "No officially-confirmed Dhan UnderlyingScrip ID was found for SENSEX during this build. Left unmapped rather than guessed, per the never-fabricate-identity rule."
+            : "Symbol not in DHAN_UNDERLYING_MAP.",
+        supportedSymbols: Object.keys(DHAN_UNDERLYING_MAP),
+      },
+      501
+    );
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    "access-token": accessToken,
+    "client-id": clientId,
+  };
+
+  try {
+    // Step 1: expiry list (identity check H1 — does this underlying resolve
+    // to a real, currently-active contract series at all?)
+    const expiryRes = await fetch("https://api.dhan.co/v2/optionchain/expirylist", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        UnderlyingScrip: mapping.underlyingScrip,
+        UnderlyingSeg: mapping.underlyingSeg,
+      }),
+    });
+    const expiryRaw = await expiryRes.text();
+    let expiryPayload: any = null;
+    try {
+      expiryPayload = expiryRaw ? JSON.parse(expiryRaw) : null;
+    } catch {
+      expiryPayload = null;
+    }
+
+    if (!expiryRes.ok || !expiryPayload || !Array.isArray(expiryPayload.data) || expiryPayload.data.length === 0) {
+      return c.json(
+        {
+          architectureRole: "D2_SECURITY_ID_MAPPER",
+          generatedAt: new Date().toISOString(),
+          status: "FAIL",
+          symbol: symbolParam,
+          step: "expirylist",
+          httpStatus: expiryRes.status,
+          identityCheckH1_expiryListResolved: false,
+          providerResponse: expiryPayload,
+        },
+        502
+      );
+    }
+
+    const expiries: string[] = expiryPayload.data;
+    const nearestExpiry = expiries[0];
+
+    // Respect Dhan's documented Option Chain rate limit (1 req / 3s) before
+    // making the second call.
+    await sleep(3100);
+
+    // Step 2: option chain for nearest expiry (identity check H2 — does the
+    // resolved contract series actually contain a priced ATM CE+PE pair?)
+    const chainRes = await fetch("https://api.dhan.co/v2/optionchain", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        UnderlyingScrip: mapping.underlyingScrip,
+        UnderlyingSeg: mapping.underlyingSeg,
+        Expiry: nearestExpiry,
+      }),
+    });
+    const chainRaw = await chainRes.text();
+    let chainPayload: any = null;
+    try {
+      chainPayload = chainRaw ? JSON.parse(chainRaw) : null;
+    } catch {
+      chainPayload = null;
+    }
+
+    if (!chainRes.ok || !chainPayload || !chainPayload.data || typeof chainPayload.data.oc !== "object") {
+      return c.json(
+        {
+          architectureRole: "D2_SECURITY_ID_MAPPER",
+          generatedAt: new Date().toISOString(),
+          status: "FAIL",
+          symbol: symbolParam,
+          step: "optionchain",
+          httpStatus: chainRes.status,
+          identityCheckH1_expiryListResolved: true,
+          identityCheckH2_chainResolved: false,
+          nearestExpiry,
+          providerResponse: chainPayload,
+        },
+        502
+      );
+    }
+
+    const spot: number | null =
+      typeof chainPayload.data.last_price === "number" ? chainPayload.data.last_price : null;
+    const oc: Record<string, { ce?: any; pe?: any }> = chainPayload.data.oc;
+    const strikes = Object.keys(oc)
+      .map((s) => parseFloat(s))
+      .filter((n) => !Number.isNaN(n))
+      .sort((a, b) => a - b);
+
+    let atmStrike: number | null = null;
+    if (spot !== null && strikes.length > 0) {
+      atmStrike = strikes.reduce((closest, s) =>
+        Math.abs(s - spot) < Math.abs(closest - spot) ? s : closest
+      , strikes[0]);
+    }
+
+    const atmKey = atmStrike !== null
+      ? Object.keys(oc).find((k) => parseFloat(k) === atmStrike)
+      : undefined;
+    const atmEntry = atmKey ? oc[atmKey] : null;
+    const atmCePresent = !!(atmEntry && atmEntry.ce);
+    const atmPePresent = !!(atmEntry && atmEntry.pe);
+
+    const identityCheckH1 = true; // expiry list resolved (already validated above)
+    const identityCheckH2 = strikes.length > 0 && spot !== null && atmCePresent && atmPePresent;
+
+    return c.json({
+      architectureRole: "D2_SECURITY_ID_MAPPER",
+      generatedAt: new Date().toISOString(),
+      status: identityCheckH1 && identityCheckH2 ? "PASS" : "PARTIAL",
+      symbol: symbolParam,
+      underlyingScrip: mapping.underlyingScrip,
+      underlyingSeg: mapping.underlyingSeg,
+      identityCheckH1_expiryListResolved: identityCheckH1,
+      identityCheckH2_atmContractPairFound: identityCheckH2,
+      expiryCount: expiries.length,
+      nearestExpiry,
+      allExpiries: expiries,
+      spot,
+      atmStrike,
+      atmCePresent,
+      atmPePresent,
+      strikeCount: strikes.length,
+      strikeRange: strikes.length > 0 ? { min: strikes[0], max: strikes[strikes.length - 1] } : null,
+      sampleAtmCe: atmCePresent ? atmEntry.ce : null,
+      sampleAtmPe: atmPePresent ? atmEntry.pe : null,
+      note: "This confirms contract IDENTITY (spot/expiry/strike/CE-PE presence) via the official Option Chain API. Per-strike Dhan security IDs (needed later for D3 WebSocket subscriptions) are NOT returned by this endpoint and require the separate /v2/instrument/{exchangeSegment} endpoint — out of scope for this D2 pass.",
+      readOnlyMode: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    });
+  } catch (err) {
+    return c.json(
+      {
+        architectureRole: "D2_SECURITY_ID_MAPPER",
+        generatedAt: new Date().toISOString(),
+        status: "FAIL",
+        symbol: symbolParam,
+        step: "network-error",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      500
+    );
+  }
+});
+
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

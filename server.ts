@@ -11,6 +11,7 @@ interface Instrument {
   last_price: number;
   expiry: string;
   strike: number;
+  tick_size: number;
   lot_size: number;
   instrument_type: string;
   segment: string;
@@ -29,6 +30,19 @@ interface ExpiryData {
 interface PremiumData {
   strike: number;
   isAtm: boolean;
+  // H1 Contract Metadata Layer — copied from the exact Kite instrument-master
+  // record that produced this quote. These fields are identity metadata, not
+  // trading signals and do not alter scoring/verdicts.
+  instrumentToken: number | null;
+  exchangeToken: number | null;
+  expiryDate: string | null;
+  expiryBucket: string | null;
+  optionType: "CE" | "PE" | null;
+  lotSize: number | null;
+  tickSize: number | null;
+  exchange: string | null;
+  segment: string | null;
+  contractRegime: "LIVE_CONTRACT_MASTER";
   tradingSymbol: string | null; // Kite's actual instrument tradingsymbol, e.g. NIFTY26AUG24600CE
   bid: number;
   ask: number;
@@ -437,6 +451,7 @@ interface V2PremiumLegPoint {
   side: V2PremiumSide;
   strike: number;
   atmStrike: number | null;
+  spot: number;
   moneyness: "ITM" | "ATM" | "OTM";
   premium: number;
   intrinsic: number;
@@ -539,6 +554,7 @@ function v2RecorderLegPoint(
     side,
     strike,
     atmStrike: idx.atmStrike,
+    spot: idx.spot,
     moneyness,
     premium: leg.ltp,
     intrinsic,
@@ -626,6 +642,1188 @@ function buildV2PremiumCompositionHistory(symbol: V2PremiumSymbol, maxSnapshots 
     snapshotCount: eligible.length,
     dataQuality: overallQuality,
     comparisons,
+  };
+}
+
+
+// ============================================================================
+// V2 MODULE 6 — PREMIUM ATTRIBUTION ENGINE
+// Observation-only diagnostic. Uses already-recorded same-strike snapshots and
+// previously computed Greeks. No new Kite request, no AI call, no Rule Engine
+// or scoring impact.
+//
+// Two views are intentionally kept separate:
+// 1) EXACT ACCOUNTING: premium change = intrinsic change + extrinsic change.
+// 2) FIRST-ORDER GREEK APPROXIMATION: Delta*dS + Vega*dIV + Theta*dt + residual.
+//    This is a local approximation, not a causal decomposition. The residual
+//    absorbs gamma, vanna/volga, discrete jumps, model error and interactions.
+// ============================================================================
+
+type V2PremiumAttributionState =
+  | "SPOT_DELTA_DOMINANT"
+  | "IV_VEGA_DOMINANT"
+  | "TIME_DECAY_DOMINANT"
+  | "MIXED_DRIVERS"
+  | "RESIDUAL_LARGE"
+  | "NO_MEANINGFUL_MOVE"
+  | "INSUFFICIENT_HISTORY";
+
+interface V2PremiumAttributionLeg {
+  symbol: V2PremiumSymbol;
+  side: V2PremiumSide;
+  strike: number;
+  timestamp: string;
+  previousTimestamp: string | null;
+  premiumChange: number | null;
+  exactAccounting: {
+    intrinsicChange: number | null;
+    extrinsicChange: number | null;
+    reconciliationError: number | null;
+  };
+  greekApproximation: {
+    spotChange: number | null;
+    ivChangePoints: number | null;
+    elapsedDays: number | null;
+    deltaContribution: number | null;
+    vegaContribution: number | null;
+    thetaContribution: number | null;
+    explainedFirstOrder: number | null;
+    residual: number | null;
+    residualPctOfMove: number | null;
+  };
+  dominantDriver: V2PremiumAttributionState;
+  dataQuality: V2DataQuality;
+  guard: string;
+}
+
+function v2ElapsedDays(a: string, b: string): number | null {
+  const ta = Date.parse(a), tb = Date.parse(b);
+  if (!Number.isFinite(ta) || !Number.isFinite(tb) || ta <= tb) return null;
+  return (ta - tb) / 86_400_000;
+}
+
+function v2AttributionState(
+  premiumChange: number,
+  deltaC: number,
+  vegaC: number,
+  thetaC: number,
+  residual: number
+): V2PremiumAttributionState {
+  const absMove = Math.abs(premiumChange);
+  if (absMove < 1e-9) return "NO_MEANINGFUL_MOVE";
+  if (Math.abs(residual) / absMove > 0.5) return "RESIDUAL_LARGE";
+  const parts = [
+    ["SPOT_DELTA_DOMINANT", Math.abs(deltaC)],
+    ["IV_VEGA_DOMINANT", Math.abs(vegaC)],
+    ["TIME_DECAY_DOMINANT", Math.abs(thetaC)],
+  ] as const;
+  const sorted = [...parts].sort((a,b)=>b[1]-a[1]);
+  if (sorted[0][1] >= absMove * 0.5 && sorted[0][1] >= sorted[1][1] * 1.5) return sorted[0][0];
+  return "MIXED_DRIVERS";
+}
+
+function v2BuildPremiumAttribution(comp: V2PremiumCompositionComparison): V2PremiumAttributionLeg {
+  const cur = comp.current;
+  const prev = comp.previous;
+  if (!prev) {
+    return {
+      symbol: cur.symbol, side: cur.side, strike: cur.strike, timestamp: cur.timestamp, previousTimestamp: null,
+      premiumChange: null,
+      exactAccounting: { intrinsicChange: null, extrinsicChange: null, reconciliationError: null },
+      greekApproximation: { spotChange: null, ivChangePoints: null, elapsedDays: null, deltaContribution: null, vegaContribution: null, thetaContribution: null, explainedFirstOrder: null, residual: null, residualPctOfMove: null },
+      dominantDriver: "INSUFFICIENT_HISTORY", dataQuality: "INSUFFICIENT",
+      guard: "Greek attribution is a first-order local approximation, not proof of causality."
+    };
+  }
+  const premiumChange = cur.premium - prev.premium;
+  const intrinsicChange = cur.intrinsic - prev.intrinsic;
+  const extrinsicChange = cur.extrinsic - prev.extrinsic;
+  const reconciliationError = premiumChange - intrinsicChange - extrinsicChange;
+  const dtDays = v2ElapsedDays(cur.timestamp, prev.timestamp);
+  const spotChange = cur.spot - prev.spot;
+  const ivChange = cur.iv != null && prev.iv != null ? cur.iv - prev.iv : null;
+  const deltaC = prev.delta != null ? prev.delta * spotChange : null;
+  const vegaC = prev.vega != null && ivChange != null ? prev.vega * ivChange : null;
+  const thetaC = prev.theta != null && dtDays != null ? prev.theta * dtDays : null;
+  const complete = deltaC != null && vegaC != null && thetaC != null;
+  const explained = complete ? deltaC! + vegaC! + thetaC! : null;
+  const residual = explained != null ? premiumChange - explained : null;
+  const residualPct = residual != null && Math.abs(premiumChange) > 1e-9 ? Math.abs(residual) / Math.abs(premiumChange) * 100 : null;
+  const dominant = complete && residual != null
+    ? v2AttributionState(premiumChange, deltaC!, vegaC!, thetaC!, residual)
+    : "INSUFFICIENT_HISTORY";
+  const dq: V2DataQuality = complete ? (comp.dataQuality === "OK" ? "OK" : "PARTIAL") : "PARTIAL";
+  return {
+    symbol: cur.symbol, side: cur.side, strike: cur.strike, timestamp: cur.timestamp, previousTimestamp: prev.timestamp,
+    premiumChange,
+    exactAccounting: { intrinsicChange, extrinsicChange, reconciliationError },
+    greekApproximation: {
+      spotChange, ivChangePoints: ivChange, elapsedDays: dtDays,
+      deltaContribution: deltaC, vegaContribution: vegaC, thetaContribution: thetaC,
+      explainedFirstOrder: explained, residual, residualPctOfMove: residualPct,
+    },
+    dominantDriver: dominant, dataQuality: dq,
+    guard: "Delta/Vega/Theta attribution uses previous-snapshot Greeks and is first-order only; residual includes gamma and cross-effects."
+  };
+}
+
+function buildV2PremiumAttribution(symbol: V2PremiumSymbol, maxSnapshots = 20) {
+  const history = buildV2PremiumCompositionHistory(symbol, maxSnapshots);
+  const attributions = (history.comparisons || []).map(v2BuildPremiumAttribution);
+  const dataQuality: V2DataQuality = attributions.length === 0 ? "INSUFFICIENT" : attributions.every(x=>x.dataQuality === "OK") ? "OK" : "PARTIAL";
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    snapshotCount: history.snapshotCount,
+    attributions,
+    dataQuality,
+    scoringImpact: "NONE",
+    source: "Existing Recorder same-strike 3-minute snapshots only; no new market-data request",
+    interpretationGuard: "Use exact intrinsic/extrinsic accounting for accounting truth. Greek attribution is approximate diagnostic evidence only."
+  };
+}
+
+// ============================================================================
+// V2 MODULE 7 — OI POSITIONING EVIDENCE ENGINE
+// Observation-only diagnostic built from the Recorder's already-stored
+// current-expiry ATM±3 same-strike OI + premium history.
+//
+// IMPORTANT LIMITATION:
+// - Recorder snapshots currently DO NOT persist per-strike volume, so this
+//   first safe version does NOT fabricate volume-change history and does NOT
+//   claim buyer-vs-writer identity from OI alone.
+// - Existing chain-level OI PCR / Volume PCR remain available elsewhere in
+//   the dashboard, but are not historically synchronized inside Recorder yet.
+// - No new Kite/API request, no Rule Engine/scoring change, no AI call.
+// ============================================================================
+
+type V2OiMotion = "BUILDING" | "UNWINDING" | "FLAT" | "INSUFFICIENT_HISTORY";
+type V2OiPriceState =
+  | "PRICE_UP_OI_UP"
+  | "PRICE_DOWN_OI_UP"
+  | "PRICE_UP_OI_DOWN"
+  | "PRICE_DOWN_OI_DOWN"
+  | "PRICE_FLAT_OI_UP"
+  | "PRICE_FLAT_OI_DOWN"
+  | "OI_FLAT"
+  | "INSUFFICIENT_HISTORY";
+type V2OiAggregateState =
+  | "CE_OI_BUILDING"
+  | "PE_OI_BUILDING"
+  | "BOTH_OI_BUILDING"
+  | "BOTH_OI_UNWINDING"
+  | "CE_OI_UNWINDING"
+  | "PE_OI_UNWINDING"
+  | "MIXED"
+  | "INSUFFICIENT_HISTORY";
+
+interface V2OiLegEvidence {
+  side: V2PremiumSide;
+  strike: number;
+  timestamp: string;
+  previousTimestamp: string | null;
+  premium: number;
+  previousPremium: number | null;
+  premiumChange: number | null;
+  premiumChangePct: number | null;
+  oi: number | null;
+  previousOi: number | null;
+  oiChange: number | null;
+  oiChangePct: number | null;
+  oiMotion: V2OiMotion;
+  priceOiState: V2OiPriceState;
+  dataQuality: V2DataQuality;
+  interpretationGuard: string;
+}
+
+function v2SignedMotion(value: number | null, epsilon = 1e-9): "UP" | "DOWN" | "FLAT" | "UNKNOWN" {
+  if (value == null || !Number.isFinite(value)) return "UNKNOWN";
+  if (value > epsilon) return "UP";
+  if (value < -epsilon) return "DOWN";
+  return "FLAT";
+}
+
+function v2OiLegEvidence(comp: V2PremiumCompositionComparison): V2OiLegEvidence {
+  const cur = comp.current;
+  const prev = comp.previous;
+  if (!prev || cur.oi == null || prev.oi == null) {
+    return {
+      side: cur.side, strike: cur.strike, timestamp: cur.timestamp, previousTimestamp: prev?.timestamp || null,
+      premium: cur.premium, previousPremium: prev?.premium ?? null,
+      premiumChange: prev ? cur.premium - prev.premium : null,
+      premiumChangePct: prev && prev.premium !== 0 ? ((cur.premium - prev.premium) / prev.premium) * 100 : null,
+      oi: cur.oi, previousOi: prev?.oi ?? null, oiChange: null, oiChangePct: null,
+      oiMotion: "INSUFFICIENT_HISTORY", priceOiState: "INSUFFICIENT_HISTORY",
+      dataQuality: "INSUFFICIENT",
+      interpretationGuard: "OI measures outstanding positions; it does not identify whether buyers or writers initiated the change."
+    };
+  }
+
+  const pDelta = cur.premium - prev.premium;
+  const pPct = prev.premium !== 0 ? (pDelta / prev.premium) * 100 : null;
+  const oiDelta = cur.oi - prev.oi;
+  const oiPct = prev.oi !== 0 ? (oiDelta / prev.oi) * 100 : null;
+  const pMotion = v2SignedMotion(pDelta, 1e-6);
+  const oMotion = v2SignedMotion(oiDelta, 0.5);
+  const oiMotion: V2OiMotion = oMotion === "UP" ? "BUILDING" : oMotion === "DOWN" ? "UNWINDING" : "FLAT";
+
+  let priceOiState: V2OiPriceState = "OI_FLAT";
+  if (oMotion === "UP" && pMotion === "UP") priceOiState = "PRICE_UP_OI_UP";
+  else if (oMotion === "UP" && pMotion === "DOWN") priceOiState = "PRICE_DOWN_OI_UP";
+  else if (oMotion === "DOWN" && pMotion === "UP") priceOiState = "PRICE_UP_OI_DOWN";
+  else if (oMotion === "DOWN" && pMotion === "DOWN") priceOiState = "PRICE_DOWN_OI_DOWN";
+  else if (oMotion === "UP" && pMotion === "FLAT") priceOiState = "PRICE_FLAT_OI_UP";
+  else if (oMotion === "DOWN" && pMotion === "FLAT") priceOiState = "PRICE_FLAT_OI_DOWN";
+
+  return {
+    side: cur.side, strike: cur.strike, timestamp: cur.timestamp, previousTimestamp: prev.timestamp,
+    premium: cur.premium, previousPremium: prev.premium,
+    premiumChange: pDelta, premiumChangePct: pPct,
+    oi: cur.oi, previousOi: prev.oi, oiChange: oiDelta, oiChangePct: oiPct,
+    oiMotion, priceOiState,
+    dataQuality: comp.dataQuality === "OK" ? "OK" : "PARTIAL",
+    interpretationGuard: "Price+OI state is descriptive evidence only. Do not infer long/short ownership or buyer/writer identity from OI alone."
+  };
+}
+
+function v2AggregateOiState(legs: V2OiLegEvidence[]): V2OiAggregateState {
+  const valid = legs.filter(x => x.oiMotion !== "INSUFFICIENT_HISTORY");
+  if (valid.length === 0) return "INSUFFICIENT_HISTORY";
+  const ce = valid.filter(x => x.side === "CE");
+  const pe = valid.filter(x => x.side === "PE");
+  const score = (xs: V2OiLegEvidence[]) => xs.reduce((s,x)=>s + (x.oiMotion === "BUILDING" ? 1 : x.oiMotion === "UNWINDING" ? -1 : 0), 0);
+  const ceS = score(ce), peS = score(pe);
+  if (ceS > 0 && peS > 0) return "BOTH_OI_BUILDING";
+  if (ceS < 0 && peS < 0) return "BOTH_OI_UNWINDING";
+  if (ceS > 0 && peS <= 0) return "CE_OI_BUILDING";
+  if (peS > 0 && ceS <= 0) return "PE_OI_BUILDING";
+  if (ceS < 0 && peS >= 0) return "CE_OI_UNWINDING";
+  if (peS < 0 && ceS >= 0) return "PE_OI_UNWINDING";
+  return "MIXED";
+}
+
+function buildV2OiPositioningEvidence(symbol: V2PremiumSymbol, maxSnapshots = 20) {
+  const history = buildV2PremiumCompositionHistory(symbol, maxSnapshots);
+  const legs: V2OiLegEvidence[] = (history.comparisons || []).map(v2OiLegEvidence);
+  const valid = legs.filter(x => x.dataQuality === "OK" || x.dataQuality === "PARTIAL");
+  const dataQuality: V2DataQuality = legs.length === 0 ? "INSUFFICIENT" : valid.length === legs.length ? (legs.every(x=>x.dataQuality === "OK") ? "OK" : "PARTIAL") : valid.length > 0 ? "PARTIAL" : "INSUFFICIENT";
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    snapshotCount: history.snapshotCount,
+    aggregateState: v2AggregateOiState(legs),
+    legs,
+    volumeHistoryAvailable: false,
+    chainContextNote: "Current OI PCR and Volume PCR exist in the live market snapshot, but Recorder does not yet persist synchronized per-strike volume history; this module does not invent it.",
+    buyerWriterInference: "NOT_INFERRED",
+    dataQuality,
+    scoringImpact: "NONE",
+    source: "Existing Recorder current-expiry ATM±3 same-strike premium/OI snapshots only; no new market-data request",
+    interpretationGuard: "OI expansion/contraction is positioning evidence, not proof of long/short ownership."
+  };
+}
+
+// ============================================================================
+// V2 MODULE 8 — ROLLOVER / EXPIRY MIGRATION EVIDENCE ENGINE
+// Observation-only. Uses the multi-expiry option data already present in each
+// 3-minute refresh and stores a tiny in-memory SUMMARY history (not full chains).
+// This is required because true rollover is a CHANGE across time: current-expiry
+// OI falling while next-expiry OI builds. A single cross-sectional chain cannot
+// prove migration.
+//
+// Hard boundaries:
+// - No new Kite/API requests.
+// - No Rule Engine / score / verdict changes.
+// - No AI/Haiku/GPT calls.
+// - Does not change RecorderSnapshot schema or Drive archive format.
+// - Stores only ATM±3 aggregate CE/PE OI + mean premium/IV for first two distinct
+//   calendar expiries, capped to RECORDER_MAX_SNAPSHOTS.
+// - OI is kept as the broker-reported raw value. Lot-size normalization is NOT
+//   claimed here because PremiumData does not carry lot_size; historical/cross-era
+//   normalization belongs to the Contract Metadata layer.
+// - Rollover evidence is NOT directional market bias and does NOT identify buyers
+//   versus writers.
+// ============================================================================
+
+type V2RolloverState =
+  | "BOTH_SIDES_MIGRATING_TO_NEXT"
+  | "CE_MIGRATION_TO_NEXT"
+  | "PE_MIGRATION_TO_NEXT"
+  | "CURRENT_UNWIND_WITHOUT_NEXT_BUILD"
+  | "NEXT_BUILD_WITHOUT_CURRENT_UNWIND"
+  | "STABLE"
+  | "MIXED"
+  | "INSUFFICIENT_HISTORY"
+  | "INSUFFICIENT_DATA";
+
+interface V2RolloverExpirySummary {
+  expiryLabel: string;
+  expiryDate: string;
+  dte: number | null;
+  atmStrike: number | null;
+  ceOi: number | null;
+  peOi: number | null;
+  ceMeanPremium: number | null;
+  peMeanPremium: number | null;
+  ceMeanIv: number | null;
+  peMeanIv: number | null;
+  ceLotSize: number | null;
+  peLotSize: number | null;
+  lotSizeCompatibility: "MATCH" | "MISMATCH" | "UNKNOWN";
+  expirySeriesType: "MONTH_END_SERIES" | "NON_MONTH_END_SERIES" | "UNKNOWN";
+  strikeCountCe: number;
+  strikeCountPe: number;
+}
+
+interface V2RolloverSnapshot {
+  timestamp: string;
+  symbol: V2PremiumSymbol;
+  current: V2RolloverExpirySummary;
+  next: V2RolloverExpirySummary;
+}
+
+const v2RolloverHistory: Record<V2PremiumSymbol, V2RolloverSnapshot[]> = {
+  NIFTY: [], BANKNIFTY: [], SENSEX: [],
+};
+
+function v2ExpiryDte(expiryDate: Date): number | null {
+  const t = expiryDate.getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, (t - Date.now()) / 86_400_000);
+}
+
+function v2NearAtmLegs(legs: PremiumData[] | undefined, range = 3): PremiumData[] {
+  const xs = (legs || []).filter((x) => Number.isFinite(x.strike));
+  const atm = xs.find((x) => x.isAtm);
+  if (!atm) return [];
+  const unique = Array.from(new Set(xs.map((x) => x.strike))).sort((a,b)=>a-b);
+  const atmIndex = unique.indexOf(atm.strike);
+  if (atmIndex < 0) return [];
+  const allowed = new Set(unique.slice(Math.max(0, atmIndex-range), atmIndex+range+1));
+  return xs.filter((x) => allowed.has(x.strike));
+}
+
+function v2SingleLotSize(xs: PremiumData[]): number | null {
+  const vals = Array.from(new Set(xs.map((x) => x.lotSize).filter((v): v is number => Number.isFinite(v) && (v as number) > 0)));
+  return vals.length === 1 ? vals[0] : null;
+}
+
+function v2ExpirySeriesType(exp: ExpiryData, allExpiries?: ExpiryData[]): "MONTH_END_SERIES" | "NON_MONTH_END_SERIES" | "UNKNOWN" {
+  const d = v2IsoDateOnly(exp.expiryDate);
+  if (!d) return "UNKNOWN";
+  if (!allExpiries || allExpiries.length === 0) return exp.expiry === "Monthly" ? "MONTH_END_SERIES" : "UNKNOWN";
+  const ym = d.slice(0, 7);
+  const sameMonth = allExpiries
+    .map((x) => v2IsoDateOnly(x.expiryDate))
+    .filter((x) => x && x.slice(0, 7) === ym)
+    .sort();
+  if (sameMonth.length === 0) return "UNKNOWN";
+  return d === sameMonth[sameMonth.length - 1] ? "MONTH_END_SERIES" : "NON_MONTH_END_SERIES";
+}
+
+function v2RolloverExpirySummary(exp: ExpiryData, allExpiries?: ExpiryData[]): V2RolloverExpirySummary {
+  const ce = v2NearAtmLegs(exp.ceStrikes, 3);
+  const pe = v2NearAtmLegs(exp.peStrikes, 3);
+  const atm = ce.find((x)=>x.isAtm) || pe.find((x)=>x.isAtm);
+  const sumOi = (xs: PremiumData[]) => {
+    const vals = xs.map((x)=>x.oi).filter((v): v is number => Number.isFinite(v) && v >= 0);
+    return vals.length ? vals.reduce((a,b)=>a+b,0) : null;
+  };
+  const meanField = (xs: PremiumData[], key: "lastPrice"|"iv") => {
+    const vals = xs.map((x)=>x[key]).filter((v): v is number => Number.isFinite(v) && v >= 0);
+    return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
+  };
+  return {
+    expiryLabel: exp.expiry,
+    expiryDate: v2IsoDateOnly(exp.expiryDate),
+    dte: v2ExpiryDte(exp.expiryDate),
+    atmStrike: atm?.strike ?? null,
+    ceOi: sumOi(ce), peOi: sumOi(pe),
+    ceMeanPremium: meanField(ce,"lastPrice"), peMeanPremium: meanField(pe,"lastPrice"),
+    ceMeanIv: meanField(ce,"iv"), peMeanIv: meanField(pe,"iv"),
+    ceLotSize: v2SingleLotSize(ce),
+    peLotSize: v2SingleLotSize(pe),
+    lotSizeCompatibility: (() => {
+      const a = v2SingleLotSize(ce), b = v2SingleLotSize(pe);
+      return a == null || b == null ? "UNKNOWN" : a === b ? "MATCH" : "MISMATCH";
+    })(),
+    expirySeriesType: v2ExpirySeriesType(exp, allExpiries),
+    strikeCountCe: ce.length, strikeCountPe: pe.length,
+  };
+}
+
+function v2TwoDistinctExpiries(m: IndexMetrics | undefined): ExpiryData[] {
+  if (!m || m.error) return [];
+  const seen = new Set<string>();
+  const out: ExpiryData[] = [];
+  const sorted = [...(m.expiries || [])].sort((a,b)=>a.expiryDate.getTime()-b.expiryDate.getTime());
+  for (const exp of sorted) {
+    const d = v2IsoDateOnly(exp.expiryDate);
+    if (!d || seen.has(d)) continue;
+    seen.add(d); out.push(exp);
+    if (out.length === 2) break;
+  }
+  return out;
+}
+
+function captureV2RolloverSummary(symbol: V2PremiumSymbol, m: IndexMetrics | undefined, timestamp: string): void {
+  const exps = v2TwoDistinctExpiries(m);
+  if (exps.length < 2) return;
+  const snap: V2RolloverSnapshot = {
+    timestamp, symbol,
+    current: v2RolloverExpirySummary(exps[0], m?.expiries),
+    next: v2RolloverExpirySummary(exps[1], m?.expiries),
+  };
+  if (!snap.current.expiryDate || !snap.next.expiryDate) return;
+  const hist = v2RolloverHistory[symbol];
+  hist.push(snap);
+  if (hist.length > RECORDER_MAX_SNAPSHOTS) hist.shift();
+}
+
+function v2Delta(cur: number | null, prev: number | null): number | null {
+  return cur == null || prev == null || !Number.isFinite(cur) || !Number.isFinite(prev) ? null : cur-prev;
+}
+function v2PctDelta(cur: number | null, prev: number | null): number | null {
+  const d=v2Delta(cur,prev); return d==null || prev==null || prev===0 ? null : (d/prev)*100;
+}
+function v2RolloverSign(v: number | null): -1|0|1|null {
+  if (v==null || !Number.isFinite(v)) return null;
+  return v>0 ? 1 : v<0 ? -1 : 0;
+}
+
+function v2ClassifyRollover(curCe:number|null, prevCe:number|null, nextCe:number|null, prevNextCe:number|null,
+                           curPe:number|null, prevPe:number|null, nextPe:number|null, prevNextPe:number|null): V2RolloverState {
+  const cCe=v2RolloverSign(v2Delta(curCe,prevCe)), nCe=v2RolloverSign(v2Delta(nextCe,prevNextCe));
+  const cPe=v2RolloverSign(v2Delta(curPe,prevPe)), nPe=v2RolloverSign(v2Delta(nextPe,prevNextPe));
+  if ([cCe,nCe,cPe,nPe].some((x)=>x===null)) return "INSUFFICIENT_DATA";
+  const ceMig=cCe===-1 && nCe===1, peMig=cPe===-1 && nPe===1;
+  if (ceMig && peMig) return "BOTH_SIDES_MIGRATING_TO_NEXT";
+  if (ceMig) return "CE_MIGRATION_TO_NEXT";
+  if (peMig) return "PE_MIGRATION_TO_NEXT";
+  if ((cCe===-1 || cPe===-1) && !(nCe===1 || nPe===1)) return "CURRENT_UNWIND_WITHOUT_NEXT_BUILD";
+  if ((nCe===1 || nPe===1) && !(cCe===-1 || cPe===-1)) return "NEXT_BUILD_WITHOUT_CURRENT_UNWIND";
+  if (cCe===0 && nCe===0 && cPe===0 && nPe===0) return "STABLE";
+  return "MIXED";
+}
+
+function buildV2RolloverMigration(symbol: V2PremiumSymbol) {
+  const hist = v2RolloverHistory[symbol];
+  const latest = hist[hist.length-1];
+  if (!latest) return {
+    symbol, generatedAt:new Date().toISOString(), state:"INSUFFICIENT_DATA" as V2RolloverState,
+    snapshotCount:0, dataQuality:"INSUFFICIENT" as V2DataQuality, scoringImpact:"NONE",
+    source:"Existing 3-minute multi-expiry market refresh summaries only; no new market-data request",
+    interpretationGuard:"Rollover requires time-series evidence. No summary history is available yet."
+  };
+  let previous: V2RolloverSnapshot|undefined;
+  for (let i=hist.length-2;i>=0;i--) {
+    const p=hist[i];
+    if (p.current.expiryDate===latest.current.expiryDate && p.next.expiryDate===latest.next.expiryDate) { previous=p; break; }
+  }
+  if (!previous) return {
+    symbol, generatedAt:new Date().toISOString(), state:"INSUFFICIENT_HISTORY" as V2RolloverState,
+    snapshotCount:hist.length, current:latest.current, next:latest.next,
+    dataQuality:"INSUFFICIENT" as V2DataQuality, scoringImpact:"NONE",
+    lotSizeNormalization:"AVAILABLE_FROM_H1_CONTRACT_METADATA",
+    crossExpiryLotComparable:false,
+    buyerWriterInference:"NOT_INFERRED",
+    interpretationGuard:"Need at least two 3-minute summaries with the same current/next calendar expiries before migration can be assessed."
+  };
+  const crossExpiryLotComparable =
+    latest.current.ceLotSize != null && latest.current.peLotSize != null &&
+    latest.next.ceLotSize != null && latest.next.peLotSize != null &&
+    latest.current.ceLotSize === latest.next.ceLotSize &&
+    latest.current.peLotSize === latest.next.peLotSize;
+
+  const deltas = {
+    currentCeOi: v2Delta(latest.current.ceOi, previous.current.ceOi),
+    nextCeOi: v2Delta(latest.next.ceOi, previous.next.ceOi),
+    currentPeOi: v2Delta(latest.current.peOi, previous.current.peOi),
+    nextPeOi: v2Delta(latest.next.peOi, previous.next.peOi),
+    currentCeOiPct: v2PctDelta(latest.current.ceOi, previous.current.ceOi),
+    nextCeOiPct: v2PctDelta(latest.next.ceOi, previous.next.ceOi),
+    currentPeOiPct: v2PctDelta(latest.current.peOi, previous.current.peOi),
+    nextPeOiPct: v2PctDelta(latest.next.peOi, previous.next.peOi),
+  };
+  const state = crossExpiryLotComparable
+    ? v2ClassifyRollover(latest.current.ceOi,previous.current.ceOi,latest.next.ceOi,previous.next.ceOi,
+                        latest.current.peOi,previous.current.peOi,latest.next.peOi,previous.next.peOi)
+    : "INSUFFICIENT_DATA" as V2RolloverState;
+  const complete=Object.values(deltas).slice(0,4).every((v)=>v!=null);
+  return {
+    symbol, generatedAt:new Date().toISOString(), state, snapshotCount:hist.length,
+    current:latest.current, next:latest.next, previousTimestamp:previous.timestamp, currentTimestamp:latest.timestamp,
+    deltas,
+    dataQuality:(complete?"OK":"PARTIAL") as V2DataQuality,
+    scoringImpact:"NONE",
+    source:"Existing 3-minute multi-expiry market refresh summaries only; no new Kite/API request",
+    lotSizeNormalization:"AVAILABLE_FROM_H1_CONTRACT_METADATA",
+    crossExpiryLotComparable,
+    buyerWriterInference:"NOT_INFERRED",
+    directionalBias:"NONE",
+    interpretationGuard: crossExpiryLotComparable ? "Migration means raw OI decreased in current expiry while raw OI increased in next expiry on the same CE/PE side. It is evidence of expiry migration only, not proof of bullish/bearish direction or buyer/writer identity." : "Current and next expiries do not expose matching valid lot sizes, so raw cross-expiry OI migration is not classified. H3 blocks this comparison rather than inventing a normalization."
+  };
+}
+
+// ============================================================================
+// V2 MODULE 2 — COMPUTED IV CHANGE + STRIKE SKEW ENGINE
+// Observation-only, additive diagnostic built from the Recorder's already-stored
+// current-expiry ATM±3 strike IV values. IV here is MODEL-COMPUTED from option
+// LTP via calcImpliedVolatility(); it is NOT a Kite-published IV field.
+//
+// Hard boundaries:
+// - No new Kite/API requests.
+// - No runRuleEngine()/score/verdict changes.
+// - No AI/Haiku/GPT calls.
+// - No mutation of Recorder snapshots.
+// - Current skew can be reported from one valid snapshot; 3-minute skew-change
+//   requires a prior valid snapshot with the SAME ATM strike to avoid mixing
+//   different skew anchors after an ATM roll.
+// ============================================================================
+
+type V2IvRelativeState = "CE_ATM_IV_PREMIUM" | "PE_ATM_IV_PREMIUM" | "ATM_IV_BALANCED" | "INSUFFICIENT_DATA";
+type V2WingSkewState = "CE_WING_STEEPER" | "PE_WING_STEEPER" | "WINGS_BALANCED" | "INSUFFICIENT_DATA";
+type V2IvMotionState =
+  | "BOTH_IV_RISING"
+  | "BOTH_IV_FALLING"
+  | "CE_IV_RISING_PE_NOT_RISING"
+  | "PE_IV_RISING_CE_NOT_RISING"
+  | "CE_IV_FALLING_PE_NOT_FALLING"
+  | "PE_IV_FALLING_CE_NOT_FALLING"
+  | "ATM_IV_FLAT"
+  | "MIXED"
+  | "INSUFFICIENT_HISTORY";
+type V2SkewChangeState =
+  | "CE_SKEW_STEEPENING"
+  | "PE_SKEW_STEEPENING"
+  | "BOTH_SKEWS_STEEPENING"
+  | "BOTH_SKEWS_FLATTENING"
+  | "CE_STEEPENING_PE_FLATTENING"
+  | "PE_STEEPENING_CE_FLATTENING"
+  | "SKEW_STABLE"
+  | "MIXED"
+  | "INSUFFICIENT_HISTORY";
+
+interface V2IvSkewSnapshot {
+  timestamp: string;
+  snapshotId: string;
+  snapshotStatus: RecorderSnapshot["snapshotStatus"];
+  symbol: V2PremiumSymbol;
+  atmStrike: number;
+  atmCeIv: number | null;
+  atmPeIv: number | null;
+  ceOtmWingIvs: Array<{ strike: number; iv: number }>;
+  peOtmWingIvs: Array<{ strike: number; iv: number }>;
+  ceWingAverageIv: number | null;
+  peWingAverageIv: number | null;
+  ceWingVsAtmSpread: number | null;
+  peWingVsAtmSpread: number | null;
+  atmPeMinusCeSpread: number | null;
+  wingSkewDifference: number | null; // PE wing spread - CE wing spread
+  relativeAtmState: V2IvRelativeState;
+  wingSkewState: V2WingSkewState;
+  dataQuality: V2DataQuality;
+}
+
+function v2FiniteIv(iv: number | null | undefined): number | null {
+  return iv != null && Number.isFinite(iv) && iv > 0 ? iv : null;
+}
+
+function v2Average(values: number[]): number | null {
+  return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+}
+
+function v2Sign(value: number | null, eps = 1e-9): -1 | 0 | 1 | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  if (value > eps) return 1;
+  if (value < -eps) return -1;
+  return 0;
+}
+
+function buildV2IvSkewSnapshot(snap: RecorderSnapshot, symbol: V2PremiumSymbol): V2IvSkewSnapshot | null {
+  if (snap.snapshotStatus === "STALE" || snap.snapshotStatus === "INVALID") return null;
+  const idx = snap[symbol];
+  if (!idx || idx.atmStrike == null) return null;
+
+  const atmStrike = idx.atmStrike;
+  const ceLegs = idx.ceStrikesNear || [];
+  const peLegs = idx.peStrikesNear || [];
+  const atmCe = ceLegs.find((x) => x.strike === atmStrike);
+  const atmPe = peLegs.find((x) => x.strike === atmStrike);
+  const atmCeIv = v2FiniteIv(atmCe?.iv);
+  const atmPeIv = v2FiniteIv(atmPe?.iv);
+
+  // OTM wings only: calls above ATM, puts below ATM. This avoids mixing ITM
+  // and OTM contracts into a single "wing" measure.
+  const ceOtmWingIvs = ceLegs
+    .filter((x) => x.strike > atmStrike)
+    .map((x) => ({ strike: x.strike, iv: v2FiniteIv(x.iv) }))
+    .filter((x): x is { strike: number; iv: number } => x.iv != null);
+  const peOtmWingIvs = peLegs
+    .filter((x) => x.strike < atmStrike)
+    .map((x) => ({ strike: x.strike, iv: v2FiniteIv(x.iv) }))
+    .filter((x): x is { strike: number; iv: number } => x.iv != null);
+
+  const ceWingAverageIv = v2Average(ceOtmWingIvs.map((x) => x.iv));
+  const peWingAverageIv = v2Average(peOtmWingIvs.map((x) => x.iv));
+  const ceWingVsAtmSpread = ceWingAverageIv != null && atmCeIv != null ? ceWingAverageIv - atmCeIv : null;
+  const peWingVsAtmSpread = peWingAverageIv != null && atmPeIv != null ? peWingAverageIv - atmPeIv : null;
+  const atmPeMinusCeSpread = atmPeIv != null && atmCeIv != null ? atmPeIv - atmCeIv : null;
+  const wingSkewDifference = peWingVsAtmSpread != null && ceWingVsAtmSpread != null ? peWingVsAtmSpread - ceWingVsAtmSpread : null;
+
+  const atmSpreadSign = v2Sign(atmPeMinusCeSpread);
+  const relativeAtmState: V2IvRelativeState = atmSpreadSign == null
+    ? "INSUFFICIENT_DATA"
+    : atmSpreadSign > 0
+      ? "PE_ATM_IV_PREMIUM"
+      : atmSpreadSign < 0
+        ? "CE_ATM_IV_PREMIUM"
+        : "ATM_IV_BALANCED";
+
+  const wingDiffSign = v2Sign(wingSkewDifference);
+  const wingSkewState: V2WingSkewState = wingDiffSign == null
+    ? "INSUFFICIENT_DATA"
+    : wingDiffSign > 0
+      ? "PE_WING_STEEPER"
+      : wingDiffSign < 0
+        ? "CE_WING_STEEPER"
+        : "WINGS_BALANCED";
+
+  const requiredReady = atmCeIv != null && atmPeIv != null;
+  const wingsReady = ceWingVsAtmSpread != null && peWingVsAtmSpread != null;
+  const dataQuality: V2DataQuality = !requiredReady ? "INSUFFICIENT" : !wingsReady ? "PARTIAL" : "OK";
+
+  return {
+    timestamp: snap.backendTimestamp,
+    snapshotId: snap.snapshotId,
+    snapshotStatus: snap.snapshotStatus,
+    symbol,
+    atmStrike,
+    atmCeIv,
+    atmPeIv,
+    ceOtmWingIvs,
+    peOtmWingIvs,
+    ceWingAverageIv,
+    peWingAverageIv,
+    ceWingVsAtmSpread,
+    peWingVsAtmSpread,
+    atmPeMinusCeSpread,
+    wingSkewDifference,
+    relativeAtmState,
+    wingSkewState,
+    dataQuality,
+  };
+}
+
+function v2IvMotionState(current: V2IvSkewSnapshot, previous: V2IvSkewSnapshot | null): V2IvMotionState {
+  if (!previous || previous.atmStrike !== current.atmStrike) return "INSUFFICIENT_HISTORY";
+  if (current.atmCeIv == null || current.atmPeIv == null || previous.atmCeIv == null || previous.atmPeIv == null) return "INSUFFICIENT_HISTORY";
+  const ce = v2Sign(current.atmCeIv - previous.atmCeIv);
+  const pe = v2Sign(current.atmPeIv - previous.atmPeIv);
+  if (ce === 1 && pe === 1) return "BOTH_IV_RISING";
+  if (ce === -1 && pe === -1) return "BOTH_IV_FALLING";
+  if (ce === 1 && pe !== 1) return "CE_IV_RISING_PE_NOT_RISING";
+  if (pe === 1 && ce !== 1) return "PE_IV_RISING_CE_NOT_RISING";
+  if (ce === -1 && pe !== -1) return "CE_IV_FALLING_PE_NOT_FALLING";
+  if (pe === -1 && ce !== -1) return "PE_IV_FALLING_CE_NOT_FALLING";
+  if (ce === 0 && pe === 0) return "ATM_IV_FLAT";
+  return "MIXED";
+}
+
+function v2SkewChangeState(current: V2IvSkewSnapshot, previous: V2IvSkewSnapshot | null): V2SkewChangeState {
+  if (!previous || previous.atmStrike !== current.atmStrike) return "INSUFFICIENT_HISTORY";
+  if (current.ceWingVsAtmSpread == null || current.peWingVsAtmSpread == null || previous.ceWingVsAtmSpread == null || previous.peWingVsAtmSpread == null) {
+    return "INSUFFICIENT_HISTORY";
+  }
+  const ce = v2Sign(current.ceWingVsAtmSpread - previous.ceWingVsAtmSpread);
+  const pe = v2Sign(current.peWingVsAtmSpread - previous.peWingVsAtmSpread);
+  if (ce === 1 && pe === 1) return "BOTH_SKEWS_STEEPENING";
+  if (ce === -1 && pe === -1) return "BOTH_SKEWS_FLATTENING";
+  if (ce === 1 && pe === -1) return "CE_STEEPENING_PE_FLATTENING";
+  if (pe === 1 && ce === -1) return "PE_STEEPENING_CE_FLATTENING";
+  if (ce === 1 && pe === 0) return "CE_SKEW_STEEPENING";
+  if (pe === 1 && ce === 0) return "PE_SKEW_STEEPENING";
+  if (ce === 0 && pe === 0) return "SKEW_STABLE";
+  return "MIXED";
+}
+
+function buildV2IvSkewHistory(symbol: V2PremiumSymbol, maxSnapshots = 20) {
+  const eligible = recorderSession.snapshots
+    .filter((s) => s.snapshotStatus !== "STALE" && s.snapshotStatus !== "INVALID" && s[symbol] != null)
+    .slice(-Math.max(2, Math.min(maxSnapshots, RECORDER_MAX_SNAPSHOTS)));
+
+  if (eligible.length === 0) {
+    return {
+      symbol,
+      generatedAt: new Date().toISOString(),
+      snapshotCount: 0,
+      current: null,
+      previousComparable: null,
+      change: null,
+      dataQuality: "INSUFFICIENT" as V2DataQuality,
+      scoringImpact: "NONE",
+    };
+  }
+
+  const current = buildV2IvSkewSnapshot(eligible[eligible.length - 1], symbol);
+  if (!current) {
+    return {
+      symbol,
+      generatedAt: new Date().toISOString(),
+      snapshotCount: eligible.length,
+      current: null,
+      previousComparable: null,
+      change: null,
+      dataQuality: "INSUFFICIENT" as V2DataQuality,
+      scoringImpact: "NONE",
+    };
+  }
+
+  let previousComparable: V2IvSkewSnapshot | null = null;
+  for (let i = eligible.length - 2; i >= 0; i--) {
+    const candidate = buildV2IvSkewSnapshot(eligible[i], symbol);
+    if (candidate && candidate.atmStrike === current.atmStrike) {
+      previousComparable = candidate;
+      break;
+    }
+  }
+
+  const change = {
+    previousTimestamp: previousComparable?.timestamp || null,
+    atmContinuity: previousComparable != null,
+    atmCeIv: v2Change(current.atmCeIv, previousComparable?.atmCeIv ?? null),
+    atmPeIv: v2Change(current.atmPeIv, previousComparable?.atmPeIv ?? null),
+    ceWingVsAtmSpread: v2Change(current.ceWingVsAtmSpread, previousComparable?.ceWingVsAtmSpread ?? null),
+    peWingVsAtmSpread: v2Change(current.peWingVsAtmSpread, previousComparable?.peWingVsAtmSpread ?? null),
+    atmPeMinusCeSpread: v2Change(current.atmPeMinusCeSpread, previousComparable?.atmPeMinusCeSpread ?? null),
+    wingSkewDifference: v2Change(current.wingSkewDifference, previousComparable?.wingSkewDifference ?? null),
+    ivMotionState: v2IvMotionState(current, previousComparable),
+    skewChangeState: v2SkewChangeState(current, previousComparable),
+  };
+
+  const dataQuality: V2DataQuality = current.dataQuality === "INSUFFICIENT"
+    ? "INSUFFICIENT"
+    : previousComparable == null
+      ? "PARTIAL"
+      : current.dataQuality;
+
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    latestSnapshotAt: current.timestamp,
+    source: "Recorder 3-minute Truth-gated snapshots; current expiry ATM±3; IV is model-computed from option LTP, not supplied by Kite",
+    methodology: {
+      atmRelativeSpread: "ATM PE IV - ATM CE IV",
+      ceWingSpread: "average OTM CE IV above ATM - ATM CE IV",
+      peWingSpread: "average OTM PE IV below ATM - ATM PE IV",
+      wingSkewDifference: "PE wing spread - CE wing spread",
+      historyRule: "3-minute change requires same ATM strike across snapshots",
+    },
+    scoringImpact: "NONE",
+    snapshotCount: eligible.length,
+    dataQuality,
+    current,
+    previousComparable,
+    change,
+    interpretationGuard: "IV/skew describes volatility pricing/asymmetry only. It does not independently mean bullish, bearish, BUY, or SELL.",
+  };
+}
+
+
+// ============================================================================
+// V2 MODULE 3 — MULTI-EXPIRY IV TERM STRUCTURE ENGINE
+// Observation-only, additive diagnostic built from the multi-expiry option data
+// ALREADY fetched into IndexMetrics.expiries. IV is MODEL-COMPUTED from option
+// LTP via calcImpliedVolatility(); it is NOT a Kite-published IV field.
+//
+// Hard boundaries:
+// - No new Kite/API requests.
+// - No runRuleEngine()/score/verdict changes.
+// - No AI/Haiku/GPT calls.
+// - No Recorder mutation or storage expansion.
+// - Uses each expiry's ATM CE/PE only and deduplicates identical calendar expiries.
+// - Every expiry row must pass its own option-quote freshness check.
+// ============================================================================
+
+type V2TermStructureState = "FRONT_LOADED_IV" | "BACK_LOADED_IV" | "MIXED_TERM_STRUCTURE" | "FLAT_EXACT" | "INSUFFICIENT_DATA";
+
+interface V2TermStructureRow {
+  expiryLabel: string;
+  expiryDate: string;
+  atmStrike: number | null;
+  atmCeIv: number | null;
+  atmPeIv: number | null;
+  atmMeanIv: number | null;
+  ceQuoteTimestamp: string | null;
+  peQuoteTimestamp: string | null;
+  ceFreshness: TruthVerdict;
+  peFreshness: TruthVerdict;
+  dataQuality: V2DataQuality;
+}
+
+function v2IsoDateOnly(d: Date): string {
+  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : "";
+}
+
+function v2TermRow(expiry: ExpiryData): V2TermStructureRow {
+  const atmCe = (expiry.ceStrikes || []).find((s) => s.isAtm);
+  const atmPe = (expiry.peStrikes || []).find((s) => s.isAtm);
+  const ceIv = v2FiniteIv(atmCe?.iv);
+  const peIv = v2FiniteIv(atmPe?.iv);
+  const ceFresh = atmCe ? classifyTruthField(atmCe.quoteTimestamp, TRUTH_THRESHOLDS_MS.options) : { verdict: "INVALID" as TruthVerdict, ageMs: null, reason: "no_ce_leg" };
+  const peFresh = atmPe ? classifyTruthField(atmPe.quoteTimestamp, TRUTH_THRESHOLDS_MS.options) : { verdict: "INVALID" as TruthVerdict, ageMs: null, reason: "no_pe_leg" };
+  const validCe = ceFresh.verdict === "TRUE" ? ceIv : null;
+  const validPe = peFresh.verdict === "TRUE" ? peIv : null;
+  const ivs = [validCe, validPe].filter((x): x is number => x != null);
+  const atmMeanIv = ivs.length ? v2Average(ivs) : null;
+  const dataQuality: V2DataQuality = validCe != null && validPe != null ? "OK" : atmMeanIv != null ? "PARTIAL" : "INSUFFICIENT";
+  return { expiryLabel: expiry.expiry, expiryDate: v2IsoDateOnly(expiry.expiryDate), atmStrike: atmCe?.strike ?? atmPe?.strike ?? null, atmCeIv: validCe, atmPeIv: validPe, atmMeanIv, ceQuoteTimestamp: atmCe?.quoteTimestamp || null, peQuoteTimestamp: atmPe?.quoteTimestamp || null, ceFreshness: ceFresh.verdict, peFreshness: peFresh.verdict, dataQuality };
+}
+
+function v2ClassifyTermStructure(rows: V2TermStructureRow[]): V2TermStructureState {
+  const valid = rows.filter((r) => r.atmMeanIv != null);
+  if (valid.length < 2) return "INSUFFICIENT_DATA";
+  const vals = valid.map((r) => r.atmMeanIv as number);
+  let nonIncreasing = true, nonDecreasing = true, anyDown = false, anyUp = false;
+  for (let i = 1; i < vals.length; i++) {
+    if (vals[i] > vals[i - 1]) { nonIncreasing = false; anyUp = true; }
+    if (vals[i] < vals[i - 1]) { nonDecreasing = false; anyDown = true; }
+  }
+  if (nonIncreasing && anyDown) return "FRONT_LOADED_IV";
+  if (nonDecreasing && anyUp) return "BACK_LOADED_IV";
+  if (!anyUp && !anyDown) return "FLAT_EXACT";
+  return "MIXED_TERM_STRUCTURE";
+}
+
+function buildV2IvTermStructure(symbol: V2PremiumSymbol, m: IndexMetrics | undefined) {
+  if (!m || m.error) return { symbol, generatedAt: new Date().toISOString(), source: "Existing multi-expiry IndexMetrics only; no additional Kite request", ivSource: "MODEL_COMPUTED_FROM_OPTION_LTP_NOT_KITE_PUBLISHED_IV", scoringImpact: "NONE", state: "INSUFFICIENT_DATA" as V2TermStructureState, dataQuality: "INSUFFICIENT" as V2DataQuality, rows: [] as V2TermStructureRow[] };
+  const seenDates = new Set<string>();
+  const rows: V2TermStructureRow[] = [];
+  for (const exp of m.expiries || []) {
+    const row = v2TermRow(exp);
+    if (!row.expiryDate || seenDates.has(row.expiryDate)) continue;
+    seenDates.add(row.expiryDate);
+    rows.push(row);
+  }
+  rows.sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
+  const usable = rows.filter((r) => r.atmMeanIv != null);
+  const state = v2ClassifyTermStructure(rows);
+  const dataQuality: V2DataQuality = usable.length < 2 ? "INSUFFICIENT" : rows.every((r) => r.dataQuality === "OK") ? "OK" : "PARTIAL";
+  return { symbol, generatedAt: new Date().toISOString(), source: "Existing multi-expiry IndexMetrics only; no additional Kite request", ivSource: "MODEL_COMPUTED_FROM_OPTION_LTP_NOT_KITE_PUBLISHED_IV", scoringImpact: "NONE", state, dataQuality, usableExpiryCount: usable.length, rows };
+}
+
+
+
+// ============================================================================
+// V2 MODULE 9 — MULTI-EXPIRY ALIGNMENT EVIDENCE ENGINE
+// Observation-only, additive diagnostic. Reuses the already-fetched Current /
+// Next / Next-of-Next / Monthly option data plus Module 8 rollover context.
+// It performs NO new Kite/API request and does NOT alter scoring/verdicts.
+//
+// Scientific guardrails:
+// - CE-vs-PE OI is participation/positioning context, NOT buyer-vs-writer proof.
+// - CE-vs-PE IV asymmetry is volatility-pricing context, NOT direction by itself.
+// - Premium levels are reported as context only; different expiries have
+//   different DTE/theta/vega and must not be compared as equivalent contracts.
+// - At least two distinct calendar expiries are required for an alignment state.
+// ============================================================================
+
+type V2MultiExpiryOiAlignment =
+  | "CE_OI_TILT_CONSISTENT"
+  | "PE_OI_TILT_CONSISTENT"
+  | "OI_BALANCED"
+  | "OI_MIXED"
+  | "INSUFFICIENT_DATA";
+
+type V2MultiExpiryIvAlignment =
+  | "CE_IV_PREMIUM_CONSISTENT"
+  | "PE_IV_PREMIUM_CONSISTENT"
+  | "IV_BALANCED"
+  | "IV_MIXED"
+  | "INSUFFICIENT_DATA";
+
+type V2MultiExpiryAlignmentState =
+  | "CE_SIDE_STRUCTURE_ALIGNED"
+  | "PE_SIDE_STRUCTURE_ALIGNED"
+  | "OI_ONLY_ALIGNMENT"
+  | "IV_ONLY_ALIGNMENT"
+  | "CROSS_EXPIRY_CONFLICT"
+  | "BALANCED_OR_MIXED"
+  | "INSUFFICIENT_DATA";
+
+interface V2MultiExpiryAlignmentRow {
+  expiryLabel: string;
+  expiryDate: string;
+  dte: number | null;
+  atmStrike: number | null;
+  ceOi: number | null;
+  peOi: number | null;
+  ceOiSharePct: number | null;
+  peOiSharePct: number | null;
+  ceMeanIv: number | null;
+  peMeanIv: number | null;
+  ivSpreadCeMinusPe: number | null;
+  ceMeanPremium: number | null;
+  peMeanPremium: number | null;
+  ceLotSize: number | null;
+  peLotSize: number | null;
+  lotSizeCompatibility: "MATCH" | "MISMATCH" | "UNKNOWN";
+  expirySeriesType: "MONTH_END_SERIES" | "NON_MONTH_END_SERIES" | "UNKNOWN";
+  strikeCountCe: number;
+  strikeCountPe: number;
+  dataQuality: V2DataQuality;
+}
+
+function v2MultiExpiryRow(exp: ExpiryData): V2MultiExpiryAlignmentRow {
+  const s = v2RolloverExpirySummary(exp);
+  const totalOi = s.ceOi != null && s.peOi != null ? s.ceOi + s.peOi : null;
+  const ceShare = totalOi != null && totalOi > 0 && s.ceOi != null ? (s.ceOi / totalOi) * 100 : null;
+  const peShare = totalOi != null && totalOi > 0 && s.peOi != null ? (s.peOi / totalOi) * 100 : null;
+  const ivSpread = s.ceMeanIv != null && s.peMeanIv != null ? s.ceMeanIv - s.peMeanIv : null;
+  const required = [s.ceOi, s.peOi, s.ceMeanIv, s.peMeanIv];
+  const present = required.filter((v) => v != null && Number.isFinite(v as number)).length;
+  const dataQuality: V2DataQuality = present === 4 ? "OK" : present >= 2 ? "PARTIAL" : "INSUFFICIENT";
+  return {
+    expiryLabel: s.expiryLabel,
+    expiryDate: s.expiryDate,
+    dte: s.dte,
+    atmStrike: s.atmStrike,
+    ceOi: s.ceOi,
+    peOi: s.peOi,
+    ceOiSharePct: ceShare,
+    peOiSharePct: peShare,
+    ceMeanIv: s.ceMeanIv,
+    peMeanIv: s.peMeanIv,
+    ivSpreadCeMinusPe: ivSpread,
+    ceMeanPremium: s.ceMeanPremium,
+    peMeanPremium: s.peMeanPremium,
+    ceLotSize: s.ceLotSize,
+    peLotSize: s.peLotSize,
+    lotSizeCompatibility: s.lotSizeCompatibility,
+    expirySeriesType: s.expirySeriesType,
+    strikeCountCe: s.strikeCountCe,
+    strikeCountPe: s.strikeCountPe,
+    dataQuality,
+  };
+}
+
+function v2ClassifyMultiExpiryOi(rows: V2MultiExpiryAlignmentRow[]): V2MultiExpiryOiAlignment {
+  const usable = rows.filter((r) => r.ceOiSharePct != null && r.peOiSharePct != null);
+  if (usable.length < 2) return "INSUFFICIENT_DATA";
+  // Descriptive guard-band only; NOT a scoring threshold. 55/45 avoids calling
+  // tiny numerical differences an "alignment" while preserving a neutral zone.
+  const ceTilt = usable.filter((r) => (r.ceOiSharePct as number) >= 55).length;
+  const peTilt = usable.filter((r) => (r.peOiSharePct as number) >= 55).length;
+  const balanced = usable.filter((r) => {
+    const ce = r.ceOiSharePct as number;
+    return ce > 45 && ce < 55;
+  }).length;
+  if (ceTilt === usable.length) return "CE_OI_TILT_CONSISTENT";
+  if (peTilt === usable.length) return "PE_OI_TILT_CONSISTENT";
+  if (balanced === usable.length) return "OI_BALANCED";
+  return "OI_MIXED";
+}
+
+function v2ClassifyMultiExpiryIv(rows: V2MultiExpiryAlignmentRow[]): V2MultiExpiryIvAlignment {
+  const usable = rows.filter((r) => r.ivSpreadCeMinusPe != null);
+  if (usable.length < 2) return "INSUFFICIENT_DATA";
+  // IV is in percentage points. A small 0.25 vol-point dead-band prevents
+  // floating-point/model noise from being called a structural asymmetry.
+  const cePremium = usable.filter((r) => (r.ivSpreadCeMinusPe as number) >= 0.25).length;
+  const pePremium = usable.filter((r) => (r.ivSpreadCeMinusPe as number) <= -0.25).length;
+  const balanced = usable.filter((r) => Math.abs(r.ivSpreadCeMinusPe as number) < 0.25).length;
+  if (cePremium === usable.length) return "CE_IV_PREMIUM_CONSISTENT";
+  if (pePremium === usable.length) return "PE_IV_PREMIUM_CONSISTENT";
+  if (balanced === usable.length) return "IV_BALANCED";
+  return "IV_MIXED";
+}
+
+function v2ClassifyMultiExpiryOverall(
+  oi: V2MultiExpiryOiAlignment,
+  iv: V2MultiExpiryIvAlignment
+): V2MultiExpiryAlignmentState {
+  if (oi === "INSUFFICIENT_DATA" && iv === "INSUFFICIENT_DATA") return "INSUFFICIENT_DATA";
+  if (oi === "CE_OI_TILT_CONSISTENT" && iv === "CE_IV_PREMIUM_CONSISTENT") return "CE_SIDE_STRUCTURE_ALIGNED";
+  if (oi === "PE_OI_TILT_CONSISTENT" && iv === "PE_IV_PREMIUM_CONSISTENT") return "PE_SIDE_STRUCTURE_ALIGNED";
+  if ((oi === "CE_OI_TILT_CONSISTENT" && iv === "PE_IV_PREMIUM_CONSISTENT") ||
+      (oi === "PE_OI_TILT_CONSISTENT" && iv === "CE_IV_PREMIUM_CONSISTENT")) return "CROSS_EXPIRY_CONFLICT";
+  if (oi === "CE_OI_TILT_CONSISTENT" || oi === "PE_OI_TILT_CONSISTENT") return "OI_ONLY_ALIGNMENT";
+  if (iv === "CE_IV_PREMIUM_CONSISTENT" || iv === "PE_IV_PREMIUM_CONSISTENT") return "IV_ONLY_ALIGNMENT";
+  return "BALANCED_OR_MIXED";
+}
+
+function buildV2MultiExpiryAlignment(symbol: V2PremiumSymbol, m: IndexMetrics | undefined) {
+  if (!m || m.error) return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    state: "INSUFFICIENT_DATA" as V2MultiExpiryAlignmentState,
+    oiAlignment: "INSUFFICIENT_DATA" as V2MultiExpiryOiAlignment,
+    ivAlignment: "INSUFFICIENT_DATA" as V2MultiExpiryIvAlignment,
+    dataQuality: "INSUFFICIENT" as V2DataQuality,
+    rows: [] as V2MultiExpiryAlignmentRow[],
+    scoringImpact: "NONE",
+    directionalBias: "NONE",
+    source: "Existing multi-expiry IndexMetrics only; no additional Kite request",
+    interpretationGuard: "Multi-expiry alignment needs at least two distinct calendar expiries with usable near-ATM OI/IV data."
+  };
+
+  const seen = new Set<string>();
+  const rows: V2MultiExpiryAlignmentRow[] = [];
+  for (const exp of [...(m.expiries || [])].sort((a,b)=>a.expiryDate.getTime()-b.expiryDate.getTime())) {
+    const row = v2MultiExpiryRow(exp);
+    if (!row.expiryDate || seen.has(row.expiryDate)) continue;
+    seen.add(row.expiryDate);
+    rows.push(row);
+  }
+  const oiAlignment = v2ClassifyMultiExpiryOi(rows);
+  const ivAlignment = v2ClassifyMultiExpiryIv(rows);
+  const state = v2ClassifyMultiExpiryOverall(oiAlignment, ivAlignment);
+  const usableRows = rows.filter((r) => r.dataQuality !== "INSUFFICIENT");
+  const dataQuality: V2DataQuality = usableRows.length < 2 ? "INSUFFICIENT" : rows.every((r)=>r.dataQuality==="OK") ? "OK" : "PARTIAL";
+  const rollover = buildV2RolloverMigration(symbol);
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    state,
+    oiAlignment,
+    ivAlignment,
+    dataQuality,
+    usableExpiryCount: usableRows.length,
+    rows,
+    rolloverContext: {
+      state: rollover.state,
+      snapshotCount: rollover.snapshotCount ?? 0,
+      dataQuality: rollover.dataQuality,
+    },
+    scoringImpact: "NONE",
+    directionalBias: "NONE",
+    buyerWriterInference: "NOT_INFERRED",
+    lotSizeNormalization: "AVAILABLE_FROM_H1_CONTRACT_METADATA; NOT_USED_AS_DIRECTIONAL_SIGNAL",
+    source: "Already-fetched multi-expiry near-ATM option data + Module 8 rollover summary; no additional Kite/API request",
+    interpretationGuard: "CE/PE OI tilt and IV asymmetry are participation/volatility-pricing evidence only. They do not independently imply bullish/bearish direction or buyer/writer identity.",
+    comparisonGuard: "Premium levels across expiries are context only because DTE/theta/vega differ; raw premium equality is not assumed."
+  };
+}
+
+// ============================================================================
+// V2 MODULE 4 — INDIA VIX REGIME ENGINE
+// Observation-only, additive diagnostic. Reuses the SAME one-year VIX history
+// already fetched by /api/vix-correlation plus the current in-memory market
+// snapshot/session history. It creates NO additional Kite/API request.
+//
+// Hard boundaries:
+// - No runRuleEngine()/score/verdict changes.
+// - No AI/Haiku/GPT calls.
+// - No Recorder mutation.
+// - VIX regime is volatility/risk context only; it is NEVER mapped directly to
+//   bullish/bearish/BUY/SELL.
+// - Percentile bands are descriptive/provisional, not scoring thresholds.
+// ============================================================================
+
+type V2VixRegime = "LOW" | "BELOW_NORMAL" | "NORMAL" | "ELEVATED" | "HIGH" | "EXTREME" | "INSUFFICIENT_DATA";
+type V2VixDirection = "RISING" | "FALLING" | "STABLE" | "INSUFFICIENT_DATA";
+
+interface V2VixRegimeResult {
+  generatedAt: string;
+  currentVix: number | null;
+  currentVixSource: "LIVE_SNAPSHOT" | "HISTORICAL_LAST_CLOSE" | "UNAVAILABLE";
+  percentile90d: number | null;
+  regime: V2VixRegime;
+  dailyDirection: V2VixDirection;
+  intradayDirection: V2VixDirection;
+  dailyChangePercent: number | null;
+  historyPointsUsed: number;
+  median90d: number | null;
+  min90d: number | null;
+  max90d: number | null;
+  dataQuality: V2DataQuality;
+  directionalBias: "NONE";
+  scoringImpact: "NONE";
+  source: string;
+  interpretationGuard: string;
+  regimeBands: string;
+}
+
+function v2VixDirectionFromChange(change: number | null, eps = 1e-9): V2VixDirection {
+  if (change == null || !Number.isFinite(change)) return "INSUFFICIENT_DATA";
+  if (change > eps) return "RISING";
+  if (change < -eps) return "FALLING";
+  return "STABLE";
+}
+
+function v2PercentileRank(values: number[], current: number): number | null {
+  const clean = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+  if (clean.length === 0 || !Number.isFinite(current) || current <= 0) return null;
+  const lessOrEqual = clean.filter((v) => v <= current).length;
+  return (lessOrEqual / clean.length) * 100;
+}
+
+function v2Median(values: number[]): number | null {
+  const clean = values.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+  if (clean.length === 0) return null;
+  const mid = Math.floor(clean.length / 2);
+  return clean.length % 2 === 0 ? (clean[mid - 1] + clean[mid]) / 2 : clean[mid];
+}
+
+function v2ClassifyVixRegime(percentile: number | null): V2VixRegime {
+  if (percentile == null || !Number.isFinite(percentile)) return "INSUFFICIENT_DATA";
+  if (percentile < 20) return "LOW";
+  if (percentile < 40) return "BELOW_NORMAL";
+  if (percentile < 60) return "NORMAL";
+  if (percentile < 80) return "ELEVATED";
+  if (percentile < 95) return "HIGH";
+  return "EXTREME";
+}
+
+function buildV2VixRegime(
+  chartSeries: Array<{ date: string; niftyPct: number; bankNiftyPct: number; vix: number }>,
+  session: KiteSession
+): V2VixRegimeResult {
+  const last90 = chartSeries.slice(-90).map((x) => x.vix).filter((v) => Number.isFinite(v) && v > 0);
+  const liveNifty = session.marketSnapshot?.NIFTY;
+  const historicalLast = last90.length > 0 ? last90[last90.length - 1] : null;
+  const currentVix = liveNifty && Number.isFinite(liveNifty.vix) && liveNifty.vix > 0 ? liveNifty.vix : historicalLast;
+  const currentVixSource: V2VixRegimeResult["currentVixSource"] =
+    liveNifty && Number.isFinite(liveNifty.vix) && liveNifty.vix > 0 ? "LIVE_SNAPSHOT" : historicalLast != null ? "HISTORICAL_LAST_CLOSE" : "UNAVAILABLE";
+
+  const percentile90d = currentVix != null ? v2PercentileRank(last90, currentVix) : null;
+  const regime = v2ClassifyVixRegime(percentile90d);
+  const dailyChangePercent = liveNifty && Number.isFinite(liveNifty.vixChangePercent) ? liveNifty.vixChangePercent : null;
+  const dailyDirection = v2VixDirectionFromChange(dailyChangePercent);
+
+  // Intraday direction comes only from already-collected in-memory refresh history.
+  // Compare the latest two valid NIFTY VIX observations; do not fabricate a move
+  // when fewer than two valid observations exist.
+  const intradayVix = (session.snapshotHistory || [])
+    .map((h) => h.NIFTY?.vix ?? null)
+    .filter((v): v is number => v != null && Number.isFinite(v) && v > 0);
+  const intradayChange = intradayVix.length >= 2 ? intradayVix[intradayVix.length - 1] - intradayVix[intradayVix.length - 2] : null;
+  const intradayDirection = v2VixDirectionFromChange(intradayChange);
+
+  const min90d = last90.length > 0 ? Math.min(...last90) : null;
+  const max90d = last90.length > 0 ? Math.max(...last90) : null;
+  const median90d = v2Median(last90);
+  const dataQuality: V2DataQuality = currentVix == null || last90.length < 20 ? "INSUFFICIENT" : currentVixSource === "LIVE_SNAPSHOT" && last90.length >= 60 ? "OK" : "PARTIAL";
+
+  return {
+    generatedAt: new Date().toISOString(),
+    currentVix,
+    currentVixSource,
+    percentile90d,
+    regime,
+    dailyDirection,
+    intradayDirection,
+    dailyChangePercent,
+    historyPointsUsed: last90.length,
+    median90d,
+    min90d,
+    max90d,
+    dataQuality,
+    directionalBias: "NONE",
+    scoringImpact: "NONE",
+    source: "Existing /api/vix-correlation one-year Kite history + existing in-memory live snapshot/history; no additional Kite request",
+    interpretationGuard: "VIX measures expected volatility/risk pricing context. Rising/falling VIX is not independently bullish, bearish, BUY, or SELL.",
+    regimeBands: "PROVISIONAL descriptive percentile bands: <20 LOW, 20-<40 BELOW_NORMAL, 40-<60 NORMAL, 60-<80 ELEVATED, 80-<95 HIGH, >=95 EXTREME. Not a scoring rule.",
   };
 }
 
@@ -803,6 +2001,13 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
 
     const snapshot = await refreshMarketSnapshot(activeSession);
 
+    // V2 Module 8: capture tiny cross-expiry OI summaries from this already-fetched
+    // 3-minute market snapshot. No extra broker request and no Recorder schema change.
+    const rolloverTimestamp = new Date().toISOString();
+    captureV2RolloverSummary("NIFTY", snapshot.NIFTY, rolloverTimestamp);
+    captureV2RolloverSummary("BANKNIFTY", snapshot.BANKNIFTY, rolloverTimestamp);
+    captureV2RolloverSummary("SENSEX", snapshot.SENSEX, rolloverTimestamp);
+
     // Module 1 dependency: classify each index through the Truth Engine
     // BEFORE building the recorded snapshot, per the approved spec.
     const niftyTruth = computeTruthReport(snapshot.NIFTY);
@@ -837,6 +2042,13 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     publishEvent("TruthValidated", { NIFTY: niftyTruth.overallVerdict, BANKNIFTY: bankTruth.overallVerdict, SENSEX: sensexTruth.overallVerdict }, "Truth Engine");
 
     appendJournalEntry();
+
+    // H7/H8 shadow research pipeline: runs from the already-refreshed snapshot only.
+    // Fire-and-forget so a research/outcome bookkeeping fault can never block the
+    // primary Recorder cycle. No order execution, no AI call, no Rule Engine feed.
+    void captureV2ShadowCycle(activeSession, entry).catch((err) =>
+      console.error("[V2 Shadow] capture cycle error:", err instanceof Error ? err.message : err)
+    );
   } catch (err) {
     recorderSession.status = "DEGRADED";
     recorderSession.lastErrorRedacted = err instanceof Error ? err.message : "Unknown recorder error";
@@ -1217,6 +2429,204 @@ let instrumentsCacheTime = 0;
 let instrumentsCachePromise: Promise<Instrument[]> | null = null;
 const INSTRUMENTS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
+
+// ============================================================================
+// V2 MODULE 5 — REALIZED vs IMPLIED VOLATILITY ENGINE
+// Observation-only, additive diagnostic.
+//
+// Realized volatility (RV) is computed from the underlying INDEX daily close
+// series using close-to-close log returns and annualized with sqrt(252).
+// Implied volatility (IV) is the CURRENT EXPIRY ATM CE/PE mean IV already
+// model-computed by calcImpliedVolatility() from option LTP; it is NOT a
+// Kite-published IV field.
+//
+// Load-safety / truth boundaries:
+// - Historical daily candles are fetched ON DEMAND by this diagnostic endpoint,
+//   at most once per symbol per India trading date, then cached in memory.
+// - This module is NOT wired into the 3-minute recorder/background refresh.
+// - No runRuleEngine()/score/verdict changes.
+// - No AI/Haiku/GPT calls.
+// - No Recorder mutation.
+// - IV-vs-RV is volatility-pricing context only; it never maps directly to
+//   CE/PE, bullish/bearish, BUY/SELL.
+// ============================================================================
+
+type V2RvIvState = "IV_PREMIUM_TO_REALIZED" | "IV_NEAR_REALIZED" | "REALIZED_ABOVE_IV" | "INSUFFICIENT_DATA";
+type V2RvTrend = "EXPANDING" | "CONTRACTING" | "MIXED" | "STABLE" | "INSUFFICIENT_DATA";
+
+interface V2RvHistoryMetrics {
+  tradingDate: string;
+  symbol: V2PremiumSymbol;
+  historyFrom: string;
+  historyTo: string;
+  closesUsed: number;
+  rv5d: number | null;
+  rv10d: number | null;
+  rv20d: number | null;
+  rvTrend: V2RvTrend;
+  historicalFetchStatus: "OK" | "INSUFFICIENT" | "ERROR";
+}
+
+interface V2RvIvResult extends V2RvHistoryMetrics {
+  generatedAt: string;
+  atmStrike: number | null;
+  atmCeIv: number | null;
+  atmPeIv: number | null;
+  atmMeanIv: number | null;
+  ivSource: "MODEL_COMPUTED_FROM_OPTION_LTP_NOT_KITE_PUBLISHED_IV";
+  ivMinusRv20: number | null;
+  ivToRv20Ratio: number | null;
+  state: V2RvIvState;
+  dataQuality: V2DataQuality;
+  directionalBias: "NONE";
+  scoringImpact: "NONE";
+  source: string;
+  interpretationGuard: string;
+}
+
+const v2RvDailyCache = new Map<V2PremiumSymbol, V2RvHistoryMetrics>();
+const v2RvDailyPromise = new Map<V2PremiumSymbol, Promise<V2RvHistoryMetrics>>();
+
+function v2AnnualizedRealizedVol(closes: number[], window: number): number | null {
+  const clean = closes.filter((v) => Number.isFinite(v) && v > 0);
+  if (clean.length < window + 1) return null;
+  const slice = clean.slice(-(window + 1));
+  const returns: number[] = [];
+  for (let i = 1; i < slice.length; i++) returns.push(Math.log(slice[i] / slice[i - 1]));
+  if (returns.length < 2) return null;
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / (returns.length - 1);
+  if (!Number.isFinite(variance) || variance < 0) return null;
+  return Math.sqrt(variance) * Math.sqrt(252) * 100;
+}
+
+function v2ClassifyRvTrend(rv5: number | null, rv10: number | null, rv20: number | null): V2RvTrend {
+  if (rv5 == null || rv10 == null || rv20 == null) return "INSUFFICIENT_DATA";
+  const eps = 0.10; // 0.10 volatility-point tolerance; descriptive only.
+  if (rv5 > rv10 + eps && rv10 > rv20 + eps) return "EXPANDING";
+  if (rv5 + eps < rv10 && rv10 + eps < rv20) return "CONTRACTING";
+  if (Math.abs(rv5 - rv10) <= eps && Math.abs(rv10 - rv20) <= eps) return "STABLE";
+  return "MIXED";
+}
+
+function v2IndexHistoryLookup(symbol: V2PremiumSymbol): { exchange: string; tradingsymbol: string } {
+  if (symbol === "SENSEX") return { exchange: "BSE", tradingsymbol: "SENSEX" };
+  if (symbol === "BANKNIFTY") return { exchange: "NSE", tradingsymbol: "NIFTY BANK" };
+  return { exchange: "NSE", tradingsymbol: "NIFTY 50" };
+}
+
+async function v2LoadRvHistoryOncePerDay(
+  symbol: V2PremiumSymbol,
+  accessToken: string
+): Promise<V2RvHistoryMetrics> {
+  const tradingDate = indiaDate();
+  const cached = v2RvDailyCache.get(symbol);
+  if (cached && cached.tradingDate === tradingDate) return cached;
+  const pending = v2RvDailyPromise.get(symbol);
+  if (pending) return pending;
+
+  const promise = (async (): Promise<V2RvHistoryMetrics> => {
+    // 60 calendar days gives comfortable headroom for 21+ trading closes
+    // through weekends/holidays without requesting a large historical range.
+    const historyFrom = indiaDate(-60);
+    const historyTo = tradingDate;
+    const fallback: V2RvHistoryMetrics = {
+      tradingDate, symbol, historyFrom, historyTo, closesUsed: 0,
+      rv5d: null, rv10d: null, rv20d: null, rvTrend: "INSUFFICIENT_DATA",
+      historicalFetchStatus: "ERROR",
+    };
+    try {
+      const instruments = await fetchInstruments(accessToken);
+      if (instruments.length === 0) return fallback;
+      const lookup = v2IndexHistoryLookup(symbol);
+      const token = findIndexInstrumentToken(instruments, lookup.tradingsymbol, lookup.exchange);
+      if (!token) return fallback;
+      const candles = await fetchHistoricalDaily(accessToken, token, historyFrom, historyTo);
+      const closes = candles.map((c) => c.close).filter((v) => Number.isFinite(v) && v > 0);
+      const rv5d = v2AnnualizedRealizedVol(closes, 5);
+      const rv10d = v2AnnualizedRealizedVol(closes, 10);
+      const rv20d = v2AnnualizedRealizedVol(closes, 20);
+      return {
+        tradingDate, symbol, historyFrom, historyTo, closesUsed: closes.length,
+        rv5d, rv10d, rv20d, rvTrend: v2ClassifyRvTrend(rv5d, rv10d, rv20d),
+        historicalFetchStatus: rv20d != null ? "OK" : "INSUFFICIENT",
+      };
+    } catch (err) {
+      console.error(`[V2 RV/IV] ${symbol} historical RV load failed:`, err instanceof Error ? err.message : err);
+      return fallback;
+    }
+  })();
+
+  v2RvDailyPromise.set(symbol, promise);
+  try {
+    const result = await promise;
+    v2RvDailyCache.set(symbol, result); // cache failure too, preventing retry storms during the day
+    return result;
+  } finally {
+    v2RvDailyPromise.delete(symbol);
+  }
+}
+
+function v2CurrentAtmIv(m: IndexMetrics | undefined) {
+  if (!m || m.error) return { atmStrike: null, atmCeIv: null, atmPeIv: null, atmMeanIv: null };
+  const expiry = (m.expiries || []).find((e) => e.expiry === "Current Expiry") || (m.expiries || [])[0];
+  if (!expiry) return { atmStrike: null, atmCeIv: null, atmPeIv: null, atmMeanIv: null };
+  const atmCe = (expiry.ceStrikes || []).find((s) => s.isAtm);
+  const atmPe = (expiry.peStrikes || []).find((s) => s.isAtm);
+  const ceFresh = atmCe ? classifyTruthField(atmCe.quoteTimestamp, TRUTH_THRESHOLDS_MS.options) : { verdict: "INVALID" as TruthVerdict };
+  const peFresh = atmPe ? classifyTruthField(atmPe.quoteTimestamp, TRUTH_THRESHOLDS_MS.options) : { verdict: "INVALID" as TruthVerdict };
+  const atmCeIv = ceFresh.verdict === "TRUE" ? v2FiniteIv(atmCe?.iv) : null;
+  const atmPeIv = peFresh.verdict === "TRUE" ? v2FiniteIv(atmPe?.iv) : null;
+  const ivs = [atmCeIv, atmPeIv].filter((v): v is number => v != null);
+  return {
+    atmStrike: atmCe?.strike ?? atmPe?.strike ?? null,
+    atmCeIv,
+    atmPeIv,
+    atmMeanIv: ivs.length ? v2Average(ivs) : null,
+  };
+}
+
+function v2ClassifyIvVsRv(atmIv: number | null, rv20: number | null): V2RvIvState {
+  if (atmIv == null || rv20 == null || rv20 <= 0) return "INSUFFICIENT_DATA";
+  // Relative band avoids arbitrary absolute IV-point cutoffs across indices/regimes.
+  const ratio = atmIv / rv20;
+  if (ratio > 1.10) return "IV_PREMIUM_TO_REALIZED";
+  if (ratio < 0.90) return "REALIZED_ABOVE_IV";
+  return "IV_NEAR_REALIZED";
+}
+
+async function buildV2RealizedVsImplied(
+  symbol: V2PremiumSymbol,
+  session: KiteSession
+): Promise<V2RvIvResult> {
+  const hist = await v2LoadRvHistoryOncePerDay(symbol, session.accessToken);
+  const iv = v2CurrentAtmIv(session.marketSnapshot?.[symbol]);
+  const state = v2ClassifyIvVsRv(iv.atmMeanIv, hist.rv20d);
+  const ivMinusRv20 = iv.atmMeanIv != null && hist.rv20d != null ? iv.atmMeanIv - hist.rv20d : null;
+  const ivToRv20Ratio = iv.atmMeanIv != null && hist.rv20d != null && hist.rv20d > 0 ? iv.atmMeanIv / hist.rv20d : null;
+  const dataQuality: V2DataQuality =
+    hist.historicalFetchStatus !== "OK" || iv.atmMeanIv == null ? "INSUFFICIENT" :
+    iv.atmCeIv != null && iv.atmPeIv != null ? "OK" : "PARTIAL";
+
+  return {
+    ...hist,
+    generatedAt: new Date().toISOString(),
+    atmStrike: iv.atmStrike,
+    atmCeIv: iv.atmCeIv,
+    atmPeIv: iv.atmPeIv,
+    atmMeanIv: iv.atmMeanIv,
+    ivSource: "MODEL_COMPUTED_FROM_OPTION_LTP_NOT_KITE_PUBLISHED_IV",
+    ivMinusRv20,
+    ivToRv20Ratio,
+    state,
+    dataQuality,
+    directionalBias: "NONE",
+    scoringImpact: "NONE",
+    source: "Kite index daily candles (cached once per symbol/trading day) + existing current-expiry ATM model IV from marketSnapshot",
+    interpretationGuard: "IV-vs-RV measures volatility pricing versus recently realized movement. It is not a directional CE/PE or BUY/SELL signal.",
+  };
+}
+
 // Kite API configuration
 const KITE_API_BASE = "https://api.kite.trade";
 const KITE_API_KEY = process.env.KITE_API_KEY?.trim() || "";
@@ -1408,6 +2818,7 @@ async function fetchInstruments(accessToken: string): Promise<Instrument[]> {
           last_price: parseFloat(parts[4]) || 0,
           expiry: parts[5],
           strike: parseFloat(parts[6]) || 0,
+          tick_size: parseFloat(parts[7]) || 0,
           lot_size: parseInt(parts[8]) || 1,
           instrument_type: parts[9],
           segment: parts[10],
@@ -2344,6 +3755,16 @@ async function fetchCommodityData(
             baseMetrics.ceStrikes.push({
               strike,
               isAtm,
+              instrumentToken: Number.isFinite(ceInst.instrument_token) ? ceInst.instrument_token : null,
+              exchangeToken: Number.isFinite(ceInst.exchange_token) ? ceInst.exchange_token : null,
+              expiryDate: ceInst.expiry || null,
+              expiryBucket: "MCX_CURRENT",
+              optionType: "CE",
+              lotSize: ceInst.lot_size > 0 ? ceInst.lot_size : null,
+              tickSize: ceInst.tick_size > 0 ? ceInst.tick_size : null,
+              exchange: ceInst.exchange || null,
+              segment: ceInst.segment || null,
+              contractRegime: "LIVE_CONTRACT_MASTER",
               tradingSymbol: ceInst.tradingsymbol || null,
               bid: oq.depth?.buy?.[0]?.price || 0,
               ask: oq.depth?.sell?.[0]?.price || 0,
@@ -2381,6 +3802,16 @@ async function fetchCommodityData(
             baseMetrics.peStrikes.push({
               strike,
               isAtm,
+              instrumentToken: Number.isFinite(peInst.instrument_token) ? peInst.instrument_token : null,
+              exchangeToken: Number.isFinite(peInst.exchange_token) ? peInst.exchange_token : null,
+              expiryDate: peInst.expiry || null,
+              expiryBucket: "MCX_CURRENT",
+              optionType: "PE",
+              lotSize: peInst.lot_size > 0 ? peInst.lot_size : null,
+              tickSize: peInst.tick_size > 0 ? peInst.tick_size : null,
+              exchange: peInst.exchange || null,
+              segment: peInst.segment || null,
+              contractRegime: "LIVE_CONTRACT_MASTER",
               tradingSymbol: peInst.tradingsymbol || null,
               bid: oq.depth?.buy?.[0]?.price || 0,
               ask: oq.depth?.sell?.[0]?.price || 0,
@@ -2884,6 +4315,16 @@ async function fetchIndexData(
                 expiry.ceStrikes.push({
                   strike,
                   isAtm,
+                  instrumentToken: Number.isFinite(ceInst.instrument_token) ? ceInst.instrument_token : null,
+                  exchangeToken: Number.isFinite(ceInst.exchange_token) ? ceInst.exchange_token : null,
+                  expiryDate: ceInst.expiry || null,
+                  expiryBucket: expiryName,
+                  optionType: "CE",
+                  lotSize: ceInst.lot_size > 0 ? ceInst.lot_size : null,
+                  tickSize: ceInst.tick_size > 0 ? ceInst.tick_size : null,
+                  exchange: ceInst.exchange || null,
+                  segment: ceInst.segment || null,
+                  contractRegime: "LIVE_CONTRACT_MASTER",
                   tradingSymbol: ceInst.tradingsymbol || null,
                   bid: q.depth?.buy?.[0]?.price || 0,
                   ask: q.depth?.sell?.[0]?.price || 0,
@@ -2922,6 +4363,16 @@ async function fetchIndexData(
                 expiry.peStrikes.push({
                   strike,
                   isAtm,
+                  instrumentToken: Number.isFinite(peInst.instrument_token) ? peInst.instrument_token : null,
+                  exchangeToken: Number.isFinite(peInst.exchange_token) ? peInst.exchange_token : null,
+                  expiryDate: peInst.expiry || null,
+                  expiryBucket: expiryName,
+                  optionType: "PE",
+                  lotSize: peInst.lot_size > 0 ? peInst.lot_size : null,
+                  tickSize: peInst.tick_size > 0 ? peInst.tick_size : null,
+                  exchange: peInst.exchange || null,
+                  segment: peInst.segment || null,
+                  contractRegime: "LIVE_CONTRACT_MASTER",
                   tradingSymbol: peInst.tradingsymbol || null,
                   bid: q.depth?.buy?.[0]?.price || 0,
                   ask: q.depth?.sell?.[0]?.price || 0,
@@ -12365,6 +13816,2197 @@ app.get("/api/v2/premium-composition-history", (c) => {
   return c.json(buildV2PremiumCompositionHistory(rawSymbol as V2PremiumSymbol, limit));
 });
 
+// V2 Module 2 diagnostic API — computed-IV/skew evidence only. No Rule Engine impact.
+app.get("/api/v2/iv-skew", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  return c.json(buildV2IvSkewHistory(rawSymbol as V2PremiumSymbol, limit));
+});
+
+// V2 Module 3 diagnostic API — multi-expiry computed-IV term structure only.
+// Reads the session's already-fetched marketSnapshot; it never triggers a new quote fetch.
+app.get("/api/v2/iv-term-structure", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  const session = getSession(c);
+  const m = session?.marketSnapshot?.[rawSymbol];
+  return c.json(buildV2IvTermStructure(rawSymbol as V2PremiumSymbol, m));
+});
+
+
+// V2 Module 5 diagnostic API — realized-vs-implied volatility context only.
+// Historical candles are loaded on demand and cached once per symbol/trading day;
+// this endpoint is not part of the 3-minute recorder/background refresh.
+app.get("/api/v2/realized-vs-implied", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  return c.json(await buildV2RealizedVsImplied(rawSymbol as V2PremiumSymbol, session));
+});
+
+
+// V2 Module 6 diagnostic API — premium move attribution only. No scoring impact.
+app.get("/api/v2/premium-attribution", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!( ["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  return c.json(buildV2PremiumAttribution(rawSymbol as V2PremiumSymbol, limit));
+});
+
+// V2 Module 7 diagnostic API — OI positioning evidence only. No scoring impact.
+app.get("/api/v2/oi-positioning", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!( ["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  return c.json(buildV2OiPositioningEvidence(rawSymbol as V2PremiumSymbol, limit));
+});
+
+// V2 Module 8 diagnostic API — rollover / expiry-migration evidence only.
+// Reads only the tiny summaries captured during the normal 3-minute recorder refresh.
+app.get("/api/v2/rollover-migration", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!( ["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  return c.json(buildV2RolloverMigration(rawSymbol as V2PremiumSymbol));
+});
+
+
+// V2 Module 9 diagnostic API — multi-expiry alignment evidence only.
+// Reads the session's already-fetched multi-expiry snapshot and Module 8 context.
+app.get("/api/v2/multi-expiry-alignment", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!( ["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const session = getSession(c);
+  const m = session?.marketSnapshot?.[rawSymbol];
+  return c.json(buildV2MultiExpiryAlignment(rawSymbol as V2PremiumSymbol, m));
+});
+
+
+
+// ============== V2 MODULE 10 EXTENDED: MARKET BEHAVIOUR / REGIME ==============
+// Evidence-only deterministic state machine. It does NOT alter the Rule Engine,
+// score, verdict, risk levels, recorder schema, or AI prompts. It reuses only
+// already-collected session spot/VIX history plus the current IndexMetrics.
+// IMPORTANT: all numeric classification thresholds in this module are
+// PROVISIONAL_REQUIRES_BACKTEST. They are descriptive research labels only.
+type V2RegimeState =
+  | "TRENDING_UP"
+  | "TRENDING_DOWN"
+  | "OSCILLATING_OR_RANGE"
+  | "TRANSITIONAL"
+  | "INSUFFICIENT_HISTORY";
+
+type V2OpeningCondition =
+  | "GAP_UP_ABOVE_PDH"
+  | "GAP_UP_INSIDE_PREVIOUS_RANGE"
+  | "GAP_DOWN_BELOW_PDL"
+  | "GAP_DOWN_INSIDE_PREVIOUS_RANGE"
+  | "FLAT_OR_NEAR_FLAT_OPEN"
+  | "UNKNOWN";
+
+type V2OpeningBehaviour =
+  | "GAP_HOLD_OR_EXTENSION"
+  | "PARTIAL_GAP_FILL"
+  | "FULL_GAP_FILL_OR_REVERSAL"
+  | "OPENING_DRIVE_UP"
+  | "OPENING_DRIVE_DOWN"
+  | "BALANCED_OPEN"
+  | "INSUFFICIENT_HISTORY";
+
+function v2SpotHistoryForSymbol(session: KiteSession, symbol: V2PremiumSymbol) {
+  return (session.snapshotHistory || [])
+    .map((row) => {
+      const point = row[symbol];
+      const t = Date.parse(row.timestamp);
+      return point && Number.isFinite(t) && Number.isFinite(point.spot) && point.spot > 0
+        ? { t, timestamp: row.timestamp, spot: point.spot, vix: Number.isFinite(point.vix) && point.vix > 0 ? point.vix : null }
+        : null;
+    })
+    .filter((x): x is { t: number; timestamp: string; spot: number; vix: number | null } => x !== null)
+    .sort((a, b) => a.t - b.t);
+}
+
+function v2WindowPoints<T extends { t: number }>(points: T[], minutes: number): T[] {
+  if (points.length === 0) return [];
+  const cutoff = points[points.length - 1].t - minutes * 60_000;
+  return points.filter((p) => p.t >= cutoff);
+}
+
+function v2PathStats(points: Array<{ t: number; timestamp: string; spot: number; vix: number | null }>) {
+  if (points.length < 3) return null;
+  const first = points[0].spot;
+  const last = points[points.length - 1].spot;
+  let path = 0;
+  let high = first;
+  let low = first;
+  let highIndex = 0;
+  let lowIndex = 0;
+  for (let i = 1; i < points.length; i++) {
+    path += Math.abs(points[i].spot - points[i - 1].spot);
+    if (points[i].spot > high) { high = points[i].spot; highIndex = i; }
+    if (points[i].spot < low) { low = points[i].spot; lowIndex = i; }
+  }
+  const net = last - first;
+  const efficiency = path > 0 ? Math.abs(net) / path : 0;
+  return {
+    samples: points.length,
+    first,
+    last,
+    high,
+    low,
+    highIndex,
+    lowIndex,
+    netChange: net,
+    netChangePct: first > 0 ? (net / first) * 100 : null,
+    sampledRangePct: first > 0 ? ((high - low) / first) * 100 : null,
+    pathEfficiency: efficiency,
+  };
+}
+
+function v2ClassifyPath(stats: ReturnType<typeof v2PathStats>): V2RegimeState {
+  if (!stats) return "INSUFFICIENT_HISTORY";
+  // PROVISIONAL research thresholds — never used as a score or trading signal.
+  if (stats.pathEfficiency >= 0.70 && stats.netChange > 0) return "TRENDING_UP";
+  if (stats.pathEfficiency >= 0.70 && stats.netChange < 0) return "TRENDING_DOWN";
+  if (stats.pathEfficiency <= 0.35) return "OSCILLATING_OR_RANGE";
+  return "TRANSITIONAL";
+}
+
+function v2OpeningConditionExtended(m: IndexMetrics, prevClose: number): V2OpeningCondition {
+  if (!(m.dayOpen > 0) || !(prevClose > 0)) return "UNKNOWN";
+  // A tiny tolerance avoids treating sub-basis-point quote noise as a genuine gap.
+  // PROVISIONAL_REQUIRES_BACKTEST.
+  const gapPct = ((m.dayOpen - prevClose) / prevClose) * 100;
+  if (Math.abs(gapPct) < 0.03) return "FLAT_OR_NEAR_FLAT_OPEN";
+  if (gapPct > 0) return m.pdh > 0 && m.dayOpen > m.pdh ? "GAP_UP_ABOVE_PDH" : "GAP_UP_INSIDE_PREVIOUS_RANGE";
+  return m.pdl > 0 && m.dayOpen < m.pdl ? "GAP_DOWN_BELOW_PDL" : "GAP_DOWN_INSIDE_PREVIOUS_RANGE";
+}
+
+function v2OpeningBehaviourExtended(
+  openingCondition: V2OpeningCondition,
+  m: IndexMetrics,
+  prevClose: number,
+  state15: V2RegimeState
+): V2OpeningBehaviour {
+  if (!(m.dayOpen > 0) || !(prevClose > 0)) return "INSUFFICIENT_HISTORY";
+  const isGapUp = openingCondition.startsWith("GAP_UP");
+  const isGapDown = openingCondition.startsWith("GAP_DOWN");
+  if (isGapUp) {
+    if (m.current <= prevClose) return "FULL_GAP_FILL_OR_REVERSAL";
+    if (m.current < m.dayOpen) return "PARTIAL_GAP_FILL";
+    return "GAP_HOLD_OR_EXTENSION";
+  }
+  if (isGapDown) {
+    if (m.current >= prevClose) return "FULL_GAP_FILL_OR_REVERSAL";
+    if (m.current > m.dayOpen) return "PARTIAL_GAP_FILL";
+    return "GAP_HOLD_OR_EXTENSION";
+  }
+  if (state15 === "TRENDING_UP") return "OPENING_DRIVE_UP";
+  if (state15 === "TRENDING_DOWN") return "OPENING_DRIVE_DOWN";
+  return state15 === "INSUFFICIENT_HISTORY" ? "INSUFFICIENT_HISTORY" : "BALANCED_OPEN";
+}
+
+function v2VixStateFromSpotHistory(points: Array<{ t: number; timestamp: string; spot: number; vix: number | null }>) {
+  const valid = points.filter((p): p is { t: number; timestamp: string; spot: number; vix: number } => p.vix != null && Number.isFinite(p.vix) && p.vix > 0);
+  if (valid.length < 2) return { state: "INSUFFICIENT_HISTORY", changePct: null, samples: valid.length };
+  const first = valid[0].vix;
+  const last = valid[valid.length - 1].vix;
+  const changePct = first > 0 ? ((last - first) / first) * 100 : null;
+  const state = last > first ? "VIX_RISING" : last < first ? "VIX_FALLING" : "VIX_STABLE";
+  return { state, changePct, samples: valid.length };
+}
+
+function v2BreakoutBehaviour(
+  points30: Array<{ t: number; timestamp: string; spot: number; vix: number | null }>,
+  current: number,
+  pdh: number,
+  pdl: number
+) {
+  if (points30.length < 2 || !(pdh > 0) || !(pdl > 0)) return "INSUFFICIENT_HISTORY";
+  const hadAbovePdh = points30.some((p) => p.spot > pdh);
+  const hadBelowPdl = points30.some((p) => p.spot < pdl);
+  const hadInside = points30.some((p) => p.spot <= pdh && p.spot >= pdl);
+  if (current > pdh && hadInside) return "BREAKOUT_ABOVE_PDH";
+  if (current < pdl && hadInside) return "BREAKDOWN_BELOW_PDL";
+  if (current <= pdh && hadAbovePdh) return "FAILED_BREAKOUT_ABOVE_PDH";
+  if (current >= pdl && hadBelowPdl) return "FAILED_BREAKDOWN_BELOW_PDL";
+  if (current > pdh) return "HOLDING_ABOVE_PDH";
+  if (current < pdl) return "HOLDING_BELOW_PDL";
+  return "NO_PDH_PDL_BREAK";
+}
+
+function v2RangeSubtype(
+  s15: ReturnType<typeof v2PathStats>,
+  s30: ReturnType<typeof v2PathStats>,
+  state15: V2RegimeState,
+  state30: V2RegimeState
+) {
+  if (!s15 || !s30) return "INSUFFICIENT_HISTORY";
+  if (state15 !== "OSCILLATING_OR_RANGE") return "NOT_RANGE_DOMINANT";
+  const r15 = s15.sampledRangePct;
+  const r30 = s30.sampledRangePct;
+  if (r15 == null || r30 == null || r30 <= 0) return "OSCILLATING_RANGE";
+  // Nested-window compression ratio is deliberately provisional.
+  if (state30 === "OSCILLATING_OR_RANGE" && r15 <= r30 * 0.55) return "RANGE_COMPRESSION_PROVISIONAL";
+  if (state30 === "OSCILLATING_OR_RANGE") return "OSCILLATING_RANGE";
+  return "TREND_PULLBACK_OR_PAUSE";
+}
+
+function v2ReversalCandidate(
+  s30: ReturnType<typeof v2PathStats>,
+  state15: V2RegimeState,
+  state30: V2RegimeState,
+  currentPressure: string,
+  structuralBias: string
+) {
+  if (!s30) return "INSUFFICIENT_HISTORY";
+  if (structuralBias.startsWith("UP_") && currentPressure === "DOWN") return "COUNTER_MOVE_AGAINST_UP_STRUCTURE";
+  if (structuralBias.startsWith("DOWN_") && currentPressure === "UP") return "COUNTER_MOVE_AGAINST_DOWN_STRUCTURE";
+  if (state30 === "TRENDING_DOWN" && state15 === "TRENDING_UP") return "DELAYED_UP_REVERSAL_CANDIDATE";
+  if (state30 === "TRENDING_UP" && state15 === "TRENDING_DOWN") return "DELAYED_DOWN_REVERSAL_CANDIDATE";
+  return "NONE_CONFIRMED";
+}
+
+function buildV2MarketBehaviourRegime(
+  symbol: V2PremiumSymbol,
+  session: KiteSession,
+  m: IndexMetrics | undefined
+) {
+  if (!m || !(m.current > 0)) {
+    return { symbol, dataQuality: "INSUFFICIENT", state: "INSUFFICIENT_DATA", reason: "Current market snapshot unavailable." };
+  }
+
+  const prevClose = m.pdcClose > 0 ? m.pdcClose : m.current - (Number.isFinite(m.change) ? m.change : 0);
+  const openingCondition = v2OpeningConditionExtended(m, prevClose);
+  const openingGapPct = m.dayOpen > 0 && prevClose > 0 ? ((m.dayOpen - prevClose) / prevClose) * 100 : null;
+
+  const points = v2SpotHistoryForSymbol(session, symbol);
+  const p15 = v2WindowPoints(points, 15);
+  const p30 = v2WindowPoints(points, 30);
+  const p60 = v2WindowPoints(points, 60);
+  const s15 = v2PathStats(p15);
+  const s30 = v2PathStats(p30);
+  const s60 = v2PathStats(p60);
+  const state15 = v2ClassifyPath(s15);
+  const state30 = v2ClassifyPath(s30);
+  const state60 = v2ClassifyPath(s60);
+
+  const openingBehaviour = v2OpeningBehaviourExtended(openingCondition, m, prevClose, state15);
+  const currentVsOpen = m.dayOpen > 0 ? (m.current > m.dayOpen ? "ABOVE_OPEN" : m.current < m.dayOpen ? "BELOW_OPEN" : "AT_OPEN") : "UNKNOWN";
+  const previousRangeLocation = m.pdh > 0 && m.pdl > 0
+    ? (m.current > m.pdh ? "ABOVE_PDH" : m.current < m.pdl ? "BELOW_PDL" : "INSIDE_PREVIOUS_RANGE")
+    : "UNKNOWN";
+
+  let currentPressure = "NEUTRAL_OR_MIXED";
+  if (state15 === "TRENDING_UP" && (state30 === "TRENDING_UP" || state30 === "TRANSITIONAL")) currentPressure = "UP";
+  else if (state15 === "TRENDING_DOWN" && (state30 === "TRENDING_DOWN" || state30 === "TRANSITIONAL")) currentPressure = "DOWN";
+  else if (state15 === "INSUFFICIENT_HISTORY") currentPressure = "INSUFFICIENT_HISTORY";
+
+  let structuralBias = "NEUTRAL_OR_UNCONFIRMED";
+  if (previousRangeLocation === "ABOVE_PDH") structuralBias = "UP_STRUCTURE";
+  else if (previousRangeLocation === "BELOW_PDL") structuralBias = "DOWN_STRUCTURE";
+  else if (currentVsOpen === "ABOVE_OPEN" && state30 === "TRENDING_UP") structuralBias = "UP_STRUCTURE_PROVISIONAL";
+  else if (currentVsOpen === "BELOW_OPEN" && state30 === "TRENDING_DOWN") structuralBias = "DOWN_STRUCTURE_PROVISIONAL";
+
+  let transition = "NO_CONFIRMED_TRANSITION";
+  if (openingCondition.startsWith("GAP_UP") && currentPressure === "DOWN") transition = "GAP_UP_TO_DOWN_PRESSURE";
+  else if (openingCondition.startsWith("GAP_DOWN") && currentPressure === "UP") transition = "GAP_DOWN_TO_UP_PRESSURE";
+  else if (state30 === "TRENDING_UP" && state15 === "TRENDING_DOWN") transition = "UP_TO_DOWN_PRESSURE";
+  else if (state30 === "TRENDING_DOWN" && state15 === "TRENDING_UP") transition = "DOWN_TO_UP_PRESSURE";
+  else if (state30 === "OSCILLATING_OR_RANGE" && (state15 === "TRENDING_UP" || state15 === "TRENDING_DOWN")) transition = "RANGE_TO_DIRECTIONAL_PRESSURE";
+  else if ((state30 === "TRENDING_UP" || state30 === "TRENDING_DOWN") && state15 === "OSCILLATING_OR_RANGE") transition = "TREND_TO_CONSOLIDATION_PRESSURE";
+
+  const openingBiasStillStructurallyValid =
+    openingCondition.startsWith("GAP_UP") ? structuralBias.startsWith("UP_") :
+    openingCondition.startsWith("GAP_DOWN") ? structuralBias.startsWith("DOWN_") : null;
+
+  const conflict =
+    (structuralBias.startsWith("UP_") && currentPressure === "DOWN") ||
+    (structuralBias.startsWith("DOWN_") && currentPressure === "UP");
+
+  const vix15 = v2VixStateFromSpotHistory(p15);
+  const breakoutBehaviour = v2BreakoutBehaviour(p30, m.current, m.pdh, m.pdl);
+  const rangeSubtype = v2RangeSubtype(s15, s30, state15, state30);
+  const reversalCandidate = v2ReversalCandidate(s30, state15, state30, currentPressure, structuralBias);
+
+  let currentRegime = state30;
+  if (rangeSubtype === "RANGE_COMPRESSION_PROVISIONAL") currentRegime = "RANGE_COMPRESSION_PROVISIONAL" as any;
+  else if (state30 === "TRENDING_UP" && state15 === "OSCILLATING_OR_RANGE") currentRegime = "UPTREND_PULLBACK_OR_PAUSE" as any;
+  else if (state30 === "TRENDING_DOWN" && state15 === "OSCILLATING_OR_RANGE") currentRegime = "DOWNTREND_PULLBACK_OR_PAUSE" as any;
+
+  const specialConditions = [
+    conflict ? "STRUCTURE_PRESSURE_CONFLICT" : null,
+    openingBiasStillStructurallyValid === true && conflict ? "OPENING_STRUCTURE_INTACT_DESPITE_COUNTER_PRESSURE" : null,
+    breakoutBehaviour.startsWith("FAILED_") ? breakoutBehaviour : null,
+    breakoutBehaviour.startsWith("BREAKOUT_") || breakoutBehaviour.startsWith("BREAKDOWN_") ? breakoutBehaviour : null,
+    rangeSubtype === "RANGE_COMPRESSION_PROVISIONAL" ? rangeSubtype : null,
+    reversalCandidate !== "NONE_CONFIRMED" && reversalCandidate !== "INSUFFICIENT_HISTORY" ? reversalCandidate : null,
+  ].filter((x): x is string => x != null);
+
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    dataQuality: points.length >= 3 ? "OK" : "PARTIAL",
+    methodology: {
+      source: "already_collected_session_spot_and_vix_samples",
+      extraKiteCalls: 0,
+      scoringImpact: "NONE",
+      thresholds: "PROVISIONAL_REQUIRES_BACKTEST",
+      limitation: "Session samples are typically ~3-minute observations, not tick-level OHLC. Compression/reversal labels are descriptive candidates, not trading signals."
+    },
+    opening: {
+      condition: openingCondition,
+      behaviour: openingBehaviour,
+      gapPct: openingGapPct,
+      dayOpen: m.dayOpen || null,
+      previousClose: prevClose > 0 ? prevClose : null,
+    },
+    regime: {
+      currentRegime,
+      rangeSubtype,
+      pressure: currentPressure,
+      structuralBias,
+      transition,
+    },
+    volatility: {
+      vix15mState: vix15.state,
+      vix15mChangePct: vix15.changePct,
+      samples: vix15.samples,
+      note: "VIX state is volatility context only; it is not a directional market signal."
+    },
+    structure: {
+      currentVsOpen,
+      previousRangeLocation,
+      breakoutBehaviour,
+      openingBiasStillStructurallyValid,
+      conflict,
+      reversalCandidate,
+    },
+    specialConditions,
+    windows: {
+      "15m": { state: state15, stats: s15 },
+      "30m": { state: state30, stats: s30 },
+      "60m": { state: state60, stats: s60 },
+    },
+    first15SampledRange: m.first15High > 0 && m.first15Low > 0 ? { high: m.first15High, low: m.first15Low } : null,
+    previousDayLevels: { pdh: m.pdh || null, pdl: m.pdl || null, pdcClose: m.pdcClose || null },
+  };
+}
+
+
+// ============================================================================
+// V2 MODULE 11 — EVIDENCE FUSION MATRIX
+// Observation-only aggregation layer. It DOES NOT assign directional points,
+// confidence percentages, BUY/SELL labels, or modify the existing Rule Engine.
+// Its job is to place the independent V2 evidence modules into one auditable
+// matrix and surface explicit conflicts / missing evidence before any future
+// empirical scoring calibration.
+//
+// Hard boundaries:
+// - No fabricated +N/-N score and no probability estimate.
+// - No runRuleEngine()/verdict mutation and no AI/Haiku/GPT call.
+// - Reuses M1-M10 builders; M5 may use its already-designed once/day RV cache.
+// - M4 historical VIX percentile is NOT re-fetched here. Fusion reports current
+//   VIX context from the live snapshot and discloses that full historical M4
+//   regime remains available through /api/vix-correlation.
+// ============================================================================
+
+type V2FusionQuality = "OK" | "PARTIAL" | "INSUFFICIENT";
+
+interface V2EvidenceMatrixRow {
+  module: string;
+  domain: string;
+  state: string | string[];
+  dataQuality: V2FusionQuality;
+  directionalClaim: "NONE";
+  details?: Record<string, unknown>;
+  guard?: string;
+}
+
+function v2FusionQuality(q: unknown): V2FusionQuality {
+  return q === "OK" ? "OK" : q === "PARTIAL" ? "PARTIAL" : "INSUFFICIENT";
+}
+
+function v2CountStates(values: Array<string | null | undefined>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const v of values) {
+    if (!v) continue;
+    out[v] = (out[v] || 0) + 1;
+  }
+  return out;
+}
+
+async function buildV2EvidenceFusion(
+  symbol: V2PremiumSymbol,
+  session: KiteSession,
+  maxSnapshots = 20
+) {
+  const m = session.marketSnapshot?.[symbol];
+
+  const m1 = buildV2PremiumCompositionHistory(symbol, maxSnapshots);
+  const m2 = buildV2IvSkewHistory(symbol, maxSnapshots);
+  const m3 = buildV2IvTermStructure(symbol, m);
+  const m5 = await buildV2RealizedVsImplied(symbol, session);
+  const m6 = buildV2PremiumAttribution(symbol, maxSnapshots);
+  const m7 = buildV2OiPositioningEvidence(symbol, maxSnapshots);
+  const m8 = buildV2RolloverMigration(symbol);
+  const m9 = buildV2MultiExpiryAlignment(symbol, m);
+  const m10 = buildV2MarketBehaviourRegime(symbol, session, m);
+
+  const compositionStates = v2CountStates((m1.comparisons || []).map((x) => x.compositionState));
+  const attributionStates = v2CountStates((m6.attributions || []).map((x) => x.dominantDriver));
+
+  const liveVix = m && Number.isFinite(m.vix) && m.vix > 0 ? m.vix : null;
+  const liveVixChange = m && Number.isFinite(m.vixChangePercent) ? m.vixChangePercent : null;
+  const m4Quality: V2FusionQuality = liveVix != null ? "PARTIAL" : "INSUFFICIENT";
+
+  const rows: V2EvidenceMatrixRow[] = [
+    {
+      module: "M1_PREMIUM_COMPOSITION",
+      domain: "premium_accounting",
+      state: Object.keys(compositionStates).length ? Object.keys(compositionStates) : ["INSUFFICIENT_HISTORY"],
+      dataQuality: v2FusionQuality(m1.dataQuality),
+      directionalClaim: "NONE",
+      details: { snapshotCount: m1.snapshotCount, stateCounts: compositionStates },
+      guard: "Intrinsic/extrinsic composition explains premium structure; it is not a stand-alone CE/PE signal."
+    },
+    {
+      module: "M2_IV_SKEW",
+      domain: "volatility_surface_current_expiry",
+      state: [
+        m2.current?.relativeAtmState || "INSUFFICIENT_DATA",
+        m2.current?.wingSkewState || "INSUFFICIENT_DATA",
+        m2.change?.ivMotionState || "INSUFFICIENT_HISTORY",
+        m2.change?.skewChangeState || "INSUFFICIENT_HISTORY",
+      ],
+      dataQuality: v2FusionQuality(m2.dataQuality),
+      directionalClaim: "NONE",
+      guard: "IV/skew is volatility-pricing asymmetry, not direction by itself."
+    },
+    {
+      module: "M3_IV_TERM_STRUCTURE",
+      domain: "volatility_term_structure",
+      state: m3.state,
+      dataQuality: v2FusionQuality(m3.dataQuality),
+      directionalClaim: "NONE",
+      details: { usableExpiryCount: m3.usableExpiryCount ?? 0 },
+      guard: "Front/back-loaded IV is maturity pricing context, not a trade direction."
+    },
+    {
+      module: "M4_VIX_REGIME_CONTEXT",
+      domain: "market_volatility_context",
+      state: liveVix != null ? "CURRENT_VIX_CONTEXT_ONLY" : "INSUFFICIENT_DATA",
+      dataQuality: m4Quality,
+      directionalClaim: "NONE",
+      details: { currentVix: liveVix, currentVixChangePercent: liveVixChange },
+      guard: "Full 90-day percentile VIX regime is not re-fetched by M11; use existing /api/vix-correlation output. VIX is non-directional context."
+    },
+    {
+      module: "M5_REALIZED_VS_IMPLIED",
+      domain: "volatility_pricing_vs_realized",
+      state: [m5.state, m5.rvTrend],
+      dataQuality: v2FusionQuality(m5.dataQuality),
+      directionalClaim: "NONE",
+      details: { rv20d: m5.rv20d, atmMeanIv: m5.atmMeanIv, ivToRv20Ratio: m5.ivToRv20Ratio },
+      guard: "IV-vs-RV measures richness/cheapness of volatility, not CE/PE direction."
+    },
+    {
+      module: "M6_PREMIUM_ATTRIBUTION",
+      domain: "premium_move_drivers",
+      state: Object.keys(attributionStates).length ? Object.keys(attributionStates) : ["INSUFFICIENT_HISTORY"],
+      dataQuality: v2FusionQuality(m6.dataQuality),
+      directionalClaim: "NONE",
+      details: { driverCounts: attributionStates },
+      guard: "Greek attribution is first-order and residual-aware; it is not proof of causality."
+    },
+    {
+      module: "M7_OI_POSITIONING",
+      domain: "current_expiry_positioning",
+      state: m7.aggregateState,
+      dataQuality: v2FusionQuality(m7.dataQuality),
+      directionalClaim: "NONE",
+      details: { buyerWriterInference: m7.buyerWriterInference, volumeHistoryAvailable: m7.volumeHistoryAvailable },
+      guard: "OI does not reveal buyer-versus-writer identity."
+    },
+    {
+      module: "M8_ROLLOVER_MIGRATION",
+      domain: "expiry_migration",
+      state: m8.state,
+      dataQuality: v2FusionQuality(m8.dataQuality),
+      directionalClaim: "NONE",
+      details: { snapshotCount: m8.snapshotCount ?? 0 },
+      guard: "Rollover is expiry migration evidence, not market direction by itself."
+    },
+    {
+      module: "M9_MULTI_EXPIRY_ALIGNMENT",
+      domain: "cross_expiry_structure",
+      state: [m9.state, m9.oiAlignment, m9.ivAlignment],
+      dataQuality: v2FusionQuality(m9.dataQuality),
+      directionalClaim: "NONE",
+      details: { usableExpiryCount: m9.usableExpiryCount ?? 0 },
+      guard: "CE/PE cross-expiry structure is not equivalent to bullish/bearish direction or buyer/writer identity."
+    },
+    {
+      module: "M10_MARKET_REGIME_EXTENDED",
+      domain: "price_structure_and_transition",
+      state: [
+        m10.opening?.condition || "INSUFFICIENT_DATA",
+        m10.opening?.behaviour || "INSUFFICIENT_DATA",
+        m10.regime?.currentRegime || "INSUFFICIENT_DATA",
+        m10.regime?.pressure || "INSUFFICIENT_DATA",
+        m10.regime?.structuralBias || "INSUFFICIENT_DATA",
+        m10.regime?.transition || "INSUFFICIENT_DATA",
+      ],
+      dataQuality: v2FusionQuality(m10.dataQuality),
+      directionalClaim: "NONE",
+      details: {
+        structureConflict: m10.structure?.conflict ?? null,
+        breakoutBehaviour: m10.structure?.breakoutBehaviour ?? null,
+        reversalCandidate: m10.structure?.reversalCandidate ?? null,
+        specialConditions: m10.specialConditions || [],
+      },
+      guard: "Regime labels describe current structure/transition. Provisional thresholds require backtest and are not scoring weights."
+    },
+  ];
+
+  const conflicts: string[] = [];
+  if (m10.structure?.conflict) conflicts.push("M10_STRUCTURE_PRESSURE_CONFLICT");
+  if (m9.state === "CROSS_EXPIRY_CONFLICT") conflicts.push("M9_CROSS_EXPIRY_CONFLICT");
+  if (m8.state === "MIXED") conflicts.push("M8_ROLLOVER_MIXED");
+  if (m7.aggregateState === "MIXED") conflicts.push("M7_OI_MIXED");
+  if (m3.state === "MIXED_TERM_STRUCTURE") conflicts.push("M3_TERM_STRUCTURE_MIXED");
+  if (m2.change?.ivMotionState === "MIXED" || m2.change?.skewChangeState === "MIXED") conflicts.push("M2_IV_SKEW_MIXED");
+  const residualLargeCount = (m6.attributions || []).filter((x) => x.dominantDriver === "RESIDUAL_LARGE").length;
+  if (residualLargeCount > 0) conflicts.push("M6_LARGE_RESIDUAL_PRESENT");
+
+  const qualitySummary = rows.reduce((acc, row) => {
+    acc[row.dataQuality] += 1;
+    return acc;
+  }, { OK: 0, PARTIAL: 0, INSUFFICIENT: 0 } as Record<V2FusionQuality, number>);
+
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    architectureRole: "EVIDENCE_MATRIX_ONLY",
+    scoringImpact: "NONE",
+    probabilityImpact: "NONE",
+    aiCall: "NONE",
+    evidenceRows: rows,
+    qualitySummary,
+    conflicts,
+    conflictCount: conflicts.length,
+    readiness: qualitySummary.INSUFFICIENT === 0 ? "EVIDENCE_MATRIX_COMPLETE" : qualitySummary.OK + qualitySummary.PARTIAL >= 6 ? "PARTIAL_EVIDENCE_MATRIX" : "INSUFFICIENT_EVIDENCE_MATRIX",
+    interpretationGuard: "M11 intentionally does not decide CE/PE, BUY/SELL, confidence, or numeric score. Empirical weights belong only after historical/live outcome validation."
+  };
+}
+
+
+// ============================================================================
+// V2 MODULE 12 — REVIEW CANDIDATE / EVIDENCE UI PAYLOAD
+// Safe pre-scoring layer. It prepares auditable CE/PE option review cards from
+// the CURRENT expiry without choosing a winner, fabricating a probability, or
+// emitting BUY/SELL advice. The payload is deliberately UI-ready but the main
+// dashboard HTML is left untouched until live validation is complete.
+//
+// Hard boundaries:
+// - No numeric score, probability, BUY/SELL, or CE-vs-PE winner.
+// - No new Kite/API request: reuses the live market snapshot + M1/M6/M7/M10/M11.
+// - Candidate universe is deterministic: ATM and nearest 1-ITM contract on each
+//   side when available. These are review candidates, not recommendations.
+// - Liquidity/data checks are descriptive only; no arbitrary ranking points.
+// ============================================================================
+
+type V2ReviewStatus = "REVIEWABLE_DATA" | "PARTIAL_DATA" | "BLOCKED_DATA";
+
+interface V2ReviewCandidate {
+  side: V2PremiumSide;
+  strike: number;
+  moneynessRole: "ATM" | "1_ITM";
+  contractMetadata: {
+    instrumentToken: number | null;
+    exchangeToken: number | null;
+    expiryDate: string | null;
+    expiryBucket: string | null;
+    optionType: "CE" | "PE" | null;
+    lotSize: number | null;
+    tickSize: number | null;
+    exchange: string | null;
+    segment: string | null;
+    contractRegime: "LIVE_CONTRACT_MASTER";
+    metadataStatus: "COMPLETE" | "PARTIAL";
+  };
+  tradingSymbol: string | null;
+  lastPrice: number | null;
+  bid: number | null;
+  ask: number | null;
+  spread: number | null;
+  spreadPctOfMid: number | null;
+  oi: number | null;
+  volume: number | null;
+  iv: number | null;
+  delta: number | null;
+  theta: number | null;
+  vega: number | null;
+  quoteTimestamp: string | null;
+  reviewStatus: V2ReviewStatus;
+  blockReasons: string[];
+  evidence: {
+    premiumCompositionState: string | null;
+    premiumAttributionDriver: string | null;
+    oiPriceState: string | null;
+    oiMotion: string | null;
+  };
+  interpretationGuard: string;
+}
+
+function v2CurrentExpiry(m: IndexMetrics | undefined): ExpiryData | null {
+  if (!m) return null;
+  return (m.expiries || []).find((e) => e.expiry === "Current Expiry") || (m.expiries || [])[0] || null;
+}
+
+function v2CandidateStatus(p: PremiumData): { status: V2ReviewStatus; reasons: string[] } {
+  const reasons: string[] = [];
+  if (!(p.lastPrice > 0)) reasons.push("NON_POSITIVE_LAST_PRICE");
+  if (!(p.bid > 0) || !(p.ask > 0) || p.ask < p.bid) reasons.push("INVALID_BID_ASK");
+  if (!(p.oi > 0)) reasons.push("OI_UNAVAILABLE_OR_ZERO");
+  if (p.volume == null) reasons.push("VOLUME_UNAVAILABLE");
+  if (!p.quoteTimestamp) reasons.push("QUOTE_TIMESTAMP_UNAVAILABLE");
+  if (reasons.includes("NON_POSITIVE_LAST_PRICE") || reasons.includes("INVALID_BID_ASK")) {
+    return { status: "BLOCKED_DATA", reasons };
+  }
+  return { status: reasons.length ? "PARTIAL_DATA" : "REVIEWABLE_DATA", reasons };
+}
+
+function v2FindCandidateLeg(exp: ExpiryData, side: V2PremiumSide, atmStrike: number, role: "ATM" | "1_ITM"): PremiumData | null {
+  const legs = side === "CE" ? (exp.ceStrikes || []) : (exp.peStrikes || []);
+  if (role === "ATM") return legs.find((x) => x.strike === atmStrike) || legs.find((x) => x.isAtm) || null;
+  // Calls are ITM below spot/ATM; puts are ITM above spot/ATM. Pick the nearest
+  // available strike rather than assuming a hard-coded strike interval.
+  const eligible = side === "CE" ? legs.filter((x) => x.strike < atmStrike) : legs.filter((x) => x.strike > atmStrike);
+  if (!eligible.length) return null;
+  eligible.sort((a,b) => Math.abs(a.strike - atmStrike) - Math.abs(b.strike - atmStrike));
+  return eligible[0];
+}
+
+function v2EvidenceForCandidate(
+  side: V2PremiumSide,
+  strike: number,
+  m1: ReturnType<typeof buildV2PremiumCompositionHistory>,
+  m6: ReturnType<typeof buildV2PremiumAttribution>,
+  m7: ReturnType<typeof buildV2OiPositioningEvidence>
+) {
+  const c1 = (m1.comparisons || []).find((x) => x.current.side === side && x.current.strike === strike);
+  const c6 = (m6.attributions || []).find((x) => x.side === side && x.strike === strike);
+  const c7 = (m7.legs || []).find((x) => x.side === side && x.strike === strike);
+  return {
+    premiumCompositionState: c1?.compositionState || null,
+    premiumAttributionDriver: c6?.dominantDriver || null,
+    oiPriceState: c7?.priceOiState || null,
+    oiMotion: c7?.oiMotion || null,
+  };
+}
+
+function v2ToReviewCandidate(
+  p: PremiumData,
+  side: V2PremiumSide,
+  role: "ATM" | "1_ITM",
+  m1: ReturnType<typeof buildV2PremiumCompositionHistory>,
+  m6: ReturnType<typeof buildV2PremiumAttribution>,
+  m7: ReturnType<typeof buildV2OiPositioningEvidence>
+): V2ReviewCandidate {
+  const q = v2CandidateStatus(p);
+  const mid = p.bid > 0 && p.ask > 0 ? (p.bid + p.ask) / 2 : null;
+  const spread = p.bid > 0 && p.ask > 0 && p.ask >= p.bid ? p.ask - p.bid : null;
+  const spreadPctOfMid = spread != null && mid != null && mid > 0 ? (spread / mid) * 100 : null;
+  const metadataComplete =
+    p.instrumentToken != null &&
+    p.expiryDate != null &&
+    p.optionType === side &&
+    p.lotSize != null &&
+    p.exchange != null &&
+    p.segment != null;
+  return {
+    side,
+    strike: p.strike,
+    moneynessRole: role,
+    contractMetadata: {
+      instrumentToken: p.instrumentToken,
+      exchangeToken: p.exchangeToken,
+      expiryDate: p.expiryDate,
+      expiryBucket: p.expiryBucket,
+      optionType: p.optionType,
+      lotSize: p.lotSize,
+      tickSize: p.tickSize,
+      exchange: p.exchange,
+      segment: p.segment,
+      contractRegime: p.contractRegime,
+      metadataStatus: metadataComplete ? "COMPLETE" : "PARTIAL",
+    },
+    tradingSymbol: p.tradingSymbol,
+    lastPrice: p.lastPrice > 0 ? p.lastPrice : null,
+    bid: p.bid > 0 ? p.bid : null,
+    ask: p.ask > 0 ? p.ask : null,
+    spread,
+    spreadPctOfMid,
+    oi: p.oi > 0 ? p.oi : null,
+    volume: p.volume,
+    iv: Number.isFinite(p.iv) ? p.iv : null,
+    delta: Number.isFinite(p.delta) ? p.delta : null,
+    theta: Number.isFinite(p.theta) ? p.theta : null,
+    vega: Number.isFinite(p.vega) ? p.vega : null,
+    quoteTimestamp: p.quoteTimestamp,
+    reviewStatus: q.status,
+    blockReasons: q.reasons,
+    evidence: v2EvidenceForCandidate(side, p.strike, m1, m6, m7),
+    interpretationGuard: "This contract is surfaced only because it is ATM/nearest-1ITM with inspectable data. It is NOT a BUY recommendation and is not ranked against the opposite side."
+  };
+}
+
+async function buildV2CandidateReviewPayload(
+  symbol: V2PremiumSymbol,
+  session: KiteSession,
+  maxSnapshots = 20
+) {
+  const m = session.marketSnapshot?.[symbol];
+  if (!m || !(m.current > 0)) {
+    return { symbol, dataQuality: "INSUFFICIENT", state: "BLOCKED_NO_MARKET_SNAPSHOT", candidates: [] };
+  }
+
+  const exp = v2CurrentExpiry(m);
+  if (!exp) {
+    return { symbol, dataQuality: "INSUFFICIENT", state: "BLOCKED_NO_CURRENT_EXPIRY", candidates: [] };
+  }
+
+  const m1 = buildV2PremiumCompositionHistory(symbol, maxSnapshots);
+  const m6 = buildV2PremiumAttribution(symbol, maxSnapshots);
+  const m7 = buildV2OiPositioningEvidence(symbol, maxSnapshots);
+  const m10 = buildV2MarketBehaviourRegime(symbol, session, m);
+  const m11 = await buildV2EvidenceFusion(symbol, session, maxSnapshots);
+
+  const defs: Array<[V2PremiumSide, "ATM" | "1_ITM"]> = [
+    ["CE", "ATM"], ["CE", "1_ITM"], ["PE", "ATM"], ["PE", "1_ITM"]
+  ];
+  const candidates: V2ReviewCandidate[] = [];
+  for (const [side, role] of defs) {
+    const p = v2FindCandidateLeg(exp, side, m.atmStrike, role);
+    if (p) candidates.push(v2ToReviewCandidate(p, side, role, m1, m6, m7));
+  }
+
+  const reviewable = candidates.filter((x) => x.reviewStatus === "REVIEWABLE_DATA").length;
+  const blocked = candidates.filter((x) => x.reviewStatus === "BLOCKED_DATA").length;
+  const state = candidates.length === 0 ? "NO_CANDIDATE_DATA" : blocked === candidates.length ? "ALL_CANDIDATES_BLOCKED" : reviewable > 0 ? "REVIEW_CANDIDATES_AVAILABLE" : "PARTIAL_CANDIDATE_DATA";
+
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    architectureRole: "PRE_SCORING_REVIEW_PAYLOAD",
+    state,
+    currentExpiry: exp.expiryDate instanceof Date ? exp.expiryDate.toISOString().slice(0,10) : String(exp.expiryDate),
+    atmStrike: m.atmStrike,
+    candidates,
+    evidenceContext: {
+      matrixReadiness: m11.readiness,
+      conflictCount: m11.conflictCount,
+      conflicts: m11.conflicts,
+      marketRegime: m10.regime?.currentRegime || "INSUFFICIENT_DATA",
+      currentPressure: m10.regime?.pressure || "INSUFFICIENT_DATA",
+      structuralBias: m10.regime?.structuralBias || "INSUFFICIENT_DATA",
+      transition: m10.regime?.transition || "INSUFFICIENT_DATA",
+      specialConditions: m10.specialConditions || [],
+    },
+    uiContract: {
+      suggestedCardTitle: "PREMIUM REVIEW — LIVE 3M EVIDENCE",
+      displayMode: "SIDE_BY_SIDE_CE_PE_WITHOUT_WINNER",
+      winnerField: null,
+      buySellField: null,
+      probabilityField: null,
+      note: "Visible dashboard wiring is intentionally deferred until staged modules pass live-market validation."
+    },
+    scoringImpact: "NONE",
+    probabilityImpact: "NONE",
+    aiCall: "NONE",
+    extraKiteCalls: 0,
+    interpretationGuard: "M12 only prepares reviewable ATM/nearest-1ITM CE and PE cards plus evidence context. It must not answer which premium to buy until empirical scoring/probability validation exists."
+  };
+}
+
+
+
+// ============================================================================
+// V2 PRE-DEPLOYMENT HARDENING H1 — CONTRACT METADATA LAYER
+//
+// Purpose:
+// - Give every already-fetched option quote an auditable contract identity.
+// - Reuse the exact Kite instrument-master row used to build the quote.
+// - Carry token / expiry / strike / CE-PE / lot-size / tick-size / exchange /
+//   segment through PremiumData so later H2 can hard-block identity mismatches.
+//
+// Hard boundaries:
+// - NO new Kite quote request.
+// - NO Rule Engine / score / verdict / AI change.
+// - NO inference that weekly/monthly historical eras are comparable.
+// - H1 exposes identity metadata only. H2 performs the actual pass/fail gate.
+// ============================================================================
+
+type V2ContractMetadataStatus = "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
+
+function v2ContractMetadataFromPremium(
+  symbol: V2PremiumSymbol,
+  expiry: ExpiryData,
+  side: V2PremiumSide,
+  p: PremiumData
+) {
+  const expectedExpiry = expiry.expiryDate instanceof Date
+    ? expiry.expiryDate.toISOString().slice(0, 10)
+    : String(expiry.expiryDate || "");
+
+  const issues: string[] = [];
+  if (p.instrumentToken == null) issues.push("INSTRUMENT_TOKEN_MISSING");
+  if (!p.tradingSymbol) issues.push("TRADING_SYMBOL_MISSING");
+  if (!p.expiryDate) issues.push("EXPIRY_DATE_MISSING");
+  if (p.expiryDate && expectedExpiry && p.expiryDate !== expectedExpiry) issues.push("EXPIRY_METADATA_MISMATCH");
+  if (p.optionType !== side) issues.push("OPTION_TYPE_METADATA_MISMATCH");
+  if (!(p.strike > 0)) issues.push("STRIKE_INVALID");
+  if (!(p.lotSize != null && p.lotSize > 0)) issues.push("LOT_SIZE_MISSING");
+  if (!p.exchange) issues.push("EXCHANGE_MISSING");
+  if (!p.segment) issues.push("SEGMENT_MISSING");
+
+  return {
+    symbol,
+    expiryLabel: expiry.expiry,
+    expectedExpiryDate: expectedExpiry || null,
+    strike: p.strike,
+    side,
+    tradingSymbol: p.tradingSymbol,
+    instrumentToken: p.instrumentToken,
+    exchangeToken: p.exchangeToken,
+    expiryDate: p.expiryDate,
+    expiryBucket: p.expiryBucket,
+    optionType: p.optionType,
+    lotSize: p.lotSize,
+    tickSize: p.tickSize,
+    exchange: p.exchange,
+    segment: p.segment,
+    contractRegime: p.contractRegime,
+    metadataStatus: (issues.length === 0 ? "COMPLETE" : "PARTIAL") as V2ContractMetadataStatus,
+    issues,
+  };
+}
+
+function buildV2ContractMetadataLayer(symbol: V2PremiumSymbol, session: KiteSession) {
+  const m = session.marketSnapshot?.[symbol];
+  if (!m || !(m.current > 0)) {
+    return {
+      symbol,
+      generatedAt: new Date().toISOString(),
+      architectureRole: "H1_CONTRACT_METADATA_LAYER",
+      status: "INSUFFICIENT" as V2ContractMetadataStatus,
+      contracts: [],
+      issues: ["NO_VALID_MARKET_SNAPSHOT"],
+      extraKiteCalls: 0,
+      scoringImpact: "NONE",
+    };
+  }
+
+  const contracts = (m.expiries || []).flatMap((expiry) => [
+    ...(expiry.ceStrikes || []).map((p) => v2ContractMetadataFromPremium(symbol, expiry, "CE", p)),
+    ...(expiry.peStrikes || []).map((p) => v2ContractMetadataFromPremium(symbol, expiry, "PE", p)),
+  ]);
+
+  const complete = contracts.filter((x) => x.metadataStatus === "COMPLETE").length;
+  const partial = contracts.length - complete;
+  const status: V2ContractMetadataStatus =
+    contracts.length === 0 ? "INSUFFICIENT" : partial === 0 ? "COMPLETE" : "PARTIAL";
+
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    architectureRole: "H1_CONTRACT_METADATA_LAYER",
+    status,
+    summary: {
+      totalContracts: contracts.length,
+      completeContracts: complete,
+      partialContracts: partial,
+    },
+    contracts,
+    extraKiteCalls: 0,
+    scoringImpact: "NONE",
+    verdictImpact: "NONE",
+    aiCall: "NONE",
+    interpretationGuard: "H1 identifies contracts only. COMPLETE metadata is necessary but not sufficient for trading; H2 must still verify contract identity/freshness before candidate selection is allowed.",
+  };
+}
+
+app.get("/api/v2/contract-metadata", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  return c.json(buildV2ContractMetadataLayer(rawSymbol as V2PremiumSymbol, session));
+});
+
+
+// ============================================================================
+// V2 PRE-DEPLOYMENT HARDENING H2 — CONTRACT IDENTITY + FRESHNESS GATE
+//
+// Purpose:
+// - Turn H1 metadata into an actual hard pass/fail security gate.
+// - Verify that an ATM/1-ITM review candidate still matches the expected
+//   underlying / current expiry / strike / CE-PE identity.
+// - Require a fresh exchange/provider quote before M12B may surface a BEST_CE
+//   or BEST_PE candidate.
+//
+// Hard boundaries:
+// - NO new Kite/API request. Uses only already-fetched PremiumData/H1 metadata.
+// - NO scoring/probability/AI changes.
+// - H2 does not judge whether a trade is profitable; it only decides whether
+//   the contract identity and quote freshness are trustworthy enough to use.
+// ============================================================================
+
+type V2ContractIdentityGateStatus = "PASS" | "BLOCKED" | "INSUFFICIENT";
+
+interface V2ContractIdentityGateResult {
+  side: V2PremiumSide;
+  strike: number;
+  moneynessRole: "ATM" | "1_ITM";
+  tradingSymbol: string | null;
+  status: V2ContractIdentityGateStatus;
+  hardBlockReasons: string[];
+  warnings: string[];
+  checks: {
+    underlyingMatch: boolean;
+    expiryMatch: boolean;
+    expiryBucketMatch: boolean;
+    strikeValid: boolean;
+    moneynessRoleMatch: boolean;
+    optionTypeMatch: boolean;
+    instrumentTokenValid: boolean;
+    tradingSymbolPresent: boolean;
+    lotSizeValid: boolean;
+    exchangePresent: boolean;
+    segmentPresent: boolean;
+    quoteFreshness: TruthVerdict;
+    quoteAgeMs: number | null;
+  };
+  interpretationGuard: string;
+}
+
+function v2TradingSymbolMatchesUnderlying(symbol: V2PremiumSymbol, tradingSymbol: string | null): boolean {
+  if (!tradingSymbol) return false;
+  const expected = INDEX_NAMES[symbol as keyof typeof INDEX_NAMES] || symbol;
+  const prefix = tradingSymbol.slice(0, expected.length);
+  const nextChar = tradingSymbol.charAt(expected.length);
+  return prefix === expected && /[0-9]/.test(nextChar);
+}
+
+function v2GateCandidateIdentity(
+  symbol: V2PremiumSymbol,
+  currentExpiry: ExpiryData,
+  atmStrike: number,
+  candidate: V2ReviewCandidate
+): V2ContractIdentityGateResult {
+  const md = candidate.contractMetadata;
+  const expectedExpiry = currentExpiry.expiryDate instanceof Date
+    ? currentExpiry.expiryDate.toISOString().slice(0, 10)
+    : String(currentExpiry.expiryDate || "");
+  const fresh = classifyTruthField(candidate.quoteTimestamp, TRUTH_THRESHOLDS_MS.options);
+
+  const underlyingMatch = v2TradingSymbolMatchesUnderlying(symbol, candidate.tradingSymbol);
+  const expiryMatch = !!md.expiryDate && !!expectedExpiry && md.expiryDate === expectedExpiry;
+  const expiryBucketMatch = md.expiryBucket === currentExpiry.expiry;
+  const strikeValid = Number.isFinite(candidate.strike) && candidate.strike > 0;
+  const moneynessRoleMatch = candidate.moneynessRole === "ATM"
+    ? candidate.strike === atmStrike
+    : candidate.side === "CE"
+      ? candidate.strike < atmStrike
+      : candidate.strike > atmStrike;
+  const optionTypeMatch = md.optionType === candidate.side;
+  const instrumentTokenValid = Number.isInteger(md.instrumentToken) && (md.instrumentToken as number) > 0;
+  const tradingSymbolPresent = !!candidate.tradingSymbol;
+  const lotSizeValid = Number.isFinite(md.lotSize) && (md.lotSize as number) > 0;
+  const exchangePresent = !!md.exchange;
+  const segmentPresent = !!md.segment;
+
+  const hardBlockReasons: string[] = [];
+  if (!underlyingMatch) hardBlockReasons.push("UNDERLYING_IDENTITY_MISMATCH");
+  if (!expiryMatch) hardBlockReasons.push("EXPIRY_IDENTITY_MISMATCH");
+  if (!expiryBucketMatch) hardBlockReasons.push("EXPIRY_BUCKET_MISMATCH");
+  if (!strikeValid) hardBlockReasons.push("STRIKE_INVALID");
+  if (!moneynessRoleMatch) hardBlockReasons.push("MONEYNESS_ROLE_MISMATCH");
+  if (!optionTypeMatch) hardBlockReasons.push("OPTION_TYPE_IDENTITY_MISMATCH");
+  if (!instrumentTokenValid) hardBlockReasons.push("INSTRUMENT_TOKEN_INVALID");
+  if (!tradingSymbolPresent) hardBlockReasons.push("TRADING_SYMBOL_MISSING");
+  if (!lotSizeValid) hardBlockReasons.push("LOT_SIZE_INVALID");
+  if (!exchangePresent) hardBlockReasons.push("EXCHANGE_MISSING");
+  if (!segmentPresent) hardBlockReasons.push("SEGMENT_MISSING");
+  if (fresh.verdict !== "TRUE") hardBlockReasons.push(`QUOTE_${fresh.verdict}`);
+
+  const warnings: string[] = [];
+  if (!(md.tickSize != null && md.tickSize > 0)) warnings.push("TICK_SIZE_UNAVAILABLE");
+  if (!(md.exchangeToken != null && md.exchangeToken > 0)) warnings.push("EXCHANGE_TOKEN_UNAVAILABLE");
+  if (md.metadataStatus !== "COMPLETE") warnings.push("H1_METADATA_PARTIAL");
+
+  return {
+    side: candidate.side,
+    strike: candidate.strike,
+    moneynessRole: candidate.moneynessRole,
+    tradingSymbol: candidate.tradingSymbol,
+    status: hardBlockReasons.length === 0 ? "PASS" : "BLOCKED",
+    hardBlockReasons,
+    warnings,
+    checks: {
+      underlyingMatch,
+      expiryMatch,
+      expiryBucketMatch,
+      strikeValid,
+      moneynessRoleMatch,
+      optionTypeMatch,
+      instrumentTokenValid,
+      tradingSymbolPresent,
+      lotSizeValid,
+      exchangePresent,
+      segmentPresent,
+      quoteFreshness: fresh.verdict,
+      quoteAgeMs: fresh.ageMs,
+    },
+    interpretationGuard: "PASS means contract identity/freshness is verified against already-fetched metadata. It does NOT mean the trade will be profitable."
+  };
+}
+
+async function buildV2ContractIdentityGate(
+  symbol: V2PremiumSymbol,
+  session: KiteSession,
+  maxSnapshots = 20
+) {
+  const m = session.marketSnapshot?.[symbol];
+  if (!m || !(m.current > 0)) {
+    return {
+      symbol,
+      generatedAt: new Date().toISOString(),
+      architectureRole: "H2_CONTRACT_IDENTITY_GATE",
+      status: "INSUFFICIENT" as V2ContractIdentityGateStatus,
+      gates: [],
+      hardBlockReasons: ["NO_VALID_MARKET_SNAPSHOT"],
+      extraKiteCalls: 0,
+    };
+  }
+
+  const exp = v2CurrentExpiry(m);
+  if (!exp) {
+    return {
+      symbol,
+      generatedAt: new Date().toISOString(),
+      architectureRole: "H2_CONTRACT_IDENTITY_GATE",
+      status: "INSUFFICIENT" as V2ContractIdentityGateStatus,
+      gates: [],
+      hardBlockReasons: ["NO_CURRENT_EXPIRY"],
+      extraKiteCalls: 0,
+    };
+  }
+
+  const review = await buildV2CandidateReviewPayload(symbol, session, maxSnapshots);
+  const gates = (review.candidates || []).map((c: V2ReviewCandidate) =>
+    v2GateCandidateIdentity(symbol, exp, m.atmStrike, c)
+  );
+  const blocked = gates.filter((g: V2ContractIdentityGateResult) => g.status === "BLOCKED");
+  const status: V2ContractIdentityGateStatus = gates.length === 0
+    ? "INSUFFICIENT"
+    : blocked.length === 0
+      ? "PASS"
+      : "BLOCKED";
+
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    architectureRole: "H2_CONTRACT_IDENTITY_GATE",
+    status,
+    expected: {
+      expiryLabel: exp.expiry,
+      expiryDate: exp.expiryDate instanceof Date ? exp.expiryDate.toISOString().slice(0,10) : String(exp.expiryDate),
+      atmStrike: m.atmStrike,
+    },
+    gates,
+    summary: {
+      totalCandidates: gates.length,
+      passed: gates.filter((g: V2ContractIdentityGateResult) => g.status === "PASS").length,
+      blocked: blocked.length,
+    },
+    hardBlockReasons: Array.from(new Set(blocked.flatMap((g: V2ContractIdentityGateResult) => g.hardBlockReasons))),
+    extraKiteCalls: 0,
+    scoringImpact: "NONE",
+    probabilityImpact: "NONE",
+    aiCall: "NONE",
+    interpretationGuard: "H2 is a security gate only. A blocked contract must not reach BEST_CE/BEST_PE selection."
+  };
+}
+
+app.get("/api/v2/contract-identity-gate", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  return c.json(await buildV2ContractIdentityGate(rawSymbol as V2PremiumSymbol, session, limit));
+});
+
+// ============================================================================
+// V2 PRE-DEPLOYMENT HARDENING H3 — LOT-SIZE + CONTRACT-REGIME NORMALIZATION
+//
+// Purpose:
+// - Attach comparable, scale-free descriptors (DTE, moneyness, delta bucket,
+//   expiry-series type) to live contracts so future historical data can be
+//   compared by market state rather than absolute strike.
+// - Carry lot-size metadata from H1 and explicitly block raw cross-expiry OI
+//   migration when current/next lot sizes do not match or are unavailable.
+// - Do NOT guess whether broker OI is contracts vs underlying units. Therefore
+//   H3 never multiplies/divides OI by lot size without verified source semantics.
+//
+// Hard boundaries:
+// - NO new Kite/API request.
+// - NO Rule Engine / score / probability / AI change.
+// - NO hard-coded regulatory-era dates. Live expiry-series type is inferred only
+//   from currently available calendar expiries (month-end vs non-month-end).
+// ============================================================================
+
+type V2DeltaBucket = "DEEP_ITM" | "ITM" | "ATM_LIKE" | "OTM" | "DEEP_OTM" | "UNKNOWN";
+type V2ExpirySeriesTypeH3 = "MONTH_END_SERIES" | "NON_MONTH_END_SERIES" | "UNKNOWN";
+
+function v2DeltaBucket(side: V2PremiumSide, delta: number): V2DeltaBucket {
+  if (!Number.isFinite(delta)) return "UNKNOWN";
+  const a = Math.abs(delta);
+  if (a >= 0.75) return "DEEP_ITM";
+  if (a >= 0.60) return "ITM";
+  if (a >= 0.40) return "ATM_LIKE";
+  if (a >= 0.20) return "OTM";
+  return "DEEP_OTM";
+}
+
+function v2InferExpirySeriesType(exp: ExpiryData, expiries: ExpiryData[]): V2ExpirySeriesTypeH3 {
+  const d = v2IsoDateOnly(exp.expiryDate);
+  if (!d) return "UNKNOWN";
+  const ym = d.slice(0, 7);
+  const dates = Array.from(new Set(expiries
+    .map((x) => v2IsoDateOnly(x.expiryDate))
+    .filter((x) => x && x.slice(0, 7) === ym))).sort();
+  if (dates.length === 0) return "UNKNOWN";
+  return d === dates[dates.length - 1] ? "MONTH_END_SERIES" : "NON_MONTH_END_SERIES";
+}
+
+function v2NormalizedContractState(
+  symbol: V2PremiumSymbol,
+  spot: number,
+  expiry: ExpiryData,
+  expiries: ExpiryData[],
+  side: V2PremiumSide,
+  p: PremiumData
+) {
+  const moneynessPct = spot > 0 ? ((p.strike - spot) / spot) * 100 : null;
+  const dte = v2ExpiryDte(expiry.expiryDate);
+  const lotSizeValid = p.lotSize != null && Number.isFinite(p.lotSize) && p.lotSize > 0;
+  return {
+    symbol,
+    side,
+    strike: p.strike,
+    spot,
+    expiryLabel: expiry.expiry,
+    expiryDate: v2IsoDateOnly(expiry.expiryDate),
+    expirySeriesType: v2InferExpirySeriesType(expiry, expiries),
+    dte,
+    moneynessPct,
+    delta: Number.isFinite(p.delta) ? p.delta : null,
+    deltaBucket: v2DeltaBucket(side, p.delta),
+    lotSize: p.lotSize,
+    lotSizeValid,
+    instrumentToken: p.instrumentToken,
+    tradingSymbol: p.tradingSymbol,
+    contractRegimeSource: "LIVE_CONTRACT_MASTER",
+    oiRaw: Number.isFinite(p.oi) ? p.oi : null,
+    oiLotNormalized: null,
+    oiNormalizationStatus: "NOT_COMPUTED_SOURCE_OI_UNIT_SEMANTICS_UNVERIFIED",
+    interpretationGuard: "DTE/moneyness/delta are scale-free comparison descriptors. Lot size is carried as metadata only; raw OI is not multiplied or divided by lot size until provider OI units are explicitly verified."
+  };
+}
+
+function buildV2ContractNormalization(symbol: V2PremiumSymbol, session: KiteSession) {
+  const m = session.marketSnapshot?.[symbol];
+  if (!m || !(m.current > 0)) return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    architectureRole: "H3_CONTRACT_REGIME_NORMALIZATION",
+    status: "INSUFFICIENT",
+    contracts: [],
+    issues: ["NO_VALID_MARKET_SNAPSHOT"],
+    extraKiteCalls: 0,
+  };
+  const expiries = (m.expiries || []).filter((e) => e && e.expiryDate instanceof Date);
+  const contracts = expiries.flatMap((expiry) => [
+    ...(expiry.ceStrikes || []).map((p) => v2NormalizedContractState(symbol, m.current, expiry, expiries, "CE", p)),
+    ...(expiry.peStrikes || []).map((p) => v2NormalizedContractState(symbol, m.current, expiry, expiries, "PE", p)),
+  ]);
+  const invalidLot = contracts.filter((x) => !x.lotSizeValid).length;
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    architectureRole: "H3_CONTRACT_REGIME_NORMALIZATION",
+    status: contracts.length === 0 ? "INSUFFICIENT" : invalidLot === 0 ? "READY" : "PARTIAL",
+    summary: {
+      contracts: contracts.length,
+      validLotSize: contracts.length - invalidLot,
+      invalidLotSize: invalidLot,
+      monthEndSeries: contracts.filter((x) => x.expirySeriesType === "MONTH_END_SERIES").length,
+      nonMonthEndSeries: contracts.filter((x) => x.expirySeriesType === "NON_MONTH_END_SERIES").length,
+    },
+    normalizationAxes: ["DTE", "MONEYNESS_PCT", "DELTA_BUCKET", "EXPIRY_SERIES_TYPE", "LOT_SIZE_METADATA"],
+    oiNormalization: "BLOCKED_UNTIL_PROVIDER_OI_UNIT_SEMANTICS_VERIFIED",
+    historicalEraRule: "NO_HARD_CODED_POLICY_ERA_IN_LIVE_LAYER",
+    contracts,
+    extraKiteCalls: 0,
+    scoringImpact: "NONE",
+    candidateImpact: "NONE_DIRECT_H4_WILL_ENFORCE_DATA_QUALITY",
+  };
+}
+
+app.get("/api/v2/contract-normalization", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  return c.json(buildV2ContractNormalization(rawSymbol as V2PremiumSymbol, session));
+});
+
+
+// ============================================================================
+// V2 PRE-DEPLOYMENT HARDENING H4 — CANDIDATE HARD DATA-QUALITY GATE
+//
+// Purpose:
+// - Make data trust the absolute first condition for BEST_CE/BEST_PE.
+// - Combine Truth Engine snapshot validity + H2 contract identity/freshness +
+//   H3 contract metadata/lot-size readiness + candidate quote completeness.
+// - Fail closed: any hard failure returns NO_TRADE_DATA_QUALITY.
+//
+// Boundaries:
+// - NO new Kite/API request.
+// - NO score/probability/AI logic.
+// - H4 validates data, never predicts direction or profitability.
+// ============================================================================
+
+type V2CandidateHardGateStatus = "PASS" | "BLOCKED" | "INSUFFICIENT";
+
+function v2CandidateHardDataGate(
+  symbol: V2PremiumSymbol,
+  session: KiteSession,
+  candidate: V2ReviewCandidate,
+  h2: V2ContractIdentityGateResult | null
+) {
+  const m = session.marketSnapshot?.[symbol];
+  if (!m) return {
+    status: "INSUFFICIENT" as V2CandidateHardGateStatus,
+    hardBlockReasons: ["NO_MARKET_SNAPSHOT"],
+    warnings: [],
+  };
+
+  const truth = computeTruthReport(m);
+  const h3 = buildV2ContractNormalization(symbol, session);
+  const normalized = (h3.contracts || []).find((x: any) =>
+    x.side === candidate.side &&
+    x.strike === candidate.strike &&
+    x.expiryLabel === "Current Expiry"
+  );
+
+  const hardBlockReasons: string[] = [];
+  const warnings: string[] = [];
+
+  // Whole-snapshot trust must be TRUE. PARTIAL/STALE/INVALID cannot produce
+  // an actionable candidate even if the individual option quote looks normal.
+  if (truth.overallVerdict !== "TRUE") hardBlockReasons.push(`TRUTH_${truth.overallVerdict}`);
+  if (truth.syncOk === false) hardBlockReasons.push("CROSS_COMPONENT_SYNC_FAILED");
+
+  // H2 is mandatory and already checks exact expiry/strike/type/token/freshness.
+  if (!h2) hardBlockReasons.push("H2_GATE_MISSING");
+  else if (h2.status !== "PASS") hardBlockReasons.push(...h2.hardBlockReasons.map((r) => `H2_${r}`));
+
+  // H3 must be able to identify the same current-expiry contract and its live
+  // lot-size metadata. OI unit normalization remains deliberately NOT required
+  // because source semantics are still unverified.
+  if (!normalized) hardBlockReasons.push("H3_CURRENT_CONTRACT_NOT_FOUND");
+  else {
+    if (!normalized.lotSizeValid) hardBlockReasons.push("H3_LOT_SIZE_INVALID");
+    if (normalized.dte == null || normalized.dte < 0) hardBlockReasons.push("H3_DTE_INVALID");
+    if (normalized.deltaBucket === "UNKNOWN") warnings.push("H3_DELTA_BUCKET_UNKNOWN");
+  }
+
+  // Candidate quote itself must not be BLOCKED. PARTIAL is allowed only as a
+  // warning here because H2 + Truth have already enforced identity/freshness;
+  // the missing optional field remains visible instead of being fabricated.
+  if (candidate.reviewStatus === "BLOCKED_DATA") hardBlockReasons.push("CANDIDATE_QUOTE_BLOCKED");
+  if (candidate.reviewStatus === "PARTIAL_DATA") warnings.push("CANDIDATE_OPTIONAL_FIELDS_PARTIAL");
+  if (!(candidate.lastPrice > 0)) hardBlockReasons.push("CANDIDATE_LTP_INVALID");
+
+  return {
+    status: hardBlockReasons.length === 0 ? "PASS" as V2CandidateHardGateStatus : "BLOCKED" as V2CandidateHardGateStatus,
+    hardBlockReasons: Array.from(new Set(hardBlockReasons)),
+    warnings: Array.from(new Set(warnings)),
+    truth: {
+      overallVerdict: truth.overallVerdict,
+      syncOk: truth.syncOk,
+      rejectedFields: truth.rejectedFields,
+      snapshotId: truth.snapshotId,
+    },
+    h2Status: h2?.status || "MISSING",
+    h3: normalized ? {
+      expiryLabel: normalized.expiryLabel,
+      expiryDate: normalized.expiryDate,
+      dte: normalized.dte,
+      deltaBucket: normalized.deltaBucket,
+      lotSize: normalized.lotSize,
+      lotSizeValid: normalized.lotSizeValid,
+      oiNormalizationStatus: normalized.oiNormalizationStatus,
+    } : null,
+    interpretationGuard: "H4 PASS means the candidate data is trustworthy enough to evaluate. It is not a profitability guarantee or probability score."
+  };
+}
+
+async function buildV2CandidateHardDataGate(symbol: V2PremiumSymbol, session: KiteSession, maxSnapshots = 20) {
+  const review = await buildV2CandidateReviewPayload(symbol, session, maxSnapshots);
+  const m = session.marketSnapshot?.[symbol];
+  if (!m) return { symbol, generatedAt: new Date().toISOString(), architectureRole: "H4_CANDIDATE_HARD_DATA_QUALITY_GATE", status: "INSUFFICIENT", gates: [], hardBlockReasons: ["NO_MARKET_SNAPSHOT"], extraKiteCalls: 0 };
+  const exp = v2CurrentExpiry(m);
+  if (!exp) return { symbol, generatedAt: new Date().toISOString(), architectureRole: "H4_CANDIDATE_HARD_DATA_QUALITY_GATE", status: "INSUFFICIENT", gates: [], hardBlockReasons: ["NO_CURRENT_EXPIRY"], extraKiteCalls: 0 };
+
+  const gates = (review.candidates || []).map((candidate: V2ReviewCandidate) => {
+    const h2 = v2GateCandidateIdentity(symbol, exp, m.atmStrike, candidate);
+    return { side: candidate.side, strike: candidate.strike, moneynessRole: candidate.moneynessRole, ...v2CandidateHardDataGate(symbol, session, candidate, h2) };
+  });
+  const blocked = gates.filter((g: any) => g.status !== "PASS");
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    architectureRole: "H4_CANDIDATE_HARD_DATA_QUALITY_GATE",
+    status: gates.length === 0 ? "INSUFFICIENT" : blocked.length === 0 ? "PASS" : "BLOCKED",
+    gates,
+    summary: { totalCandidates: gates.length, passed: gates.length - blocked.length, blocked: blocked.length },
+    hardBlockReasons: Array.from(new Set(blocked.flatMap((g: any) => g.hardBlockReasons || []))),
+    extraKiteCalls: 0,
+    scoringImpact: "NONE",
+    probabilityImpact: "NONE",
+    aiCall: "NONE",
+  };
+}
+
+app.get("/api/v2/candidate-data-quality-gate", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  return c.json(await buildV2CandidateHardDataGate(rawSymbol as V2PremiumSymbol, session, limit));
+});
+
+
+// ============================================================================
+// V2 HARDENING H5 — PROVISIONAL-RULE ISOLATION
+//
+// Goal:
+// - Make every unvalidated heuristic/threshold that can influence M12B explicit.
+// - Preserve the exact deterministic BEST_CE/BEST_PE research candidate.
+// - Prevent that provisional candidate from silently entering the production
+//   Rule Engine, AI explanation path, or any order/execution path.
+//
+// Important:
+// H5 does NOT claim that provisional logic is wrong. It only labels provenance
+// and keeps it in SHADOW_ONLY mode until historical + live outcome validation
+// promotes the rule family.
+// ============================================================================
+
+type V2ProvisionalIsolationStatus =
+  | "SHADOW_ONLY_PROVISIONAL_INFLUENCE"
+  | "NO_DIRECTIONAL_CANDIDATE"
+  | "DATA_QUALITY_BLOCKED";
+
+interface V2ProvisionalIsolationReport {
+  status: V2ProvisionalIsolationStatus;
+  provisionalInfluence: boolean;
+  provisionalSources: string[];
+  productionEligibility: {
+    ruleEngine: false;
+    aiVerdict: false;
+    orderExecution: false;
+  };
+  allowedUse: "RESEARCH_SHADOW_DISPLAY_AND_OUTCOME_RECORDING_ONLY";
+  promotionRequirement: string;
+}
+
+function buildV2ProvisionalIsolationReport(candidateResult: any): V2ProvisionalIsolationReport {
+  const decision = String(candidateResult?.decision || "");
+  const hasCandidate = decision === "BEST_CE" || decision === "BEST_PE";
+
+  if (decision === "NO_TRADE_DATA_QUALITY" || decision === "NO_TRADE_NO_CONTRACT") {
+    return {
+      status: "DATA_QUALITY_BLOCKED",
+      provisionalInfluence: false,
+      provisionalSources: [],
+      productionEligibility: { ruleEngine: false, aiVerdict: false, orderExecution: false },
+      allowedUse: "RESEARCH_SHADOW_DISPLAY_AND_OUTCOME_RECORDING_ONLY",
+      promotionRequirement: "Resolve hard data/contract-quality failures first; no rule promotion is possible while H2/H4 blocks the candidate."
+    };
+  }
+
+  if (!hasCandidate) {
+    return {
+      status: "NO_DIRECTIONAL_CANDIDATE",
+      provisionalInfluence: false,
+      provisionalSources: [],
+      productionEligibility: { ruleEngine: false, aiVerdict: false, orderExecution: false },
+      allowedUse: "RESEARCH_SHADOW_DISPLAY_AND_OUTCOME_RECORDING_ONLY",
+      promotionRequirement: "No candidate exists to promote. WAIT/CONFLICT remains a valid deterministic result."
+    };
+  }
+
+  return {
+    status: "SHADOW_ONLY_PROVISIONAL_INFLUENCE",
+    provisionalInfluence: true,
+    provisionalSources: [
+      "M10 market-regime/path-efficiency thresholds are PROVISIONAL_REQUIRES_BACKTEST.",
+      "M10 structural-bias labels derived from those thresholds are provisional research states.",
+      "M12B ATM-vs-1ITM final tie-break is a deterministic heuristic, not an empirically validated profitability rule."
+    ],
+    productionEligibility: { ruleEngine: false, aiVerdict: false, orderExecution: false },
+    allowedUse: "RESEARCH_SHADOW_DISPLAY_AND_OUTCOME_RECORDING_ONLY",
+    promotionRequirement: "Promote only after historical episode testing plus live out-of-sample outcome validation demonstrates stable performance by regime."
+  };
+}
+
+// ============================================================================
+// V2 MODULE 12B — DETERMINISTIC CANDIDATE SELECTION (PROVISIONAL LIVE GATE)
+// Converts M12 review cards into one actionable REVIEW CANDIDATE only when
+// directional market structure is internally aligned. This is intentionally a
+// rule tree, NOT a fabricated numeric score or probability model.
+//
+// Hard boundaries:
+// - Side selection uses price/regime structure only (M10), because M2/M3/M4/
+//   M5/M7/M8/M9 are context/evidence and are not direction by themselves.
+// - If structural bias and pressure conflict, output WAIT instead of forcing a
+//   CE/PE winner.
+// - Contract selection on the chosen side is a transparent market-quality
+//   ordering: usable quote -> tighter spread -> higher OI -> higher volume.
+// - No empirical probability is claimed yet. Historical/live calibration is
+//   still required before calling the selector statistically validated.
+// ============================================================================
+
+type V2CandidateDecisionState =
+  | "BEST_CE"
+  | "BEST_PE"
+  | "WAIT_CONFLICT"
+  | "WAIT_NO_DIRECTIONAL_EDGE"
+  | "NO_TRADE_DATA_QUALITY"
+  | "NO_TRADE_NO_CONTRACT";
+
+function v2NormalizeDirectionalWord(v: unknown): "UP" | "DOWN" | "NEUTRAL" {
+  const s = String(v || "").toUpperCase();
+  if (s.includes("UP") || s.includes("BULL")) return "UP";
+  if (s.includes("DOWN") || s.includes("BEAR")) return "DOWN";
+  return "NEUTRAL";
+}
+
+function v2DirectionFromRegime(m10: ReturnType<typeof buildV2MarketBehaviourRegime>) {
+  const structural = v2NormalizeDirectionalWord(m10.regime?.structuralBias);
+  const pressure = v2NormalizeDirectionalWord(m10.regime?.pressure);
+  const regime = String(m10.regime?.currentRegime || "").toUpperCase();
+  const transition = String(m10.regime?.transition || "").toUpperCase();
+
+  if (m10.structure?.conflict || (structural !== "NEUTRAL" && pressure !== "NEUTRAL" && structural !== pressure)) {
+    return {
+      side: null as V2PremiumSide | null,
+      state: "WAIT_CONFLICT" as V2CandidateDecisionState,
+      reason: "Structural bias and current pressure are conflicting; forcing CE/PE would hide a real market conflict."
+    };
+  }
+
+  if (structural === "UP" && pressure === "UP") {
+    return { side: "CE" as V2PremiumSide, state: "BEST_CE" as V2CandidateDecisionState, reason: "UP structural bias and UP current pressure are aligned." };
+  }
+  if (structural === "DOWN" && pressure === "DOWN") {
+    return { side: "PE" as V2PremiumSide, state: "BEST_PE" as V2CandidateDecisionState, reason: "DOWN structural bias and DOWN current pressure are aligned." };
+  }
+
+  // Fallback only when structure is neutral/unconfirmed but the current regime
+  // itself is explicitly directional. This is weaker than structure+pressure alignment.
+  if (structural === "NEUTRAL" && pressure === "UP" && regime.includes("TRENDING_UP") && !transition.includes("DOWN")) {
+    return { side: "CE" as V2PremiumSide, state: "BEST_CE" as V2CandidateDecisionState, reason: "Structure is not confirmed, but current pressure and explicit TRENDING_UP regime align." };
+  }
+  if (structural === "NEUTRAL" && pressure === "DOWN" && regime.includes("TRENDING_DOWN") && !transition.includes("UP")) {
+    return { side: "PE" as V2PremiumSide, state: "BEST_PE" as V2CandidateDecisionState, reason: "Structure is not confirmed, but current pressure and explicit TRENDING_DOWN regime align." };
+  }
+
+  return {
+    side: null as V2PremiumSide | null,
+    state: "WAIT_NO_DIRECTIONAL_EDGE" as V2CandidateDecisionState,
+    reason: "No clean directional structure is present; candidate side is not forced."
+  };
+}
+
+function v2ReviewStatusRank(s: V2ReviewStatus): number {
+  return s === "REVIEWABLE_DATA" ? 0 : s === "PARTIAL_DATA" ? 1 : 2;
+}
+
+function v2ContractQualitySort(a: V2ReviewCandidate, b: V2ReviewCandidate): number {
+  const sr = v2ReviewStatusRank(a.reviewStatus) - v2ReviewStatusRank(b.reviewStatus);
+  if (sr !== 0) return sr;
+
+  // Prefer the tighter observable spread when both quotes are otherwise usable.
+  const aSpread = a.spreadPctOfMid == null ? Number.POSITIVE_INFINITY : a.spreadPctOfMid;
+  const bSpread = b.spreadPctOfMid == null ? Number.POSITIVE_INFINITY : b.spreadPctOfMid;
+  if (aSpread !== bSpread) return aSpread - bSpread;
+
+  // Then prefer deeper observable OI, then volume. No weighted score is used.
+  const aOi = a.oi ?? -1;
+  const bOi = b.oi ?? -1;
+  if (aOi !== bOi) return bOi - aOi;
+  const aVol = a.volume ?? -1;
+  const bVol = b.volume ?? -1;
+  if (aVol !== bVol) return bVol - aVol;
+
+  // Final deterministic tie-break: 1-ITM first for directional review because
+  // it generally carries more intrinsic/delta participation than ATM; this is
+  // a contract-choice tie-break only, not a side-selection signal.
+  if (a.moneynessRole !== b.moneynessRole) return a.moneynessRole === "1_ITM" ? -1 : 1;
+  return a.strike - b.strike;
+}
+
+async function buildV2CandidateSelectionCore(
+  symbol: V2PremiumSymbol,
+  session: KiteSession,
+  maxSnapshots = 20
+) {
+  const review = await buildV2CandidateReviewPayload(symbol, session, maxSnapshots);
+  const m = session.marketSnapshot?.[symbol];
+  if (!m || !(m.current > 0)) {
+    return { symbol, generatedAt: new Date().toISOString(), decision: "NO_TRADE_DATA_QUALITY" as V2CandidateDecisionState, selectedCandidate: null, reason: "No valid market snapshot." };
+  }
+
+  // H2 hard gate: candidate selection may only consider contracts whose
+  // identity + current-expiry mapping + quote freshness pass.
+  const expForGate = v2CurrentExpiry(m);
+  if (!expForGate) {
+    return { symbol, generatedAt: new Date().toISOString(), architectureRole: "DETERMINISTIC_CANDIDATE_SELECTOR_PROVISIONAL", decision: "NO_TRADE_DATA_QUALITY" as V2CandidateDecisionState, selectedCandidate: null, reason: "H2 blocked: current expiry unavailable.", h2Gate: { status: "INSUFFICIENT", hardBlockReasons: ["NO_CURRENT_EXPIRY"] } };
+  }
+  const h2Gates = (review.candidates || []).map((candidate: V2ReviewCandidate) => v2GateCandidateIdentity(symbol, expForGate, m.atmStrike, candidate));
+  const h2ByKey = new Map(h2Gates.map((g: V2ContractIdentityGateResult) => [`${g.side}:${g.strike}:${g.moneynessRole}`, g]));
+
+  const m10 = buildV2MarketBehaviourRegime(symbol, session, m);
+  const direction = v2DirectionFromRegime(m10);
+  if (!direction.side) {
+    return {
+      symbol,
+      generatedAt: new Date().toISOString(),
+      architectureRole: "DETERMINISTIC_CANDIDATE_SELECTOR_PROVISIONAL",
+      decision: direction.state,
+      selectedSide: null,
+      selectedCandidate: null,
+      reason: direction.reason,
+      marketContext: review.evidenceContext,
+      empiricalProbability: null,
+      numericScore: null,
+      scoringImpact: "NONE",
+      aiCall: "NONE",
+      extraKiteCalls: 0,
+      validationStatus: "PROVISIONAL_REQUIRES_HISTORICAL_AND_LIVE_OUTCOME_VALIDATION"
+    };
+  }
+
+  const sameSide = (review.candidates || []).filter((x: V2ReviewCandidate) => x.side === direction.side);
+  if (!sameSide.length) {
+    return {
+      symbol,
+      generatedAt: new Date().toISOString(),
+      architectureRole: "DETERMINISTIC_CANDIDATE_SELECTOR_PROVISIONAL",
+      decision: "NO_TRADE_NO_CONTRACT" as V2CandidateDecisionState,
+      selectedSide: direction.side,
+      selectedCandidate: null,
+      reason: "Directional side exists, but ATM/1-ITM contract data is unavailable.",
+      marketContext: review.evidenceContext,
+      empiricalProbability: null,
+      numericScore: null,
+      scoringImpact: "NONE",
+      aiCall: "NONE",
+      extraKiteCalls: 0,
+      validationStatus: "PROVISIONAL_REQUIRES_HISTORICAL_AND_LIVE_OUTCOME_VALIDATION"
+    };
+  }
+
+  const h4ByKey = new Map(sameSide.map((x: V2ReviewCandidate) => {
+    const key = `${x.side}:${x.strike}:${x.moneynessRole}`;
+    const h2 = h2ByKey.get(key) || null;
+    return [key, v2CandidateHardDataGate(symbol, session, x, h2)] as const;
+  }));
+  const h2PassedSameSide = sameSide.filter((x: V2ReviewCandidate) => {
+    const key = `${x.side}:${x.strike}:${x.moneynessRole}`;
+    return h2ByKey.get(key)?.status === "PASS" && h4ByKey.get(key)?.status === "PASS";
+  });
+  if (!h2PassedSameSide.length) {
+    const blockedGates = sameSide.map((x: V2ReviewCandidate) => h2ByKey.get(`${x.side}:${x.strike}:${x.moneynessRole}`)).filter(Boolean);
+    return {
+      symbol,
+      generatedAt: new Date().toISOString(),
+      architectureRole: "DETERMINISTIC_CANDIDATE_SELECTOR_PROVISIONAL",
+      decision: "NO_TRADE_DATA_QUALITY" as V2CandidateDecisionState,
+      selectedSide: direction.side,
+      selectedCandidate: null,
+      reason: "H4 blocked all contracts on the selected side because hard data-quality verification failed.",
+      h2Gate: { status: "BLOCKED", gates: blockedGates },
+      h4Gate: { status: "BLOCKED", gates: sameSide.map((x: V2ReviewCandidate) => h4ByKey.get(`${x.side}:${x.strike}:${x.moneynessRole}`)) },
+      marketContext: review.evidenceContext,
+      empiricalProbability: null,
+      numericScore: null,
+      scoringImpact: "NONE",
+      aiCall: "NONE",
+      extraKiteCalls: 0,
+      validationStatus: "PROVISIONAL_REQUIRES_HISTORICAL_AND_LIVE_OUTCOME_VALIDATION"
+    };
+  }
+
+  const ordered = [...h2PassedSameSide].sort(v2ContractQualitySort);
+  const selected = ordered[0];
+  if (!selected || selected.reviewStatus === "BLOCKED_DATA") {
+    return {
+      symbol,
+      generatedAt: new Date().toISOString(),
+      architectureRole: "DETERMINISTIC_CANDIDATE_SELECTOR_PROVISIONAL",
+      decision: "NO_TRADE_DATA_QUALITY" as V2CandidateDecisionState,
+      selectedSide: direction.side,
+      selectedCandidate: null,
+      reason: "Directional side exists, but candidate quote quality is blocked.",
+      alternatives: ordered,
+      marketContext: review.evidenceContext,
+      empiricalProbability: null,
+      numericScore: null,
+      scoringImpact: "NONE",
+      aiCall: "NONE",
+      extraKiteCalls: 0,
+      validationStatus: "PROVISIONAL_REQUIRES_HISTORICAL_AND_LIVE_OUTCOME_VALIDATION"
+    };
+  }
+
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    architectureRole: "DETERMINISTIC_CANDIDATE_SELECTOR_PROVISIONAL",
+    decision: direction.state,
+    selectedSide: direction.side,
+    selectedCandidate: selected,
+    h2Gate: h2ByKey.get(`${selected.side}:${selected.strike}:${selected.moneynessRole}`) || null,
+    h4Gate: h4ByKey.get(`${selected.side}:${selected.strike}:${selected.moneynessRole}`) || null,
+    alternativeSameSide: ordered.slice(1),
+    whySide: direction.reason,
+    whyContract: [
+      `Quote status: ${selected.reviewStatus}`,
+      selected.spreadPctOfMid == null ? "Spread unavailable" : `Spread ${selected.spreadPctOfMid.toFixed(3)}% of mid`,
+      selected.oi == null ? "OI unavailable" : `OI ${selected.oi}`,
+      selected.volume == null ? "Volume unavailable" : `Volume ${selected.volume}`,
+      `Moneyness role: ${selected.moneynessRole}`,
+      selected.evidence.premiumCompositionState ? `Premium composition: ${selected.evidence.premiumCompositionState}` : "Premium composition history insufficient",
+      selected.evidence.premiumAttributionDriver ? `Premium driver: ${selected.evidence.premiumAttributionDriver}` : "Premium attribution history insufficient",
+      selected.evidence.oiPriceState ? `Price/OI: ${selected.evidence.oiPriceState}` : "Price/OI history insufficient",
+    ],
+    marketContext: review.evidenceContext,
+    empiricalProbability: null,
+    numericScore: null,
+    scoringImpact: "NONE",
+    aiCall: "NONE",
+    extraKiteCalls: 0,
+    validationStatus: "PROVISIONAL_REQUIRES_HISTORICAL_AND_LIVE_OUTCOME_VALIDATION",
+    interpretationGuard: "This is an exact deterministic candidate under the current provisional rule tree, not a guaranteed profitable trade. WAIT/NO_TRADE is a valid exact output when evidence conflicts or data quality fails."
+  };
+}
+
+
+async function buildV2CandidateSelection(
+  symbol: V2PremiumSymbol,
+  session: KiteSession,
+  maxSnapshots = 20
+) {
+  const core = await buildV2CandidateSelectionCore(symbol, session, maxSnapshots);
+  const h5 = buildV2ProvisionalIsolationReport(core);
+  const h10 = buildV2DevilDetector(symbol, session, core);
+
+  // H10 may hard-block only objective integrity/engine contradictions.
+  // Heuristic market anomalies remain shadow warnings and never auto-block.
+  if (h10.hardBlock && (core.decision === "BEST_CE" || core.decision === "BEST_PE")) {
+    return {
+      ...core,
+      decision: "NO_TRADE_DATA_QUALITY" as V2CandidateDecisionState,
+      blockedCandidate: core.selectedCandidate || null,
+      selectedCandidate: null,
+      reason: `H10 Devil Detector blocked the shadow candidate: ${h10.hardBlockReasons.join("; ")}`,
+      h5Isolation: h5,
+      h10Detector: h10,
+      executionEligibility: "BLOCKED_BY_H10",
+      productionPipelineIsolation: {
+        ruleEngineFeed: "BLOCKED",
+        aiVerdictFeed: "BLOCKED",
+        orderExecutionFeed: "BLOCKED"
+      },
+      outcomeRecordingEligible: false,
+      interpretationGuardH5:
+        "BEST_CE/BEST_PE remains a research-only construct. H10 can block only objective integrity/engine contradictions; heuristic anomalies remain warnings."
+    };
+  }
+
+  return {
+    ...core,
+    h5Isolation: h5,
+    h10Detector: h10,
+    executionEligibility: "SHADOW_ONLY",
+    productionPipelineIsolation: {
+      ruleEngineFeed: "BLOCKED",
+      aiVerdictFeed: "BLOCKED",
+      orderExecutionFeed: "BLOCKED"
+    },
+    outcomeRecordingEligible: true,
+    interpretationGuardH5:
+      "BEST_CE/BEST_PE remains visible as an exact research candidate, but H5 blocks silent promotion into Rule Engine/AI/order execution until empirical validation is complete."
+  };
+}
+
+app.get("/api/v2/candidate-selection", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!( ["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  return c.json(await buildV2CandidateSelection(rawSymbol as V2PremiumSymbol, session, limit));
+});
+
+
+app.get("/api/v2/provisional-isolation", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!( ["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+
+  const core = await buildV2CandidateSelectionCore(rawSymbol as V2PremiumSymbol, session, limit);
+  return c.json({
+    symbol: rawSymbol,
+    generatedAt: new Date().toISOString(),
+    candidateDecision: core.decision,
+    selectedCandidate: core.selectedCandidate || null,
+    h5Isolation: buildV2ProvisionalIsolationReport(core),
+    hardBoundary: "PROVISIONAL LOGIC MAY PRODUCE A SHADOW CANDIDATE BUT CANNOT FEED RULE ENGINE / AI VERDICT / ORDER EXECUTION."
+  });
+});
+
+
+// ============================================================================
+// V2 HARDENING H7 — LIVE SHADOW MODE
+// V2 HARDENING H8 — DEDICATED CANDIDATE OUTCOME RECORDER
+//
+// Purpose:
+// - H7 observes the exact M12B/H1-H5 candidate on each completed 3-minute
+//   Recorder cycle without feeding Rule Engine, AI, alerts, or execution.
+// - H8 records BEST_CE/BEST_PE candidates as research events and evaluates
+//   actual option-premium outcomes at +15m/+30m/+60m using Recorder ATM±3 data.
+// - No broker/API fetch is triggered here. It reuses the already-refreshed
+//   market snapshot + already-recorded snapshots only.
+//
+// Statistical guard:
+// Consecutive 3-minute observations are correlated. H8 therefore records a new
+// outcome event only when the candidate fingerprint changes OR at least
+// 15 minutes have elapsed since the prior recorded event for that symbol.
+// This is still not independence; V3 episode clustering remains required.
+// ============================================================================
+
+type V2ShadowDecision =
+  | "BEST_CE"
+  | "BEST_PE"
+  | "WAIT_CONFLICT"
+  | "WAIT_NO_DIRECTIONAL_EDGE"
+  | "NO_TRADE_DATA_QUALITY"
+  | "NO_TRADE_NO_CONTRACT"
+  | "SHADOW_ERROR";
+
+interface V2ShadowObservation {
+  id: string;
+  tradingDate: string;
+  timestamp: string;
+  recorderSnapshotId: string;
+  symbol: V2PremiumSymbol;
+  decision: V2ShadowDecision;
+  side: V2PremiumSide | null;
+  strike: number | null;
+  moneynessRole: string | null;
+  entryPremium: number | null;
+  marketRegime: string | null;
+  currentPressure: string | null;
+  structuralBias: string | null;
+  h4Status: string | null;
+  executionEligibility: "SHADOW_ONLY";
+  fingerprint: string;
+  error: string | null;
+}
+
+type V2OutcomeHorizonStatus = "PENDING" | "EVALUATED" | "MISSING_MATCHING_PREMIUM";
+
+interface V2OutcomeHorizon {
+  minutes: 15 | 30 | 60;
+  status: V2OutcomeHorizonStatus;
+  evaluatedAt: string | null;
+  premium: number | null;
+  premiumReturnPct: number | null;
+}
+
+interface V2CandidateOutcomeRecord {
+  id: string;
+  tradingDate: string;
+  createdAt: string;
+  sourceShadowObservationId: string;
+  sourceRecorderSnapshotId: string;
+  symbol: V2PremiumSymbol;
+  decision: "BEST_CE" | "BEST_PE";
+  side: V2PremiumSide;
+  strike: number;
+  moneynessRole: string | null;
+  entryPremium: number;
+  fingerprint: string;
+  regimeContext: {
+    marketRegime: string | null;
+    currentPressure: string | null;
+    structuralBias: string | null;
+  };
+  horizons: V2OutcomeHorizon[];
+  maxFavorableExcursionPct: number | null;
+  maxAdverseExcursionPct: number | null;
+  terminalStatus: "PENDING" | "COMPLETE" | "INCOMPLETE";
+  statisticalGuard: string;
+}
+
+const V2_SHADOW_MAX_OBSERVATIONS = 1500;
+const V2_OUTCOME_MAX_RECORDS = 600;
+const V2_OUTCOME_RECORD_MIN_GAP_MS = 15 * 60 * 1000;
+
+const v2ShadowObservations: V2ShadowObservation[] = [];
+const v2CandidateOutcomeRecords: V2CandidateOutcomeRecord[] = [];
+const v2LastOutcomeSeedBySymbol: Partial<Record<V2PremiumSymbol, { atMs: number; fingerprint: string }>> = {};
+
+function v2FindRecordedPremium(
+  snap: RecorderSnapshot,
+  symbol: V2PremiumSymbol,
+  side: V2PremiumSide,
+  strike: number
+): number | null {
+  const idx = snap[symbol];
+  if (!idx) return null;
+  const legs = side === "CE" ? idx.ceStrikesNear : idx.peStrikesNear;
+  const exact = (legs || []).find((x) => x.strike === strike);
+  if (exact?.ltp != null && exact.ltp > 0) return exact.ltp;
+
+  // ATM fallback is allowed only when the requested strike is exactly the
+  // recorded ATM strike. Never substitute a neighboring strike.
+  if (idx.atmStrike === strike) {
+    const atm = side === "CE" ? idx.ceLtp : idx.peLtp;
+    return atm != null && atm > 0 ? atm : null;
+  }
+  return null;
+}
+
+function v2CandidateFingerprint(candidateResult: any): string {
+  const c = candidateResult?.selectedCandidate;
+  const ctx = candidateResult?.marketContext?.marketRegime || candidateResult?.marketContext || {};
+  return [
+    String(candidateResult?.decision || "UNKNOWN"),
+    String(candidateResult?.selectedSide || ""),
+    String(c?.strike ?? ""),
+    String(c?.moneynessRole || ""),
+    String(ctx?.currentRegime || ""),
+    String(ctx?.pressure || ctx?.currentPressure || ""),
+    String(ctx?.structuralBias || "")
+  ].join("|");
+}
+
+function v2AppendShadowObservation(obs: V2ShadowObservation): void {
+  v2ShadowObservations.push(obs);
+  if (v2ShadowObservations.length > V2_SHADOW_MAX_OBSERVATIONS) v2ShadowObservations.shift();
+}
+
+function v2SeedOutcomeFromShadow(obs: V2ShadowObservation): void {
+  if (!((obs.decision === "BEST_CE" || obs.decision === "BEST_PE") && obs.side && obs.strike != null && obs.entryPremium != null && obs.entryPremium > 0)) return;
+
+  const nowMs = new Date(obs.timestamp).getTime();
+  const prior = v2LastOutcomeSeedBySymbol[obs.symbol];
+  const changed = !prior || prior.fingerprint !== obs.fingerprint;
+  const gapElapsed = !prior || nowMs - prior.atMs >= V2_OUTCOME_RECORD_MIN_GAP_MS;
+  if (!changed && !gapElapsed) return;
+
+  const record: V2CandidateOutcomeRecord = {
+    id: `v2out-${obs.symbol}-${nowMs}-${randomBytes(3).toString("hex")}`,
+    tradingDate: obs.tradingDate,
+    createdAt: obs.timestamp,
+    sourceShadowObservationId: obs.id,
+    sourceRecorderSnapshotId: obs.recorderSnapshotId,
+    symbol: obs.symbol,
+    decision: obs.decision,
+    side: obs.side,
+    strike: obs.strike,
+    moneynessRole: obs.moneynessRole,
+    entryPremium: obs.entryPremium,
+    fingerprint: obs.fingerprint,
+    regimeContext: {
+      marketRegime: obs.marketRegime,
+      currentPressure: obs.currentPressure,
+      structuralBias: obs.structuralBias,
+    },
+    horizons: ([15, 30, 60] as const).map((minutes) => ({
+      minutes,
+      status: "PENDING",
+      evaluatedAt: null,
+      premium: null,
+      premiumReturnPct: null,
+    })),
+    maxFavorableExcursionPct: null,
+    maxAdverseExcursionPct: null,
+    terminalStatus: "PENDING",
+    statisticalGuard: "3-minute observations are serially correlated. Outcome seeds are de-duplicated by candidate fingerprint or >=15-minute spacing; V3 episode clustering is still required before inferential statistics."
+  };
+
+  v2CandidateOutcomeRecords.push(record);
+  if (v2CandidateOutcomeRecords.length > V2_OUTCOME_MAX_RECORDS) {
+    const terminalIdx = v2CandidateOutcomeRecords.findIndex((r) => r.terminalStatus !== "PENDING");
+    v2CandidateOutcomeRecords.splice(terminalIdx === -1 ? 0 : terminalIdx, 1);
+  }
+  v2LastOutcomeSeedBySymbol[obs.symbol] = { atMs: nowMs, fingerprint: obs.fingerprint };
+}
+
+async function captureV2ShadowCycle(session: KiteSession, recorderEntry: RecorderSnapshot): Promise<void> {
+  // The primary Recorder/Truth pipeline is already complete before this runs.
+  // Never throw into that pipeline.
+  for (const symbol of ["NIFTY", "BANKNIFTY", "SENSEX"] as V2PremiumSymbol[]) {
+    try {
+      const result = await buildV2CandidateSelection(symbol, session, 20);
+      if (result?.h10Detector) v2RecordDevilReport(result.h10Detector as V2DevilReport);
+      const selected = result?.selectedCandidate || null;
+      const ctx: any = result?.marketContext?.marketRegime || result?.marketContext || {};
+      const fingerprint = v2CandidateFingerprint(result);
+      const observation: V2ShadowObservation = {
+        id: `v2shadow-${symbol}-${Date.now()}-${randomBytes(3).toString("hex")}`,
+        tradingDate: recorderSession.tradingDate || indiaTradingDate(),
+        timestamp: recorderEntry.backendTimestamp,
+        recorderSnapshotId: recorderEntry.snapshotId,
+        symbol,
+        decision: String(result?.decision || "SHADOW_ERROR") as V2ShadowDecision,
+        side: (result?.selectedSide === "CE" || result?.selectedSide === "PE") ? result.selectedSide : null,
+        strike: Number.isFinite(Number(selected?.strike)) ? Number(selected.strike) : null,
+        moneynessRole: selected?.moneynessRole ? String(selected.moneynessRole) : null,
+        entryPremium: Number(selected?.lastPrice) > 0 ? Number(selected.lastPrice) : null,
+        marketRegime: ctx?.currentRegime ? String(ctx.currentRegime) : null,
+        currentPressure: (ctx?.pressure || ctx?.currentPressure) ? String(ctx.pressure || ctx.currentPressure) : null,
+        structuralBias: ctx?.structuralBias ? String(ctx.structuralBias) : null,
+        h4Status: result?.h4Gate?.status ? String(result.h4Gate.status) : null,
+        executionEligibility: "SHADOW_ONLY",
+        fingerprint,
+        error: null,
+      };
+      v2AppendShadowObservation(observation);
+      v2SeedOutcomeFromShadow(observation);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const observation: V2ShadowObservation = {
+        id: `v2shadow-${symbol}-${Date.now()}-${randomBytes(3).toString("hex")}`,
+        tradingDate: recorderSession.tradingDate || indiaTradingDate(),
+        timestamp: recorderEntry.backendTimestamp,
+        recorderSnapshotId: recorderEntry.snapshotId,
+        symbol,
+        decision: "SHADOW_ERROR",
+        side: null,
+        strike: null,
+        moneynessRole: null,
+        entryPremium: null,
+        marketRegime: null,
+        currentPressure: null,
+        structuralBias: null,
+        h4Status: null,
+        executionEligibility: "SHADOW_ONLY",
+        fingerprint: `SHADOW_ERROR|${symbol}`,
+        error: msg.substring(0, 300),
+      };
+      v2AppendShadowObservation(observation);
+    }
+  }
+}
+
+function runV2CandidateOutcomeEvaluationCycle(): void {
+  const snapshots = recorderSession.snapshots;
+  if (!snapshots.length) return;
+
+  for (const rec of v2CandidateOutcomeRecords) {
+    if (rec.terminalStatus !== "PENDING") continue;
+    const createdMs = new Date(rec.createdAt).getTime();
+
+    // Excursion is measured on all matching-strike observations after entry.
+    const matching: Array<{ t: number; premium: number }> = [];
+    for (const snap of snapshots) {
+      const t = new Date(snap.backendTimestamp).getTime();
+      if (t < createdMs || snap.snapshotStatus === "STALE" || snap.snapshotStatus === "INVALID") continue;
+      const p = v2FindRecordedPremium(snap, rec.symbol, rec.side, rec.strike);
+      if (p != null) matching.push({ t, premium: p });
+    }
+    if (matching.length) {
+      const returns = matching.map((x) => ((x.premium - rec.entryPremium) / rec.entryPremium) * 100);
+      rec.maxFavorableExcursionPct = Math.max(...returns);
+      rec.maxAdverseExcursionPct = Math.min(...returns);
+    }
+
+    for (const h of rec.horizons) {
+      if (h.status !== "PENDING") continue;
+      const target = createdMs + h.minutes * 60 * 1000;
+      // 3-minute cadence: accept the first valid matching observation from the
+      // target time through +6 minutes. Never use an earlier candle.
+      const match = matching.find((x) => x.t >= target && x.t <= target + 6 * 60 * 1000);
+      if (match) {
+        h.status = "EVALUATED";
+        h.evaluatedAt = new Date(match.t).toISOString();
+        h.premium = match.premium;
+        h.premiumReturnPct = ((match.premium - rec.entryPremium) / rec.entryPremium) * 100;
+      } else if (Date.now() > target + 6 * 60 * 1000) {
+        h.status = "MISSING_MATCHING_PREMIUM";
+        h.evaluatedAt = new Date().toISOString();
+      }
+    }
+
+    if (rec.horizons.every((h) => h.status !== "PENDING")) {
+      rec.terminalStatus = rec.horizons.every((h) => h.status === "EVALUATED") ? "COMPLETE" : "INCOMPLETE";
+    }
+  }
+}
+
+setInterval(() => {
+  try {
+    runV2CandidateOutcomeEvaluationCycle();
+  } catch (err) {
+    console.error("[V2 Outcome] evaluation cycle error:", err instanceof Error ? err.message : err);
+  }
+}, 60 * 1000);
+
+app.get("/api/v2/shadow-status", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "").toUpperCase();
+  const symbols = (["NIFTY", "BANKNIFTY", "SENSEX"] as string[]);
+  if (rawSymbol && !symbols.includes(rawSymbol)) return c.json({ error: "Unsupported symbol." }, 400);
+  const filtered = rawSymbol
+    ? v2ShadowObservations.filter((x) => x.symbol === rawSymbol)
+    : v2ShadowObservations;
+  const latestBySymbol: Record<string, V2ShadowObservation | null> = { NIFTY: null, BANKNIFTY: null, SENSEX: null };
+  for (const obs of filtered) latestBySymbol[obs.symbol] = obs;
+  return c.json({
+    architectureRole: "H7_LIVE_SHADOW_MODE",
+    tradingDate: recorderSession.tradingDate || indiaTradingDate(),
+    observationCount: filtered.length,
+    latestBySymbol,
+    productionPipelineIsolation: { ruleEngineFeed: "BLOCKED", aiVerdictFeed: "BLOCKED", orderExecutionFeed: "BLOCKED" },
+    extraKiteCalls: 0,
+  });
+});
+
+app.get("/api/v2/shadow-outcomes", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "").toUpperCase();
+  const symbols = (["NIFTY", "BANKNIFTY", "SENSEX"] as string[]);
+  if (rawSymbol && !symbols.includes(rawSymbol)) return c.json({ error: "Unsupported symbol." }, 400);
+  const filtered = rawSymbol
+    ? v2CandidateOutcomeRecords.filter((x) => x.symbol === rawSymbol)
+    : v2CandidateOutcomeRecords;
+  const complete = filtered.filter((x) => x.terminalStatus === "COMPLETE");
+  const avg = (vals: number[]) => vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  const horizonSummary = ([15, 30, 60] as const).map((minutes) => {
+    const vals = complete
+      .map((r) => r.horizons.find((h) => h.minutes === minutes)?.premiumReturnPct)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    return {
+      minutes,
+      sampleCount: vals.length,
+      positivePremiumReturnPct: vals.length ? (vals.filter((v) => v > 0).length / vals.length) * 100 : null,
+      averagePremiumReturnPct: avg(vals),
+    };
+  });
+  return c.json({
+    architectureRole: "H8_V2_CANDIDATE_OUTCOME_RECORDER",
+    tradingDate: recorderSession.tradingDate || indiaTradingDate(),
+    totalRecords: filtered.length,
+    pending: filtered.filter((x) => x.terminalStatus === "PENDING").length,
+    complete: complete.length,
+    incomplete: filtered.filter((x) => x.terminalStatus === "INCOMPLETE").length,
+    horizonSummary,
+    records: filtered.slice(-100),
+    interpretationGuard: "These are shadow research outcomes, not independent samples and not a validated probability. V3 episode clustering/regime stratification is required before scoring calibration.",
+    extraKiteCalls: 0,
+  });
+});
+
+
+// V2 Module 12 diagnostic API — UI-ready candidate review payload, no winner.
+app.get("/api/v2/candidate-review", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!( ["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  return c.json(await buildV2CandidateReviewPayload(rawSymbol as V2PremiumSymbol, session, limit));
+});
+
+// V2 Module 11 diagnostic API — evidence fusion without scoring.
+app.get("/api/v2/evidence-fusion", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!( ["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  return c.json(await buildV2EvidenceFusion(rawSymbol as V2PremiumSymbol, session, limit));
+});
+
+// V2 Module 10 Extended diagnostic API — market behaviour/regime evidence only.
+app.get("/api/v2/market-regime", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!( ["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  return c.json(buildV2MarketBehaviourRegime(rawSymbol as V2PremiumSymbol, session, session.marketSnapshot?.[rawSymbol]));
+});
+
 app.get("/api/recorder/session.csv", (c) => {
   const rows = [
     "snapshot_id,backend_timestamp,reason,snapshot_status,truth_verdict,symbol,spot,change,pdh,pdl,vwap,futures_ltp,futures_oi,atm_strike,ce_ltp,pe_ltp,ce_oi,pe_oi,exchange_timestamp,snapshot_sync_id,fii_cash_cr,dii_cash_cr",
@@ -12410,6 +16052,666 @@ app.get("/api/recorder/session.csv", (c) => {
 //
 // Scope: drive.file only (files created by this app), never full Drive
 // access.
+
+
+
+// ============================================================================
+// V2 HARDENING H9 — OBSERVABILITY + AI DIAGNOSTIC WATCHDOG
+//
+// Purpose:
+// - Observe already-built runtime health, Recorder status, H7 shadow output,
+//   H8 outcome tracking and recovery state WITHOUT adding any market-data call.
+// - Produce a deterministic, structured incident packet that an AI can analyse
+//   on demand. The watchdog itself NEVER edits code, pushes GitHub, deploys
+//   Railway, changes a rule/score, calls an order API, or performs credential
+//   re-authentication.
+// - Fail safe: diagnosis is advisory. Existing H2/H4/H5 gates remain the only
+//   source of truth for candidate eligibility/isolation.
+//
+// This deliberately does NOT auto-call Haiku/GPT. Runtime diagnosis should not
+// silently consume model quota, and the user is migrating AI providers. The
+// /api/v2/diagnostic-ai-packet endpoint emits a provider-neutral packet that can
+// be handed to GPT/Haiku after explicit user invocation/wiring.
+// ============================================================================
+
+type V2WatchdogSeverity = "INFO" | "WARNING" | "CRITICAL";
+
+type V2WatchdogIssue = {
+  code: string;
+  severity: V2WatchdogSeverity;
+  component: string;
+  evidence: Record<string, unknown>;
+  safeNextAction: string;
+  autoFixAllowed: false;
+};
+
+type V2WatchdogSnapshot = {
+  architectureRole: "H9_OBSERVABILITY_AI_DIAGNOSTIC_WATCHDOG";
+  generatedAt: string;
+  tradingDate: string;
+  overallStatus: "HEALTHY" | "DEGRADED" | "CRITICAL";
+  issues: V2WatchdogIssue[];
+  systemHealth: ReturnType<typeof computeSystemHealth>;
+  recorder: {
+    status: RecorderSession["status"];
+    snapshotCount: number;
+    lastSnapshotAt: string | null;
+    lastSnapshotAgeSec: number | null;
+    lastErrorRedacted: string | null;
+  };
+  shadow: {
+    observationCount: number;
+    latestBySymbol: Record<V2PremiumSymbol, V2ShadowObservation | null>;
+    shadowErrorCountToday: number;
+  };
+  outcomes: {
+    total: number;
+    pending: number;
+    complete: number;
+    incomplete: number;
+  };
+  recovery: {
+    active: Array<Pick<RecoveryAttempt, "moduleName" | "status" | "reason" | "attempt" | "maxAttempts">>;
+  };
+  boundaries: {
+    extraKiteCalls: 0;
+    automaticCodeChanges: false;
+    automaticGitHubPush: false;
+    automaticRailwayDeploy: false;
+    automaticOrderExecution: false;
+    automaticAiCall: false;
+  };
+};
+
+const V2_WATCHDOG_MAX_EVENTS = 300;
+const v2WatchdogEvents: Array<{ timestamp: string; fingerprint: string; snapshot: V2WatchdogSnapshot }> = [];
+let v2WatchdogLastFingerprint = "";
+
+function v2LatestShadowBySymbol(): Record<V2PremiumSymbol, V2ShadowObservation | null> {
+  const out: Record<V2PremiumSymbol, V2ShadowObservation | null> = { NIFTY: null, BANKNIFTY: null, SENSEX: null };
+  for (const obs of v2ShadowObservations) out[obs.symbol] = obs;
+  return out;
+}
+
+function buildV2DiagnosticWatchdogSnapshot(): V2WatchdogSnapshot {
+  const generatedAt = new Date().toISOString();
+  const tradingDate = recorderSession.tradingDate || indiaTradingDate();
+  const health = computeSystemHealth();
+  const latestBySymbol = v2LatestShadowBySymbol();
+  const issues: V2WatchdogIssue[] = [];
+  const marketOpen = isMarketOpenNowServer();
+  const lastSnapshotAgeSec = recorderSession.lastSnapshotAt
+    ? Math.max(0, Math.round((Date.now() - new Date(recorderSession.lastSnapshotAt).getTime()) / 1000))
+    : null;
+
+  for (const module of health.modules) {
+    if (module.status === "DOWN") {
+      issues.push({
+        code: `HEALTH_${module.moduleName.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_DOWN`,
+        severity: "CRITICAL",
+        component: module.moduleName,
+        evidence: module.metrics,
+        safeNextAction: "Keep V2 candidate execution blocked. Inspect the module metrics and restore the underlying data/session dependency before proceeding.",
+        autoFixAllowed: false,
+      });
+    } else if (module.status === "DEGRADED") {
+      issues.push({
+        code: `HEALTH_${module.moduleName.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_DEGRADED`,
+        severity: "WARNING",
+        component: module.moduleName,
+        evidence: module.metrics,
+        safeNextAction: "Inspect the degraded dependency; do not bypass H2/H4 data-quality gates.",
+        autoFixAllowed: false,
+      });
+    }
+  }
+
+  // Recorder freshness is only an incident during market hours. Off-hours a
+  // quiet recorder is expected and must not create false alarms.
+  if (marketOpen) {
+    if (recorderSession.status !== "RECORDING") {
+      issues.push({
+        code: "RECORDER_NOT_RECORDING_DURING_MARKET",
+        severity: "CRITICAL",
+        component: "Recorder Engine",
+        evidence: { status: recorderSession.status, lastError: recorderSession.lastErrorRedacted },
+        safeNextAction: "Keep shadow candidates blocked; verify active Kite session, Truth Engine and Recorder cycle logs.",
+        autoFixAllowed: false,
+      });
+    } else if (lastSnapshotAgeSec != null && lastSnapshotAgeSec > 8 * 60) {
+      issues.push({
+        code: "RECORDER_SNAPSHOT_STALE_GT_8_MIN",
+        severity: "CRITICAL",
+        component: "Recorder Engine",
+        evidence: { lastSnapshotAgeSec, expectedCadence: "~3 minutes" },
+        safeNextAction: "Treat live evidence as stale. Inspect refresh-cycle/API failures before accepting any candidate.",
+        autoFixAllowed: false,
+      });
+    } else if (lastSnapshotAgeSec != null && lastSnapshotAgeSec > 5 * 60) {
+      issues.push({
+        code: "RECORDER_SNAPSHOT_DELAYED_GT_5_MIN",
+        severity: "WARNING",
+        component: "Recorder Engine",
+        evidence: { lastSnapshotAgeSec, expectedCadence: "~3 minutes" },
+        safeNextAction: "Check refresh timing and API latency; do not relax freshness thresholds.",
+        autoFixAllowed: false,
+      });
+    }
+  }
+
+  let shadowErrorCountToday = 0;
+  for (const obs of v2ShadowObservations) {
+    if (obs.tradingDate === tradingDate && (obs.decision === "SHADOW_ERROR" || obs.error)) shadowErrorCountToday++;
+  }
+  if (shadowErrorCountToday > 0) {
+    issues.push({
+      code: "V2_SHADOW_ERRORS_PRESENT",
+      severity: shadowErrorCountToday >= 3 ? "CRITICAL" : "WARNING",
+      component: "H7 Shadow Mode",
+      evidence: {
+        shadowErrorCountToday,
+        latestErrors: v2ShadowObservations.filter((x) => x.tradingDate === tradingDate && (x.decision === "SHADOW_ERROR" || x.error)).slice(-5).map((x) => ({ symbol: x.symbol, timestamp: x.timestamp, error: x.error })),
+      },
+      safeNextAction: "Inspect the first shadow error and its upstream H2/H4 state. Do not patch production code blindly from the symptom alone.",
+      autoFixAllowed: false,
+    });
+  }
+
+  for (const symbol of ["NIFTY", "BANKNIFTY", "SENSEX"] as V2PremiumSymbol[]) {
+    const latest = latestBySymbol[symbol];
+    if (!latest) {
+      if (marketOpen && recorderSession.snapshots.length >= 2) {
+        issues.push({
+          code: `SHADOW_MISSING_${symbol}`,
+          severity: "WARNING",
+          component: "H7 Shadow Mode",
+          evidence: { symbol, recorderSnapshotCount: recorderSession.snapshots.length },
+          safeNextAction: "Verify H7 shadow cycle ran after the Recorder snapshot; keep this symbol in shadow/no-trade state.",
+          autoFixAllowed: false,
+        });
+      }
+      continue;
+    }
+    if (latest.h4Status === "BLOCKED") {
+      issues.push({
+        code: `H4_BLOCK_${symbol}`,
+        severity: "WARNING",
+        component: "H4 Candidate Hard Data Gate",
+        evidence: { symbol, decision: latest.decision, timestamp: latest.timestamp, fingerprint: latest.fingerprint },
+        safeNextAction: "This is a safety block, not automatically a bug. Inspect /api/v2/candidate-data-quality-gate for the exact hardBlockReasons.",
+        autoFixAllowed: false,
+      });
+    }
+  }
+
+  const pending = v2CandidateOutcomeRecords.filter((x) => x.terminalStatus === "PENDING").length;
+  const complete = v2CandidateOutcomeRecords.filter((x) => x.terminalStatus === "COMPLETE").length;
+  const incomplete = v2CandidateOutcomeRecords.filter((x) => x.terminalStatus === "INCOMPLETE").length;
+  if (incomplete >= 3) {
+    issues.push({
+      code: "V2_OUTCOME_MATCHING_INCOMPLETE_CLUSTER",
+      severity: "WARNING",
+      component: "H8 Candidate Outcome Recorder",
+      evidence: { incomplete, total: v2CandidateOutcomeRecords.length },
+      safeNextAction: "Check whether selected strikes remain inside the Recorder ATM±3 universe and whether valid snapshots exist at +15/+30/+60 minute windows.",
+      autoFixAllowed: false,
+    });
+  }
+
+  const activeRecovery = recoveryAttempts
+    .filter((r) => r.status === "RETRYING" || r.status === "MANUAL_ACTION_REQUIRED")
+    .map((r) => ({ moduleName: r.moduleName, status: r.status, reason: r.reason, attempt: r.attempt, maxAttempts: r.maxAttempts }));
+  if (activeRecovery.length) {
+    issues.push({
+      code: "ACTIVE_RECOVERY_OR_MANUAL_ACTION",
+      severity: activeRecovery.some((r) => r.status === "MANUAL_ACTION_REQUIRED") ? "CRITICAL" : "WARNING",
+      component: "Recovery Engine",
+      evidence: { activeRecovery },
+      safeNextAction: "Follow the registered recovery/manual reconnect action. The AI watchdog must not bypass credential or provider security boundaries.",
+      autoFixAllowed: false,
+    });
+  }
+
+  const overallStatus: V2WatchdogSnapshot["overallStatus"] = issues.some((x) => x.severity === "CRITICAL")
+    ? "CRITICAL"
+    : issues.some((x) => x.severity === "WARNING")
+      ? "DEGRADED"
+      : "HEALTHY";
+
+  return {
+    architectureRole: "H9_OBSERVABILITY_AI_DIAGNOSTIC_WATCHDOG",
+    generatedAt,
+    tradingDate,
+    overallStatus,
+    issues,
+    systemHealth: health,
+    recorder: {
+      status: recorderSession.status,
+      snapshotCount: recorderSession.snapshots.length,
+      lastSnapshotAt: recorderSession.lastSnapshotAt,
+      lastSnapshotAgeSec,
+      lastErrorRedacted: recorderSession.lastErrorRedacted,
+    },
+    shadow: {
+      observationCount: v2ShadowObservations.length,
+      latestBySymbol,
+      shadowErrorCountToday,
+    },
+    outcomes: { total: v2CandidateOutcomeRecords.length, pending, complete, incomplete },
+    recovery: { active: activeRecovery },
+    boundaries: {
+      extraKiteCalls: 0,
+      automaticCodeChanges: false,
+      automaticGitHubPush: false,
+      automaticRailwayDeploy: false,
+      automaticOrderExecution: false,
+      automaticAiCall: false,
+    },
+  };
+}
+
+function v2WatchdogFingerprint(snapshot: V2WatchdogSnapshot): string {
+  return [snapshot.overallStatus, ...snapshot.issues.map((x) => `${x.severity}:${x.code}`).sort()].join("|");
+}
+
+function runV2DiagnosticWatchdogCycle(): void {
+  try {
+    const snapshot = buildV2DiagnosticWatchdogSnapshot();
+    const fingerprint = v2WatchdogFingerprint(snapshot);
+    if (fingerprint !== v2WatchdogLastFingerprint) {
+      v2WatchdogEvents.push({ timestamp: snapshot.generatedAt, fingerprint, snapshot });
+      if (v2WatchdogEvents.length > V2_WATCHDOG_MAX_EVENTS) v2WatchdogEvents.shift();
+      v2WatchdogLastFingerprint = fingerprint;
+    }
+  } catch (err) {
+    console.error("[H9 Watchdog] diagnostic cycle failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+setInterval(runV2DiagnosticWatchdogCycle, 60 * 1000);
+
+app.get("/api/v2/diagnostic-watchdog", (c) => {
+  return c.json(buildV2DiagnosticWatchdogSnapshot());
+});
+
+app.get("/api/v2/diagnostic-watchdog/events", (c) => {
+  const rawLimit = Number(c.req.query("limit") || 50);
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(Math.trunc(rawLimit), V2_WATCHDOG_MAX_EVENTS)) : 50;
+  return c.json({
+    architectureRole: "H9_OBSERVABILITY_EVENT_HISTORY",
+    eventCount: v2WatchdogEvents.length,
+    events: v2WatchdogEvents.slice(-limit),
+    extraKiteCalls: 0,
+  });
+});
+
+app.get("/api/v2/diagnostic-ai-packet", (c) => {
+  const snapshot = buildV2DiagnosticWatchdogSnapshot();
+  return c.json({
+    architectureRole: "H9_PROVIDER_NEUTRAL_AI_DIAGNOSTIC_PACKET",
+    generatedAt: snapshot.generatedAt,
+    runtimeEvidence: snapshot,
+    aiInstruction: [
+      "Act as a diagnostic reviewer only.",
+      "Identify the most likely root cause from the supplied runtime evidence and distinguish symptom from cause.",
+      "Never invent missing logs/data and never recommend bypassing H2/H4/H5 safety gates.",
+      "Return: severity, affected component, evidence, likely root cause, verification steps, and a minimal proposed fix.",
+      "Do not edit files, push GitHub, deploy Railway, alter scoring/rules, or place orders automatically.",
+    ].join(" "),
+    providerStatus: "NOT_AUTO_INVOKED_BY_DESIGN",
+    reason: "Prevents silent model-cost usage and prevents an AI from self-modifying production. Wire GPT/Haiku only as an explicit reviewed diagnostic action.",
+  });
+});
+
+
+
+// ============================================================================
+// V2 HARDENING H10 — "DEVIL DETECTOR" / ADVERSARIAL INTEGRITY LAYER
+//
+// Purpose:
+// Detect the dangerous class of failures where individual numbers look valid
+// but the combined system is internally inconsistent, corrupted, frozen, or
+// behaving adversarially. H10 is NOT a directional market signal and is NOT a
+// self-healing AI. It reuses already-fetched live/Recorder/shadow data only.
+//
+// Hard-block policy:
+// - ONLY objective integrity/engine contradictions may hard-block a candidate.
+// - Heuristic market/microstructure anomalies are SHADOW WARNINGS only until
+//   historical/live validation establishes calibrated thresholds.
+// - No automatic code edits, GitHub pushes, deploys, rule changes, AI calls,
+//   or order execution.
+// ============================================================================
+
+type V2DevilSeverity = "INFO" | "WARNING" | "CRITICAL";
+type V2DevilCategory =
+  | "DATA_INTEGRITY_THREAT"
+  | "ENGINE_CONTRADICTION"
+  | "MARKET_MICROSTRUCTURE_ANOMALY"
+  | "CANDIDATE_TRAP_RISK";
+type V2DevilState =
+  | "NO_DEVIL"
+  | "SUSPICIOUS"
+  | "HIGH_RISK_ANOMALY"
+  | "DATA_INTEGRITY_THREAT"
+  | "ENGINE_CONTRADICTION"
+  | "MARKET_MICROSTRUCTURE_ANOMALY"
+  | "CANDIDATE_TRAP_RISK";
+
+interface V2DevilIssue {
+  code: string;
+  category: V2DevilCategory;
+  severity: V2DevilSeverity;
+  hardBlock: boolean;
+  evidence: Record<string, unknown>;
+  interpretation: string;
+  safeNextAction: string;
+  thresholdStatus: "OBJECTIVE_INTEGRITY_RULE" | "PROVISIONAL_OBSERVATION_THRESHOLD";
+}
+
+interface V2DevilReport {
+  architectureRole: "H10_ADVERSARIAL_INTEGRITY_DEVIL_DETECTOR";
+  symbol: V2PremiumSymbol;
+  generatedAt: string;
+  state: V2DevilState;
+  hardBlock: boolean;
+  hardBlockReasons: string[];
+  issues: V2DevilIssue[];
+  issueCount: number;
+  candidateDecision: string;
+  selectedCandidate: any;
+  boundaries: {
+    extraKiteCalls: 0;
+    directionalSignal: false;
+    automaticCodeChanges: false;
+    automaticAiCall: false;
+    automaticOrderExecution: false;
+  };
+  interpretationGuard: string;
+}
+
+interface V2DevilEvent {
+  timestamp: string;
+  symbol: V2PremiumSymbol;
+  fingerprint: string;
+  report: V2DevilReport;
+}
+
+const V2_DEVIL_MAX_EVENTS = 300;
+const v2DevilEvents: V2DevilEvent[] = [];
+const v2DevilLastFingerprintBySymbol: Partial<Record<V2PremiumSymbol, string>> = {};
+
+function v2RecentRecorderRows(symbol: V2PremiumSymbol, limit = 8): RecorderSnapshot[] {
+  return recorderSession.snapshots
+    .filter((s) => !!s[symbol] && s.snapshotStatus !== "INVALID" && s.snapshotStatus !== "STALE")
+    .slice(-limit);
+}
+
+function v2FindNearLeg(idx: RecorderIndexSnapshot | null, side: V2PremiumSide, strike: number) {
+  if (!idx) return null;
+  const legs = side === "CE" ? idx.ceStrikesNear : idx.peStrikesNear;
+  return (legs || []).find((x) => x.strike === strike) || null;
+}
+
+function buildV2DevilDetector(symbol: V2PremiumSymbol, session: KiteSession, candidateCore: any): V2DevilReport {
+  const generatedAt = new Date().toISOString();
+  const issues: V2DevilIssue[] = [];
+  const m = session.marketSnapshot?.[symbol];
+  const selected = candidateCore?.selectedCandidate || null;
+  const decision = String(candidateCore?.decision || "UNKNOWN");
+
+  const push = (issue: V2DevilIssue) => issues.push(issue);
+
+  // ----- Objective integrity checks: eligible to hard-block. -----
+  if ((decision === "BEST_CE" || decision === "BEST_PE") && selected) {
+    if (candidateCore?.h2Gate?.status !== "PASS" || candidateCore?.h4Gate?.status !== "PASS") {
+      push({
+        code: "BEST_CANDIDATE_WITH_FAILED_UPSTREAM_GATE",
+        category: "ENGINE_CONTRADICTION",
+        severity: "CRITICAL",
+        hardBlock: true,
+        evidence: { decision, h2Status: candidateCore?.h2Gate?.status || null, h4Status: candidateCore?.h4Gate?.status || null },
+        interpretation: "A BEST candidate cannot coexist with a failed H2/H4 gate.",
+        safeNextAction: "Block the candidate and inspect H2/H4 integration before trusting downstream output.",
+        thresholdStatus: "OBJECTIVE_INTEGRITY_RULE",
+      });
+    }
+
+    const cm = selected?.contractMetadata || {};
+    if (!(Number(cm.instrumentToken) > 0) || !cm.expiryDate || !cm.optionType || !(Number(cm.lotSize) > 0)) {
+      push({
+        code: "SELECTED_CANDIDATE_METADATA_INCOMPLETE",
+        category: "DATA_INTEGRITY_THREAT",
+        severity: "CRITICAL",
+        hardBlock: true,
+        evidence: { instrumentToken: cm.instrumentToken ?? null, expiryDate: cm.expiryDate ?? null, optionType: cm.optionType ?? null, lotSize: cm.lotSize ?? null },
+        interpretation: "The selected contract lacks required H1 identity metadata.",
+        safeNextAction: "Do not accept the candidate; verify instrument-master parsing and current-expiry mapping.",
+        thresholdStatus: "OBJECTIVE_INTEGRITY_RULE",
+      });
+    }
+  }
+
+  const currentExp = v2CurrentExpiry(m);
+  if (currentExp) {
+    const tokenOwner = new Map<number, string>();
+    for (const side of ["CE", "PE"] as V2PremiumSide[]) {
+      const legs = side === "CE" ? currentExp.ceStrikes : currentExp.peStrikes;
+      for (const leg of legs || []) {
+        const token = Number((leg as any).instrumentToken || 0);
+        if (!(token > 0)) continue;
+        const key = `${side}:${leg.strike}:${leg.tradingSymbol || ""}`;
+        const prior = tokenOwner.get(token);
+        if (prior && prior !== key) {
+          push({
+            code: "DUPLICATE_INSTRUMENT_TOKEN_ACROSS_CONTRACTS",
+            category: "DATA_INTEGRITY_THREAT",
+            severity: "CRITICAL",
+            hardBlock: true,
+            evidence: { instrumentToken: token, firstContract: prior, secondContract: key },
+            interpretation: "One instrument token maps to more than one current-expiry option contract in the same snapshot.",
+            safeNextAction: "Block candidate generation and refresh/verify the instrument master before continuing.",
+            thresholdStatus: "OBJECTIVE_INTEGRITY_RULE",
+          });
+        } else tokenOwner.set(token, key);
+      }
+    }
+  }
+
+  const recentRows = v2RecentRecorderRows(symbol, 8);
+  const seenSnapshotIds = new Set<string>();
+  let previousTs = 0;
+  for (const row of recentRows) {
+    const ts = new Date(row.backendTimestamp).getTime();
+    if (row.snapshotId && seenSnapshotIds.has(row.snapshotId)) {
+      push({
+        code: "DUPLICATE_RECORDER_SNAPSHOT_ID",
+        category: "DATA_INTEGRITY_THREAT",
+        severity: "CRITICAL",
+        hardBlock: true,
+        evidence: { snapshotId: row.snapshotId, backendTimestamp: row.backendTimestamp },
+        interpretation: "Recorder snapshot identity was reused; time-series evidence may be duplicated/corrupted.",
+        safeNextAction: "Block candidate acceptance and inspect Recorder snapshot-ID generation/order.",
+        thresholdStatus: "OBJECTIVE_INTEGRITY_RULE",
+      });
+    }
+    if (row.snapshotId) seenSnapshotIds.add(row.snapshotId);
+    if (previousTs && Number.isFinite(ts) && ts < previousTs) {
+      push({
+        code: "RECORDER_TIME_MOVED_BACKWARD",
+        category: "DATA_INTEGRITY_THREAT",
+        severity: "CRITICAL",
+        hardBlock: true,
+        evidence: { backendTimestamp: row.backendTimestamp, previousTimestampMs: previousTs },
+        interpretation: "Recorder chronology is non-monotonic; historical evidence ordering is unsafe.",
+        safeNextAction: "Block candidate acceptance and verify timestamp/timezone/session append ordering.",
+        thresholdStatus: "OBJECTIVE_INTEGRITY_RULE",
+      });
+    }
+    if (Number.isFinite(ts)) previousTs = ts;
+  }
+
+  // If M10 reports a structural conflict, a BEST candidate is an impossible
+  // downstream state under the current deterministic selector.
+  const mc: any = candidateCore?.marketContext?.marketRegime || candidateCore?.marketContext || {};
+  const conflictFlag = Boolean(mc?.structure?.conflict || mc?.conflict || mc?.structuralConflict);
+  if ((decision === "BEST_CE" || decision === "BEST_PE") && conflictFlag) {
+    push({
+      code: "BEST_CANDIDATE_WHILE_MARKET_STRUCTURE_CONFLICT_TRUE",
+      category: "ENGINE_CONTRADICTION",
+      severity: "CRITICAL",
+      hardBlock: true,
+      evidence: { decision, marketContext: mc },
+      interpretation: "The deterministic selector should WAIT when structural conflict is true.",
+      safeNextAction: "Block the candidate and inspect M10→M12B mapping; do not bypass the conflict state.",
+      thresholdStatus: "OBJECTIVE_INTEGRITY_RULE",
+    });
+  }
+
+  // ----- Provisional anomaly checks: warnings only, never hard-block. -----
+  if ((decision === "BEST_CE" || decision === "BEST_PE") && selected && recentRows.length >= 3) {
+    const side = candidateCore?.selectedSide as V2PremiumSide;
+    const strike = Number(selected.strike);
+    const series = recentRows.map((row) => {
+      const idx = row[symbol];
+      const leg = v2FindNearLeg(idx, side, strike);
+      return { ts: row.backendTimestamp, spot: idx?.spot ?? null, ltp: leg?.ltp ?? null, iv: leg?.iv ?? null, oi: leg?.oi ?? null };
+    }).filter((x) => x.spot != null && x.ltp != null && Number(x.spot) > 0 && Number(x.ltp) > 0);
+
+    if (series.length >= 3) {
+      const a = series[0];
+      const z = series[series.length - 1];
+      const spotMovePct = ((Number(z.spot) - Number(a.spot)) / Number(a.spot)) * 100;
+      const allSamePremium = series.every((x) => Math.abs(Number(x.ltp) - Number(a.ltp)) < 1e-9);
+      if (allSamePremium && Math.abs(spotMovePct) >= 0.15) {
+        push({
+          code: "PREMIUM_FROZEN_WHILE_SPOT_MOVED",
+          category: "MARKET_MICROSTRUCTURE_ANOMALY",
+          severity: "WARNING",
+          hardBlock: false,
+          evidence: { side, strike, observations: series.length, premium: a.ltp, spotMovePct },
+          interpretation: "The same option premium stayed exactly unchanged across multiple snapshots while spot moved materially.",
+          safeNextAction: "Inspect quote timestamps/provider freshness and compare with neighboring strikes; threshold remains provisional.",
+          thresholdStatus: "PROVISIONAL_OBSERVATION_THRESHOLD",
+        });
+      }
+
+      const p = series[series.length - 2];
+      const ivJumpPts = Number(z.iv) - Number(p.iv);
+      if (Number.isFinite(ivJumpPts) && Math.abs(ivJumpPts) >= 8) {
+        push({
+          code: "ABRUPT_IV_JUMP",
+          category: "MARKET_MICROSTRUCTURE_ANOMALY",
+          severity: "WARNING",
+          hardBlock: false,
+          evidence: { side, strike, priorIv: p.iv, currentIv: z.iv, ivJumpPoints: ivJumpPts },
+          interpretation: "Computed IV changed abruptly between adjacent Recorder observations.",
+          safeNextAction: "Check premium/spot timestamp alignment and whether the move is genuine; do not treat this provisional threshold as a trading signal.",
+          thresholdStatus: "PROVISIONAL_OBSERVATION_THRESHOLD",
+        });
+      }
+
+      if (Number(p.oi) > 0 && Number(z.oi) >= 0) {
+        const oiChangePct = ((Number(z.oi) - Number(p.oi)) / Number(p.oi)) * 100;
+        if (oiChangePct <= -70) {
+          push({
+            code: "ABRUPT_OI_COLLAPSE",
+            category: "MARKET_MICROSTRUCTURE_ANOMALY",
+            severity: "WARNING",
+            hardBlock: false,
+            evidence: { side, strike, priorOi: p.oi, currentOi: z.oi, oiChangePct },
+            interpretation: "OI collapsed sharply between adjacent observations; this may be genuine expiry activity or a feed/reset anomaly.",
+            safeNextAction: "Compare neighboring strikes/expiry and provider timestamps before interpreting the OI move.",
+            thresholdStatus: "PROVISIONAL_OBSERVATION_THRESHOLD",
+          });
+        }
+      }
+    }
+  }
+
+  // Candidate flip/thrash detector using already-recorded H7 shadow history.
+  const nowMs = Date.now();
+  const recentShadow = v2ShadowObservations.filter((x) => x.symbol === symbol && nowMs - new Date(x.timestamp).getTime() <= 15 * 60 * 1000);
+  const directional = recentShadow.filter((x) => x.decision === "BEST_CE" || x.decision === "BEST_PE");
+  let flips = 0;
+  for (let i = 1; i < directional.length; i++) if (directional[i].decision !== directional[i - 1].decision) flips++;
+  if (flips >= 3) {
+    push({
+      code: "CANDIDATE_CE_PE_THRASHING",
+      category: "CANDIDATE_TRAP_RISK",
+      severity: "WARNING",
+      hardBlock: false,
+      evidence: { windowMinutes: 15, directionalObservations: directional.length, flips },
+      interpretation: "The shadow selector is alternating CE/PE repeatedly; this is a likely whipsaw/trap regime, not proof of a code bug.",
+      safeNextAction: "Keep in shadow mode and inspect M10 transition/conflict states; calibrate this threshold from outcome data before production use.",
+      thresholdStatus: "PROVISIONAL_OBSERVATION_THRESHOLD",
+    });
+  }
+
+  const hard = issues.filter((x) => x.hardBlock);
+  let state: V2DevilState = "NO_DEVIL";
+  if (hard.some((x) => x.category === "DATA_INTEGRITY_THREAT")) state = "DATA_INTEGRITY_THREAT";
+  else if (hard.some((x) => x.category === "ENGINE_CONTRADICTION")) state = "ENGINE_CONTRADICTION";
+  else if (issues.some((x) => x.category === "CANDIDATE_TRAP_RISK")) state = "CANDIDATE_TRAP_RISK";
+  else if (issues.some((x) => x.category === "MARKET_MICROSTRUCTURE_ANOMALY")) state = "MARKET_MICROSTRUCTURE_ANOMALY";
+  else if (issues.some((x) => x.severity === "WARNING")) state = "SUSPICIOUS";
+
+  return {
+    architectureRole: "H10_ADVERSARIAL_INTEGRITY_DEVIL_DETECTOR",
+    symbol,
+    generatedAt,
+    state,
+    hardBlock: hard.length > 0,
+    hardBlockReasons: hard.map((x) => x.code),
+    issues,
+    issueCount: issues.length,
+    candidateDecision: decision,
+    selectedCandidate: selected,
+    boundaries: {
+      extraKiteCalls: 0,
+      directionalSignal: false,
+      automaticCodeChanges: false,
+      automaticAiCall: false,
+      automaticOrderExecution: false,
+    },
+    interpretationGuard: "H10 distinguishes objective integrity contradictions (hard-block eligible) from provisional market/microstructure anomaly thresholds (warning only). It does not predict direction or guarantee a trap." 
+  };
+}
+
+function v2DevilFingerprint(report: V2DevilReport): string {
+  return [report.state, report.hardBlock ? "BLOCK" : "PASS", ...report.issues.map((x) => `${x.severity}:${x.code}`).sort()].join("|");
+}
+
+function v2RecordDevilReport(report: V2DevilReport): void {
+  const fp = v2DevilFingerprint(report);
+  if (v2DevilLastFingerprintBySymbol[report.symbol] === fp) return;
+  v2DevilEvents.push({ timestamp: report.generatedAt, symbol: report.symbol, fingerprint: fp, report });
+  if (v2DevilEvents.length > V2_DEVIL_MAX_EVENTS) v2DevilEvents.shift();
+  v2DevilLastFingerprintBySymbol[report.symbol] = fp;
+}
+
+app.get("/api/v2/devil-detector", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  const core = await buildV2CandidateSelectionCore(rawSymbol as V2PremiumSymbol, session, 20);
+  return c.json(buildV2DevilDetector(rawSymbol as V2PremiumSymbol, session, core));
+});
+
+app.get("/api/v2/devil-detector/events", (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "").toUpperCase();
+  const rawLimit = Number(c.req.query("limit") || 50);
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(Math.trunc(rawLimit), V2_DEVIL_MAX_EVENTS)) : 50;
+  const filtered = rawSymbol ? v2DevilEvents.filter((x) => x.symbol === rawSymbol) : v2DevilEvents;
+  return c.json({
+    architectureRole: "H10_DEVIL_DETECTOR_EVENT_HISTORY",
+    eventCount: filtered.length,
+    events: filtered.slice(-limit),
+    extraKiteCalls: 0,
+  });
+});
 
 const GOOGLE_OAUTH_SCOPE = "https://www.googleapis.com/auth/drive.file";
 
@@ -13241,7 +17543,7 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
     const dateId = await findOrCreateDriveFolder(tradingDate, monthId, token);
     if (!dateId) throw new Error("Could not create date folder");
 
-    const rawJson = JSON.stringify({ recorderSession, journalEntries }, null, 2);
+    const rawJson = JSON.stringify({ recorderSession, journalEntries, v2ShadowObservations, v2CandidateOutcomeRecords, v2DevilEvents }, null, 2);
     const rawResult = await uploadFileToDrive(`OptionPilot_${tradingDate}_Raw.json`, "application/json", rawJson, dateId, token);
     if (!rawResult) throw new Error("Raw JSON upload failed");
     if (rawResult.size === 0) throw new Error("Raw JSON uploaded but file size is zero");
@@ -13767,6 +18069,8 @@ app.get("/api/vix-correlation", async (c) => {
       vix: s.vix,
     }));
 
+    const v2VixRegime = buildV2VixRegime(chartSeries, session);
+
     return c.json({
       series: chartSeries,
       niftyVixCorrelation,
@@ -13775,6 +18079,7 @@ app.get("/api/vix-correlation", async (c) => {
       fromDate,
       toDate,
       timestamp: new Date().toISOString(),
+      v2VixRegime,
     });
   } catch (err) {
     console.error("[API] VIX correlation error:", err instanceof Error ? err.message : err);

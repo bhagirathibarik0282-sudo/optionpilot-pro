@@ -2026,14 +2026,25 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     captureV2RolloverSummary("BANKNIFTY", snapshot.BANKNIFTY, rolloverTimestamp);
     captureV2RolloverSummary("SENSEX", snapshot.SENSEX, rolloverTimestamp);
 
+    // D6-A: NIFTY/BANKNIFTY Truth-check and Recorder storage now source from
+    // the Dhan production buffer (reusing D6.1.2's already-running 3-minute
+    // cache — no new fetch). SENSEX is unchanged (Kite) — no confirmed Dhan
+    // security ID for it. captureV2RolloverSummary (M8) below intentionally
+    // still reads the original Kite `snapshot.*` — M8 needs multi-expiry
+    // data the shared D3-D5 cache doesn't fetch, and migrating it is
+    // explicitly out of scope for this step ("Do not migrate M2 or any
+    // other module yet").
+    const niftyMetricsForTruth = dhanRecorderSourceMetrics("NIFTY");
+    const bankMetricsForTruth = dhanRecorderSourceMetrics("BANKNIFTY");
+
     // Module 1 dependency: classify each index through the Truth Engine
     // BEFORE building the recorded snapshot, per the approved spec.
-    const niftyTruth = computeTruthReport(snapshot.NIFTY);
-    const bankTruth = computeTruthReport(snapshot.BANKNIFTY);
+    const niftyTruth = computeTruthReport(niftyMetricsForTruth);
+    const bankTruth = computeTruthReport(bankMetricsForTruth);
     const sensexTruth = computeTruthReport(snapshot.SENSEX);
 
-    const niftySnap = toTruthValidatedRecorderIndexSnapshot(snapshot.NIFTY, niftyTruth);
-    const bankSnap = toTruthValidatedRecorderIndexSnapshot(snapshot.BANKNIFTY, bankTruth);
+    const niftySnap = toTruthValidatedRecorderIndexSnapshot(niftyMetricsForTruth, niftyTruth);
+    const bankSnap = toTruthValidatedRecorderIndexSnapshot(bankMetricsForTruth, bankTruth);
     const sensexSnap = toTruthValidatedRecorderIndexSnapshot(snapshot.SENSEX, sensexTruth);
 
     const entry: RecorderSnapshot = {
@@ -19937,11 +19948,11 @@ const D6_MODULE_PROVIDER_MATRIX: ModuleProviderRow[] = [
   },
   {
     module: "M2_IV_SKEW", productionFunction: "buildV2IvSkewHistory -> buildV2IvSkewSnapshot",
-    directDataSource: "RecorderSnapshot (Kite-backed Recorder: idx.ceStrikesNear/peStrikesNear)",
-    indirectDataSource: "recorderSession.snapshots", historySource: "Kite Recorder 3-min snapshots",
-    usesKiteFunction: true, usesKiteRecorder: true, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
-    providerState: "KITE", migrationRequired: true,
-    evidence: "buildV2IvSkewSnapshot(snap: RecorderSnapshot, ...) reads snap[symbol].ceStrikesNear/peStrikesNear directly — NOT routed through M1's new Dhan path. Confirmed by source read, not M1's cutover does not touch M2.",
+    directDataSource: "RecorderSnapshot.ceStrikesNear/peStrikesNear (NIFTY/BANKNIFTY: now DHAN-sourced via D6-A Recorder migration. SENSEX: Kite Recorder, unchanged.)",
+    indirectDataSource: "recorderSession.snapshots", historySource: "NIFTY/BANKNIFTY: Dhan 3-min production buffer (via Recorder). SENSEX: Kite Recorder 3-min snapshots.",
+    usesKiteFunction: true, usesKiteRecorder: true, usesDhanNormalizedData: true, usesDhanInstrumentMaster: false,
+    providerState: "MIXED", migrationRequired: false,
+    evidence: "M2's own code (buildV2IvSkewSnapshot) was NOT touched — but D6-A's Recorder migration now stores Dhan-sourced ceStrikesNear/peStrikesNear in RecorderSnapshot.NIFTY/BANKNIFTY, so M2 automatically inherits Dhan data for those two symbols at runtime. SENSEX still inherits Kite via the unchanged Recorder path.",
   },
   {
     module: "M3_IV_TERM_STRUCTURE", productionFunction: "buildV2IvTermStructure",
@@ -20079,13 +20090,75 @@ const D6_MODULE_PROVIDER_MATRIX: ModuleProviderRow[] = [
     evidence: "Not individually re-verified in this pass (see knownLimitations) — flagged for explicit re-check before any PASS claim.",
   },
   {
-    module: "RECORDER", productionFunction: "recorderSession.snapshots population",
-    directDataSource: "Kite quote refresh cycle", indirectDataSource: "none", historySource: "n/a — this IS the history source for M2/M8 etc.",
-    usesKiteFunction: true, usesKiteRecorder: true, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
-    providerState: "KITE", migrationRequired: true,
-    evidence: "Recorder itself is unchanged — still Kite-driven. D6.1.2 added a SEPARATE Dhan production buffer (DHAN_M1_PRODUCTION_HISTORY) for M1 only; it did not migrate the Recorder itself, so M2/M8/H9 (which read the Recorder directly) remain Kite-dependent even after M1's cutover.",
+    module: "RECORDER", productionFunction: "captureRecorderSnapshot -> dhanRecorderSourceMetrics",
+    directDataSource: "NIFTY/BANKNIFTY: DHAN_M1_PRODUCTION_HISTORY (shared D3-D5/D6.1.2 buffer, via dhanToIndexMetricsShim). SENSEX: Kite refreshMarketSnapshot, unchanged.",
+    indirectDataSource: "none", historySource: "n/a — this IS the history source for M2/M8 etc.",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: true, usesDhanInstrumentMaster: false,
+    providerState: "MIXED", migrationRequired: false,
+    evidence: "D6-A: dhanRecorderSourceMetrics() feeds NIFTY/BANKNIFTY through the SAME UNMODIFIED computeTruthReport/toTruthValidatedRecorderIndexSnapshot functions using a Dhan-sourced shim. SENSEX unchanged (Kite). Known gap: no Dhan futures adapter exists, so Dhan-sourced Truth is capped at PARTIAL (never TRUE) — disclosed in /api/v2/d6/recorder-provider-audit.",
   },
 ];
+
+app.get("/api/v2/d6/recorder-provider-audit", async (c) => {
+  const latestSnap = recorderSession.snapshots[recorderSession.snapshots.length - 1] || null;
+  const nifDhanHistory = DHAN_M1_PRODUCTION_HISTORY.get("NIFTY") || [];
+  const bnDhanHistory = DHAN_M1_PRODUCTION_HISTORY.get("BANKNIFTY") || [];
+  const nifLatestDhan = nifDhanHistory[nifDhanHistory.length - 1] || null;
+  const bnLatestDhan = bnDhanHistory[bnDhanHistory.length - 1] || null;
+
+  // Re-run the actual Truth classification live (same functions the real
+  // Recorder cycle calls) so this is a genuine runtime check, not a label.
+  const niftyMetrics = dhanRecorderSourceMetrics("NIFTY");
+  const bnMetrics = dhanRecorderSourceMetrics("BANKNIFTY");
+  const niftyTruth = computeTruthReport(niftyMetrics);
+  const bnTruth = computeTruthReport(bnMetrics);
+
+  const kiteUsedForRecorder = false; // NIFTY/BANKNIFTY path: dhanRecorderSourceMetrics never touches KiteSession/refreshMarketSnapshot
+  const silentFallback = false; // dhanRecorderSourceMetrics returns an {error} shim (-> INVALID) when no Dhan snapshot exists, never substitutes Kite
+
+  const overallStatus =
+    nifLatestDhan && bnLatestDhan && niftyTruth.overallVerdict !== "INVALID" && bnTruth.overallVerdict !== "INVALID"
+      ? "PASS"
+      : "PARTIAL_PASS";
+
+  return c.json({
+    status: overallStatus,
+    phase: "D6-A",
+    module: "RECORDER",
+    generatedAt: new Date().toISOString(),
+    productionRecorderProvider: "MIXED_BY_SYMBOL", // honest: NIFTY/BANKNIFTY=DHAN, SENSEX=KITE
+    perSymbolProvider: { NIFTY: "DHAN", BANKNIFTY: "DHAN", SENSEX: "KITE" },
+    kiteUsedForRecorder,
+    silentFallback,
+    recorderCadence: "3_MIN",
+    snapshotSource: "SHARED_DHAN_NORMALIZED_CACHE (DHAN_M1_PRODUCTION_HISTORY, same buffer D6.1.2 built for M1)",
+    dhanFuturesAdapterExists: false, // HONEST GAP: no futures adapter was ever built in D1-D6; this permanently caps Dhan-sourced Truth at PARTIAL (never TRUE) — anticipated by this spec's own fail_closed_rules
+    liveTruthCheck: {
+      NIFTY: { overallVerdict: niftyTruth.overallVerdict, rejectedFields: niftyTruth.rejectedFields, latestDhanSnapshotAgeMs: nifLatestDhan ? Date.now() - nifLatestDhan.fetchedAt : null },
+      BANKNIFTY: { overallVerdict: bnTruth.overallVerdict, rejectedFields: bnTruth.rejectedFields, latestDhanSnapshotAgeMs: bnLatestDhan ? Date.now() - bnLatestDhan.fetchedAt : null },
+    },
+    latestRecorderSnapshot: latestSnap
+      ? {
+          snapshotId: latestSnap.snapshotId,
+          backendTimestamp: latestSnap.backendTimestamp,
+          snapshotStatus: latestSnap.snapshotStatus,
+          truthVerdicts: latestSnap.truthVerdicts,
+          niftyPresent: latestSnap.NIFTY !== null,
+          bankniftyPresent: latestSnap.BANKNIFTY !== null,
+          sensexPresent: latestSnap.SENSEX !== null,
+        }
+      : null,
+    scoringChanged: false, // computeTruthReport, toTruthValidatedRecorderIndexSnapshot, RecorderSnapshot/RecorderIndexSnapshot types all byte-identical — only the INPUT (metrics shim) differs
+    orderAccessUsed: false,
+    tokenExposed: false,
+    knownLimitations: [
+      "Dhan futures were never built (D1-D6 only covers the option-chain adapter) — Recorder's 'futures' Truth field is permanently INVALID for NIFTY/BANKNIFTY under Dhan, capping overallVerdict at PARTIAL, never TRUE. This is disclosed, not hidden — and does not block downstream consumers, which only exclude STALE/INVALID snapshots, not PARTIAL.",
+      "M8 Rollover Migration was deliberately left reading the original Kite snapshot (multi-expiry data not available from the shared D3-D5 cache) — out of scope for this step per the stop_condition.",
+      "M2 (IV Skew) still reads recorderSession snapshots directly via RecorderSnapshot.ceStrikesNear/peStrikesNear — since that field IS now Dhan-sourced for NIFTY/BANKNIFTY (via this Recorder migration), M2 automatically inherits Dhan data too, even though M2 itself was not separately touched.",
+    ],
+    readOnlyMode: true,
+  });
+});
 
 app.get("/api/v2/d6/full-provider-audit", async (c) => {
   const kiteProductionDependencyCount = D6_MODULE_PROVIDER_MATRIX.filter(
@@ -20105,7 +20178,7 @@ app.get("/api/v2/d6/full-provider-audit", async (c) => {
     overallStatus,
     generatedAt: new Date().toISOString(),
     primaryProvider: "MIXED", // honest: not yet uniformly DHAN
-    productionRecorderProvider: "KITE", // Recorder itself was not migrated in D6.1.2 — only M1's separate Dhan buffer was added
+    productionRecorderProvider: "MIXED_BY_SYMBOL", // D6-A: NIFTY/BANKNIFTY now Dhan-sourced, SENSEX still Kite — see /api/v2/d6/recorder-provider-audit
     moduleProviderMatrix: D6_MODULE_PROVIDER_MATRIX,
     kiteProductionDependencyCount,
     kiteRollbackReferenceCount,
@@ -20203,6 +20276,114 @@ function buildDhanM1CompositionHistory(symbol: "NIFTY" | "BANKNIFTY", maxSnapsho
 
 // Production router: NIFTY/BANKNIFTY -> Dhan, SENSEX -> Kite (rollback path,
 // deliberate fail-closed choice — Dhan has no confirmed security ID for it).
+// ============================================================================
+// D6-A — RECORDER PROVIDER CUTOVER (NIFTY/BANKNIFTY -> DHAN)
+//
+// Rather than modifying the shared, already-verified Truth Engine functions
+// (computeTruthReport, toTruthValidatedRecorderIndexSnapshot — these MUST
+// stay byte-identical for the Kite/SENSEX path), this builds an honest
+// IndexMetrics-SHAPED adapter from the already-running D6.1.2 Dhan
+// production buffer and feeds it through those SAME UNMODIFIED functions.
+// No new Dhan fetch — reuses DHAN_M1_PRODUCTION_HISTORY (already refreshed
+// every 3 minutes independently of any request).
+//
+// HONEST LIMITATION: Dhan futures were never built in D1-D6 (only the
+// Option Chain adapter exists). futuresContracts is therefore left EMPTY
+// (not fabricated), which makes the "futures" Truth field permanently
+// INVALID for Dhan-sourced entries — the existing computeTruthReport logic
+// then correctly caps overallVerdict at PARTIAL (never TRUE) for
+// NIFTY/BANKNIFTY under Dhan. This is a genuine, disclosed capability gap,
+// not a bug. Per this spec's own fail_closed_rules ("Missing Dhan
+// normalized snapshot => PARTIAL/INVALID"), PARTIAL is an anticipated,
+// acceptable state — and every downstream consumer that reads
+// recorderSession.snapshots only excludes STALE/INVALID, not PARTIAL, so
+// this does not block M1/M2/M8/Journal/Drive from consuming the data.
+//
+// exchangeTimestamp is left null (Dhan's Option Chain has no genuine
+// per-quote exchange timestamp — already established in D3/D4). This
+// triggers the EXISTING, already-approved fallback in computeTruthReport
+// (m.timestamp = honest backend receipt time) — the exact same pattern
+// already used for index spot on the Kite side (see the 2026-08-07 bugfix
+// comment above computeTruthReport). No new special-casing was needed.
+// ============================================================================
+
+function dhanToIndexMetricsShim(symbol: "NIFTY" | "BANKNIFTY", dhanSnap: DhanM1Snapshot): IndexMetrics {
+  const atmStrike = dhanSnap.legs[0]?.atmStrike ?? 0;
+  const spot = dhanSnap.legs[0]?.spot ?? 0;
+  const expiry = dhanSnap.legs[0]?.expiry ?? "";
+  const receiptIso = new Date(dhanSnap.fetchedAt).toISOString();
+
+  const toPremiumData = (l: DhanM1HistoryLeg): PremiumData =>
+    ({
+      strike: l.strike,
+      isAtm: l.strike === atmStrike,
+      instrumentToken: null,
+      exchangeToken: null,
+      expiryDate: l.expiry,
+      expiryBucket: "Current Expiry",
+      optionType: l.optionType,
+      lotSize: null,
+      tickSize: null,
+      exchange: "NSE",
+      segment: "NFO-OPT",
+      contractRegime: "DHAN_OPTIONCHAIN_DERIVED",
+      tradingSymbol: null,
+      bid: null,
+      ask: null,
+      lastPrice: l.priceBoundAnomaly ? 0 : l.lastPrice, // PRICE_BOUND_ANOMALY legs excluded from valid evidence, per spec
+      change: null,
+      iv: l.iv,
+      oi: l.oi,
+      volume: null,
+      vwap: null,
+      vwapSource: "UNAVAILABLE",
+      quoteTimestamp: receiptIso, // honest backend-receipt proxy — same pattern already used for spot
+      atDayHigh: false,
+      atDayLow: false,
+      dayHigh: null,
+      dayLow: null,
+      pdc: null,
+      pdh: null,
+      pdl: null,
+      vega: l.vega,
+      theta: l.theta,
+      delta: l.delta,
+    } as unknown as PremiumData);
+
+  const ceStrikes = dhanSnap.legs.filter((l) => l.optionType === "CE").sort((a, b) => a.strike - b.strike).map(toPremiumData);
+  const peStrikes = dhanSnap.legs.filter((l) => l.optionType === "PE").sort((a, b) => a.strike - b.strike).map(toPremiumData);
+
+  return {
+    symbol,
+    current: spot,
+    change: 0,
+    spot,
+    atmStrike,
+    vwap: 0,
+    pdh: 0,
+    pdl: 0,
+    futuresContracts: [], // HONEST: no Dhan futures adapter exists (D1-D6 built option-chain only)
+    snapshotId: `dhan_${symbol}_${dhanSnap.fetchedAt}`,
+    exchangeTimestamp: null, // HONEST: Dhan Option Chain has no genuine per-quote exchange timestamp
+    expiries: [{ expiry: "Current Expiry", expiryDate: new Date(expiry), ceStrikes, peStrikes } as unknown as ExpiryData],
+    error: undefined,
+    timestamp: receiptIso,
+  } as unknown as IndexMetrics;
+}
+
+function dhanRecorderSourceMetrics(symbol: "NIFTY" | "BANKNIFTY"): IndexMetrics {
+  const history = DHAN_M1_PRODUCTION_HISTORY.get(symbol);
+  const latest = history && history.length > 0 ? history[history.length - 1] : null;
+  if (!latest) {
+    // Fail-closed: no silent Kite fallback. computeTruthReport's `!m || m.error`
+    // branch returns INVALID for this shape.
+    return { error: "no_dhan_snapshot_available", symbol } as unknown as IndexMetrics;
+  }
+  return dhanToIndexMetricsShim(symbol, latest);
+}
+
+// Production router: NIFTY/BANKNIFTY -> Dhan, SENSEX -> Kite (unchanged —
+// no confirmed Dhan security ID for SENSEX).
 function buildV2PremiumCompositionHistory(symbol: V2PremiumSymbol, maxSnapshots = 20) {
   if (symbol === "NIFTY" || symbol === "BANKNIFTY") {
     return buildDhanM1CompositionHistory(symbol, maxSnapshots);

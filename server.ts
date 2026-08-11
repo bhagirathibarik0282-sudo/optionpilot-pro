@@ -19604,12 +19604,140 @@ interface D6M1FieldCheck {
   detail: string;
 }
 
+// ============================================================================
+// DHAN MIGRATION — D6.1.1 SHADOW INFRASTRUCTURE (READ-ONLY, DIAGNOSTIC ONLY)
+//
+// IMPORTANT SCOPE NOTE: per explicit confirmation, this builds a SHADOW
+// Dhan-backed M1 pipeline (Dhan → normalized → M1 math → shadow candidate)
+// running ALONGSIDE the existing Kite-backed production dashboard — it does
+// NOT replace buildV2PremiumCompositionHistory or the live Recorder path.
+// productionM1Provider stays honestly reported as KITE below. Full
+// production cutover to Dhan is a separate, later decision gated on D7.
+// ============================================================================
+
+// --- Instrument master: lotSize/tickSize/tradingSymbol/expirySeriesType ---
+// GET /v2/instrument/{exchangeSegment} returns CSV. Columns are parsed by
+// HEADER NAME (case-insensitive keyword match), never by fixed position —
+// if a column can't be confidently identified, the field stays null with an
+// explicit reason rather than risking a silently-misaligned value.
+interface DhanInstrumentMeta {
+  securityId: string;
+  lotSize: number | null;
+  tickSize: number | null;
+  tradingSymbol: string | null;
+  expirySeriesType: string | null; // e.g. WEEKLY/MONTHLY if the CSV exposes it, else null
+}
+
+let dhanInstrumentMasterCache: { fetchedAt: number; bySecurityId: Map<string, DhanInstrumentMeta> } | null = null;
+const DHAN_INSTRUMENT_MASTER_TTL_MS = 24 * 60 * 60 * 1000; // instrument master doesn't change intraday
+
+function csvParseLine(line: string): string[] {
+  // Minimal CSV split (Dhan's instrument CSV fields are not quote-escaped in
+  // practice for this column set); good enough for header + numeric/symbol rows.
+  return line.split(",").map((s) => s.trim());
+}
+
+async function getDhanInstrumentMaster(
+  accessToken: string,
+  clientId: string
+): Promise<{ bySecurityId: Map<string, DhanInstrumentMeta>; fromCache: boolean; error?: string }> {
+  if (dhanInstrumentMasterCache && Date.now() - dhanInstrumentMasterCache.fetchedAt < DHAN_INSTRUMENT_MASTER_TTL_MS) {
+    return { bySecurityId: dhanInstrumentMasterCache.bySecurityId, fromCache: true };
+  }
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/instrument/NSE_FNO", {
+      method: "GET",
+      headers: { Accept: "text/csv", "access-token": accessToken, "client-id": clientId },
+    });
+    const text = await res.text();
+    if (!res.ok || !text || text.length < 20) {
+      return { bySecurityId: new Map(), fromCache: false, error: `instrument master fetch failed, httpStatus=${res.status}` };
+    }
+
+    const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
+    if (lines.length < 2) {
+      return { bySecurityId: new Map(), fromCache: false, error: "instrument master CSV had no data rows" };
+    }
+    const header = csvParseLine(lines[0]).map((h) => h.toUpperCase());
+
+    const findCol = (...keywords: string[]) =>
+      header.findIndex((h) => keywords.every((kw) => h.includes(kw)));
+
+    const secIdCol = findCol("SECURITY", "ID");
+    const lotCol = findCol("LOT");
+    const tickCol = findCol("TICK");
+    const symbolCol = findCol("TRADING", "SYMBOL");
+    const seriesCol = findCol("SERIES"); // best-effort; may not exist
+
+    const bySecurityId = new Map<string, DhanInstrumentMeta>();
+    for (let i = 1; i < lines.length; i++) {
+      const row = csvParseLine(lines[i]);
+      const secId = secIdCol >= 0 ? row[secIdCol] : null;
+      if (!secId) continue;
+      bySecurityId.set(secId, {
+        securityId: secId,
+        lotSize: lotCol >= 0 && row[lotCol] && !Number.isNaN(Number(row[lotCol])) ? Number(row[lotCol]) : null,
+        tickSize: tickCol >= 0 && row[tickCol] && !Number.isNaN(Number(row[tickCol])) ? Number(row[tickCol]) : null,
+        tradingSymbol: symbolCol >= 0 ? row[symbolCol] || null : null,
+        expirySeriesType: seriesCol >= 0 ? row[seriesCol] || null : null,
+      });
+    }
+
+    dhanInstrumentMasterCache = { fetchedAt: Date.now(), bySecurityId };
+    return { bySecurityId, fromCache: false };
+  } catch (err) {
+    return { bySecurityId: new Map(), fromCache: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// --- Price-bound validation: LTP must not be below the no-arbitrage
+// intrinsic floor beyond a small numerical tolerance. ---
+const PRICE_BOUND_TOLERANCE = 0.05; // rupees; not a scoring threshold, purely a data-sanity check
+
+function checkPriceBound(lastPrice: number, intrinsic: number): { anomaly: boolean; deficit: number } {
+  const deficit = intrinsic - lastPrice;
+  return { anomaly: deficit > PRICE_BOUND_TOLERANCE, deficit };
+}
+
+// --- Shadow (Dhan-backed) M1 history buffer — SEPARATE from the Kite
+// Recorder. Same securityId + expiry + strike + CE/PE required to compare
+// two points; never compares across a mismatch (fail-closed per spec). ---
+interface DhanShadowSnapshotPoint {
+  fetchedAt: number;
+  securityId: number;
+  expiry: string;
+  strike: number;
+  optionType: "CE" | "PE";
+  lastPrice: number;
+  intrinsic: number;
+  extrinsic: number;
+  iv: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  oi: number | null;
+  priceBoundAnomaly: boolean;
+}
+
+const DHAN_SHADOW_M1_HISTORY = new Map<string, DhanShadowSnapshotPoint[]>();
+const DHAN_SHADOW_M1_MAX_SNAPSHOTS = 20;
+
+function pushShadowSnapshot(key: string, point: DhanShadowSnapshotPoint) {
+  const arr = DHAN_SHADOW_M1_HISTORY.get(key) || [];
+  arr.push(point);
+  if (arr.length > DHAN_SHADOW_M1_MAX_SNAPSHOTS) arr.shift();
+  DHAN_SHADOW_M1_HISTORY.set(key, arr);
+}
+
 app.get("/api/v2/d6/m1-audit", async (c) => {
   const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
   const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
 
   if (!accessToken || !clientId) {
+
     return c.json({
       status: "FAIL", phase: "D6.1", module: "M1_PREMIUM_COMPOSITION",
       generatedAt: new Date().toISOString(),
@@ -19707,8 +19835,14 @@ app.get("/api/v2/d6/m1-audit", async (c) => {
     };
     if (freshnessStatus.status !== "PASS") invalidOrPartialReasons.push(freshnessStatus.detail);
 
+    // --- D6.1.1: instrument master fetch (cached 24h) for lotSize/tickSize/tradingSymbol ---
+    const instrumentMaster = await getDhanInstrumentMaster(accessToken, clientId);
+    if (instrumentMaster.error) invalidOrPartialReasons.push(`instrument master: ${instrumentMaster.error}`);
+
     const sampleComposition: any[] = [];
     let contractIdentityOverall: "PASS" | "INVALID" = "PASS";
+    let priceBoundAnomalyCount = 0;
+    const sameContractComparisons: any[] = [];
 
     for (const { side, raw } of legs) {
       const fieldChecks: D6M1FieldCheck[] = [];
@@ -19747,6 +19881,29 @@ app.get("/api/v2/d6/m1-audit", async (c) => {
         const d4StyleIntrinsic = side === "CE" ? Math.max(0, spot - atmStrike) : Math.max(0, atmStrike - spot);
         dhanImpliedIntrinsicMatch = Math.abs(d4StyleIntrinsic - intrinsic) < 1e-9;
       }
+
+      // --- D6.1.1: price-bound validation (no-arbitrage floor check) ---
+      let priceBoundAnomaly = false;
+      let priceBoundDeficit: number | null = null;
+      if (lastPrice !== null && intrinsic !== null) {
+        const check = checkPriceBound(lastPrice, intrinsic);
+        priceBoundAnomaly = check.anomaly;
+        priceBoundDeficit = check.deficit;
+        if (priceBoundAnomaly) {
+          priceBoundAnomalyCount++;
+          invalidOrPartialReasons.push(`${side}: PRICE_BOUND_ANOMALY — LTP ${lastPrice} is below intrinsic ${intrinsic} by ${check.deficit.toFixed(2)}, beyond ${PRICE_BOUND_TOLERANCE} tolerance. Excluded from valid composition evidence.`);
+          // Per fail-closed rule: intrinsicPct above 100 from this condition is NOT published as valid evidence.
+          intrinsicPct = null;
+          extrinsicPct = null;
+        }
+      }
+      fieldChecks.push({
+        field: "price-bound validation (LTP vs no-arbitrage intrinsic floor)",
+        status: priceBoundAnomaly ? "INVALID" : lastPrice !== null && intrinsic !== null ? "PASS" : "PARTIAL",
+        detail: priceBoundAnomaly
+          ? `PRICE_BOUND_ANOMALY: deficit=${priceBoundDeficit?.toFixed(2)} — excluded from valid evidence, not published as intrinsicPct>100`
+          : lastPrice !== null && intrinsic !== null ? "within bounds" : "could not evaluate — missing LTP or intrinsic",
+      });
       fieldChecks.push({
         field: "intrinsic value (M1 formula: v2ComputeIntrinsicValue, unmodified)",
         status: intrinsic !== null ? "PASS" : "INVALID",
@@ -19790,49 +19947,121 @@ app.get("/api/v2/d6/m1-audit", async (c) => {
         detail: bid !== null && ask !== null ? `bid=${bid}, ask=${ask}, securityId=${securityId}` : "one or both missing",
       });
 
-      const tradingSymbolCheck: D6M1FieldCheck = {
-        field: "tradingSymbol / lotSize / tickSize",
-        status: "UNAVAILABLE_FROM_PROVIDER",
-        detail: "Option Chain API does not return these (confirmed in D4) — requires separate instrument-master endpoint, not fetched. Does not block PASS since M1's core math does not require them.",
-      };
+      const tradingSymbolCheck: D6M1FieldCheck = (() => {
+        if (securityId === null) {
+          return { field: "tradingSymbol / lotSize / tickSize (instrument master)", status: "UNAVAILABLE_FROM_PROVIDER", detail: "no securityId to look up" };
+        }
+        const meta = instrumentMaster.bySecurityId.get(String(securityId));
+        if (!meta || (meta.lotSize === null && meta.tickSize === null && meta.tradingSymbol === null)) {
+          return { field: "tradingSymbol / lotSize / tickSize (instrument master)", status: "PARTIAL", detail: `securityId ${securityId} not found in instrument master CSV (or all target columns unidentifiable by header) — per spec, missing metadata is PARTIAL, not PASS` };
+        }
+        const missingSome = meta.lotSize === null || meta.tickSize === null;
+        return {
+          field: "tradingSymbol / lotSize / tickSize (instrument master)",
+          status: missingSome ? "PARTIAL" : "PASS",
+          detail: `lotSize=${meta.lotSize}, tickSize=${meta.tickSize}, tradingSymbol=${meta.tradingSymbol}, expirySeriesType=${meta.expirySeriesType}${instrumentMaster.fromCache ? " (from 24h cache)" : " (freshly fetched)"}`,
+        };
+      })();
+      if (tradingSymbolCheck.status !== "PASS") invalidOrPartialReasons.push(`${side}: ${tradingSymbolCheck.detail}`);
+      const instrumentMeta = securityId !== null ? instrumentMaster.bySecurityId.get(String(securityId)) || null : null;
 
       const moneyness: "ITM" | "ATM" | "OTM" = side === "CE"
         ? (atmStrike === spot ? "ATM" : atmStrike < spot ? "ITM" : "OTM")
         : (atmStrike === spot ? "ATM" : atmStrike > spot ? "ITM" : "OTM");
+
+      // --- D6.1.1: shadow history — same securityId+expiry+strike+CE/PE only ---
+      let sameContractComparison: any = { status: "INSUFFICIENT_HISTORY" };
+      if (securityId !== null && lastPrice !== null && intrinsic !== null && !priceBoundAnomaly) {
+        const historyKey = `${symbolParam}_${side}`;
+        const history = DHAN_SHADOW_M1_HISTORY.get(historyKey) || [];
+        // Find the most recent PRIOR point with an EXACT identity match (fail-closed: never compares across a mismatch)
+        const prior = [...history].reverse().find(
+          (p) => p.securityId === securityId && p.expiry === targetExpiry && p.strike === atmStrike && p.optionType === side && !p.priceBoundAnomaly
+        );
+        if (prior) {
+          sameContractComparison = {
+            status: "OK",
+            identityMatch: true,
+            previousFetchedAt: new Date(prior.fetchedAt).toISOString(),
+            premiumChange: lastPrice - prior.lastPrice,
+            intrinsicChange: intrinsic - prior.intrinsic,
+            extrinsicChange: (extrinsic ?? 0) - prior.extrinsic,
+          };
+        }
+        pushShadowSnapshot(historyKey, {
+          fetchedAt: chainFetchedAt, securityId, expiry: targetExpiry, strike: atmStrike, optionType: side,
+          lastPrice, intrinsic, extrinsic: extrinsic ?? 0,
+          iv: ivSuspect ? null : ivRaw, delta: greeksSuspect ? null : delta, gamma: greeksSuspect ? null : gamma,
+          theta: greeksSuspect ? null : theta, vega: greeksSuspect ? null : vega, oi, priceBoundAnomaly,
+        });
+      }
+      sameContractComparisons.push({ side, ...sameContractComparison });
 
       sampleComposition.push({
         side, strike: atmStrike, moneyness, spot, expiry: targetExpiry,
         securityId, lastPrice, intrinsic, extrinsic, intrinsicPct, extrinsicPct,
         iv: ivSuspect ? null : ivRaw, delta: greeksSuspect ? null : delta, gamma: greeksSuspect ? null : gamma,
         theta: greeksSuspect ? null : theta, vega: greeksSuspect ? null : vega, oi,
-        compositionState: "INSUFFICIENT_HISTORY", // honest: no Dhan history buffer exists yet (see KNOWN LIMITATION above)
+        priceBoundAnomaly,
+        instrumentMetadata: instrumentMeta ? { lotSize: instrumentMeta.lotSize, tickSize: instrumentMeta.tickSize, tradingSymbol: instrumentMeta.tradingSymbol, expirySeriesType: instrumentMeta.expirySeriesType } : null,
+        compositionState: sameContractComparison.status === "OK" ? "SAME_CONTRACT_COMPARISON_AVAILABLE" : "INSUFFICIENT_HISTORY",
         fieldChecks: [...fieldChecks, tradingSymbolCheck, freshnessStatus],
       });
     }
 
-    const anyInvalid = sampleComposition.some((s) => s.fieldChecks.some((f: D6M1FieldCheck) => f.status === "INVALID"));
+    const anyInvalid = sampleComposition.some((s) =>
+      s.fieldChecks.some((f: D6M1FieldCheck) => f.status === "INVALID" && !f.field.startsWith("price-bound validation"))
+    );
     const overallStatus = contractIdentityOverall === "INVALID" || anyInvalid
       ? "FAIL"
       : invalidOrPartialReasons.length > 0
         ? "PARTIAL_PASS"
         : "PASS";
 
+    const snapshotCounts = ["CE", "PE"].map((side) => ({
+      side,
+      count: (DHAN_SHADOW_M1_HISTORY.get(`${symbolParam}_${side}`) || []).length,
+    }));
+
     return c.json({
       status: overallStatus,
-      phase: "D6.1",
+      phase: "D6.1.1",
       module: "M1_PREMIUM_COMPOSITION",
       generatedAt: new Date().toISOString(),
+      // Diagnostic path (this endpoint) is Dhan-backed:
       provider: "DHAN",
       symbol: symbolParam,
+      // Live production dashboard is honestly reported as UNCHANGED — see
+      // "IMPORTANT SCOPE NOTE" above the route: this is a SHADOW pipeline,
+      // confirmed with the user, not a production cutover.
+      productionM1Provider: "KITE",
+      productionHistorySource: "KITE_RECORDER_UNCHANGED",
+      shadowM1Provider: "DHAN",
+      shadowHistorySource: "DHAN_NORMALIZED_SNAPSHOTS",
+      snapshotCount: snapshotCounts,
       contractIdentity: contractIdentityOverall,
       freshness: freshnessStatus.status,
       fieldAvailability: sampleComposition.map((s) => ({ side: s.side, checks: s.fieldChecks })),
       sampleComposition: sampleComposition.map(({ fieldChecks, ...rest }) => rest),
+      sameContractComparison: sameContractComparisons,
+      priceBoundValidation: {
+        tolerance: PRICE_BOUND_TOLERANCE,
+        anomalyCount: priceBoundAnomalyCount,
+        note: priceBoundAnomalyCount > 0
+          ? "One or more legs breached the no-arbitrage intrinsic floor beyond tolerance — excluded from valid evidence, intrinsicPct not published for those legs."
+          : "No price-bound anomalies detected in this snapshot.",
+      },
+      instrumentMasterMetadata: {
+        fetchedFromCache: instrumentMaster.fromCache,
+        error: instrumentMaster.error || null,
+        legsResolved: sampleComposition.filter((s) => s.instrumentMetadata !== null).length,
+        legsTotal: sampleComposition.length,
+      },
       invalidOrPartialReasons,
       zerodhaFallbackUsed: false, // provably true by construction — this function never references recorderSession/sessions/Kite
       scoringChanged: false, // v2ComputeIntrinsicValue/v2PctPart/v2CompositionState/buildV2PremiumCompositionHistory are called by reference, unmodified — see diff report
       orderAccessUsed: false,
-      knownLimitation: "This endpoint has no Dhan-side history buffer, so compositionState always reports INSUFFICIENT_HISTORY. Live M1 (buildV2PremiumCompositionHistory) is UNCHANGED and still reads only from the Kite-backed Recorder — this diagnostic does not switch M1's data source.",
+      scopeNote: "SHADOW pipeline only (Dhan → M1 math → shadow candidate), confirmed with user. Live production dashboard's buildV2PremiumCompositionHistory() is UNCHANGED and still reads only from the Kite-backed Recorder.",
       readOnlyMode: true,
       tokenExposed: false,
     });

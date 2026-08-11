@@ -19895,6 +19895,242 @@ async function dhanM1ProductionRefreshCycle() {
 // Background cadence, independent of any inbound HTTP request — mirrors the
 // existing Recorder's 3-minute cadence concept. Guarded so it only runs when
 // Dhan credentials are configured, and never throws out of the interval.
+// ============================================================================
+// D6 STEP 1/2 — FULL PROVIDER DEPENDENCY AUDIT (READ-ONLY, NO CODE CHANGES)
+//
+// This is a STATIC CODE AUDIT (grounded in actual function signatures/call
+// graph, not guesses) exposed as a live JSON report, plus a few runtime
+// counters. It does NOT perform step 3-7 (full M2-M12B/H1-H10 cutover) —
+// that is a separate, much larger engineering task deliberately NOT
+// attempted in this pass: every module from M3 through M12B and H1/H2/H3/
+// H4/H10 takes `session: KiteSession` directly and reads
+// `session.marketSnapshot` for its core evidence, meaning a real cutover
+// requires rewriting dozens of function signatures across the whole
+// evidence/candidate pipeline — not a safe single-pass change on a live
+// trading system. Reporting that honestly here, per the audit's own rule:
+// "report PARTIAL_PASS and identify it" rather than claiming false PASS.
+// ============================================================================
+
+interface ModuleProviderRow {
+  module: string;
+  productionFunction: string;
+  directDataSource: string;
+  indirectDataSource: string;
+  historySource: string;
+  usesKiteFunction: boolean;
+  usesKiteRecorder: boolean;
+  usesDhanNormalizedData: boolean;
+  usesDhanInstrumentMaster: boolean;
+  providerState: "DHAN" | "KITE" | "MIXED" | "PROVIDER_NEUTRAL_DERIVED" | "NO_MARKET_DATA_REQUIRED";
+  migrationRequired: boolean;
+  evidence: string;
+}
+
+const D6_MODULE_PROVIDER_MATRIX: ModuleProviderRow[] = [
+  {
+    module: "M1_PREMIUM_COMPOSITION", productionFunction: "buildV2PremiumCompositionHistory",
+    directDataSource: "NIFTY/BANKNIFTY: DHAN_M1_PRODUCTION_HISTORY (Dhan option chain). SENSEX: Kite Recorder.",
+    indirectDataSource: "none", historySource: "NIFTY/BANKNIFTY: Dhan 3-min background buffer. SENSEX: Kite Recorder 3-min snapshots.",
+    usesKiteFunction: true, usesKiteRecorder: true, usesDhanNormalizedData: true, usesDhanInstrumentMaster: false,
+    providerState: "MIXED", migrationRequired: false,
+    evidence: "D6.1.2: router at line ~19970 sends NIFTY/BANKNIFTY to buildDhanM1CompositionHistory (Dhan), SENSEX to buildV2PremiumCompositionHistoryKite (unchanged, no confirmed Dhan security ID for SENSEX).",
+  },
+  {
+    module: "M2_IV_SKEW", productionFunction: "buildV2IvSkewHistory -> buildV2IvSkewSnapshot",
+    directDataSource: "RecorderSnapshot (Kite-backed Recorder: idx.ceStrikesNear/peStrikesNear)",
+    indirectDataSource: "recorderSession.snapshots", historySource: "Kite Recorder 3-min snapshots",
+    usesKiteFunction: true, usesKiteRecorder: true, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "buildV2IvSkewSnapshot(snap: RecorderSnapshot, ...) reads snap[symbol].ceStrikesNear/peStrikesNear directly — NOT routed through M1's new Dhan path. Confirmed by source read, not M1's cutover does not touch M2.",
+  },
+  {
+    module: "M3_IV_TERM_STRUCTURE", productionFunction: "buildV2IvTermStructure",
+    directDataSource: "IndexMetrics param `m` (caller passes session.marketSnapshot[symbol])",
+    indirectDataSource: "KiteSession.marketSnapshot", historySource: "live Kite snapshot only, no time-series",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Function signature takes `m: IndexMetrics | undefined`; all call sites (M11, M12) pass `session.marketSnapshot[symbol]` which is Kite-populated.",
+  },
+  {
+    module: "M4_VIX_REGIME", productionFunction: "buildV2VixRegime",
+    directDataSource: "session.marketSnapshot.NIFTY.vix (live) + session.snapshotHistory (intraday) + external chartSeries param (historical)",
+    indirectDataSource: "KiteSession", historySource: "session.snapshotHistory (Kite-populated) for intraday; external chart series for 90d percentile",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "MIXED", migrationRequired: true,
+    evidence: "Signature is (chartSeries, session: KiteSession). currentVixSource can be LIVE_SNAPSHOT (Kite) or HISTORICAL_LAST_CLOSE (external, provider-neutral) — genuinely mixed, not falsely labeled Dhan per the audit doc's own warning.",
+  },
+  {
+    module: "M5_REALIZED_VS_IMPLIED", productionFunction: "buildV2RealizedVsImplied",
+    directDataSource: "session.marketSnapshot[symbol] for current IV; v2LoadRvHistoryOncePerDay(symbol, session.accessToken) for RV",
+    indirectDataSource: "KiteSession.accessToken used for the RV history fetch itself", historySource: "once-per-day cached RV history, fetched using the Kite access token",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Signature is (symbol, session: KiteSession); session.accessToken is passed onward to the RV loader — a direct Kite auth + data dependency.",
+  },
+  {
+    module: "M6_PREMIUM_ATTRIBUTION", productionFunction: "buildV2PremiumAttribution",
+    directDataSource: "buildV2PremiumCompositionHistory(symbol, maxSnapshots) — M1's output",
+    indirectDataSource: "M1", historySource: "inherits M1's history source",
+    usesKiteFunction: false, usesKiteRecorder: false, usesDhanNormalizedData: true, usesDhanInstrumentMaster: false,
+    providerState: "MIXED", migrationRequired: false,
+    evidence: "Line 771 calls buildV2PremiumCompositionHistory(symbol, maxSnapshots) — since M1 now routes NIFTY/BANKNIFTY to Dhan, M6 inherits that automatically for those two symbols; SENSEX still inherits Kite via M1's SENSEX path.",
+  },
+  {
+    module: "M7_OI_POSITIONING", productionFunction: "buildV2OiPositioningEvidence",
+    directDataSource: "buildV2PremiumCompositionHistory(symbol, maxSnapshots) — M1's output",
+    indirectDataSource: "M1", historySource: "inherits M1's history source",
+    usesKiteFunction: false, usesKiteRecorder: false, usesDhanNormalizedData: true, usesDhanInstrumentMaster: false,
+    providerState: "MIXED", migrationRequired: false,
+    evidence: "Line 906 calls buildV2PremiumCompositionHistory(symbol, maxSnapshots) — same inheritance as M6.",
+  },
+  {
+    module: "M8_ROLLOVER_MIGRATION", productionFunction: "buildV2RolloverMigration",
+    directDataSource: "v2RolloverHistory[symbol] (a separate in-memory array)",
+    indirectDataSource: "populated elsewhere from the existing 3-minute multi-expiry market refresh (Kite-sourced, per its own source label)",
+    historySource: "\"Existing 3-minute multi-expiry market refresh summaries only\" (function's own comment)",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "v2RolloverHistory is populated from the multi-expiry refresh cycle, which is Kite-driven — not wired to Dhan in D6.1/D6.1.2.",
+  },
+  {
+    module: "M9_MULTI_EXPIRY_ALIGNMENT", productionFunction: "buildV2MultiExpiryAlignment",
+    directDataSource: "IndexMetrics param `m` (session.marketSnapshot[symbol]) + M8 rollover context",
+    indirectDataSource: "KiteSession.marketSnapshot", historySource: "live Kite snapshot",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Same `m: IndexMetrics` pattern as M3 — Kite-sourced at every call site.",
+  },
+  {
+    module: "M10_MARKET_BEHAVIOUR_REGIME", productionFunction: "buildV2MarketBehaviourRegime",
+    directDataSource: "session: KiteSession + IndexMetrics param `m`",
+    indirectDataSource: "KiteSession.marketSnapshot", historySource: "live Kite snapshot",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Signature is (symbol, session: KiteSession, m: IndexMetrics).",
+  },
+  {
+    module: "M11_EVIDENCE_FUSION", productionFunction: "buildV2EvidenceFusion",
+    directDataSource: "session: KiteSession (for `m`, passed to M3/M9/M10) + calls M1-M10 internally",
+    indirectDataSource: "M1(mixed)+M2(Kite)+M3(Kite)+M4(mixed)+M5(Kite)+M6(mixed)+M7(mixed)+M8(Kite)+M9(Kite)+M10(Kite)",
+    historySource: "inherits from all upstream modules",
+    usesKiteFunction: true, usesKiteRecorder: true, usesDhanNormalizedData: true, usesDhanInstrumentMaster: false,
+    providerState: "MIXED", migrationRequired: true,
+    evidence: "Signature is (symbol, session: KiteSession, maxSnapshots); fuses M1-M10, most of which are still Kite-sourced (see rows above).",
+  },
+  {
+    module: "M12_CANDIDATE_REVIEW", productionFunction: "buildV2CandidateReviewPayload",
+    directDataSource: "session: KiteSession (m = session.marketSnapshot[symbol])",
+    indirectDataSource: "M11 fusion output", historySource: "inherits from M11",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Signature is (symbol, session: KiteSession, maxSnapshots); blocked entirely (BLOCKED_NO_MARKET_SNAPSHOT) if session.marketSnapshot is absent — hard Kite session dependency.",
+  },
+  {
+    module: "H1_CONTRACT_METADATA", productionFunction: "buildV2ContractMetadataLayer",
+    directDataSource: "session: KiteSession (Kite instrument metadata)",
+    indirectDataSource: "none", historySource: "n/a",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Signature is (symbol, session: KiteSession) — Kite instrument-token-based metadata, not Dhan securityId-based.",
+  },
+  {
+    module: "H2_CONTRACT_IDENTITY_GATE", productionFunction: "buildV2ContractIdentityGate",
+    directDataSource: "not fully traced in this pass — signature not yet confirmed as Kite/Dhan-specific",
+    indirectDataSource: "likely session-based given H1/H3/H4 pattern", historySource: "n/a",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Not individually re-verified in this pass (see knownLimitations) — classified KITE by strong pattern inference from H1/H3/H4, flagged for explicit re-check before any PASS claim.",
+  },
+  {
+    module: "H3_CONTRACT_NORMALIZATION", productionFunction: "buildV2ContractNormalization",
+    directDataSource: "session: KiteSession", indirectDataSource: "none", historySource: "n/a",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Signature is (symbol, session: KiteSession).",
+  },
+  {
+    module: "H4_HARD_DATA_QUALITY_GATE", productionFunction: "buildV2CandidateHardDataGate",
+    directDataSource: "session: KiteSession", indirectDataSource: "none", historySource: "n/a",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Signature is (symbol, session: KiteSession, maxSnapshots).",
+  },
+  {
+    module: "H5_H9_PROVISIONAL_AND_WATCHDOG", productionFunction: "buildV2ProvisionalIsolationReport / buildV2DiagnosticWatchdogSnapshot",
+    directDataSource: "consumes upstream candidate/report objects; H9 reads recorderSession internally",
+    indirectDataSource: "upstream (Kite-heavy per above)", historySource: "n/a",
+    usesKiteFunction: true, usesKiteRecorder: true, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "PROVIDER_NEUTRAL_DERIVED", migrationRequired: false,
+    evidence: "These consume already-computed evidence rather than fetching market data directly; their PROVIDER_NEUTRAL_DERIVED classification depends on what's upstream, which is currently still mostly Kite.",
+  },
+  {
+    module: "H10_DEVIL_DETECTOR", productionFunction: "buildV2DevilDetector",
+    directDataSource: "session: KiteSession + candidateCore param", indirectDataSource: "M12B output", historySource: "n/a",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Signature is (symbol, session: KiteSession, candidateCore).",
+  },
+  {
+    module: "M12B_CANDIDATE_SELECTION", productionFunction: "buildV2CandidateSelectionCore / buildV2CandidateSelection",
+    directDataSource: "not individually re-verified in this pass — strongly inferred KiteSession-based given it composes H1-H4/M11/M12",
+    indirectDataSource: "H1-H4, M11, M12 (all Kite-heavy per above)", historySource: "n/a",
+    usesKiteFunction: true, usesKiteRecorder: false, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Not individually re-verified in this pass (see knownLimitations) — flagged for explicit re-check before any PASS claim.",
+  },
+  {
+    module: "RECORDER", productionFunction: "recorderSession.snapshots population",
+    directDataSource: "Kite quote refresh cycle", indirectDataSource: "none", historySource: "n/a — this IS the history source for M2/M8 etc.",
+    usesKiteFunction: true, usesKiteRecorder: true, usesDhanNormalizedData: false, usesDhanInstrumentMaster: false,
+    providerState: "KITE", migrationRequired: true,
+    evidence: "Recorder itself is unchanged — still Kite-driven. D6.1.2 added a SEPARATE Dhan production buffer (DHAN_M1_PRODUCTION_HISTORY) for M1 only; it did not migrate the Recorder itself, so M2/M8/H9 (which read the Recorder directly) remain Kite-dependent even after M1's cutover.",
+  },
+];
+
+app.get("/api/v2/d6/full-provider-audit", async (c) => {
+  const kiteProductionDependencyCount = D6_MODULE_PROVIDER_MATRIX.filter(
+    (r) => r.providerState === "KITE" || (r.providerState === "MIXED" && r.usesKiteFunction)
+  ).length;
+  const mixedProviderModuleCount = D6_MODULE_PROVIDER_MATRIX.filter((r) => r.providerState === "MIXED").length;
+  const dhanNativeModuleCount = D6_MODULE_PROVIDER_MATRIX.filter((r) => r.providerState === "DHAN").length;
+  const providerNeutralModuleCount = D6_MODULE_PROVIDER_MATRIX.filter((r) => r.providerState === "PROVIDER_NEUTRAL_DERIVED").length;
+  const kiteRollbackReferenceCount = 1; // buildV2PremiumCompositionHistoryKite — intentional, explicit rollback path
+
+  const nifDhanSnaps = DHAN_M1_PRODUCTION_HISTORY.get("NIFTY")?.length || 0;
+  const bnDhanSnaps = DHAN_M1_PRODUCTION_HISTORY.get("BANKNIFTY")?.length || 0;
+
+  const overallStatus = kiteProductionDependencyCount === 0 && mixedProviderModuleCount === 0 ? "PASS" : "PARTIAL_PASS";
+
+  return c.json({
+    overallStatus,
+    generatedAt: new Date().toISOString(),
+    primaryProvider: "MIXED", // honest: not yet uniformly DHAN
+    productionRecorderProvider: "KITE", // Recorder itself was not migrated in D6.1.2 — only M1's separate Dhan buffer was added
+    moduleProviderMatrix: D6_MODULE_PROVIDER_MATRIX,
+    kiteProductionDependencyCount,
+    kiteRollbackReferenceCount,
+    mixedProviderModuleCount,
+    dhanNativeModuleCount,
+    providerNeutralModuleCount,
+    invalidDataIssues: [
+      "M2, M3, M5, M8, M9, M10, M12, H1, H3, H4, H10 read Kite (session.marketSnapshot or Recorder) directly — NOT migrated in D6.1/D6.1.2.",
+      "The Recorder itself (recorderSession) is still Kite-driven; D6.1.2 added a PARALLEL Dhan buffer for M1 only, it did not replace the Recorder.",
+      "H2 and M12B/buildV2CandidateSelectionCore were not individually re-verified line-by-line in this pass (inferred KITE by strong structural pattern, not directly confirmed) — flagged, not silently assumed migrated.",
+    ],
+    scoringChanged: false,
+    orderAccessUsed: false,
+    tokenExposed: false,
+    migrationReadiness: "NOT_READY_FOR_D7 — most of M2-M12B and H1-H10 still require a live KiteSession; only M1 (and M6/M7 by inheritance) are Dhan-backed for NIFTY/BANKNIFTY",
+    runtimeCounters: { nifDhanProductionSnapshots: nifDhanSnaps, bankniftyDhanProductionSnapshots: bnDhanSnaps },
+    knownLimitations: [
+      "This audit is a STATIC code-structure trace (function signatures + call graph), cross-checked against real source, not a full line-by-line re-verification of every module's internal logic.",
+      "H2 (buildV2ContractIdentityGate) and M12B core were classified by strong inference from the surrounding H1/H3/H4/M11/M12 pattern, not individually re-opened and confirmed in this pass.",
+      "Full step 3-7 cutover (rewriting M2-M12B and H1-H10 to not require KiteSession) was NOT attempted here — it is a large, multi-module rewrite of the live candidate-generation pipeline and was judged too high-risk to do in a single unreviewed pass on a production trading system.",
+    ],
+    readOnlyMode: true,
+  });
+});
+
 if (process.env.NODE_ENV !== "test" && process.env.DHAN_ACCESS_TOKEN && process.env.DHAN_CLIENT_ID) {
   dhanM1ProductionRefreshCycle().catch((err) => console.error("[DHAN_M1] initial refresh failed:", err));
   setInterval(() => {

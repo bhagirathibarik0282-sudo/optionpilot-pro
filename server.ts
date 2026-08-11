@@ -19367,21 +19367,26 @@ app.get("/api/dhan/cross-validate", async (c) => {
 
   const kiteSnapshotAgeMs = session.snapshotTime ? Date.now() - session.snapshotTime : null;
 
-  // Pick Kite's nearest (soonest) expiry from its expiries array, sorted
-  // defensively rather than assuming array order.
+  // NOTE: kiteSnapshot.expiries[].expiry holds a DISPLAY LABEL ("Current
+  // Expiry", "Next Expiry", ...), NOT a date string — the platform's own
+  // convention (see e.g. line ~260, ~1852 elsewhere in this file). The real
+  // date lives in .expiryDate (a Date object). Sort/compare on that instead.
   const kiteExpiriesSorted = (kiteSnapshot.expiries || [])
-    .filter((e) => e && e.expiry)
+    .filter((e) => e && e.expiryDate instanceof Date)
     .slice()
     .sort((a, b) => a.expiryDate.getTime() - b.expiryDate.getTime());
   const kiteNearestExpiry = kiteExpiriesSorted[0];
+  const kiteNearestExpiryDateStr = kiteNearestExpiry
+    ? kiteNearestExpiry.expiryDate.toISOString().slice(0, 10)
+    : null;
 
-  if (!kiteNearestExpiry) {
+  if (!kiteNearestExpiry || !kiteNearestExpiryDateStr) {
     return c.json({
       architectureRole: "D5_CROSS_VALIDATION",
       generatedAt: new Date().toISOString(),
       status: "INSUFFICIENT_COMPARISON_DATA",
       symbol: symbolParam,
-      reason: "Kite snapshot has no expiries data for this symbol.",
+      reason: "Kite snapshot has no usable expiryDate for this symbol.",
       readOnlyMode: true,
     }, 200);
   }
@@ -19424,7 +19429,7 @@ app.get("/api/dhan/cross-validate", async (c) => {
     }
 
     const dhanNearestExpiry = dhanExpiries[0];
-    const expiryMatch = dhanNearestExpiry === kiteNearestExpiry.expiry;
+    const expiryMatch = dhanNearestExpiry === kiteNearestExpiryDateStr;
 
     if (!expiryMatch) {
       return c.json({
@@ -19432,7 +19437,7 @@ app.get("/api/dhan/cross-validate", async (c) => {
         generatedAt: new Date().toISOString(),
         status: "CONTRACT_MAPPING_MISMATCH",
         symbol: symbolParam,
-        kiteNearestExpiry: kiteNearestExpiry.expiry,
+        kiteNearestExpiry: kiteNearestExpiryDateStr,
         dhanNearestExpiry,
         note: "Zerodha and Dhan disagree on which expiry is nearest for this symbol right now. Not comparing further until this is understood — could be a genuine listing difference or a stale side.",
         kiteSnapshotAgeMs,

@@ -21123,6 +21123,312 @@ app.get("/api/audit/dhan-expired-options-check", async (c) => {
   }
 });
 
+
+// ============================================================================
+// V3-D STEP 1 (continued) — INSTRUMENT MASTER + FUTURES HISTORY AUDIT
+// (READ-ONLY, DIAGNOSTIC ONLY)
+//
+// Shared helper: streams Dhan's public compact scrip-master CSV
+// (https://images.dhan.co/api-data/api-scrip-master.csv) and stops early
+// once a handful of matching FUTIDX/OPTIDX sample rows are found for the
+// requested symbol+exchange, rather than loading the entire multi-MB file
+// into memory. Column names are read from the CSV's own header row, never
+// hardcoded positions — if Dhan reorders columns this still works.
+//
+// Two endpoints reuse this helper:
+//   /api/audit/dhan-instrument-master  — audits the master-list fields
+//     themselves (securityId, lot size, tick size, trading symbol, etc.)
+//   /api/audit/dhan-futures-check      — resolves the nearest-expiry
+//     FUTIDX contract's real securityId from the master list (never
+//     fabricated/guessed), then probes Dhan's historical OHLC+OI for it.
+//
+// Auth: both require ?key=<DHAN_AUDIT_KEY>, same gate as the other probes.
+// ============================================================================
+
+type DhanCsvRow = Record<string, string>;
+
+async function dhanScanScripMaster(
+  symbolParam: string,
+  maxSamplesEach: number = 8
+): Promise<{
+  headerCols: string[] | null;
+  colIndex: Record<string, number>;
+  totalRowsScanned: number;
+  futRows: DhanCsvRow[];
+  optRows: DhanCsvRow[];
+  exchangeFiltered: string;
+  fetchOk: boolean;
+  httpStatus: number;
+}> {
+  const exchangeFilter = symbolParam === "SENSEX" ? "BSE" : "NSE";
+  const res = await fetch("https://images.dhan.co/api-data/api-scrip-master.csv");
+  if (!res.ok || !res.body) {
+    return {
+      headerCols: null, colIndex: {}, totalRowsScanned: 0,
+      futRows: [], optRows: [], exchangeFiltered: exchangeFilter,
+      fetchOk: false, httpStatus: res.status,
+    };
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let headerCols: string[] | null = null;
+  const colIndex: Record<string, number> = {};
+  let totalRowsScanned = 0;
+  const futRows: DhanCsvRow[] = [];
+  const optRows: DhanCsvRow[] = [];
+
+  outer: while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (!headerCols) {
+        headerCols = line.split(",");
+        headerCols.forEach((h, i) => { colIndex[h.trim()] = i; });
+        continue;
+      }
+      totalRowsScanned++;
+      const cols = line.split(",");
+      const exch = cols[colIndex["SEM_EXM_EXCH_ID"]] ?? "";
+      const instType = cols[colIndex["SEM_INSTRUMENT_NAME"]] ?? "";
+      const symName = cols[colIndex["SM_SYMBOL_NAME"]] ?? "";
+      const tradingSymbol = cols[colIndex["SEM_TRADING_SYMBOL"]] ?? "";
+      if (exch !== exchangeFilter) continue;
+      if (!symName.toUpperCase().includes(symbolParam) && !tradingSymbol.toUpperCase().includes(symbolParam)) continue;
+
+      const row: DhanCsvRow = {};
+      headerCols.forEach((h, i) => { row[h.trim()] = cols[i] ?? ""; });
+
+      if (instType === "FUTIDX" && futRows.length < maxSamplesEach) futRows.push(row);
+      if (instType === "OPTIDX" && optRows.length < maxSamplesEach) optRows.push(row);
+
+      if (futRows.length >= maxSamplesEach && optRows.length >= maxSamplesEach) break outer;
+    }
+  }
+  try { await reader.cancel(); } catch {}
+
+  return { headerCols, colIndex, totalRowsScanned, futRows, optRows, exchangeFiltered: exchangeFilter, fetchOk: true, httpStatus: res.status };
+}
+
+app.get("/api/audit/dhan-instrument-master", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+  const symbolParam = (c.req.query("symbol") || "NIFTY").toUpperCase();
+  const generatedAt = new Date().toISOString();
+
+  try {
+    const scan = await dhanScanScripMaster(symbolParam, 8);
+    if (!scan.fetchOk || !scan.headerCols) {
+      return c.json({
+        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        generatedAt, symbol: symbolParam, dataField: "instrument_master",
+        status: "ERROR", httpStatus: scan.httpStatus,
+        error: "Instrument master CSV fetch/parse failed.",
+      }, 200);
+    }
+
+    const expectedFields = [
+      "SEM_SMST_SECURITY_ID", "SM_SYMBOL_NAME", "SEM_INSTRUMENT_NAME",
+      "SEM_EXPIRY_DATE", "SEM_STRIKE_PRICE", "SEM_OPTION_TYPE",
+      "SEM_LOT_UNITS", "SEM_TICK_SIZE", "SEM_TRADING_SYMBOL",
+    ];
+    const fieldAudit: Record<string, any> = {};
+    const sampleRow = scan.futRows[0] || scan.optRows[0] || null;
+    for (const f of expectedFields) {
+      fieldAudit[f] = {
+        columnPresentInCsv: f in scan.colIndex,
+        sampleValue: sampleRow ? (sampleRow[f] ?? null) : null,
+      };
+    }
+
+    const status = (scan.futRows.length > 0 || scan.optRows.length > 0) ? "PASS" : "UNAVAILABLE";
+
+    return c.json({
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol: symbolParam, dataField: "instrument_master",
+      status,
+      exchangeFiltered: scan.exchangeFiltered,
+      csvHeaderColumnCount: scan.headerCols.length,
+      rowsScannedBeforeEnoughSamples: scan.totalRowsScanned,
+      futuresContractsFound: scan.futRows.length,
+      optionsContractsFound: scan.optRows.length,
+      sampleFuturesRows: scan.futRows,
+      sampleOptionsRows: scan.optRows.slice(0, 3),
+      fieldAudit,
+      provenanceRule: "DHAN_NATIVE fields only — nothing derived, nothing assumed. Header columns read directly from the CSV, not hardcoded.",
+      limitations: [
+        "Scan stopped early once 8 sample futures + 8 sample options rows were found — rowsScannedBeforeEnoughSamples is a partial-scan count, not the file's true total row count.",
+        "Only proves current/near-term contracts exist in the master — does not prove historical/expired listings were retained here.",
+      ],
+      v3StepGate: status === "PASS" ? "SAFE_TO_PROCEED_TO_NEXT_FIELD_CHECK" : "HOLD — resolve this field before continuing V3-D Step 1",
+      readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol: symbolParam, dataField: "instrument_master",
+      status: "ERROR",
+      error: err instanceof Error ? err.message : "Unknown instrument master fetch failure",
+      readOnlyMode: true, tokenExposed: false,
+    }, 500);
+  }
+});
+
+app.get("/api/audit/dhan-futures-check", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+  const symbolParam = (c.req.query("symbol") || "NIFTY").toUpperCase();
+  const generatedAt = new Date().toISOString();
+
+  try {
+    const scan = await dhanScanScripMaster(symbolParam, 8);
+    if (!scan.fetchOk || !scan.headerCols) {
+      return c.json({
+        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        generatedAt, symbol: symbolParam, dataField: "futures_history",
+        status: "ERROR", httpStatus: scan.httpStatus,
+        error: "Could not read instrument master CSV to resolve a futures securityId.",
+      }, 200);
+    }
+    if (scan.futRows.length === 0) {
+      return c.json({
+        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        generatedAt, symbol: symbolParam, dataField: "futures_history",
+        status: "UNAVAILABLE",
+        reason: "No FUTIDX row found for this symbol in the scrip master scan window.",
+      }, 200);
+    }
+
+    const sorted = [...scan.futRows].sort((a, b) => {
+      const da = new Date(a["SEM_EXPIRY_DATE"] || "").getTime();
+      const db = new Date(b["SEM_EXPIRY_DATE"] || "").getTime();
+      return (isNaN(da) ? Infinity : da) - (isNaN(db) ? Infinity : db);
+    });
+    const nearest = sorted[0];
+    const securityId = nearest["SEM_SMST_SECURITY_ID"];
+    const tradingSymbol = nearest["SEM_TRADING_SYMBOL"];
+    const expiryDate = nearest["SEM_EXPIRY_DATE"];
+
+    if (!securityId) {
+      return c.json({
+        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        generatedAt, symbol: symbolParam, dataField: "futures_history",
+        status: "ERROR",
+        error: "Matched a FUTIDX row but SEM_SMST_SECURITY_ID column was empty.",
+        matchedRow: nearest,
+      }, 200);
+    }
+
+    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+    if (!accessToken || !clientId) {
+      return c.json({
+        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        generatedAt, symbol: symbolParam, dataField: "futures_history",
+        status: "ERROR", error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+      }, 503);
+    }
+
+    const futuresSegment = symbolParam === "SENSEX" ? "BSE_FNO" : "NSE_FNO";
+    const toDate = new Date();
+    const fromDate = new Date(toDate.getTime() - 5 * 24 * 60 * 60 * 1000);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/historical", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: JSON.stringify({
+        securityId: String(securityId),
+        exchangeSegment: futuresSegment,
+        instrument: "FUTIDX",
+        expiryCode: 0,
+        oi: true,
+        fromDate: fmt(fromDate),
+        toDate: fmt(toDate),
+      }),
+    });
+
+    const httpStatus = res.status;
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    if (!res.ok || !payload || typeof payload !== "object") {
+      return c.json({
+        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        generatedAt, symbol: symbolParam, dataField: "futures_history",
+        status: "ERROR",
+        httpStatus,
+        contractIdentity: { securityId, tradingSymbol, expiryDate },
+        providerError: payload && typeof payload === "object" ? {
+          errorType: payload.errorType ?? null,
+          errorCode: payload.errorCode ?? null,
+          errorMessage: payload.errorMessage ?? null,
+        } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `Dhan historical returned HTTP ${httpStatus}` },
+        rawSnippet: raw.slice(0, 400),
+        readOnlyMode: true, tokenExposed: false,
+      }, 200);
+    }
+
+    const expectedFields = ["open", "high", "low", "close", "volume", "oi", "timestamp"];
+    const fieldAudit: Record<string, any> = {};
+    let presentCount = 0;
+    for (const f of expectedFields) {
+      const has = Object.prototype.hasOwnProperty.call(payload, f);
+      const val = payload[f];
+      const isArray = Array.isArray(val);
+      const len = isArray ? val.length : null;
+      const lastValue = isArray && len && len > 0 ? val[len - 1] : (has ? val : null);
+      const provenance = !has ? "MISSING" : (isArray && len === 0 ? "PRESENT_EMPTY" : "PRESENT_WITH_DATA");
+      if (provenance === "PRESENT_WITH_DATA") presentCount++;
+      fieldAudit[f] = { provenance, candleCount: len, sampleLastValue: lastValue };
+    }
+
+    const status = presentCount === expectedFields.length ? "PASS" : presentCount > 0 ? "PARTIAL" : "UNAVAILABLE";
+
+    return c.json({
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol: symbolParam, dataField: "futures_history",
+      status, httpStatus,
+      contractIdentity: { securityId, tradingSymbol, expiryDate, resolvedFrom: "api-scrip-master.csv scan, not fabricated" },
+      requestedRange: { fromDate: fmt(fromDate), toDate: fmt(toDate) },
+      fieldAudit,
+      provenanceRule: "DHAN_NATIVE fields only — nothing derived, nothing assumed.",
+      limitations: [
+        "Small (5-day) probe only, nearest-expiry contract — not proof of full multi-expiry/multi-year availability.",
+        "securityId was resolved from a partial CSV scan (stopped after finding a handful of sample rows), not the full file.",
+      ],
+      v3StepGate: status === "PASS" ? "SAFE_TO_PROCEED_TO_NEXT_FIELD_CHECK" : "HOLD — resolve this field before continuing V3-D Step 1",
+      readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol: symbolParam, dataField: "futures_history",
+      status: "ERROR",
+      error: err instanceof Error ? err.message : "Unknown Dhan historical (futures) request failure",
+      readOnlyMode: true, tokenExposed: false,
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

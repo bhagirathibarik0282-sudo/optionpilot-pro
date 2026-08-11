@@ -20747,6 +20747,219 @@ app.get("/api/v2/d6/m1-audit", async (c) => {
   }
 });
 
+
+// ============================================================================
+// V3-D STEP 1 — DHAN RAW DATA AVAILABILITY AUDIT (READ-ONLY, DIAGNOSTIC ONLY)
+//
+// Purpose: audit exactly what raw data Dhan's historical Charts API returns
+// for index spot OHLC — before ANY V3 engine, feature derivation, or
+// backtest work begins. Read-only. Does NOT feed V2 scoring, does NOT write
+// to any store, does NOT touch buildV2PremiumCompositionHistory, the Rule
+// Engine, or any Verdict path. Reuses existing D1-D5 Dhan credentials,
+// DHAN_UNDERLYING_MAP and the existing rate-limited fetch helper — no new
+// duplicate identity source for NIFTY/BANKNIFTY.
+//
+// SENSEX: DHAN_UNDERLYING_MAP has no confirmed SENSEX entry (see D2). This
+// endpoint separately test-probes an UNOFFICIAL candidate (securityId=51,
+// IDX_I) sourced from a third-party community SDK README — NOT Dhan's
+// official docs. The probe result is clearly labelled isUnofficialCandidate
+// and carries a promotionGate note: it must NEVER be copied into
+// DHAN_UNDERLYING_MAP without Bhagi Sir's explicit confirmation after
+// reviewing this output.
+//
+// Auth: requires ?key=<DHAN_AUDIT_KEY> (set in Railway Variables) or the
+// route 403s. Keeps this diagnostic route from sitting open on the public
+// internet.
+// ============================================================================
+
+type DhanAuditStatus = "PASS" | "PARTIAL" | "UNAVAILABLE" | "ERROR";
+
+// Unofficial candidate only — sourced from a third-party community SDK
+// README, NOT Dhan's official documentation, and NOT part of the confirmed
+// DHAN_UNDERLYING_MAP used by D1-D6 production paths. Exists solely so
+// V3-D Step 1 can test-verify it with a real API call.
+const DHAN_SENSEX_UNCONFIRMED_CANDIDATE = { underlyingScrip: 51, underlyingSeg: "IDX_I" };
+
+async function dhanAuditSpotHistory(
+  symbol: string,
+  mapping: { underlyingScrip: number; underlyingSeg: string },
+  isUnofficialCandidate: boolean
+) {
+  const generatedAt = new Date().toISOString();
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    return {
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol, dataField: "spot_history",
+      status: "ERROR" as DhanAuditStatus,
+      error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+    };
+  }
+
+  const toDate = new Date();
+  const fromDate = new Date(toDate.getTime() - 5 * 24 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/historical", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: JSON.stringify({
+        securityId: String(mapping.underlyingScrip),
+        exchangeSegment: mapping.underlyingSeg,
+        instrument: "INDEX",
+        expiryCode: 0,
+        oi: false,
+        fromDate: fmt(fromDate),
+        toDate: fmt(toDate),
+      }),
+    });
+
+    const httpStatus = res.status;
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    if (!res.ok || !payload || typeof payload !== "object") {
+      return {
+        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        generatedAt, symbol, dataField: "spot_history",
+        status: "ERROR" as DhanAuditStatus,
+        httpStatus,
+        isUnofficialCandidate,
+        securityIdTested: mapping.underlyingScrip,
+        providerError: payload && typeof payload === "object" ? {
+          errorType: payload.errorType ?? null,
+          errorCode: payload.errorCode ?? null,
+          errorMessage: payload.errorMessage ?? null,
+        } : { errorType: "NON_JSON_RESPONSE", errorCode: null, errorMessage: `Dhan historical returned HTTP ${httpStatus}` },
+        rawSnippet: raw.slice(0, 300),
+        readOnlyMode: true, tokenExposed: false,
+      };
+    }
+
+    const expectedFields = ["open", "high", "low", "close", "volume", "timestamp"];
+    const fieldAudit: Record<string, any> = {};
+    let presentCount = 0;
+
+    for (const f of expectedFields) {
+      const has = Object.prototype.hasOwnProperty.call(payload, f);
+      const val = payload[f];
+      const isArray = Array.isArray(val);
+      const len = isArray ? val.length : null;
+      const lastValue = isArray && len && len > 0 ? val[len - 1] : (has ? val : null);
+      let provenance: "MISSING" | "PRESENT_EMPTY" | "PRESENT_WITH_DATA";
+      if (!has) provenance = "MISSING";
+      else if (isArray && len === 0) provenance = "PRESENT_EMPTY";
+      else provenance = "PRESENT_WITH_DATA";
+      if (provenance === "PRESENT_WITH_DATA") presentCount++;
+      fieldAudit[f] = { provenance, candleCount: len, sampleLastValue: lastValue };
+    }
+
+    const timestampSample = fieldAudit.timestamp?.sampleLastValue ?? null;
+    let timestampResolution = "UNKNOWN";
+    if (typeof timestampSample === "number") {
+      timestampResolution = timestampSample > 10_000_000_000 ? "EPOCH_MILLISECONDS" : "EPOCH_SECONDS";
+    } else if (typeof timestampSample === "string") {
+      timestampResolution = "STRING_ISO_OR_OTHER";
+    }
+
+    // Sanity check for the SENSEX candidate: SENSEX trades in the tens of
+    // thousands; if "close" is wildly outside that band, this ID is
+    // almost certainly NOT SENSEX.
+    let candidateSanityCheck: string | undefined;
+    if (isUnofficialCandidate) {
+      const closeVal = fieldAudit.close?.sampleLastValue;
+      if (typeof closeVal === "number") {
+        candidateSanityCheck = closeVal > 40000 && closeVal < 150000
+          ? "PLAUSIBLE_RANGE_FOR_SENSEX"
+          : "IMPLAUSIBLE_RANGE — this securityId likely does NOT map to SENSEX, do not trust it";
+      } else {
+        candidateSanityCheck = "NO_NUMERIC_CLOSE_VALUE_TO_CHECK";
+      }
+    }
+
+    const status: DhanAuditStatus =
+      presentCount === expectedFields.length ? "PASS" :
+      presentCount > 0 ? "PARTIAL" : "UNAVAILABLE";
+
+    return {
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol, dataField: "spot_history",
+      status,
+      httpStatus,
+      isUnofficialCandidate,
+      candidateSource: isUnofficialCandidate
+        ? "Third-party community SDK README (NOT Dhan's official docs) — unverified until this probe and Bhagi Sir's explicit confirmation."
+        : undefined,
+      candidateSanityCheck,
+      promotionGate: isUnofficialCandidate
+        ? "DO NOT add to DHAN_UNDERLYING_MAP based on this result alone — requires Bhagi Sir's explicit confirmation after reviewing this output."
+        : undefined,
+      requestedRange: { fromDate: fmt(fromDate), toDate: fmt(toDate) },
+      securityIdTested: mapping.underlyingScrip,
+      exchangeSegment: mapping.underlyingSeg,
+      fieldAudit,
+      timestampResolution,
+      timestampSampleRaw: timestampSample,
+      provenanceRule: "DHAN_NATIVE fields only — nothing derived, nothing assumed.",
+      limitations: [
+        "This is a small (5-day) probe, not proof of 5-year availability — do not infer long-history availability from this result.",
+        "Only spot_history (index OHLC) is checked here. Futures, expired options, live chain and instrument master need separate Step 1 checks.",
+      ],
+      v3StepGate: status === "PASS" ? "SAFE_TO_PROCEED_TO_NEXT_FIELD_CHECK" : "HOLD — resolve this field before continuing V3-D Step 1",
+      readOnlyMode: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    };
+  } catch (err) {
+    return {
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt, symbol, dataField: "spot_history",
+      status: "ERROR" as DhanAuditStatus,
+      isUnofficialCandidate,
+      error: err instanceof Error ? err.message : "Unknown Dhan historical request failure",
+      readOnlyMode: true, tokenExposed: false,
+    };
+  }
+}
+
+app.get("/api/audit/dhan-raw-check", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR" as DhanAuditStatus, error: "Missing or invalid audit key." }, 403);
+  }
+
+  const symbolParam = (c.req.query("symbol") || "NIFTY").toUpperCase();
+
+  if (symbolParam === "SENSEX") {
+    const result = await dhanAuditSpotHistory("SENSEX", DHAN_SENSEX_UNCONFIRMED_CANDIDATE, true);
+    return c.json(result, 200);
+  }
+
+  const mapping = DHAN_UNDERLYING_MAP[symbolParam];
+  if (!mapping) {
+    return c.json({
+      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      generatedAt: new Date().toISOString(),
+      symbol: symbolParam,
+      status: "ERROR" as DhanAuditStatus,
+      error: "Symbol not in DHAN_UNDERLYING_MAP.",
+      supportedSymbols: [...Object.keys(DHAN_UNDERLYING_MAP), "SENSEX"],
+    }, 400);
+  }
+
+  const result = await dhanAuditSpotHistory(symbolParam, mapping, false);
+  return c.json(result, 200);
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

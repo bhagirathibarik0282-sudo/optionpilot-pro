@@ -21200,7 +21200,18 @@ async function dhanScanScripMaster(
       const symName = cols[colIndex["SM_SYMBOL_NAME"]] ?? "";
       const tradingSymbol = cols[colIndex["SEM_TRADING_SYMBOL"]] ?? "";
       if (exch !== exchangeFilter) continue;
-      if (!symName.toUpperCase().includes(symbolParam) && !tradingSymbol.toUpperCase().includes(symbolParam)) continue;
+      // EXACT match only, not substring — "NIFTY" as a substring also
+      // matches BANKNIFTY, FINNIFTY, MIDCPNIFTY, NIFTYNXT50, which is a
+      // confirmed false-positive found via live audit on 2026-08-11. The
+      // trading symbol always has "<SYMBOL>-<expiry>-..." shape, so require
+      // that exact prefix + delimiter rather than a loose substring test.
+      const symNameUp = symName.toUpperCase();
+      const tradingSymbolUp = tradingSymbol.toUpperCase();
+      const symbolMatches =
+        symNameUp === symbolParam ||
+        tradingSymbolUp === symbolParam ||
+        tradingSymbolUp.startsWith(symbolParam + "-");
+      if (!symbolMatches) continue;
 
       const row: DhanCsvRow = {};
       headerCols.forEach((h, i) => { row[h.trim()] = cols[i] ?? ""; });

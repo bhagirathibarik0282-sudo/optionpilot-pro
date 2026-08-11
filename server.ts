@@ -18438,6 +18438,19 @@ export default app;
 const DHAN_UNDERLYING_MAP: Record<string, { underlyingScrip: number; underlyingSeg: string }> = {
   NIFTY: { underlyingScrip: 13, underlyingSeg: "IDX_I" },
   BANKNIFTY: { underlyingScrip: 25, underlyingSeg: "IDX_I" },
+  // SENSEX — added 2026-08-11 via V3-D Step 1 raw-data-availability audit.
+  // securityId=51 originated as an UNOFFICIAL candidate (a third-party
+  // community SDK README, NOT Dhan's official docs) and was live-verified
+  // by /api/audit/dhan-raw-check: Dhan's returned close (78542.44 on
+  // 2026-08-10) matched independent sources (Trading Economics, Yahoo
+  // Finance) to the exact rupee/paisa. Confirmed by Bhagi Sir to enable
+  // D2/D3/D4/D5 diagnostic endpoints for SENSEX. Does NOT affect the M1
+  // production cutover or Recorder cutover — both remain hardcoded to
+  // "NIFTY" | "BANKNIFTY" only (see dhanM1BuildProductionSnapshot,
+  // dhanRecorderSourceMetrics) and are independent of this map, so SENSEX
+  // production scoring stays on Kite, unchanged, per the D6.1.2 fail-closed
+  // design.
+  SENSEX: { underlyingScrip: 51, underlyingSeg: "IDX_I" },
 };
 
 function sleep(ms: number): Promise<void> {

@@ -18344,7 +18344,14 @@ app.get("/api/dhan/health", async (c) => {
     const clientIdMatch = returnedClientId.length > 0 && returnedClientId === configuredClientId;
     const activeSegment = String(payload.activeSegment ?? "");
     const dataPlan = String(payload.dataPlan ?? "");
-    const derivativesActive = /derivative/i.test(activeSegment);
+    // Dhan's /v2/profile returns activeSegment as a comma-separated list of
+    // single-letter codes (e.g. "E, D, C, M, ") — NOT the full word
+    // "derivative". Match "D" as a standalone comma/space-delimited token so
+    // this doesn't false-negative on accounts that genuinely have F&O active.
+    const derivativesActive = activeSegment
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .includes("D");
     const dataPlanActive = /^active$/i.test(dataPlan.trim());
     const authValid = returnedClientId.length > 0;
 

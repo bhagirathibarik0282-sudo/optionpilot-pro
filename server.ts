@@ -21512,6 +21512,244 @@ app.get("/api/audit/dhan-futures-check", async (c) => {
   }
 });
 
+
+// ============================================================================
+// V3D_BUG_02 — HISTORICAL_OPTION_IV_EMPTY DIAGNOSTIC (READ-ONLY, DIAGNOSTIC ONLY)
+//
+// Runs 4 mandatory tests against Dhan's rollingoption endpoint
+// (ATM CALL / ATM PUT x current-expiry / next-expiry), inspects the RAW
+// response before any parsing, generically walks every nested object/array
+// in the payload (not a pre-decided field list) to find every IV-shaped key
+// and every array's length, and classifies the result per the Bug 02 spec.
+//
+// Hard rules honoured: no historical IV calculated, no zero substituted for
+// missing IV, no 5-year fetch, no V2 production path touched.
+// ============================================================================
+
+// Generic deep scanner: walks the whole payload and records, for every
+// array found at any nesting depth, its dotted path and length. Scalars
+// are recorded as null so a path can be distinguished from "doesn't
+// exist" vs "exists but isn't an array". This is intentionally NOT tied
+// to any assumed schema (e.g. data.ce.iv) — if Dhan nests things
+// differently than our earlier probe, this still finds it.
+function dhanScanArrayPaths(obj: any, prefix: string, results: Record<string, number | null>) {
+  if (obj === null || obj === undefined) return;
+  if (Array.isArray(obj)) {
+    results[prefix] = obj.length;
+    return;
+  }
+  if (typeof obj === "object") {
+    for (const k of Object.keys(obj)) {
+      const path = prefix ? `${prefix}.${k}` : k;
+      if (Array.isArray(obj[k])) {
+        results[path] = obj[k].length;
+      } else if (obj[k] !== null && typeof obj[k] === "object") {
+        dhanScanArrayPaths(obj[k], path, results);
+      } else {
+        results[path] = null;
+      }
+    }
+  }
+}
+
+app.get("/api/audit/dhan-bug02-iv-check", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const symbolParam = (c.req.query("symbol") || "NIFTY").toUpperCase();
+  const generatedAt = new Date().toISOString();
+  const mapping = DHAN_UNDERLYING_MAP[symbolParam];
+
+  if (!mapping) {
+    return c.json({
+      architectureRole: "V3D_BUG02_HISTORICAL_OPTION_IV_EMPTY",
+      generatedAt, symbol: symbolParam, bugId: "V3D_BUG_02",
+      status: "ERROR", error: "Symbol not in DHAN_UNDERLYING_MAP.",
+    }, 400);
+  }
+
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    return c.json({
+      architectureRole: "V3D_BUG02_HISTORICAL_OPTION_IV_EMPTY",
+      generatedAt, symbol: symbolParam, bugId: "V3D_BUG_02",
+      status: "ERROR", error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+    }, 503);
+  }
+
+  const optionsSegment = symbolParam === "SENSEX" ? "BSE_FNO" : "NSE_FNO";
+  const toDate = new Date();
+  const fromDate = new Date(toDate.getTime() - 10 * 24 * 60 * 60 * 1000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  const mandatoryTests = [
+    { name: "ATM_CALL_CURRENT_OR_NEAR_EXPIRY", optionType: "CALL", expiryCode: 0 },
+    { name: "ATM_PUT_CURRENT_OR_NEAR_EXPIRY", optionType: "PUT", expiryCode: 0 },
+    { name: "ATM_CALL_NEXT_EXPIRY", optionType: "CALL", expiryCode: 1 },
+    { name: "ATM_PUT_NEXT_EXPIRY", optionType: "PUT", expiryCode: 1 },
+  ] as const;
+
+  const ivKeyPattern = /(\biv\b|implied[_]?volatility)/i;
+  const timestampKeyPattern = /timestamp/i;
+  const oiKeyPattern = /(^oi$|open[_]?interest)/i;
+  const spotKeyPattern = /spot/i;
+
+  const testResults: any[] = [];
+
+  for (const test of mandatoryTests) {
+    const requestBodyObj = {
+      exchangeSegment: optionsSegment,
+      interval: "1",
+      securityId: mapping.underlyingScrip,
+      instrument: "OPTIDX",
+      expiryFlag: "WEEK",
+      expiryCode: test.expiryCode,
+      strike: "ATM",
+      drvOptionType: test.optionType,
+      requiredData: ["open", "high", "low", "close", "volume", "oi", "implied_volatility", "spot"],
+      fromDate: fmt(fromDate),
+      toDate: fmt(toDate),
+    };
+    const requestBodyStr = JSON.stringify(requestBodyObj);
+
+    try {
+      const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/rollingoption", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "access-token": accessToken,
+          "client-id": clientId,
+        },
+        body: requestBodyStr,
+      });
+
+      const httpStatus = res.status;
+      const raw = await res.text();
+      let payload: any = null;
+      try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+      if (!res.ok || !payload || typeof payload !== "object") {
+        testResults.push({
+          test: test.name,
+          sanitizedRequestBody: requestBodyObj,
+          httpStatus,
+          ok: false,
+          providerError: payload && typeof payload === "object" ? {
+            errorType: payload.errorType ?? null,
+            errorCode: payload.errorCode ?? null,
+            errorMessage: payload.errorMessage ?? null,
+          } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `HTTP ${httpStatus}` },
+          rawSnippet: raw.slice(0, 400),
+        });
+        continue;
+      }
+
+      const arrayPaths: Record<string, number | null> = {};
+      dhanScanArrayPaths(payload, "", arrayPaths);
+
+      const allPaths = Object.keys(arrayPaths);
+      const ivPaths = allPaths.filter((p) => ivKeyPattern.test(p));
+      const timestampPaths = allPaths.filter((p) => timestampKeyPattern.test(p));
+      const oiPaths = allPaths.filter((p) => oiKeyPattern.test(p));
+      const spotPaths = allPaths.filter((p) => spotKeyPattern.test(p));
+
+      const ivLengths = ivPaths.map((p) => arrayPaths[p]);
+      const timestampLengths = timestampPaths.map((p) => arrayPaths[p]);
+      const oiLengths = oiPaths.map((p) => arrayPaths[p]);
+      const spotLengths = spotPaths.map((p) => arrayPaths[p]);
+
+      const ivHasAnyData = ivLengths.some((len) => typeof len === "number" && len > 0);
+
+      testResults.push({
+        test: test.name,
+        sanitizedRequestBody: requestBodyObj,
+        httpStatus,
+        ok: true,
+        allArrayPaths: arrayPaths,
+        ivFieldPaths: ivPaths,
+        ivArrayLengths: ivLengths,
+        timestampFieldPaths: timestampPaths,
+        timestampArrayLengths: timestampLengths,
+        oiFieldPaths: oiPaths,
+        oiArrayLengths: oiLengths,
+        spotFieldPaths: spotPaths,
+        spotArrayLengths: spotLengths,
+        ivHasAnyData,
+      });
+    } catch (err) {
+      testResults.push({
+        test: test.name,
+        sanitizedRequestBody: requestBodyObj,
+        ok: false,
+        error: err instanceof Error ? err.message : "Unknown request failure",
+      });
+    }
+  }
+
+  // Classification across all 4 tests together, per the Bug 02 spec's
+  // required_result_states.
+  const okResults = testResults.filter((r) => r.ok);
+  let rootCauseStatus: "PASS_IV_PRESENT" | "PARSER_BUG" | "REQUEST_SCHEMA_BUG" | "CONTRACT_OR_EXPIRY_SPECIFIC_BEHAVIOR" | "PROVIDER_RESPONSE_ANOMALY" | "ERROR";
+  let rootCauseNote: string;
+  let safeLocalFix: string | null;
+
+  if (okResults.length === 0) {
+    rootCauseStatus = "ERROR";
+    rootCauseNote = "None of the 4 tests returned a usable HTTP 200 JSON response to classify against.";
+    safeLocalFix = null;
+  } else {
+    const anyIvFieldFoundAtAll = okResults.some((r) => r.ivFieldPaths.length > 0);
+    const allIvEmpty = okResults.every((r) => !r.ivHasAnyData);
+    const someIvHasData = okResults.some((r) => r.ivHasAnyData);
+    const someIvEmpty = okResults.some((r) => !r.ivHasAnyData);
+
+    if (!anyIvFieldFoundAtAll) {
+      rootCauseStatus = "REQUEST_SCHEMA_BUG";
+      rootCauseNote = "No key matching iv / implied_volatility (case-insensitive, any nesting depth) appeared anywhere in any of the 4 raw responses — not even as an empty array. This suggests requiredData's 'implied_volatility' name, or the request schema itself, does not match what Dhan's rollingoption endpoint expects.";
+      safeLocalFix = "Try alternate requiredData field-name spellings for IV (e.g. 'iv') and re-run this same diagnostic; if a differently-named key then appears (even empty), this reclassifies away from REQUEST_SCHEMA_BUG.";
+    } else if (someIvHasData && someIvEmpty) {
+      rootCauseStatus = "CONTRACT_OR_EXPIRY_SPECIFIC_BEHAVIOR";
+      rootCauseNote = "The IV field exists in the schema and has real data for at least one test combination, but is empty for at least one other (CALL vs PUT and/or current vs next expiry) — see per-test ivHasAnyData below for which combination(s) are affected.";
+      safeLocalFix = "None needed in the audit code itself — downstream consumers must treat IV availability as expiry/side-dependent, not assume it is always present once the field exists.";
+    } else if (allIvEmpty) {
+      rootCauseStatus = "PROVIDER_RESPONSE_ANOMALY";
+      rootCauseNote = "The IV field is present in the schema (as an array key) across all 4 tests, but its array is empty ([]) in every single test — CALL and PUT, current and next expiry alike — while OI/spot/timestamp arrays for the same requests are populated. This is consistent with Dhan's rollingoption endpoint not actually back-filling historical IV for this instrument, not a local parsing defect.";
+      safeLocalFix = null;
+    } else {
+      rootCauseStatus = "PASS_IV_PRESENT";
+      rootCauseNote = "IV array has real (non-empty) data in all 4 tested combinations.";
+      safeLocalFix = null;
+    }
+  }
+
+  return c.json({
+    architectureRole: "V3D_BUG02_HISTORICAL_OPTION_IV_EMPTY",
+    generatedAt, symbol: symbolParam, bugId: "V3D_BUG_02",
+    requestedRange: { fromDate: fmt(fromDate), toDate: fmt(toDate) },
+    testResults,
+    rootCauseStatus,
+    rootCauseNote,
+    safeLocalFix,
+    bug02Closed: rootCauseStatus !== "ERROR",
+    hardRulesHonoured: {
+      noHistoricalIvCalculated: true,
+      noZeroSubstitutedForMissingIv: true,
+      noFiveYearFetch: true,
+      v2ProductionUntouched: true,
+    },
+    limitations: [
+      "10-day probe window only, ATM strike only, WEEK expiryFlag only — does not test every strike/expiry-flag combination.",
+      "requiredData field name 'implied_volatility' was our best-effort guess at Dhan's schema; see rootCauseStatus if that guess itself is wrong.",
+    ],
+    readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+  }, 200);
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

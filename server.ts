@@ -16282,11 +16282,29 @@ function buildV2DiagnosticWatchdogSnapshot(): V2WatchdogSnapshot {
     .filter((r) => r.status === "RETRYING" || r.status === "MANUAL_ACTION_REQUIRED")
     .map((r) => ({ moduleName: r.moduleName, status: r.status, reason: r.reason, attempt: r.attempt, maxAttempts: r.maxAttempts }));
   if (activeRecovery.length) {
+    // H9.2 severity inheritance: a recovery/manual-action record is a response
+    // to an underlying module state, not an independent reason to escalate the
+    // whole platform. In particular, a DEGRADED Google Drive connection must
+    // remain a WARNING instead of becoming CRITICAL merely because reconnecting
+    // credentials requires manual action. Only an underlying module that is
+    // actually DOWN during a live session can make the Recovery issue CRITICAL.
+    const recoveryCriticalModules = activeRecovery
+      .map((r) => ({ recovery: r, health: health.modules.find((m) => m.moduleName === r.moduleName) || null }))
+      .filter((x) => marketOpen && x.health?.status === "DOWN");
+    const recoverySeverity: V2WatchdogSeverity = recoveryCriticalModules.length > 0 ? "CRITICAL" : "WARNING";
+
     issues.push({
       code: "ACTIVE_RECOVERY_OR_MANUAL_ACTION",
-      severity: activeRecovery.some((r) => r.status === "MANUAL_ACTION_REQUIRED") ? "CRITICAL" : "WARNING",
+      severity: recoverySeverity,
       component: "Recovery Engine",
-      evidence: { activeRecovery },
+      evidence: {
+        activeRecovery,
+        inheritedFrom: activeRecovery.map((r) => ({
+          moduleName: r.moduleName,
+          moduleHealth: health.modules.find((m) => m.moduleName === r.moduleName)?.status || "UNKNOWN",
+        })),
+        marketPhase,
+      },
       safeNextAction: "Follow the registered recovery/manual reconnect action. The AI watchdog must not bypass credential or provider security boundaries.",
       autoFixAllowed: false,
     });

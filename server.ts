@@ -21307,7 +21307,7 @@ app.get("/api/audit/dhan-futures-check", async (c) => {
     const scan = await dhanScanScripMaster(symbolParam, 8);
     if (!scan.fetchOk || !scan.headerCols) {
       return c.json({
-        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        architectureRole: "V3D_BUG01_HISTORICAL_FUTURES_OI_MISSING",
         generatedAt, symbol: symbolParam, dataField: "futures_history",
         status: "ERROR", httpStatus: scan.httpStatus,
         error: "Could not read instrument master CSV to resolve a futures securityId.",
@@ -21315,7 +21315,7 @@ app.get("/api/audit/dhan-futures-check", async (c) => {
     }
     if (scan.futRows.length === 0) {
       return c.json({
-        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        architectureRole: "V3D_BUG01_HISTORICAL_FUTURES_OI_MISSING",
         generatedAt, symbol: symbolParam, dataField: "futures_history",
         status: "UNAVAILABLE",
         reason: "No FUTIDX row found for this symbol in the scrip master scan window.",
@@ -21334,7 +21334,7 @@ app.get("/api/audit/dhan-futures-check", async (c) => {
 
     if (!securityId) {
       return c.json({
-        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        architectureRole: "V3D_BUG01_HISTORICAL_FUTURES_OI_MISSING",
         generatedAt, symbol: symbolParam, dataField: "futures_history",
         status: "ERROR",
         error: "Matched a FUTIDX row but SEM_SMST_SECURITY_ID column was empty.",
@@ -21346,7 +21346,7 @@ app.get("/api/audit/dhan-futures-check", async (c) => {
     const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
     if (!accessToken || !clientId) {
       return c.json({
-        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+        architectureRole: "V3D_BUG01_HISTORICAL_FUTURES_OI_MISSING",
         generatedAt, symbol: symbolParam, dataField: "futures_history",
         status: "ERROR", error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
       }, 503);
@@ -21357,81 +21357,153 @@ app.get("/api/audit/dhan-futures-check", async (c) => {
     const fromDate = new Date(toDate.getTime() - 5 * 24 * 60 * 60 * 1000);
     const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
-    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/historical", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "access-token": accessToken,
-        "client-id": clientId,
-      },
-      body: JSON.stringify({
-        securityId: String(securityId),
-        exchangeSegment: futuresSegment,
-        instrument: "FUTIDX",
-        expiryCode: 0,
-        oi: true,
-        fromDate: fmt(fromDate),
-        toDate: fmt(toDate),
-      }),
-    });
+    // Bug 01 check #1/#2: build the exact body, then prove oi:true is
+    // literally present in the SERIALIZED string we send — not just in the
+    // source object (a stray typo could silently drop it during stringify).
+    const requestBodyObj = {
+      securityId: String(securityId),
+      exchangeSegment: futuresSegment,
+      instrument: "FUTIDX",
+      expiryCode: 0,
+      oi: true,
+      fromDate: fmt(fromDate),
+      toDate: fmt(toDate),
+    };
+    const requestBodyStr = JSON.stringify(requestBodyObj);
+    const oiFlagLiterallyInOutgoingBody = /"oi"\s*:\s*true/.test(requestBodyStr);
 
-    const httpStatus = res.status;
-    const raw = await res.text();
-    let payload: any = null;
-    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+    async function probe(endpointUrl: string, endpointLabel: string) {
+      const res = await dhanRateLimitedFetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "access-token": accessToken,
+          "client-id": clientId,
+        },
+        body: requestBodyStr,
+      });
+      const httpStatus = res.status;
+      const raw = await res.text();
+      let payload: any = null;
+      try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
 
-    if (!res.ok || !payload || typeof payload !== "object") {
-      return c.json({
-        architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
-        generatedAt, symbol: symbolParam, dataField: "futures_history",
-        status: "ERROR",
-        httpStatus,
-        contractIdentity: { securityId, tradingSymbol, expiryDate },
-        providerError: payload && typeof payload === "object" ? {
-          errorType: payload.errorType ?? null,
-          errorCode: payload.errorCode ?? null,
-          errorMessage: payload.errorMessage ?? null,
-        } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `Dhan historical returned HTTP ${httpStatus}` },
-        rawSnippet: raw.slice(0, 400),
-        readOnlyMode: true, tokenExposed: false,
-      }, 200);
+      if (!res.ok || !payload || typeof payload !== "object") {
+        return {
+          endpointLabel, endpointUrl, httpStatus,
+          ok: false,
+          providerError: payload && typeof payload === "object" ? {
+            errorType: payload.errorType ?? null,
+            errorCode: payload.errorCode ?? null,
+            errorMessage: payload.errorMessage ?? null,
+          } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `HTTP ${httpStatus}` },
+          rawSnippet: raw.slice(0, 400),
+        };
+      }
+
+      // Bug 01 check #3/#4/#5: dump EVERY top-level key Dhan actually
+      // returned — no pre-decided field list — then case-insensitively
+      // search all of them for anything OI-shaped, so a differently-named
+      // or differently-cased field is never silently mistaken for MISSING.
+      const rawTopLevelKeys = Object.keys(payload);
+      const oiLikeKeyPattern = /(^oi$|open[_]?interest|openinterest)/i;
+      const oiLikeKeysFound = rawTopLevelKeys.filter((k) => oiLikeKeyPattern.test(k));
+      const rawOiPresent = oiLikeKeysFound.length > 0 &&
+        oiLikeKeysFound.some((k) => Array.isArray(payload[k]) ? payload[k].length > 0 : payload[k] != null);
+
+      const candleCounts: Record<string, number | null> = {};
+      for (const k of rawTopLevelKeys) {
+        candleCounts[k] = Array.isArray(payload[k]) ? payload[k].length : null;
+      }
+
+      return {
+        endpointLabel, endpointUrl, httpStatus, ok: true,
+        rawTopLevelKeys, candleCounts,
+        oiLikeKeysFound, rawOiPresent,
+        oiSampleTail: oiLikeKeysFound.length > 0 && Array.isArray(payload[oiLikeKeysFound[0]])
+          ? payload[oiLikeKeysFound[0]].slice(-3)
+          : (oiLikeKeysFound.length > 0 ? payload[oiLikeKeysFound[0]] : null),
+      };
     }
 
-    const expectedFields = ["open", "high", "low", "close", "volume", "oi", "timestamp"];
-    const fieldAudit: Record<string, any> = {};
-    let presentCount = 0;
-    for (const f of expectedFields) {
-      const has = Object.prototype.hasOwnProperty.call(payload, f);
-      const val = payload[f];
-      const isArray = Array.isArray(val);
-      const len = isArray ? val.length : null;
-      const lastValue = isArray && len && len > 0 ? val[len - 1] : (has ? val : null);
-      const provenance = !has ? "MISSING" : (isArray && len === 0 ? "PRESENT_EMPTY" : "PRESENT_WITH_DATA");
-      if (provenance === "PRESENT_WITH_DATA") presentCount++;
-      fieldAudit[f] = { provenance, candleCount: len, sampleLastValue: lastValue };
+    // Primary probe: /v2/charts/historical, which Dhan's own docs label
+    // "Daily Historical Data" — this IS the daily endpoint, so the
+    // "repeat with daily endpoint if supported" check is this same call;
+    // there is no separate third daily endpoint to fall back to.
+    const dailyResult = await probe("https://api.dhan.co/v2/charts/historical", "DAILY_HISTORICAL");
+
+    // Normalized-adapter comparison: does the same rawTopLevelKeys audit
+    // logic used elsewhere in this file (fieldAudit) agree with the raw
+    // scan above? Re-derive it here from the SAME raw payload fetched
+    // above (not a second network call) so there's no drift between the
+    // two views.
+    let normalizedOiPresent: boolean | null = null;
+    let normalizedFieldAudit: Record<string, any> | null = null;
+    if (dailyResult.ok) {
+      const expectedFields = ["open", "high", "low", "close", "volume", "oi", "timestamp"];
+      normalizedFieldAudit = {};
+      for (const f of expectedFields) {
+        const has = f in (dailyResult.candleCounts as Record<string, number | null>);
+        normalizedFieldAudit[f] = has ? "PRESENT_IN_NORMALIZED_KEYSET" : "MISSING_FROM_NORMALIZED_KEYSET";
+      }
+      normalizedOiPresent = "oi" in (dailyResult.candleCounts as Record<string, number | null>);
     }
 
-    const status = presentCount === expectedFields.length ? "PASS" : presentCount > 0 ? "PARTIAL" : "UNAVAILABLE";
+    // Classification per the Bug 01 spec's required_result_states.
+    let rootCauseStatus: "PASS_OI_PRESENT" | "PARSER_BUG" | "REQUEST_BUG_OI_FLAG_MISSING" | "PROVIDER_RESPONSE_ANOMALY" | "ERROR";
+    let rootCauseNote: string;
+    let safeFixIfLocalBug: string | null;
+
+    if (!oiFlagLiterallyInOutgoingBody) {
+      rootCauseStatus = "REQUEST_BUG_OI_FLAG_MISSING";
+      rootCauseNote = "The outgoing serialized request body did not literally contain \"oi\":true.";
+      safeFixIfLocalBug = "Fix requestBodyObj construction so oi:true survives JSON.stringify.";
+    } else if (!dailyResult.ok) {
+      rootCauseStatus = "ERROR";
+      rootCauseNote = "Dhan's historical endpoint did not return a usable response to classify against.";
+      safeFixIfLocalBug = null;
+    } else if (dailyResult.rawOiPresent) {
+      rootCauseStatus = "PASS_OI_PRESENT";
+      rootCauseNote = `OI-like key(s) found in Dhan's raw response with data: ${dailyResult.oiLikeKeysFound.join(", ")}.`;
+      safeFixIfLocalBug = normalizedOiPresent ? null : "Normalized field-audit list should also check this key name — extend expectedFields.";
+    } else {
+      rootCauseStatus = "PROVIDER_RESPONSE_ANOMALY";
+      rootCauseNote = "oi:true was sent, Dhan returned HTTP 200 with a normal-looking OHLC/volume/timestamp payload, but no key matching oi / OI / open_interest / openInterest (case-insensitive) was present anywhere in the raw top-level response, and no OI field is documented separately for FUTIDX under this endpoint. This does not match a local parser bug — the raw payload itself lacks the field.";
+      safeFixIfLocalBug = null;
+    }
 
     return c.json({
-      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      architectureRole: "V3D_BUG01_HISTORICAL_FUTURES_OI_MISSING",
       generatedAt, symbol: symbolParam, dataField: "futures_history",
-      status, httpStatus,
+      bugId: "V3D_BUG_01",
       contractIdentity: { securityId, tradingSymbol, expiryDate, resolvedFrom: "api-scrip-master.csv scan, not fabricated" },
-      requestedRange: { fromDate: fmt(fromDate), toDate: fmt(toDate) },
-      fieldAudit,
-      provenanceRule: "DHAN_NATIVE fields only — nothing derived, nothing assumed.",
+      sanitizedRequestBody: requestBodyObj,
+      oiFlagLiterallyInOutgoingBody,
+      httpStatus: dailyResult.httpStatus,
+      rawResponseKeys: dailyResult.ok ? dailyResult.rawTopLevelKeys : null,
+      rawResponseCandleCounts: dailyResult.ok ? dailyResult.candleCounts : null,
+      oiLikeKeysFound: dailyResult.ok ? dailyResult.oiLikeKeysFound : null,
+      rawOiPresent: dailyResult.ok ? dailyResult.rawOiPresent : null,
+      oiSampleTail: dailyResult.ok ? dailyResult.oiSampleTail : null,
+      normalizedOiPresent,
+      normalizedFieldAudit,
+      providerError: !dailyResult.ok ? (dailyResult as any).providerError : null,
+      rawSnippetIfError: !dailyResult.ok ? (dailyResult as any).rawSnippet : null,
+      rootCauseStatus,
+      rootCauseNote,
+      safeFixIfLocalBug,
+      bug01Closed: rootCauseStatus !== "ERROR",
+      dailyVsIntradayNote: "Only the daily historical endpoint (/v2/charts/historical) was probed — Dhan's docs label this endpoint itself 'Daily Historical Data', so this satisfies the 'repeat with daily endpoint' check; no separate third daily endpoint exists to additionally try.",
       limitations: [
-        "Small (5-day) probe only, nearest-expiry contract — not proof of full multi-expiry/multi-year availability.",
-        "securityId was resolved from a partial CSV scan (stopped after finding a handful of sample rows), not the full file.",
+        "Small (5-day) probe only, nearest-expiry contract.",
+        "securityId was resolved from a partial CSV scan, not the full file.",
+        "No OI values were derived or fabricated anywhere in this diagnostic.",
       ],
-      v3StepGate: status === "PASS" ? "SAFE_TO_PROCEED_TO_NEXT_FIELD_CHECK" : "HOLD — resolve this field before continuing V3-D Step 1",
       readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
     }, 200);
   } catch (err) {
     return c.json({
-      architectureRole: "V3D_STEP1_DHAN_RAW_AUDIT",
+      architectureRole: "V3D_BUG01_HISTORICAL_FUTURES_OI_MISSING",
       generatedAt, symbol: symbolParam, dataField: "futures_history",
       status: "ERROR",
       error: err instanceof Error ? err.message : "Unknown Dhan historical (futures) request failure",

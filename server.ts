@@ -7309,7 +7309,7 @@ app.get("/", (c) => {
     // silently reported as OK, and never confused with a signal that has
     // no computation anywhere yet (fib_pivot).
 
-    const STALE_THRESHOLD_MS_HAIKU = 5 * 60 * 1000; // widened 2026-08-11 (user-approved, re-applied after being reverted by an uploaded file replacement): was 3 min, exactly equal to the 3-min auto-refresh interval, so data was routinely flagged stale by just 1-2 seconds right before each refresh landed (observed live: age 181s vs a 180s threshold). 5 min gives real margin above the refresh cadence while still catching genuinely stale data. Distinct from the platform's general 6-min staleness convention used elsewhere.
+    const STALE_THRESHOLD_MS_HAIKU = 3 * 60 * 1000; // per document Override Rule 7 (3 min), distinct from the platform's general 6-min staleness convention used elsewhere
 
     const HAIKU_SIGNAL_CATALOG = [
       { id: 'futures_vwap', existsElsewhere: null },
@@ -18265,6 +18265,136 @@ app.get("/api/kite/status", (c) => {
       connected: false,
       user: null,
     });
+  }
+});
+
+
+// ============================================================================
+// DHAN MIGRATION — D1 AUTHENTICATION HEALTH (READ-ONLY)
+// Purpose: verify Railway-held Dhan credentials and Data API entitlement
+// without exposing secrets or enabling any trading/order action.
+// Official test endpoint: GET https://api.dhan.co/v2/profile
+// ============================================================================
+
+type DhanAuthHealthStatus = "PASS" | "FAIL" | "NOT_CONFIGURED";
+
+app.get("/api/dhan/health", async (c) => {
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const configuredClientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+
+  if (!accessToken || !configuredClientId) {
+    return c.json({
+      architectureRole: "D1_DHAN_AUTHENTICATION_HEALTH",
+      generatedAt: new Date().toISOString(),
+      status: "NOT_CONFIGURED" as DhanAuthHealthStatus,
+      configured: {
+        clientId: !!configuredClientId,
+        accessToken: !!accessToken,
+      },
+      readOnlyMode: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+      error: "DHAN_CLIENT_ID and/or DHAN_ACCESS_TOKEN is not configured in Railway Variables.",
+    }, 503);
+  }
+
+  try {
+    const response = await fetch("https://api.dhan.co/v2/profile", {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "access-token": accessToken,
+      },
+    });
+
+    const raw = await response.text();
+    let payload: any = null;
+    try {
+      payload = raw ? JSON.parse(raw) : null;
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok || !payload || typeof payload !== "object") {
+      return c.json({
+        architectureRole: "D1_DHAN_AUTHENTICATION_HEALTH",
+        generatedAt: new Date().toISOString(),
+        status: "FAIL" as DhanAuthHealthStatus,
+        httpStatus: response.status,
+        authValid: false,
+        clientIdMatch: null,
+        dataPlanActive: false,
+        derivativesActive: false,
+        readOnlyMode: true,
+        orderAccessUsed: false,
+        tokenExposed: false,
+        providerError: payload && typeof payload === "object" ? {
+          errorType: payload.errorType ?? null,
+          errorCode: payload.errorCode ?? null,
+          errorMessage: payload.errorMessage ?? null,
+        } : {
+          errorType: "NON_JSON_RESPONSE",
+          errorCode: null,
+          errorMessage: `Dhan profile returned HTTP ${response.status}`,
+        },
+      }, response.status >= 400 && response.status < 600 ? response.status as any : 502);
+    }
+
+    const returnedClientId = String(payload.dhanClientId ?? "").trim();
+    const clientIdMatch = returnedClientId.length > 0 && returnedClientId === configuredClientId;
+    const activeSegment = String(payload.activeSegment ?? "");
+    const dataPlan = String(payload.dataPlan ?? "");
+    const derivativesActive = /derivative/i.test(activeSegment);
+    const dataPlanActive = /^active$/i.test(dataPlan.trim());
+    const authValid = returnedClientId.length > 0;
+
+    const status: DhanAuthHealthStatus = authValid && clientIdMatch ? "PASS" : "FAIL";
+
+    return c.json({
+      architectureRole: "D1_DHAN_AUTHENTICATION_HEALTH",
+      generatedAt: new Date().toISOString(),
+      status,
+      authValid,
+      clientIdMatch,
+      dhanClientIdMasked: returnedClientId
+        ? `${returnedClientId.slice(0, 3)}***${returnedClientId.slice(-2)}`
+        : null,
+      tokenValidity: payload.tokenValidity ?? null,
+      activeSegment: payload.activeSegment ?? null,
+      derivativesActive,
+      dataPlan: payload.dataPlan ?? null,
+      dataPlanActive,
+      dataValidity: payload.dataValidity ?? null,
+      ddpi: payload.ddpi ?? null,
+      mtf: payload.mtf ?? null,
+      migrationReadiness: authValid && clientIdMatch && dataPlanActive && derivativesActive
+        ? "READY_FOR_D2_SECURITY_ID_MAPPING"
+        : "HOLD_AND_FIX_D1_REQUIREMENTS",
+      readOnlyMode: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+      boundaries: {
+        marketDataMigrationOnly: true,
+        orderPlacement: false,
+        orderModification: false,
+        orderCancellation: false,
+      },
+    }, status === "PASS" ? 200 : 409);
+  } catch (err) {
+    console.error("[DHAN D1] profile health check failed:", err instanceof Error ? err.message : err);
+    return c.json({
+      architectureRole: "D1_DHAN_AUTHENTICATION_HEALTH",
+      generatedAt: new Date().toISOString(),
+      status: "FAIL" as DhanAuthHealthStatus,
+      authValid: false,
+      clientIdMatch: null,
+      dataPlanActive: false,
+      derivativesActive: false,
+      readOnlyMode: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+      error: err instanceof Error ? err.message : "Unknown Dhan profile request failure",
+    }, 502);
   }
 });
 

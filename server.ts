@@ -5635,6 +5635,7 @@ app.get("/", (c) => {
       <button class="tab-btn" onclick="switchTab('RESEARCH')">🔍 Research</button>
       <button class="tab-btn" onclick="switchTab('SYSTEM')">⚙️ System</button>
       <button class="tab-btn" onclick="switchTab('HOLIDAYS')">📅 Holidays</button>
+      <button class="tab-btn" onclick="switchTab('TRADELAB')">🧪 Trade Lab</button>
     </div>
 
     <div id="NIFTY" class="tab-content"></div>
@@ -5650,6 +5651,9 @@ app.get("/", (c) => {
     <div id="RESEARCH" class="tab-content"></div>
     <div id="SYSTEM" class="tab-content"></div>
     <div id="HOLIDAYS" class="tab-content"></div>
+    <div id="TRADELAB" class="tab-content">
+      <div style="padding:20px;color:#8892a0;text-align:center;">🧪 Trade Lab — coming soon (read-only, Dhan-only decision support)</div>
+    </div>
 
     <div class="timestamp" id="dataTimestamp"></div>
   </div>

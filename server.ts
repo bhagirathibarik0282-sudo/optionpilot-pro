@@ -23298,6 +23298,8 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
       return c.json({ ...report, status: "FAIL", error: "Option (rollingoption) fetch failed.", dhanHttpStatus: optRes.status, safeToStartL4: false }, 200);
     }
     const optSeries = parseDhanSeries(optPayload);
+    const _debugOptPayloadKeys = optPayload && typeof optPayload === "object" ? Object.keys(optPayload) : [];
+    const _debugOptPayloadSample = JSON.stringify(optPayload).slice(0, 800);
     const optionExpiryIso = nearestFut["SEM_EXPIRY_DATE"] ? new Date(nearestFut["SEM_EXPIRY_DATE"]).toISOString() : null;
 
     const inputRows = spotSeries.rowCount;
@@ -23308,6 +23310,8 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
       spotCount: spotSeries.rowCount,
       futCount: futSeries.rowCount,
       optCount: optSeries.rowCount,
+      optPayloadKeys: _debugOptPayloadKeys,
+      optPayloadSample: _debugOptPayloadSample,
     };
 
     // --- L1: write immutable raw payloads for all three sources (content-hash names) ---

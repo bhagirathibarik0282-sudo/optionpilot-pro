@@ -8974,15 +8974,20 @@ app.get("/", (c) => {
       html += tlCard('3. Evidence Readiness (M11)', m11Html);
 
       let m1to9Html = '';
+      const dhanBackedModules = ['M1_PREMIUM_COMPOSITION', 'M6_PREMIUM_ATTRIBUTION', 'M7_OI_POSITIONING'];
       evidenceRows.filter((r) => r.module && ['M10', 'M2_IV_SKEW', 'M3_IV_TERM_STRUCTURE', 'M8_ROLLOVER_MIGRATION', 'M9_MULTI_EXPIRY_ALIGNMENT'].every((skip) => r.module.indexOf(skip) === -1)).forEach((r) => {
         const stateText = Array.isArray(r.state) ? r.state.join(', ') : String(r.state);
+        const isDhanBacked = dhanBackedModules.indexOf(r.module) !== -1;
+        const rowSource = isDhanBacked ? (d.m1m6m7Provenance === 'DHAN' ? 'DERIVED_FROM_DHAN' : 'KITE') : 'KITE';
+        const rowSourceColor = rowSource === 'DERIVED_FROM_DHAN' ? 'var(--green)' : 'var(--muted)';
         m1to9Html += '<div style="padding:5px 0; border-bottom:1px solid var(--border);">';
         m1to9Html += '<div style="display:flex; justify-content:space-between;"><span style="color:var(--text); font-size:0.7rem;">' + escapeHtml(r.module || '') + '</span><span style="color:' + tlQualityColor(r.dataQuality) + '; font-size:0.65rem;">' + escapeHtml(r.dataQuality || '') + '</span></div>';
         m1to9Html += '<div style="color:var(--muted); font-size:0.65rem;">' + escapeHtml(stateText) + '</div>';
+        m1to9Html += '<div style="color:' + rowSourceColor + '; font-size:0.58rem; margin-top:2px;">Source: ' + escapeHtml(rowSource) + '</div>';
         m1to9Html += '</div>';
       });
-      m1to9Html += '<div style="color:var(--muted-dim); font-size:0.6rem; margin-top:4px;">M2/M3/M8/M9 have their own DHAN-sourced cards below (sections 6, 7, 8b, 8c) \u2014 not duplicated here.</div>';
-      html += tlCard('4. M1, M4-M7 Compact Evidence (Kite)', m1to9Html || '<div style="color:var(--muted); font-size:0.7rem;">No evidence rows available.</div>');
+      m1to9Html += '<div style="color:var(--muted-dim); font-size:0.6rem; margin-top:4px;">M1/M6/M7 source = DERIVED_FROM_DHAN for NIFTY/BANKNIFTY (existing D6.1 production router), KITE for SENSEX. M4/M5 remain KITE. M2/M3/M8/M9 have their own DHAN cards below (sections 6, 7, 8b, 8c) \u2014 not duplicated here.</div>';
+      html += tlCard('4. M1, M4-M7 Compact Evidence', m1to9Html || '<div style="color:var(--muted); font-size:0.7rem;">No evidence rows available.</div>');
 
       const vixRow = evidenceRows.find((r) => r.module === 'M4_VIX_REGIME_CONTEXT');
       let vixHtml = '';
@@ -27891,6 +27896,16 @@ app.get("/api/tradelab", async (c) => {
   const m11 = await buildV2EvidenceFusion(symbol, session, 20);
   const m12 = await buildV2CandidateSelection(symbol, session, 20);
 
+  // Phase 2A (2026-08-13): honest M1/M6/M7 provenance for the UI. This is a
+  // metadata-only read — buildV2PremiumCompositionHistory is the SAME
+  // production router M1/M6/M7 already call internally (via M11 above). No
+  // new fetch, no new Dhan history buffer, no duplicate engine — this just
+  // reads the `provider` field the existing Dhan cutover (D6.1) already
+  // attaches for NIFTY/BANKNIFTY, so TradeLab can stop mislabeling
+  // Dhan-backed M1/M6/M7 data as Kite.
+  const m1Direct = buildV2PremiumCompositionHistory(symbol, 20);
+  const m1m6m7Provenance = (m1Direct as any).provider === "DHAN" ? "DHAN" : "KITE";
+
   // D4 Dhan normalized Greeks/IV — internal self-fetch to the EXISTING
   // route so its logic is reused verbatim, not duplicated.
   let d4: any = { status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
@@ -27949,7 +27964,8 @@ app.get("/api/tradelab", async (c) => {
     m3IvTermStructureDhan: m3Dhan,
     m8RolloverMigrationDhan: m8Dhan,
     m9MultiExpiryAlignmentDhan: m9Dhan,
-    note: "M2/M3/M8/M9 are now DHAN ONLY (see the *Dhan fields). M1/M4/M5/M6/M7/M10/M11/M12 unchanged, still Kite-based via m11EvidenceFusion/m10MarketRegime/m12CandidateSet. The endpoint itself still requires a Kite session (see getSession gate above) because M10/M11/M12 still need it — this is a known, not-yet-migrated dependency, tracked separately.",
+    m1m6m7Provenance,
+    note: "M2/M3/M8/M9 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M4/M5/M10/M11/M12 unchanged, still Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M10/M11/M12 still need it — known, not-yet-migrated, tracked separately.",
   });
 });
 

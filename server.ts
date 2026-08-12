@@ -27078,6 +27078,61 @@ app.get("/api/audit/v3d-deduplicate-option-grid-proof", async (c) => {
   }
 });
 
+// ============================================================================
+// TRADE LAB — read-only aggregator (Phase B, 2026-08-12)
+// Combines EXISTING outputs only: M10 (regime), M11 (evidence fusion),
+// M12 (candidate set) via direct function reuse, and Dhan D4 normalized
+// Greeks via an internal self-fetch to the existing /api/dhan/normalized
+// route (zero changes to that route). Does NOT create any new scoring,
+// does NOT call any new Dhan endpoint, does NOT touch production verdict.
+// Greek Engine / Entry Quality layers are intentionally NOT wired yet —
+// this step only proves the read-only data plumbing end-to-end.
+// ============================================================================
+app.get("/api/tradelab", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const symbol = rawSymbol as V2PremiumSymbol;
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+
+  const dhanConfigured = !!(process.env.DHAN_ACCESS_TOKEN?.trim() && process.env.DHAN_CLIENT_ID?.trim());
+
+  // Fetch existing M10/M11/M12 outputs directly (same functions the
+  // existing dashboard tabs already use — no duplicate logic).
+  const m = session.marketSnapshot?.[symbol];
+  const m10 = buildV2MarketBehaviourRegime(symbol, session, m);
+  const m11 = await buildV2EvidenceFusion(symbol, session, 20);
+  const m12 = await buildV2CandidateSelection(symbol, session, 20);
+
+  // D4 Dhan normalized Greeks/IV — internal self-fetch to the EXISTING
+  // route so its logic is reused verbatim, not duplicated.
+  let d4: any = { status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  if (dhanConfigured) {
+    try {
+      const port = process.env.PORT || String(PORT);
+      const d4Res = await fetch(`http://localhost:${port}/api/dhan/normalized?symbol=${symbol}`);
+      d4 = await d4Res.json();
+    } catch (err) {
+      d4 = { status: "FETCH_FAILED", error: err instanceof Error ? err.message : "Unknown error" };
+    }
+  }
+
+  return c.json({
+    architectureRole: "TRADELAB_PHASE_B_AGGREGATOR",
+    generatedAt: new Date().toISOString(),
+    symbol,
+    readOnly: true,
+    dhanConfigured,
+    dhanNormalized: d4,
+    m10MarketRegime: m10,
+    m11EvidenceFusion: m11,
+    m12CandidateSet: m12,
+    note: "Greek Engine and Entry Quality layer not yet wired (Phase C/D). This endpoint proves read-only reuse of existing M10/M11/M12 + Dhan D4 only.",
+  });
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

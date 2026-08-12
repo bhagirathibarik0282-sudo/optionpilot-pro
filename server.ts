@@ -22506,6 +22506,128 @@ app.get("/api/audit/dhan-finnifty-spot-intraday-check", async (c) => {
   }
 });
 
+
+// ============================================================================
+// V3D_MIDCPNIFTY_SPOT_HISTORY_CHECK — INDEX intraday spot proof (READ-ONLY)
+//
+// Probes Dhan's /v2/charts/intraday for MIDCPNIFTY index spot
+// (securityId=442, IDX_I, instrument=INDEX) -- the ID came directly from
+// Dhan's own scrip-master CSV (SEM_INSTRUMENT_NAME=INDEX,
+// SEM_TRADING_SYMBOL=MIDCPNIFTY, SEM_CUSTOM_SYMBOL="Nifty Midcap Select"),
+// not guessed. This probe adds a live price sanity check on top, same
+// discipline as the FINNIFTY and SENSEX candidate checks.
+// ============================================================================
+
+app.get("/api/audit/dhan-midcpnifty-spot-intraday-check", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    return c.json({
+      architectureRole: "V3D_MIDCPNIFTY_SPOT_HISTORY_CHECK",
+      generatedAt, symbol: "MIDCPNIFTY",
+      status: "ERROR", error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+    }, 503);
+  }
+
+  const requestBodyObj = {
+    securityId: "442",
+    exchangeSegment: "IDX_I",
+    instrument: "INDEX",
+    interval: "1",
+    oi: false,
+    fromDate: "2026-08-11 09:15:00",
+    toDate: "2026-08-11 15:30:00",
+  };
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/intraday", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: JSON.stringify(requestBodyObj),
+    });
+
+    const httpStatus = res.status;
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    if (!res.ok || !payload || typeof payload !== "object") {
+      return c.json({
+        architectureRole: "V3D_MIDCPNIFTY_SPOT_HISTORY_CHECK",
+        generatedAt, symbol: "MIDCPNIFTY",
+        sanitizedRequestBody: requestBodyObj,
+        httpStatus,
+        rootCauseStatus: "ERROR",
+        providerError: payload && typeof payload === "object" ? {
+          errorType: payload.errorType ?? null,
+          errorCode: payload.errorCode ?? null,
+          errorMessage: payload.errorMessage ?? null,
+        } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `HTTP ${httpStatus}` },
+        rawSnippet: raw.slice(0, 500),
+        readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+      }, 200);
+    }
+
+    const rawTopLevelKeys = Object.keys(payload);
+    const arrLen = (v: any) => (Array.isArray(v) ? v.length : 0);
+    const counts: Record<string, number> = {};
+    for (const k of rawTopLevelKeys) counts[k] = arrLen(payload[k]);
+
+    const ohlcvFields = ["open", "high", "low", "close", "volume", "timestamp"];
+    const allNonEmpty = ohlcvFields.every((f) => (counts[f] ?? 0) > 0);
+    const lastClose = Array.isArray(payload.close) && payload.close.length > 0 ? payload.close[payload.close.length - 1] : null;
+
+    // Real MIDCPNIFTY (Nifty Midcap Select) level was ~14,780-14,955 over
+    // early August 2026, 52-week range ~12,046-14,954.
+    let sanityCheck: string;
+    if (typeof lastClose === "number") {
+      sanityCheck = lastClose > 9000 && lastClose < 20000
+        ? "PLAUSIBLE_RANGE_FOR_MIDCPNIFTY"
+        : "IMPLAUSIBLE_RANGE — securityId=442 likely does NOT map to MIDCPNIFTY, do not trust it";
+    } else {
+      sanityCheck = "NO_NUMERIC_CLOSE_VALUE_TO_CHECK";
+    }
+
+    return c.json({
+      architectureRole: "V3D_MIDCPNIFTY_SPOT_HISTORY_CHECK",
+      generatedAt, symbol: "MIDCPNIFTY",
+      sanitizedRequestBody: requestBodyObj,
+      httpStatus,
+      rawResponseKeys: rawTopLevelKeys,
+      rawResponseArrayLengths: counts,
+      ohlcvAllNonEmpty: allNonEmpty,
+      lastCloseSample: lastClose,
+      sanityCheck,
+      rootCauseStatus: allNonEmpty ? "PASS" : "PARTIAL",
+      limitations: [
+        "Single trading day (2026-08-11 09:15-15:30 IST) only.",
+        "securityId=442 came from Dhan's own scrip-master CSV INDEX row (not guessed), but is still pending this sanity check before being promoted to a confirmed DHAN_UNDERLYING_MAP entry.",
+      ],
+      readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      architectureRole: "V3D_MIDCPNIFTY_SPOT_HISTORY_CHECK",
+      generatedAt, symbol: "MIDCPNIFTY",
+      status: "ERROR",
+      error: err instanceof Error ? err.message : "Unknown MIDCPNIFTY spot intraday request failure",
+      readOnlyMode: true, tokenExposed: false,
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

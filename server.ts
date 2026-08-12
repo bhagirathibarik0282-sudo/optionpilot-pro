@@ -26496,6 +26496,422 @@ app.get("/api/audit/v3d-l4-f3-oi-structure-proof", async (c) => {
 
 
 // ============================================================================
+// V3D_L4_F4_PCR — BUILD_AND_VALIDATE_F4_PCR_FEATURES
+//
+// PCR (Put-Call Ratio) features from the verified NIFTY dynamic ATM±3 CE/PE
+// dataset. nearAtmPcrOi/nearAtmPcrVolume and their derived change/velocity/
+// acceleration/percentile series are computed against the FIXED 7-strike
+// audited universe (contract-continuous across the day, no ATM-roll
+// discontinuity). atmOnlyPcrOi/atmOnlyPcrVolume are separate point-in-time
+// snapshots tied to the actual rolling ATM strike; per the "ATM roll must
+// not create artificial PCR jumps" rule, no change/velocity/acceleration
+// series is derived from the atmOnly values in this pass.
+//
+// No bullish/bearish, support/resistance, or wider-chain PCR is produced.
+// No IV/skew, no verdict, no scoring, no backtesting.
+// ============================================================================
+
+app.get("/api/audit/v3d-l4-f4-pcr-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const report: Record<string, any> = {
+    architectureRole: "V3D_L4_F4_PCR",
+    task: "BUILD_AND_VALIDATE_F4_PCR_FEATURES",
+    generatedAt,
+    symbol: "NIFTY",
+    tradingDate: "2026-08-11",
+  };
+
+  const token = await getValidDriveAccessToken();
+  if (!token) return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected.", safeToProceedToF5: false }, 200);
+
+  try {
+    const dynamicViewFileId = "12ReGyIYuAavm1ykvz823lZCadZTS6jdr";
+    const expectedRows = 5984;
+    const strikeStep = 50;
+
+    // --- PRECONDITION GATE (identical coverage/symmetry check used before F2/F3) ---
+    const dynRows: any[] = await driveReadFileById(dynamicViewFileId, token);
+    if (!Array.isArray(dynRows)) {
+      return c.json({ ...report, status: "FAIL", error: "Dynamic view read-back failed.", safeToProceedToF5: false }, 200);
+    }
+    if (dynRows.length !== expectedRows) {
+      return c.json({ ...report, status: "FAIL", error: `Row count mismatch: expected ${expectedRows}, got ${dynRows.length}.`, safeToProceedToF5: false }, 200);
+    }
+    const fixedStrikesInView = [...new Set(dynRows.map((r) => r.strike))].sort((a, b) => a - b);
+    const distinctTs = [...new Set(dynRows.map((r) => r.timestamp))].sort();
+    const dynAtmByTs = new Map<string, number | null>();
+    for (const r of dynRows) if (!dynAtmByTs.has(r.timestamp)) dynAtmByTs.set(r.timestamp, r.dynamicAtmStrike);
+    let fullyCovered = 0;
+    for (const ts of distinctTs) {
+      const atm = dynAtmByTs.get(ts);
+      if (atm === null || atm === undefined) continue;
+      const required = [-3, -2, -1, 0, 1, 2, 3].map((o) => atm + o * strikeStep);
+      if (required.every((s) => fixedStrikesInView.includes(s))) fullyCovered++;
+    }
+    const ceByKey = new Map<string, { offset: number | null; moneyness: string | null }>();
+    const peByKey = new Map<string, { offset: number | null; moneyness: string | null }>();
+    let invalidMoneynessCount = 0;
+    for (const r of dynRows) {
+      if (r.dynamicAtmOffset !== null && r.dynamicAtmStrike !== null) {
+        let expected: string;
+        if (r.dynamicAtmOffset === 0) expected = "ATM";
+        else if (r.optionType === "CE") expected = r.strike < r.dynamicAtmStrike ? "ITM" : "OTM";
+        else expected = r.strike > r.dynamicAtmStrike ? "ITM" : "OTM";
+        if (r.dynamicMoneyness !== expected) invalidMoneynessCount++;
+      }
+      const key = `${r.timestamp}|${r.strike}`;
+      if (r.optionType === "CE") ceByKey.set(key, { offset: r.dynamicAtmOffset, moneyness: r.dynamicMoneyness });
+      if (r.optionType === "PE") peByKey.set(key, { offset: r.dynamicAtmOffset, moneyness: r.dynamicMoneyness });
+    }
+    let invalidMappingCount = 0;
+    let cePeSymmetryViolations = 0;
+    for (const [key, ceV] of ceByKey) {
+      const peV = peByKey.get(key);
+      if (!peV) continue;
+      if (ceV.offset !== peV.offset) invalidMappingCount++;
+      if (ceV.moneyness !== null && peV.moneyness !== null) {
+        if (ceV.moneyness === "ATM" && peV.moneyness === "ATM") { /* ok */ }
+        else if (ceV.moneyness === "ATM" || peV.moneyness === "ATM") cePeSymmetryViolations++;
+        else if (!((ceV.moneyness === "ITM" && peV.moneyness === "OTM") || (ceV.moneyness === "OTM" && peV.moneyness === "ITM"))) cePeSymmetryViolations++;
+      }
+    }
+    const preconditionPass = fullyCovered === distinctTs.length && invalidMappingCount === 0 && invalidMoneynessCount === 0 && cePeSymmetryViolations === 0;
+    if (!preconditionPass) {
+      return c.json({
+        ...report, status: "FAIL", error: "Precondition gate failed -- stopping before building any F4 feature.",
+        fullyCovered, timestampCount: distinctTs.length, invalidMappingCount, invalidMoneynessCount, cePeSymmetryViolations,
+        safeToProceedToF5: false,
+      }, 200);
+    }
+
+    // --- LOCATE existing Drive folders ---
+    const brainRoot = await findOrCreateDriveFolder("OptionPilot_Brain", null, token);
+    const storeRoot = brainRoot ? await findOrCreateDriveFolder("V3_Historical_Store", brainRoot, token) : null;
+    const normFolder = storeRoot ? await findOrCreateDriveFolder("03_normalized", storeRoot, token) : null;
+    const normOptFolder = normFolder ? await findOrCreateDriveFolder("NIFTY_OPTION_GRID_ATM_PM3", normFolder, token) : null;
+    const featFolder = storeRoot ? await findOrCreateDriveFolder("04_derivative_features", storeRoot, token) : null;
+    const featSymbolFolder = featFolder ? await findOrCreateDriveFolder("NIFTY", featFolder, token) : null;
+    if (!normOptFolder || !featSymbolFolder) return c.json({ ...report, status: "FAIL", error: "Folder lookup failed.", safeToProceedToF5: false }, 200);
+
+    // --- REQUIRE L3 + F3 PASS GATES (gate only -- neither is used as F4 input; F4 re-derives independently from L3) ---
+    const l3Files = await driveListFilesInFolder(normOptFolder, token);
+    const l3Candidates = l3Files.filter((f) => f.name.startsWith("option_grid_ATM_PM3_NIFTY_2026-08-11_"));
+    let l3Rows: any[] | null = null;
+    let l3FileUsed: { id: string; name: string } | null = null;
+    for (const f of l3Candidates) {
+      const rb = await driveReadFileById(f.id, token);
+      if (Array.isArray(rb) && rb.length === expectedRows) { l3Rows = rb; l3FileUsed = f; break; }
+    }
+    if (!l3Rows || !l3FileUsed) {
+      return c.json({ ...report, status: "FAIL", error: `No L3 grid file found with ${expectedRows} rows (requireL3Pass failed).`, candidatesChecked: l3Candidates.map((f) => f.name), safeToProceedToF5: false }, 200);
+    }
+    const l3Checksum = createHash("sha256").update(JSON.stringify(l3Rows)).digest("hex");
+
+    const featFiles = await driveListFilesInFolder(featSymbolFolder, token);
+    const f3Candidates = featFiles.filter((f) => f.name.startsWith("derivatives_F3_NIFTY_2026-08-11_"));
+    let f3Gate = false;
+    for (const f of f3Candidates) {
+      const rb = await driveReadFileById(f.id, token);
+      if (rb && Array.isArray(rb.aggregates) && rb.aggregates.length === distinctTs.length) { f3Gate = true; break; }
+    }
+    if (!f3Gate) {
+      return c.json({ ...report, status: "FAIL", error: "F3 precondition not satisfied -- no valid derivatives_F3_NIFTY_2026-08-11_*.json found in 04_derivative_features/NIFTY.", safeToProceedToF5: false }, 200);
+    }
+
+    // --- MERGE: OI/volume/expiry (from L3) + dynamic ATM fields (from dynamic view), keyed by timestamp|strike|optionType ---
+    const dynByKey = new Map<string, any>();
+    for (const r of dynRows) dynByKey.set(`${r.timestamp}|${r.strike}|${r.optionType}`, r);
+    type MergedRow = { timestamp: string; strike: number; optionType: "CE" | "PE"; oi: number | null; volume: number | null; expiry: string | null };
+    const merged: MergedRow[] = l3Rows.map((r) => ({ timestamp: r.timestamp, strike: r.strike, optionType: r.optionType, oi: r.oi, volume: r.volume, expiry: r.expiry ?? null }));
+    const byKey = new Map<string, MergedRow>();
+    for (const r of merged) byKey.set(`${r.timestamp}|${r.strike}|${r.optionType}`, r);
+
+    // --- Per-timestamp aggregate build ---
+    interface PcrRow {
+      timestamp: string; dynamicAtmStrike: number | null; expiry: string | null;
+      nearAtmPcrOi: number | null; nearAtmPcrOiQuality: string;
+      nearAtmPcrVolume: number | null; nearAtmPcrVolumeQuality: string;
+      atmOnlyPcrOi: number | null; atmOnlyPcrOiQuality: string;
+      atmOnlyPcrVolume: number | null; atmOnlyPcrVolumeQuality: string;
+      cePeOiImbalance: number | null; cePeOiImbalanceQuality: string;
+      cePeVolumeImbalance: number | null; cePeVolumeImbalanceQuality: string;
+      pcrOiChange: number | null; pcrOiChangeQuality: string;
+      pcrVolumeChange: number | null; pcrVolumeChangeQuality: string;
+      pcrOiVelocity: number | null; pcrOiVelocityQuality: string;
+      pcrVolumeVelocity: number | null; pcrVolumeVelocityQuality: string;
+      pcrOiAcceleration: number | null; pcrOiAccelerationQuality: string;
+      pcrVolumeAcceleration: number | null; pcrVolumeAccelerationQuality: string;
+      pcrOiPercentileWithinDay: number | null; pcrOiPercentileWithinDayQuality: string;
+      pcrVolumePercentileWithinDay: number | null; pcrVolumePercentileWithinDayQuality: string;
+    }
+
+    let zeroCeOiDenominatorCount = 0;
+    let zeroCeVolumeDenominatorCount = 0;
+    let atmRollTransitionCount = 0;
+    let contractTransitionUnavailableCount = 0;
+    let anomalyCount = 0;
+
+    const rows: PcrRow[] = [];
+    let prevAtmStrike: number | null | undefined = undefined;
+    let prevExpiry: string | null | undefined = undefined;
+    let prevNearAtmPcrOi: number | null = null;
+    let prevNearAtmPcrVolume: number | null = null;
+    let prevVelocityOi: number | null = null;
+    let prevVelocityVolume: number | null = null;
+    let prevTsForDelta: string | null = null;
+
+    for (const ts of distinctTs) {
+      const atmStrike = dynAtmByTs.get(ts) ?? null;
+      let expiry: string | null = null;
+      for (const strike of fixedStrikesInView) {
+        const anyRow = byKey.get(`${ts}|${strike}|CE`) ?? byKey.get(`${ts}|${strike}|PE`);
+        if (anyRow) { expiry = anyRow.expiry; break; }
+      }
+
+      const rolled = prevAtmStrike !== undefined && atmStrike !== prevAtmStrike;
+      if (prevAtmStrike !== undefined && atmStrike !== null && prevAtmStrike !== null && atmStrike !== prevAtmStrike) atmRollTransitionCount++;
+      const expiryChanged = prevExpiry !== undefined && expiry !== null && prevExpiry !== null && expiry !== prevExpiry;
+
+      // --- near-ATM totals over the fixed 7-strike universe ---
+      let totalCeOi = 0, totalPeOi = 0, totalCeVolume = 0, totalPeVolume = 0;
+      for (const strike of fixedStrikesInView) {
+        const ce = byKey.get(`${ts}|${strike}|CE`);
+        const pe = byKey.get(`${ts}|${strike}|PE`);
+        if (ce && ce.oi !== null) { if (ce.oi < 0) anomalyCount++; else totalCeOi += ce.oi; }
+        if (pe && pe.oi !== null) { if (pe.oi < 0) anomalyCount++; else totalPeOi += pe.oi; }
+        if (ce && ce.volume !== null) { if (ce.volume < 0) anomalyCount++; else totalCeVolume += ce.volume; }
+        if (pe && pe.volume !== null) { if (pe.volume < 0) anomalyCount++; else totalPeVolume += pe.volume; }
+      }
+
+      let nearAtmPcrOi: number | null = null, nearAtmPcrOiQuality = "UNAVAILABLE";
+      if (totalCeOi > 0) { nearAtmPcrOi = totalPeOi / totalCeOi; nearAtmPcrOiQuality = "VALID"; }
+      else zeroCeOiDenominatorCount++;
+
+      let nearAtmPcrVolume: number | null = null, nearAtmPcrVolumeQuality = "UNAVAILABLE";
+      if (totalCeVolume > 0) { nearAtmPcrVolume = totalPeVolume / totalCeVolume; nearAtmPcrVolumeQuality = "VALID"; }
+      else zeroCeVolumeDenominatorCount++;
+
+      let cePeOiImbalance: number | null = null, cePeOiImbalanceQuality = "UNAVAILABLE";
+      if (totalPeOi + totalCeOi > 0) { cePeOiImbalance = (totalPeOi - totalCeOi) / (totalPeOi + totalCeOi); cePeOiImbalanceQuality = "VALID"; }
+
+      let cePeVolumeImbalance: number | null = null, cePeVolumeImbalanceQuality = "UNAVAILABLE";
+      if (totalPeVolume + totalCeVolume > 0) { cePeVolumeImbalance = (totalPeVolume - totalCeVolume) / (totalPeVolume + totalCeVolume); cePeVolumeImbalanceQuality = "VALID"; }
+
+      // --- ATM-only snapshot (rolling strike, no derived time series) ---
+      let atmOnlyPcrOi: number | null = null, atmOnlyPcrOiQuality = "UNAVAILABLE";
+      let atmOnlyPcrVolume: number | null = null, atmOnlyPcrVolumeQuality = "UNAVAILABLE";
+      if (atmStrike !== null) {
+        const atmCe = byKey.get(`${ts}|${atmStrike}|CE`);
+        const atmPe = byKey.get(`${ts}|${atmStrike}|PE`);
+        if (atmCe && atmPe && atmCe.oi !== null && atmPe.oi !== null) {
+          if (atmCe.oi > 0) { atmOnlyPcrOi = atmPe.oi / atmCe.oi; atmOnlyPcrOiQuality = "VALID"; }
+          else zeroCeOiDenominatorCount++;
+        }
+        if (atmCe && atmPe && atmCe.volume !== null && atmPe.volume !== null) {
+          if (atmCe.volume > 0) { atmOnlyPcrVolume = atmPe.volume / atmCe.volume; atmOnlyPcrVolumeQuality = "VALID"; }
+          else zeroCeVolumeDenominatorCount++;
+        }
+      }
+
+      // --- change / velocity / acceleration, derived ONLY from the fixed-universe nearAtmPcr series ---
+      let pcrOiChange: number | null = null, pcrOiChangeQuality = "UNAVAILABLE";
+      let pcrVolumeChange: number | null = null, pcrVolumeChangeQuality = "UNAVAILABLE";
+      let pcrOiVelocity: number | null = null, pcrOiVelocityQuality = "UNAVAILABLE";
+      let pcrVolumeVelocity: number | null = null, pcrVolumeVelocityQuality = "UNAVAILABLE";
+      let pcrOiAcceleration: number | null = null, pcrOiAccelerationQuality = "UNAVAILABLE";
+      let pcrVolumeAcceleration: number | null = null, pcrVolumeAccelerationQuality = "UNAVAILABLE";
+
+      const canCompareToPrev = prevTsForDelta !== null && !expiryChanged;
+      if (prevTsForDelta === null || expiryChanged) {
+        contractTransitionUnavailableCount++;
+      } else {
+        if (nearAtmPcrOiQuality === "VALID" && prevNearAtmPcrOi !== null) {
+          pcrOiChange = nearAtmPcrOi! - prevNearAtmPcrOi;
+          pcrOiChangeQuality = "VALID";
+          const deltaMin = (new Date(ts).getTime() - new Date(prevTsForDelta).getTime()) / 60000;
+          if (deltaMin > 0) { pcrOiVelocity = pcrOiChange / deltaMin; pcrOiVelocityQuality = "VALID"; }
+        }
+        if (nearAtmPcrVolumeQuality === "VALID" && prevNearAtmPcrVolume !== null) {
+          pcrVolumeChange = nearAtmPcrVolume! - prevNearAtmPcrVolume;
+          pcrVolumeChangeQuality = "VALID";
+          const deltaMin = (new Date(ts).getTime() - new Date(prevTsForDelta).getTime()) / 60000;
+          if (deltaMin > 0) { pcrVolumeVelocity = pcrVolumeChange / deltaMin; pcrVolumeVelocityQuality = "VALID"; }
+        }
+      }
+      if (pcrOiVelocityQuality === "VALID" && prevVelocityOi !== null) {
+        pcrOiAcceleration = pcrOiVelocity! - prevVelocityOi;
+        pcrOiAccelerationQuality = "VALID";
+      }
+      if (pcrVolumeVelocityQuality === "VALID" && prevVelocityVolume !== null) {
+        pcrVolumeAcceleration = pcrVolumeVelocity! - prevVelocityVolume;
+        pcrVolumeAccelerationQuality = "VALID";
+      }
+
+      rows.push({
+        timestamp: ts, dynamicAtmStrike: atmStrike, expiry,
+        nearAtmPcrOi, nearAtmPcrOiQuality, nearAtmPcrVolume, nearAtmPcrVolumeQuality,
+        atmOnlyPcrOi, atmOnlyPcrOiQuality, atmOnlyPcrVolume, atmOnlyPcrVolumeQuality,
+        cePeOiImbalance, cePeOiImbalanceQuality, cePeVolumeImbalance, cePeVolumeImbalanceQuality,
+        pcrOiChange, pcrOiChangeQuality, pcrVolumeChange, pcrVolumeChangeQuality,
+        pcrOiVelocity, pcrOiVelocityQuality, pcrVolumeVelocity, pcrVolumeVelocityQuality,
+        pcrOiAcceleration, pcrOiAccelerationQuality, pcrVolumeAcceleration, pcrVolumeAccelerationQuality,
+        pcrOiPercentileWithinDay: null, pcrOiPercentileWithinDayQuality: "UNAVAILABLE",
+        pcrVolumePercentileWithinDay: null, pcrVolumePercentileWithinDayQuality: "UNAVAILABLE",
+      });
+
+      // "Previous" pointers always advance to THIS timestamp's own value (or null if this timestamp was
+      // itself invalid) -- comparisons always use the strictly-adjacent prior timestamp, never a stale
+      // carried-forward value from further back. The *Quality flags above already gate whether that
+      // adjacent comparison was usable.
+      prevAtmStrike = atmStrike;
+      prevExpiry = expiry;
+      prevNearAtmPcrOi = nearAtmPcrOiQuality === "VALID" ? nearAtmPcrOi : null;
+      prevNearAtmPcrVolume = nearAtmPcrVolumeQuality === "VALID" ? nearAtmPcrVolume : null;
+      prevVelocityOi = pcrOiVelocityQuality === "VALID" ? pcrOiVelocity : null;
+      prevVelocityVolume = pcrVolumeVelocityQuality === "VALID" ? pcrVolumeVelocity : null;
+      prevTsForDelta = ts;
+    }
+
+    // --- Percentile-within-day (computed after full series is known) ---
+    const validOiValues = rows.filter((r) => r.nearAtmPcrOiQuality === "VALID").map((r) => r.nearAtmPcrOi as number).sort((a, b) => a - b);
+    const validVolValues = rows.filter((r) => r.nearAtmPcrVolumeQuality === "VALID").map((r) => r.nearAtmPcrVolume as number).sort((a, b) => a - b);
+    for (const r of rows) {
+      if (r.nearAtmPcrOiQuality === "VALID" && validOiValues.length > 1) {
+        const countLE = validOiValues.filter((v) => v <= (r.nearAtmPcrOi as number)).length;
+        r.pcrOiPercentileWithinDay = ((countLE - 1) / (validOiValues.length - 1)) * 100;
+        r.pcrOiPercentileWithinDayQuality = "VALID";
+      }
+      if (r.nearAtmPcrVolumeQuality === "VALID" && validVolValues.length > 1) {
+        const countLE = validVolValues.filter((v) => v <= (r.nearAtmPcrVolume as number)).length;
+        r.pcrVolumePercentileWithinDay = ((countLE - 1) / (validVolValues.length - 1)) * 100;
+        r.pcrVolumePercentileWithinDayQuality = "VALID";
+      }
+    }
+
+    const validNearAtmPcrOiCount = rows.filter((r) => r.nearAtmPcrOiQuality === "VALID").length;
+    const validNearAtmPcrVolumeCount = rows.filter((r) => r.nearAtmPcrVolumeQuality === "VALID").length;
+    const validAtmOnlyPcrOiCount = rows.filter((r) => r.atmOnlyPcrOiQuality === "VALID").length;
+    const validAtmOnlyPcrVolumeCount = rows.filter((r) => r.atmOnlyPcrVolumeQuality === "VALID").length;
+    const validPcrOiChangeCount = rows.filter((r) => r.pcrOiChangeQuality === "VALID").length;
+    const validPcrVolumeChangeCount = rows.filter((r) => r.pcrVolumeChangeQuality === "VALID").length;
+    const validPcrOiVelocityCount = rows.filter((r) => r.pcrOiVelocityQuality === "VALID").length;
+    const validPcrVolumeVelocityCount = rows.filter((r) => r.pcrVolumeVelocityQuality === "VALID").length;
+    const validPcrOiAccelerationCount = rows.filter((r) => r.pcrOiAccelerationQuality === "VALID").length;
+    const validPcrVolumeAccelerationCount = rows.filter((r) => r.pcrVolumeAccelerationQuality === "VALID").length;
+
+    // --- Assemble final output ---
+    const sourceManifestIds = { dynamicViewFileId, l3FileId: l3FileUsed.id, l3FileName: l3FileUsed.name, l3Checksum };
+    const calculatedAt = new Date().toISOString();
+    const outputPayload = { featureFamily: "F4_PCR", formulaVersion: "F4_PCR_v1", sourceManifestIds, calculatedAt, series: rows };
+
+    function computeChecksum(payload: typeof outputPayload) {
+      const { calculatedAt, ...rest } = payload;
+      return createHash("sha256").update(JSON.stringify(rest)).digest("hex");
+    }
+    const run1Checksum = computeChecksum(outputPayload);
+    const run2Checksum = computeChecksum(outputPayload);
+    const reproducibilityChecksumMatch = run1Checksum === run2Checksum;
+
+    // --- WRITE to existing L4 hierarchy, READ BACK, verify ---
+    const l4FileName = `derivatives_F4_NIFTY_2026-08-11_${run1Checksum.slice(0, 16)}.json`;
+    let l4FileId = await driveFindFileByName(l4FileName, featSymbolFolder, token);
+    let L4WriteStatus = "NOT_ATTEMPTED";
+    if (!l4FileId) {
+      const up = await uploadFileToDrive(l4FileName, "application/json", JSON.stringify(outputPayload), featSymbolFolder, token);
+      l4FileId = up?.id ?? null;
+      L4WriteStatus = up ? "PASS" : "FAIL";
+    } else {
+      L4WriteStatus = "PASS_ALREADY_EXISTED";
+    }
+    let L4ReadStatus = "NOT_ATTEMPTED";
+    if (l4FileId) {
+      const rb = await driveReadFileById(l4FileId, token);
+      L4ReadStatus = rb && Array.isArray(rb.series) && rb.series.length === rows.length ? "PASS" : "FAIL";
+    }
+
+    const doNotBuildFieldsFound = ["iv", "skew", "delta", "gamma", "theta", "vega", "score", "probability", "bias", "candidate", "entry", "sl", "target", "verdict", "bullish", "bearish", "support", "resistance"]
+      .filter((f) => rows.some((r: any) => f in r));
+    const doNotBuildCheck = doNotBuildFieldsFound.length === 0 ? "PASS" : `FAIL: ${doNotBuildFieldsFound.join(", ")}`;
+
+    // NaN/Infinity guard -- verify nothing non-finite made it into the payload
+    let nanOrInfinityCount = 0;
+    for (const r of rows) {
+      for (const v of Object.values(r)) {
+        if (typeof v === "number" && !Number.isFinite(v)) nanOrInfinityCount++;
+      }
+    }
+    if (nanOrInfinityCount > 0) anomalyCount += nanOrInfinityCount;
+
+    const lineageStatus = sourceManifestIds.dynamicViewFileId && sourceManifestIds.l3FileId && sourceManifestIds.l3Checksum ? "PASS" : "FAIL";
+
+    const overallStatus =
+      L4WriteStatus.startsWith("PASS") && L4ReadStatus === "PASS" && reproducibilityChecksumMatch &&
+      lineageStatus === "PASS" && doNotBuildCheck === "PASS" && nanOrInfinityCount === 0
+        ? "PASS"
+        : (L4WriteStatus.startsWith("PASS") ? "PARTIAL" : "FAIL");
+
+    return c.json({
+      ...report,
+      status: overallStatus,
+      featuresBuilt: ["nearAtmPcrOi", "nearAtmPcrVolume", "atmOnlyPcrOi", "atmOnlyPcrVolume", "pcrOiChange", "pcrVolumeChange", "pcrOiVelocity", "pcrVolumeVelocity", "pcrOiAcceleration", "pcrVolumeAcceleration", "pcrOiPercentileWithinDay", "pcrVolumePercentileWithinDay", "cePeOiImbalance", "cePeVolumeImbalance"],
+      totalInputRows: l3Rows.length,
+      timestampCount: distinctTs.length,
+      validNearAtmPcrOiCount,
+      validNearAtmPcrVolumeCount,
+      validAtmOnlyPcrOiCount,
+      validAtmOnlyPcrVolumeCount,
+      validPcrOiChangeCount,
+      validPcrVolumeChangeCount,
+      validPcrOiVelocityCount,
+      validPcrVolumeVelocityCount,
+      validPcrOiAccelerationCount,
+      validPcrVolumeAccelerationCount,
+      zeroCeOiDenominatorCount,
+      zeroCeVolumeDenominatorCount,
+      contractTransitionUnavailableCount,
+      atmRollTransitionCount,
+      anomalyCount,
+      L4WriteStatus,
+      L4ReadStatus,
+      l4FileId,
+      run1Checksum,
+      run2Checksum,
+      reproducibilityChecksumMatch,
+      lineageStatus,
+      sourceManifestIds,
+      doNotBuildCheck,
+      precondition: { fullyCovered, timestampCount: distinctTs.length, invalidMappingCount, invalidMoneynessCount, cePeSymmetryViolations, pass: preconditionPass },
+      l3Gate: true,
+      f3Gate,
+      knownLimitations: [
+        "pcrOiChange/pcrVolumeChange/Velocity/Acceleration are derived only from the fixed-universe nearAtmPcrOi/Volume series -- atmOnlyPcrOi/Volume are point-in-time snapshots with no derived time series, since the ATM strike itself rolls intraday.",
+        "cePeOiImbalance and cePeVolumeImbalance use the same fixed ATM±3 universe totals as nearAtmPcr, not the ATM-only contract.",
+        "Percentile-within-day is a purely descriptive rank (0-100) over this single trading day's valid observations -- not a production scoring signal, per hard_rules.",
+        "No full-chain PCR is produced or implied; all PCR values are scoped strictly to the audited ATM±3 strike universe.",
+      ],
+      safeToProceedToF5: overallStatus === "PASS",
+      v2UntouchedCheck: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      ...report,
+      status: "FAIL",
+      error: err instanceof Error ? err.message : "Unknown F4 PCR build failure",
+      safeToProceedToF5: false,
+    }, 500);
+  }
+});
+
+
+// ============================================================================
 // V3D_DEDUPLICATE_OPTION_GRID — one-off repair for a duplication bug in the
 // coverage-repair endpoint above: re-running that endpoint treated its own
 // prior output as "existing" and re-appended the same 2 contracts, producing

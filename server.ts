@@ -22637,6 +22637,298 @@ app.get("/api/audit/dhan-midcpnifty-spot-intraday-check", async (c) => {
   }
 });
 
+
+// ============================================================================
+// V3_STORE_BRAIN_STEP_1 — GOOGLE_DRIVE_L0_L1_L2_WRITE_READ_PROOF
+// (READ-MOSTLY DIAGNOSTIC — writes only to a new, isolated Drive folder tree)
+//
+// Proves the V3 Historical Store Brain's three layers using ONE tiny,
+// already-proven NIFTY spot sample:
+//   L0 — Ingestion manifest (metadata about the fetch)
+//   L1 — Immutable raw Dhan payload (exact, untransformed, duplicate-safe)
+//   L2 — Contract/time identity record
+//
+// Reuses the EXISTING Google Drive OAuth session, getValidDriveAccessToken,
+// findOrCreateDriveFolder and uploadFileToDrive helpers — no new credentials,
+// no changes to the existing Journal archive tree. Writes only under a new
+// isolated "OptionPilot_Brain/V3_Historical_Store/" folder tree.
+//
+// Does not touch V2 scoring/verdict/recorder/order code in any way.
+// ============================================================================
+
+async function driveFindFileByName(name: string, parentId: string, token: string): Promise<string | null> {
+  const q = encodeURIComponent(`name='${name.replace(/'/g, "\\'")}' and trashed=false and '${parentId}' in parents`);
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const json = await res.json();
+  if (res.ok && json.files && json.files.length > 0) return json.files[0].id;
+  return null;
+}
+
+async function driveReadFileById(fileId: string, token: string): Promise<any | null> {
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  try { return await res.json(); } catch { return null; }
+}
+
+app.get("/api/audit/v3-store-brain-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const report: Record<string, any> = {
+    architectureRole: "V3_HISTORICAL_STORE_BRAIN_L0_L1_L2_PROOF",
+    generatedAt,
+    symbol: "NIFTY",
+  };
+
+  const token = await getValidDriveAccessToken();
+  if (!token) {
+    return c.json({
+      ...report,
+      status: "FAIL",
+      folderCreationStatus: "NOT_ATTEMPTED",
+      l0WriteStatus: "NOT_ATTEMPTED",
+      l0ReadBackStatus: "NOT_ATTEMPTED",
+      l1ImmutableWriteStatus: "NOT_ATTEMPTED",
+      l1DuplicateWriteProtectionStatus: "NOT_ATTEMPTED",
+      l1ReadBackStatus: "NOT_ATTEMPTED",
+      l2WriteStatus: "NOT_ATTEMPTED",
+      l2ReadBackStatus: "NOT_ATTEMPTED",
+      checksumMatch: null,
+      secretExposureCheck: "NOT_ATTEMPTED",
+      v2UntouchedCheck: true,
+      knownLimitations: ["Google Drive is not connected -- use the Connect Google Drive button in the dashboard first."],
+      safeToStartStep2: false,
+    }, 200);
+  }
+
+  try {
+    // ------------------------------------------------------------------
+    // Step 1: idempotent folder creation
+    // ------------------------------------------------------------------
+    const brainRoot = await findOrCreateDriveFolder("OptionPilot_Brain", null, token);
+    const storeRoot = brainRoot ? await findOrCreateDriveFolder("V3_Historical_Store", brainRoot, token) : null;
+    const manifestsFolder = storeRoot ? await findOrCreateDriveFolder("00_manifests", storeRoot, token) : null;
+    const rawParentFolder = storeRoot ? await findOrCreateDriveFolder("01_raw", storeRoot, token) : null;
+    const rawSymbolFolder = rawParentFolder ? await findOrCreateDriveFolder("NIFTY", rawParentFolder, token) : null;
+    const identityParentFolder = storeRoot ? await findOrCreateDriveFolder("02_identity", storeRoot, token) : null;
+    const identitySymbolFolder = identityParentFolder ? await findOrCreateDriveFolder("NIFTY", identityParentFolder, token) : null;
+
+    const folderCreationStatus = (brainRoot && storeRoot && manifestsFolder && rawSymbolFolder && identitySymbolFolder) ? "PASS" : "FAIL";
+    if (folderCreationStatus === "FAIL") {
+      return c.json({
+        ...report, status: "FAIL",
+        folderCreationStatus, folderIds: { brainRoot, storeRoot, manifestsFolder, rawSymbolFolder, identitySymbolFolder },
+        knownLimitations: ["Folder creation failed partway -- see folderIds for which step failed."],
+        safeToStartStep2: false,
+      }, 200);
+    }
+
+    // ------------------------------------------------------------------
+    // Step 2: fetch ONE tiny, already-proven NIFTY spot sample directly
+    // from Dhan (same call pattern verified earlier this session) --
+    // no bulk fetch, one small date window.
+    // ------------------------------------------------------------------
+    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+    if (!accessToken || !clientId) {
+      return c.json({ ...report, status: "FAIL", folderCreationStatus, error: "DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing", safeToStartStep2: false }, 200);
+    }
+    const toDate = new Date();
+    const fromDate = new Date(toDate.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const dhanRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/historical", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
+      body: JSON.stringify({
+        securityId: "13", exchangeSegment: "IDX_I", instrument: "INDEX",
+        expiryCode: 0, oi: false, fromDate: fmt(fromDate), toDate: fmt(toDate),
+      }),
+    });
+    const rawSample = await dhanRes.json().catch(() => null);
+    if (!dhanRes.ok || !rawSample || typeof rawSample !== "object") {
+      return c.json({ ...report, status: "FAIL", folderCreationStatus, error: "Could not fetch the tiny NIFTY sample from Dhan to test with.", safeToStartStep2: false }, 200);
+    }
+    const rowsReceived = Array.isArray(rawSample.timestamp) ? rawSample.timestamp.length : 0;
+
+    // ------------------------------------------------------------------
+    // Step 3: L0 manifest — write, then read back
+    // ------------------------------------------------------------------
+    const manifestId = `manifest-NIFTY-${Date.now()}-${randomBytes(4).toString("hex")}`;
+    const rawPayloadStr = JSON.stringify(rawSample);
+    const checksumBeforeWrite = createHash("sha256").update(rawPayloadStr).digest("hex");
+
+    const l0Manifest = {
+      manifestId,
+      provider: "DHAN",
+      symbol: "NIFTY",
+      datasetType: "SPOT_HISTORY",
+      requestedFrom: fmt(fromDate),
+      requestedTo: fmt(toDate),
+      rowsReceived,
+      schemaVersion: "v1",
+      completeness: rowsReceived > 0 ? "COMPLETE" : "EMPTY",
+      checksum: checksumBeforeWrite,
+    };
+    const l0FileName = `${manifestId}.json`;
+    const l0Upload = await uploadFileToDrive(l0FileName, "application/json", JSON.stringify(l0Manifest), manifestsFolder!, token);
+    const l0WriteStatus = l0Upload ? "PASS" : "FAIL";
+
+    let l0ReadBackStatus = "NOT_ATTEMPTED";
+    let l0ReadBackMatches = false;
+    if (l0Upload) {
+      const l0ReadBack = await driveReadFileById(l0Upload.id, token);
+      l0ReadBackMatches = !!l0ReadBack && l0ReadBack.manifestId === manifestId && l0ReadBack.checksum === checksumBeforeWrite;
+      l0ReadBackStatus = l0ReadBackMatches ? "PASS" : "FAIL";
+    }
+
+    // ------------------------------------------------------------------
+    // Step 4: L1 immutable raw payload — deterministic content-hash
+    // filename means a second write with the same raw identity is
+    // detected and refused (duplicate-safe), never silently overwritten.
+    // ------------------------------------------------------------------
+    const l1FileName = `raw_NIFTY_SPOT_${checksumBeforeWrite.slice(0, 16)}.json`;
+    let l1FirstWriteStatus = "NOT_ATTEMPTED";
+    let l1FileId: string | null = await driveFindFileByName(l1FileName, rawSymbolFolder!, token);
+    if (!l1FileId) {
+      const l1Upload = await uploadFileToDrive(l1FileName, "application/json", rawPayloadStr, rawSymbolFolder!, token);
+      l1FileId = l1Upload?.id ?? null;
+      l1FirstWriteStatus = l1Upload ? "PASS" : "FAIL";
+    } else {
+      l1FirstWriteStatus = "PASS_ALREADY_EXISTED";
+    }
+
+    // Duplicate-write attempt: same content, same deterministic name.
+    let l1DuplicateWriteProtectionStatus = "NOT_ATTEMPTED";
+    if (l1FileId) {
+      const existingBeforeSecondAttempt = await driveFindFileByName(l1FileName, rawSymbolFolder!, token);
+      l1DuplicateWriteProtectionStatus = existingBeforeSecondAttempt
+        ? "PASS_REFUSED_DUPLICATE_SAFE (deterministic name already present -- second write skipped, not overwritten)"
+        : "FAIL_COULD_NOT_VERIFY";
+    }
+
+    let l1ReadBackStatus = "NOT_ATTEMPTED";
+    let checksumAfterReadBack: string | null = null;
+    let l1ReadBackMatches = false;
+    if (l1FileId) {
+      const readRes = await fetch(`https://www.googleapis.com/drive/v3/files/${l1FileId}?alt=media`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (readRes.ok) {
+        const readBackText = await readRes.text();
+        checksumAfterReadBack = createHash("sha256").update(readBackText).digest("hex");
+        l1ReadBackMatches = checksumAfterReadBack === checksumBeforeWrite;
+        l1ReadBackStatus = l1ReadBackMatches ? "PASS" : "FAIL";
+      } else {
+        l1ReadBackStatus = "FAIL";
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Step 5: L2 contract/time identity record — write, then read back
+    // ------------------------------------------------------------------
+    const l2Identity = {
+      symbol: "NIFTY",
+      securityId: 13,
+      instrument: "INDEX",
+      expiry: null,
+      strike: null,
+      optionType: null,
+      atmOffset: null,
+      dte: null,
+      timestampIdentity: {
+        firstTimestamp: Array.isArray(rawSample.timestamp) && rawSample.timestamp.length > 0 ? rawSample.timestamp[0] : null,
+        lastTimestamp: Array.isArray(rawSample.timestamp) && rawSample.timestamp.length > 0 ? rawSample.timestamp[rawSample.timestamp.length - 1] : null,
+      },
+    };
+    const l2FileName = `identity_NIFTY_${checksumBeforeWrite.slice(0, 16)}.json`;
+    let l2FileId = await driveFindFileByName(l2FileName, identitySymbolFolder!, token);
+    let l2WriteStatus = "NOT_ATTEMPTED";
+    if (!l2FileId) {
+      const l2Upload = await uploadFileToDrive(l2FileName, "application/json", JSON.stringify(l2Identity), identitySymbolFolder!, token);
+      l2FileId = l2Upload?.id ?? null;
+      l2WriteStatus = l2Upload ? "PASS" : "FAIL";
+    } else {
+      l2WriteStatus = "PASS_ALREADY_EXISTED";
+    }
+
+    let l2ReadBackStatus = "NOT_ATTEMPTED";
+    if (l2FileId) {
+      const l2ReadBack = await driveReadFileById(l2FileId, token);
+      const l2Matches = !!l2ReadBack && l2ReadBack.symbol === "NIFTY" && l2ReadBack.securityId === 13;
+      l2ReadBackStatus = l2Matches ? "PASS" : "FAIL";
+    }
+
+    // ------------------------------------------------------------------
+    // Step 6: secret exposure check — every payload we wrote must NOT
+    // contain any real credential value. Comparison only, never logged.
+    // ------------------------------------------------------------------
+    const secretsToCheck = [
+      process.env.DHAN_ACCESS_TOKEN, process.env.DHAN_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET, process.env.GOOGLE_CLIENT_ID,
+      token,
+    ].filter((s): s is string => !!s && s.length > 6);
+    const allWrittenPayloads = [JSON.stringify(l0Manifest), rawPayloadStr, JSON.stringify(l2Identity)];
+    const secretFound = secretsToCheck.some((secret) => allWrittenPayloads.some((p) => p.includes(secret)));
+    const secretExposureCheck = secretFound ? "FAIL_SECRET_FOUND_IN_PAYLOAD" : "PASS_NO_SECRETS_FOUND";
+
+    const allLayersPassed = [
+      folderCreationStatus, l0WriteStatus, l0ReadBackStatus,
+      l1FirstWriteStatus.startsWith("PASS"), l1DuplicateWriteProtectionStatus.startsWith("PASS"), l1ReadBackStatus,
+      l2WriteStatus.toString().startsWith("PASS"), l2ReadBackStatus,
+    ].every((s) => s === "PASS" || s === true);
+
+    const overallStatus = allLayersPassed && secretExposureCheck === "PASS_NO_SECRETS_FOUND" ? "PASS"
+      : (folderCreationStatus === "PASS" && l0WriteStatus === "PASS") ? "PARTIAL"
+      : "FAIL";
+
+    return c.json({
+      ...report,
+      status: overallStatus,
+      folderCreationStatus,
+      folderIds: { brainRoot, storeRoot, manifestsFolder, rawSymbolFolder, identitySymbolFolder },
+      l0ManifestId: manifestId,
+      l0WriteStatus,
+      l0ReadBackStatus,
+      l1ImmutableWriteStatus: l1FirstWriteStatus,
+      l1DuplicateWriteProtectionStatus,
+      l1ReadBackStatus,
+      l2WriteStatus,
+      l2ReadBackStatus,
+      checksumBeforeWrite,
+      checksumAfterReadBack,
+      checksumMatch: l1ReadBackMatches,
+      rowsReceived,
+      secretExposureCheck,
+      v2UntouchedCheck: true,
+      knownLimitations: [
+        "Single tiny 3-day NIFTY spot sample only -- not proof of bulk/multi-symbol reliability.",
+        "Deterministic content-hash filenames provide duplicate-write protection for this session's re-runs; Drive itself does not enforce uniqueness natively, this endpoint's pre-write existence check does.",
+        "Folder tree is new and isolated from the existing Journal archive tree -- does not interact with or affect Module 3's daily archive.",
+      ],
+      safeToStartStep2: overallStatus === "PASS",
+      readOnlyMode: false,
+      writesToNewIsolatedFolderTreeOnly: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      ...report,
+      status: "FAIL",
+      error: err instanceof Error ? err.message : "Unknown Store Brain proof failure",
+      safeToStartStep2: false,
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

@@ -21750,6 +21750,390 @@ app.get("/api/audit/dhan-bug02-iv-check", async (c) => {
   }, 200);
 });
 
+
+// ============================================================================
+// V3D_MASTER_AUDIT_HARNESS — read-only master audit orchestrator
+// Source: v3_master_audit_harness.ts (provided by Bhagi Sir). Embedded here
+// rather than as a separate import file, to match this codebase's existing
+// single-file Railway/tsx convention and avoid new build/import-resolution
+// risk. Harness logic itself is unchanged from the provided file; only
+// names are prefixed v3* to avoid collisions with existing code.
+//
+// Historical Store Brain (Google Drive L0/L1/L2 write-read proof) is
+// intentionally NOT wired in this pass -- the harness marks it optional,
+// and wiring any new write path against the Drive connector needs its own
+// explicit confirmation, even for a read-back diagnostic.
+// ============================================================================
+
+type V3AuditStatus = "PASS" | "PARTIAL" | "FAIL" | "UNKNOWN" | "BLOCKED_BY_DATA";
+type V3AuditSymbol = "NIFTY" | "BANKNIFTY" | "FINNIFTY" | "MIDCPNIFTY" | "SENSEX";
+
+interface V3AuditCheck {
+  id: string;
+  name: string;
+  status: V3AuditStatus;
+  evidence?: Record<string, unknown>;
+  reason?: string;
+  dependsOn?: string[];
+}
+
+interface V3SymbolAuditReport {
+  symbol: V3AuditSymbol;
+  checks: V3AuditCheck[];
+  overallStatus: V3AuditStatus;
+}
+
+interface V3MasterAuditReport {
+  architectureRole: "V3D_MASTER_AUDIT_HARNESS";
+  generatedAt: string;
+  readOnlyMode: true;
+  tokenExposed: false;
+  orderAccessUsed: false;
+  symbols: V3SymbolAuditReport[];
+  summary: { pass: number; partial: number; fail: number; unknown: number; blockedByData: number };
+  blockers: Array<{ symbol: V3AuditSymbol; checkId: string; name: string; reason?: string }>;
+}
+
+interface V3AuditAdapter {
+  resolveContracts(symbol: V3AuditSymbol): Promise<{ ok: boolean; spotSecurityId?: string | number | null; currentFuture?: unknown; nextFuture?: unknown; farFuture?: unknown; currentOptionExpiries?: unknown[]; errors?: string[] }>;
+  fetchFuturesHistory(symbol: V3AuditSymbol): Promise<{ ok: boolean; identityOk: boolean; openCount?: number; highCount?: number; lowCount?: number; closeCount?: number; volumeCount?: number; oiCount?: number; timestampCount?: number; rawHasOi?: boolean; requestHadOiTrue?: boolean; errors?: string[] }>;
+  fetchExpiredOptionProbe(symbol: V3AuditSymbol): Promise<{ ok: boolean; callOk?: boolean; putOk?: boolean; ohlcCount?: number; volumeCount?: number; oiCount?: number; ivCount?: number; strikeCount?: number; spotCount?: number; timestampCount?: number; requestUsedOfficialIvField?: boolean; expiryCodeZeroAccepted?: boolean | null; errors?: string[] }>;
+  fetchLiveOptionChainProbe(symbol: V3AuditSymbol): Promise<{ ok: boolean; strikeCount?: number; hasOi?: boolean; hasVolume?: boolean; hasIv?: boolean; hasGreeks?: boolean; hasBidAsk?: boolean; providerTimestampAvailable?: boolean; zeroGreekAnomalyCount?: number; priceBoundAnomalyCount?: number; errors?: string[] }>;
+  verifyHistoricalStoreBrain?(): Promise<{ ok: boolean; l0ManifestWriteRead?: boolean; l1RawImmutableWriteRead?: boolean; l2IdentityWriteRead?: boolean; checksumMatch?: boolean; errors?: string[] }>;
+}
+
+function v3StatusFromCounts(ok: boolean, counts: Array<number | undefined>): V3AuditStatus {
+  if (!ok) return "FAIL";
+  const present = counts.filter((v) => typeof v === "number" && v > 0).length;
+  if (present === counts.length) return "PASS";
+  if (present > 0) return "PARTIAL";
+  return "FAIL";
+}
+
+function v3AggregateStatus(checks: V3AuditCheck[]): V3AuditStatus {
+  if (checks.some((c) => c.status === "FAIL")) return "FAIL";
+  if (checks.some((c) => c.status === "PARTIAL")) return "PARTIAL";
+  if (checks.some((c) => c.status === "UNKNOWN")) return "UNKNOWN";
+  if (checks.every((c) => c.status === "BLOCKED_BY_DATA")) return "BLOCKED_BY_DATA";
+  if (checks.some((c) => c.status === "BLOCKED_BY_DATA")) return "PARTIAL";
+  return "PASS";
+}
+
+function v3BlockDependents(checks: V3AuditCheck[]): V3AuditCheck[] {
+  const map = new Map(checks.map((c) => [c.id, c.status]));
+  return checks.map((c) => {
+    const bad = c.dependsOn?.find((id) => ["FAIL", "UNKNOWN", "BLOCKED_BY_DATA"].includes(String(map.get(id))));
+    return bad ? { ...c, status: "BLOCKED_BY_DATA" as V3AuditStatus, reason: `Blocked because prerequisite ${bad} is not usable.` } : c;
+  });
+}
+
+async function v3AuditOne(symbol: V3AuditSymbol, adapter: V3AuditAdapter): Promise<V3SymbolAuditReport> {
+  const checks: V3AuditCheck[] = [];
+
+  try {
+    const r = await adapter.resolveContracts(symbol);
+    checks.push({ id: "A_IDENTITY", name: "Contract identity", status: r.ok ? "PASS" : "FAIL", evidence: { spotSecurityId: r.spotSecurityId ?? null, currentFuture: r.currentFuture ?? null, nextFuture: r.nextFuture ?? null, farFuture: r.farFuture ?? null, expiryCount: r.currentOptionExpiries?.length ?? 0 }, reason: r.errors?.join("; ") });
+  } catch (e) {
+    checks.push({ id: "A_IDENTITY", name: "Contract identity", status: "FAIL", reason: e instanceof Error ? e.message : String(e) });
+  }
+
+  try {
+    const r = await adapter.fetchFuturesHistory(symbol);
+    checks.push({ id: "B_FUTURES_HISTORY", name: "Futures OHLC/volume/timestamp", status: v3StatusFromCounts(r.ok && r.identityOk, [r.openCount, r.highCount, r.lowCount, r.closeCount, r.volumeCount, r.timestampCount]), dependsOn: ["A_IDENTITY"], evidence: r as unknown as Record<string, unknown>, reason: r.errors?.join("; ") });
+    let s: V3AuditStatus = "UNKNOWN";
+    if (r.requestHadOiTrue === false) s = "FAIL";
+    else if (r.rawHasOi === true && (r.oiCount ?? 0) > 0) s = "PASS";
+    else if (r.requestHadOiTrue === true && r.rawHasOi === false) s = "PARTIAL";
+    checks.push({ id: "B_FUTURES_OI", name: "Historical futures OI", status: s, dependsOn: ["A_IDENTITY"], evidence: { requestHadOiTrue: r.requestHadOiTrue ?? null, rawHasOi: r.rawHasOi ?? null, oiCount: r.oiCount ?? 0 } });
+  } catch (e) {
+    checks.push({ id: "B_FUTURES_HISTORY", name: "Futures OHLC/volume/timestamp", status: "FAIL", dependsOn: ["A_IDENTITY"], reason: e instanceof Error ? e.message : String(e) });
+    checks.push({ id: "B_FUTURES_OI", name: "Historical futures OI", status: "UNKNOWN", dependsOn: ["A_IDENTITY"], reason: "Futures probe failed before OI could be proven." });
+  }
+
+  try {
+    const r = await adapter.fetchExpiredOptionProbe(symbol);
+    checks.push({ id: "C_OPTION_HISTORY", name: "Expired option OHLC/OI/volume/spot/timestamp", status: v3StatusFromCounts(r.ok, [r.ohlcCount, r.volumeCount, r.oiCount, r.spotCount, r.timestampCount]), dependsOn: ["A_IDENTITY"], evidence: r as unknown as Record<string, unknown>, reason: r.errors?.join("; ") });
+    checks.push({ id: "C_HISTORICAL_IV", name: "Historical option IV", status: r.requestUsedOfficialIvField !== true ? "FAIL" : (r.ivCount ?? 0) > 0 ? "PASS" : "PARTIAL", dependsOn: ["C_OPTION_HISTORY"], evidence: { requestUsedOfficialIvField: r.requestUsedOfficialIvField ?? null, ivCount: r.ivCount ?? 0 } });
+    checks.push({ id: "C_HISTORICAL_STRIKE", name: "Historical option strike identity", status: (r.strikeCount ?? 0) > 0 ? "PASS" : "PARTIAL", dependsOn: ["C_OPTION_HISTORY"], evidence: { strikeCount: r.strikeCount ?? 0 } });
+    checks.push({ id: "C_CALL_PUT_COVERAGE", name: "CALL and PUT historical coverage", status: r.callOk && r.putOk ? "PASS" : "PARTIAL", dependsOn: ["C_OPTION_HISTORY"], evidence: { callOk: !!r.callOk, putOk: !!r.putOk } });
+    checks.push({ id: "C_EXPIRYCODE_ZERO", name: "Current/near expiryCode=0 behavior", status: r.expiryCodeZeroAccepted === true ? "PASS" : r.expiryCodeZeroAccepted === false ? "PARTIAL" : "UNKNOWN", dependsOn: ["C_OPTION_HISTORY"], evidence: { expiryCodeZeroAccepted: r.expiryCodeZeroAccepted ?? null } });
+  } catch (e) {
+    checks.push({ id: "C_OPTION_HISTORY", name: "Expired option history", status: "FAIL", dependsOn: ["A_IDENTITY"], reason: e instanceof Error ? e.message : String(e) });
+  }
+
+  try {
+    const r = await adapter.fetchLiveOptionChainProbe(symbol);
+    const live = r.ok && r.hasOi && r.hasVolume && r.hasIv && r.hasBidAsk && (r.strikeCount ?? 0) > 0 ? "PASS" : r.ok ? "PARTIAL" : "FAIL";
+    checks.push({ id: "D_LIVE_CHAIN", name: "Live option-chain raw fields", status: live, dependsOn: ["A_IDENTITY"], evidence: r as unknown as Record<string, unknown>, reason: r.errors?.join("; ") });
+    checks.push({ id: "D_ZERO_GREEKS", name: "Live zero-IV/zero-Greeks anomaly gate", status: (r.zeroGreekAnomalyCount ?? 0) > 0 ? "PARTIAL" : "PASS", dependsOn: ["D_LIVE_CHAIN"], evidence: { anomalyCount: r.zeroGreekAnomalyCount ?? 0 } });
+    checks.push({ id: "D_PRICE_BOUND", name: "Price-bound anomaly gate", status: (r.priceBoundAnomalyCount ?? 0) > 0 ? "PARTIAL" : "PASS", dependsOn: ["D_LIVE_CHAIN"], evidence: { anomalyCount: r.priceBoundAnomalyCount ?? 0 } });
+    checks.push({ id: "D_PROVIDER_TIMESTAMP", name: "Exchange/provider timestamp availability", status: r.providerTimestampAvailable ? "PASS" : "PARTIAL", dependsOn: ["D_LIVE_CHAIN"], evidence: { providerTimestampAvailable: !!r.providerTimestampAvailable } });
+  } catch (e) {
+    checks.push({ id: "D_LIVE_CHAIN", name: "Live option-chain raw fields", status: "FAIL", dependsOn: ["A_IDENTITY"], reason: e instanceof Error ? e.message : String(e) });
+  }
+
+  const resolved = v3BlockDependents(checks);
+  return { symbol, checks: resolved, overallStatus: v3AggregateStatus(resolved) };
+}
+
+async function v3RunMasterAudit(adapter: V3AuditAdapter, symbols: V3AuditSymbol[]): Promise<V3MasterAuditReport> {
+  const reports: V3SymbolAuditReport[] = [];
+  for (const symbol of symbols) reports.push(await v3AuditOne(symbol, adapter));
+
+  if (adapter.verifyHistoricalStoreBrain) {
+    try {
+      const store = await adapter.verifyHistoricalStoreBrain();
+      const s: V3AuditStatus = store.ok && store.l0ManifestWriteRead && store.l1RawImmutableWriteRead && store.l2IdentityWriteRead && store.checksumMatch ? "PASS" : store.ok ? "PARTIAL" : "FAIL";
+      for (const r of reports) {
+        r.checks.push({ id: "E_STORE_BRAIN", name: "Historical Store Brain L0/L1/L2 write-read proof", status: s, evidence: store as unknown as Record<string, unknown>, reason: store.errors?.join("; ") });
+        r.overallStatus = v3AggregateStatus(r.checks);
+      }
+    } catch (e) {
+      for (const r of reports) {
+        r.checks.push({ id: "E_STORE_BRAIN", name: "Historical Store Brain L0/L1/L2 write-read proof", status: "FAIL", reason: e instanceof Error ? e.message : String(e) });
+        r.overallStatus = v3AggregateStatus(r.checks);
+      }
+    }
+  }
+
+  const all = reports.flatMap((r) => r.checks);
+  const cnt = (s: V3AuditStatus) => all.filter((c) => c.status === s).length;
+  return {
+    architectureRole: "V3D_MASTER_AUDIT_HARNESS",
+    generatedAt: new Date().toISOString(),
+    readOnlyMode: true,
+    tokenExposed: false,
+    orderAccessUsed: false,
+    symbols: reports,
+    summary: { pass: cnt("PASS"), partial: cnt("PARTIAL"), fail: cnt("FAIL"), unknown: cnt("UNKNOWN"), blockedByData: cnt("BLOCKED_BY_DATA") },
+    blockers: reports.flatMap((r) => r.checks.filter((c) => c.status === "FAIL" || c.status === "UNKNOWN").map((c) => ({ symbol: r.symbol, checkId: c.id, name: c.name, reason: c.reason }))),
+  };
+}
+
+// ----------------------------------------------------------------------------
+// V3AuditAdapter implementation. Reuses existing D1-D6 Dhan credentials and
+// the audit endpoints already LIVE_VERIFIED earlier today via internal
+// self-fetch calls (no duplicated credentials, no new Dhan call sites for
+// logic already proven correct today). Fresh logic is written only for the
+// expired-options probe, per Bug 02A's official 'iv' field-name requirement.
+// ----------------------------------------------------------------------------
+
+function v3SelfBaseUrl(): string {
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
+  return domain ? `https://${domain}` : "http://localhost:8080";
+}
+
+const v3AuditKey = () => process.env.DHAN_AUDIT_KEY?.trim() || "";
+
+async function v3SelfFetchJson(path: string): Promise<{ ok: boolean; status: number; json: any }> {
+  const url = `${v3SelfBaseUrl()}${path}`;
+  const res = await fetch(url);
+  const text = await res.text();
+  let json: any = null;
+  try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+  return { ok: res.ok, status: res.status, json };
+}
+
+const v3RealDhanAdapter: V3AuditAdapter = {
+  async resolveContracts(symbol) {
+    const key = v3AuditKey();
+    if (!key) return { ok: false, errors: ["DHAN_AUDIT_KEY not set in Railway variables"] };
+
+    const [liveRes, scan] = await Promise.all([
+      v3SelfFetchJson(`/api/dhan/live?symbol=${symbol}`),
+      dhanScanScripMaster(symbol, 8),
+    ]);
+
+    const errors: string[] = [];
+    if (!liveRes.ok) errors.push(`live probe HTTP ${liveRes.status}`);
+    if (!scan.fetchOk) errors.push("scrip master scan failed");
+
+    const sortedFut = [...scan.futRows].sort((a, b) => {
+      const da = new Date(a["SEM_EXPIRY_DATE"] || "").getTime();
+      const db = new Date(b["SEM_EXPIRY_DATE"] || "").getTime();
+      return (isNaN(da) ? Infinity : da) - (isNaN(db) ? Infinity : db);
+    });
+
+    return {
+      ok: liveRes.ok && scan.fetchOk && sortedFut.length > 0,
+      spotSecurityId: liveRes.json?.underlyingScrip ?? null,
+      currentFuture: sortedFut[0] ? { securityId: sortedFut[0]["SEM_SMST_SECURITY_ID"], tradingSymbol: sortedFut[0]["SEM_TRADING_SYMBOL"], expiry: sortedFut[0]["SEM_EXPIRY_DATE"] } : null,
+      nextFuture: sortedFut[1] ? { securityId: sortedFut[1]["SEM_SMST_SECURITY_ID"], tradingSymbol: sortedFut[1]["SEM_TRADING_SYMBOL"], expiry: sortedFut[1]["SEM_EXPIRY_DATE"] } : null,
+      farFuture: sortedFut[2] ? { securityId: sortedFut[2]["SEM_SMST_SECURITY_ID"], tradingSymbol: sortedFut[2]["SEM_TRADING_SYMBOL"], expiry: sortedFut[2]["SEM_EXPIRY_DATE"] } : null,
+      currentOptionExpiries: Array.isArray(liveRes.json?.availableExpiries) ? liveRes.json.availableExpiries : [],
+      errors: errors.length ? errors : undefined,
+    };
+  },
+
+  async fetchFuturesHistory(symbol) {
+    const key = v3AuditKey();
+    if (!key) return { ok: false, identityOk: false, errors: ["DHAN_AUDIT_KEY not set"] };
+    const { ok, status, json } = await v3SelfFetchJson(`/api/audit/dhan-futures-check?symbol=${symbol}&key=${encodeURIComponent(key)}`);
+    if (!ok || !json) return { ok: false, identityOk: false, errors: [`futures probe HTTP ${status}`] };
+
+    const counts = json.rawResponseCandleCounts || {};
+    return {
+      ok: true,
+      identityOk: !!json.contractIdentity?.securityId,
+      openCount: counts.open ?? 0,
+      highCount: counts.high ?? 0,
+      lowCount: counts.low ?? 0,
+      closeCount: counts.close ?? 0,
+      volumeCount: counts.volume ?? 0,
+      oiCount: counts.open_interest ?? 0,
+      timestampCount: counts.timestamp ?? 0,
+      rawHasOi: !!json.rawOiPresent,
+      requestHadOiTrue: !!json.oiFlagLiterallyInOutgoingBody,
+      errors: json.rootCauseStatus === "ERROR" ? [json.rootCauseNote].filter(Boolean) : undefined,
+    };
+  },
+
+  async fetchExpiredOptionProbe(symbol) {
+    const mapping = (DHAN_UNDERLYING_MAP as Record<string, { underlyingScrip: number; underlyingSeg: string }>)[symbol];
+    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+    if (!mapping) return { ok: false, errors: ["Symbol not in DHAN_UNDERLYING_MAP"] };
+    if (!accessToken || !clientId) return { ok: false, errors: ["DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing"] };
+
+    const optionsSegment = symbol === "SENSEX" ? "BSE_FNO" : "NSE_FNO";
+    const toDate = new Date();
+    const fromDate = new Date(toDate.getTime() - 10 * 24 * 60 * 60 * 1000);
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+    async function probe(optionType: "CALL" | "PUT", expiryCode: number) {
+      const body = {
+        exchangeSegment: optionsSegment,
+        interval: "1",
+        securityId: mapping.underlyingScrip,
+        instrument: "OPTIDX",
+        expiryFlag: "WEEK",
+        expiryCode,
+        strike: "ATM",
+        drvOptionType: optionType,
+        requiredData: ["open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot"],
+        fromDate: fmt(fromDate),
+        toDate: fmt(toDate),
+      };
+      const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/rollingoption", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
+        body: JSON.stringify(body),
+      });
+      const raw = await res.text();
+      let payload: any = null;
+      try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+      return { ok: res.ok, status: res.status, payload };
+    }
+
+    // Record-only check: does Dhan accept expiryCode:0 at all? (not used
+    // for the real data pull below, since prior live probes confirmed 0
+    // is rejected with DH-905).
+    let expiryCodeZeroAccepted: boolean | null = null;
+    try {
+      const zeroProbe = await probe("CALL", 0);
+      expiryCodeZeroAccepted = zeroProbe.ok;
+    } catch {
+      expiryCodeZeroAccepted = null;
+    }
+
+    const errors: string[] = [];
+    let callResult: any = null;
+    let putResult: any = null;
+    try {
+      const r = await probe("CALL", 1);
+      if (r.ok && r.payload) callResult = r.payload; else errors.push(`CALL probe HTTP ${r.status}`);
+    } catch (e) { errors.push(e instanceof Error ? e.message : "CALL probe failed"); }
+    try {
+      const r = await probe("PUT", 1);
+      if (r.ok && r.payload) putResult = r.payload; else errors.push(`PUT probe HTTP ${r.status}`);
+    } catch (e) { errors.push(e instanceof Error ? e.message : "PUT probe failed"); }
+
+    function leg(payload: any): any {
+      return payload?.data?.ce ?? payload?.data?.pe ?? null;
+    }
+    const callLeg = leg(callResult);
+    const putLeg = leg(putResult);
+    const arrLen = (v: any) => (Array.isArray(v) ? v.length : 0);
+
+    return {
+      ok: !!(callLeg || putLeg),
+      callOk: !!callLeg,
+      putOk: !!putLeg,
+      ohlcCount: arrLen(callLeg?.open ?? putLeg?.open),
+      volumeCount: arrLen(callLeg?.volume ?? putLeg?.volume),
+      oiCount: arrLen(callLeg?.oi ?? putLeg?.oi),
+      ivCount: Math.max(arrLen(callLeg?.iv), arrLen(putLeg?.iv)),
+      strikeCount: Math.max(arrLen(callLeg?.strike), arrLen(putLeg?.strike)),
+      spotCount: arrLen(callLeg?.spot ?? putLeg?.spot),
+      timestampCount: arrLen(callLeg?.timestamp ?? putLeg?.timestamp),
+      requestUsedOfficialIvField: true,
+      expiryCodeZeroAccepted,
+      errors: errors.length ? errors : undefined,
+    };
+  },
+
+  async fetchLiveOptionChainProbe(symbol) {
+    const { ok, status, json } = await v3SelfFetchJson(`/api/dhan/live?symbol=${symbol}`);
+    if (!ok || !json || json.status !== "PASS") return { ok: false, errors: [`live probe HTTP ${status}`] };
+
+    const strikes: any[] = Array.isArray(json.strikes) ? json.strikes : [];
+    let zeroGreekAnomalyCount = 0;
+    let priceBoundAnomalyCount = 0;
+    let hasOi = false, hasVolume = false, hasIv = false, hasGreeks = false, hasBidAsk = false;
+
+    for (const s of strikes) {
+      for (const legKey of ["ce", "pe"] as const) {
+        const leg = s[legKey];
+        if (!leg) continue;
+        if (typeof leg.oi === "number") hasOi = true;
+        if (typeof leg.volume === "number") hasVolume = true;
+        if (typeof leg.iv === "number") hasIv = true;
+        if (typeof leg.delta === "number") hasGreeks = true;
+        if (typeof leg.bid === "number" && typeof leg.ask === "number") hasBidAsk = true;
+        if (leg.iv === 0 && leg.delta === 0 && leg.gamma === 0 && leg.theta === 0 && leg.vega === 0) zeroGreekAnomalyCount++;
+        if (typeof leg.lastPrice === "number" && (leg.lastPrice < 0 || leg.lastPrice > (json.spot ?? Infinity) * 2)) priceBoundAnomalyCount++;
+      }
+    }
+
+    return {
+      ok: true,
+      strikeCount: strikes.length,
+      hasOi, hasVolume, hasIv, hasGreeks, hasBidAsk,
+      providerTimestampAvailable: json.providerTimestamp !== "UNAVAILABLE_FROM_PROVIDER",
+      zeroGreekAnomalyCount,
+      priceBoundAnomalyCount,
+    };
+  },
+
+  // verifyHistoricalStoreBrain intentionally omitted -- see banner comment above.
+};
+
+app.get("/v3/audit/master", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const allParam = c.req.query("all")?.trim() === "true";
+  const symbols: V3AuditSymbol[] = allParam
+    ? ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"]
+    : ["NIFTY"];
+
+  try {
+    const report = await v3RunMasterAudit(v3RealDhanAdapter, symbols);
+    return c.json(report, 200);
+  } catch (err) {
+    return c.json({
+      architectureRole: "V3D_MASTER_AUDIT_HARNESS",
+      generatedAt: new Date().toISOString(),
+      status: "ERROR",
+      error: err instanceof Error ? err.message : "Unknown master audit failure",
+      readOnlyMode: true, tokenExposed: false, orderAccessUsed: false,
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

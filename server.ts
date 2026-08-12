@@ -21156,6 +21156,7 @@ async function dhanScanScripMaster(
   totalRowsScanned: number;
   futRows: DhanCsvRow[];
   optRows: DhanCsvRow[];
+  idxRows: DhanCsvRow[];
   exchangeFiltered: string;
   fetchOk: boolean;
   httpStatus: number;
@@ -21165,7 +21166,7 @@ async function dhanScanScripMaster(
   if (!res.ok || !res.body) {
     return {
       headerCols: null, colIndex: {}, totalRowsScanned: 0,
-      futRows: [], optRows: [], exchangeFiltered: exchangeFilter,
+      futRows: [], optRows: [], idxRows: [], exchangeFiltered: exchangeFilter,
       fetchOk: false, httpStatus: res.status,
     };
   }
@@ -21178,6 +21179,7 @@ async function dhanScanScripMaster(
   let totalRowsScanned = 0;
   const futRows: DhanCsvRow[] = [];
   const optRows: DhanCsvRow[] = [];
+  const idxRows: DhanCsvRow[] = [];
 
   outer: while (true) {
     const { done, value } = await reader.read();
@@ -21218,13 +21220,14 @@ async function dhanScanScripMaster(
 
       if (instType === "FUTIDX" && futRows.length < maxSamplesEach) futRows.push(row);
       if (instType === "OPTIDX" && optRows.length < maxSamplesEach) optRows.push(row);
+      if (instType === "INDEX" && idxRows.length < maxSamplesEach) idxRows.push(row);
 
-      if (futRows.length >= maxSamplesEach && optRows.length >= maxSamplesEach) break outer;
+      if (futRows.length >= maxSamplesEach && optRows.length >= maxSamplesEach && idxRows.length >= 1) break outer;
     }
   }
   try { await reader.cancel(); } catch {}
 
-  return { headerCols, colIndex, totalRowsScanned, futRows, optRows, exchangeFiltered: exchangeFilter, fetchOk: true, httpStatus: res.status };
+  return { headerCols, colIndex, totalRowsScanned, futRows, optRows, idxRows, exchangeFiltered: exchangeFilter, fetchOk: true, httpStatus: res.status };
 }
 
 app.get("/api/audit/dhan-instrument-master", async (c) => {
@@ -21272,8 +21275,10 @@ app.get("/api/audit/dhan-instrument-master", async (c) => {
       rowsScannedBeforeEnoughSamples: scan.totalRowsScanned,
       futuresContractsFound: scan.futRows.length,
       optionsContractsFound: scan.optRows.length,
+      indexRowsFound: scan.idxRows.length,
       sampleFuturesRows: scan.futRows,
       sampleOptionsRows: scan.optRows.slice(0, 3),
+      sampleIndexRows: scan.idxRows,
       fieldAudit,
       provenanceRule: "DHAN_NATIVE fields only — nothing derived, nothing assumed. Header columns read directly from the CSV, not hardcoded.",
       limitations: [

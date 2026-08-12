@@ -22370,6 +22370,142 @@ app.get("/api/audit/dhan-bug01b-intraday-futures-check", async (c) => {
   }
 });
 
+
+// ============================================================================
+// V3D_FINNIFTY_SPOT_HISTORY_FIX — INDEX intraday spot proof (READ-ONLY)
+//
+// Probes Dhan's /v2/charts/intraday for FINNIFTY index spot (securityId=27,
+// IDX_I, instrument=INDEX) per Bhagi Sir's exact request spec. Never
+// substitutes another index, never uses NSE_FNO for spot history.
+// ============================================================================
+
+app.get("/api/audit/dhan-finnifty-spot-intraday-check", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    return c.json({
+      architectureRole: "V3D_FINNIFTY_SPOT_HISTORY_FIX",
+      generatedAt, symbol: "FINNIFTY",
+      status: "ERROR", error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+    }, 503);
+  }
+
+  // Exact request per Bhagi Sir's spec -- no expiryCode field at all for
+  // index spot, oi:false, one already-completed trading day.
+  const requestBodyObj = {
+    securityId: "27",
+    exchangeSegment: "IDX_I",
+    instrument: "INDEX",
+    interval: "1",
+    oi: false,
+    fromDate: "2026-08-11 09:15:00",
+    toDate: "2026-08-11 15:30:00",
+  };
+  const requestBodyStr = JSON.stringify(requestBodyObj);
+  const checks = {
+    securityIdLiterally27: /"securityId"\s*:\s*"27"/.test(requestBodyStr),
+    exchangeSegmentLiterallyIDX_I: /"exchangeSegment"\s*:\s*"IDX_I"/.test(requestBodyStr),
+    instrumentLiterallyINDEX: /"instrument"\s*:\s*"INDEX"/.test(requestBodyStr),
+    intervalLiterally1: /"interval"\s*:\s*"1"/.test(requestBodyStr),
+    oiLiterallyFalse: /"oi"\s*:\s*false/.test(requestBodyStr),
+    noExpiryCodeField: !/"expiryCode"/.test(requestBodyStr),
+  };
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/intraday", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: requestBodyStr,
+    });
+
+    const httpStatus = res.status;
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    if (!res.ok || !payload || typeof payload !== "object") {
+      return c.json({
+        architectureRole: "V3D_FINNIFTY_SPOT_HISTORY_FIX",
+        generatedAt, symbol: "FINNIFTY",
+        sanitizedRequestBody: requestBodyObj,
+        requestChecks: checks,
+        httpStatus,
+        rootCauseStatus: "ERROR",
+        providerError: payload && typeof payload === "object" ? {
+          errorType: payload.errorType ?? null,
+          errorCode: payload.errorCode ?? null,
+          errorMessage: payload.errorMessage ?? null,
+        } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `HTTP ${httpStatus}` },
+        rawSnippet: raw.slice(0, 500),
+        finniftySpotHistoryClosed: false,
+        readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+      }, 200);
+    }
+
+    const rawTopLevelKeys = Object.keys(payload);
+    const arrLen = (v: any) => (Array.isArray(v) ? v.length : 0);
+    const counts: Record<string, number> = {};
+    for (const k of rawTopLevelKeys) counts[k] = arrLen(payload[k]);
+
+    const ohlcvFields = ["open", "high", "low", "close", "volume", "timestamp"];
+    const allNonEmpty = ohlcvFields.every((f) => (counts[f] ?? 0) > 0);
+    const lastClose = Array.isArray(payload.close) && payload.close.length > 0 ? payload.close[payload.close.length - 1] : null;
+
+    // Sanity check: real FINNIFTY level is in the ~20,000-35,000 range
+    // (confirmed independently ~26,532 on 2026-08-10). If Dhan's returned
+    // close is wildly outside that band, securityId=27 likely isn't
+    // FINNIFTY, regardless of HTTP 200.
+    let sanityCheck: string;
+    if (typeof lastClose === "number") {
+      sanityCheck = lastClose > 15000 && lastClose < 40000
+        ? "PLAUSIBLE_RANGE_FOR_FINNIFTY"
+        : "IMPLAUSIBLE_RANGE — securityId=27 likely does NOT map to FINNIFTY, do not trust it";
+    } else {
+      sanityCheck = "NO_NUMERIC_CLOSE_VALUE_TO_CHECK";
+    }
+
+    return c.json({
+      architectureRole: "V3D_FINNIFTY_SPOT_HISTORY_FIX",
+      generatedAt, symbol: "FINNIFTY",
+      sanitizedRequestBody: requestBodyObj,
+      requestChecks: checks,
+      httpStatus,
+      rawResponseKeys: rawTopLevelKeys,
+      rawResponseArrayLengths: counts,
+      ohlcvAllNonEmpty: allNonEmpty,
+      lastCloseSample: lastClose,
+      sanityCheck,
+      rootCauseStatus: allNonEmpty ? "PASS" : "PARTIAL",
+      finniftySpotHistoryClosed: true,
+      limitations: [
+        "Single trading day (2026-08-11 09:15-15:30 IST) only.",
+        "securityId=27 is still an unverified candidate pending this sanity check -- do not promote to a confirmed comment without reviewing sanityCheck above.",
+      ],
+      readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      architectureRole: "V3D_FINNIFTY_SPOT_HISTORY_FIX",
+      generatedAt, symbol: "FINNIFTY",
+      status: "ERROR",
+      error: err instanceof Error ? err.message : "Unknown FINNIFTY spot intraday request failure",
+      readOnlyMode: true, tokenExposed: false,
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

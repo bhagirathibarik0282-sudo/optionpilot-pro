@@ -18457,6 +18457,13 @@ const DHAN_UNDERLYING_MAP: Record<string, { underlyingScrip: number; underlyingS
   // (~26,532 on 2026-08-10). Futures contract IDs (58070/48702) were
   // separately cross-validated against two independent scrip-master scans.
   FINNIFTY: { underlyingScrip: 27, underlyingSeg: "IDX_I" },
+  // MIDCPNIFTY — confirmed 2026-08-12. securityId=442 came directly from
+  // Dhan's own scrip-master CSV INDEX row (SEM_TRADING_SYMBOL=MIDCPNIFTY,
+  // SEM_CUSTOM_SYMBOL="Nifty Midcap Select" -- not guessed) and was
+  // live-verified via /v2/charts/intraday: 374 minute candles,
+  // close=14990.55 on 2026-08-11, matching MIDCPNIFTY's real range
+  // (~14,780-14,955 in early August 2026).
+  MIDCPNIFTY: { underlyingScrip: 442, underlyingSeg: "IDX_I" },
 };
 
 function sleep(ms: number): Promise<void> {

@@ -23300,6 +23300,14 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
     const optionExpiryIso = nearestFut["SEM_EXPIRY_DATE"] ? new Date(nearestFut["SEM_EXPIRY_DATE"]).toISOString() : null;
 
     const inputRows = spotSeries.rowCount;
+    const _debugTimestamps = {
+      spotFirst5: spotSeries.timestamps.slice(0, 5),
+      futFirst5: futSeries.timestamps.slice(0, 5),
+      optFirst5: optSeries.timestamps.slice(0, 5),
+      spotCount: spotSeries.rowCount,
+      futCount: futSeries.rowCount,
+      optCount: optSeries.rowCount,
+    };
 
     // --- L1: write immutable raw payloads for all three sources (content-hash names) ---
     const rawParentFolder = storeRoot ? await findOrCreateDriveFolder("01_raw", storeRoot, token) : null;
@@ -23392,6 +23400,7 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
     return c.json({
       ...report,
       status: overallStatus,
+      _debugTimestamps,
       tradingDate: tradingDateStr,
       folderIds: { brainRoot, storeRoot, normFolder, normSymbolFolder },
       inputRows,

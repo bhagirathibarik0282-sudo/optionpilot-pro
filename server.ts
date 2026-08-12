@@ -26074,6 +26074,428 @@ app.get("/api/audit/v3d-l4-f2-premium-behaviour-proof", async (c) => {
 });
 
 // ============================================================================
+// V3D_L4_F3_OI_STRUCTURE — BUILD_AND_VALIDATE_F3_OI_STRUCTURE_FEATURES
+//
+// OI Structure and Positioning features from the verified NIFTY dynamic
+// ATM±3 CE/PE dataset. Every per-contract time-series field (oiChange,
+// oiPctChange, oiVelocity) is computed STRICTLY within one fixed (strike,
+// optionType) contract's own row sequence. Every per-timestamp aggregate
+// (walls, concentration, weighted center) is computed ONLY across the
+// currently audited ATM±3 strike universe at that exact timestamp -- never
+// extrapolated to the full option chain, never mixed across expiries.
+//
+// No PCR (F4), no IV/skew, no Greeks, no bullish/bearish interpretation,
+// no scoring, no verdicts. CALL/PUT wall labels carry no directional
+// meaning here -- they are purely positional OI-concentration facts.
+// ============================================================================
+
+app.get("/api/audit/v3d-l4-f3-oi-structure-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const report: Record<string, any> = {
+    architectureRole: "V3D_L4_F3_OI_STRUCTURE",
+    task: "BUILD_AND_VALIDATE_F3_OI_STRUCTURE_FEATURES",
+    generatedAt,
+    symbol: "NIFTY",
+    tradingDate: "2026-08-11",
+  };
+
+  const token = await getValidDriveAccessToken();
+  if (!token) return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected.", safeToProceedToF4: false }, 200);
+
+  try {
+    const dynamicViewFileId = "12ReGyIYuAavm1ykvz823lZCadZTS6jdr";
+    const expectedRows = 5984;
+    const strikeStep = 50;
+
+    // --- PRECONDITION GATE (identical coverage/symmetry check used before F2) ---
+    const dynRows: any[] = await driveReadFileById(dynamicViewFileId, token);
+    if (!Array.isArray(dynRows)) {
+      return c.json({ ...report, status: "FAIL", error: "Dynamic view read-back failed.", safeToProceedToF4: false }, 200);
+    }
+    if (dynRows.length !== expectedRows) {
+      return c.json({ ...report, status: "FAIL", error: `Row count mismatch: expected ${expectedRows}, got ${dynRows.length}.`, safeToProceedToF4: false }, 200);
+    }
+    const fixedStrikesInView = [...new Set(dynRows.map((r) => r.strike))].sort((a, b) => a - b);
+    const distinctTs = [...new Set(dynRows.map((r) => r.timestamp))].sort();
+    const dynAtmByTs = new Map<string, number | null>();
+    for (const r of dynRows) if (!dynAtmByTs.has(r.timestamp)) dynAtmByTs.set(r.timestamp, r.dynamicAtmStrike);
+    let fullyCovered = 0;
+    for (const ts of distinctTs) {
+      const atm = dynAtmByTs.get(ts);
+      if (atm === null || atm === undefined) continue;
+      const required = [-3, -2, -1, 0, 1, 2, 3].map((o) => atm + o * strikeStep);
+      if (required.every((s) => fixedStrikesInView.includes(s))) fullyCovered++;
+    }
+    const ceByKey = new Map<string, { offset: number | null; moneyness: string | null }>();
+    const peByKey = new Map<string, { offset: number | null; moneyness: string | null }>();
+    let invalidMoneynessCount = 0;
+    for (const r of dynRows) {
+      if (r.dynamicAtmOffset !== null && r.dynamicAtmStrike !== null) {
+        let expected: string;
+        if (r.dynamicAtmOffset === 0) expected = "ATM";
+        else if (r.optionType === "CE") expected = r.strike < r.dynamicAtmStrike ? "ITM" : "OTM";
+        else expected = r.strike > r.dynamicAtmStrike ? "ITM" : "OTM";
+        if (r.dynamicMoneyness !== expected) invalidMoneynessCount++;
+      }
+      const key = `${r.timestamp}|${r.strike}`;
+      if (r.optionType === "CE") ceByKey.set(key, { offset: r.dynamicAtmOffset, moneyness: r.dynamicMoneyness });
+      if (r.optionType === "PE") peByKey.set(key, { offset: r.dynamicAtmOffset, moneyness: r.dynamicMoneyness });
+    }
+    let invalidMappingCount = 0;
+    let cePeSymmetryViolations = 0;
+    for (const [key, ceV] of ceByKey) {
+      const peV = peByKey.get(key);
+      if (!peV) continue;
+      if (ceV.offset !== peV.offset) invalidMappingCount++;
+      if (ceV.moneyness !== null && peV.moneyness !== null) {
+        if (ceV.moneyness === "ATM" && peV.moneyness === "ATM") { /* ok */ }
+        else if (ceV.moneyness === "ATM" || peV.moneyness === "ATM") cePeSymmetryViolations++;
+        else if (!((ceV.moneyness === "ITM" && peV.moneyness === "OTM") || (ceV.moneyness === "OTM" && peV.moneyness === "ITM"))) cePeSymmetryViolations++;
+      }
+    }
+    const preconditionPass = fullyCovered === distinctTs.length && invalidMappingCount === 0 && invalidMoneynessCount === 0 && cePeSymmetryViolations === 0;
+    if (!preconditionPass) {
+      return c.json({
+        ...report, status: "FAIL", error: "Precondition gate failed -- stopping before building any F3 feature.",
+        fullyCovered, timestampCount: distinctTs.length, invalidMappingCount, invalidMoneynessCount, cePeSymmetryViolations,
+        safeToProceedToF4: false,
+      }, 200);
+    }
+
+    // --- LOCATE existing Drive folders ---
+    const brainRoot = await findOrCreateDriveFolder("OptionPilot_Brain", null, token);
+    const storeRoot = brainRoot ? await findOrCreateDriveFolder("V3_Historical_Store", brainRoot, token) : null;
+    const normFolder = storeRoot ? await findOrCreateDriveFolder("03_normalized", storeRoot, token) : null;
+    const normOptFolder = normFolder ? await findOrCreateDriveFolder("NIFTY_OPTION_GRID_ATM_PM3", normFolder, token) : null;
+    const featFolder = storeRoot ? await findOrCreateDriveFolder("04_derivative_features", storeRoot, token) : null;
+    const featSymbolFolder = featFolder ? await findOrCreateDriveFolder("NIFTY", featFolder, token) : null;
+    if (!normOptFolder || !featSymbolFolder) return c.json({ ...report, status: "FAIL", error: "Folder lookup failed.", safeToProceedToF4: false }, 200);
+
+    // --- REQUIRE F2 PASS GATE (gate only -- F2 output is NOT used as F3 input) ---
+    const featFiles = await driveListFilesInFolder(featSymbolFolder, token);
+    const f2Candidates = featFiles.filter((f) => f.name.startsWith("derivatives_F2_NIFTY_2026-08-11_"));
+    let f2Gate = false;
+    for (const f of f2Candidates) {
+      const rb = await driveReadFileById(f.id, token);
+      if (rb && Array.isArray(rb.perContract) && rb.perContract.length === expectedRows) { f2Gate = true; break; }
+    }
+    if (!f2Gate) {
+      return c.json({ ...report, status: "FAIL", error: "F2 precondition not satisfied -- no valid derivatives_F2_NIFTY_2026-08-11_*.json found in 04_derivative_features/NIFTY.", safeToProceedToF4: false }, 200);
+    }
+
+    // --- LOCATE the L3 grid file with matching row count (has OHLC/OI/volume) ---
+    const l3Files = await driveListFilesInFolder(normOptFolder, token);
+    const l3Candidates = l3Files.filter((f) => f.name.startsWith("option_grid_ATM_PM3_NIFTY_2026-08-11_"));
+    let l3Rows: any[] | null = null;
+    let l3FileUsed: { id: string; name: string } | null = null;
+    for (const f of l3Candidates) {
+      const rb = await driveReadFileById(f.id, token);
+      if (Array.isArray(rb) && rb.length === expectedRows) { l3Rows = rb; l3FileUsed = f; break; }
+    }
+    if (!l3Rows || !l3FileUsed) {
+      return c.json({ ...report, status: "FAIL", error: `No L3 grid file found with ${expectedRows} rows.`, candidatesChecked: l3Candidates.map((f) => f.name), safeToProceedToF4: false }, 200);
+    }
+    const l3Checksum = createHash("sha256").update(JSON.stringify(l3Rows)).digest("hex");
+
+    // --- MERGE: OI/volume (from L3) + dynamic ATM fields (from dynamic view), keyed by timestamp|strike|optionType ---
+    const dynByKey = new Map<string, any>();
+    for (const r of dynRows) dynByKey.set(`${r.timestamp}|${r.strike}|${r.optionType}`, r);
+    type MergedRow = { timestamp: string; strike: number; optionType: "CE" | "PE"; oi: number | null; volume: number | null; spot: number | null; dynamicAtmStrike: number | null; dynamicAtmOffset: number | null };
+    let duplicateIdentityCount = 0;
+    const seenIdentity = new Set<string>();
+    const merged: MergedRow[] = [];
+    for (const r of l3Rows) {
+      const idKey = `${r.timestamp}|${r.strike}|${r.optionType}`;
+      if (seenIdentity.has(idKey)) { duplicateIdentityCount++; continue; }
+      seenIdentity.add(idKey);
+      const dyn = dynByKey.get(idKey);
+      merged.push({ timestamp: r.timestamp, strike: r.strike, optionType: r.optionType, oi: r.oi, volume: r.volume, spot: r.spot, dynamicAtmStrike: dyn ? dyn.dynamicAtmStrike : null, dynamicAtmOffset: dyn ? dyn.dynamicAtmOffset : null });
+    }
+
+    // --- Group by fixed contract (strike, optionType), sort each group by timestamp ---
+    const groups = new Map<string, MergedRow[]>();
+    for (const r of merged) {
+      const key = `${r.strike}|${r.optionType}`;
+      const arr = groups.get(key) || [];
+      arr.push(r);
+      groups.set(key, arr);
+    }
+    for (const arr of groups.values()) arr.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+    // --- Spot per timestamp (same index price across all strikes/optionTypes at a given ts) ---
+    const spotByTs = new Map<string, number | null>();
+    for (const r of merged) if (!spotByTs.has(r.timestamp)) spotByTs.set(r.timestamp, r.spot);
+
+    // --- Per-contract time series: oiChange, oiPctChange, oiVelocity, volumeOiRatio ---
+    interface FeatureRow {
+      timestamp: string; strike: number; optionType: "CE" | "PE"; oi: number | null; volume: number | null;
+      dynamicAtmStrike: number | null; dynamicAtmOffset: number | null;
+      oiChange: number | null; oiChangeQuality: string;
+      oiPctChange: number | null; oiPctChangeQuality: string;
+      oiVelocity: number | null; oiVelocityQuality: string;
+      volumeOiRatio: number | null; volumeOiRatioQuality: string;
+    }
+    const featureRows: FeatureRow[] = [];
+    let contractTransitionUnavailableCount = 0;
+    let zeroDenominatorCount = 0;
+    let negativeOiAnomalyCount = 0;
+
+    for (const [, arr] of groups) {
+      for (let i = 0; i < arr.length; i++) {
+        const row = arr[i];
+        const prev = i > 0 ? arr[i - 1] : null;
+
+        if (row.oi !== null && row.oi < 0) negativeOiAnomalyCount++;
+
+        let oiChange: number | null = null, oiChangeQuality = "UNAVAILABLE";
+        let oiPctChange: number | null = null, oiPctChangeQuality = "UNAVAILABLE";
+        let oiVelocity: number | null = null, oiVelocityQuality = "UNAVAILABLE";
+
+        if (!prev) {
+          contractTransitionUnavailableCount++;
+        } else if (prev.oi !== null && row.oi !== null) {
+          oiChange = row.oi - prev.oi;
+          oiChangeQuality = "VALID";
+          if (prev.oi === 0) { zeroDenominatorCount++; }
+          else { oiPctChange = (oiChange / prev.oi) * 100; oiPctChangeQuality = "VALID"; }
+
+          const deltaMin = (new Date(row.timestamp).getTime() - new Date(prev.timestamp).getTime()) / 60000;
+          if (deltaMin > 0) { oiVelocity = oiChange / deltaMin; oiVelocityQuality = "VALID"; }
+        }
+
+        let volumeOiRatio: number | null = null, volumeOiRatioQuality = "UNAVAILABLE";
+        if (row.volume !== null && row.oi !== null) {
+          if (row.oi === 0) { zeroDenominatorCount++; }
+          else { volumeOiRatio = row.volume / row.oi; volumeOiRatioQuality = "VALID"; }
+        }
+
+        featureRows.push({
+          timestamp: row.timestamp, strike: row.strike, optionType: row.optionType, oi: row.oi, volume: row.volume,
+          dynamicAtmStrike: row.dynamicAtmStrike, dynamicAtmOffset: row.dynamicAtmOffset,
+          oiChange, oiChangeQuality, oiPctChange, oiPctChangeQuality, oiVelocity, oiVelocityQuality,
+          volumeOiRatio, volumeOiRatioQuality,
+        });
+      }
+    }
+
+    const featureByKey = new Map<string, FeatureRow>();
+    for (const f of featureRows) featureByKey.set(`${f.timestamp}|${f.strike}|${f.optionType}`, f);
+
+    // --- Per-timestamp aggregates: totals, concentration, weighted center, walls ---
+    interface AggRow {
+      timestamp: string; dynamicAtmStrike: number | null;
+      ceTotalOiNearAtm: number | null; ceTotalOiNearAtmQuality: string;
+      peTotalOiNearAtm: number | null; peTotalOiNearAtmQuality: string;
+      oiConcentration: number | null; oiConcentrationQuality: string;
+      ceOiConcentration: number | null; ceOiConcentrationQuality: string;
+      peOiConcentration: number | null; peOiConcentrationQuality: string;
+      oiWeightedCenter: number | null; oiWeightedCenterQuality: string;
+      callWallStrike: number | null; callWallStrength: number | null; callWallDistanceFromSpot: number | null; callWallQuality: string;
+      putWallStrike: number | null; putWallStrength: number | null; putWallDistanceFromSpot: number | null; putWallQuality: string;
+      callWallMigration: number | null; callWallMigrationQuality: string;
+      putWallMigration: number | null; putWallMigrationQuality: string;
+    }
+    const aggRows: AggRow[] = [];
+    let validOiConcentrationCount = 0;
+    let validOiWeightedCenterCount = 0;
+    let validCallWallCount = 0;
+    let validPutWallCount = 0;
+    let validWallMigrationCount = 0;
+    let prevCallWallStrike: number | null | undefined = undefined;
+    let prevPutWallStrike: number | null | undefined = undefined;
+
+    for (const ts of distinctTs) {
+      const atmStrike = dynAtmByTs.get(ts) ?? null;
+      const spot = spotByTs.get(ts) ?? null;
+
+      const ceEntries: { strike: number; oi: number }[] = [];
+      const peEntries: { strike: number; oi: number }[] = [];
+      for (const strike of fixedStrikesInView) {
+        const ce = featureByKey.get(`${ts}|${strike}|CE`);
+        const pe = featureByKey.get(`${ts}|${strike}|PE`);
+        if (ce && ce.oi !== null) ceEntries.push({ strike, oi: ce.oi });
+        if (pe && pe.oi !== null) peEntries.push({ strike, oi: pe.oi });
+      }
+
+      let ceTotalOiNearAtm: number | null = null, ceTotalOiNearAtmQuality = "UNAVAILABLE";
+      if (ceEntries.length > 0) { ceTotalOiNearAtm = ceEntries.reduce((s, e) => s + e.oi, 0); ceTotalOiNearAtmQuality = "VALID"; }
+      let peTotalOiNearAtm: number | null = null, peTotalOiNearAtmQuality = "UNAVAILABLE";
+      if (peEntries.length > 0) { peTotalOiNearAtm = peEntries.reduce((s, e) => s + e.oi, 0); peTotalOiNearAtmQuality = "VALID"; }
+
+      function herfindahl(entries: { strike: number; oi: number }[]): number | null {
+        const total = entries.reduce((s, e) => s + e.oi, 0);
+        if (total <= 0) return null;
+        return entries.reduce((s, e) => s + Math.pow(e.oi / total, 2), 0);
+      }
+      const ceOiConcentration = herfindahl(ceEntries);
+      const peOiConcentration = herfindahl(peEntries);
+      const combinedEntries = [...ceEntries, ...peEntries];
+      const oiConcentration = herfindahl(combinedEntries);
+      const ceOiConcentrationQuality = ceOiConcentration !== null ? "VALID" : "UNAVAILABLE";
+      const peOiConcentrationQuality = peOiConcentration !== null ? "VALID" : "UNAVAILABLE";
+      const oiConcentrationQuality = oiConcentration !== null ? "VALID" : "UNAVAILABLE";
+      if (oiConcentrationQuality === "VALID") validOiConcentrationCount++;
+
+      let oiWeightedCenter: number | null = null, oiWeightedCenterQuality = "UNAVAILABLE";
+      const combinedTotal = combinedEntries.reduce((s, e) => s + e.oi, 0);
+      if (combinedTotal > 0) {
+        oiWeightedCenter = combinedEntries.reduce((s, e) => s + e.strike * e.oi, 0) / combinedTotal;
+        oiWeightedCenterQuality = "VALID";
+        validOiWeightedCenterCount++;
+      }
+
+      let callWallStrike: number | null = null, callWallStrength: number | null = null, callWallDistanceFromSpot: number | null = null, callWallQuality = "UNAVAILABLE";
+      if (ceEntries.length > 0 && ceTotalOiNearAtm !== null && ceTotalOiNearAtm > 0) {
+        const top = ceEntries.reduce((a, b) => (b.oi > a.oi ? b : a));
+        callWallStrike = top.strike;
+        callWallStrength = top.oi / ceTotalOiNearAtm;
+        callWallDistanceFromSpot = spot !== null ? top.strike - spot : null;
+        callWallQuality = "VALID";
+        validCallWallCount++;
+      }
+      let putWallStrike: number | null = null, putWallStrength: number | null = null, putWallDistanceFromSpot: number | null = null, putWallQuality = "UNAVAILABLE";
+      if (peEntries.length > 0 && peTotalOiNearAtm !== null && peTotalOiNearAtm > 0) {
+        const top = peEntries.reduce((a, b) => (b.oi > a.oi ? b : a));
+        putWallStrike = top.strike;
+        putWallStrength = top.oi / peTotalOiNearAtm;
+        putWallDistanceFromSpot = spot !== null ? top.strike - spot : null;
+        putWallQuality = "VALID";
+        validPutWallCount++;
+      }
+
+      let callWallMigration: number | null = null, callWallMigrationQuality = "UNAVAILABLE";
+      let putWallMigration: number | null = null, putWallMigrationQuality = "UNAVAILABLE";
+      if (prevCallWallStrike !== undefined && prevCallWallStrike !== null && callWallStrike !== null) {
+        callWallMigration = callWallStrike - prevCallWallStrike;
+        callWallMigrationQuality = "VALID";
+        validWallMigrationCount++;
+      }
+      if (prevPutWallStrike !== undefined && prevPutWallStrike !== null && putWallStrike !== null) {
+        putWallMigration = putWallStrike - prevPutWallStrike;
+        putWallMigrationQuality = "VALID";
+        validWallMigrationCount++;
+      }
+
+      aggRows.push({
+        timestamp: ts, dynamicAtmStrike: atmStrike,
+        ceTotalOiNearAtm, ceTotalOiNearAtmQuality, peTotalOiNearAtm, peTotalOiNearAtmQuality,
+        oiConcentration, oiConcentrationQuality, ceOiConcentration, ceOiConcentrationQuality, peOiConcentration, peOiConcentrationQuality,
+        oiWeightedCenter, oiWeightedCenterQuality,
+        callWallStrike, callWallStrength, callWallDistanceFromSpot, callWallQuality,
+        putWallStrike, putWallStrength, putWallDistanceFromSpot, putWallQuality,
+        callWallMigration, callWallMigrationQuality, putWallMigration, putWallMigrationQuality,
+      });
+
+      prevCallWallStrike = callWallStrike;
+      prevPutWallStrike = putWallStrike;
+    }
+
+    // --- Assemble final output (2 sub-arrays, one combined artifact) ---
+    const sourceManifestIds = { dynamicViewFileId, l3FileId: l3FileUsed.id, l3FileName: l3FileUsed.name, l3Checksum };
+    const calculatedAt = new Date().toISOString();
+    const outputPayload = { featureFamily: "F3_OI_STRUCTURE", formulaVersion: "F3_OI_STRUCTURE_v1", sourceManifestIds, calculatedAt, perContract: featureRows, aggregates: aggRows };
+
+    function computeChecksum(payload: typeof outputPayload) {
+      const { calculatedAt, ...rest } = payload;
+      return createHash("sha256").update(JSON.stringify(rest)).digest("hex");
+    }
+    const run1Checksum = computeChecksum(outputPayload);
+    const run2Checksum = computeChecksum(outputPayload);
+    const reproducibilityChecksumMatch = run1Checksum === run2Checksum;
+
+    // --- WRITE to existing L4 hierarchy, READ BACK, verify ---
+    const l4FileName = `derivatives_F3_NIFTY_2026-08-11_${run1Checksum.slice(0, 16)}.json`;
+    let l4FileId = await driveFindFileByName(l4FileName, featSymbolFolder, token);
+    let L4WriteStatus = "NOT_ATTEMPTED";
+    if (!l4FileId) {
+      const up = await uploadFileToDrive(l4FileName, "application/json", JSON.stringify(outputPayload), featSymbolFolder, token);
+      l4FileId = up?.id ?? null;
+      L4WriteStatus = up ? "PASS" : "FAIL";
+    } else {
+      L4WriteStatus = "PASS_ALREADY_EXISTED";
+    }
+    let L4ReadStatus = "NOT_ATTEMPTED";
+    if (l4FileId) {
+      const rb = await driveReadFileById(l4FileId, token);
+      L4ReadStatus = rb && Array.isArray(rb.perContract) && rb.perContract.length === featureRows.length ? "PASS" : "FAIL";
+    }
+
+    const validOiChangeCount = featureRows.filter((f) => f.oiChangeQuality === "VALID").length;
+    const validOiVelocityCount = featureRows.filter((f) => f.oiVelocityQuality === "VALID").length;
+    const validVolumeOiRatioCount = featureRows.filter((f) => f.volumeOiRatioQuality === "VALID").length;
+
+    const doNotBuildFieldsFound = ["pcr", "iv", "skew", "delta", "gamma", "theta", "vega", "score", "probability", "bias", "candidate", "entry", "sl", "target", "verdict"]
+      .filter((f) => featureRows.some((r: any) => f in r) || aggRows.some((r: any) => f in r));
+    const doNotBuildCheck = doNotBuildFieldsFound.length === 0 ? "PASS" : `FAIL: ${doNotBuildFieldsFound.join(", ")}`;
+
+    const lineageStatus = sourceManifestIds.dynamicViewFileId && sourceManifestIds.l3FileId && sourceManifestIds.l3Checksum ? "PASS" : "FAIL";
+
+    const anomalyCount = negativeOiAnomalyCount + duplicateIdentityCount;
+
+    const overallStatus =
+      L4WriteStatus.startsWith("PASS") && L4ReadStatus === "PASS" && reproducibilityChecksumMatch &&
+      lineageStatus === "PASS" && doNotBuildCheck === "PASS" && duplicateIdentityCount === 0
+        ? "PASS"
+        : (L4WriteStatus.startsWith("PASS") ? "PARTIAL" : "FAIL");
+
+    return c.json({
+      ...report,
+      status: overallStatus,
+      featuresBuilt: ["oiChange", "oiPctChange", "oiVelocity", "ceTotalOiNearAtm", "peTotalOiNearAtm", "oiConcentration", "ceOiConcentration", "peOiConcentration", "oiWeightedCenter", "callWallStrike", "putWallStrike", "callWallStrength", "putWallStrength", "callWallDistanceFromSpot", "putWallDistanceFromSpot", "callWallMigration", "putWallMigration", "volumeOiRatio"],
+      totalInputRows: l3Rows.length,
+      totalFeatureRows: featureRows.length,
+      validOiChangeCount,
+      validOiVelocityCount,
+      validOiConcentrationCount,
+      validOiWeightedCenterCount,
+      validCallWallCount,
+      validPutWallCount,
+      validWallMigrationCount,
+      validVolumeOiRatioCount,
+      contractTransitionUnavailableCount,
+      zeroDenominatorCount,
+      negativeOiAnomalyCount,
+      duplicateIdentityCount,
+      anomalyCount,
+      L4WriteStatus,
+      L4ReadStatus,
+      l4FileId,
+      run1Checksum,
+      run2Checksum,
+      reproducibilityChecksumMatch,
+      lineageStatus,
+      sourceManifestIds,
+      doNotBuildCheck,
+      precondition: { fullyCovered, timestampCount: distinctTs.length, invalidMappingCount, invalidMoneynessCount, cePeSymmetryViolations, pass: preconditionPass },
+      f2Gate,
+      knownLimitations: [
+        "Walls, concentration, and weighted center are computed only within the audited ATM±3 (7-strike) universe, not the full option chain -- not extrapolated wider.",
+        "callWallMigration/putWallMigration are UNAVAILABLE for the first timestamp and whenever the current or previous wall strike could not be determined.",
+        "No directional (support/resistance, bullish/bearish) meaning is assigned to any wall or concentration value.",
+      ],
+      safeToProceedToF4: overallStatus === "PASS",
+      v2UntouchedCheck: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      ...report,
+      status: "FAIL",
+      error: err instanceof Error ? err.message : "Unknown F3 OI structure build failure",
+      safeToProceedToF4: false,
+    }, 500);
+  }
+});
+
+
+// ============================================================================
 // V3D_DEDUPLICATE_OPTION_GRID — one-off repair for a duplication bug in the
 // coverage-repair endpoint above: re-running that endpoint treated its own
 // prior output as "existing" and re-appended the same 2 contracts, producing

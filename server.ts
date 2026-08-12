@@ -22134,6 +22134,174 @@ app.get("/v3/audit/master", async (c) => {
   }
 });
 
+
+// ============================================================================
+// V3D_BUG_01B — INTRADAY_FUTURES_HISTORY_AND_OI_PROOF (READ-ONLY, DIAGNOSTIC)
+//
+// Probes Dhan's official /v2/charts/intraday endpoint for one already-
+// completed trading day of NIFTY futures minute data (OHLC+volume+OI),
+// per the exact request spec Bhagi Sir provided. securityId is resolved
+// dynamically via the scrip-master scan (never hardcoded/fabricated),
+// then cross-checked against the expected contract from the spec.
+// ============================================================================
+
+app.get("/api/audit/dhan-bug01b-intraday-futures-check", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const symbolParam = (c.req.query("symbol") || "NIFTY").toUpperCase();
+  const generatedAt = new Date().toISOString();
+
+  try {
+    const scan = await dhanScanScripMaster(symbolParam, 8);
+    if (!scan.fetchOk || !scan.headerCols || scan.futRows.length === 0) {
+      return c.json({
+        architectureRole: "V3D_BUG01B_INTRADAY_FUTURES_HISTORY_AND_OI_PROOF",
+        generatedAt, symbol: symbolParam, bugId: "V3D_BUG_01B",
+        status: "ERROR", error: "Could not resolve a FUTIDX securityId from the scrip master scan.",
+      }, 200);
+    }
+
+    const sorted = [...scan.futRows].sort((a, b) => {
+      const da = new Date(a["SEM_EXPIRY_DATE"] || "").getTime();
+      const db = new Date(b["SEM_EXPIRY_DATE"] || "").getTime();
+      return (isNaN(da) ? Infinity : da) - (isNaN(db) ? Infinity : db);
+    });
+    const nearest = sorted[0];
+    const securityId = nearest["SEM_SMST_SECURITY_ID"];
+    const tradingSymbol = nearest["SEM_TRADING_SYMBOL"];
+    const expiryDate = nearest["SEM_EXPIRY_DATE"];
+
+    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+    if (!accessToken || !clientId) {
+      return c.json({
+        architectureRole: "V3D_BUG01B_INTRADAY_FUTURES_HISTORY_AND_OI_PROOF",
+        generatedAt, symbol: symbolParam, bugId: "V3D_BUG_01B",
+        status: "ERROR", error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+      }, 503);
+    }
+
+    // Exact request per Bhagi Sir's spec — one already-completed trading
+    // day, minute interval, oi:true.
+    const requestBodyObj = {
+      securityId: String(securityId),
+      exchangeSegment: "NSE_FNO",
+      instrument: "FUTIDX",
+      interval: "1",
+      oi: true,
+      fromDate: "2026-08-11 09:15:00",
+      toDate: "2026-08-11 15:30:00",
+    };
+    const requestBodyStr = JSON.stringify(requestBodyObj);
+    const oiFlagLiterallyInOutgoingBody = /"oi"\s*:\s*true/.test(requestBodyStr);
+    const intervalLiterallyInOutgoingBody = /"interval"\s*:\s*"1"/.test(requestBodyStr);
+
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/intraday", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: requestBodyStr,
+    });
+
+    const httpStatus = res.status;
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    if (!res.ok || !payload || typeof payload !== "object") {
+      return c.json({
+        architectureRole: "V3D_BUG01B_INTRADAY_FUTURES_HISTORY_AND_OI_PROOF",
+        generatedAt, symbol: symbolParam, bugId: "V3D_BUG_01B",
+        contractIdentity: { securityId, tradingSymbol, expiryDate, expectedFromSpec: "58072 / NIFTY-Aug2026-FUT", matchesSpec: String(securityId) === "58072" },
+        sanitizedRequestBody: requestBodyObj,
+        oiFlagLiterallyInOutgoingBody,
+        intervalLiterallyInOutgoingBody,
+        httpStatus,
+        rootCauseStatus: "ERROR",
+        providerError: payload && typeof payload === "object" ? {
+          errorType: payload.errorType ?? null,
+          errorCode: payload.errorCode ?? null,
+          errorMessage: payload.errorMessage ?? null,
+        } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `HTTP ${httpStatus}` },
+        rawSnippet: raw.slice(0, 500),
+        bug01bClosed: false,
+        readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+      }, 200);
+    }
+
+    const rawTopLevelKeys = Object.keys(payload);
+    const arrLen = (v: any) => (Array.isArray(v) ? v.length : null);
+    const counts: Record<string, number | null> = {};
+    for (const k of rawTopLevelKeys) counts[k] = arrLen(payload[k]);
+
+    // OI-shaped key search (case-insensitive, handles open_interest naming
+    // confirmed for the daily endpoint's futures response earlier today).
+    const oiKeyPattern = /(\boi\b|open[_]?interest)/i;
+    const oiLikeKeys = rawTopLevelKeys.filter((k) => oiKeyPattern.test(k));
+    const oiArrayLength = oiLikeKeys.length > 0 ? (counts[oiLikeKeys[0]] ?? 0) : null;
+    const oiHasData = typeof oiArrayLength === "number" && oiArrayLength > 0;
+
+    const ohlcvFields = ["open", "high", "low", "close", "volume", "timestamp"];
+    const ohlcvNonEmpty = ohlcvFields.every((f) => (counts[f] ?? 0) > 0);
+
+    let rootCauseStatus: "PASS" | "PARSER_BUG" | "PROVIDER_OI_ANOMALY" | "PARTIAL" | "ERROR";
+    let rootCauseNote: string;
+    if (!ohlcvNonEmpty) {
+      rootCauseStatus = "PARTIAL";
+      rootCauseNote = "OHLC/volume/timestamp arrays were not all non-empty -- cannot fully PASS the base data requirement.";
+    } else if (oiLikeKeys.length === 0) {
+      rootCauseStatus = "PROVIDER_OI_ANOMALY";
+      rootCauseNote = "oi:true was sent and OHLC/volume/timestamp are populated, but no key matching oi/open_interest (case-insensitive) appeared anywhere in the raw top-level response.";
+    } else if (!oiHasData) {
+      rootCauseStatus = "PROVIDER_OI_ANOMALY";
+      rootCauseNote = `An OI-shaped key (${oiLikeKeys.join(", ")}) exists in the schema but its array is empty, while OHLC/volume/timestamp are populated.`;
+    } else {
+      rootCauseStatus = "PASS";
+      rootCauseNote = `OHLC/volume/timestamp all non-empty, and OI-shaped key (${oiLikeKeys.join(", ")}) has ${oiArrayLength} data points.`;
+    }
+
+    return c.json({
+      architectureRole: "V3D_BUG01B_INTRADAY_FUTURES_HISTORY_AND_OI_PROOF",
+      generatedAt, symbol: symbolParam, bugId: "V3D_BUG_01B",
+      contractIdentity: { securityId, tradingSymbol, expiryDate, expectedFromSpec: "58072 / NIFTY-Aug2026-FUT", matchesSpec: String(securityId) === "58072" },
+      sanitizedRequestBody: requestBodyObj,
+      oiFlagLiterallyInOutgoingBody,
+      intervalLiterallyInOutgoingBody,
+      httpStatus,
+      rawResponseKeys: rawTopLevelKeys,
+      rawResponseArrayLengths: counts,
+      ohlcvAllNonEmpty: ohlcvNonEmpty,
+      oiLikeKeysFound: oiLikeKeys,
+      oiArrayLength,
+      oiHasData,
+      rootCauseStatus,
+      rootCauseNote,
+      bug01bClosed: true,
+      limitations: [
+        "Single trading day (2026-08-11 09:15-15:30 IST) only, per stop_condition.",
+        "No OI values were derived or fabricated -- oiArrayLength reflects exactly what Dhan returned.",
+      ],
+      readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      architectureRole: "V3D_BUG01B_INTRADAY_FUTURES_HISTORY_AND_OI_PROOF",
+      generatedAt, symbol: symbolParam, bugId: "V3D_BUG_01B",
+      status: "ERROR",
+      error: err instanceof Error ? err.message : "Unknown intraday futures request failure",
+      readOnlyMode: true, tokenExposed: false,
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

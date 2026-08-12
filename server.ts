@@ -23297,9 +23297,14 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
     if (!optRes.ok || !optPayload) {
       return c.json({ ...report, status: "FAIL", error: "Option (rollingoption) fetch failed.", dhanHttpStatus: optRes.status, safeToStartL4: false }, 200);
     }
-    const optSeries = parseDhanSeries(optPayload);
+    const optCeBlockRaw = optPayload && optPayload.data && optPayload.data.ce ? optPayload.data.ce : optPayload;
+    const optCeBlock = optCeBlockRaw && typeof optCeBlockRaw === "object"
+      ? { ...optCeBlockRaw, timestamp: optCeBlockRaw.timestamp || (optPayload?.data?.timestamp ?? undefined) }
+      : optCeBlockRaw;
+    const optSeries = parseDhanSeries(optCeBlock);
     const _debugOptPayloadKeys = optPayload && typeof optPayload === "object" ? Object.keys(optPayload) : [];
-    const _debugOptPayloadSample = JSON.stringify(optPayload).slice(0, 800);
+    const _debugOptDataKeys = optPayload && optPayload.data ? Object.keys(optPayload.data) : [];
+    const _debugOptCeKeys = optCeBlock && typeof optCeBlock === "object" ? Object.keys(optCeBlock) : [];
     const optionExpiryIso = nearestFut["SEM_EXPIRY_DATE"] ? new Date(nearestFut["SEM_EXPIRY_DATE"]).toISOString() : null;
 
     const inputRows = spotSeries.rowCount;
@@ -23311,7 +23316,8 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
       futCount: futSeries.rowCount,
       optCount: optSeries.rowCount,
       optPayloadKeys: _debugOptPayloadKeys,
-      optPayloadSample: _debugOptPayloadSample,
+      optDataKeys: _debugOptDataKeys,
+      optCeKeys: _debugOptCeKeys,
     };
 
     // --- L1: write immutable raw payloads for all three sources (content-hash names) ---

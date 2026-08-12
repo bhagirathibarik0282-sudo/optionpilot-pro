@@ -23270,10 +23270,11 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
     });
     const nearestFut = sortedFut[0];
     const futSecurityId = nearestFut["SEM_SMST_SECURITY_ID"];
-    const futRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/historical", {
+    const futuresSegment = "NSE_FNO"; // NIFTY only this pass
+    const futRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/intraday", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
-      body: JSON.stringify({ securityId: String(futSecurityId), exchangeSegment: "NSE_FNO", instrument: "FUTIDX", expiryCode: 1, oi: true, fromDate: tradingDateStr, toDate: fmt(toDate) }),
+      body: JSON.stringify({ securityId: String(futSecurityId), exchangeSegment: futuresSegment, instrument: "FUTIDX", interval: "1", oi: true, fromDate: `${tradingDateStr} 09:15:00`, toDate: `${tradingDateStr} 15:30:00` }),
     });
     const futText = await futRes.text();
     let futPayload: any = null;

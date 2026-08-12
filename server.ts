@@ -23285,10 +23285,11 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
     const futSeries = parseDhanSeries(futPayload);
 
     // --- OPTION (ATM CALL, rolling series -- proven pattern from rollingoption audit) ---
+    const optFromDate = new Date(toDate.getTime() - 10 * 24 * 60 * 60 * 1000); // matches the proven 10-day rollingoption window used elsewhere in this codebase -- the 1-2 day window returned zero rows
     const optRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/rollingoption", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
-      body: JSON.stringify({ exchangeSegment: "NSE_FNO", interval: "1", securityId: "13", instrument: "OPTIDX", expiryFlag: "WEEK", expiryCode: 1, strike: "ATM", drvOptionType: "CALL", requiredData: ["open", "high", "low", "close", "volume", "oi", "implied_volatility", "spot"], fromDate: tradingDateStr, toDate: fmt(toDate) }),
+      body: JSON.stringify({ exchangeSegment: "NSE_FNO", interval: "1", securityId: "13", instrument: "OPTIDX", expiryFlag: "WEEK", expiryCode: 1, strike: "ATM", drvOptionType: "CALL", requiredData: ["open", "high", "low", "close", "volume", "oi", "implied_volatility", "spot"], fromDate: fmt(optFromDate), toDate: fmt(toDate) }),
     });
     const optText = await optRes.text();
     let optPayload: any = null;

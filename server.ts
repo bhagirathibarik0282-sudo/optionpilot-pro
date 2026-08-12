@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createHash, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
 import { createOutcomeRecord, evaluateOutcome, computeOutcomeStats, type OutcomeRecord, type SnapshotForOutcome, type Side as OutcomeSide, type IndexSymbol as OutcomeIndexSymbol } from "./outcome-engine.js";
 
 interface Instrument {
@@ -16798,6 +16800,57 @@ let driveSession: DriveSession = {
   lastError: null,
 };
 
+// ---- Drive OAuth persistence (Railway volume) ----
+// driveSession above is in-memory only by default, which is lost on every
+// restart/redeploy. These helpers persist just the encrypted refresh token
+// + display metadata to the attached Railway volume so the connection
+// survives restarts without re-running the OAuth consent flow. Access
+// tokens are never written to disk — they're short-lived and re-derived
+// from the refresh token on demand via getValidDriveAccessToken().
+function driveAuthDataDir(): string {
+  return process.env.RAILWAY_VOLUME_MOUNT_PATH || "/app/data";
+}
+
+function driveAuthFilePath(): string {
+  return joinPath(driveAuthDataDir(), "drive-session.json");
+}
+
+function persistDriveSession(): void {
+  try {
+    const dir = driveAuthDataDir();
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const payload = {
+      refreshTokenEncrypted: driveSession.refreshTokenEncrypted,
+      connectedEmail: driveSession.connectedEmail,
+      connectedAt: driveSession.connectedAt,
+    };
+    writeFileSync(driveAuthFilePath(), JSON.stringify(payload), { mode: 0o600 });
+  } catch (err) {
+    console.error("[DRIVE-AUTH] Failed to persist session to disk:", err instanceof Error ? err.message : err);
+  }
+}
+
+function loadDriveSessionFromDisk(): void {
+  try {
+    const filePath = driveAuthFilePath();
+    if (!existsSync(filePath)) {
+      console.log(`[DRIVE-AUTH] No persisted session at ${filePath} (first boot or not yet connected).`);
+      return;
+    }
+    const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+    if (parsed && parsed.refreshTokenEncrypted) {
+      driveSession.refreshTokenEncrypted = parsed.refreshTokenEncrypted;
+      driveSession.connectedEmail = parsed.connectedEmail || null;
+      driveSession.connectedAt = parsed.connectedAt || null;
+      console.log(`[DRIVE-AUTH] Restored Drive session from disk (account: ${parsed.connectedEmail || "unknown"}).`);
+    }
+  } catch (err) {
+    console.error("[DRIVE-AUTH] Failed to load persisted session from disk:", err instanceof Error ? err.message : err);
+  }
+}
+
+loadDriveSessionFromDisk();
+
 interface DriveArchiveRecord {
   date: string;
   status: "VERIFIED" | "ARCHIVE_FAILED" | "PENDING";
@@ -17343,6 +17396,8 @@ app.get("/api/drive/callback", async (c) => {
       // non-fatal — email display is informational only
     }
 
+    persistDriveSession(); // survive restarts/redeploys from this point on
+
     return c.redirect("/?drive=connected");
   } catch (err) {
     driveSession.lastError = err instanceof Error ? err.message : "Unknown OAuth error";
@@ -17380,6 +17435,11 @@ async function getValidDriveAccessToken(): Promise<string | null> {
     }
     driveSession.accessToken = json.access_token;
     driveSession.accessTokenExpiresAt = Date.now() + (json.expires_in || 3600) * 1000;
+    if (json.refresh_token) {
+      // Google occasionally rotates the refresh token — re-encrypt and persist the new one
+      driveSession.refreshTokenEncrypted = encryptToken(json.refresh_token);
+      persistDriveSession();
+    }
     return json.access_token;
   } catch (err) {
     driveSession.lastError = err instanceof Error ? err.message : "Token refresh error";

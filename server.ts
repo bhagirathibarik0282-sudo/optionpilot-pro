@@ -22742,14 +22742,19 @@ app.get("/api/audit/v3-store-brain-proof", async (c) => {
       return c.json({ ...report, status: "FAIL", folderCreationStatus, error: "DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing", safeToStartStep2: false }, 200);
     }
     const toDate = new Date();
-    const fromDate = new Date(toDate.getTime() - 3 * 24 * 60 * 60 * 1000);
+    const fromDate = new Date(toDate.getTime() - 24 * 60 * 60 * 1000);
     const fmt = (d: Date) => d.toISOString().slice(0, 10);
-    const dhanRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/historical", {
+    // Uses the intraday endpoint with NO expiryCode field, matching the
+    // confirmed-working FINNIFTY/MIDCPNIFTY spot pattern -- the daily
+    // endpoint intermittently rejects expiryCode:0 for index spot (same
+    // DH-905 instability seen for futures earlier this session).
+    const dhanRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/intraday", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
       body: JSON.stringify({
         securityId: "13", exchangeSegment: "IDX_I", instrument: "INDEX",
-        expiryCode: 0, oi: false, fromDate: fmt(fromDate), toDate: fmt(toDate),
+        interval: "1", oi: false,
+        fromDate: `${fmt(fromDate)} 09:15:00`, toDate: `${fmt(fromDate)} 15:30:00`,
       }),
     });
     const dhanRawText = await dhanRes.text();
@@ -22779,7 +22784,7 @@ app.get("/api/audit/v3-store-brain-proof", async (c) => {
       symbol: "NIFTY",
       datasetType: "SPOT_HISTORY",
       requestedFrom: fmt(fromDate),
-      requestedTo: fmt(toDate),
+      requestedTo: fmt(fromDate),
       rowsReceived,
       schemaVersion: "v1",
       completeness: rowsReceived > 0 ? "COMPLETE" : "EMPTY",

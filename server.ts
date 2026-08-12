@@ -18451,11 +18451,11 @@ const DHAN_UNDERLYING_MAP: Record<string, { underlyingScrip: number; underlyingS
   // production scoring stays on Kite, unchanged, per the D6.1.2 fail-closed
   // design.
   SENSEX: { underlyingScrip: 51, underlyingSeg: "IDX_I" },
-  // FINNIFTY — added 2026-08-12 as an UNVERIFIED CANDIDATE (spotSecurityId
-  // reported by Bhagi Sir, futures IDs 58070/48702 already cross-validated
-  // against two independent scrip-master scans). Spot price itself not yet
-  // live-verified against an independent source. Temporary for this audit
-  // pass only; promote to a permanent confirmed comment once verified.
+  // FINNIFTY — confirmed 2026-08-12. securityId=27 live-verified via
+  // /v2/charts/intraday (IDX_I/INDEX): 374 minute candles, close=26432.4
+  // on 2026-08-11, matching FINNIFTY's real independently-sourced range
+  // (~26,532 on 2026-08-10). Futures contract IDs (58070/48702) were
+  // separately cross-validated against two independent scrip-master scans.
   FINNIFTY: { underlyingScrip: 27, underlyingSeg: "IDX_I" },
 };
 

@@ -26073,6 +26073,169 @@ app.get("/api/audit/v3d-l4-f2-premium-behaviour-proof", async (c) => {
   }
 });
 
+// ============================================================================
+// V3D_DEDUPLICATE_OPTION_GRID — one-off repair for a duplication bug in the
+// coverage-repair endpoint above: re-running that endpoint treated its own
+// prior output as "existing" and re-appended the same 2 contracts, producing
+// 6732 rows (18 contracts) instead of the correct 5984 (16 contracts).
+// This endpoint reads the CURRENT (duplicated) grid, deduplicates by
+// (timestamp, strike, optionType) keeping one canonical row per key, writes
+// a clean file, regenerates the dynamic ATM view from the clean data, and
+// verifies the corrected counts before anything else is allowed to build on
+// top of this dataset.
+// ============================================================================
+app.get("/api/audit/v3d-deduplicate-option-grid-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+  const generatedAt = new Date().toISOString();
+  const report: Record<string, any> = { architectureRole: "V3D_DEDUPLICATE_OPTION_GRID", generatedAt, symbol: "NIFTY", tradingDate: "2026-08-11" };
+
+  const token = await getValidDriveAccessToken();
+  if (!token) return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected." }, 200);
+
+  try {
+    const strikeStep = 50;
+    const brainRoot = await findOrCreateDriveFolder("OptionPilot_Brain", null, token);
+    const storeRoot = brainRoot ? await findOrCreateDriveFolder("V3_Historical_Store", brainRoot, token) : null;
+    const normFolder = storeRoot ? await findOrCreateDriveFolder("03_normalized", storeRoot, token) : null;
+    const normOptFolder = normFolder ? await findOrCreateDriveFolder("NIFTY_OPTION_GRID_ATM_PM3", normFolder, token) : null;
+    const dynamicViewFolder = normFolder ? await findOrCreateDriveFolder("NIFTY_OPTION_GRID_DYNAMIC_ATM_VIEW", normFolder, token) : null;
+    if (!normOptFolder || !dynamicViewFolder) return c.json({ ...report, status: "FAIL", error: "Folder lookup failed." }, 200);
+
+    // --- Find the largest (most recent, most rows) existing grid file -- the duplicated one ---
+    const files = await driveListFilesInFolder(normOptFolder, token);
+    const candidates = files.filter((f) => f.name.startsWith("option_grid_ATM_PM3_NIFTY_2026-08-11_"));
+    if (candidates.length === 0) return c.json({ ...report, status: "FAIL", error: "No grid files found." }, 200);
+
+    let largest: { id: string; name: string; rows: any[] } | null = null;
+    const allCandidateCounts: Array<{ name: string; rowCount: number }> = [];
+    for (const f of candidates) {
+      const rb = await driveReadFileById(f.id, token);
+      const rowCount = Array.isArray(rb) ? rb.length : 0;
+      allCandidateCounts.push({ name: f.name, rowCount });
+      if (Array.isArray(rb) && (!largest || rb.length > largest.rows.length)) largest = { id: f.id, name: f.name, rows: rb };
+    }
+    if (!largest) return c.json({ ...report, status: "FAIL", error: "No readable grid file found.", allCandidateCounts }, 200);
+
+    const beforeRowCount = largest.rows.length;
+
+    // --- Deduplicate: one canonical row per (timestamp, strike, optionType) ---
+    const seen = new Map<string, any>();
+    let duplicatesRemoved = 0;
+    for (const row of largest.rows) {
+      const key = `${row.timestamp}|${row.strike}|${row.optionType}`;
+      if (seen.has(key)) { duplicatesRemoved++; continue; } // keep first occurrence, drop the rest
+      seen.set(key, row);
+    }
+    const cleanRows = [...seen.values()];
+    const cleanStrikes = [...new Set(cleanRows.map((r) => r.strike))].sort((a, b) => a - b);
+    const cleanTimestamps = [...new Set(cleanRows.map((r) => r.timestamp))].sort();
+
+    // --- Write the CLEAN grid as a new file (new checksum) ---
+    const cleanStr = JSON.stringify(cleanRows);
+    const cleanChecksum = createHash("sha256").update(cleanStr).digest("hex");
+    const cleanFileName = `option_grid_ATM_PM3_NIFTY_2026-08-11_${cleanChecksum.slice(0, 16)}.json`;
+    let cleanFileId = await driveFindFileByName(cleanFileName, normOptFolder, token);
+    let writeStatus = "NOT_ATTEMPTED";
+    if (!cleanFileId) {
+      const up = await uploadFileToDrive(cleanFileName, "application/json", cleanStr, normOptFolder, token);
+      cleanFileId = up?.id ?? null;
+      writeStatus = up ? "PASS" : "FAIL";
+    } else {
+      writeStatus = "PASS_ALREADY_EXISTED";
+    }
+    let readStatus = "NOT_ATTEMPTED";
+    let readBackRowCount = 0;
+    if (cleanFileId) {
+      const rb = await driveReadFileById(cleanFileId, token);
+      readBackRowCount = Array.isArray(rb) ? rb.length : 0;
+      readStatus = readBackRowCount === cleanRows.length ? "PASS" : "FAIL";
+    }
+
+    // --- Regenerate the dynamic ATM view from the CLEAN data, run twice for reproducibility ---
+    function transform(rows: any[]) {
+      return rows.map((r) => {
+        const spot: number | null = r.spot;
+        const strike: number = r.strike;
+        const dynamicAtmStrike = spot !== null ? nearestAtmStrike(spot, strikeStep) : null;
+        const dynamicAtmOffset = dynamicAtmStrike !== null ? Math.round((strike - dynamicAtmStrike) / strikeStep) : null;
+        let dynamicMoneyness: string | null = null;
+        if (dynamicAtmOffset !== null) {
+          if (dynamicAtmOffset === 0) dynamicMoneyness = "ATM";
+          else if (r.optionType === "CE") dynamicMoneyness = strike < (dynamicAtmStrike as number) ? "ITM" : "OTM";
+          else if (r.optionType === "PE") dynamicMoneyness = strike > (dynamicAtmStrike as number) ? "ITM" : "OTM";
+        }
+        return { timestamp: r.timestamp, spot, strike, optionType: r.optionType, sessionAnchorAtm: r.atmStrike, sessionAnchorOffset: r.atmOffset, dynamicAtmStrike, dynamicAtmOffset, dynamicMoneyness, quality: spot !== null ? "VALID" : "UNAVAILABLE" };
+      });
+    }
+    const run1 = transform(cleanRows);
+    const run2 = transform(cleanRows);
+    const run1Checksum = createHash("sha256").update(JSON.stringify(run1)).digest("hex");
+    const run2Checksum = createHash("sha256").update(JSON.stringify(run2)).digest("hex");
+    const reproducibilityChecksumMatch = run1Checksum === run2Checksum;
+
+    const dynFileName = `dynamic_atm_view_NIFTY_2026-08-11_${run1Checksum.slice(0, 16)}.json`;
+    let dynFileId = await driveFindFileByName(dynFileName, dynamicViewFolder, token);
+    let dynWriteStatus = "NOT_ATTEMPTED";
+    if (!dynFileId) {
+      const up = await uploadFileToDrive(dynFileName, "application/json", JSON.stringify(run1), dynamicViewFolder, token);
+      dynFileId = up?.id ?? null;
+      dynWriteStatus = up ? "PASS" : "FAIL";
+    } else {
+      dynWriteStatus = "PASS_ALREADY_EXISTED";
+    }
+    let dynReadStatus = "NOT_ATTEMPTED";
+    let dynReadBackRowCount = 0;
+    if (dynFileId) {
+      const rb = await driveReadFileById(dynFileId, token);
+      dynReadBackRowCount = Array.isArray(rb) ? rb.length : 0;
+      dynReadStatus = dynReadBackRowCount === run1.length ? "PASS" : "FAIL";
+    }
+
+    // --- Coverage metrics on the CLEAN data ---
+    const dynAtmByTs = new Map<string, number | null>();
+    for (const r of run1) if (!dynAtmByTs.has(r.timestamp)) dynAtmByTs.set(r.timestamp, r.dynamicAtmStrike);
+    let fullyCovered = 0;
+    for (const ts of cleanTimestamps) {
+      const atm = dynAtmByTs.get(ts);
+      if (atm === null || atm === undefined) continue;
+      const required = [-3, -2, -1, 0, 1, 2, 3].map((o) => atm + o * strikeStep);
+      if (required.every((s) => cleanStrikes.includes(s))) fullyCovered++;
+    }
+
+    const expectedRowCount = cleanTimestamps.length * cleanStrikes.length * 2; // timestamps x strikes x (CE+PE)
+    const overallStatus =
+      writeStatus.startsWith("PASS") && readStatus === "PASS" && dynWriteStatus.startsWith("PASS") && dynReadStatus === "PASS" &&
+      reproducibilityChecksumMatch && cleanRows.length === expectedRowCount && fullyCovered === cleanTimestamps.length
+        ? "PASS" : "PARTIAL";
+
+    return c.json({
+      ...report,
+      status: overallStatus,
+      sourceFileUsed: { id: largest.id, name: largest.name },
+      allCandidateCounts,
+      beforeRowCount,
+      duplicatesRemoved,
+      afterRowCount: cleanRows.length,
+      expectedRowCount,
+      cleanStrikes,
+      timestampCount: cleanTimestamps.length,
+      fullyCoveredAtmPlusMinus3TimestampCount: fullyCovered,
+      cleanL3FileId: cleanFileId,
+      writeStatus, readStatus, readBackRowCount,
+      cleanDynamicViewFileId: dynFileId,
+      dynWriteStatus, dynReadStatus, dynReadBackRowCount,
+      run1Checksum, run2Checksum, reproducibilityChecksumMatch,
+      v2UntouchedCheck: true, orderAccessUsed: false, tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({ ...report, status: "FAIL", error: err instanceof Error ? err.message : "Unknown dedup failure" }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

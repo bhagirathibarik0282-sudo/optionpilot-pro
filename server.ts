@@ -22015,9 +22015,10 @@ const v3RealDhanAdapter: V3AuditAdapter = {
     // elsewhere in this codebase's small-window probes.
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const y = yesterday.toISOString().slice(0, 10);
+    const futuresSegment = symbol === "SENSEX" ? "BSE_FNO" : "NSE_FNO"; // BUG FIX 2026-08-12: was hardcoded NSE_FNO, causing SENSEX futures history to silently return empty arrays (caught by V3D_CROSS_INDEX_MASTER_AUDIT_V2)
     const requestBodyObj = {
       securityId: String(securityId),
-      exchangeSegment: "NSE_FNO",
+      exchangeSegment: futuresSegment,
       instrument: "FUTIDX",
       interval: "1",
       oi: true,
@@ -22261,10 +22262,11 @@ app.get("/api/audit/dhan-bug01b-intraday-futures-check", async (c) => {
     }
 
     // Exact request per Bhagi Sir's spec — one already-completed trading
-    // day, minute interval, oi:true.
+    // day, minute interval, oi:true. Segment kept symbol-aware for
+    // consistency (SENSEX trades on BSE_FNO, never NSE_FNO).
     const requestBodyObj = {
       securityId: String(securityId),
-      exchangeSegment: "NSE_FNO",
+      exchangeSegment: symbolParam === "SENSEX" ? "BSE_FNO" : "NSE_FNO",
       instrument: "FUTIDX",
       interval: "1",
       oi: true,

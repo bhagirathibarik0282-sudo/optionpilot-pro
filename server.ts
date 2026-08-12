@@ -21966,26 +21966,83 @@ const v3RealDhanAdapter: V3AuditAdapter = {
   },
 
   async fetchFuturesHistory(symbol) {
-    const key = v3AuditKey();
-    if (!key) return { ok: false, identityOk: false, errors: ["DHAN_AUDIT_KEY not set"] };
-    const { ok, status, json } = await v3SelfFetchJson(`/api/audit/dhan-futures-check?symbol=${symbol}&key=${encodeURIComponent(key)}`);
-    if (!ok || !json) return { ok: false, identityOk: false, errors: [`futures probe HTTP ${status}`] };
+    // PATCH (V3D_MASTER_AUDIT_PATCH_01): the daily endpoint
+    // (/v2/charts/historical) started rejecting FUTIDX requests with
+    // DH-905 regardless of expiryCode value (confirmed live 2026-08-12).
+    // Bug 01B proved /v2/charts/intraday works reliably for the same
+    // contract (374 minute rows, oi returned as "open_interest"). V3
+    // futures research uses intraday going forward, per hard_rules
+    // ("Do not use daily endpoint for minute V3 research").
+    const mapping = (DHAN_UNDERLYING_MAP as Record<string, { underlyingScrip: number; underlyingSeg: string }>)[symbol];
+    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+    if (!accessToken || !clientId) return { ok: false, identityOk: false, errors: ["DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing"] };
 
-    const counts = json.rawResponseCandleCounts || {};
-    return {
-      ok: true,
-      identityOk: !!json.contractIdentity?.securityId,
-      openCount: counts.open ?? 0,
-      highCount: counts.high ?? 0,
-      lowCount: counts.low ?? 0,
-      closeCount: counts.close ?? 0,
-      volumeCount: counts.volume ?? 0,
-      oiCount: counts.open_interest ?? 0,
-      timestampCount: counts.timestamp ?? 0,
-      rawHasOi: !!json.rawOiPresent,
-      requestHadOiTrue: !!json.oiFlagLiterallyInOutgoingBody,
-      errors: json.rootCauseStatus === "ERROR" ? [json.rootCauseNote].filter(Boolean) : undefined,
+    const scan = await dhanScanScripMaster(symbol, 8);
+    if (!scan.fetchOk || !scan.headerCols || scan.futRows.length === 0) {
+      return { ok: false, identityOk: false, errors: ["Could not resolve a FUTIDX securityId from the scrip master scan."] };
+    }
+    const sortedFut = [...scan.futRows].sort((a, b) => {
+      const da = new Date(a["SEM_EXPIRY_DATE"] || "").getTime();
+      const db = new Date(b["SEM_EXPIRY_DATE"] || "").getTime();
+      return (isNaN(da) ? Infinity : da) - (isNaN(db) ? Infinity : db);
+    });
+    const nearest = sortedFut[0];
+    const securityId = nearest["SEM_SMST_SECURITY_ID"];
+    if (!securityId) return { ok: false, identityOk: false, errors: ["Matched FUTIDX row had no SEM_SMST_SECURITY_ID"] };
+
+    // Most recent already-completed calendar day (yesterday), full
+    // market-hours window -- a fixed hardcoded date would go stale.
+    // Weekend/holiday gaps are a known limitation here, same as
+    // elsewhere in this codebase's small-window probes.
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const y = yesterday.toISOString().slice(0, 10);
+    const requestBodyObj = {
+      securityId: String(securityId),
+      exchangeSegment: "NSE_FNO",
+      instrument: "FUTIDX",
+      interval: "1",
+      oi: true,
+      fromDate: `${y} 09:15:00`,
+      toDate: `${y} 15:30:00`,
     };
+
+    try {
+      const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/intraday", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
+        body: JSON.stringify(requestBodyObj),
+      });
+      const raw = await res.text();
+      let payload: any = null;
+      try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+      if (!res.ok || !payload || typeof payload !== "object") {
+        return { ok: false, identityOk: true, errors: [payload?.errorMessage || `intraday futures HTTP ${res.status}`] };
+      }
+
+      const arrLen = (v: any) => (Array.isArray(v) ? v.length : 0);
+      return {
+        ok: true,
+        identityOk: true,
+        openCount: arrLen(payload.open),
+        highCount: arrLen(payload.high),
+        lowCount: arrLen(payload.low),
+        closeCount: arrLen(payload.close),
+        volumeCount: arrLen(payload.volume),
+        // Raw provider field name preserved for provenance; the
+        // normalized-layer mapping open_interest -> oi (source:
+        // DHAN_NATIVE) happens only here in the adapter's return shape,
+        // never in raw storage.
+        oiCount: arrLen(payload.open_interest),
+        timestampCount: arrLen(payload.timestamp),
+        rawHasOi: arrLen(payload.open_interest) > 0,
+        requestHadOiTrue: true,
+        errors: undefined,
+      };
+    } catch (e) {
+      return { ok: false, identityOk: true, errors: [e instanceof Error ? e.message : "intraday futures request failed"] };
+    }
   },
 
   async fetchExpiredOptionProbe(symbol) {

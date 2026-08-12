@@ -23302,23 +23302,9 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
       ? { ...optCeBlockRaw, timestamp: optCeBlockRaw.timestamp || (optPayload?.data?.timestamp ?? undefined) }
       : optCeBlockRaw;
     const optSeries = parseDhanSeries(optCeBlock);
-    const _debugOptPayloadKeys = optPayload && typeof optPayload === "object" ? Object.keys(optPayload) : [];
-    const _debugOptDataKeys = optPayload && optPayload.data ? Object.keys(optPayload.data) : [];
-    const _debugOptCeKeys = optCeBlock && typeof optCeBlock === "object" ? Object.keys(optCeBlock) : [];
     const optionExpiryIso = nearestFut["SEM_EXPIRY_DATE"] ? new Date(nearestFut["SEM_EXPIRY_DATE"]).toISOString() : null;
 
     const inputRows = spotSeries.rowCount;
-    const _debugTimestamps = {
-      spotFirst5: spotSeries.timestamps.slice(0, 5),
-      futFirst5: futSeries.timestamps.slice(0, 5),
-      optFirst5: optSeries.timestamps.slice(0, 5),
-      spotCount: spotSeries.rowCount,
-      futCount: futSeries.rowCount,
-      optCount: optSeries.rowCount,
-      optPayloadKeys: _debugOptPayloadKeys,
-      optDataKeys: _debugOptDataKeys,
-      optCeKeys: _debugOptCeKeys,
-    };
 
     // --- L1: write immutable raw payloads for all three sources (content-hash names) ---
     const rawParentFolder = storeRoot ? await findOrCreateDriveFolder("01_raw", storeRoot, token) : null;
@@ -23411,7 +23397,6 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
     return c.json({
       ...report,
       status: overallStatus,
-      _debugTimestamps,
       tradingDate: tradingDateStr,
       folderIds: { brainRoot, storeRoot, normFolder, normSymbolFolder },
       inputRows,

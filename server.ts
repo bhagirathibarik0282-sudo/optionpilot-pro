@@ -27136,6 +27136,8 @@ function buildGreekEngine(dhanNormalized: any) {
       strike: leg.strike,
       moneyness: leg.moneyness,
       lastPrice: leg.lastPrice,
+      averagePrice: leg.averagePrice,
+      averagePriceSource: leg.averagePriceSource,
       delta: leg.delta,
       gamma: leg.gamma,
       theta: leg.theta,
@@ -27164,6 +27166,93 @@ function buildGreekEngine(dhanNormalized: any) {
       ITM1_CE: evaluateLeg(itmCERow?.ce, "1_ITM_CE"),
       ATM_PE: evaluateLeg(atmRow?.pe, "ATM_PE"),
       ITM1_PE: evaluateLeg(itmPERow?.pe, "1_ITM_PE"),
+    },
+  };
+}
+
+// ============================================================================
+// ENTRY QUALITY LAYER — pure per-contract timing evaluator (Phase D, 2026-08-12)
+// Input: Greek Engine candidates (spread/liquidity) + D4 leg averagePrice
+// (explicitly UNVERIFIED, NOT VWAP, per D4 note) + existing futuresVwapBias
+// from IndexMetrics (already computed by the production Rule-14 engine —
+// no new fetch). Output per candidate: ENTRY_NOW | WAIT | DO_NOT_CHASE |
+// POOR_LIQUIDITY. This is per-CONTRACT execution-quality only — it is NOT
+// a buy/sell signal and does NOT override M10/M11/M12 direction. Entry
+// zone/SL/T1/T2 remain UNCALIBRATED per spec until MFE/MAE research exists.
+// Thresholds below are PROVISIONAL_REQUIRES_BACKTEST, same status as the
+// rest of the codebase's un-backtested thresholds (e.g. Rule 14 PDH/PDL).
+// ============================================================================
+function buildEntryQualityLayer(greekEngine: any, futuresVwapBias: string | undefined) {
+  if (!greekEngine || greekEngine.status !== "OK") {
+    return {
+      architectureRole: "ENTRY_QUALITY_LAYER_PHASE_D",
+      status: "UNAVAILABLE",
+      reason: "Greek Engine data not available (see greekEngine.status in parent response).",
+    };
+  }
+
+  function evaluateCandidate(cand: any) {
+    if (!cand || cand.status !== "OK") {
+      return { label: cand?.label || "UNKNOWN", entryQuality: "POOR_LIQUIDITY", reasons: ["Leg data UNAVAILABLE from Greek Engine — cannot assess execution quality."] };
+    }
+    const reasons: string[] = [];
+    let entryQuality: "ENTRY_NOW" | "WAIT" | "DO_NOT_CHASE" | "POOR_LIQUIDITY" = "ENTRY_NOW";
+
+    // Liquidity gate (spread-based, from Greek Engine)
+    if (cand.liquidityNote === "WIDE_SPREAD") {
+      entryQuality = "POOR_LIQUIDITY";
+      reasons.push(`Bid-ask spread ${cand.spreadPct}% of premium — wider than the provisional 3% comfort band.`);
+    } else if (cand.liquidityNote === "UNAVAILABLE") {
+      entryQuality = "POOR_LIQUIDITY";
+      reasons.push("Spread could not be computed (missing bid/ask) — liquidity unknown.");
+    }
+
+    // Premium extension gate — averagePrice is explicitly UNVERIFIED/NOT VWAP (D4 note),
+    // so this is a rough heuristic only, always disclosed as such.
+    // (dhanNormalized leg average price is attached by the caller onto cand.averagePrice)
+    if (typeof cand.averagePrice === "number" && cand.averagePrice > 0 && typeof cand.lastPrice === "number") {
+      const extensionPct = Number((((cand.lastPrice - cand.averagePrice) / cand.averagePrice) * 100).toFixed(2));
+      if (entryQuality !== "POOR_LIQUIDITY") {
+        if (extensionPct > 15) {
+          entryQuality = "DO_NOT_CHASE";
+          reasons.push(`Premium is ${extensionPct}% above its session average price (UNVERIFIED, not VWAP) — provisional chase threshold is 15%.`);
+        } else if (extensionPct < -15) {
+          entryQuality = "WAIT";
+          reasons.push(`Premium is ${extensionPct}% below its session average price (UNVERIFIED, not VWAP) — provisional threshold flags this as WAIT pending stabilization.`);
+        }
+      }
+    } else {
+      reasons.push("Premium extension could not be assessed — averagePrice unavailable for this leg.");
+    }
+
+    // Futures confirmation gate (reuses existing Rule-14 futuresVwapBias, no new fetch)
+    if (entryQuality === "ENTRY_NOW") {
+      if (!futuresVwapBias || futuresVwapBias === "UNKNOWN") {
+        entryQuality = "WAIT";
+        reasons.push("Futures VWAP bias is UNKNOWN — no independent timing confirmation available yet.");
+      } else {
+        reasons.push(`Futures VWAP bias: ${futuresVwapBias} (existing Rule-14 signal, reused as-is).`);
+      }
+    }
+
+    if (reasons.length === 0) reasons.push("No provisional-threshold conditions triggered.");
+    return { label: cand.label, strike: cand.strike, entryQuality, reasons };
+  }
+
+  const gc = greekEngine.candidates || {};
+  return {
+    architectureRole: "ENTRY_QUALITY_LAYER_PHASE_D",
+    generatedAt: new Date().toISOString(),
+    status: "OK",
+    scope: "PER_CONTRACT_EXECUTION_QUALITY_ONLY",
+    directionRule: "Does NOT decide direction and does NOT override M10/M11/M12. Direction comes only from the parent /api/tradelab response.",
+    thresholdStatus: "PROVISIONAL_REQUIRES_BACKTEST",
+    entryZoneStopLossTargets: "UNCALIBRATED — pending historical MFE/MAE research (per spec, no fabricated numbers).",
+    candidates: {
+      ATM_CE: evaluateCandidate(gc.ATM_CE),
+      ITM1_CE: evaluateCandidate(gc.ITM1_CE),
+      ATM_PE: evaluateCandidate(gc.ATM_PE),
+      ITM1_PE: evaluateCandidate(gc.ITM1_PE),
     },
   };
 }
@@ -27200,6 +27289,7 @@ app.get("/api/tradelab", async (c) => {
   }
 
   const greekEngine = buildGreekEngine(d4);
+  const entryQuality = buildEntryQualityLayer(greekEngine, m?.futuresVwapBias);
 
   return c.json({
     architectureRole: "TRADELAB_PHASE_B_AGGREGATOR",
@@ -27212,7 +27302,8 @@ app.get("/api/tradelab", async (c) => {
     m11EvidenceFusion: m11,
     m12CandidateSet: m12,
     greekEngine,
-    note: "Entry Quality layer not yet wired (Phase D). Greek Engine (Phase C) is now live — contract suitability only, direction still comes from M10/M11/M12.",
+    entryQuality,
+    note: "Phase C (Greek Engine) and Phase D (Entry Quality) are now live. UI card (Phase E) not yet built — Trade Lab tab still shows a placeholder.",
   });
 });
 

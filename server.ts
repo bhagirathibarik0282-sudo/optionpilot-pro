@@ -21364,7 +21364,7 @@ app.get("/api/audit/dhan-futures-check", async (c) => {
       securityId: String(securityId),
       exchangeSegment: futuresSegment,
       instrument: "FUTIDX",
-      expiryCode: 0,
+      expiryCode: 1, // Dhan DH-905 confirmed live on 2026-08-12 (2 consecutive retries) -- 0 previously worked earlier the same day, now consistently rejected. Matches the same 0-treated-as-missing quirk already fixed for the options endpoints.
       oi: true,
       fromDate: fmt(fromDate),
       toDate: fmt(toDate),

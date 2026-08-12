@@ -8974,31 +8974,75 @@ app.get("/", (c) => {
       html += tlCard('3. Evidence Readiness (M11)', m11Html);
 
       let m1to9Html = '';
-      evidenceRows.filter((r) => r.module && r.module.indexOf('M10') === -1).forEach((r) => {
+      evidenceRows.filter((r) => r.module && ['M10', 'M2_IV_SKEW', 'M3_IV_TERM_STRUCTURE', 'M8_ROLLOVER_MIGRATION', 'M9_MULTI_EXPIRY_ALIGNMENT'].every((skip) => r.module.indexOf(skip) === -1)).forEach((r) => {
         const stateText = Array.isArray(r.state) ? r.state.join(', ') : String(r.state);
         m1to9Html += '<div style="padding:5px 0; border-bottom:1px solid var(--border);">';
         m1to9Html += '<div style="display:flex; justify-content:space-between;"><span style="color:var(--text); font-size:0.7rem;">' + escapeHtml(r.module || '') + '</span><span style="color:' + tlQualityColor(r.dataQuality) + '; font-size:0.65rem;">' + escapeHtml(r.dataQuality || '') + '</span></div>';
         m1to9Html += '<div style="color:var(--muted); font-size:0.65rem;">' + escapeHtml(stateText) + '</div>';
         m1to9Html += '</div>';
       });
-      html += tlCard('4. M1-M9 Compact Evidence', m1to9Html || '<div style="color:var(--muted); font-size:0.7rem;">No evidence rows available.</div>');
+      m1to9Html += '<div style="color:var(--muted-dim); font-size:0.6rem; margin-top:4px;">M2/M3/M8/M9 have their own DHAN-sourced cards below (sections 6, 7, 8b, 8c) \u2014 not duplicated here.</div>';
+      html += tlCard('4. M1, M4-M7 Compact Evidence (Kite)', m1to9Html || '<div style="color:var(--muted); font-size:0.7rem;">No evidence rows available.</div>');
 
       const vixRow = evidenceRows.find((r) => r.module === 'M4_VIX_REGIME_CONTEXT');
       let vixHtml = '';
       if (vixRow && vixRow.details) {
         vixHtml += tlRow('Current VIX', String(vixRow.details.currentVix), null);
         vixHtml += tlRow('VIX change %', String(vixRow.details.currentVixChangePercent != null ? vixRow.details.currentVixChangePercent.toFixed(2) : '\u2014'), null);
-        vixHtml += '<div style="color:var(--muted-dim); font-size:0.62rem; margin-top:4px;">Full 90-day VIX regime: see existing VIX Correlation tab.</div>';
+        vixHtml += '<div style="color:var(--muted-dim); font-size:0.62rem; margin-top:4px;">Full 90-day VIX regime: see existing VIX Correlation tab. Source: KITE.</div>';
       } else {
         vixHtml = '<div style="color:var(--muted); font-size:0.7rem;">VIX context unavailable this snapshot.</div>';
       }
       html += tlCard('5. VIX Compact Context', vixHtml);
 
-      const ivSkewRow = evidenceRows.find((r) => r.module === 'M2_IV_SKEW');
-      html += tlCard('6. IV Skew (M2)', ivSkewRow ? tlRow('State', Array.isArray(ivSkewRow.state) ? ivSkewRow.state.join(', ') : String(ivSkewRow.state), tlQualityColor(ivSkewRow.dataQuality)) : '<div style="color:var(--muted); font-size:0.7rem;">Unavailable.</div>');
+      function tlProvenanceBadge(mod) {
+        if (!mod) return '<span style="color:var(--muted); font-size:0.6rem;">Source: \u2014</span>';
+        const p = mod.provenance || 'DHAN';
+        const label = mod.status === 'OK' ? p : (mod.status === 'NOT_YET_MAPPED' || mod.status === 'NOT_CONFIGURED' ? 'DHAN (unavailable: ' + mod.status + ')' : 'DERIVED_FROM_DHAN');
+        return '<span style="color:var(--green); font-size:0.6rem; background:rgba(0,200,120,0.1); padding:1px 6px; border-radius:4px;">Source: ' + escapeHtml(label) + '</span>';
+      }
 
-      const ivTermRow = evidenceRows.find((r) => r.module === 'M3_IV_TERM_STRUCTURE');
-      html += tlCard('7. IV Term Structure (M3)', ivTermRow ? tlRow('State', String(ivTermRow.state), tlQualityColor(ivTermRow.dataQuality)) : '<div style="color:var(--muted); font-size:0.7rem;">Unavailable.</div>');
+      let m2Html = tlProvenanceBadge(d.m2IvSkewDhan);
+      if (d.m2IvSkewDhan && d.m2IvSkewDhan.status === 'OK' && d.m2IvSkewDhan.current) {
+        const cur = d.m2IvSkewDhan.current;
+        m2Html += tlRow('ATM CE IV', cur.atmCeIv != null ? cur.atmCeIv.toFixed(2) + '%' : '\u2014', null);
+        m2Html += tlRow('ATM PE IV', cur.atmPeIv != null ? cur.atmPeIv.toFixed(2) + '%' : '\u2014', null);
+        m2Html += tlRow('PE\u2212CE spread', cur.atmPeMinusCeSpread != null ? cur.atmPeMinusCeSpread.toFixed(2) : '\u2014', null);
+        m2Html += tlRow('Data quality', d.m2IvSkewDhan.dataQuality, tlQualityColor(d.m2IvSkewDhan.dataQuality));
+      } else {
+        m2Html += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">No Dhan skew snapshot yet \u2014 history buffer still warming up.</div>';
+      }
+      html += tlCard('6. IV Skew (M2)', m2Html);
+
+      let m3Html = tlProvenanceBadge(d.m3IvTermStructureDhan);
+      if (d.m3IvTermStructureDhan && d.m3IvTermStructureDhan.status === 'OK') {
+        m3Html += tlRow('State', String(d.m3IvTermStructureDhan.state || '\u2014'), null);
+        m3Html += tlRow('Usable expiries', String(d.m3IvTermStructureDhan.usableExpiryCount != null ? d.m3IvTermStructureDhan.usableExpiryCount : '\u2014'), null);
+        m3Html += tlRow('Data quality', d.m3IvTermStructureDhan.dataQuality, tlQualityColor(d.m3IvTermStructureDhan.dataQuality));
+      } else {
+        m3Html += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Unavailable this snapshot.</div>';
+      }
+      html += tlCard('7. IV Term Structure (M3)', m3Html);
+
+      let m8Html = tlProvenanceBadge(d.m8RolloverMigrationDhan);
+      if (d.m8RolloverMigrationDhan && d.m8RolloverMigrationDhan.status === 'OK') {
+        m8Html += tlRow('State', String(d.m8RolloverMigrationDhan.state || (d.m8RolloverMigrationDhan.dataQuality === 'OK' ? 'COMPARABLE' : '\u2014')), null);
+        m8Html += tlRow('Snapshots buffered', String(d.m8RolloverMigrationDhan.snapshotCount != null ? d.m8RolloverMigrationDhan.snapshotCount : 0), null);
+        m8Html += tlRow('Data quality', d.m8RolloverMigrationDhan.dataQuality, tlQualityColor(d.m8RolloverMigrationDhan.dataQuality));
+      } else {
+        m8Html += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Unavailable this snapshot.</div>';
+      }
+      html += tlCard('8b. Rollover Migration (M8)', m8Html);
+
+      let m9Html = tlProvenanceBadge(d.m9MultiExpiryAlignmentDhan);
+      if (d.m9MultiExpiryAlignmentDhan && d.m9MultiExpiryAlignmentDhan.status === 'OK') {
+        m9Html += tlRow('OI alignment', String(d.m9MultiExpiryAlignmentDhan.oiAlignment || '\u2014'), null);
+        m9Html += tlRow('IV alignment', String(d.m9MultiExpiryAlignmentDhan.ivAlignment || '\u2014'), null);
+        m9Html += tlRow('Data quality', d.m9MultiExpiryAlignmentDhan.dataQuality, tlQualityColor(d.m9MultiExpiryAlignmentDhan.dataQuality));
+      } else {
+        m9Html += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Unavailable this snapshot.</div>';
+      }
+      html += tlCard('8c. Multi-Expiry Alignment (M9)', m9Html);
 
       let m12Html = '';
       if (d.m12CandidateSet) {
@@ -27338,6 +27382,337 @@ app.get("/api/audit/v3d-deduplicate-option-grid-proof", async (c) => {
 // comes only from M10/M11/M12 in the parent /api/tradelab response.
 // No new Dhan calls, no mutation of any existing module.
 // ============================================================================
+// ============================================================================
+// TRADELAB DHAN-ONLY MIGRATION — M2/M3/M8/M9 (2026-08-12, Phase 1)
+// Goal: TradeLab's IV Skew (M2), IV Term Structure (M3), Rollover Migration
+// (M8), and Multi-Expiry Alignment (M9) must be DHAN ONLY — no Kite read,
+// no Kite fallback. This block is entirely NEW/additive:
+//   - Does NOT modify buildV2IvSkewHistory, buildV2IvTermStructure,
+//     buildV2RolloverMigration, buildV2MultiExpiryAlignment, or any of
+//     M1/M4/M5/M6/M7/M10/M11/M12 — those keep serving the existing
+//     Kite-based VERDICT tab and diagnostic endpoints unchanged.
+//   - Reuses v2TermRow, v2ClassifyTermStructure, v2MultiExpiryRow,
+//     v2ClassifyMultiExpiryOi, v2ClassifyMultiExpiryIv, and
+//     v2RolloverExpirySummary UNCHANGED — only the INPUT is Dhan-shaped
+//     instead of Kite-shaped, via the shim below. Interpretation rules
+//     (the classification functions themselves) are untouched.
+//   - Reuses the existing /api/dhan/normalized (D4) route via internal
+//     self-fetch for both current AND next expiry (D4 already supports an
+//     ?expiry= override), so no new option-chain parsing code is written
+//     and the exact same ivSuspect/greeksSuspect fail-closed logic applies.
+//   - Reuses the exact same DHAN_LIVE_CACHE key scheme
+//     (`expirylist_${symbol}`, `optionchain_${symbol}_${expiry}`) already
+//     used by D1-D5/M1, so the CURRENT expiry fetch is very likely already
+//     warm from M1's own 3-minute background job — only the NEXT expiry is
+//     a genuinely new fetch per cycle.
+// ============================================================================
+
+async function tradeLabDhanGetExpiryList(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"): Promise<string[] | null> {
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) return null;
+  const mapping = DHAN_UNDERLYING_MAP[symbol];
+  if (!mapping) return null;
+  const expiryCacheKey = `expirylist_${symbol}`;
+  const cached = DHAN_LIVE_CACHE.get(expiryCacheKey);
+  if (cached && Date.now() - cached.fetchedAt < 5 * 60 * 1000) return cached.payload;
+  const headers = { "Content-Type": "application/json", "access-token": accessToken, "client-id": clientId };
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain/expirylist", {
+      method: "POST", headers,
+      body: JSON.stringify({ UnderlyingScrip: mapping.underlyingScrip, UnderlyingSeg: mapping.underlyingSeg }),
+    });
+    const raw = await res.text();
+    let parsed: any = null;
+    try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+    if (!res.ok || !parsed || !Array.isArray(parsed.data) || parsed.data.length === 0) return null;
+    DHAN_LIVE_CACHE.set(expiryCacheKey, { fetchedAt: Date.now(), payload: parsed.data });
+    return parsed.data;
+  } catch (err) {
+    console.error(`[TRADELAB_DHAN] expirylist fetch failed for ${symbol}:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+async function tradeLabDhanFetchNormalizedForExpiry(symbol: string, expiry: string, port: string): Promise<any> {
+  try {
+    const res = await fetch(`http://localhost:${port}/api/dhan/normalized?symbol=${symbol}&expiry=${encodeURIComponent(expiry)}`);
+    return await res.json();
+  } catch (err) {
+    return { status: "FETCH_FAILED", error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+interface TradeLabDhanMultiExpirySnapshot {
+  status: "OK" | "NOT_CONFIGURED" | "NOT_YET_MAPPED" | "FAIL";
+  provenance: "DHAN";
+  symbol: string;
+  generatedAt: string;
+  availableExpiryCount: number;
+  current: any | null; // D4 response for expiries[0]
+  next: any | null;    // D4 response for expiries[1], if it exists
+}
+
+async function buildTradeLabDhanMultiExpirySnapshot(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", port: string): Promise<TradeLabDhanMultiExpirySnapshot> {
+  const dhanConfigured = !!(process.env.DHAN_ACCESS_TOKEN?.trim() && process.env.DHAN_CLIENT_ID?.trim());
+  if (!dhanConfigured) {
+    return { status: "NOT_CONFIGURED", provenance: "DHAN", symbol, generatedAt: new Date().toISOString(), availableExpiryCount: 0, current: null, next: null };
+  }
+  const mapping = DHAN_UNDERLYING_MAP[symbol];
+  if (!mapping) {
+    return { status: "NOT_YET_MAPPED", provenance: "DHAN", symbol, generatedAt: new Date().toISOString(), availableExpiryCount: 0, current: null, next: null };
+  }
+  const expiries = await tradeLabDhanGetExpiryList(symbol);
+  if (!expiries || expiries.length === 0) {
+    return { status: "FAIL", provenance: "DHAN", symbol, generatedAt: new Date().toISOString(), availableExpiryCount: 0, current: null, next: null };
+  }
+  const currentExpiry = expiries[0];
+  const nextExpiry = expiries.length > 1 ? expiries[1] : null;
+  const current = await tradeLabDhanFetchNormalizedForExpiry(symbol, currentExpiry, port);
+  const next = nextExpiry ? await tradeLabDhanFetchNormalizedForExpiry(symbol, nextExpiry, port) : null;
+  return {
+    status: "OK",
+    provenance: "DHAN",
+    symbol,
+    generatedAt: new Date().toISOString(),
+    availableExpiryCount: expiries.length,
+    current: current && current.status === "PASS" ? current : null,
+    next: next && next.status === "PASS" ? next : null,
+  };
+}
+
+// Shim: converts one D4 (/api/dhan/normalized) response into the EXACT
+// ExpiryData/PremiumData shape that v2TermRow/v2MultiExpiryRow/
+// v2RolloverExpirySummary already expect — same technique M1's
+// dhanToIndexMetricsShim already uses. quoteTimestamp is set to the D4
+// backend-receipt time (generatedAt), NOT left as "UNAVAILABLE_FROM_PROVIDER",
+// because the reused freshness check (classifyTruthField) needs a real
+// timestamp to evaluate — this mirrors M1's already-approved precedent of
+// using an honest backend-receipt proxy when Dhan has no genuine per-quote
+// exchange timestamp (see dhanToIndexMetricsShim's exchangeTimestamp comment).
+// Suspect IV/Greeks (ivSuspect/greeksSuspect, already computed by D4) are
+// passed through as null — NEVER substituted with 0 — so downstream
+// dataQuality logic in the reused classifiers correctly treats them as
+// UNAVAILABLE, exactly as it already does for genuinely missing Kite data.
+function tradeLabDhanNormalizedToExpiryData(d4Result: any): ExpiryData | null {
+  if (!d4Result || d4Result.status !== "PASS" || !Array.isArray(d4Result.normalized)) return null;
+  const atmStrike = d4Result.atmStrike;
+  const receiptTimestamp = d4Result.generatedAt || new Date().toISOString();
+  const toPD = (leg: any): PremiumData =>
+    ({
+      strike: leg.strike,
+      isAtm: leg.strike === atmStrike,
+      instrumentToken: null,
+      exchangeToken: null,
+      expiryDate: d4Result.expiry,
+      expiryBucket: "TradeLab_Dhan",
+      optionType: leg.optionType,
+      lotSize: leg.lotSize,
+      tickSize: leg.tickSize,
+      exchange: null,
+      segment: leg.exchangeSegment || null,
+      contractRegime: "DHAN_OPTIONCHAIN_DERIVED",
+      tradingSymbol: leg.tradingSymbol,
+      bid: leg.bid,
+      ask: leg.ask,
+      lastPrice: leg.lastPrice,
+      change: leg.change,
+      iv: leg.ivSuspect ? null : leg.iv,
+      oi: leg.oi,
+      volume: leg.volume,
+      vwap: null,
+      vwapSource: "VWAP UNAVAILABLE",
+      quoteTimestamp: receiptTimestamp, // honest backend-receipt proxy — same pattern M1 already uses for spot
+      atDayHigh: false,
+      atDayLow: false,
+      dayHigh: leg.dayHigh,
+      dayLow: leg.dayLow,
+      pdc: null,
+      pdh: leg.pdh,
+      pdl: leg.pdl,
+      vega: leg.greeksSuspect ? null : leg.vega,
+      theta: leg.greeksSuspect ? null : leg.theta,
+      delta: leg.greeksSuspect ? null : leg.delta,
+    } as unknown as PremiumData);
+
+  const ceStrikes = d4Result.normalized.filter((r: any) => r.ce).map((r: any) => toPD(r.ce)).sort((a: any, b: any) => a.strike - b.strike);
+  const peStrikes = d4Result.normalized.filter((r: any) => r.pe).map((r: any) => toPD(r.pe)).sort((a: any, b: any) => a.strike - b.strike);
+  return { expiry: d4Result.expiry, expiryDate: new Date(d4Result.expiry), ceStrikes, peStrikes };
+}
+
+// ===== M3 (Dhan) — IV Term Structure =====
+async function buildTradeLabDhanM3(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", port: string) {
+  const bundle = await buildTradeLabDhanMultiExpirySnapshot(symbol, port);
+  if (bundle.status !== "OK") {
+    return { module: "M3_IV_TERM_STRUCTURE", provenance: "DHAN", status: bundle.status, dataQuality: "INSUFFICIENT" as V2DataQuality, state: "INSUFFICIENT_DATA" as V2TermStructureState, rows: [] as V2TermStructureRow[] };
+  }
+  const rows: V2TermStructureRow[] = [];
+  const curED = tradeLabDhanNormalizedToExpiryData(bundle.current);
+  const nextED = tradeLabDhanNormalizedToExpiryData(bundle.next);
+  if (curED) rows.push(v2TermRow(curED)); // v2TermRow: EXISTING, unmodified
+  if (nextED) rows.push(v2TermRow(nextED)); // v2TermRow: EXISTING, unmodified
+  const usable = rows.filter((r) => r.atmMeanIv != null);
+  const state = v2ClassifyTermStructure(rows); // EXISTING, unmodified
+  const dataQuality: V2DataQuality = usable.length < 2 ? "INSUFFICIENT" : rows.every((r) => r.dataQuality === "OK") ? "OK" : "PARTIAL";
+  return {
+    module: "M3_IV_TERM_STRUCTURE", provenance: "DHAN", status: "OK",
+    generatedAt: new Date().toISOString(), state, dataQuality, usableExpiryCount: usable.length, rows,
+    note: "Dhan current+next expiry only (Dhan does not expose a monthly-expiry shortcut the way Kite's instrument master does) — usableExpiryCount reflects this honestly, not fabricated as a full term structure.",
+  };
+}
+
+// ===== M9 (Dhan) — Multi-Expiry Alignment =====
+async function buildTradeLabDhanM9(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", port: string) {
+  const bundle = await buildTradeLabDhanMultiExpirySnapshot(symbol, port);
+  if (bundle.status !== "OK") {
+    return { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: bundle.status, dataQuality: "INSUFFICIENT" as V2DataQuality, state: "INSUFFICIENT_DATA" as V2MultiExpiryAlignmentState, rows: [] as V2MultiExpiryAlignmentRow[] };
+  }
+  const rows: V2MultiExpiryAlignmentRow[] = [];
+  const curED = tradeLabDhanNormalizedToExpiryData(bundle.current);
+  const nextED = tradeLabDhanNormalizedToExpiryData(bundle.next);
+  if (curED) rows.push(v2MultiExpiryRow(curED)); // EXISTING, unmodified
+  if (nextED) rows.push(v2MultiExpiryRow(nextED)); // EXISTING, unmodified
+  const oiAlignment = v2ClassifyMultiExpiryOi(rows); // EXISTING, unmodified
+  const ivAlignment = v2ClassifyMultiExpiryIv(rows); // EXISTING, unmodified
+  const dataQuality: V2DataQuality = rows.length < 2 ? "INSUFFICIENT" : rows.every((r: any) => r.dataQuality === "OK") ? "OK" : "PARTIAL";
+  return {
+    module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "OK",
+    generatedAt: new Date().toISOString(), oiAlignment, ivAlignment, dataQuality, rows,
+    directionalBias: "NONE",
+  };
+}
+
+// ===== Shared rolling history buffer for M2 (skew-over-time) and M8 (rollover-over-time) =====
+// Same 3-minute cadence as M1's DHAN_M1_PRODUCTION_REFRESH_MS, reused (not
+// redefined) to avoid a second, slightly-different timer. Not gated on
+// market hours (matches M1's existing unconditional-refresh precedent) —
+// Dhan's after-hours option-chain response is still a real, honestly-timestamped
+// snapshot, just not a fresh intraday one.
+const TRADELAB_DHAN_MULTIEXPIRY_HISTORY = new Map<"NIFTY" | "BANKNIFTY" | "SENSEX", TradeLabDhanMultiExpirySnapshot[]>();
+const TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS = 200; // matches RECORDER_MAX_SNAPSHOTS / DHAN_M1_PRODUCTION_MAX_SNAPSHOTS
+
+async function tradeLabDhanMultiExpiryRefreshCycle() {
+  const port = process.env.PORT || String(PORT);
+  for (const symbol of ["NIFTY", "BANKNIFTY", "SENSEX"] as const) {
+    const snap = await buildTradeLabDhanMultiExpirySnapshot(symbol, port);
+    if (snap.status !== "OK") continue;
+    const arr = TRADELAB_DHAN_MULTIEXPIRY_HISTORY.get(symbol) || [];
+    arr.push(snap);
+    if (arr.length > TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS) arr.shift();
+    TRADELAB_DHAN_MULTIEXPIRY_HISTORY.set(symbol, arr);
+  }
+}
+
+if (process.env.NODE_ENV !== "test" && process.env.DHAN_ACCESS_TOKEN && process.env.DHAN_CLIENT_ID) {
+  tradeLabDhanMultiExpiryRefreshCycle().catch((err) => console.error("[TRADELAB_DHAN] initial multi-expiry refresh failed:", err));
+  setInterval(() => {
+    tradeLabDhanMultiExpiryRefreshCycle().catch((err) => console.error("[TRADELAB_DHAN] scheduled multi-expiry refresh failed:", err));
+  }, DHAN_M1_PRODUCTION_REFRESH_MS);
+}
+
+// ===== M8 (Dhan) — Rollover Migration =====
+function buildTradeLabDhanM8(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
+  const hist = TRADELAB_DHAN_MULTIEXPIRY_HISTORY.get(symbol) || [];
+  const latest = hist[hist.length - 1];
+  if (!latest || !latest.current || !latest.next) {
+    return {
+      module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "OK",
+      state: "INSUFFICIENT_DATA" as V2RolloverState, snapshotCount: hist.length, dataQuality: "INSUFFICIENT" as V2DataQuality,
+      interpretationGuard: "Need a current+next Dhan snapshot with both expiries present before migration can be assessed.",
+    };
+  }
+  const latestCurED = tradeLabDhanNormalizedToExpiryData(latest.current);
+  const latestNextED = tradeLabDhanNormalizedToExpiryData(latest.next);
+  if (!latestCurED || !latestNextED) {
+    return { module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "OK", state: "INSUFFICIENT_DATA" as V2RolloverState, snapshotCount: hist.length, dataQuality: "INSUFFICIENT" as V2DataQuality };
+  }
+  const latestSummary = { current: v2RolloverExpirySummary(latestCurED), next: v2RolloverExpirySummary(latestNextED) }; // EXISTING fn, unmodified
+
+  let previous: { current: any; next: any } | null = null;
+  for (let i = hist.length - 2; i >= 0; i--) {
+    const h = hist[i];
+    if (!h.current || !h.next) continue;
+    const pCurED = tradeLabDhanNormalizedToExpiryData(h.current);
+    const pNextED = tradeLabDhanNormalizedToExpiryData(h.next);
+    if (!pCurED || !pNextED) continue;
+    if (pCurED.expiry === latestCurED.expiry && pNextED.expiry === latestNextED.expiry) {
+      previous = { current: v2RolloverExpirySummary(pCurED), next: v2RolloverExpirySummary(pNextED) };
+      break;
+    }
+  }
+  if (!previous) {
+    return {
+      module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "OK",
+      state: "INSUFFICIENT_HISTORY" as V2RolloverState, snapshotCount: hist.length,
+      current: latestSummary.current, next: latestSummary.next, dataQuality: "INSUFFICIENT" as V2DataQuality,
+      interpretationGuard: "Need at least two Dhan snapshots with the same current/next calendar expiries before migration can be assessed.",
+    };
+  }
+  return {
+    module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "OK",
+    generatedAt: new Date().toISOString(), snapshotCount: hist.length,
+    current: latestSummary.current, next: latestSummary.next, dataQuality: "OK" as V2DataQuality,
+    note: "Full delta computation (lot-size normalization, cross-expiry deltas) intentionally mirrors buildV2RolloverMigration's own scope for this pass — this returns the two comparable summaries; deeper delta math is identical logic to the existing (unmodified) function and can be layered on identically once this base is approved.",
+  };
+}
+
+// ===== M2 (Dhan) — IV Skew =====
+// Same formulas as buildV2IvSkewSnapshot (ATM PE IV - ATM CE IV, wing spreads
+// vs ATM), re-implemented directly against ExpiryData/PremiumData instead of
+// RecorderSnapshot, because the original function's input type is hard-wired
+// to the Kite recorder's schema and cannot accept Dhan data without changing
+// that function itself (which is out of scope — buildV2IvSkewSnapshot/
+// buildV2IvSkewHistory are NOT modified by this migration).
+function tradeLabDhanIvSkewSnapshot(ed: ExpiryData) {
+  const atmCe = (ed.ceStrikes || []).find((s) => s.isAtm);
+  const atmPe = (ed.peStrikes || []).find((s) => s.isAtm);
+  const atmCeIv = v2FiniteIv(atmCe?.iv);
+  const atmPeIv = v2FiniteIv(atmPe?.iv);
+  const ceWings = (ed.ceStrikes || []).filter((s) => !s.isAtm && s.strike > (atmCe?.strike ?? -Infinity));
+  const peWings = (ed.peStrikes || []).filter((s) => !s.isAtm && s.strike < (atmPe?.strike ?? Infinity));
+  const ceWingIv = v2Average(ceWings.map((s) => v2FiniteIv(s.iv)).filter((x): x is number => x != null));
+  const peWingIv = v2Average(peWings.map((s) => v2FiniteIv(s.iv)).filter((x): x is number => x != null));
+  const ceWingVsAtmSpread = ceWingIv != null && atmCeIv != null ? ceWingIv - atmCeIv : null;
+  const peWingVsAtmSpread = peWingIv != null && atmPeIv != null ? peWingIv - atmPeIv : null;
+  const atmPeMinusCeSpread = atmPeIv != null && atmCeIv != null ? atmPeIv - atmCeIv : null;
+  const dataQuality: V2DataQuality = atmCeIv != null && atmPeIv != null ? "OK" : atmCeIv != null || atmPeIv != null ? "PARTIAL" : "INSUFFICIENT";
+  return { timestamp: ed.expiryDate?.toISOString?.() || null, atmStrike: atmCe?.strike ?? atmPe?.strike ?? null, atmCeIv, atmPeIv, ceWingVsAtmSpread, peWingVsAtmSpread, atmPeMinusCeSpread, dataQuality };
+}
+
+function buildTradeLabDhanM2(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
+  const hist = TRADELAB_DHAN_MULTIEXPIRY_HISTORY.get(symbol) || [];
+  const latest = hist[hist.length - 1];
+  const latestED = latest?.current ? tradeLabDhanNormalizedToExpiryData(latest.current) : null;
+  if (!latestED) {
+    return { module: "M2_IV_SKEW", provenance: "DHAN", status: "OK", snapshotCount: hist.length, current: null, dataQuality: "INSUFFICIENT" as V2DataQuality };
+  }
+  const current = tradeLabDhanIvSkewSnapshot(latestED);
+
+  let previousComparable: ReturnType<typeof tradeLabDhanIvSkewSnapshot> | null = null;
+  for (let i = hist.length - 2; i >= 0; i--) {
+    const h = hist[i];
+    if (!h.current) continue;
+    const ed = tradeLabDhanNormalizedToExpiryData(h.current);
+    if (!ed) continue;
+    const candidate = tradeLabDhanIvSkewSnapshot(ed);
+    if (candidate.atmStrike === current.atmStrike) { previousComparable = candidate; break; }
+  }
+
+  const change = previousComparable ? {
+    atmCeIv: current.atmCeIv != null && previousComparable.atmCeIv != null ? current.atmCeIv - previousComparable.atmCeIv : null,
+    atmPeIv: current.atmPeIv != null && previousComparable.atmPeIv != null ? current.atmPeIv - previousComparable.atmPeIv : null,
+    atmPeMinusCeSpread: current.atmPeMinusCeSpread != null && previousComparable.atmPeMinusCeSpread != null ? current.atmPeMinusCeSpread - previousComparable.atmPeMinusCeSpread : null,
+  } : null;
+
+  const dataQuality: V2DataQuality = current.dataQuality === "INSUFFICIENT" ? "INSUFFICIENT" : previousComparable == null ? "PARTIAL" : current.dataQuality;
+
+  return {
+    module: "M2_IV_SKEW", provenance: "DHAN", status: "OK",
+    generatedAt: new Date().toISOString(), snapshotCount: hist.length, current, previousComparable, change, dataQuality,
+    interpretationGuard: "IV/skew is volatility-pricing asymmetry, not a stand-alone CE/PE direction vote — same guard as the Kite-based M2.",
+  };
+}
+
 function buildGreekEngine(dhanNormalized: any) {
   if (!dhanNormalized || dhanNormalized.status !== "PASS" || !Array.isArray(dhanNormalized.normalized)) {
     return {
@@ -27532,6 +27907,32 @@ app.get("/api/tradelab", async (c) => {
   const greekEngine = buildGreekEngine(d4);
   const entryQuality = buildEntryQualityLayer(greekEngine, m?.futuresVwapBias);
 
+  // TradeLab Dhan-only migration (Phase 1, 2026-08-12): M2/M3/M8/M9 now
+  // computed from Dhan only, via the shared multi-expiry layer above.
+  // M1/M4/M5/M6/M7/M10/M11/M12 remain exactly as before (Kite-based,
+  // reused unchanged) — see m11EvidenceFusion.evidenceRows for those,
+  // which still includes the OLD Kite-sourced M2/M3/M8/M9 rows too, kept
+  // for side-by-side comparison during this migration, not removed.
+  const port = process.env.PORT || String(PORT);
+  let m2Dhan: any = { module: "M2_IV_SKEW", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  let m3Dhan: any = { module: "M3_IV_TERM_STRUCTURE", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  let m8Dhan: any = { module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  let m9Dhan: any = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  if (dhanConfigured) {
+    try {
+      m2Dhan = buildTradeLabDhanM2(symbol);
+      m3Dhan = await buildTradeLabDhanM3(symbol, port);
+      m8Dhan = buildTradeLabDhanM8(symbol);
+      m9Dhan = await buildTradeLabDhanM9(symbol, port);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "Unknown error";
+      m2Dhan = { module: "M2_IV_SKEW", provenance: "DHAN", status: "FAIL", error: errMsg };
+      m3Dhan = { module: "M3_IV_TERM_STRUCTURE", provenance: "DHAN", status: "FAIL", error: errMsg };
+      m8Dhan = { module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "FAIL", error: errMsg };
+      m9Dhan = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "FAIL", error: errMsg };
+    }
+  }
+
   return c.json({
     architectureRole: "TRADELAB_PHASE_B_AGGREGATOR",
     generatedAt: new Date().toISOString(),
@@ -27544,7 +27945,11 @@ app.get("/api/tradelab", async (c) => {
     m12CandidateSet: m12,
     greekEngine,
     entryQuality,
-    note: "Phase C (Greek Engine) and Phase D (Entry Quality) are now live. UI card (Phase E) not yet built — Trade Lab tab still shows a placeholder.",
+    m2IvSkewDhan: m2Dhan,
+    m3IvTermStructureDhan: m3Dhan,
+    m8RolloverMigrationDhan: m8Dhan,
+    m9MultiExpiryAlignmentDhan: m9Dhan,
+    note: "M2/M3/M8/M9 are now DHAN ONLY (see the *Dhan fields). M1/M4/M5/M6/M7/M10/M11/M12 unchanged, still Kite-based via m11EvidenceFusion/m10MarketRegime/m12CandidateSet. The endpoint itself still requires a Kite session (see getSession gate above) because M10/M11/M12 still need it — this is a known, not-yet-migrated dependency, tracked separately.",
   });
 });
 

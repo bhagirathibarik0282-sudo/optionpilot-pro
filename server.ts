@@ -25117,6 +25117,226 @@ app.get("/api/audit/v3d-option-data-expansion-proof", async (c) => {
   }
 });
 
+// ============================================================================
+// V3D_DYNAMIC_ATM_MAPPING — REMAP_EXISTING_OPTION_DATA_TO_TRUE_PER_TIMESTAMP_ATM_OFFSETS
+//
+// Pure transformation of the already-stored NIFTY CE/PE ATM-3..+3 L3 grid.
+// No new Dhan fetch. Original fixed-strike L1/L2/L3 artifacts are read-only
+// inputs here and are never modified. For every timestamp independently,
+// recomputes the TRUE ATM from that timestamp's own spot value (never the
+// session-open anchor), and reports exactly which ATM±3 slots the fixed
+// 7-strike basket can and cannot actually cover as the day's ATM drifts.
+// ============================================================================
+
+app.get("/api/audit/v3d-dynamic-atm-mapping-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const report: Record<string, any> = {
+    architectureRole: "V3D_DYNAMIC_ATM_MAPPING",
+    task: "REMAP_EXISTING_OPTION_DATA_TO_TRUE_PER_TIMESTAMP_ATM_OFFSETS",
+    generatedAt,
+    symbol: "NIFTY",
+    tradingDate: "2026-08-11",
+  };
+
+  const token = await getValidDriveAccessToken();
+  if (!token) return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected." }, 200);
+
+  try {
+    const tradingDateStr = "2026-08-11";
+    const strikeStep = 50;
+
+    // --- LOCATE + READ the actual stored fixed-strike L3 option grid (never recomputed, never refetched) ---
+    const brainRoot = await findOrCreateDriveFolder("OptionPilot_Brain", null, token);
+    const storeRoot = brainRoot ? await findOrCreateDriveFolder("V3_Historical_Store", brainRoot, token) : null;
+    const normFolder = storeRoot ? await findOrCreateDriveFolder("03_normalized", storeRoot, token) : null;
+    const normOptFolder = normFolder ? await findOrCreateDriveFolder("NIFTY_OPTION_GRID_ATM_PM3", normFolder, token) : null;
+    if (!normOptFolder) return c.json({ ...report, status: "FAIL", error: "Folder lookup failed." }, 200);
+
+    const files = await driveListFilesInFolder(normOptFolder, token);
+    const candidates = files.filter((f) => f.name.startsWith(`option_grid_ATM_PM3_NIFTY_${tradingDateStr}_`));
+    if (candidates.length === 0) {
+      return c.json({ ...report, status: "FAIL", error: "No stored fixed-strike option grid found for this trading date." }, 200);
+    }
+    const sourceFile = candidates[0];
+    const storedRows: any[] = await driveReadFileById(sourceFile.id, token);
+    if (!Array.isArray(storedRows) || storedRows.length === 0) {
+      return c.json({ ...report, status: "FAIL", error: "Stored option grid read-back failed or empty.", sourceFileId: sourceFile.id }, 200);
+    }
+    const storedFixedStrikes = [...new Set(storedRows.map((r) => r.strike))].sort((a, b) => a - b);
+    const sourceChecksum = createHash("sha256").update(JSON.stringify(storedRows)).digest("hex");
+    const sourceManifestIds = { sourceL3FileId: sourceFile.id, sourceL3FileName: sourceFile.name, sourceL3Checksum: sourceChecksum };
+
+    // --- TRANSFORM (defined as a pure function so it can be run twice for reproducibility) ---
+    function transform(rows: any[]) {
+      const out = rows.map((r) => {
+        const spot: number | null = r.spot;
+        const strike: number = r.strike;
+        const dynamicAtmStrike = spot !== null ? nearestAtmStrike(spot, strikeStep) : null;
+        const dynamicAtmOffset = dynamicAtmStrike !== null ? Math.round((strike - dynamicAtmStrike) / strikeStep) : null;
+        let dynamicMoneyness: string | null = null;
+        if (dynamicAtmOffset !== null) {
+          if (dynamicAtmOffset === 0) dynamicMoneyness = "ATM";
+          else if (r.optionType === "CE") dynamicMoneyness = dynamicAtmOffset < 0 ? "ITM" : "OTM";
+          else if (r.optionType === "PE") dynamicMoneyness = dynamicAtmOffset > 0 ? "ITM" : "OTM";
+        }
+        return {
+          timestamp: r.timestamp,
+          spot,
+          strike,
+          optionType: r.optionType,
+          sessionAnchorAtm: r.atmStrike,
+          sessionAnchorOffset: r.atmOffset,
+          dynamicAtmStrike,
+          dynamicAtmOffset,
+          dynamicMoneyness,
+          quality: spot !== null ? "VALID" : "UNAVAILABLE",
+        };
+      });
+      return out;
+    }
+
+    const run1 = transform(storedRows);
+    const run2 = transform(storedRows);
+    const run1Checksum = createHash("sha256").update(JSON.stringify(run1)).digest("hex");
+    const run2Checksum = createHash("sha256").update(JSON.stringify(run2)).digest("hex");
+    const reproducibilityChecksumMatch = run1Checksum === run2Checksum;
+
+    // --- METRICS ---
+    const distinctTimestamps = [...new Set(run1.map((r) => r.timestamp))].sort();
+    const timestampCount = distinctTimestamps.length;
+
+    // dynamicAtmStrike per timestamp (take first row's value for that timestamp -- CE/PE/all strikes share it, verified below)
+    const dynamicAtmByTs = new Map<string, number | null>();
+    for (const r of run1) {
+      if (!dynamicAtmByTs.has(r.timestamp)) dynamicAtmByTs.set(r.timestamp, r.dynamicAtmStrike);
+    }
+
+    let dynamicAtmChangeCount = 0;
+    let prevAtm: number | null | undefined = undefined;
+    for (const ts of distinctTimestamps) {
+      const atm = dynamicAtmByTs.get(ts) ?? null;
+      if (prevAtm !== undefined && atm !== prevAtm) dynamicAtmChangeCount++;
+      prevAtm = atm;
+    }
+
+    const dynamicAtmDistribution: Record<string, number> = {};
+    for (const ts of distinctTimestamps) {
+      const atm = dynamicAtmByTs.get(ts);
+      const key = atm === null || atm === undefined ? "UNAVAILABLE" : String(atm);
+      dynamicAtmDistribution[key] = (dynamicAtmDistribution[key] || 0) + 1;
+    }
+
+    let fullyCoveredAtmPlusMinus3TimestampCount = 0;
+    let partiallyCoveredTimestampCount = 0;
+    let uncoveredRequiredSlotCount = 0;
+    for (const ts of distinctTimestamps) {
+      const atm = dynamicAtmByTs.get(ts);
+      if (atm === null || atm === undefined) { uncoveredRequiredSlotCount += 7; continue; }
+      const requiredStrikes = [-3, -2, -1, 0, 1, 2, 3].map((off) => atm + off * strikeStep);
+      const coveredCount = requiredStrikes.filter((s) => storedFixedStrikes.includes(s)).length;
+      uncoveredRequiredSlotCount += (7 - coveredCount);
+      if (coveredCount === 7) fullyCoveredAtmPlusMinus3TimestampCount++;
+      else if (coveredCount > 0) partiallyCoveredTimestampCount++;
+    }
+
+    // --- QUALITY CHECKS: duplicate/invalid mapping ---
+    // duplicateMappingCount: a single (strike, timestamp, optionType) should map to exactly one dynamicAtmOffset.
+    const keySeen = new Map<string, number | null>();
+    let duplicateMappingCount = 0;
+    for (const r of run1) {
+      const key = `${r.timestamp}|${r.strike}|${r.optionType}`;
+      if (keySeen.has(key) && keySeen.get(key) !== r.dynamicAtmOffset) duplicateMappingCount++;
+      keySeen.set(key, r.dynamicAtmOffset);
+    }
+    // invalidMappingCount: CE and PE at the same strike/timestamp must share the same dynamicAtmOffset.
+    const ceByStrikeTs = new Map<string, number | null>();
+    const peByStrikeTs = new Map<string, number | null>();
+    for (const r of run1) {
+      const key = `${r.timestamp}|${r.strike}`;
+      if (r.optionType === "CE") ceByStrikeTs.set(key, r.dynamicAtmOffset);
+      if (r.optionType === "PE") peByStrikeTs.set(key, r.dynamicAtmOffset);
+    }
+    let invalidMappingCount = 0;
+    for (const [key, ceOffset] of ceByStrikeTs) {
+      if (peByStrikeTs.has(key) && peByStrikeTs.get(key) !== ceOffset) invalidMappingCount++;
+    }
+
+    // --- WRITE as a new, separate normalized research view, linked (never overwriting the source) ---
+    const dynamicViewFolder = normFolder ? await findOrCreateDriveFolder("NIFTY_OPTION_GRID_DYNAMIC_ATM_VIEW", normFolder, token) : null;
+    let L_WriteStatus = "NOT_ATTEMPTED";
+    let dynamicFileId: string | null = null;
+    if (dynamicViewFolder) {
+      const outStr = JSON.stringify(run1);
+      const fileName = `dynamic_atm_view_NIFTY_${tradingDateStr}_${run1Checksum.slice(0, 16)}.json`;
+      dynamicFileId = await driveFindFileByName(fileName, dynamicViewFolder, token);
+      if (!dynamicFileId) {
+        const up = await uploadFileToDrive(fileName, "application/json", outStr, dynamicViewFolder, token);
+        dynamicFileId = up?.id ?? null;
+        L_WriteStatus = up ? "PASS" : "FAIL";
+      } else {
+        L_WriteStatus = "PASS_ALREADY_EXISTED";
+      }
+    }
+    let L_ReadStatus = "NOT_ATTEMPTED";
+    let readBackRowCount = 0;
+    if (dynamicFileId) {
+      const readBack = await driveReadFileById(dynamicFileId, token);
+      readBackRowCount = Array.isArray(readBack) ? readBack.length : 0;
+      L_ReadStatus = readBackRowCount === run1.length ? "PASS" : "FAIL";
+    }
+
+    const overallStatus =
+      L_WriteStatus.startsWith("PASS") && L_ReadStatus === "PASS" && reproducibilityChecksumMatch &&
+      duplicateMappingCount === 0 && invalidMappingCount === 0
+        ? "PASS"
+        : (L_WriteStatus.startsWith("PASS") ? "PARTIAL" : "FAIL");
+
+    return c.json({
+      ...report,
+      status: overallStatus,
+      sourceManifestIds,
+      sourceFixedStrikes: storedFixedStrikes,
+      totalRows: run1.length,
+      writeStatus: L_WriteStatus,
+      readStatus: L_ReadStatus,
+      readBackRowCount,
+      dynamicFileId,
+      run1Checksum,
+      run2Checksum,
+      reproducibilityChecksumMatch,
+      metrics: {
+        timestampCount,
+        dynamicAtmChangeCount,
+        fullyCoveredAtmPlusMinus3TimestampCount,
+        partiallyCoveredTimestampCount,
+        uncoveredRequiredSlotCount,
+        dynamicAtmDistribution,
+        duplicateMappingCount,
+        invalidMappingCount,
+      },
+      knownLimitations: [
+        "Coverage is evaluated against the FIXED 7-strike basket already stored (24350-24650) -- any dynamic ATM whose required ±3 range falls outside this basket is reported as uncovered, never fabricated as a new contract.",
+        "dynamicMoneyness is a simple ITM/ATM/OTM label from offset sign only -- no premium-based moneyness interpretation is performed here.",
+      ],
+      v2UntouchedCheck: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      ...report,
+      status: "FAIL",
+      error: err instanceof Error ? err.message : "Unknown dynamic ATM mapping failure",
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

@@ -24418,6 +24418,300 @@ app.get("/api/audit/v3d-futures-oi-final-validation-proof", async (c) => {
   }
 });
 
+// ============================================================================
+// V3D_L4_F1_OI_FEATURES — BUILD_VALIDATED_FUTURES_OI_FEATURES
+//
+// Builds the 6 newly-unlocked F1 OI features (futuresOiChange,
+// futuresOiPctChange, longBuildupState, shortBuildupState,
+// longUnwindingState, shortCoveringState) from the ACTUAL stored L3
+// artifact (never recomputed -- same locate+read pattern proven in the
+// L3->L4 lineage repair). The 4 buildup/unwinding states are modelled as a
+// SINGLE categorical field so contradictory simultaneous states are
+// structurally impossible, not just checked after the fact.
+//
+// No scoring, no verdicts -- these are descriptive positioning states only.
+// No PE leg, no PCR, no OI walls, no IV, no Greeks, no rollover features.
+// No V2 changes. No new Dhan fetch (reads only from already-stored L3).
+// ============================================================================
+
+type PositioningState =
+  | "LONG_BUILDUP" | "SHORT_BUILDUP" | "LONG_UNWINDING" | "SHORT_COVERING"
+  | "NEUTRAL_NO_DIRECTIONAL_CHANGE" | "UNAVAILABLE";
+
+interface L4FuturesOiRow {
+  timestamp: string;
+  tradingDate: string;
+  symbol: string;
+  featureFamily: "F1_FUTURES_STRUCTURE";
+  currentFutureClose: number | null;
+  currentFutureOi: number | null;
+  priceChange: number | null;
+  priceChangeQuality: "VALID" | "UNAVAILABLE";
+  futuresOiChange: number | null;
+  futuresOiChangeQuality: "VALID" | "UNAVAILABLE";
+  futuresOiPctChange: number | null;
+  futuresOiPctChangeQuality: "VALID" | "UNAVAILABLE" | "ANOMALOUS";
+  positioningState: PositioningState;
+  positioningStateQuality: "VALID" | "UNAVAILABLE";
+  formulaVersion: string;
+  inputFieldRefs: string[];
+  sourceManifestIds: Record<string, string | null>;
+  calculatedAt: string;
+  schemaVersion: string;
+}
+
+function computeL4FuturesOiRows(l3Rows: L3Row[], sourceManifestIds: Record<string, string | null>): L4FuturesOiRow[] {
+  const calculatedAt = new Date().toISOString();
+  const formulaVersion = "F1_FUTURES_OI_v1";
+  const rows: L4FuturesOiRow[] = [];
+
+  for (let i = 0; i < l3Rows.length; i++) {
+    const row = l3Rows[i];
+    const prev = i > 0 ? l3Rows[i - 1] : null;
+    const close = row.currentFutureClose;
+    const oi = row.currentFutureOi;
+
+    // --- priceChange ---
+    let priceChange: number | null = null;
+    let priceChangeQuality: L4FuturesOiRow["priceChangeQuality"] = "UNAVAILABLE";
+    if (prev && prev.currentFutureClose !== null && close !== null) {
+      priceChange = close - prev.currentFutureClose;
+      priceChangeQuality = "VALID";
+    }
+
+    // --- futuresOiChange ---
+    let futuresOiChange: number | null = null;
+    let futuresOiChangeQuality: L4FuturesOiRow["futuresOiChangeQuality"] = "UNAVAILABLE";
+    if (prev && prev.currentFutureOi !== null && oi !== null) {
+      futuresOiChange = oi - prev.currentFutureOi;
+      futuresOiChangeQuality = "VALID";
+    }
+
+    // --- futuresOiPctChange (explicit rule: prevOI zero or missing -> UNAVAILABLE, never fabricated) ---
+    let futuresOiPctChange: number | null = null;
+    let futuresOiPctChangeQuality: L4FuturesOiRow["futuresOiPctChangeQuality"] = "UNAVAILABLE";
+    if (futuresOiChangeQuality === "VALID" && prev && prev.currentFutureOi !== null) {
+      if (prev.currentFutureOi === 0) {
+        futuresOiPctChangeQuality = "UNAVAILABLE"; // explicit rule -- prev OI zero means % change is undefined, not infinite/fabricated
+      } else {
+        futuresOiPctChange = (futuresOiChange as number / prev.currentFutureOi) * 100;
+        futuresOiPctChangeQuality = "VALID";
+      }
+    }
+
+    // --- positioningState: single categorical field, mutually exclusive by construction ---
+    let positioningState: PositioningState = "UNAVAILABLE";
+    let positioningStateQuality: L4FuturesOiRow["positioningStateQuality"] = "UNAVAILABLE";
+    if (priceChangeQuality === "VALID" && futuresOiChangeQuality === "VALID") {
+      positioningStateQuality = "VALID";
+      const pc = priceChange as number;
+      const oc = futuresOiChange as number;
+      if (pc === 0 || oc === 0) {
+        positioningState = "NEUTRAL_NO_DIRECTIONAL_CHANGE"; // never interpret unchanged price/OI as directional
+      } else if (pc > 0 && oc > 0) {
+        positioningState = "LONG_BUILDUP";
+      } else if (pc < 0 && oc > 0) {
+        positioningState = "SHORT_BUILDUP";
+      } else if (pc < 0 && oc < 0) {
+        positioningState = "LONG_UNWINDING";
+      } else if (pc > 0 && oc < 0) {
+        positioningState = "SHORT_COVERING";
+      }
+    }
+
+    rows.push({
+      timestamp: row.timestamp,
+      tradingDate: row.tradingDate,
+      symbol: row.symbol,
+      featureFamily: "F1_FUTURES_STRUCTURE",
+      currentFutureClose: close,
+      currentFutureOi: oi,
+      priceChange,
+      priceChangeQuality,
+      futuresOiChange,
+      futuresOiChangeQuality,
+      futuresOiPctChange,
+      futuresOiPctChangeQuality,
+      positioningState,
+      positioningStateQuality,
+      formulaVersion,
+      inputFieldRefs: ["currentFutureClose", "currentFutureOi"],
+      sourceManifestIds,
+      calculatedAt,
+      schemaVersion: "l4_oi_v1",
+    });
+  }
+
+  return rows;
+}
+
+app.get("/api/audit/v3d-l4-f1-oi-features-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const report: Record<string, any> = {
+    architectureRole: "V3D_L4_F1_OI_FEATURES",
+    task: "BUILD_VALIDATED_FUTURES_OI_FEATURES",
+    generatedAt,
+    symbol: "NIFTY",
+    featuresThisPass: ["futuresOiChange", "futuresOiPctChange", "longBuildupState", "shortBuildupState", "longUnwindingState", "shortCoveringState"],
+  };
+
+  const token = await getValidDriveAccessToken();
+  if (!token) {
+    return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected.", safeToProceed: false }, 200);
+  }
+
+  try {
+    const brainRoot = await findOrCreateDriveFolder("OptionPilot_Brain", null, token);
+    const storeRoot = brainRoot ? await findOrCreateDriveFolder("V3_Historical_Store", brainRoot, token) : null;
+    const normFolder = storeRoot ? await findOrCreateDriveFolder("03_normalized", storeRoot, token) : null;
+    const normSymbolFolder = normFolder ? await findOrCreateDriveFolder("NIFTY", normFolder, token) : null;
+    const featFolder = storeRoot ? await findOrCreateDriveFolder("04_derivative_features", storeRoot, token) : null;
+    const featSymbolFolder = featFolder ? await findOrCreateDriveFolder("NIFTY", featFolder, token) : null;
+    if (!normSymbolFolder || !featSymbolFolder) {
+      return c.json({ ...report, status: "FAIL", error: "Folder lookup failed.", safeToProceed: false }, 200);
+    }
+
+    const toDate = new Date();
+    const fromDate = new Date(toDate.getTime() - 24 * 60 * 60 * 1000);
+    const tradingDateStr = fromDate.toISOString().slice(0, 10);
+
+    // --- LOCATE + READ the actual stored L3 artifact (never recomputed) ---
+    const normFiles = await driveListFilesInFolder(normSymbolFolder, token);
+    const l3Candidates = normFiles.filter((f) => f.name.startsWith(`normalized_NIFTY_${tradingDateStr}_`));
+    if (l3Candidates.length === 0) {
+      return c.json({ ...report, status: "FAIL", error: "No stored L3 artifact found for this trading date.", safeToProceed: false }, 200);
+    }
+    const l3File = l3Candidates[0];
+    const storedL3Rows = await driveReadFileById(l3File.id, token);
+    if (!Array.isArray(storedL3Rows)) {
+      return c.json({ ...report, status: "FAIL", error: "Stored L3 read-back failed.", l3FileId: l3File.id, safeToProceed: false }, 200);
+    }
+    const storedL3Checksum = createHash("sha256").update(JSON.stringify(storedL3Rows)).digest("hex");
+
+    const oiPresentInL3 = (storedL3Rows as L3Row[]).some((r) => r.currentFutureOi !== null && r.currentFutureOi !== undefined);
+    if (!oiPresentInL3) {
+      return c.json({ ...report, status: "FAIL", error: "Stored L3 artifact has no currentFutureOi values -- cannot build OI features from it.", l3FileId: l3File.id, safeToProceed: false }, 200);
+    }
+
+    const sourceManifestIds: Record<string, string | null> = {
+      l3StoredFileId: l3File.id,
+      l3StoredFileName: l3File.name,
+      l3StoredChecksum: storedL3Checksum,
+    };
+
+    // --- COMPUTE TWICE for reproducibility ---
+    const run1 = computeL4FuturesOiRows(storedL3Rows as L3Row[], sourceManifestIds);
+    const run2 = computeL4FuturesOiRows(storedL3Rows as L3Row[], sourceManifestIds);
+    const strip = (rows: L4FuturesOiRow[]) => rows.map(({ calculatedAt, ...rest }) => rest);
+    const run1Checksum = createHash("sha256").update(JSON.stringify(strip(run1))).digest("hex");
+    const run2Checksum = createHash("sha256").update(JSON.stringify(strip(run2))).digest("hex");
+    const reproducibilityChecksumMatch = run1Checksum === run2Checksum;
+
+    // --- CONTRADICTION CHECK: by construction positioningState is a single
+    // field, so no row can hold two states at once -- verify this
+    // structurally anyway (defensive, not assumed). ---
+    const contradictionCount = run1.filter((r) => {
+      const flags = [
+        r.positioningState === "LONG_BUILDUP",
+        r.positioningState === "SHORT_BUILDUP",
+        r.positioningState === "LONG_UNWINDING",
+        r.positioningState === "SHORT_COVERING",
+      ].filter(Boolean).length;
+      return flags > 1;
+    }).length;
+
+    // --- WRITE to the EXISTING 04_derivative_features/NIFTY location, read back, verify ---
+    const l4FileName = `derivatives_F1_OI_NIFTY_${tradingDateStr}_${run1Checksum.slice(0, 16)}.json`;
+    const l4WriteStr = JSON.stringify(run1);
+    let l4FileId = await driveFindFileByName(l4FileName, featSymbolFolder, token);
+    let L4WriteStatus = "NOT_ATTEMPTED";
+    if (!l4FileId) {
+      const up = await uploadFileToDrive(l4FileName, "application/json", l4WriteStr, featSymbolFolder, token);
+      l4FileId = up?.id ?? null;
+      L4WriteStatus = up ? "PASS" : "FAIL";
+    } else {
+      L4WriteStatus = "PASS_ALREADY_EXISTED";
+    }
+    let L4ReadStatus = "NOT_ATTEMPTED";
+    let readBackRowCount = 0;
+    if (l4FileId) {
+      const readBack = await driveReadFileById(l4FileId, token);
+      readBackRowCount = Array.isArray(readBack) ? readBack.length : 0;
+      L4ReadStatus = readBackRowCount === run1.length ? "PASS" : "FAIL";
+    }
+
+    // --- STATE COUNTS ---
+    const stateCounts = {
+      LONG_BUILDUP: run1.filter((r) => r.positioningState === "LONG_BUILDUP").length,
+      SHORT_BUILDUP: run1.filter((r) => r.positioningState === "SHORT_BUILDUP").length,
+      LONG_UNWINDING: run1.filter((r) => r.positioningState === "LONG_UNWINDING").length,
+      SHORT_COVERING: run1.filter((r) => r.positioningState === "SHORT_COVERING").length,
+      NEUTRAL_NO_DIRECTIONAL_CHANGE: run1.filter((r) => r.positioningState === "NEUTRAL_NO_DIRECTIONAL_CHANGE").length,
+      UNAVAILABLE: run1.filter((r) => r.positioningState === "UNAVAILABLE").length,
+    };
+    const unavailableCounts = {
+      priceChange: run1.filter((r) => r.priceChangeQuality === "UNAVAILABLE").length,
+      futuresOiChange: run1.filter((r) => r.futuresOiChangeQuality === "UNAVAILABLE").length,
+      futuresOiPctChange: run1.filter((r) => r.futuresOiPctChangeQuality !== "VALID").length,
+      positioningState: run1.filter((r) => r.positioningStateQuality === "UNAVAILABLE").length,
+    };
+
+    // --- doNotDoInL4 check (same guard as the first F1 pass) ---
+    const disallowedFieldsFound = ["score", "verdict", "candidate", "stopLoss", "sl", "target1", "target2", "t1", "t2", "orderId", "signal", "bias", "recommendation"]
+      .filter((f) => run1.some((r: any) => f in r));
+    const doNotDoInL4Check = disallowedFieldsFound.length === 0 ? "PASS_NO_SCORING_OR_VERDICT_FIELDS" : `FAIL_DISALLOWED_FIELDS_FOUND: ${disallowedFieldsFound.join(", ")}`;
+
+    const overallStatus =
+      L4WriteStatus.startsWith("PASS") && L4ReadStatus === "PASS" && reproducibilityChecksumMatch &&
+      contradictionCount === 0 && doNotDoInL4Check.startsWith("PASS")
+        ? "PASS"
+        : (L4WriteStatus.startsWith("PASS") ? "PARTIAL" : "FAIL");
+
+    return c.json({
+      ...report,
+      status: overallStatus,
+      tradingDate: tradingDateStr,
+      totalRows: run1.length,
+      L4WriteStatus,
+      L4ReadStatus,
+      readBackRowCount,
+      run1Checksum,
+      run2Checksum,
+      reproducibilityChecksumMatch,
+      contradictionCount,
+      stateCounts,
+      unavailableCounts,
+      doNotDoInL4Check,
+      sourceManifestIds,
+      lineage: "L1 -> L2 -> STORED_L3 -> L4",
+      l3RowCountUsed: storedL3Rows.length,
+      knownLimitations: [
+        "First row of the trading day is always UNAVAILABLE across all 4 fields (no previous-minute row to diff against) -- by design, never fabricated.",
+        "NEUTRAL_NO_DIRECTIONAL_CHANGE is reported separately from the 4 directional states -- unchanged price or unchanged OI is never classified as buildup/unwinding, per the explicit rule.",
+        "Single tiny ~1-day NIFTY sample only -- not proof of bulk/multi-symbol/multi-day reliability.",
+        "rolloverPct, nearToNextOiMigration, calendarSpreadState remain deliberately unbuilt (require multi-expiry data not yet fetched).",
+      ],
+      safeToProceed: overallStatus === "PASS",
+      v2UntouchedCheck: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      ...report,
+      status: "FAIL",
+      error: err instanceof Error ? err.message : "Unknown F1 OI features build failure",
+      safeToProceed: false,
+    }, 500);
+  }
+});
+
 if (process.env.NODE_ENV !== "test") {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);

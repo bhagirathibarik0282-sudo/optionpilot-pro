@@ -5651,9 +5651,7 @@ app.get("/", (c) => {
     <div id="RESEARCH" class="tab-content"></div>
     <div id="SYSTEM" class="tab-content"></div>
     <div id="HOLIDAYS" class="tab-content"></div>
-    <div id="TRADELAB" class="tab-content">
-      <div style="padding:20px;color:#8892a0;text-align:center;">🧪 Trade Lab — coming soon (read-only, Dhan-only decision support)</div>
-    </div>
+    <div id="TRADELAB" class="tab-content"></div>
 
     <div class="timestamp" id="dataTimestamp"></div>
   </div>
@@ -7274,6 +7272,13 @@ app.get("/", (c) => {
     }
 
     let vixCorrData = null;
+
+    // ===== Trade Lab (Phase E, 2026-08-12) — client-side state =====
+    let tradeLabSymbol = 'NIFTY';
+    let tradeLabData = null;
+    let tradeLabLoading = false;
+    let tradeLabError = null;
+    let tradeLabAccordionOpen = 'regime';
     let vixCorrChart = null;
     let vixCorrChartBank = null;
     let vixCorrLoaded = false;
@@ -7299,6 +7304,44 @@ app.get("/", (c) => {
         vixCorrLoading = false;
       }
     }
+
+    // ===== Trade Lab (Phase E) =====
+    async function loadTradeLab() {
+      if (tradeLabLoading || !kiteConnected) return;
+      tradeLabLoading = true;
+      tradeLabError = null;
+      updateUI();
+      try {
+        const response = await fetch('/api/tradelab?symbol=' + tradeLabSymbol);
+        const json = await response.json();
+        if (!response.ok || json.error) {
+          tradeLabError = json.error || 'Failed to load Trade Lab data';
+          tradeLabData = null;
+        } else {
+          tradeLabData = json;
+        }
+      } catch (err) {
+        console.error('Failed to load Trade Lab:', err);
+        tradeLabError = err.message;
+        tradeLabData = null;
+      } finally {
+        tradeLabLoading = false;
+        updateUI();
+      }
+    }
+
+    function switchTradeLabSymbol(sym) {
+      if (sym === tradeLabSymbol) return;
+      tradeLabSymbol = sym;
+      tradeLabData = null;
+      loadTradeLab();
+    }
+
+    function toggleTradeLabAccordion(id) {
+      tradeLabAccordionOpen = (tradeLabAccordionOpen === id) ? null : id;
+      updateUI();
+    }
+
 
     // NSE trading hours: 9:15 AM - 3:30 PM IST, Monday-Friday. Used to stop
     // the Spot vs PCR chart from growing once the market has closed for the day.
@@ -8166,6 +8209,7 @@ app.get("/", (c) => {
       document.getElementById('RESEARCH').innerHTML = renderResearchTab();
       document.getElementById('SYSTEM').innerHTML = renderSystemTab();
       document.getElementById('HOLIDAYS').innerHTML = renderHolidays();
+      document.getElementById('TRADELAB').innerHTML = renderTradeLabTab();
       document.getElementById('COMMODITIES').innerHTML = renderCommodities();
       document.getElementById('FIIDII').innerHTML = renderFiiDii();
       document.getElementById('VERDICT').innerHTML = renderVerdict();
@@ -8809,6 +8853,202 @@ app.get("/", (c) => {
         html += '</div>';
       }
       html += '</div>';
+      return html;
+    }
+
+    // ===== Trade Lab (Phase E) — renderer =====
+    function tlQualityColor(q) {
+      if (q === 'OK' || q === 'PASS') return 'var(--green)';
+      if (q === 'PARTIAL') return 'var(--gold)';
+      if (q === 'INSUFFICIENT' || q === 'FAIL') return 'var(--red)';
+      return 'var(--muted)';
+    }
+    function tlEntryColor(q) {
+      if (q === 'ENTRY_NOW') return 'var(--green)';
+      if (q === 'WAIT') return 'var(--gold)';
+      if (q === 'DO_NOT_CHASE' || q === 'POOR_LIQUIDITY') return 'var(--red)';
+      return 'var(--muted)';
+    }
+    function tlCard(titleText, innerHtml) {
+      let h = '<div style="background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px;">';
+      h += '<div style="color:var(--muted); font-size:0.65rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">' + escapeHtml(titleText) + '</div>';
+      h += innerHtml;
+      h += '</div>';
+      return h;
+    }
+    function tlRow(label, value, color) {
+      return '<div style="display:flex; justify-content:space-between; padding:3px 0; font-size:0.75rem;">' +
+        '<span style="color:var(--muted);">' + escapeHtml(label) + '</span>' +
+        '<span style="color:' + (color || 'var(--text)') + '; font-weight:600;">' + escapeHtml(value) + '</span></div>';
+    }
+    function tlGreekRow(cand) {
+      if (!cand || cand.status !== 'OK') {
+        return '<div style="padding:8px; background:rgba(255,255,255,0.03); border-radius:6px; margin-bottom:6px;">' +
+          '<div style="color:var(--muted); font-size:0.72rem;">' + escapeHtml((cand && cand.label) || '\u2014') + ': UNAVAILABLE</div>' +
+          '<div style="color:var(--muted-dim); font-size:0.65rem;">' + escapeHtml((cand && cand.reason) || '') + '</div></div>';
+      }
+      let h = '<div style="padding:8px; background:rgba(255,255,255,0.03); border-radius:6px; margin-bottom:6px;">';
+      h += '<div style="display:flex; justify-content:space-between; margin-bottom:4px;">';
+      h += '<span style="color:var(--text); font-size:0.75rem; font-weight:600;">' + escapeHtml(cand.label + ' (' + cand.strike + ')') + '</span>';
+      h += '<span style="color:var(--muted); font-size:0.68rem;">' + escapeHtml(cand.moneyness || '') + '</span>';
+      h += '</div>';
+      h += '<div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; font-size:0.68rem; color:var(--muted);">';
+      h += '<div>LTP: <span style="color:var(--text);">' + escapeHtml(String(cand.lastPrice)) + '</span></div>';
+      h += '<div>IV: <span style="color:var(--text);">' + escapeHtml(String(cand.iv != null ? cand.iv.toFixed(2) : '\u2014')) + '%</span></div>';
+      h += '<div>Delta: <span style="color:var(--text);">' + escapeHtml(String(cand.delta)) + '</span></div>';
+      h += '<div>Gamma: <span style="color:var(--text);">' + escapeHtml(String(cand.gamma)) + '</span></div>';
+      h += '<div>Theta: <span style="color:var(--text);">' + escapeHtml(String(cand.theta)) + '</span></div>';
+      h += '<div>Vega: <span style="color:var(--text);">' + escapeHtml(String(cand.vega)) + '</span></div>';
+      h += '</div>';
+      h += '<div style="margin-top:4px; font-size:0.68rem; color:' + (cand.liquidityNote === 'WIDE_SPREAD' ? 'var(--red)' : cand.liquidityNote === 'MODERATE_SPREAD' ? 'var(--gold)' : 'var(--green)') + ';">Spread: ' + escapeHtml(String(cand.spreadPct)) + '% (' + escapeHtml(cand.liquidityNote) + ')</div>';
+      h += '</div>';
+      return h;
+    }
+    function tlEntryRow(cand) {
+      if (!cand) return '';
+      let h = '<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border);">';
+      h += '<span style="color:var(--text); font-size:0.72rem;">' + escapeHtml(cand.label || '') + '</span>';
+      h += '<span style="color:' + tlEntryColor(cand.entryQuality) + '; font-size:0.7rem; font-weight:700;">' + escapeHtml(cand.entryQuality) + '</span>';
+      h += '</div>';
+      if (cand.reasons && cand.reasons.length) {
+        h += '<div style="font-size:0.62rem; color:var(--muted-dim); padding:2px 0 6px;">' + escapeHtml(cand.reasons.join(' ')) + '</div>';
+      }
+      return h;
+    }
+
+    function renderTradeLabTab() {
+      let html = '<div style="display:flex; gap:6px; margin-bottom:10px;">';
+      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => {
+        const active = sym === tradeLabSymbol;
+        html += '<button onclick="switchTradeLabSymbol(\\'' + sym + '\\')" style="flex:1; padding:8px; border-radius:6px; border:1px solid ' + (active ? 'var(--gold)' : 'var(--border)') + '; background:' + (active ? 'rgba(212,175,55,0.12)' : 'var(--panel)') + '; color:' + (active ? 'var(--gold)' : 'var(--muted)') + '; font-size:0.72rem; font-weight:600;">' + sym + '</button>';
+      });
+      html += '</div>';
+
+      if (!kiteConnected) {
+        html += tlCard('Status', '<div style="color:var(--gold); font-size:0.75rem;">Connect Kite first \u2014 Trade Lab reuses M10/M11/M12, which require an active Kite session.</div>');
+        return html;
+      }
+      if (tradeLabLoading && !tradeLabData) {
+        html += '<div class="loading">Loading Trade Lab (' + tradeLabSymbol + ')...</div>';
+        return html;
+      }
+      if (tradeLabError) {
+        html += tlCard('Error', '<div style="color:var(--red); font-size:0.75rem;">' + escapeHtml(tradeLabError) + '</div>');
+        return html;
+      }
+      if (!tradeLabData) {
+        html += '<div class="loading">Loading Trade Lab (' + tradeLabSymbol + ')...</div>';
+        return html;
+      }
+
+      const d = tradeLabData;
+
+      let dhanHtml = '';
+      dhanHtml += tlRow('Configured', d.dhanConfigured ? 'YES' : 'NO', d.dhanConfigured ? 'var(--green)' : 'var(--red)');
+      if (d.dhanNormalized) {
+        dhanHtml += tlRow('Status', String(d.dhanNormalized.status || '\u2014'), tlQualityColor(d.dhanNormalized.status));
+        if (d.dhanNormalized.spot != null) dhanHtml += tlRow('Spot', String(d.dhanNormalized.spot), null);
+        if (d.dhanNormalized.expiry) dhanHtml += tlRow('Expiry', String(d.dhanNormalized.expiry), null);
+        if (d.dhanNormalized.suspectLegCount != null) dhanHtml += tlRow('Suspect legs', String(d.dhanNormalized.suspectLegCount), d.dhanNormalized.suspectLegCount > 0 ? 'var(--gold)' : 'var(--green)');
+      }
+      html += tlCard('1. Dhan Connection Status', dhanHtml);
+
+      let m10Html = '';
+      if (d.m10MarketRegime) {
+        const m10 = d.m10MarketRegime;
+        m10Html += tlRow('Regime', String((m10.regime && m10.regime.currentRegime) || '\u2014'), null);
+        m10Html += tlRow('Structural bias', String((m10.regime && m10.regime.structuralBias) || '\u2014'), null);
+        m10Html += tlRow('Transition', String((m10.regime && m10.regime.transition) || '\u2014'), null);
+        m10Html += tlRow('Data quality', String(m10.dataQuality || '\u2014'), tlQualityColor(m10.dataQuality));
+      }
+      html += tlCard('2. Market Regime (M10)', m10Html);
+
+      let m11Html = '';
+      const evidenceRows = (d.m11EvidenceFusion && d.m11EvidenceFusion.evidenceRows) || [];
+      if (d.m11EvidenceFusion) {
+        m11Html += tlRow('Readiness', String(d.m11EvidenceFusion.readiness || '\u2014'), null);
+        m11Html += tlRow('Conflicts', String(d.m11EvidenceFusion.conflictCount != null ? d.m11EvidenceFusion.conflictCount : '\u2014'), (d.m11EvidenceFusion.conflictCount > 0 ? 'var(--gold)' : 'var(--green)'));
+        const qs = d.m11EvidenceFusion.qualitySummary;
+        if (qs) m11Html += tlRow('Quality (OK/Partial/Insufficient)', qs.OK + ' / ' + qs.PARTIAL + ' / ' + qs.INSUFFICIENT, null);
+      }
+      html += tlCard('3. Evidence Readiness (M11)', m11Html);
+
+      let m1to9Html = '';
+      evidenceRows.filter((r) => r.module && r.module.indexOf('M10') === -1).forEach((r) => {
+        const stateText = Array.isArray(r.state) ? r.state.join(', ') : String(r.state);
+        m1to9Html += '<div style="padding:5px 0; border-bottom:1px solid var(--border);">';
+        m1to9Html += '<div style="display:flex; justify-content:space-between;"><span style="color:var(--text); font-size:0.7rem;">' + escapeHtml(r.module || '') + '</span><span style="color:' + tlQualityColor(r.dataQuality) + '; font-size:0.65rem;">' + escapeHtml(r.dataQuality || '') + '</span></div>';
+        m1to9Html += '<div style="color:var(--muted); font-size:0.65rem;">' + escapeHtml(stateText) + '</div>';
+        m1to9Html += '</div>';
+      });
+      html += tlCard('4. M1-M9 Compact Evidence', m1to9Html || '<div style="color:var(--muted); font-size:0.7rem;">No evidence rows available.</div>');
+
+      const vixRow = evidenceRows.find((r) => r.module === 'M4_VIX_REGIME_CONTEXT');
+      let vixHtml = '';
+      if (vixRow && vixRow.details) {
+        vixHtml += tlRow('Current VIX', String(vixRow.details.currentVix), null);
+        vixHtml += tlRow('VIX change %', String(vixRow.details.currentVixChangePercent != null ? vixRow.details.currentVixChangePercent.toFixed(2) : '\u2014'), null);
+        vixHtml += '<div style="color:var(--muted-dim); font-size:0.62rem; margin-top:4px;">Full 90-day VIX regime: see existing VIX Correlation tab.</div>';
+      } else {
+        vixHtml = '<div style="color:var(--muted); font-size:0.7rem;">VIX context unavailable this snapshot.</div>';
+      }
+      html += tlCard('5. VIX Compact Context', vixHtml);
+
+      const ivSkewRow = evidenceRows.find((r) => r.module === 'M2_IV_SKEW');
+      html += tlCard('6. IV Skew (M2)', ivSkewRow ? tlRow('State', Array.isArray(ivSkewRow.state) ? ivSkewRow.state.join(', ') : String(ivSkewRow.state), tlQualityColor(ivSkewRow.dataQuality)) : '<div style="color:var(--muted); font-size:0.7rem;">Unavailable.</div>');
+
+      const ivTermRow = evidenceRows.find((r) => r.module === 'M3_IV_TERM_STRUCTURE');
+      html += tlCard('7. IV Term Structure (M3)', ivTermRow ? tlRow('State', String(ivTermRow.state), tlQualityColor(ivTermRow.dataQuality)) : '<div style="color:var(--muted); font-size:0.7rem;">Unavailable.</div>');
+
+      let m12Html = '';
+      if (d.m12CandidateSet) {
+        m12Html += tlRow('Decision', String(d.m12CandidateSet.decision || '\u2014'), d.m12CandidateSet.decision === 'WAIT_NO_DIRECTIONAL_EDGE' ? 'var(--gold)' : 'var(--green)');
+        m12Html += tlRow('Selected side', String(d.m12CandidateSet.selectedSide || 'NONE'), null);
+        if (d.m12CandidateSet.reason) m12Html += '<div style="color:var(--muted-dim); font-size:0.65rem; margin-top:4px;">' + escapeHtml(d.m12CandidateSet.reason) + '</div>';
+      }
+      html += tlCard('8. Candidate Set (M12)', m12Html);
+
+      let geHtml = '';
+      if (d.greekEngine && d.greekEngine.status === 'OK') {
+        const gc = d.greekEngine.candidates;
+        geHtml += tlGreekRow(gc.ATM_CE) + tlGreekRow(gc.ITM1_CE) + tlGreekRow(gc.ATM_PE) + tlGreekRow(gc.ITM1_PE);
+        geHtml += '<div style="color:var(--muted-dim); font-size:0.62rem; margin-top:4px;">Contract suitability only \u2014 direction comes from M10/M11/M12 above, not from this engine.</div>';
+      } else {
+        geHtml = '<div style="color:var(--muted); font-size:0.7rem;">' + escapeHtml((d.greekEngine && d.greekEngine.reason) || 'Unavailable.') + '</div>';
+      }
+      html += tlCard('9. Greek Engine', geHtml);
+
+      let pqHtml = '';
+      if (d.dhanNormalized) {
+        pqHtml += tlRow('Strikes fetched', String(d.dhanNormalized.strikeCount != null ? d.dhanNormalized.strikeCount : '\u2014'), null);
+        pqHtml += tlRow('Suspect legs', String(d.dhanNormalized.suspectLegCount != null ? d.dhanNormalized.suspectLegCount : '\u2014'), (d.dhanNormalized.suspectLegCount > 0 ? 'var(--gold)' : 'var(--green)'));
+        if (d.dhanNormalized.dataQualityNote) pqHtml += '<div style="color:var(--muted-dim); font-size:0.62rem; margin-top:4px;">' + escapeHtml(d.dhanNormalized.dataQualityNote) + '</div>';
+      }
+      html += tlCard('10. Premium Quality', pqHtml || '<div style="color:var(--muted); font-size:0.7rem;">Unavailable.</div>');
+
+      let eqHtml = '';
+      if (d.entryQuality && d.entryQuality.status === 'OK') {
+        const ec = d.entryQuality.candidates;
+        eqHtml += tlEntryRow(ec.ATM_CE) + tlEntryRow(ec.ITM1_CE) + tlEntryRow(ec.ATM_PE) + tlEntryRow(ec.ITM1_PE);
+        eqHtml += '<div style="color:var(--muted-dim); font-size:0.62rem; margin-top:4px;">Per-contract execution quality only \u2014 not a buy/sell signal. Thresholds are provisional, not backtested.</div>';
+      } else {
+        eqHtml = '<div style="color:var(--muted); font-size:0.7rem;">' + escapeHtml((d.entryQuality && d.entryQuality.reason) || 'Unavailable.') + '</div>';
+      }
+      html += tlCard('11. Entry Quality', eqHtml);
+
+      html += tlCard('12. Entry Zone / SL / T1 / T2', '<div style="color:var(--gold); font-size:0.75rem;">UNCALIBRATED \u2014 pending historical MFE/MAE research. No numbers are fabricated.</div>');
+
+      let devilHtml = '';
+      const h10 = d.m12CandidateSet && d.m12CandidateSet.h10Detector;
+      if (h10) {
+        devilHtml += tlRow('State', String(h10.state || '\u2014'), h10.state === 'NO_DEVIL' ? 'var(--green)' : 'var(--red)');
+        devilHtml += tlRow('Hard block', h10.hardBlock ? 'YES' : 'NO', h10.hardBlock ? 'var(--red)' : 'var(--green)');
+        devilHtml += tlRow('Issues', String(h10.issueCount != null ? h10.issueCount : 0), null);
+      }
+      html += tlCard('13. Devil Check / Data Quality', devilHtml || '<div style="color:var(--muted); font-size:0.7rem;">Unavailable.</div>');
+
+      html += '<div style="color:var(--muted-dim); font-size:0.6rem; text-align:center; margin-top:8px;">Read-only decision support. Not an order-placement system. Generated: ' + escapeHtml(d.generatedAt || '') + '</div>';
+
       return html;
     }
 
@@ -13209,6 +13449,7 @@ app.get("/", (c) => {
         }
       }
       if (symbol === 'VIXCORR') loadVixCorrelation();
+      if (symbol === 'TRADELAB' && !tradeLabData && !tradeLabLoading) loadTradeLab();
     }
 
     function updateRefreshStatus() {

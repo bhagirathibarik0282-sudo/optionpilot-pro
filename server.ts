@@ -22752,9 +22752,17 @@ app.get("/api/audit/v3-store-brain-proof", async (c) => {
         expiryCode: 0, oi: false, fromDate: fmt(fromDate), toDate: fmt(toDate),
       }),
     });
-    const rawSample = await dhanRes.json().catch(() => null);
+    const dhanRawText = await dhanRes.text();
+    let rawSample: any = null;
+    try { rawSample = dhanRawText ? JSON.parse(dhanRawText) : null; } catch { rawSample = null; }
     if (!dhanRes.ok || !rawSample || typeof rawSample !== "object") {
-      return c.json({ ...report, status: "FAIL", folderCreationStatus, error: "Could not fetch the tiny NIFTY sample from Dhan to test with.", safeToStartStep2: false }, 200);
+      return c.json({
+        ...report, status: "FAIL", folderCreationStatus,
+        error: "Could not fetch the tiny NIFTY sample from Dhan to test with.",
+        dhanHttpStatus: dhanRes.status,
+        dhanRawErrorSnippet: dhanRawText.slice(0, 500),
+        safeToStartStep2: false,
+      }, 200);
     }
     const rowsReceived = Array.isArray(rawSample.timestamp) ? rawSample.timestamp.length : 0;
 

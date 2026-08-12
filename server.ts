@@ -16780,7 +16780,7 @@ app.get("/api/v2/devil-detector/events", (c) => {
   });
 });
 
-const GOOGLE_OAUTH_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const GOOGLE_OAUTH_SCOPE = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
 
 interface DriveSession {
   accessToken: string | null;

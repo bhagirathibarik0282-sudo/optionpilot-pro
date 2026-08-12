@@ -27088,6 +27088,86 @@ app.get("/api/audit/v3d-deduplicate-option-grid-proof", async (c) => {
 // Greek Engine / Entry Quality layers are intentionally NOT wired yet —
 // this step only proves the read-only data plumbing end-to-end.
 // ============================================================================
+// ============================================================================
+// GREEK ENGINE — pure contract-suitability comparator (Phase C, 2026-08-12)
+// Input: the D4 Dhan normalized leg data already fetched by /api/tradelab.
+// Output: side-by-side ATM CE / 1-ITM CE / ATM PE / 1-ITM PE comparison on
+// Delta/Gamma/Theta/Vega/IV/spread/liquidity. Does NOT decide bullish/
+// bearish direction and does NOT create a probability/score — direction
+// comes only from M10/M11/M12 in the parent /api/tradelab response.
+// No new Dhan calls, no mutation of any existing module.
+// ============================================================================
+function buildGreekEngine(dhanNormalized: any) {
+  if (!dhanNormalized || dhanNormalized.status !== "PASS" || !Array.isArray(dhanNormalized.normalized)) {
+    return {
+      architectureRole: "GREEK_ENGINE_PHASE_C",
+      status: "UNAVAILABLE",
+      reason: "Dhan normalized data not available (see dhanNormalized.status in parent response).",
+    };
+  }
+
+  const rows = dhanNormalized.normalized as Array<{ strike: number; ce: any; pe: any }>;
+  const atmStrike = dhanNormalized.atmStrike;
+  const sortedStrikes = rows.map((r) => r.strike).sort((a, b) => a - b);
+  let gap: number | null = null;
+  for (let i = 1; i < sortedStrikes.length; i++) {
+    const d = sortedStrikes[i] - sortedStrikes[i - 1];
+    if (gap === null || d < gap) gap = d;
+  }
+
+  const atmRow = rows.find((r) => r.strike === atmStrike);
+  const itmCEStrike = gap !== null ? atmStrike - gap : null; // lower strike = ITM for CE
+  const itmPEStrike = gap !== null ? atmStrike + gap : null; // higher strike = ITM for PE
+  const itmCERow = itmCEStrike !== null ? rows.find((r) => r.strike === itmCEStrike) : undefined;
+  const itmPERow = itmPEStrike !== null ? rows.find((r) => r.strike === itmPEStrike) : undefined;
+
+  function evaluateLeg(leg: any, label: string) {
+    if (!leg) return { label, status: "UNAVAILABLE", reason: "Strike not present in fetched ATM±3 window." };
+    if (leg.ivSuspect || leg.greeksSuspect) {
+      return { label, strike: leg.strike, status: "UNAVAILABLE", reason: "D4 flagged ivSuspect or greeksSuspect for this leg — treated as UNAVAILABLE, not zero." };
+    }
+    const spread = leg.ask != null && leg.bid != null ? Number((leg.ask - leg.bid).toFixed(2)) : null;
+    const spreadPct = spread !== null && leg.lastPrice ? Number(((spread / leg.lastPrice) * 100).toFixed(2)) : null;
+    const liquidityNote =
+      spreadPct === null ? "UNAVAILABLE" : spreadPct < 1 ? "TIGHT_SPREAD" : spreadPct < 3 ? "MODERATE_SPREAD" : "WIDE_SPREAD";
+    return {
+      label,
+      status: "OK",
+      strike: leg.strike,
+      moneyness: leg.moneyness,
+      lastPrice: leg.lastPrice,
+      delta: leg.delta,
+      gamma: leg.gamma,
+      theta: leg.theta,
+      vega: leg.vega,
+      iv: leg.iv,
+      oi: leg.oi,
+      volume: leg.volume,
+      bid: leg.bid,
+      ask: leg.ask,
+      spread,
+      spreadPct,
+      liquidityNote,
+    };
+  }
+
+  return {
+    architectureRole: "GREEK_ENGINE_PHASE_C",
+    generatedAt: new Date().toISOString(),
+    status: "OK",
+    purpose: "Contract suitability comparison only (Delta/Gamma/Theta/Vega/IV/spread/liquidity).",
+    directionRule: "Does NOT decide bullish/bearish and does NOT create a probability/score. Direction comes only from M10/M11/M12 in the parent response.",
+    atmStrike,
+    strikeGap: gap,
+    candidates: {
+      ATM_CE: evaluateLeg(atmRow?.ce, "ATM_CE"),
+      ITM1_CE: evaluateLeg(itmCERow?.ce, "1_ITM_CE"),
+      ATM_PE: evaluateLeg(atmRow?.pe, "ATM_PE"),
+      ITM1_PE: evaluateLeg(itmPERow?.pe, "1_ITM_PE"),
+    },
+  };
+}
+
 app.get("/api/tradelab", async (c) => {
   const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
   if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
@@ -27119,6 +27199,8 @@ app.get("/api/tradelab", async (c) => {
     }
   }
 
+  const greekEngine = buildGreekEngine(d4);
+
   return c.json({
     architectureRole: "TRADELAB_PHASE_B_AGGREGATOR",
     generatedAt: new Date().toISOString(),
@@ -27129,7 +27211,8 @@ app.get("/api/tradelab", async (c) => {
     m10MarketRegime: m10,
     m11EvidenceFusion: m11,
     m12CandidateSet: m12,
-    note: "Greek Engine and Entry Quality layer not yet wired (Phase C/D). This endpoint proves read-only reuse of existing M10/M11/M12 + Dhan D4 only.",
+    greekEngine,
+    note: "Entry Quality layer not yet wired (Phase D). Greek Engine (Phase C) is now live — contract suitability only, direction still comes from M10/M11/M12.",
   });
 });
 

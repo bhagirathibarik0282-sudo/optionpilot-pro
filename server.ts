@@ -7279,6 +7279,11 @@ app.get("/", (c) => {
     let tradeLabLoading = false;
     let tradeLabError = null;
     let tradeLabAccordionOpen = 'regime';
+    let m11DhanExpanded = false;
+    function toggleM11DhanExpanded() {
+      m11DhanExpanded = !m11DhanExpanded;
+      updateUI();
+    }
     // ===== Freshness-gate fix (2026-08-13) — track when TradeLab was last
     // successfully fetched, and the server's own generatedAt/snapshotId, so
     // the UI can show FRESH/STALE/UNKNOWN honestly instead of trusting the
@@ -9112,12 +9117,24 @@ app.get("/", (c) => {
       let m11DhanHtml = tlProvenanceBadge(d.m11EvidenceFusionDhan);
       if (d.m11EvidenceFusionDhan && d.m11EvidenceFusionDhan.status === 'OK') {
         const m11d = d.m11EvidenceFusionDhan;
-        (m11d.evidenceRows || []).forEach((row) => {
-          const stateStr = Array.isArray(row.state) ? row.state.join(' / ') : String(row.state || '\u2014');
-          m11DhanHtml += tlRow(row.module.replace(/_/g, ' '), stateStr, tlQualityColor(row.dataQuality));
-        });
+        const qs = m11d.qualitySummary || {};
+        m11DhanHtml += tlRow('Modules OK', String(qs.OK || 0) + ' / ' + String((m11d.evidenceRows || []).length), tlQualityColor('OK'));
+        if (qs.PARTIAL) m11DhanHtml += tlRow('Modules Partial', String(qs.PARTIAL), tlQualityColor('PARTIAL'));
+        if (qs.INSUFFICIENT) m11DhanHtml += tlRow('Modules Insufficient', String(qs.INSUFFICIENT), tlQualityColor('INSUFFICIENT'));
         if (m11d.conflicts && m11d.conflicts.length) {
           m11DhanHtml += '<div style="color:var(--red); font-size:0.68rem; margin-top:6px;">Conflicts: ' + escapeHtml(m11d.conflicts.join(', ')) + '</div>';
+        } else {
+          m11DhanHtml += '<div style="color:var(--muted); font-size:0.68rem; margin-top:6px;">No conflicts detected.</div>';
+        }
+        m11DhanHtml += '<div onclick="toggleM11DhanExpanded()" style="cursor:pointer; color:var(--gold); font-size:0.68rem; margin-top:8px; text-align:center; padding-top:6px; border-top:1px solid var(--border);">' +
+          (m11DhanExpanded ? '\u25b2 Hide module-by-module detail' : '\u25bc Show module-by-module detail (' + (m11d.evidenceRows || []).length + ' modules)') + '</div>';
+        if (m11DhanExpanded) {
+          m11DhanHtml += '<div style="margin-top:6px;">';
+          (m11d.evidenceRows || []).forEach((row) => {
+            const stateStr = Array.isArray(row.state) ? row.state.join(' / ') : String(row.state || '\u2014');
+            m11DhanHtml += tlRow(row.module.replace(/_/g, ' '), stateStr, tlQualityColor(row.dataQuality));
+          });
+          m11DhanHtml += '</div>';
         }
       } else {
         m11DhanHtml += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Unavailable this snapshot.</div>';

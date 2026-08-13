@@ -27829,6 +27829,21 @@ async function buildTradeLabDhanM9(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", por
 const TRADELAB_DHAN_MULTIEXPIRY_HISTORY = new Map<"NIFTY" | "BANKNIFTY" | "SENSEX", TradeLabDhanMultiExpirySnapshot[]>();
 const TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS = 200; // matches RECORDER_MAX_SNAPSHOTS / DHAN_M1_PRODUCTION_MAX_SNAPSHOTS
 
+// ===== Step 3.1 (2026-08-13) — Dhan spot-price rolling history buffer =====
+// Reuses the spot LTP already present in bundle.current.spot (the D4
+// /api/dhan/normalized response fetched by buildTradeLabDhanMultiExpirySnapshot
+// above) — this buffer is populated INSIDE the same refresh cycle below, so
+// it costs ZERO additional Dhan API calls / rate-limit budget. Mirrors the
+// shape v2SpotHistoryForSymbol already returns for Kite ({t, timestamp,
+// spot, vix}), so the existing generic windowing helpers (v2WindowPoints,
+// v2PathStats, v2ClassifyPath) can be reused unmodified for the Dhan path.
+// vix is intentionally null here — M4 VIX is a separate Dhan fetch
+// (buildTradeLabDhanM4) not currently joined into this cadence; wiring it
+// in is a possible future refinement, not fabricated as 0.
+type DhanSpotPoint = { t: number; timestamp: string; spot: number; vix: number | null };
+const DHAN_SPOT_HISTORY = new Map<"NIFTY" | "BANKNIFTY" | "SENSEX", DhanSpotPoint[]>();
+const DHAN_SPOT_HISTORY_MAX_POINTS = 200; // same cap as TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS
+
 async function tradeLabDhanMultiExpiryRefreshCycle() {
   const port = process.env.PORT || String(PORT);
   for (const symbol of ["NIFTY", "BANKNIFTY", "SENSEX"] as const) {
@@ -27838,6 +27853,15 @@ async function tradeLabDhanMultiExpiryRefreshCycle() {
     arr.push(snap);
     if (arr.length > TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS) arr.shift();
     TRADELAB_DHAN_MULTIEXPIRY_HISTORY.set(symbol, arr);
+
+    const spotVal = snap.current && typeof snap.current.spot === "number" ? snap.current.spot : null;
+    if (spotVal != null && spotVal > 0) {
+      const nowIso = new Date().toISOString();
+      const spotArr = DHAN_SPOT_HISTORY.get(symbol) || [];
+      spotArr.push({ t: Date.now(), timestamp: nowIso, spot: spotVal, vix: null });
+      if (spotArr.length > DHAN_SPOT_HISTORY_MAX_POINTS) spotArr.shift();
+      DHAN_SPOT_HISTORY.set(symbol, spotArr);
+    }
   }
 }
 
@@ -28004,6 +28028,202 @@ async function buildTradeLabDhanM4() {
     console.error(`[DHAN M4 FAIL] exception=${errMsg}`);
     return { module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "FAIL", error: errMsg, dataQuality: "INSUFFICIENT" as V2DataQuality };
   }
+}
+
+// ===== Step 3.1 — Dhan daily levels (previous-day close/PDH/PDL) =====
+// Uses /v2/charts/historical, the SAME endpoint already live-verified in the
+// V3-D Step 1 spot_history audit for NIFTY/BANKNIFTY/SENSEX (open/high/low/
+// close/volume/timestamp daily arrays, DHAN_UNDERLYING_MAP-driven, never
+// fabricated). Cached once per symbol per calendar day — daily levels don't
+// change intraday, so this never adds to the 1-req/3s live rate-limit budget
+// beyond a single call per symbol per day.
+interface DhanDailyLevels {
+  status: "OK" | "INSUFFICIENT" | "NOT_CONFIGURED" | "NOT_YET_MAPPED" | "FAIL";
+  pdcClose: number | null;
+  pdh: number | null;
+  pdl: number | null;
+}
+const DHAN_DAILY_LEVELS_CACHE = new Map<string, { dateKey: string; result: DhanDailyLevels }>();
+
+async function dhanFetchDailyLevels(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"): Promise<DhanDailyLevels> {
+  const dateKey = new Date().toISOString().slice(0, 10);
+  const cached = DHAN_DAILY_LEVELS_CACHE.get(symbol);
+  if (cached && cached.dateKey === dateKey) return cached.result;
+
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) return { status: "NOT_CONFIGURED", pdcClose: null, pdh: null, pdl: null };
+
+  const mapping = DHAN_UNDERLYING_MAP[symbol];
+  if (!mapping) return { status: "NOT_YET_MAPPED", pdcClose: null, pdh: null, pdl: null };
+
+  const toDate = new Date();
+  const fromDate = new Date(toDate.getTime() - 10 * 24 * 60 * 60 * 1000); // 10 calendar days back, comfortably covers weekends/holidays for "previous trading day"
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/historical", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: JSON.stringify({
+        securityId: String(mapping.underlyingScrip),
+        exchangeSegment: mapping.underlyingSeg,
+        instrument: "INDEX",
+        expiryCode: 0,
+        oi: false,
+        fromDate: fmt(fromDate),
+        toDate: fmt(toDate),
+      }),
+    });
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    const closeArr = Array.isArray(payload?.close) ? payload.close : null;
+    const highArr = Array.isArray(payload?.high) ? payload.high : null;
+    const lowArr = Array.isArray(payload?.low) ? payload.low : null;
+    if (!res.ok || !closeArr || !highArr || !lowArr || closeArr.length === 0) {
+      console.error(`[DHAN M10 DAILY_LEVELS FAIL] symbol=${symbol} httpStatus=${res.status} bodySnippet=${raw.slice(0, 300)}`);
+      const result: DhanDailyLevels = { status: "FAIL", pdcClose: null, pdh: null, pdl: null };
+      DHAN_DAILY_LEVELS_CACHE.set(symbol, { dateKey, result });
+      return result;
+    }
+
+    // Last row still in the array is the most recent COMPLETED trading day
+    // (today's still-forming candle is not part of a daily-history response
+    // fetched intraday) — same "last completed candle" convention the
+    // existing Kite-based pdh/pdl/pdcClose already uses.
+    const lastIdx = closeArr.length - 1;
+    const result: DhanDailyLevels = {
+      status: "OK",
+      pdcClose: typeof closeArr[lastIdx] === "number" ? closeArr[lastIdx] : null,
+      pdh: typeof highArr[lastIdx] === "number" ? highArr[lastIdx] : null,
+      pdl: typeof lowArr[lastIdx] === "number" ? lowArr[lastIdx] : null,
+    };
+    DHAN_DAILY_LEVELS_CACHE.set(symbol, { dateKey, result });
+    return result;
+  } catch (err) {
+    console.error(`[DHAN M10 DAILY_LEVELS FAIL] symbol=${symbol} exception=${err instanceof Error ? err.message : "Unknown error"}`);
+    const result: DhanDailyLevels = { status: "FAIL", pdcClose: null, pdh: null, pdl: null };
+    DHAN_DAILY_LEVELS_CACHE.set(symbol, { dateKey, result });
+    return result;
+  }
+}
+
+// ===== Step 3.1 — M10 (Dhan) — Market Behaviour Regime =====
+// Dhan version of buildV2MarketBehaviourRegime. Reuses the SAME generic
+// windowing/classification helpers (v2WindowPoints, v2PathStats,
+// v2ClassifyPath, v2VixStateFromSpotHistory, v2BreakoutBehaviour,
+// v2RangeSubtype, v2ReversalCandidate) — those take plain points/primitives,
+// not a KiteSession, so nothing there needed duplicating. Only the two
+// small IndexMetrics-typed helpers (opening condition / opening behaviour)
+// are reimplemented here inline with primitive params, to avoid requiring a
+// fake/partial IndexMetrics object just to satisfy Kite-specific typing.
+function dhanOpeningCondition(dayOpen: number, prevClose: number, pdh: number | null, pdl: number | null): V2OpeningCondition {
+  if (!(dayOpen > 0) || !(prevClose > 0)) return "UNKNOWN";
+  const gapPct = ((dayOpen - prevClose) / prevClose) * 100;
+  if (Math.abs(gapPct) < 0.03) return "FLAT_OR_NEAR_FLAT_OPEN";
+  if (gapPct > 0) return pdh != null && pdh > 0 && dayOpen > pdh ? "GAP_UP_ABOVE_PDH" : "GAP_UP_INSIDE_PREVIOUS_RANGE";
+  return pdl != null && pdl > 0 && dayOpen < pdl ? "GAP_DOWN_BELOW_PDL" : "GAP_DOWN_INSIDE_PREVIOUS_RANGE";
+}
+
+function dhanOpeningBehaviour(
+  openingCondition: V2OpeningCondition,
+  current: number,
+  dayOpen: number,
+  prevClose: number,
+  state15: V2RegimeState
+): V2OpeningBehaviour {
+  if (!(dayOpen > 0) || !(prevClose > 0)) return "INSUFFICIENT_HISTORY";
+  const isGapUp = openingCondition.startsWith("GAP_UP");
+  const isGapDown = openingCondition.startsWith("GAP_DOWN");
+  if (isGapUp) {
+    if (current <= prevClose) return "FULL_GAP_FILL_OR_REVERSAL";
+    if (current < dayOpen) return "PARTIAL_GAP_FILL";
+    return "GAP_HOLD_OR_EXTENSION";
+  }
+  if (isGapDown) {
+    if (current >= prevClose) return "FULL_GAP_FILL_OR_REVERSAL";
+    if (current > dayOpen) return "PARTIAL_GAP_FILL";
+    return "GAP_HOLD_OR_EXTENSION";
+  }
+  if (state15 === "TRENDING_UP") return "OPENING_DRIVE_UP";
+  if (state15 === "TRENDING_DOWN") return "OPENING_DRIVE_DOWN";
+  return state15 === "INSUFFICIENT_HISTORY" ? "INSUFFICIENT_HISTORY" : "BALANCED_OPEN";
+}
+
+async function buildTradeLabDhanM10(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
+  const points = DHAN_SPOT_HISTORY.get(symbol) || [];
+  if (points.length === 0) {
+    return { module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "SKIPPED", reason: "NO_SPOT_HISTORY_YET", dataQuality: "INSUFFICIENT" as V2DataQuality };
+  }
+  const current = points[points.length - 1].spot;
+  const dayOpen = points[0].spot; // first sample recorded today — best available proxy; Dhan option-chain response has no separate "day open" field
+  const daily = await dhanFetchDailyLevels(symbol);
+  const prevClose = daily.pdcClose ?? 0;
+  const pdh = daily.pdh;
+  const pdl = daily.pdl;
+
+  const openingCondition = dhanOpeningCondition(dayOpen, prevClose, pdh, pdl);
+  const openingGapPct = dayOpen > 0 && prevClose > 0 ? ((dayOpen - prevClose) / prevClose) * 100 : null;
+
+  const p15 = v2WindowPoints(points, 15);
+  const p30 = v2WindowPoints(points, 30);
+  const p60 = v2WindowPoints(points, 60);
+  const s15 = v2PathStats(p15);
+  const s30 = v2PathStats(p30);
+  const s60 = v2PathStats(p60);
+  const state15 = v2ClassifyPath(s15);
+  const state30 = v2ClassifyPath(s30);
+  const state60 = v2ClassifyPath(s60);
+
+  const openingBehaviour = dhanOpeningBehaviour(openingCondition, current, dayOpen, prevClose, state15);
+  const currentVsOpen = dayOpen > 0 ? (current > dayOpen ? "ABOVE_OPEN" : current < dayOpen ? "BELOW_OPEN" : "AT_OPEN") : "UNKNOWN";
+  const previousRangeLocation = pdh != null && pdh > 0 && pdl != null && pdl > 0
+    ? (current > pdh ? "ABOVE_PDH" : current < pdl ? "BELOW_PDL" : "INSIDE_PREVIOUS_RANGE")
+    : "UNKNOWN";
+
+  let currentPressure = "NEUTRAL_OR_MIXED";
+  if (state15 === "TRENDING_UP" && (state30 === "TRENDING_UP" || state30 === "TRANSITIONAL")) currentPressure = "UP";
+  else if (state15 === "TRENDING_DOWN" && (state30 === "TRENDING_DOWN" || state30 === "TRANSITIONAL")) currentPressure = "DOWN";
+  else if (state15 === "INSUFFICIENT_HISTORY") currentPressure = "INSUFFICIENT_HISTORY";
+
+  let structuralBias = "NEUTRAL_OR_UNCONFIRMED";
+  if (previousRangeLocation === "ABOVE_PDH") structuralBias = "UP_STRUCTURE";
+  else if (previousRangeLocation === "BELOW_PDL") structuralBias = "DOWN_STRUCTURE";
+  else if (currentVsOpen === "ABOVE_OPEN" && state30 === "TRENDING_UP") structuralBias = "UP_STRUCTURE_PROVISIONAL";
+  else if (currentVsOpen === "BELOW_OPEN" && state30 === "TRENDING_DOWN") structuralBias = "DOWN_STRUCTURE_PROVISIONAL";
+
+  const breakoutBehaviour = v2BreakoutBehaviour(p30, current, pdh ?? 0, pdl ?? 0);
+  const rangeSubtype = v2RangeSubtype(s15, s30, state15, state30);
+  const reversalCandidate = v2ReversalCandidate(s30, state15, state30, currentPressure, structuralBias);
+
+  let currentRegime: string = state30;
+  if (rangeSubtype === "RANGE_COMPRESSION_PROVISIONAL") currentRegime = "RANGE_COMPRESSION_PROVISIONAL";
+  else if (state30 === "TRENDING_UP" && state15 === "OSCILLATING_OR_RANGE") currentRegime = "UPTREND_PULLBACK_OR_PAUSE";
+  else if (state30 === "TRENDING_DOWN" && state15 === "OSCILLATING_OR_RANGE") currentRegime = "DOWNTREND_PULLBACK_OR_PAUSE";
+
+  return {
+    module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "OK",
+    generatedAt: new Date().toISOString(),
+    dataQuality: (points.length >= 3 ? "OK" : "PARTIAL") as V2DataQuality,
+    methodology: {
+      source: "DHAN_SPOT_HISTORY (piggybacked on the existing 3-min TradeLab multi-expiry refresh, zero extra Dhan calls) + /v2/charts/historical for daily levels (cached once/day)",
+      thresholds: "PROVISIONAL_REQUIRES_BACKTEST — same as the Kite-based M10",
+      limitation: "Dhan-sourced samples are ~3-minute observations (same cadence as TradeLab M2/M3/M8/M9), not tick-level. dayOpen is approximated as the first sample recorded today, not a genuine exchange day-open tick — Dhan's option-chain response has no separate day-open field.",
+    },
+    opening: { condition: openingCondition, behaviour: openingBehaviour, gapPct: openingGapPct, dayOpen: dayOpen || null, previousClose: prevClose > 0 ? prevClose : null },
+    regime: { currentRegime, rangeSubtype, pressure: currentPressure, structuralBias, transition: "NOT_COMPUTED_IN_DHAN_M10_V1" },
+    structure: { currentVsOpen, previousRangeLocation, breakoutBehaviour, reversalCandidate },
+    windows: { "15m": { state: state15, stats: s15 }, "30m": { state: state30, stats: s30 }, "60m": { state: state60, stats: s60 } },
+    previousDayLevels: { pdh: pdh || null, pdl: pdl || null, pdcClose: prevClose || null },
+    interpretationGuard: "Descriptive market-structure context only — same guard as the Kite-based M10. Not a directional CE/PE or BUY/SELL signal.",
+  };
 }
 
 function buildGreekEngine(dhanNormalized: any) {
@@ -28210,18 +28430,23 @@ app.get("/api/tradelab", async (c) => {
   const greekEngine = buildGreekEngine(d4);
   const entryQuality = buildEntryQualityLayer(greekEngine, m?.futuresVwapBias);
 
-  // TradeLab Dhan-only migration (Phase 1, 2026-08-12): M2/M3/M8/M9 now
-  // computed from Dhan only, via the shared multi-expiry layer above.
-  // M1/M4/M5/M6/M7/M10/M11/M12 remain exactly as before (Kite-based,
-  // reused unchanged) — see m11EvidenceFusion.evidenceRows for those,
-  // which still includes the OLD Kite-sourced M2/M3/M8/M9 rows too, kept
-  // for side-by-side comparison during this migration, not removed.
+  // TradeLab Dhan-only migration. Phase 1 (2026-08-12): M2/M3/M8/M9 computed
+  // from Dhan only, via the shared multi-expiry layer above. Phase 2
+  // (2026-08-13): M4 (VIX) added as a separate Dhan-only fetch. Phase 3,
+  // Step 3.1 (2026-08-13): M10 added, Dhan-sourced spot-history + daily
+  // levels (see buildTradeLabDhanM10). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY
+  // and KITE for SENSEX (see m1m6m7Provenance below). M5/M11/M12 remain
+  // exactly as before (Kite-based, reused unchanged) — see
+  // m11EvidenceFusion.evidenceRows for those, which still includes the OLD
+  // Kite-sourced M2/M3/M8/M9/M10 rows too, kept for side-by-side comparison
+  // during this migration, not removed.
   const port = process.env.PORT || String(PORT);
   let m2Dhan: any = { module: "M2_IV_SKEW", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m3Dhan: any = { module: "M3_IV_TERM_STRUCTURE", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m4Dhan: any = { module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m8Dhan: any = { module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m9Dhan: any = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  let m10Dhan: any = { module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   if (dhanConfigured) {
     try {
       m2Dhan = buildTradeLabDhanM2(symbol);
@@ -28229,6 +28454,7 @@ app.get("/api/tradelab", async (c) => {
       m4Dhan = await buildTradeLabDhanM4();
       m8Dhan = buildTradeLabDhanM8(symbol);
       m9Dhan = await buildTradeLabDhanM9(symbol, port);
+      m10Dhan = await buildTradeLabDhanM10(symbol);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
       m2Dhan = { module: "M2_IV_SKEW", provenance: "DHAN", status: "FAIL", error: errMsg };
@@ -28236,6 +28462,7 @@ app.get("/api/tradelab", async (c) => {
       m4Dhan = { module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "FAIL", error: errMsg };
       m8Dhan = { module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "FAIL", error: errMsg };
       m9Dhan = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "FAIL", error: errMsg };
+      m10Dhan = { module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "FAIL", error: errMsg };
     }
   }
 
@@ -28256,8 +28483,9 @@ app.get("/api/tradelab", async (c) => {
     m4VixRegimeDhan: m4Dhan,
     m8RolloverMigrationDhan: m8Dhan,
     m9MultiExpiryAlignmentDhan: m9Dhan,
+    m10MarketRegimeDhan: m10Dhan,
     m1m6m7Provenance,
-    note: "M2/M3/M4/M8/M9 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M5/M10/M11/M12 unchanged, still Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M10/M11/M12 still need it — known, not-yet-migrated, tracked separately.",
+    note: "M2/M3/M4/M8/M9/M10 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M5/M11/M12 unchanged, still Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M5/M11/M12 still need it — known, not-yet-migrated, tracked separately (Phase 3, Step 3.1 = M10 only; M5/M11/M12 remain).",
   });
 });
 

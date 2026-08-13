@@ -9040,22 +9040,22 @@ app.get("/", (c) => {
       }
       html += tlCard('7b. VIX Regime Context (M4)', m4Html);
 
-      let m10Html = tlProvenanceBadge(d.m10MarketRegimeDhan);
+      let m10DhanHtml = tlProvenanceBadge(d.m10MarketRegimeDhan);
       if (d.m10MarketRegimeDhan && d.m10MarketRegimeDhan.status === 'OK') {
-        m10Html += tlRow('Regime', String(d.m10MarketRegimeDhan.regime && d.m10MarketRegimeDhan.regime.currentRegime || '\u2014'), null);
-        m10Html += tlRow('Pressure', String(d.m10MarketRegimeDhan.regime && d.m10MarketRegimeDhan.regime.pressure || '\u2014'), null);
-        m10Html += tlRow('Structural bias', String(d.m10MarketRegimeDhan.regime && d.m10MarketRegimeDhan.regime.structuralBias || '\u2014'), null);
-        m10Html += tlRow('Opening condition', String(d.m10MarketRegimeDhan.opening && d.m10MarketRegimeDhan.opening.condition || '\u2014'), null);
-        m10Html += tlRow('Opening behaviour', String(d.m10MarketRegimeDhan.opening && d.m10MarketRegimeDhan.opening.behaviour || '\u2014'), null);
-        m10Html += tlRow('15m state', String(d.m10MarketRegimeDhan.windows && d.m10MarketRegimeDhan.windows['15m'] && d.m10MarketRegimeDhan.windows['15m'].state || '\u2014'), null);
-        m10Html += tlRow('30m state', String(d.m10MarketRegimeDhan.windows && d.m10MarketRegimeDhan.windows['30m'] && d.m10MarketRegimeDhan.windows['30m'].state || '\u2014'), null);
-        m10Html += tlRow('Data quality', d.m10MarketRegimeDhan.dataQuality, tlQualityColor(d.m10MarketRegimeDhan.dataQuality));
+        m10DhanHtml += tlRow('Regime', String(d.m10MarketRegimeDhan.regime && d.m10MarketRegimeDhan.regime.currentRegime || '\u2014'), null);
+        m10DhanHtml += tlRow('Pressure', String(d.m10MarketRegimeDhan.regime && d.m10MarketRegimeDhan.regime.pressure || '\u2014'), null);
+        m10DhanHtml += tlRow('Structural bias', String(d.m10MarketRegimeDhan.regime && d.m10MarketRegimeDhan.regime.structuralBias || '\u2014'), null);
+        m10DhanHtml += tlRow('Opening condition', String(d.m10MarketRegimeDhan.opening && d.m10MarketRegimeDhan.opening.condition || '\u2014'), null);
+        m10DhanHtml += tlRow('Opening behaviour', String(d.m10MarketRegimeDhan.opening && d.m10MarketRegimeDhan.opening.behaviour || '\u2014'), null);
+        m10DhanHtml += tlRow('15m state', String(d.m10MarketRegimeDhan.windows && d.m10MarketRegimeDhan.windows['15m'] && d.m10MarketRegimeDhan.windows['15m'].state || '\u2014'), null);
+        m10DhanHtml += tlRow('30m state', String(d.m10MarketRegimeDhan.windows && d.m10MarketRegimeDhan.windows['30m'] && d.m10MarketRegimeDhan.windows['30m'].state || '\u2014'), null);
+        m10DhanHtml += tlRow('Data quality', d.m10MarketRegimeDhan.dataQuality, tlQualityColor(d.m10MarketRegimeDhan.dataQuality));
       } else if (d.m10MarketRegimeDhan && d.m10MarketRegimeDhan.reason === 'NO_SPOT_HISTORY_YET') {
-        m10Html += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Dhan spot-history buffer still warming up (needs a few 3-min refresh cycles) \u2014 check back shortly.</div>';
+        m10DhanHtml += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Dhan spot-history buffer still warming up (needs a few 3-min refresh cycles) \u2014 check back shortly.</div>';
       } else {
-        m10Html += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Unavailable this snapshot.</div>';
+        m10DhanHtml += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Unavailable this snapshot.</div>';
       }
-      html += tlCard('7c. Market Regime (M10)', m10Html);
+      html += tlCard('7c. Market Regime (M10)', m10DhanHtml);
 
       let m8Html = tlProvenanceBadge(d.m8RolloverMigrationDhan);
       if (d.m8RolloverMigrationDhan && d.m8RolloverMigrationDhan.status === 'OK') {

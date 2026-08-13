@@ -17343,7 +17343,6 @@ function loadDriveSessionFromDisk(): void {
 }
 
 loadDriveSessionFromDisk();
-loadDhanSessionFromDisk();
 
 interface DriveArchiveRecord {
   date: string;
@@ -18872,6 +18871,8 @@ const dhanSession: DhanSessionState = {
   lastRefreshedAt: null,
   lastError: null,
 };
+
+loadDhanSessionFromDisk();
 
 function dhanAuthFilePath(): string {
   return joinPath(driveAuthDataDir(), "dhan-session.json");

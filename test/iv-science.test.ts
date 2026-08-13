@@ -126,3 +126,56 @@ test("rows outside the required dynamic ATM±3 universe are excluded", () => {
   assert.equal(result.qualitySummary.validIvCount, 1);
   assert.equal(result.perContract.some((feature) => feature.strike === 24_300), false);
 });
+
+test("a duplicate timestamp also blocks the immediately following derivative", () => {
+  const result = buildF5IvScience([
+    row({ timestamp: "2026-08-11T09:15:00.000Z", iv: 12 }),
+    row({ timestamp: "2026-08-11T09:16:00.000Z", iv: 13 }),
+    row({ timestamp: "2026-08-11T09:16:00.000Z", iv: 99 }),
+    row({ timestamp: "2026-08-11T09:17:00.000Z", iv: 14 }),
+  ]);
+
+  const following = result.perContract.find((feature) => feature.timestamp === "2026-08-11T09:17:00.000Z")!;
+  assert.equal(result.qualitySummary.duplicateTimestampCount, 2);
+  assert.equal(following.ivChange, null);
+  assert.equal(following.ivChangeQuality, "UNAVAILABLE_PREVIOUS_TIMESTAMP_DUPLICATE");
+});
+
+test("a full-looking 14-contract basket is PARTIAL when ATM offsets or expiry identity are wrong", () => {
+  const rows: IvScienceInputRow[] = [];
+  let iv = 10;
+  for (const offset of [-3, -2, -1, 0, 1, 2, 3]) {
+    for (const optionType of ["CE", "PE"] as const) {
+      rows.push(row({ strike: 24_500 + offset * 50, dynamicAtmOffset: offset, optionType, iv: iv++ }));
+    }
+  }
+  const malformedOffset = rows.find((candidate) => candidate.dynamicAtmOffset === 3 && candidate.optionType === "CE")!;
+  malformedOffset.dynamicAtmOffset = -3;
+  const mixedExpiry = rows.find((candidate) => candidate.dynamicAtmOffset === 2 && candidate.optionType === "PE")!;
+  mixedExpiry.expiry = "2026-08-25";
+
+  const result = buildF5IvScience(rows);
+  assert.equal(result.status, "PARTIAL");
+  assert.equal(result.crossSection[0].eligibleContractCount, 14);
+  assert.equal(result.crossSection[0].quality, "PARTIAL_VALID_SUBSET");
+  assert.equal(result.crossSection[0].expiryCount, 2);
+  assert.equal(result.crossSection[0].offsetSideIdentityViolationCount, 2);
+  assert.equal(result.qualitySummary.universeIdentityViolationCrossSectionCount, 1);
+});
+
+test("an otherwise complete universe with a cadence gap cannot report PASS", () => {
+  const rows: IvScienceInputRow[] = [];
+  for (const timestamp of ["2026-08-11T09:15:00.000Z", "2026-08-11T09:17:00.000Z"]) {
+    let iv = timestamp.includes("09:15") ? 10 : 11;
+    for (const offset of [-3, -2, -1, 0, 1, 2, 3]) {
+      for (const optionType of ["CE", "PE"] as const) {
+        rows.push(row({ timestamp, strike: 24_500 + offset * 50, dynamicAtmOffset: offset, optionType, iv: iv++ }));
+      }
+    }
+  }
+
+  const result = buildF5IvScience(rows);
+  assert.equal(result.qualitySummary.fullUniverseCrossSectionCount, 2);
+  assert.equal(result.qualitySummary.cadenceGapCount, 14);
+  assert.equal(result.status, "PARTIAL");
+});

@@ -27696,29 +27696,9 @@ app.get("/api/audit/v3d-l4-f5-iv-science-proof", async (c) => {
       return c.json({ ...report, status: "FAIL", error: "Historical Store folder lookup failed.", safeToProceedToF6: false, f6NotStarted: true }, 200);
     }
 
-    // --- Explicit F4 gate: a real readable F4 artifact must exist ---
+    // --- Explicit F4 gate: exact lineage is checked after L3 is selected ---
     const featureFiles = await driveListFilesInFolder(featSymbolFolder, token);
     const f4Candidates = featureFiles.filter((file) => file.name.startsWith("derivatives_F4_NIFTY_2026-08-11_"));
-    let f4Artifact: any = null;
-    let f4FileUsed: { id: string; name: string } | null = null;
-    for (const file of f4Candidates) {
-      const readBack = await driveReadFileById(file.id, token);
-      if (readBack?.featureFamily === "F4_PCR" && Array.isArray(readBack.series) && readBack.series.length === expectedTimestampCount) {
-        f4Artifact = readBack;
-        f4FileUsed = file;
-        break;
-      }
-    }
-    if (!f4Artifact || !f4FileUsed) {
-      return c.json({
-        ...report,
-        status: "FAIL",
-        error: "F4 gate failed: no readable 374-row F4_PCR artifact found.",
-        f4CandidatesChecked: f4Candidates.map((file) => file.name),
-        safeToProceedToF6: false,
-        f6NotStarted: true,
-      }, 200);
-    }
 
     // --- Locate the exact 5984-row stored L3 grid used by F2-F4 ---
     const l3Files = await driveListFilesInFolder(normOptFolder, token);
@@ -27747,11 +27727,49 @@ app.get("/api/audit/v3d-l4-f5-iv-science-proof", async (c) => {
     const l3Checksum = createHash("sha256").update(JSON.stringify(l3Rows)).digest("hex");
     const dynChecksum = createHash("sha256").update(JSON.stringify(dynRows)).digest("hex");
 
+    // A same-date/row-count F4 file is not sufficient. It must prove that it
+    // was built from this exact L3 file/checksum and this dynamic-view ID.
+    let f4Artifact: any = null;
+    let f4FileUsed: { id: string; name: string } | null = null;
+    for (const file of f4Candidates) {
+      const readBack = await driveReadFileById(file.id, token);
+      const lineage = readBack?.sourceManifestIds;
+      if (readBack?.featureFamily === "F4_PCR" &&
+          Array.isArray(readBack.series) && readBack.series.length === expectedTimestampCount &&
+          lineage?.dynamicViewFileId === dynamicViewFileId &&
+          lineage?.l3FileId === l3FileUsed.id &&
+          lineage?.l3Checksum === l3Checksum) {
+        f4Artifact = readBack;
+        f4FileUsed = file;
+        break;
+      }
+    }
+    if (!f4Artifact || !f4FileUsed) {
+      return c.json({
+        ...report,
+        status: "FAIL",
+        error: "F4 gate failed: no readable 374-row F4_PCR artifact with exact L3 lineage found.",
+        f4CandidatesChecked: f4Candidates.map((file) => file.name),
+        requiredL3FileId: l3FileUsed.id,
+        requiredL3Checksum: l3Checksum,
+        safeToProceedToF6: false,
+        f6NotStarted: true,
+      }, 200);
+    }
+    const f4Checksum = createHash("sha256").update(JSON.stringify(f4Artifact)).digest("hex");
+
     // --- Merge dynamic offset onto L3 without changing or inventing an IV field ---
     const dynByKey = new Map<string, any>();
-    for (const row of dynRows) dynByKey.set(`${row.timestamp}|${row.strike}|${row.optionType}`, row);
+    let dynamicJoinDuplicateCount = 0;
+    for (const row of dynRows) {
+      const key = `${row.timestamp}|${row.strike}|${row.optionType}`;
+      if (dynByKey.has(key)) dynamicJoinDuplicateCount++;
+      dynByKey.set(key, row);
+    }
+    let dynamicJoinMissingCount = 0;
     const mergedRows = l3Rows.map((row) => {
       const dynamicRow = dynByKey.get(`${row.timestamp}|${row.strike}|${row.optionType}`);
+      if (!dynamicRow) dynamicJoinMissingCount++;
       return {
         ...row,
         dynamicAtmOffset: dynamicRow?.dynamicAtmOffset ?? null,
@@ -27769,12 +27787,27 @@ app.get("/api/audit/v3d-l4-f5-iv-science-proof", async (c) => {
       rows.push(row);
       rowsByTimestamp.set(row.timestamp, rows);
     }
+    const expectedOffsetSideKeys = requiredAtmOffsets.flatMap((offset) => [`${offset}|CE`, `${offset}|PE`]);
     let universeIdentityViolationCount = 0;
     for (const rows of rowsByTimestamp.values()) {
-      const keys = new Set(rows.map((row) => `${row.expiry}|${row.strike}|${row.optionType}`));
-      if (rows.length !== expectedContractsPerTimestamp || keys.size !== expectedContractsPerTimestamp) universeIdentityViolationCount++;
+      const contractKeys = new Set(rows.map((row) => `${row.expiry}|${row.strike}|${row.optionType}`));
+      const expirySet = new Set(rows.map((row) => row.expiry));
+      const offsetSideCounts = new Map<string, number>();
+      for (const row of rows) {
+        const key = `${row.dynamicAtmOffset}|${row.optionType}`;
+        offsetSideCounts.set(key, (offsetSideCounts.get(key) ?? 0) + 1);
+      }
+      const exactOffsetSideUniverse = expectedOffsetSideKeys.every((key) => offsetSideCounts.get(key) === 1);
+      if (rows.length !== expectedContractsPerTimestamp ||
+          contractKeys.size !== expectedContractsPerTimestamp ||
+          expirySet.size !== 1 ||
+          !exactOffsetSideUniverse) {
+        universeIdentityViolationCount++;
+      }
     }
     const universePreconditionPass =
+      dynamicJoinDuplicateCount === 0 &&
+      dynamicJoinMissingCount === 0 &&
       requiredUniverseRows.length === expectedRequiredUniverseRows &&
       rowsByTimestamp.size === expectedTimestampCount &&
       universeIdentityViolationCount === 0;
@@ -27788,6 +27821,8 @@ app.get("/api/audit/v3d-l4-f5-iv-science-proof", async (c) => {
         timestampCount: rowsByTimestamp.size,
         expectedTimestampCount,
         universeIdentityViolationCount,
+        dynamicJoinDuplicateCount,
+        dynamicJoinMissingCount,
         safeToProceedToF6: false,
         f6NotStarted: true,
       }, 200);
@@ -27809,6 +27844,7 @@ app.get("/api/audit/v3d-l4-f5-iv-science-proof", async (c) => {
       l3Checksum,
       f4FileId: f4FileUsed.id,
       f4FileName: f4FileUsed.name,
+      f4Checksum,
     };
     const calculatedAt = new Date().toISOString();
     const outputPayload = {
@@ -27889,8 +27925,11 @@ app.get("/api/audit/v3d-l4-f5-iv-science-proof", async (c) => {
       doNotBuildCheck,
       precondition: {
         f4Gate: true,
+        f4ExactL3LineageGate: true,
         l3Gate: true,
         dynamicAtmGate: true,
+        dynamicJoinDuplicateCount,
+        dynamicJoinMissingCount,
         requiredUniverseRowCount: requiredUniverseRows.length,
         expectedRequiredUniverseRows,
         timestampCount: rowsByTimestamp.size,

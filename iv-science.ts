@@ -14,6 +14,7 @@ export type IvDerivativeQuality =
   | "UNAVAILABLE_INVALID_CONTRACT_IDENTITY"
   | "UNAVAILABLE_INVALID_TIMESTAMP"
   | "UNAVAILABLE_DUPLICATE_TIMESTAMP"
+  | "UNAVAILABLE_PREVIOUS_TIMESTAMP_DUPLICATE"
   | "UNAVAILABLE_NON_POSITIVE_TIME_DELTA"
   | "UNAVAILABLE_CADENCE_GAP"
   | "UNAVAILABLE_PREVIOUS_VELOCITY";
@@ -67,6 +68,8 @@ export interface IvCrossSectionRow {
   validIvCount: number;
   invalidOrMissingIvCount: number;
   duplicateContractCount: number;
+  expiryCount: number;
+  offsetSideIdentityViolationCount: number;
   ivMin: number | null;
   ivMax: number | null;
   ivRange: number | null;
@@ -101,6 +104,7 @@ export interface IvScienceResult {
     fullUniverseCrossSectionCount: number;
     partialCrossSectionCount: number;
     unavailableCrossSectionCount: number;
+    universeIdentityViolationCrossSectionCount: number;
   };
   perContract: IvContractFeatureRow[];
   crossSection: IvCrossSectionRow[];
@@ -214,6 +218,7 @@ export function buildF5IvScience(inputRows: IvScienceInputRow[], config: IvScien
     throw new Error("requiredAtmOffsets must contain at least one finite number");
   }
   const requiredOffsetSet = new Set(requiredAtmOffsets);
+  const requiredOffsetSideKeys = requiredAtmOffsets.flatMap((offset) => [`${offset}|CE`, `${offset}|PE`]);
   const expectedContractsPerTimestamp = requiredAtmOffsets.length * 2;
 
   const normalizedAll = inputRows.map(normalizeRow);
@@ -277,16 +282,22 @@ export function buildF5IvScience(inputRows: IvScienceInputRow[], config: IvScien
         feature.ivAccelerationQuality = "UNAVAILABLE_CURRENT_IV_INVALID";
         continue;
       }
-      if (previousRow.ivQuality !== "VALID") {
-        feature.ivChangeQuality = "UNAVAILABLE_PREVIOUS_IV_INVALID";
-        feature.ivVelocityQuality = "UNAVAILABLE_PREVIOUS_IV_INVALID";
-        feature.ivAccelerationQuality = "UNAVAILABLE_PREVIOUS_IV_INVALID";
-        continue;
-      }
       if (previousRow.timestampMs === null) {
         feature.ivChangeQuality = "UNAVAILABLE_INVALID_TIMESTAMP";
         feature.ivVelocityQuality = "UNAVAILABLE_INVALID_TIMESTAMP";
         feature.ivAccelerationQuality = "UNAVAILABLE_INVALID_TIMESTAMP";
+        continue;
+      }
+      if ((timestampCounts.get(previousRow.timestampMs) ?? 0) > 1) {
+        feature.ivChangeQuality = "UNAVAILABLE_PREVIOUS_TIMESTAMP_DUPLICATE";
+        feature.ivVelocityQuality = "UNAVAILABLE_PREVIOUS_TIMESTAMP_DUPLICATE";
+        feature.ivAccelerationQuality = "UNAVAILABLE_PREVIOUS_TIMESTAMP_DUPLICATE";
+        continue;
+      }
+      if (previousRow.ivQuality !== "VALID") {
+        feature.ivChangeQuality = "UNAVAILABLE_PREVIOUS_IV_INVALID";
+        feature.ivVelocityQuality = "UNAVAILABLE_PREVIOUS_IV_INVALID";
+        feature.ivAccelerationQuality = "UNAVAILABLE_PREVIOUS_IV_INVALID";
         continue;
       }
 
@@ -350,6 +361,16 @@ export function buildF5IvScience(inputRows: IvScienceInputRow[], config: IvScien
     const eligibleContractCount = uniqueEligible.length;
     const duplicateContractCount = duplicateContracts.size;
     const invalidOrMissingIvCount = eligibleContractCount - validIvCount;
+    const expiryCount = new Set(uniqueEligible.map((row) => row.expiry)).size;
+    const offsetSideCounts = new Map<string, number>();
+    for (const row of uniqueEligible) {
+      if (row.dynamicAtmOffset === null || row.optionType === null) continue;
+      const key = `${row.dynamicAtmOffset}|${row.optionType}`;
+      offsetSideCounts.set(key, (offsetSideCounts.get(key) ?? 0) + 1);
+    }
+    const offsetSideIdentityViolationCount = requiredOffsetSideKeys
+      .filter((key) => (offsetSideCounts.get(key) ?? 0) !== 1)
+      .length;
 
     let ivMin: number | null = null;
     let ivMax: number | null = null;
@@ -364,7 +385,11 @@ export function buildF5IvScience(inputRows: IvScienceInputRow[], config: IvScien
       ivRange = ivMax - ivMin;
       ivMean = validValues.reduce((sum, value) => sum + value, 0) / validValues.length;
       ivDispersion = populationStdDev(validValues, ivMean);
-      quality = validIvCount === expectedContractsPerTimestamp && eligibleContractCount === expectedContractsPerTimestamp && duplicateContractCount === 0
+      quality = validIvCount === expectedContractsPerTimestamp &&
+        eligibleContractCount === expectedContractsPerTimestamp &&
+        duplicateContractCount === 0 &&
+        expiryCount === 1 &&
+        offsetSideIdentityViolationCount === 0
         ? "VALID_FULL_UNIVERSE"
         : "PARTIAL_VALID_SUBSET";
     }
@@ -376,6 +401,8 @@ export function buildF5IvScience(inputRows: IvScienceInputRow[], config: IvScien
       validIvCount,
       invalidOrMissingIvCount,
       duplicateContractCount,
+      expiryCount,
+      offsetSideIdentityViolationCount,
       ivMin,
       ivMax,
       ivRange,
@@ -390,9 +417,16 @@ export function buildF5IvScience(inputRows: IvScienceInputRow[], config: IvScien
   const fullUniverseCrossSectionCount = crossSection.filter((row) => row.quality === "VALID_FULL_UNIVERSE").length;
   const partialCrossSectionCount = crossSection.filter((row) => row.quality === "PARTIAL_VALID_SUBSET").length;
   const unavailableCrossSectionCount = crossSection.filter((row) => row.quality === "UNAVAILABLE_INSUFFICIENT_VALID_IV").length;
+  const universeIdentityViolationCrossSectionCount = crossSection.filter((row) =>
+    row.expiryCount !== 1 || row.offsetSideIdentityViolationCount > 0
+  ).length;
   const invalidContractIdentityCount = perContract.filter((row) => row.contractKey === null).length;
   const invalidTimestampCount = perContract.filter((row) => row.timestamp === null || !Number.isFinite(new Date(row.timestamp).getTime())).length;
-  const allRowsValid = validIvCount === perContract.length && invalidContractIdentityCount === 0 && invalidTimestampCount === 0 && duplicateTimestampCount === 0;
+  const allRowsValid = validIvCount === perContract.length &&
+    invalidContractIdentityCount === 0 &&
+    invalidTimestampCount === 0 &&
+    duplicateTimestampCount === 0 &&
+    cadenceGapCount === 0;
   const allCrossSectionsFull = crossSection.length > 0 && fullUniverseCrossSectionCount === crossSection.length;
   const status: IvScienceStatus = validIvCount === 0 ? "BLOCKED" : (allRowsValid && allCrossSectionsFull ? "PASS" : "PARTIAL");
 
@@ -422,6 +456,7 @@ export function buildF5IvScience(inputRows: IvScienceInputRow[], config: IvScien
       fullUniverseCrossSectionCount,
       partialCrossSectionCount,
       unavailableCrossSectionCount,
+      universeIdentityViolationCrossSectionCount,
     },
     perContract,
     crossSection,

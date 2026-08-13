@@ -19522,6 +19522,9 @@ app.get("/api/dhan/normalized", async (c) => {
         parsed = null;
       }
       if (!expiryRes.ok || !parsed || !Array.isArray(parsed.data) || parsed.data.length === 0) {
+        console.error(
+          `[DHAN D4 FAIL] step=expirylist symbol=${symbolParam} httpStatus=${expiryRes.status} bodySnippet=${raw.slice(0, 300)}`
+        );
         return c.json(
           {
             architectureRole: "D4_NORMALIZED_ADAPTER",
@@ -19564,6 +19567,9 @@ app.get("/api/dhan/normalized", async (c) => {
         parsed = null;
       }
       if (!chainRes.ok || !parsed || !parsed.data || typeof parsed.data.oc !== "object") {
+        console.error(
+          `[DHAN D4 FAIL] step=optionchain symbol=${symbolParam} httpStatus=${chainRes.status} bodySnippet=${raw.slice(0, 300)}`
+        );
         return c.json(
           {
             architectureRole: "D4_NORMALIZED_ADAPTER",

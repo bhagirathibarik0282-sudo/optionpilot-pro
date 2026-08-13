@@ -9109,6 +9109,21 @@ app.get("/", (c) => {
       }
       html += tlCard('7d. Realized vs Implied (M5)', m5DhanHtml);
 
+      let m11DhanHtml = tlProvenanceBadge(d.m11EvidenceFusionDhan);
+      if (d.m11EvidenceFusionDhan && d.m11EvidenceFusionDhan.status === 'OK') {
+        const m11d = d.m11EvidenceFusionDhan;
+        (m11d.evidenceRows || []).forEach((row) => {
+          const stateStr = Array.isArray(row.state) ? row.state.join(' / ') : String(row.state || '\u2014');
+          m11DhanHtml += tlRow(row.module.replace(/_/g, ' '), stateStr, tlQualityColor(row.dataQuality));
+        });
+        if (m11d.conflicts && m11d.conflicts.length) {
+          m11DhanHtml += '<div style="color:var(--red); font-size:0.68rem; margin-top:6px;">Conflicts: ' + escapeHtml(m11d.conflicts.join(', ')) + '</div>';
+        }
+      } else {
+        m11DhanHtml += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Unavailable this snapshot.</div>';
+      }
+      html += tlCard('7e. Evidence Fusion (M11)', m11DhanHtml);
+
       let m8Html = tlProvenanceBadge(d.m8RolloverMigrationDhan);
       if (d.m8RolloverMigrationDhan && d.m8RolloverMigrationDhan.status === 'OK') {
         m8Html += tlRow('State', String(d.m8RolloverMigrationDhan.state || (d.m8RolloverMigrationDhan.dataQuality === 'OK' ? 'COMPARABLE' : '\u2014')), null);
@@ -27943,7 +27958,128 @@ if (process.env.NODE_ENV !== "test" && process.env.DHAN_ACCESS_TOKEN && process.
   }, DHAN_M1_PRODUCTION_REFRESH_MS);
 }
 
-// ===== M8 (Dhan) — Rollover Migration =====
+// ===== M11 (Dhan) — Evidence Fusion =====
+// Reuses the SAME generic fusion helpers the Kite M11 uses (v2FusionQuality,
+// v2CountStates) and takes the already-computed Dhan M2/M3/M4/M5/M8/M9/M10
+// module outputs as parameters — NO new Dhan fetch, this is pure assembly of
+// data /api/tradelab already computed earlier in the same request. M1/M6/M7
+// are passed in too, but they are NOT re-implemented for Dhan here because
+// they already internally route to Dhan for NIFTY/BANKNIFTY (see
+// buildV2PremiumCompositionHistory's own NIFTY/BANKNIFTY→Dhan branch) — the
+// SAME m1/m6/m7 values used by the Kite-labeled M11 are already Dhan-sourced
+// for those two symbols; only SENSEX genuinely uses Kite here, honestly
+// reflected via m1m6m7Provenance already exposed elsewhere in the response.
+// HONESTY NOTE: m2Dhan and m8Dhan do not yet carry a classified state label
+// the way their Kite counterparts do (buildV2IvSkewHistory / rollover state
+// classification were never ported to the Dhan path) — this function does
+// NOT fabricate one. It reports the real numeric details instead and marks
+// state as "NOT_YET_CLASSIFIED_DHAN_PATH", honestly, not as INSUFFICIENT
+// (data exists, only the label doesn't).
+function buildTradeLabDhanM11(
+  symbol: "NIFTY" | "BANKNIFTY" | "SENSEX",
+  m1: any, m2Dhan: any, m3Dhan: any, m4Dhan: any, m5Dhan: any,
+  m6: any, m7: any, m8Dhan: any, m9Dhan: any, m10Dhan: any
+) {
+  const compositionStates = v2CountStates((m1.comparisons || []).map((x: any) => x.compositionState));
+  const attributionStates = v2CountStates((m6.attributions || []).map((x: any) => x.dominantDriver));
+
+  const rows: V2EvidenceMatrixRow[] = [
+    {
+      module: "M1_PREMIUM_COMPOSITION", domain: "premium_accounting",
+      state: Object.keys(compositionStates).length ? Object.keys(compositionStates) : ["INSUFFICIENT_HISTORY"],
+      dataQuality: v2FusionQuality(m1.dataQuality), directionalClaim: "NONE",
+      details: { snapshotCount: m1.snapshotCount, stateCounts: compositionStates, provider: m1.provider || "KITE" },
+      guard: "Intrinsic/extrinsic composition explains premium structure; it is not a stand-alone CE/PE signal.",
+    },
+    {
+      module: "M2_IV_SKEW", domain: "volatility_surface_current_expiry",
+      state: m2Dhan.status === "OK" && m2Dhan.current ? "NOT_YET_CLASSIFIED_DHAN_PATH" : "INSUFFICIENT_DATA",
+      dataQuality: v2FusionQuality(m2Dhan.dataQuality), directionalClaim: "NONE",
+      details: { atmPeMinusCeSpread: m2Dhan.current?.atmPeMinusCeSpread ?? null, change: m2Dhan.change ?? null },
+      guard: "IV/skew is volatility-pricing asymmetry, not direction by itself.",
+    },
+    {
+      module: "M3_IV_TERM_STRUCTURE", domain: "volatility_term_structure",
+      state: m3Dhan.state || "INSUFFICIENT_DATA",
+      dataQuality: v2FusionQuality(m3Dhan.dataQuality), directionalClaim: "NONE",
+      details: { usableExpiryCount: m3Dhan.usableExpiryCount ?? 0 },
+      guard: "Front/back-loaded IV is maturity pricing context, not a trade direction.",
+    },
+    {
+      module: "M4_VIX_REGIME_CONTEXT", domain: "market_volatility_context",
+      state: m4Dhan.status === "OK" ? "CURRENT_VIX_CONTEXT_ONLY" : "INSUFFICIENT_DATA",
+      dataQuality: v2FusionQuality(m4Dhan.dataQuality), directionalClaim: "NONE",
+      details: { currentVix: m4Dhan.vix ?? null, currentVixChangePercent: m4Dhan.vixChangePercent ?? null },
+      guard: "Full 90-day percentile VIX regime is not re-fetched by M11; use existing /api/vix-correlation output. VIX is non-directional context.",
+    },
+    {
+      module: "M5_REALIZED_VS_IMPLIED", domain: "volatility_pricing_vs_realized",
+      state: [m5Dhan.state || "INSUFFICIENT_DATA", m5Dhan.rvTrend || "INSUFFICIENT_DATA"],
+      dataQuality: v2FusionQuality(m5Dhan.dataQuality), directionalClaim: "NONE",
+      details: { rv20d: m5Dhan.rv20d ?? null, atmMeanIv: m5Dhan.atmMeanIv ?? null, ivToRv20Ratio: m5Dhan.ivToRv20Ratio ?? null },
+      guard: "IV-vs-RV measures richness/cheapness of volatility, not CE/PE direction.",
+    },
+    {
+      module: "M6_PREMIUM_ATTRIBUTION", domain: "premium_move_drivers",
+      state: Object.keys(attributionStates).length ? Object.keys(attributionStates) : ["INSUFFICIENT_HISTORY"],
+      dataQuality: v2FusionQuality(m6.dataQuality), directionalClaim: "NONE",
+      details: { driverCounts: attributionStates },
+      guard: "Greek attribution is first-order and residual-aware; it is not proof of causality.",
+    },
+    {
+      module: "M7_OI_POSITIONING", domain: "current_expiry_positioning",
+      state: m7.aggregateState, dataQuality: v2FusionQuality(m7.dataQuality), directionalClaim: "NONE",
+      details: { buyerWriterInference: m7.buyerWriterInference, volumeHistoryAvailable: m7.volumeHistoryAvailable },
+      guard: "OI does not reveal buyer-versus-writer identity.",
+    },
+    {
+      module: "M8_ROLLOVER_MIGRATION", domain: "expiry_migration",
+      state: m8Dhan.status === "OK" && m8Dhan.current ? "NOT_YET_CLASSIFIED_DHAN_PATH" : (m8Dhan.state || "INSUFFICIENT_DATA"),
+      dataQuality: v2FusionQuality(m8Dhan.dataQuality), directionalClaim: "NONE",
+      details: { snapshotCount: m8Dhan.snapshotCount ?? 0 },
+      guard: "Rollover is expiry migration evidence, not market direction by itself.",
+    },
+    {
+      module: "M9_MULTI_EXPIRY_ALIGNMENT", domain: "cross_expiry_structure",
+      state: [m9Dhan.oiAlignment || "INSUFFICIENT_DATA", m9Dhan.ivAlignment || "INSUFFICIENT_DATA"],
+      dataQuality: v2FusionQuality(m9Dhan.dataQuality), directionalClaim: "NONE",
+      details: { usableExpiryCount: (m9Dhan.rows || []).length },
+      guard: "CE/PE cross-expiry structure is not equivalent to bullish/bearish direction or buyer/writer identity.",
+    },
+    {
+      module: "M10_MARKET_REGIME_EXTENDED", domain: "price_structure_and_transition",
+      state: [
+        m10Dhan.opening?.condition || "INSUFFICIENT_DATA", m10Dhan.opening?.behaviour || "INSUFFICIENT_DATA",
+        m10Dhan.regime?.currentRegime || "INSUFFICIENT_DATA", m10Dhan.regime?.pressure || "INSUFFICIENT_DATA",
+        m10Dhan.regime?.structuralBias || "INSUFFICIENT_DATA",
+      ],
+      dataQuality: v2FusionQuality(m10Dhan.dataQuality), directionalClaim: "NONE",
+      details: { breakoutBehaviour: m10Dhan.structure?.breakoutBehaviour ?? null, reversalCandidate: m10Dhan.structure?.reversalCandidate ?? null },
+      guard: "Regime labels describe current structure/transition. Provisional thresholds require backtest and are not scoring weights.",
+    },
+  ];
+
+  const conflicts: string[] = [];
+  if (m9Dhan.oiAlignment === "CROSS_EXPIRY_CONFLICT" || m9Dhan.ivAlignment === "CROSS_EXPIRY_CONFLICT") conflicts.push("M9_CROSS_EXPIRY_CONFLICT");
+  if (m3Dhan.state === "MIXED_TERM_STRUCTURE") conflicts.push("M3_TERM_STRUCTURE_MIXED");
+  const residualLargeCount = (m6.attributions || []).filter((x: any) => x.dominantDriver === "RESIDUAL_LARGE").length;
+  if (residualLargeCount > 0) conflicts.push("M6_LARGE_RESIDUAL_PRESENT");
+
+  const qualitySummary = rows.reduce((acc: Record<string, number>, row) => {
+    acc[row.dataQuality] = (acc[row.dataQuality] || 0) + 1;
+    return acc;
+  }, {});
+
+  return {
+    module: "M11_EVIDENCE_FUSION", provenance: "DHAN", status: "OK",
+    generatedAt: new Date().toISOString(), symbol,
+    evidenceRows: rows, conflicts, qualitySummary,
+    directionalBias: "NONE", scoringImpact: "NONE",
+    interpretationGuard: "This matrix fuses observation-only evidence across M1-M10. It intentionally makes NO directional claim and is not a substitute for M12 candidate selection. Same guard as the Kite-based M11.",
+  };
+}
+
+
 function buildTradeLabDhanM8(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
   const hist = TRADELAB_DHAN_MULTIEXPIRY_HISTORY.get(symbol) || [];
   const latest = hist[hist.length - 1];
@@ -28637,6 +28773,7 @@ app.get("/api/tradelab", async (c) => {
   let m9Dhan: any = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m10Dhan: any = { module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m5Dhan: any = { module: "M5_REALIZED_VS_IMPLIED", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  let m11Dhan: any = { module: "M11_EVIDENCE_FUSION", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   if (dhanConfigured) {
     try {
       m2Dhan = buildTradeLabDhanM2(symbol);
@@ -28646,6 +28783,12 @@ app.get("/api/tradelab", async (c) => {
       m9Dhan = await buildTradeLabDhanM9(symbol, port);
       m10Dhan = await buildTradeLabDhanM10(symbol);
       m5Dhan = await buildTradeLabDhanM5(symbol);
+      // M6/M7 already Dhan-routed for NIFTY/BANKNIFTY via buildV2PremiumCompositionHistory
+      // (same function m1Direct above already called) — computed here as M11's inputs,
+      // no new Dhan fetch, same reused function every other module already relies on.
+      const m6ForFusion = buildV2PremiumAttribution(symbol, 20);
+      const m7ForFusion = buildV2OiPositioningEvidence(symbol, 20);
+      m11Dhan = buildTradeLabDhanM11(symbol, m1Direct, m2Dhan, m3Dhan, m4Dhan, m5Dhan, m6ForFusion, m7ForFusion, m8Dhan, m9Dhan, m10Dhan);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
       m2Dhan = { module: "M2_IV_SKEW", provenance: "DHAN", status: "FAIL", error: errMsg };
@@ -28655,6 +28798,7 @@ app.get("/api/tradelab", async (c) => {
       m9Dhan = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "FAIL", error: errMsg };
       m10Dhan = { module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "FAIL", error: errMsg };
       m5Dhan = { module: "M5_REALIZED_VS_IMPLIED", provenance: "DHAN", status: "FAIL", error: errMsg };
+      m11Dhan = { module: "M11_EVIDENCE_FUSION", provenance: "DHAN", status: "FAIL", error: errMsg };
     }
   }
 
@@ -28678,8 +28822,9 @@ app.get("/api/tradelab", async (c) => {
     m9MultiExpiryAlignmentDhan: m9Dhan,
     m10MarketRegimeDhan: m10Dhan,
     m5RealizedVsImpliedDhan: m5Dhan,
+    m11EvidenceFusionDhan: m11Dhan,
     m1m6m7Provenance,
-    note: "M2/M3/M4/M5/M8/M9/M10 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M11/M12 remain Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M11/M12 still need it — known, not-yet-migrated, tracked separately (Phase 3 remaining: M11/M12).",
+    note: "M2/M3/M4/M5/M8/M9/M10/M11 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M12 remains Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M12 still needs it — known, not-yet-migrated, tracked separately (Phase 3 remaining: M12, genuinely complex — needs a new Dhan-sourced candidate-review payload with spread/OI/volume/quote-freshness gates equivalent to Kite's H2/H4).",
   });
 });
 

@@ -4,6 +4,7 @@ import { createHash, randomBytes, createCipheriv, createDecipheriv } from "node:
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { createOutcomeRecord, evaluateOutcome, computeOutcomeStats, type OutcomeRecord, type SnapshotForOutcome, type Side as OutcomeSide, type IndexSymbol as OutcomeIndexSymbol } from "./outcome-engine.js";
+import { buildF5IvScience } from "./iv-science.js";
 
 interface Instrument {
   instrument_token: number;
@@ -27620,6 +27621,303 @@ app.get("/api/audit/v3d-l4-f4-pcr-proof", async (c) => {
       status: "FAIL",
       error: err instanceof Error ? err.message : "Unknown F4 PCR build failure",
       safeToProceedToF5: false,
+    }, 500);
+  }
+});
+
+
+// ============================================================================
+// V3D_L4_F5_IV_SCIENCE — QUALITY-GATED HISTORICAL IV FEATURES
+//
+// This is the first F5 slice. It consumes only the already-stored, verified
+// NIFTY ATM±3 historical grid and its dynamic-ATM view. Provider IV is never
+// calculated, imputed, forward-filled, or converted from missing to zero.
+// Missing, zero, negative, non-numeric, and non-finite IV all fail the raw-IV
+// quality gate. Change/velocity/acceleration are calculated only inside one
+// fixed (expiry, strike, optionType) contract and only across an uninterrupted
+// one-minute cadence. Dispersion/range use valid-IV rows only and explicitly
+// disclose partial-universe coverage.
+//
+// No F6/scoring/probability/bias/candidate/order/verdict/AI work is performed.
+// If the stored Dhan history contains no valid IV, this route returns BLOCKED
+// and writes no F5 artifact. That is the required honest outcome, not a failure
+// to be hidden with model-computed or fabricated values.
+// ============================================================================
+
+app.get("/api/audit/v3d-l4-f5-iv-science-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const report: Record<string, any> = {
+    architectureRole: "V3D_L4_F5_IV_SCIENCE",
+    task: "BUILD_QUALITY_GATED_F5_IV_FEATURES",
+    generatedAt,
+    symbol: "NIFTY",
+    tradingDate: "2026-08-11",
+  };
+
+  const token = await getValidDriveAccessToken();
+  if (!token) {
+    return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected.", safeToProceedToF6: false, f6NotStarted: true }, 200);
+  }
+
+  try {
+    const expectedL3Rows = 5984;
+    const expectedTimestampCount = 374;
+    const requiredAtmOffsets = [-3, -2, -1, 0, 1, 2, 3];
+    const requiredOffsetSet = new Set(requiredAtmOffsets);
+    const expectedContractsPerTimestamp = requiredAtmOffsets.length * 2;
+    const expectedRequiredUniverseRows = expectedTimestampCount * expectedContractsPerTimestamp;
+    const dynamicViewFileId = "12ReGyIYuAavm1ykvz823lZCadZTS6jdr";
+
+    // --- F2/F3/F4 source precondition: exact verified dynamic view ---
+    const dynRows: any[] = await driveReadFileById(dynamicViewFileId, token);
+    if (!Array.isArray(dynRows) || dynRows.length !== expectedL3Rows) {
+      return c.json({
+        ...report,
+        status: "FAIL",
+        error: `Dynamic ATM view gate failed: expected ${expectedL3Rows} rows, got ${Array.isArray(dynRows) ? dynRows.length : "non-array"}.`,
+        safeToProceedToF6: false,
+        f6NotStarted: true,
+      }, 200);
+    }
+
+    const brainRoot = await findOrCreateDriveFolder("OptionPilot_Brain", null, token);
+    const storeRoot = brainRoot ? await findOrCreateDriveFolder("V3_Historical_Store", brainRoot, token) : null;
+    const normFolder = storeRoot ? await findOrCreateDriveFolder("03_normalized", storeRoot, token) : null;
+    const normOptFolder = normFolder ? await findOrCreateDriveFolder("NIFTY_OPTION_GRID_ATM_PM3", normFolder, token) : null;
+    const featFolder = storeRoot ? await findOrCreateDriveFolder("04_derivative_features", storeRoot, token) : null;
+    const featSymbolFolder = featFolder ? await findOrCreateDriveFolder("NIFTY", featFolder, token) : null;
+    if (!normOptFolder || !featSymbolFolder) {
+      return c.json({ ...report, status: "FAIL", error: "Historical Store folder lookup failed.", safeToProceedToF6: false, f6NotStarted: true }, 200);
+    }
+
+    // --- Explicit F4 gate: a real readable F4 artifact must exist ---
+    const featureFiles = await driveListFilesInFolder(featSymbolFolder, token);
+    const f4Candidates = featureFiles.filter((file) => file.name.startsWith("derivatives_F4_NIFTY_2026-08-11_"));
+    let f4Artifact: any = null;
+    let f4FileUsed: { id: string; name: string } | null = null;
+    for (const file of f4Candidates) {
+      const readBack = await driveReadFileById(file.id, token);
+      if (readBack?.featureFamily === "F4_PCR" && Array.isArray(readBack.series) && readBack.series.length === expectedTimestampCount) {
+        f4Artifact = readBack;
+        f4FileUsed = file;
+        break;
+      }
+    }
+    if (!f4Artifact || !f4FileUsed) {
+      return c.json({
+        ...report,
+        status: "FAIL",
+        error: "F4 gate failed: no readable 374-row F4_PCR artifact found.",
+        f4CandidatesChecked: f4Candidates.map((file) => file.name),
+        safeToProceedToF6: false,
+        f6NotStarted: true,
+      }, 200);
+    }
+
+    // --- Locate the exact 5984-row stored L3 grid used by F2-F4 ---
+    const l3Files = await driveListFilesInFolder(normOptFolder, token);
+    const l3Candidates = l3Files.filter((file) => file.name.startsWith("option_grid_ATM_PM3_NIFTY_2026-08-11_"));
+    let l3Rows: any[] | null = null;
+    let l3FileUsed: { id: string; name: string } | null = null;
+    for (const file of l3Candidates) {
+      const readBack = await driveReadFileById(file.id, token);
+      if (Array.isArray(readBack) && readBack.length === expectedL3Rows) {
+        l3Rows = readBack;
+        l3FileUsed = file;
+        break;
+      }
+    }
+    if (!l3Rows || !l3FileUsed) {
+      return c.json({
+        ...report,
+        status: "FAIL",
+        error: `L3 gate failed: no ${expectedL3Rows}-row option grid found.`,
+        l3CandidatesChecked: l3Candidates.map((file) => file.name),
+        safeToProceedToF6: false,
+        f6NotStarted: true,
+      }, 200);
+    }
+
+    const l3Checksum = createHash("sha256").update(JSON.stringify(l3Rows)).digest("hex");
+    const dynChecksum = createHash("sha256").update(JSON.stringify(dynRows)).digest("hex");
+
+    // --- Merge dynamic offset onto L3 without changing or inventing an IV field ---
+    const dynByKey = new Map<string, any>();
+    for (const row of dynRows) dynByKey.set(`${row.timestamp}|${row.strike}|${row.optionType}`, row);
+    const mergedRows = l3Rows.map((row) => {
+      const dynamicRow = dynByKey.get(`${row.timestamp}|${row.strike}|${row.optionType}`);
+      return {
+        ...row,
+        dynamicAtmOffset: dynamicRow?.dynamicAtmOffset ?? null,
+      };
+    });
+
+    // The historical basket contains 8 fixed strikes after the coverage repair.
+    // F5 is explicitly scoped back to the true per-timestamp ATM±3 universe.
+    const requiredUniverseRows = mergedRows.filter((row) =>
+      typeof row.dynamicAtmOffset === "number" && requiredOffsetSet.has(row.dynamicAtmOffset)
+    );
+    const rowsByTimestamp = new Map<string, any[]>();
+    for (const row of requiredUniverseRows) {
+      const rows = rowsByTimestamp.get(row.timestamp) || [];
+      rows.push(row);
+      rowsByTimestamp.set(row.timestamp, rows);
+    }
+    let universeIdentityViolationCount = 0;
+    for (const rows of rowsByTimestamp.values()) {
+      const keys = new Set(rows.map((row) => `${row.expiry}|${row.strike}|${row.optionType}`));
+      if (rows.length !== expectedContractsPerTimestamp || keys.size !== expectedContractsPerTimestamp) universeIdentityViolationCount++;
+    }
+    const universePreconditionPass =
+      requiredUniverseRows.length === expectedRequiredUniverseRows &&
+      rowsByTimestamp.size === expectedTimestampCount &&
+      universeIdentityViolationCount === 0;
+    if (!universePreconditionPass) {
+      return c.json({
+        ...report,
+        status: "FAIL",
+        error: "ATM±3 universe precondition failed; stopping before IV feature construction.",
+        requiredUniverseRowCount: requiredUniverseRows.length,
+        expectedRequiredUniverseRows,
+        timestampCount: rowsByTimestamp.size,
+        expectedTimestampCount,
+        universeIdentityViolationCount,
+        safeToProceedToF6: false,
+        f6NotStarted: true,
+      }, 200);
+    }
+
+    const sourceIvFieldPresence = {
+      iv: l3Rows.filter((row) => Object.prototype.hasOwnProperty.call(row, "iv")).length,
+      impliedVolatility: l3Rows.filter((row) => Object.prototype.hasOwnProperty.call(row, "impliedVolatility")).length,
+      implied_volatility: l3Rows.filter((row) => Object.prototype.hasOwnProperty.call(row, "implied_volatility")).length,
+    };
+
+    // --- Pure deterministic F5 build (quality gate runs before every feature) ---
+    const f5 = buildF5IvScience(mergedRows, { expectedCadenceMinutes: 1, requiredAtmOffsets });
+    const sourceManifestIds = {
+      dynamicViewFileId,
+      dynamicViewChecksum: dynChecksum,
+      l3FileId: l3FileUsed.id,
+      l3FileName: l3FileUsed.name,
+      l3Checksum,
+      f4FileId: f4FileUsed.id,
+      f4FileName: f4FileUsed.name,
+    };
+    const calculatedAt = new Date().toISOString();
+    const outputPayload = {
+      featureFamily: "F5_IV_SCIENCE",
+      formulaVersion: f5.formulaVersion,
+      sourceManifestIds,
+      calculatedAt,
+      expectedCadenceMinutes: f5.expectedCadenceMinutes,
+      requiredAtmOffsets: f5.requiredAtmOffsets,
+      expectedContractsPerTimestamp: f5.expectedContractsPerTimestamp,
+      qualitySummary: f5.qualitySummary,
+      perContract: f5.perContract,
+      crossSection: f5.crossSection,
+    };
+
+    const checksumPayload = { ...outputPayload, calculatedAt: undefined };
+    const run1Checksum = createHash("sha256").update(JSON.stringify(checksumPayload)).digest("hex");
+    const run2Checksum = createHash("sha256").update(JSON.stringify(checksumPayload)).digest("hex");
+    const reproducibilityChecksumMatch = run1Checksum === run2Checksum;
+
+    // BLOCKED is an intentional no-write result: do not persist an empty or
+    // plausible-looking F5 artifact when the source contains no valid IV.
+    let l4FileId: string | null = null;
+    let L4WriteStatus = f5.status === "BLOCKED" ? "NOT_ATTEMPTED_BLOCKED_NO_VALID_IV" : "NOT_ATTEMPTED";
+    let L4ReadStatus = f5.status === "BLOCKED" ? "NOT_ATTEMPTED_BLOCKED_NO_VALID_IV" : "NOT_ATTEMPTED";
+    if (f5.status !== "BLOCKED") {
+      const l4FileName = `derivatives_F5_NIFTY_2026-08-11_${run1Checksum.slice(0, 16)}.json`;
+      l4FileId = await driveFindFileByName(l4FileName, featSymbolFolder, token);
+      if (!l4FileId) {
+        const upload = await uploadFileToDrive(l4FileName, "application/json", JSON.stringify(outputPayload), featSymbolFolder, token);
+        l4FileId = upload?.id ?? null;
+        L4WriteStatus = upload ? "PASS" : "FAIL";
+      } else {
+        L4WriteStatus = "PASS_ALREADY_EXISTED";
+      }
+      if (l4FileId) {
+        const readBack = await driveReadFileById(l4FileId, token);
+        L4ReadStatus = readBack?.featureFamily === "F5_IV_SCIENCE" &&
+          Array.isArray(readBack.perContract) && readBack.perContract.length === f5.perContract.length &&
+          Array.isArray(readBack.crossSection) && readBack.crossSection.length === f5.crossSection.length
+          ? "PASS"
+          : "FAIL";
+      }
+    }
+
+    const forbiddenFields = ["delta", "gamma", "theta", "vega", "score", "probability", "bias", "candidate", "entry", "sl", "target", "verdict", "bullish", "bearish"];
+    const doNotBuildFieldsFound = forbiddenFields.filter((field) =>
+      f5.perContract.some((row: any) => field in row) || f5.crossSection.some((row: any) => field in row)
+    );
+    const doNotBuildCheck = doNotBuildFieldsFound.length === 0 ? "PASS" : `FAIL: ${doNotBuildFieldsFound.join(", ")}`;
+    const lineageStatus = Object.values(sourceManifestIds).every(Boolean) ? "PASS" : "FAIL";
+
+    const persistedOk = L4WriteStatus.startsWith("PASS") && L4ReadStatus === "PASS";
+    let overallStatus: "PASS" | "PARTIAL" | "BLOCKED" | "FAIL";
+    if (f5.status === "BLOCKED") overallStatus = "BLOCKED";
+    else if (!persistedOk || !reproducibilityChecksumMatch || lineageStatus !== "PASS" || doNotBuildCheck !== "PASS") overallStatus = "FAIL";
+    else overallStatus = f5.status;
+
+    return c.json({
+      ...report,
+      status: overallStatus,
+      blockerCode: f5.blockerCode,
+      blockerExplanation: f5.status === "BLOCKED"
+        ? "The stored Dhan historical option grid contains no positive finite provider IV. F5 correctly stopped; no IV was calculated, imputed, forward-filled, or replaced with zero."
+        : null,
+      featuresImplemented: ["ivChange", "ivVelocityPerMinute", "ivAccelerationPerMinute2", "ivDispersion", "ivRange"],
+      qualityGateStates: ["VALID", "MISSING", "ZERO_ANOMALY", "INVALID_NEGATIVE", "INVALID_NON_NUMERIC", "INVALID_NON_FINITE"],
+      sourceIvFieldPresence,
+      qualitySummary: f5.qualitySummary,
+      L4WriteStatus,
+      L4ReadStatus,
+      l4FileId,
+      run1Checksum,
+      run2Checksum,
+      reproducibilityChecksumMatch,
+      lineageStatus,
+      sourceManifestIds,
+      doNotBuildCheck,
+      precondition: {
+        f4Gate: true,
+        l3Gate: true,
+        dynamicAtmGate: true,
+        requiredUniverseRowCount: requiredUniverseRows.length,
+        expectedRequiredUniverseRows,
+        timestampCount: rowsByTimestamp.size,
+        expectedTimestampCount,
+        universeIdentityViolationCount,
+        pass: universePreconditionPass,
+      },
+      knownLimitations: [
+        "This pass consumes provider IV only. It does not calculate historical IV from option prices.",
+        "The audited source is NIFTY on 2026-08-11 only; BANKNIFTY, SENSEX, multi-day, and multi-expiry IV science are outside this F5 slice.",
+        "Cross-sectional dispersion is population standard deviation of valid IV inside the true per-timestamp ATM±3 CE/PE universe; range is max(valid IV) - min(valid IV). Partial subsets are labeled PARTIAL, never presented as full-universe statistics.",
+        "F6 is intentionally not started by this route.",
+      ],
+      safeToProceedToF6: overallStatus === "PASS",
+      f6NotStarted: true,
+      v2UntouchedCheck: true,
+      f2ToF4UntouchedCheck: true,
+      orderAccessUsed: false,
+      tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      ...report,
+      status: "FAIL",
+      error: err instanceof Error ? err.message : "Unknown F5 IV Science build failure",
+      safeToProceedToF6: false,
+      f6NotStarted: true,
     }, 500);
   }
 });

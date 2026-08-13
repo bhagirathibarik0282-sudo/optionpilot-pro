@@ -1,4 +1,4 @@
-// Unit tests for outcome-engine.ts — run with: npx tsx test/outcome-engine.test.ts
+// Unit tests for outcome-engine.ts — run with: npm test
 // Uses Node's built-in test runner (node:test) — no new dependency added.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -172,4 +172,3 @@ test("eviction rule: falls back to oldest PENDING only if nothing is terminal ye
   const records = [{ status: "PENDING" }, { status: "PENDING" }];
   assert.equal(pickEvictionIndex(records), 0);
 });
-

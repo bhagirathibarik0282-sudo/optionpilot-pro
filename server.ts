@@ -22997,6 +22997,128 @@ app.get("/api/audit/dhan-midcpnifty-spot-intraday-check", async (c) => {
   }
 });
 
+// ============================================================================
+// V3-D Phase 2 (2026-08-13): INDIA VIX spot intraday sanity check.
+// Dhan's own scrip-master CSV (SEM_INSTRUMENT_NAME=INDEX, SEM_EXM_EXCH_ID=NSE,
+// SEM_TRADING_SYMBOL="INDIA VIX", SEM_CUSTOM_SYMBOL="India VIX"), resolved via
+// /api/audit/dhan-instrument-master?symbol=INDIA VIX — securityId=21, NOT
+// guessed. This probe adds a live price sanity check on top, same discipline
+// as the FINNIFTY/MIDCPNIFTY candidate checks, before promoting securityId=21
+// to a confirmed DHAN_UNDERLYING_MAP / M4 entry.
+// ============================================================================
+
+app.get("/api/audit/dhan-indiavix-spot-intraday-check", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    return c.json({
+      architectureRole: "V3D_INDIAVIX_SPOT_HISTORY_CHECK",
+      generatedAt, symbol: "INDIA VIX",
+      status: "ERROR", error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+    }, 503);
+  }
+
+  const requestBodyObj = {
+    securityId: "21",
+    exchangeSegment: "IDX_I",
+    instrument: "INDEX",
+    interval: "1",
+    oi: false,
+    fromDate: "2026-08-12 09:15:00",
+    toDate: "2026-08-12 15:30:00",
+  };
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/intraday", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: JSON.stringify(requestBodyObj),
+    });
+
+    const httpStatus = res.status;
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    if (!res.ok || !payload || typeof payload !== "object") {
+      return c.json({
+        architectureRole: "V3D_INDIAVIX_SPOT_HISTORY_CHECK",
+        generatedAt, symbol: "INDIA VIX",
+        sanitizedRequestBody: requestBodyObj,
+        httpStatus,
+        rootCauseStatus: "ERROR",
+        providerError: payload && typeof payload === "object" ? {
+          errorType: payload.errorType ?? null,
+          errorCode: payload.errorCode ?? null,
+          errorMessage: payload.errorMessage ?? null,
+        } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `HTTP ${httpStatus}` },
+        rawSnippet: raw.slice(0, 500),
+        readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+      }, 200);
+    }
+
+    const rawTopLevelKeys = Object.keys(payload);
+    const arrLen = (v: any) => (Array.isArray(v) ? v.length : 0);
+    const counts: Record<string, number> = {};
+    for (const k of rawTopLevelKeys) counts[k] = arrLen(payload[k]);
+
+    const ohlcvFields = ["open", "high", "low", "close", "volume", "timestamp"];
+    const allNonEmpty = ohlcvFields.every((f) => (counts[f] ?? 0) > 0);
+    const lastClose = Array.isArray(payload.close) && payload.close.length > 0 ? payload.close[payload.close.length - 1] : null;
+
+    // India VIX historically trades roughly 8-35 in normal-to-elevated
+    // conditions (can spike higher in genuine market stress). Anything
+    // outside a generous 5-60 band means securityId=21 likely does NOT
+    // map to India VIX and should not be trusted.
+    let sanityCheck: string;
+    if (typeof lastClose === "number") {
+      sanityCheck = lastClose > 5 && lastClose < 60
+        ? "PLAUSIBLE_RANGE_FOR_INDIA_VIX"
+        : "IMPLAUSIBLE_RANGE — securityId=21 likely does NOT map to INDIA VIX, do not trust it";
+    } else {
+      sanityCheck = "NO_NUMERIC_CLOSE_VALUE_TO_CHECK";
+    }
+
+    return c.json({
+      architectureRole: "V3D_INDIAVIX_SPOT_HISTORY_CHECK",
+      generatedAt, symbol: "INDIA VIX",
+      sanitizedRequestBody: requestBodyObj,
+      httpStatus,
+      rawResponseKeys: rawTopLevelKeys,
+      rawResponseArrayLengths: counts,
+      ohlcvAllNonEmpty: allNonEmpty,
+      lastCloseSample: lastClose,
+      sanityCheck,
+      rootCauseStatus: allNonEmpty ? "PASS" : "PARTIAL",
+      limitations: [
+        "Single trading day (2026-08-12 09:15-15:30 IST) only.",
+        "securityId=21 came from Dhan's own scrip-master CSV INDEX row (not guessed), but is still pending this sanity check before being promoted to a confirmed DHAN_UNDERLYING_MAP/M4 entry.",
+      ],
+      readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      architectureRole: "V3D_INDIAVIX_SPOT_HISTORY_CHECK",
+      generatedAt, symbol: "INDIA VIX",
+      status: "ERROR",
+      error: err instanceof Error ? err.message : "Unknown INDIA VIX spot intraday request failure",
+      readOnlyMode: true, tokenExposed: false,
+    }, 500);
+  }
+});
+
 
 // ============================================================================
 // V3_STORE_BRAIN_STEP_1 — GOOGLE_DRIVE_L0_L1_L2_WRITE_READ_PROOF

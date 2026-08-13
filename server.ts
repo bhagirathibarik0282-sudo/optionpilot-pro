@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
-import { createHash, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { createOutcomeRecord, evaluateOutcome, computeOutcomeStats, type OutcomeRecord, type SnapshotForOutcome, type Side as OutcomeSide, type IndexSymbol as OutcomeIndexSymbol } from "./outcome-engine.js";
@@ -17343,6 +17343,7 @@ function loadDriveSessionFromDisk(): void {
 }
 
 loadDriveSessionFromDisk();
+loadDhanSessionFromDisk();
 
 interface DriveArchiveRecord {
   date: string;
@@ -18834,6 +18835,204 @@ app.get("/api/kite/status", (c) => {
 
 
 // ============================================================================
+// DHAN TOTP-BASED AUTO ACCESS TOKEN REFRESH
+//
+// Purpose: eliminate the daily manual "paste DHAN_ACCESS_TOKEN into Railway"
+// step. Dhan access tokens are hard-capped at 24h validity by exchange/SEBI
+// rule (not a Dhan-specific limit, so this cannot be made longer-lived).
+// Instead, this computes a fresh RFC 6238 TOTP code from DHAN_TOTP_SECRET
+// on demand and calls Dhan's documented generateAccessToken endpoint
+// (https://auth.dhan.co/app/generateAccessToken) with DHAN_CLIENT_ID +
+// DHAN_PIN + totp. No API-key/secret OAuth consent flow needed for this
+// (individual-trader) method.
+//
+// The resulting access token is encrypted at rest (AES-256-GCM, reusing the
+// same encryptToken/decryptToken helpers as the Drive integration) and
+// persisted to the Railway volume so it survives restarts. In-memory value
+// is reused until ~5 minutes before its reported expiryTime, at which point
+// it is silently refreshed before the next Dhan API call.
+//
+// Requires three Railway variables: DHAN_CLIENT_ID (already in use),
+// DHAN_PIN (6-digit numeric), DHAN_TOTP_SECRET (base32 secret from Dhan's
+// Setup TOTP screen). If any are missing, getValidDhanAccessToken() falls
+// back to the legacy static DHAN_ACCESS_TOKEN env var so nothing breaks
+// mid-migration.
+// ============================================================================
+
+interface DhanSessionState {
+  accessTokenEncrypted: string | null;
+  expiryTime: string | null; // ISO timestamp as returned by Dhan
+  lastRefreshedAt: string | null;
+  lastError: string | null;
+}
+
+const dhanSession: DhanSessionState = {
+  accessTokenEncrypted: null,
+  expiryTime: null,
+  lastRefreshedAt: null,
+  lastError: null,
+};
+
+function dhanAuthFilePath(): string {
+  return joinPath(driveAuthDataDir(), "dhan-session.json");
+}
+
+function persistDhanSession(): void {
+  try {
+    const dir = driveAuthDataDir();
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(dhanAuthFilePath(), JSON.stringify(dhanSession), { mode: 0o600 });
+  } catch (err) {
+    console.error("[DHAN-AUTH] Failed to persist session to disk:", err instanceof Error ? err.message : err);
+  }
+}
+
+function loadDhanSessionFromDisk(): void {
+  try {
+    const filePath = dhanAuthFilePath();
+    if (!existsSync(filePath)) {
+      console.log(`[DHAN-AUTH] No persisted session at ${filePath} (first boot or not yet refreshed).`);
+      return;
+    }
+    const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+    if (parsed && parsed.accessTokenEncrypted) {
+      dhanSession.accessTokenEncrypted = parsed.accessTokenEncrypted;
+      dhanSession.expiryTime = parsed.expiryTime || null;
+      dhanSession.lastRefreshedAt = parsed.lastRefreshedAt || null;
+      console.log(`[DHAN-AUTH] Restored Dhan session from disk (expires ${parsed.expiryTime || "unknown"}).`);
+    }
+  } catch (err) {
+    console.error("[DHAN-AUTH] Failed to load persisted session:", err instanceof Error ? err.message : err);
+  }
+}
+
+// RFC 4648 base32 decode (no padding required) — Dhan's TOTP secret comes
+// base32-encoded, same as any standard authenticator-app secret.
+function base32Decode(input: string): Buffer {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = input.toUpperCase().replace(/[^A-Z2-7]/g, "");
+  let bits = "";
+  for (const char of clean) {
+    const val = alphabet.indexOf(char);
+    if (val === -1) continue;
+    bits += val.toString(2).padStart(5, "0");
+  }
+  const bytes: number[] = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  }
+  return Buffer.from(bytes);
+}
+
+// RFC 6238 TOTP — 30s step, 6 digits, HMAC-SHA1 (the universal default used
+// by every authenticator app and by Dhan's own TOTP setup screen).
+function generateTotp(secretBase32: string, stepSeconds = 30, digits = 6): string {
+  const key = base32Decode(secretBase32);
+  const counter = Math.floor(Date.now() / 1000 / stepSeconds);
+  const counterBuf = Buffer.alloc(8);
+  counterBuf.writeBigUInt64BE(BigInt(counter));
+  const hmac = createHmac("sha1", key).update(counterBuf).digest();
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const binCode =
+    ((hmac[offset] & 0x7f) << 24) |
+    ((hmac[offset + 1] & 0xff) << 16) |
+    ((hmac[offset + 2] & 0xff) << 8) |
+    (hmac[offset + 3] & 0xff);
+  const code = (binCode % 10 ** digits).toString().padStart(digits, "0");
+  return code;
+}
+
+async function refreshDhanAccessToken(): Promise<string | null> {
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  const pin = process.env.DHAN_PIN?.trim() || "";
+  const totpSecret = process.env.DHAN_TOTP_SECRET?.trim() || "";
+  if (!clientId || !pin || !totpSecret) {
+    dhanSession.lastError = "DHAN_CLIENT_ID / DHAN_PIN / DHAN_TOTP_SECRET not fully configured for auto-refresh.";
+    return null;
+  }
+
+  try {
+    const totp = generateTotp(totpSecret);
+    const params = new URLSearchParams({ dhanClientId: clientId, pin, totp });
+    const res = await fetch(`https://auth.dhan.co/app/generateAccessToken?${params.toString()}`, {
+      method: "POST",
+    });
+    const json: any = await res.json().catch(() => null);
+    if (!res.ok || !json || !json.accessToken) {
+      dhanSession.lastError = json?.errorMessage || `Dhan generateAccessToken failed (HTTP ${res.status})`;
+      console.error("[DHAN-AUTH] Auto-refresh failed:", dhanSession.lastError);
+      return null;
+    }
+    dhanSession.accessTokenEncrypted = encryptToken(json.accessToken);
+    dhanSession.expiryTime = json.expiryTime || null;
+    dhanSession.lastRefreshedAt = new Date().toISOString();
+    dhanSession.lastError = null;
+    persistDhanSession();
+    console.log(`[DHAN-AUTH] Access token auto-refreshed via TOTP, expires ${dhanSession.expiryTime}.`);
+    return json.accessToken;
+  } catch (err) {
+    dhanSession.lastError = err instanceof Error ? err.message : "Unknown Dhan auto-refresh error";
+    console.error("[DHAN-AUTH] Auto-refresh error:", dhanSession.lastError);
+    return null;
+  }
+}
+
+// Drop-in replacement for `process.env.DHAN_ACCESS_TOKEN?.trim() || ""`.
+// Returns a live, auto-refreshed token when TOTP auto-refresh is configured;
+// otherwise falls back to the legacy static env var so existing setups keep
+// working unchanged during migration.
+async function getValidDhanAccessToken(): Promise<string | null> {
+  const bufferMs = 5 * 60 * 1000; // refresh 5 minutes before reported expiry
+  if (dhanSession.accessTokenEncrypted && dhanSession.expiryTime) {
+    const expiresAt = new Date(dhanSession.expiryTime).getTime();
+    if (!Number.isNaN(expiresAt) && Date.now() < expiresAt - bufferMs) {
+      const decrypted = decryptToken(dhanSession.accessTokenEncrypted);
+      if (decrypted) return decrypted;
+    }
+  }
+  const refreshed = await refreshDhanAccessToken();
+  if (refreshed) return refreshed;
+  // Fallback: legacy static token (pre-automation setups, or if auto-refresh
+  // is temporarily failing but a manually-pasted token is still valid).
+  const legacy = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  return legacy || null;
+}
+
+// Config-presence check used by startup gates and status displays. True if
+// EITHER the legacy static token is set, OR the full TOTP auto-refresh
+// trio (client id + pin + totp secret) is set — so nothing that used to
+// gate on "DHAN_ACCESS_TOKEN present" silently stops working after
+// migrating to auto-refresh (where that legacy var is no longer set).
+function isDhanConfigured(): boolean {
+  const hasLegacyToken = Boolean(process.env.DHAN_ACCESS_TOKEN?.trim());
+  const hasClientId = Boolean(process.env.DHAN_CLIENT_ID?.trim());
+  const hasAutoRefresh = Boolean(
+    process.env.DHAN_CLIENT_ID?.trim() && process.env.DHAN_PIN?.trim() && process.env.DHAN_TOTP_SECRET?.trim()
+  );
+  return hasClientId && (hasLegacyToken || hasAutoRefresh);
+}
+
+app.get("/api/audit/dhan-auto-refresh-status", (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+  return c.json({
+    architectureRole: "DHAN_TOTP_AUTO_REFRESH",
+    configured: Boolean(
+      process.env.DHAN_CLIENT_ID?.trim() && process.env.DHAN_PIN?.trim() && process.env.DHAN_TOTP_SECRET?.trim()
+    ),
+    hasStoredToken: Boolean(dhanSession.accessTokenEncrypted),
+    expiryTime: dhanSession.expiryTime,
+    lastRefreshedAt: dhanSession.lastRefreshedAt,
+    lastError: dhanSession.lastError,
+    legacyStaticTokenPresent: Boolean(process.env.DHAN_ACCESS_TOKEN?.trim()),
+    tokenExposed: false,
+  }, 200);
+});
+
+// ============================================================================
 // DHAN MIGRATION — D1 AUTHENTICATION HEALTH (READ-ONLY)
 // Purpose: verify Railway-held Dhan credentials and Data API entitlement
 // without exposing secrets or enabling any trading/order action.
@@ -18843,7 +19042,7 @@ app.get("/api/kite/status", (c) => {
 type DhanAuthHealthStatus = "PASS" | "FAIL" | "NOT_CONFIGURED";
 
 app.get("/api/dhan/health", async (c) => {
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const configuredClientId = process.env.DHAN_CLIENT_ID?.trim() || "";
 
   if (!accessToken || !configuredClientId) {
@@ -19032,7 +19231,7 @@ function sleep(ms: number): Promise<void> {
 
 app.get("/api/dhan/contracts", async (c) => {
   const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
 
   if (!accessToken || !clientId) {
@@ -19271,7 +19470,7 @@ app.get("/api/dhan/live", async (c) => {
   const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
   const rangeParam = parseInt(c.req.query("range") || "3", 10);
   const range = Number.isFinite(rangeParam) && rangeParam > 0 && rangeParam <= 10 ? rangeParam : 3;
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
 
   if (!accessToken || !clientId) {
@@ -19672,7 +19871,7 @@ app.get("/api/dhan/normalized", async (c) => {
   const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
   const rangeParam = parseInt(c.req.query("range") || "3", 10);
   const range = Number.isFinite(rangeParam) && rangeParam > 0 && rangeParam <= 10 ? rangeParam : 3;
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
 
   if (!accessToken || !clientId) {
@@ -19923,7 +20122,7 @@ function pctDiff(a: number, b: number): number | null {
 
 app.get("/api/dhan/cross-validate", async (c) => {
   const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
 
   if (!accessToken || !clientId) {
@@ -20385,7 +20584,7 @@ const DHAN_M1_PRODUCTION_STALE_MS = 6 * 60 * 1000; // a snapshot older than 2 cy
 // new/duplicate Dhan Option Chain call beyond what D3/D4/D5/shadow already
 // share when their TTL windows overlap.
 async function dhanM1BuildProductionSnapshot(symbol: "NIFTY" | "BANKNIFTY"): Promise<DhanM1Snapshot | null> {
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) return null;
   const mapping = DHAN_UNDERLYING_MAP[symbol];
@@ -20798,7 +20997,7 @@ app.get("/api/v2/d6/full-provider-audit", async (c) => {
   });
 });
 
-if (process.env.NODE_ENV !== "test" && process.env.DHAN_ACCESS_TOKEN && process.env.DHAN_CLIENT_ID) {
+if (process.env.NODE_ENV !== "test" && isDhanConfigured()) {
   dhanM1ProductionRefreshCycle().catch((err) => console.error("[DHAN_M1] initial refresh failed:", err));
   setInterval(() => {
     dhanM1ProductionRefreshCycle().catch((err) => console.error("[DHAN_M1] scheduled refresh failed:", err));
@@ -20987,7 +21186,7 @@ function buildV2PremiumCompositionHistory(symbol: V2PremiumSymbol, maxSnapshots 
 
 app.get("/api/v2/d6/m1-audit", async (c) => {
   const symbolParam = (c.req.query("symbol") || "").trim().toUpperCase();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
 
   if (!accessToken || !clientId) {
@@ -21380,7 +21579,7 @@ async function dhanAuditSpotHistory(
   isUnofficialCandidate: boolean
 ) {
   const generatedAt = new Date().toISOString();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) {
     return {
@@ -21593,7 +21792,7 @@ app.get("/api/audit/dhan-expired-options-check", async (c) => {
     }, 400);
   }
 
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) {
     return c.json({
@@ -21928,7 +22127,7 @@ app.get("/api/audit/dhan-futures-check", async (c) => {
       }, 200);
     }
 
-    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const accessToken = (await getValidDhanAccessToken()) || "";
     const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
     if (!accessToken || !clientId) {
       return c.json({
@@ -22157,7 +22356,7 @@ app.get("/api/audit/dhan-bug02-iv-check", async (c) => {
     }, 400);
   }
 
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) {
     return c.json({
@@ -22560,7 +22759,7 @@ const v3RealDhanAdapter: V3AuditAdapter = {
     // futures research uses intraday going forward, per hard_rules
     // ("Do not use daily endpoint for minute V3 research").
     const mapping = (DHAN_UNDERLYING_MAP as Record<string, { underlyingScrip: number; underlyingSeg: string }>)[symbol];
-    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const accessToken = (await getValidDhanAccessToken()) || "";
     const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
     if (!accessToken || !clientId) return { ok: false, identityOk: false, errors: ["DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing"] };
 
@@ -22634,7 +22833,7 @@ const v3RealDhanAdapter: V3AuditAdapter = {
 
   async fetchExpiredOptionProbe(symbol) {
     const mapping = (DHAN_UNDERLYING_MAP as Record<string, { underlyingScrip: number; underlyingSeg: string }>)[symbol];
-    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const accessToken = (await getValidDhanAccessToken()) || "";
     const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
     if (!mapping) return { ok: false, errors: ["Symbol not in DHAN_UNDERLYING_MAP"] };
     if (!accessToken || !clientId) return { ok: false, errors: ["DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing"] };
@@ -22819,7 +23018,7 @@ app.get("/api/audit/dhan-bug01b-intraday-futures-check", async (c) => {
     const tradingSymbol = nearest["SEM_TRADING_SYMBOL"];
     const expiryDate = nearest["SEM_EXPIRY_DATE"];
 
-    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const accessToken = (await getValidDhanAccessToken()) || "";
     const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
     if (!accessToken || !clientId) {
       return c.json({
@@ -22964,7 +23163,7 @@ app.get("/api/audit/dhan-finnifty-spot-intraday-check", async (c) => {
   }
 
   const generatedAt = new Date().toISOString();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) {
     return c.json({
@@ -23103,7 +23302,7 @@ app.get("/api/audit/dhan-midcpnifty-spot-intraday-check", async (c) => {
   }
 
   const generatedAt = new Date().toISOString();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) {
     return c.json({
@@ -23223,7 +23422,7 @@ app.get("/api/audit/dhan-indiavix-spot-intraday-check", async (c) => {
   }
 
   const generatedAt = new Date().toISOString();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) {
     return c.json({
@@ -23343,7 +23542,7 @@ app.get("/api/audit/dhan-indiavix-quote-check", async (c) => {
   }
 
   const generatedAt = new Date().toISOString();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) {
     return c.json({
@@ -23511,7 +23710,7 @@ app.get("/api/audit/v3-store-brain-proof", async (c) => {
     // from Dhan (same call pattern verified earlier this session) --
     // no bulk fetch, one small date window.
     // ------------------------------------------------------------------
-    const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+    const accessToken = (await getValidDhanAccessToken()) || "";
     const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
     if (!accessToken || !clientId) {
       return c.json({ ...report, status: "FAIL", folderCreationStatus, error: "DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing", safeToStartStep2: false }, 200);
@@ -23935,7 +24134,7 @@ app.get("/api/audit/v3-store-brain-l3-proof", async (c) => {
   };
 
   const token = await getValidDriveAccessToken();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!token) {
     return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected.", safeToStartL4: false }, 200);
@@ -24280,7 +24479,7 @@ app.get("/api/audit/v3-store-brain-l4-proof", async (c) => {
   };
 
   const token = await getValidDriveAccessToken();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!token) {
     return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected.", safeToProceed: false }, 200);
@@ -24924,7 +25123,7 @@ app.get("/api/audit/v3d-futures-oi-final-validation-proof", async (c) => {
   };
 
   const token = await getValidDriveAccessToken();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!token) {
     return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected.", safeToProceed: false }, 200);
@@ -25518,7 +25717,7 @@ app.get("/api/audit/v3d-option-data-expansion-proof", async (c) => {
   };
 
   const token = await getValidDriveAccessToken();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!token) return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected.", safeToBuildF2: false, safeToBuildF3: false, safeToBuildF4: false }, 200);
   if (!accessToken || !clientId) return c.json({ ...report, status: "FAIL", error: "DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing.", safeToBuildF2: false, safeToBuildF3: false, safeToBuildF4: false }, 200);
@@ -26080,7 +26279,7 @@ app.get("/api/audit/v3d-dynamic-atm-coverage-repair-proof", async (c) => {
   };
 
   const token = await getValidDriveAccessToken();
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!token) return c.json({ ...report, status: "FAIL", error: "Google Drive is not connected." }, 200);
   if (!accessToken || !clientId) return c.json({ ...report, status: "FAIL", error: "DHAN_ACCESS_TOKEN/DHAN_CLIENT_ID missing." }, 200);
@@ -28170,7 +28369,7 @@ app.get("/api/audit/v3d-deduplicate-option-grid-proof", async (c) => {
 // ============================================================================
 
 async function tradeLabDhanGetExpiryList(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"): Promise<string[] | null> {
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) return null;
   const mapping = DHAN_UNDERLYING_MAP[symbol];
@@ -28216,7 +28415,7 @@ interface TradeLabDhanMultiExpirySnapshot {
 }
 
 async function buildTradeLabDhanMultiExpirySnapshot(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", port: string): Promise<TradeLabDhanMultiExpirySnapshot> {
-  const dhanConfigured = !!(process.env.DHAN_ACCESS_TOKEN?.trim() && process.env.DHAN_CLIENT_ID?.trim());
+  const dhanConfigured = isDhanConfigured();
   if (!dhanConfigured) {
     return { status: "NOT_CONFIGURED", provenance: "DHAN", symbol, generatedAt: new Date().toISOString(), availableExpiryCount: 0, current: null, next: null };
   }
@@ -28418,7 +28617,7 @@ async function tradeLabDhanMultiExpiryRefreshCycle() {
   }
 }
 
-if (process.env.NODE_ENV !== "test" && process.env.DHAN_ACCESS_TOKEN && process.env.DHAN_CLIENT_ID) {
+if (process.env.NODE_ENV !== "test" && isDhanConfigured()) {
   tradeLabDhanMultiExpiryRefreshCycle().catch((err) => console.error("[TRADELAB_DHAN] initial multi-expiry refresh failed:", err));
   setInterval(() => {
     tradeLabDhanMultiExpiryRefreshCycle().catch((err) => console.error("[TRADELAB_DHAN] scheduled multi-expiry refresh failed:", err));
@@ -28663,7 +28862,7 @@ function buildTradeLabDhanM2(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
 const DHAN_INDIA_VIX_SECURITY_ID = 21;
 
 async function buildTradeLabDhanM4() {
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) {
     return { module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
@@ -28724,7 +28923,7 @@ async function dhanFetchDailyLevels(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"): P
   const cached = DHAN_DAILY_LEVELS_CACHE.get(symbol);
   if (cached && cached.dateKey === dateKey) return cached.result;
 
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) return { status: "NOT_CONFIGURED", pdcClose: null, pdh: null, pdl: null };
 
@@ -28921,7 +29120,7 @@ async function dhanFetchDailyCloses(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"): P
     historicalFetchStatus: "ERROR",
   };
 
-  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const accessToken = (await getValidDhanAccessToken()) || "";
   const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   if (!accessToken || !clientId) {
     DHAN_RV_DAILY_CACHE.set(symbol, { dateKey: tradingDate, result: fallback });
@@ -29187,7 +29386,7 @@ app.get("/api/tradelab", async (c) => {
   const session = getSession(c);
   if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
 
-  const dhanConfigured = !!(process.env.DHAN_ACCESS_TOKEN?.trim() && process.env.DHAN_CLIENT_ID?.trim());
+  const dhanConfigured = isDhanConfigured();
 
   // Fetch existing M10/M11/M12 outputs directly (same functions the
   // existing dashboard tabs already use — no duplicate logic).

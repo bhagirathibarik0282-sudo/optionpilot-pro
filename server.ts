@@ -9057,6 +9057,20 @@ app.get("/", (c) => {
       }
       html += tlCard('7c. Market Regime (M10)', m10DhanHtml);
 
+      let m5DhanHtml = tlProvenanceBadge(d.m5RealizedVsImpliedDhan);
+      if (d.m5RealizedVsImpliedDhan && d.m5RealizedVsImpliedDhan.status === 'OK') {
+        const m5d = d.m5RealizedVsImpliedDhan;
+        m5DhanHtml += tlRow('ATM Mean IV', m5d.atmMeanIv != null ? m5d.atmMeanIv.toFixed(2) + '%' : '\u2014', null);
+        m5DhanHtml += tlRow('RV 20d', m5d.rv20d != null ? m5d.rv20d.toFixed(2) + '%' : '\u2014', null);
+        m5DhanHtml += tlRow('IV \u2212 RV20', m5d.ivMinusRv20 != null ? (m5d.ivMinusRv20 >= 0 ? '+' : '') + m5d.ivMinusRv20.toFixed(2) : '\u2014', null);
+        m5DhanHtml += tlRow('State', String(m5d.state || '\u2014'), null);
+        m5DhanHtml += tlRow('RV trend', String(m5d.rvTrend || '\u2014'), null);
+        m5DhanHtml += tlRow('Data quality', m5d.dataQuality, tlQualityColor(m5d.dataQuality));
+      } else {
+        m5DhanHtml += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Unavailable this snapshot.</div>';
+      }
+      html += tlCard('7d. Realized vs Implied (M5)', m5DhanHtml);
+
       let m8Html = tlProvenanceBadge(d.m8RolloverMigrationDhan);
       if (d.m8RolloverMigrationDhan && d.m8RolloverMigrationDhan.status === 'OK') {
         m8Html += tlRow('State', String(d.m8RolloverMigrationDhan.state || (d.m8RolloverMigrationDhan.dataQuality === 'OK' ? 'COMPARABLE' : '\u2014')), null);
@@ -28243,6 +28257,124 @@ async function buildTradeLabDhanM10(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
   };
 }
 
+// ===== Step 3.2 (2026-08-13) — Dhan daily closes for Realized Vol =====
+// Dhan version of v2LoadRvHistoryOncePerDay. Same /v2/charts/historical
+// endpoint dhanFetchDailyLevels already uses (proven for NIFTY/BANKNIFTY/
+// SENSEX), just a longer 60-day range so v2AnnualizedRealizedVol (generic,
+// takes a plain closes[] array, no Kite dependency) has enough closes for
+// the 20-day window. Cached once per symbol per calendar day.
+const DHAN_RV_DAILY_CACHE = new Map<string, { dateKey: string; result: V2RvHistoryMetrics }>();
+
+async function dhanFetchDailyCloses(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"): Promise<V2RvHistoryMetrics> {
+  const tradingDate = indiaDate();
+  const cached = DHAN_RV_DAILY_CACHE.get(symbol);
+  if (cached && cached.dateKey === tradingDate) return cached.result;
+
+  const historyFrom = indiaDate(-60);
+  const historyTo = tradingDate;
+  const fallback: V2RvHistoryMetrics = {
+    tradingDate, symbol, historyFrom, historyTo, closesUsed: 0,
+    rv5d: null, rv10d: null, rv20d: null, rvTrend: "INSUFFICIENT_DATA",
+    historicalFetchStatus: "ERROR",
+  };
+
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    DHAN_RV_DAILY_CACHE.set(symbol, { dateKey: tradingDate, result: fallback });
+    return fallback;
+  }
+  const mapping = DHAN_UNDERLYING_MAP[symbol];
+  if (!mapping) {
+    DHAN_RV_DAILY_CACHE.set(symbol, { dateKey: tradingDate, result: fallback });
+    return fallback;
+  }
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/historical", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: JSON.stringify({
+        securityId: String(mapping.underlyingScrip),
+        exchangeSegment: mapping.underlyingSeg,
+        instrument: "INDEX",
+        expiryCode: 0,
+        oi: false,
+        fromDate: historyFrom,
+        toDate: historyTo,
+      }),
+    });
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+    const closeArr = Array.isArray(payload?.close) ? payload.close : null;
+    if (!res.ok || !closeArr || closeArr.length === 0) {
+      console.error(`[DHAN M5 RV FAIL] symbol=${symbol} httpStatus=${res.status} bodySnippet=${raw.slice(0, 300)}`);
+      DHAN_RV_DAILY_CACHE.set(symbol, { dateKey: tradingDate, result: fallback });
+      return fallback;
+    }
+    const closes = closeArr.filter((v: unknown) => typeof v === "number" && Number.isFinite(v) && v > 0) as number[];
+    const rv5d = v2AnnualizedRealizedVol(closes, 5);
+    const rv10d = v2AnnualizedRealizedVol(closes, 10);
+    const rv20d = v2AnnualizedRealizedVol(closes, 20);
+    const result: V2RvHistoryMetrics = {
+      tradingDate, symbol, historyFrom, historyTo, closesUsed: closes.length,
+      rv5d, rv10d, rv20d, rvTrend: v2ClassifyRvTrend(rv5d, rv10d, rv20d),
+      historicalFetchStatus: rv20d != null ? "OK" : "INSUFFICIENT",
+    };
+    DHAN_RV_DAILY_CACHE.set(symbol, { dateKey: tradingDate, result });
+    return result;
+  } catch (err) {
+    console.error(`[DHAN M5 RV FAIL] symbol=${symbol} exception=${err instanceof Error ? err.message : "Unknown error"}`);
+    DHAN_RV_DAILY_CACHE.set(symbol, { dateKey: tradingDate, result: fallback });
+    return fallback;
+  }
+}
+
+// ===== Step 3.2 — M5 (Dhan) — Realized vs Implied =====
+// Reuses tradeLabDhanIvSkewSnapshot (already computes ATM CE/PE IV from the
+// SAME Dhan multi-expiry snapshot M2 already uses — no new option-chain
+// fetch) for the IV side, dhanFetchDailyCloses (above) for the RV side, and
+// the generic v2ClassifyIvVsRv (Kite-independent) to classify. Mirrors
+// buildV2RealizedVsImplied's shape/fields so the frontend card pattern is
+// familiar.
+async function buildTradeLabDhanM5(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
+  const hist = TRADELAB_DHAN_MULTIEXPIRY_HISTORY.get(symbol) || [];
+  const latest = hist[hist.length - 1];
+  const latestED = latest?.current ? tradeLabDhanNormalizedToExpiryData(latest.current) : null;
+  const ivSnap = latestED ? tradeLabDhanIvSkewSnapshot(latestED) : null;
+  const atmCeIv = ivSnap?.atmCeIv ?? null;
+  const atmPeIv = ivSnap?.atmPeIv ?? null;
+  const ivs = [atmCeIv, atmPeIv].filter((v): v is number => v != null);
+  const atmMeanIv = ivs.length ? v2Average(ivs) : null;
+
+  const rvHist = await dhanFetchDailyCloses(symbol);
+  const state = v2ClassifyIvVsRv(atmMeanIv, rvHist.rv20d);
+  const ivMinusRv20 = atmMeanIv != null && rvHist.rv20d != null ? atmMeanIv - rvHist.rv20d : null;
+  const ivToRv20Ratio = atmMeanIv != null && rvHist.rv20d != null && rvHist.rv20d > 0 ? atmMeanIv / rvHist.rv20d : null;
+  const dataQuality: V2DataQuality =
+    rvHist.historicalFetchStatus !== "OK" || atmMeanIv == null ? "INSUFFICIENT" :
+    atmCeIv != null && atmPeIv != null ? "OK" : "PARTIAL";
+
+  return {
+    module: "M5_REALIZED_VS_IMPLIED", provenance: "DHAN", status: "OK",
+    ...rvHist,
+    generatedAt: new Date().toISOString(),
+    atmStrike: ivSnap?.atmStrike ?? null,
+    atmCeIv, atmPeIv, atmMeanIv,
+    ivSource: "MODEL_COMPUTED_FROM_DHAN_OPTIONCHAIN_LTP",
+    ivMinusRv20, ivToRv20Ratio, state, dataQuality,
+    directionalBias: "NONE", scoringImpact: "NONE",
+    source: "Dhan /v2/charts/historical daily closes (cached once/day) + Dhan option-chain ATM IV (shared with M2)",
+    interpretationGuard: "IV-vs-RV measures volatility pricing versus recently realized movement. It is not a directional CE/PE or BUY/SELL signal — same guard as the Kite-based M5.",
+  };
+}
+
 function buildGreekEngine(dhanNormalized: any) {
   if (!dhanNormalized || dhanNormalized.status !== "PASS" || !Array.isArray(dhanNormalized.normalized)) {
     return {
@@ -28464,6 +28596,7 @@ app.get("/api/tradelab", async (c) => {
   let m8Dhan: any = { module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m9Dhan: any = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m10Dhan: any = { module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  let m5Dhan: any = { module: "M5_REALIZED_VS_IMPLIED", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   if (dhanConfigured) {
     try {
       m2Dhan = buildTradeLabDhanM2(symbol);
@@ -28472,6 +28605,7 @@ app.get("/api/tradelab", async (c) => {
       m8Dhan = buildTradeLabDhanM8(symbol);
       m9Dhan = await buildTradeLabDhanM9(symbol, port);
       m10Dhan = await buildTradeLabDhanM10(symbol);
+      m5Dhan = await buildTradeLabDhanM5(symbol);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
       m2Dhan = { module: "M2_IV_SKEW", provenance: "DHAN", status: "FAIL", error: errMsg };
@@ -28480,6 +28614,7 @@ app.get("/api/tradelab", async (c) => {
       m8Dhan = { module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "FAIL", error: errMsg };
       m9Dhan = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "FAIL", error: errMsg };
       m10Dhan = { module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "FAIL", error: errMsg };
+      m5Dhan = { module: "M5_REALIZED_VS_IMPLIED", provenance: "DHAN", status: "FAIL", error: errMsg };
     }
   }
 
@@ -28501,8 +28636,9 @@ app.get("/api/tradelab", async (c) => {
     m8RolloverMigrationDhan: m8Dhan,
     m9MultiExpiryAlignmentDhan: m9Dhan,
     m10MarketRegimeDhan: m10Dhan,
+    m5RealizedVsImpliedDhan: m5Dhan,
     m1m6m7Provenance,
-    note: "M2/M3/M4/M8/M9/M10 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M5/M11/M12 unchanged, still Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M5/M11/M12 still need it — known, not-yet-migrated, tracked separately (Phase 3, Step 3.1 = M10 only; M5/M11/M12 remain).",
+    note: "M2/M3/M4/M5/M8/M9/M10 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M11/M12 remain Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M11/M12 still need it — known, not-yet-migrated, tracked separately (Phase 3 remaining: M11/M12).",
   });
 });
 

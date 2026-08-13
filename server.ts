@@ -23119,6 +23119,91 @@ app.get("/api/audit/dhan-indiavix-spot-intraday-check", async (c) => {
   }
 });
 
+// ============================================================================
+// V3-D Phase 2 (2026-08-13): INDIA VIX live quote field-shape probe.
+// Purpose: confirm the RAW field names Dhan's /v2/marketfeed/quote actually
+// returns for securityId=21 (LTP, previous close, etc.) before writing any
+// M4-Dhan production logic on top of them. Diagnostic-only, read-only —
+// no M4 code is written or changed by this endpoint.
+// ============================================================================
+
+app.get("/api/audit/dhan-indiavix-quote-check", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+
+  const generatedAt = new Date().toISOString();
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    return c.json({
+      architectureRole: "V3D_INDIAVIX_QUOTE_SHAPE_PROBE",
+      generatedAt, symbol: "INDIA VIX",
+      status: "ERROR", error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing in Railway variables",
+    }, 503);
+  }
+
+  const requestBodyObj = { IDX_I: [21] };
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/marketfeed/quote", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: JSON.stringify(requestBodyObj),
+    });
+
+    const httpStatus = res.status;
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    if (!res.ok || !payload || typeof payload !== "object") {
+      return c.json({
+        architectureRole: "V3D_INDIAVIX_QUOTE_SHAPE_PROBE",
+        generatedAt, symbol: "INDIA VIX",
+        sanitizedRequestBody: requestBodyObj,
+        httpStatus,
+        rootCauseStatus: "ERROR",
+        providerError: payload && typeof payload === "object" ? {
+          errorType: payload.errorType ?? null,
+          errorCode: payload.errorCode ?? null,
+          errorMessage: payload.errorMessage ?? null,
+        } : { errorType: "NON_JSON_OR_EMPTY", errorCode: null, errorMessage: `HTTP ${httpStatus}` },
+        rawSnippet: raw.slice(0, 800),
+        readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+      }, 200);
+    }
+
+    return c.json({
+      architectureRole: "V3D_INDIAVIX_QUOTE_SHAPE_PROBE",
+      generatedAt, symbol: "INDIA VIX",
+      sanitizedRequestBody: requestBodyObj,
+      httpStatus,
+      rawFullPayload: payload,
+      rootCauseStatus: "PASS",
+      limitations: [
+        "Diagnostic-only — this endpoint does not feed any production module. Its sole purpose is to confirm Dhan's raw quote field names before M4-Dhan logic is written.",
+      ],
+      readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+    }, 200);
+  } catch (err) {
+    return c.json({
+      architectureRole: "V3D_INDIAVIX_QUOTE_SHAPE_PROBE",
+      generatedAt, symbol: "INDIA VIX",
+      status: "ERROR",
+      error: err instanceof Error ? err.message : "Unknown INDIA VIX quote probe failure",
+      readOnlyMode: true, tokenExposed: false,
+    }, 500);
+  }
+});
+
 
 // ============================================================================
 // V3_STORE_BRAIN_STEP_1 — GOOGLE_DRIVE_L0_L1_L2_WRITE_READ_PROOF

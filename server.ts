@@ -28760,6 +28760,142 @@ function buildTradeLabDhanM11(
   };
 }
 
+// ============================================================================
+// M12 (Dhan) — HONEST HARD DATA-QUALITY GATE (Sub-steps 3-4, 2026-08-13)
+//
+// Mirrors the INTENT of Kite's H4 (v2CandidateHardDataGate): hard-block a
+// candidate on missing/stale data, broken contract identity, or an invalid
+// price. Never predicts direction or profitability.
+//
+// DELIBERATE, USER-CONFIRMED DEPARTURE FROM KITE'S H4: Kite's H4 additionally
+// requires the whole-snapshot Truth Report to reach overallVerdict === "TRUE",
+// which itself requires spot+futures+options to be in sync. No Dhan futures
+// adapter exists yet (a disclosed, tracked gap — see
+// /api/v2/d6/recorder-provider-audit), so Dhan-sourced Truth is PERMANENTLY
+// capped at PARTIAL under the existing computeTruthReport logic. Reusing that
+// requirement verbatim would make this gate BLOCKED forever — not an honest
+// safety signal, just a dead end. This Dhan gate instead hard-blocks on what
+// Dhan CAN actually prove today (snapshot/quote freshness, contract identity
+// via H2-Dhan, price validity) and does NOT require futures-sync.
+// futuresAdapterStatus is reported explicitly on every result so this is
+// never silently mistaken for Kite's stronger guarantee. When a Dhan futures
+// adapter is eventually built, this function is the one place to revisit and
+// add a real futures-sync requirement on top of what already exists here.
+// ============================================================================
+
+function v2CandidateHardDataGateDhan(
+  symbol: "NIFTY" | "BANKNIFTY" | "SENSEX",
+  currentExpiry: ExpiryData,
+  candidate: V2ReviewCandidate,
+  h2: V2ContractIdentityGateResult | null,
+  dhanBundleGeneratedAt: string | null
+) {
+  const hardBlockReasons: string[] = [];
+  const warnings: string[] = [];
+
+  const bundleFresh = classifyTruthField(dhanBundleGeneratedAt, TRUTH_THRESHOLDS_MS.options);
+  if (bundleFresh.verdict !== "TRUE") hardBlockReasons.push(`DHAN_SNAPSHOT_${bundleFresh.verdict}`);
+
+  if (!h2) hardBlockReasons.push("H2_DHAN_GATE_MISSING");
+  else if (h2.status !== "PASS") hardBlockReasons.push(...h2.hardBlockReasons.map((r) => `H2_${r}`));
+
+  const expiryDateObj = currentExpiry.expiryDate instanceof Date
+    ? currentExpiry.expiryDate
+    : new Date(String(currentExpiry.expiryDate));
+  const dte = Number.isFinite(expiryDateObj.getTime())
+    ? Math.floor((expiryDateObj.getTime() - Date.now()) / 86400000)
+    : null;
+  if (dte == null || dte < 0) hardBlockReasons.push("H3_DTE_INVALID");
+
+  if (candidate.reviewStatus === "BLOCKED_DATA") hardBlockReasons.push("CANDIDATE_QUOTE_BLOCKED");
+  if (candidate.reviewStatus === "PARTIAL_DATA") warnings.push("CANDIDATE_OPTIONAL_FIELDS_PARTIAL");
+  if (!(candidate.lastPrice != null && candidate.lastPrice > 0)) hardBlockReasons.push("CANDIDATE_LTP_INVALID");
+
+  return {
+    status: hardBlockReasons.length === 0 ? "PASS" as V2CandidateHardGateStatus : "BLOCKED" as V2CandidateHardGateStatus,
+    hardBlockReasons: Array.from(new Set(hardBlockReasons)),
+    warnings: Array.from(new Set(warnings)),
+    dhanTruth: {
+      snapshotFreshness: bundleFresh.verdict,
+      snapshotAgeMs: bundleFresh.ageMs,
+      futuresAdapterStatus: "NOT_YET_IMPLEMENTED",
+      note: "Dhan-path gate intentionally does not require spot-futures-options triple-sync TRUE (unlike Kite's H4) because no Dhan futures adapter exists yet — a disclosed, tracked gap, not a live failure. Revisit this gate once a Dhan futures adapter is built.",
+    },
+    h2Status: h2?.status || "MISSING",
+    dte,
+    interpretationGuard: "Dhan-path H4 — PASS means this candidate's Dhan-sourced data is trustworthy enough to evaluate under Dhan's current real capability (no futures-sync claim). It is not a profitability guarantee or probability score.",
+  };
+}
+
+async function buildTradeLabDhanM12(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", port: string) {
+  const bundle = await buildTradeLabDhanMultiExpirySnapshot(symbol, port);
+  if (bundle.status !== "OK") {
+    return { module: "M12_CANDIDATE_HARD_DATA_GATE", provenance: "DHAN", symbol, status: "INSUFFICIENT", gates: [], hardBlockReasons: ["NO_DHAN_BUNDLE"], generatedAt: new Date().toISOString() };
+  }
+  const curED = tradeLabDhanNormalizedToExpiryData(bundle.current);
+  if (!curED) {
+    return { module: "M12_CANDIDATE_HARD_DATA_GATE", provenance: "DHAN", symbol, status: "INSUFFICIENT", gates: [], hardBlockReasons: ["NO_CURRENT_EXPIRY"], generatedAt: new Date().toISOString() };
+  }
+  const atmStrike = bundle.current.atmStrike;
+  if (!(Number.isFinite(atmStrike) && atmStrike > 0)) {
+    return { module: "M12_CANDIDATE_HARD_DATA_GATE", provenance: "DHAN", symbol, status: "INSUFFICIENT", gates: [], hardBlockReasons: ["NO_ATM_STRIKE"], generatedAt: new Date().toISOString() };
+  }
+
+  // M1/M6/M7 already Dhan-routed for NIFTY/BANKNIFTY (same production
+  // functions every other TradeLab module already relies on) — no new
+  // Dhan fetch here.
+  const m1 = buildV2PremiumCompositionHistory(symbol, 20);
+  const m6 = buildV2PremiumAttribution(symbol, 20);
+  const m7 = buildV2OiPositioningEvidence(symbol, 20);
+
+  const defs: Array<["CE" | "PE", "ATM" | "1_ITM"]> = [["CE", "ATM"], ["CE", "1_ITM"], ["PE", "ATM"], ["PE", "1_ITM"]];
+  const candidates: V2ReviewCandidate[] = [];
+  for (const [side, role] of defs) {
+    const p = v2FindCandidateLeg(curED, side as any, atmStrike, role);
+    if (p) candidates.push(v2ToReviewCandidate(p, side as any, role, m1, m6, m7));
+  }
+
+  const generatedAt = bundle.current.generatedAt || (bundle as any).generatedAt || new Date().toISOString();
+  const gates = candidates.map((candidate) => {
+    const h2 = v2GateCandidateIdentityDhan(symbol, curED, atmStrike, candidate);
+    return { side: candidate.side, strike: candidate.strike, moneynessRole: candidate.moneynessRole, ...v2CandidateHardDataGateDhan(symbol, curED, candidate, h2, generatedAt) };
+  });
+
+  const blocked = gates.filter((g: any) => g.status !== "PASS");
+  return {
+    module: "M12_CANDIDATE_HARD_DATA_GATE",
+    provenance: "DHAN",
+    symbol,
+    generatedAt: new Date().toISOString(),
+    status: gates.length === 0 ? "INSUFFICIENT" : blocked.length === 0 ? "PASS" : "BLOCKED",
+    gates,
+    summary: { totalCandidates: gates.length, passed: gates.length - blocked.length, blocked: blocked.length },
+    hardBlockReasons: Array.from(new Set(blocked.flatMap((g: any) => g.hardBlockReasons || []))),
+    scoringImpact: "NONE",
+    probabilityImpact: "NONE",
+    aiCall: "NONE",
+    knownLimitations: [
+      "No Dhan futures adapter exists yet — this gate does not require spot-futures-options sync TRUE, unlike Kite's H4. See dhanTruth.futuresAdapterStatus on each gate.",
+      "This is the H4-equivalent data-quality gate only (M12 scope agreed 2026-08-13). It does not yet include the M12B-style directional BEST_CE/BEST_PE selection tree — that remains Kite-only for now.",
+    ],
+  };
+}
+
+app.get("/api/audit/tradelab-dhan-m12-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+  const symbolParam = (c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(symbolParam)) {
+    return c.json({ status: "ERROR", error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const port = process.env.PORT || String(PORT);
+  const result = await buildTradeLabDhanM12(symbolParam as "NIFTY" | "BANKNIFTY" | "SENSEX", port);
+  return c.json({ architectureRole: "TRADELAB_M12_DHAN_PROOF", readOnlyMode: true, orderAccessUsed: false, tokenExposed: false, ...result }, 200);
+});
+
 
 function buildTradeLabDhanM8(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
   const hist = TRADELAB_DHAN_MULTIEXPIRY_HISTORY.get(symbol) || [];

@@ -18942,8 +18942,18 @@ function generateTotp(secretBase32: string, stepSeconds = 30, digits = 6): strin
   return code;
 }
 
+let dhanRefreshInFlight: Promise<string | null> | null = null;
+
 async function refreshDhanAccessToken(): Promise<string | null> {
-  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  // Multiple background cycles (M1 production, TradeLab multi-expiry, etc.)
+  // can all discover an empty/expired session within the same tick at
+  // startup. Without this lock, each would fire its own TOTP-based
+  // generateAccessToken call — wasteful, and Dhan rejects rapid repeat
+  // calls, so only the first caller actually refreshes; everyone else
+  // awaits and reuses that same in-flight result.
+  if (dhanRefreshInFlight) return dhanRefreshInFlight;
+  dhanRefreshInFlight = (async () => {
+    const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
   const pin = process.env.DHAN_PIN?.trim() || "";
   const totpSecret = process.env.DHAN_TOTP_SECRET?.trim() || "";
   if (!clientId || !pin || !totpSecret) {
@@ -18975,6 +18985,10 @@ async function refreshDhanAccessToken(): Promise<string | null> {
     console.error("[DHAN-AUTH] Auto-refresh error:", dhanSession.lastError);
     return null;
   }
+  })().finally(() => {
+    dhanRefreshInFlight = null;
+  });
+  return dhanRefreshInFlight;
 }
 
 // Drop-in replacement for `process.env.DHAN_ACCESS_TOKEN?.trim() || ""`.

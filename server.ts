@@ -7279,6 +7279,13 @@ app.get("/", (c) => {
     let tradeLabLoading = false;
     let tradeLabError = null;
     let tradeLabAccordionOpen = 'regime';
+    // ===== Freshness-gate fix (2026-08-13) — track when TradeLab was last
+    // successfully fetched, and the server's own generatedAt/snapshotId, so
+    // the UI can show FRESH/STALE/UNKNOWN honestly instead of trusting the
+    // main dashboard's "FEED LIVE" indicator as proof TradeLab itself is
+    // current. No fabricated timestamps — only set on a real successful fetch.
+    let tradeLabLastFetchedAt = null;
+    let tradeLabLastSnapshotId = null;
     let vixCorrChart = null;
     let vixCorrChartBank = null;
     let vixCorrLoaded = false;
@@ -7319,6 +7326,8 @@ app.get("/", (c) => {
           tradeLabData = null;
         } else {
           tradeLabData = json;
+          tradeLabLastFetchedAt = Date.now();
+          tradeLabLastSnapshotId = json.snapshotId || null;
         }
       } catch (err) {
         console.error('Failed to load Trade Lab:', err);
@@ -7328,6 +7337,11 @@ app.get("/", (c) => {
         tradeLabLoading = false;
         updateUI();
       }
+    }
+
+    function isTradeLabTabActive() {
+      const el = document.getElementById('TRADELAB');
+      return !!(el && el.classList.contains('active'));
     }
 
     function switchTradeLabSymbol(sym) {
@@ -8906,11 +8920,15 @@ app.get("/", (c) => {
     }
     function tlEntryRow(cand) {
       if (!cand) return '';
+      const isStale = !!window.tradeLabIsStale;
+      const displayQuality = (isStale && cand.entryQuality === 'ENTRY_NOW') ? 'DATA_STALE_WAIT' : cand.entryQuality;
       let h = '<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border);">';
       h += '<span style="color:var(--text); font-size:0.72rem;">' + escapeHtml(cand.label || '') + '</span>';
-      h += '<span style="color:' + tlEntryColor(cand.entryQuality) + '; font-size:0.7rem; font-weight:700;">' + escapeHtml(cand.entryQuality) + '</span>';
+      h += '<span style="color:' + (displayQuality === 'DATA_STALE_WAIT' ? 'var(--red)' : tlEntryColor(cand.entryQuality)) + '; font-size:0.7rem; font-weight:700;">' + escapeHtml(displayQuality) + '</span>';
       h += '</div>';
-      if (cand.reasons && cand.reasons.length) {
+      if (isStale && cand.entryQuality === 'ENTRY_NOW') {
+        h += '<div style="font-size:0.62rem; color:var(--red); padding:2px 0 6px;">Snapshot is stale \u2014 refresh before acting on this.</div>';
+      } else if (cand.reasons && cand.reasons.length) {
         h += '<div style="font-size:0.62rem; color:var(--muted-dim); padding:2px 0 6px;">' + escapeHtml(cand.reasons.join(' ')) + '</div>';
       }
       return h;
@@ -8942,6 +8960,26 @@ app.get("/", (c) => {
       }
 
       const d = tradeLabData;
+
+      // ===== Freshness-gate fix (2026-08-13) =====
+      // Age computed from the SERVER's own generatedAt (genuine receipt
+      // timestamp from /api/tradelab), never fabricated. Threshold is
+      // conservatively derived from the EXISTING refresh cadence
+      // (refreshIntervalMinutes, default 3 min) — STALE if the snapshot is
+      // older than 2x the current auto-refresh interval, i.e. it has
+      // survived at least one missed refresh cycle. This is a UI-only gate;
+      // it does not alter any M1-M12 formula, score, or the underlying
+      // entryQuality value computed by the backend.
+      const tlAgeMs = d.generatedAt ? (Date.now() - Date.parse(d.generatedAt)) : null;
+      const tlThresholdMs = refreshIntervalMinutes * 60 * 1000 * 2;
+      const tlFreshness = tlAgeMs == null ? 'UNKNOWN' : (tlAgeMs > tlThresholdMs ? 'STALE' : 'FRESH');
+      window.tradeLabIsStale = tlFreshness === 'STALE';
+      const tlFreshColor = tlFreshness === 'FRESH' ? 'var(--green)' : tlFreshness === 'STALE' ? 'var(--red)' : 'var(--muted)';
+      const tlAgeLabel = tlAgeMs == null ? '\u2014' : (tlAgeMs < 60000 ? Math.round(tlAgeMs / 1000) + 's' : Math.round(tlAgeMs / 60000) + 'm');
+      const tlUpdatedLabel = d.generatedAt ? new Date(d.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '\u2014';
+      html += '<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 10px; margin-bottom:8px; background:var(--panel); border:1px solid ' + tlFreshColor + '; border-radius:6px; font-size:0.68rem;">' +
+        '<span style="color:var(--muted);">Snapshot: ' + escapeHtml(tlUpdatedLabel) + ' \u00b7 Age: ' + escapeHtml(tlAgeLabel) + '</span>' +
+        '<span style="color:' + tlFreshColor + '; font-weight:700;">' + tlFreshness + '</span></div>';
 
       let dhanHtml = '';
       dhanHtml += tlRow('Configured', d.dhanConfigured ? 'YES' : 'NO', d.dhanConfigured ? 'var(--green)' : 'var(--red)');
@@ -13540,7 +13578,7 @@ app.get("/", (c) => {
         }
       }
       if (symbol === 'VIXCORR') loadVixCorrelation();
-      if (symbol === 'TRADELAB' && !tradeLabData && !tradeLabLoading) loadTradeLab();
+      if (symbol === 'TRADELAB') loadTradeLab();
     }
 
     function updateRefreshStatus() {
@@ -13553,7 +13591,9 @@ app.get("/", (c) => {
     async function refreshData() {
       if (!kiteConnected) return;
       document.getElementById('manualRefresh').disabled = true;
-      await Promise.all([fetchData(), loadCommodities(), loadSectorHeatmap()]);
+      const refreshTasks = [fetchData(), loadCommodities(), loadSectorHeatmap()];
+      if (isTradeLabTabActive()) refreshTasks.push(loadTradeLab());
+      await Promise.all(refreshTasks);
       if (document.getElementById('autoRefreshToggle').checked) resetCountdown();
       setTimeout(() => {
         document.getElementById('manualRefresh').disabled = false;
@@ -28621,6 +28661,7 @@ app.get("/api/tradelab", async (c) => {
   return c.json({
     architectureRole: "TRADELAB_PHASE_B_AGGREGATOR",
     generatedAt: new Date().toISOString(),
+    snapshotId: `${symbol}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     symbol,
     readOnly: true,
     dhanConfigured,

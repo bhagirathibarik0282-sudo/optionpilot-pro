@@ -29591,6 +29591,7 @@ app.get("/api/tradelab", async (c) => {
   let m10Dhan: any = { module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m5Dhan: any = { module: "M5_REALIZED_VS_IMPLIED", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m11Dhan: any = { module: "M11_EVIDENCE_FUSION", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  let m12Dhan: any = { module: "M12_CANDIDATE_HARD_DATA_GATE", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   if (dhanConfigured) {
     try {
       m2Dhan = buildTradeLabDhanM2(symbol);
@@ -29606,6 +29607,12 @@ app.get("/api/tradelab", async (c) => {
       const m6ForFusion = buildV2PremiumAttribution(symbol, 20);
       const m7ForFusion = buildV2OiPositioningEvidence(symbol, 20);
       m11Dhan = buildTradeLabDhanM11(symbol, m1Direct, m2Dhan, m3Dhan, m4Dhan, m5Dhan, m6ForFusion, m7ForFusion, m8Dhan, m9Dhan, m10Dhan);
+      // M12 Sub-step 5 (2026-08-13): wired as a PARALLEL field alongside the
+      // existing Kite-based m12CandidateSet — does NOT replace it and does
+      // NOT remove the Kite session gate above. This is the honest
+      // Dhan-equivalent H4 hard data-quality gate only (see
+      // v2CandidateHardDataGateDhan), not yet the M12B directional selector.
+      m12Dhan = await buildTradeLabDhanM12(symbol, port);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
       m2Dhan = { module: "M2_IV_SKEW", provenance: "DHAN", status: "FAIL", error: errMsg };
@@ -29616,6 +29623,7 @@ app.get("/api/tradelab", async (c) => {
       m10Dhan = { module: "M10_MARKET_REGIME_EXTENDED", provenance: "DHAN", status: "FAIL", error: errMsg };
       m5Dhan = { module: "M5_REALIZED_VS_IMPLIED", provenance: "DHAN", status: "FAIL", error: errMsg };
       m11Dhan = { module: "M11_EVIDENCE_FUSION", provenance: "DHAN", status: "FAIL", error: errMsg };
+      m12Dhan = { module: "M12_CANDIDATE_HARD_DATA_GATE", provenance: "DHAN", status: "FAIL", error: errMsg };
     }
   }
 
@@ -29640,8 +29648,9 @@ app.get("/api/tradelab", async (c) => {
     m10MarketRegimeDhan: m10Dhan,
     m5RealizedVsImpliedDhan: m5Dhan,
     m11EvidenceFusionDhan: m11Dhan,
+    m12CandidateSetDhan: m12Dhan,
     m1m6m7Provenance,
-    note: "M2/M3/M4/M5/M8/M9/M10/M11 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M12 remains Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M12 still needs it — known, not-yet-migrated, tracked separately (Phase 3 remaining: M12, genuinely complex — needs a new Dhan-sourced candidate-review payload with spread/OI/volume/quote-freshness gates equivalent to Kite's H2/H4).",
+    note: "M2/M3/M4/M5/M8/M9/M10/M11/M12 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. m12CandidateSet (Kite) is still the production candidate set; m12CandidateSetDhan is the new honest Dhan H4-equivalent gate (2026-08-13), running in parallel for comparison — NOT yet promoted to replace the Kite path, and the endpoint itself still requires a Kite session (see getSession gate above) for that reason. TradeLab Phase 3 M12 sub-steps 1-5 are now all complete; removing the Kite session gate from this endpoint is the next and final Phase 3 step, deliberately deferred to its own session.",
   });
 });
 

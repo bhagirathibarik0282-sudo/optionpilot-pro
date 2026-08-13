@@ -15269,6 +15269,90 @@ function v2TradingSymbolMatchesUnderlying(symbol: V2PremiumSymbol, tradingSymbol
   return prefix === expected && /[0-9]/.test(nextChar);
 }
 
+// ===== M12 Sub-step 2 — H2 identity gate (Dhan) =====
+// Same safety intent as v2GateCandidateIdentity (underlying/expiry/strike/
+// option-type match, valid contract identity, valid lot-size/exchange/
+// segment, fresh quote) but adapted to Dhan's real field semantics instead
+// of reusing v2TradingSymbolMatchesUnderlying, which assumes Kite's
+// no-separator tradingSymbol format (e.g. NIFTY24AUG24600CE — symbol name
+// immediately followed by a digit) and would ALWAYS fail against Dhan's
+// hyphenated scrip-master format (e.g. NIFTY-Sep2026-29150-CE), which Dhan's
+// option-chain response doesn't even return in the first place (confirmed
+// null — see D4's own schemaNote).
+// underlyingMatch here is TRUE BY CONSTRUCTION, not string-parsed: the
+// caller already resolved this exact symbol through DHAN_UNDERLYING_MAP
+// before requesting data from Dhan (same map already scrip-master-confirmed
+// for all 3 symbols) — there is no cross-symbol mixing possible in this
+// path, so re-deriving the same fact via fragile string matching would add
+// risk, not safety.
+// tradingSymbolPresent is DROPPED as a hard-block reason (kept as an
+// informational false in checks, not blocking) because Dhan's option-chain
+// genuinely does not provide it — this is an honest capability gap, not a
+// quality failure of THIS specific quote. instrumentTokenValid (Dhan's own
+// securityId) already provides the real per-contract identity guarantee.
+function v2GateCandidateIdentityDhan(
+  symbol: "NIFTY" | "BANKNIFTY" | "SENSEX",
+  currentExpiry: ExpiryData,
+  atmStrike: number,
+  candidate: V2ReviewCandidate
+): V2ContractIdentityGateResult {
+  const md = candidate.contractMetadata;
+  const expectedExpiry = currentExpiry.expiryDate instanceof Date
+    ? currentExpiry.expiryDate.toISOString().slice(0, 10)
+    : String(currentExpiry.expiryDate || "");
+  const fresh = classifyTruthField(candidate.quoteTimestamp, TRUTH_THRESHOLDS_MS.options);
+
+  const underlyingMatch = true; // true by construction — see comment above
+  const expiryMatch = !!md.expiryDate && !!expectedExpiry && md.expiryDate === expectedExpiry;
+  const expiryBucketMatch = md.expiryBucket === currentExpiry.expiry;
+  const strikeValid = Number.isFinite(candidate.strike) && candidate.strike > 0;
+  const moneynessRoleMatch = candidate.moneynessRole === "ATM"
+    ? candidate.strike === atmStrike
+    : candidate.side === "CE"
+      ? candidate.strike < atmStrike
+      : candidate.strike > atmStrike;
+  const optionTypeMatch = md.optionType === candidate.side;
+  const instrumentTokenValid = Number.isInteger(md.instrumentToken) && (md.instrumentToken as number) > 0;
+  const tradingSymbolPresent = !!candidate.tradingSymbol; // informational only for the Dhan gate, see note above
+  const lotSizeValid = Number.isFinite(md.lotSize) && (md.lotSize as number) > 0;
+  const exchangePresent = !!md.exchange;
+  const segmentPresent = !!md.segment;
+
+  const hardBlockReasons: string[] = [];
+  if (!expiryMatch) hardBlockReasons.push("EXPIRY_IDENTITY_MISMATCH");
+  if (!expiryBucketMatch) hardBlockReasons.push("EXPIRY_BUCKET_MISMATCH");
+  if (!strikeValid) hardBlockReasons.push("STRIKE_INVALID");
+  if (!moneynessRoleMatch) hardBlockReasons.push("MONEYNESS_ROLE_MISMATCH");
+  if (!optionTypeMatch) hardBlockReasons.push("OPTION_TYPE_IDENTITY_MISMATCH");
+  if (!instrumentTokenValid) hardBlockReasons.push("DHAN_SECURITY_ID_INVALID");
+  if (!lotSizeValid) hardBlockReasons.push("LOT_SIZE_INVALID");
+  if (!exchangePresent) hardBlockReasons.push("EXCHANGE_MISSING");
+  if (!segmentPresent) hardBlockReasons.push("SEGMENT_MISSING");
+  if (fresh.verdict !== "TRUE") hardBlockReasons.push(`QUOTE_${fresh.verdict}`);
+
+  const warnings: string[] = [];
+  if (!(md.tickSize != null && md.tickSize > 0)) warnings.push("TICK_SIZE_UNAVAILABLE");
+  if (!tradingSymbolPresent) warnings.push("DHAN_TRADING_SYMBOL_UNAVAILABLE_FROM_OPTIONCHAIN_API");
+  if (md.metadataStatus !== "COMPLETE") warnings.push("H1_METADATA_PARTIAL");
+
+  return {
+    side: candidate.side,
+    strike: candidate.strike,
+    moneynessRole: candidate.moneynessRole,
+    tradingSymbol: candidate.tradingSymbol,
+    status: hardBlockReasons.length === 0 ? "PASS" : "BLOCKED",
+    hardBlockReasons,
+    warnings,
+    checks: {
+      underlyingMatch, expiryMatch, expiryBucketMatch, strikeValid, moneynessRoleMatch,
+      optionTypeMatch, instrumentTokenValid, tradingSymbolPresent, lotSizeValid,
+      exchangePresent, segmentPresent, quoteFreshness: fresh.verdict, quoteAgeMs: fresh.ageMs,
+    },
+    interpretationGuard: "Dhan-path identity gate — same safety intent as the Kite H2 gate (contract identity + freshness must PASS before any candidate is considered), adapted to Dhan's real field semantics. Not a directional signal.",
+  };
+}
+
+
 function v2GateCandidateIdentity(
   symbol: V2PremiumSymbol,
   currentExpiry: ExpiryData,
@@ -27835,23 +27919,52 @@ async function buildTradeLabDhanMultiExpirySnapshot(symbol: "NIFTY" | "BANKNIFTY
 // passed through as null — NEVER substituted with 0 — so downstream
 // dataQuality logic in the reused classifiers correctly treats them as
 // UNAVAILABLE, exactly as it already does for genuinely missing Kite data.
+// ===== M12 Sub-step 2 (2026-08-13) — Dhan contract identity metadata =====
+// Static per-symbol lot-size/exchange/segment, confirmed DIRECTLY from
+// Dhan's own scrip-master CSV via /api/audit/dhan-instrument-master (same
+// endpoint/evidence standard already used to confirm SENSEX/VIX securityIds)
+// — not guessed, not carried over from Kite. Confirmed 2026-08-13:
+//   NIFTY:     SEM_LOT_UNITS=65.0, SEM_EXM_EXCH_ID=NSE
+//   BANKNIFTY: SEM_LOT_UNITS=30.0, SEM_EXM_EXCH_ID=NSE
+//   SENSEX:    SEM_LOT_UNITS=20.0, SEM_EXM_EXCH_ID=BSE
+// segment uses Dhan's own exchange-segment naming (NSE_FNO/BSE_FNO), not a
+// Kite-borrowed label. HONESTY NOTE: lot sizes are exchange-set and can be
+// revised periodically (SEBI does this occasionally) — this static table is
+// a snapshot as of the confirmation date above, not a live daily check. A
+// future refinement could re-verify it periodically via the same audit
+// endpoint; not done here to keep this sub-step scoped.
+const DHAN_CONTRACT_METADATA: Record<"NIFTY" | "BANKNIFTY" | "SENSEX", { lotSize: number; exchange: string; segment: string }> = {
+  NIFTY: { lotSize: 65, exchange: "NSE", segment: "NSE_FNO" },
+  BANKNIFTY: { lotSize: 30, exchange: "NSE", segment: "NSE_FNO" },
+  SENSEX: { lotSize: 20, exchange: "BSE", segment: "BSE_FNO" },
+};
+
 function tradeLabDhanNormalizedToExpiryData(d4Result: any): ExpiryData | null {
   if (!d4Result || d4Result.status !== "PASS" || !Array.isArray(d4Result.normalized)) return null;
   const atmStrike = d4Result.atmStrike;
   const receiptTimestamp = d4Result.generatedAt || new Date().toISOString();
+  const meta = DHAN_CONTRACT_METADATA[d4Result.symbol as "NIFTY" | "BANKNIFTY" | "SENSEX"] || null;
   const toPD = (leg: any): PremiumData =>
     ({
       strike: leg.strike,
       isAtm: leg.strike === atmStrike,
-      instrumentToken: null,
+      // Dhan's own contract security ID used as the identity token — this
+      // IS Dhan's real per-contract identifier (same field already
+      // scrip-master-confirmed elsewhere), not a fabricated stand-in for
+      // Kite's instrumentToken.
+      instrumentToken: typeof leg.securityId === "number" ? leg.securityId : null,
       exchangeToken: null,
       expiryDate: d4Result.expiry,
-      expiryBucket: "TradeLab_Dhan",
+      // Fixed 2026-08-13 (Sub-step 2): was hardcoded to "TradeLab_Dhan",
+      // which could never equal currentExpiry.expiry and would always fail
+      // H2's expiryBucketMatch check. Now set to the actual expiry string,
+      // matching the field's real comparison target.
+      expiryBucket: d4Result.expiry,
       optionType: leg.optionType,
-      lotSize: leg.lotSize,
+      lotSize: meta ? meta.lotSize : (typeof leg.lotSize === "number" ? leg.lotSize : null),
       tickSize: leg.tickSize,
-      exchange: null,
-      segment: leg.exchangeSegment || null,
+      exchange: meta ? meta.exchange : null,
+      segment: meta ? meta.segment : (leg.exchangeSegment || null),
       contractRegime: "DHAN_OPTIONCHAIN_DERIVED",
       tradingSymbol: leg.tradingSymbol,
       bid: leg.bid,

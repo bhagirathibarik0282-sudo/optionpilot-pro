@@ -9029,6 +9029,17 @@ app.get("/", (c) => {
       }
       html += tlCard('7. IV Term Structure (M3)', m3Html);
 
+      let m4Html = tlProvenanceBadge(d.m4VixRegimeDhan);
+      if (d.m4VixRegimeDhan && d.m4VixRegimeDhan.status === 'OK') {
+        m4Html += tlRow('VIX', d.m4VixRegimeDhan.vix != null ? d.m4VixRegimeDhan.vix.toFixed(2) : '\u2014', null);
+        m4Html += tlRow('Prev close', d.m4VixRegimeDhan.prevClose != null ? d.m4VixRegimeDhan.prevClose.toFixed(2) : '\u2014', null);
+        m4Html += tlRow('Change %', d.m4VixRegimeDhan.vixChangePercent != null ? (d.m4VixRegimeDhan.vixChangePercent >= 0 ? '+' : '') + d.m4VixRegimeDhan.vixChangePercent.toFixed(2) + '%' : '\u2014', d.m4VixRegimeDhan.vixChangePercent != null ? (d.m4VixRegimeDhan.vixChangePercent >= 0 ? 'var(--red)' : 'var(--green)') : null);
+        m4Html += tlRow('Data quality', d.m4VixRegimeDhan.dataQuality, tlQualityColor(d.m4VixRegimeDhan.dataQuality));
+      } else {
+        m4Html += '<div style="color:var(--muted); font-size:0.7rem; margin-top:4px;">Unavailable this snapshot.</div>';
+      }
+      html += tlCard('7b. VIX Regime Context (M4)', m4Html);
+
       let m8Html = tlProvenanceBadge(d.m8RolloverMigrationDhan);
       if (d.m8RolloverMigrationDhan && d.m8RolloverMigrationDhan.status === 'OK') {
         m8Html += tlRow('State', String(d.m8RolloverMigrationDhan.state || (d.m8RolloverMigrationDhan.dataQuality === 'OK' ? 'COMPARABLE' : '\u2014')), null);
@@ -27931,6 +27942,61 @@ function buildTradeLabDhanM2(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
   };
 }
 
+// ===== M4 (Dhan) — VIX Regime Context =====
+// securityId=21 resolved from Dhan's own scrip-master CSV (SEM_TRADING_SYMBOL
+// = "INDIA VIX", NSE, INDEX — not guessed) and live-verified via
+// /api/audit/dhan-indiavix-spot-intraday-check (lastClose=11.7,
+// PLAUSIBLE_RANGE_FOR_INDIA_VIX, PASS) and /api/audit/dhan-indiavix-quote-check
+// (raw field shape confirmed: last_price, ohlc.close, net_change).
+// Computation mirrors the existing Kite-based M4 exactly:
+//   vix = last_price; vixChange = last_price - ohlc.close;
+//   vixChangePercent = vixChange / ohlc.close * 100 (when ohlc.close > 0).
+// This is a NEW, Dhan-only card in TradeLab (m4VixRegimeDhan) — the existing
+// M11 evidence-fusion M4_VIX_REGIME_CONTEXT row (Kite-sourced) is untouched.
+const DHAN_INDIA_VIX_SECURITY_ID = 21;
+
+async function buildTradeLabDhanM4() {
+  const accessToken = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    return { module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  }
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/marketfeed/quote", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "access-token": accessToken,
+        "client-id": clientId,
+      },
+      body: JSON.stringify({ IDX_I: [DHAN_INDIA_VIX_SECURITY_ID] }),
+    });
+    const raw = await res.text();
+    let parsed: any = null;
+    try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+    const row = parsed?.data?.IDX_I?.[String(DHAN_INDIA_VIX_SECURITY_ID)];
+    if (!res.ok || !row || typeof row.last_price !== "number") {
+      console.error(`[DHAN M4 FAIL] httpStatus=${res.status} bodySnippet=${raw.slice(0, 300)}`);
+      return { module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "FAIL", httpStatus: res.status, dataQuality: "INSUFFICIENT" as V2DataQuality };
+    }
+    const vix = row.last_price;
+    const prevClose = typeof row.ohlc?.close === "number" ? row.ohlc.close : null;
+    const vixChange = prevClose != null && prevClose > 0 ? vix - prevClose : null;
+    const vixChangePercent = vixChange != null && prevClose != null && prevClose > 0 ? (vixChange / prevClose) * 100 : null;
+    return {
+      module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "OK",
+      generatedAt: new Date().toISOString(),
+      vix, prevClose, vixChange, vixChangePercent,
+      dataQuality: "PARTIAL" as V2DataQuality, // PARTIAL, not OK: matches Kite M4's own convention (live-only, no 90-day percentile regime here)
+      interpretationGuard: "Current-VIX context only, non-directional — same guard as the Kite-based M4. Full 90-day percentile regime is not re-fetched here; see /api/vix-correlation.",
+    };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[DHAN M4 FAIL] exception=${errMsg}`);
+    return { module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "FAIL", error: errMsg, dataQuality: "INSUFFICIENT" as V2DataQuality };
+  }
+}
+
 function buildGreekEngine(dhanNormalized: any) {
   if (!dhanNormalized || dhanNormalized.status !== "PASS" || !Array.isArray(dhanNormalized.normalized)) {
     return {
@@ -28144,18 +28210,21 @@ app.get("/api/tradelab", async (c) => {
   const port = process.env.PORT || String(PORT);
   let m2Dhan: any = { module: "M2_IV_SKEW", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m3Dhan: any = { module: "M3_IV_TERM_STRUCTURE", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
+  let m4Dhan: any = { module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m8Dhan: any = { module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   let m9Dhan: any = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "SKIPPED", reason: "DHAN_NOT_CONFIGURED" };
   if (dhanConfigured) {
     try {
       m2Dhan = buildTradeLabDhanM2(symbol);
       m3Dhan = await buildTradeLabDhanM3(symbol, port);
+      m4Dhan = await buildTradeLabDhanM4();
       m8Dhan = buildTradeLabDhanM8(symbol);
       m9Dhan = await buildTradeLabDhanM9(symbol, port);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Unknown error";
       m2Dhan = { module: "M2_IV_SKEW", provenance: "DHAN", status: "FAIL", error: errMsg };
       m3Dhan = { module: "M3_IV_TERM_STRUCTURE", provenance: "DHAN", status: "FAIL", error: errMsg };
+      m4Dhan = { module: "M4_VIX_REGIME_CONTEXT", provenance: "DHAN", status: "FAIL", error: errMsg };
       m8Dhan = { module: "M8_ROLLOVER_MIGRATION", provenance: "DHAN", status: "FAIL", error: errMsg };
       m9Dhan = { module: "M9_MULTI_EXPIRY_ALIGNMENT", provenance: "DHAN", status: "FAIL", error: errMsg };
     }
@@ -28175,10 +28244,11 @@ app.get("/api/tradelab", async (c) => {
     entryQuality,
     m2IvSkewDhan: m2Dhan,
     m3IvTermStructureDhan: m3Dhan,
+    m4VixRegimeDhan: m4Dhan,
     m8RolloverMigrationDhan: m8Dhan,
     m9MultiExpiryAlignmentDhan: m9Dhan,
     m1m6m7Provenance,
-    note: "M2/M3/M8/M9 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M4/M5/M10/M11/M12 unchanged, still Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M10/M11/M12 still need it — known, not-yet-migrated, tracked separately.",
+    note: "M2/M3/M4/M8/M9 are DHAN ONLY (see the *Dhan fields). M1/M6/M7 are DHAN for NIFTY/BANKNIFTY and KITE for SENSEX (see m1m6m7Provenance) — same already-existing D6.1 production router, just now honestly labeled. M5/M10/M11/M12 unchanged, still Kite-based. The endpoint itself still requires a Kite session (see getSession gate above) because M10/M11/M12 still need it — known, not-yet-migrated, tracked separately.",
   });
 });
 

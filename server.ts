@@ -13018,19 +13018,42 @@ app.get("/", (c) => {
       if (!m) return '<div class="loading">Loading...</div>';
       if (m.error) return '<div class="error">DATA UNAVAILABLE — ' + escapeHtml(m.error) + '</div>';
 
-      let html = '<div class="chip-nav">';
+      let nav = '<div class="chip-nav">';
       ['OVERVIEW', 'FUTURES', 'OPTIONS', 'ALIGNMENT'].forEach((t) => {
-        html += '<button class="' + (indexInternalTab[symbol] === t ? 'active' : '') + '" onclick="switchIndexInternalTab(\\'' + symbol + '\\', \\'' + t + '\\')">' + t + '</button>';
+        nav += '<button class="' + (indexInternalTab[symbol] === t ? 'active' : '') + '" onclick="switchIndexInternalTab(\\'' + symbol + '\\', \\'' + t + '\\')">' + t + '</button>';
       });
-      html += '</div>';
+      nav += '</div>';
 
       const tab = indexInternalTab[symbol];
-      if (tab === 'OVERVIEW') html += renderOverviewTab(symbol, m);
-      else if (tab === 'FUTURES') html += renderFuturesTab(symbol, m);
-      else if (tab === 'OPTIONS') html += renderOptionsTab(symbol, m);
-      else html += renderAlignmentTab(symbol, m);
+      let body = '';
+      if (tab === 'OVERVIEW') body += renderOverviewTab(symbol, m);
+      else if (tab === 'FUTURES') body += renderFuturesTab(symbol, m);
+      else if (tab === 'OPTIONS') body += renderOptionsTab(symbol, m);
+      else body += renderAlignmentTab(symbol, m);
 
-      return html;
+      // PHASE 5 (Mobile Resync): when the server's own freshness verdict
+      // (Phase 2's connectionState) says FROZEN or LOCKED, grey out and
+      // label the WHOLE tab body — never let stale/unavailable data look
+      // indistinguishable from live data. Wrapping happens ONLY here, at
+      // this single top-level entry point, rather than touching any of
+      // the deeply nested per-cell renderers below (renderOverviewTab /
+      // renderFuturesTab / renderOptionsTab / renderAlignmentTab /
+      // renderStrikeBand) — keeps this change small and low-risk, given
+      // this file's own history of a much smaller edit deep in this
+      // render tree once blanking the entire dashboard. Tab-switch chip
+      // buttons (nav) are deliberately left OUTSIDE the greyed wrapper so
+      // switching tabs still works while frozen/locked.
+      if (serverConnectionState === 'FROZEN' || serverConnectionState === 'LOCKED') {
+        const label = serverConnectionState === 'LOCKED'
+          ? 'LOCKED — data unavailable, do not use for trading decisions'
+          : 'FROZEN — showing last known values, not live';
+        body = '<div style="position:relative;">' +
+          '<div style="text-align:center; background:rgba(0,0,0,0.8); color:var(--red); border:1px solid var(--red); border-radius:6px; padding:6px 10px; margin-bottom:8px; font-family:var(--font-mono); font-size:0.72rem; font-weight:700;">' + escapeHtml(label) + '</div>' +
+          '<div style="opacity:0.45; filter:grayscale(70%);">' + body + '</div>' +
+        '</div>';
+      }
+
+      return nav + body;
     }
 
     function classifyBuildup(priceDir, oiDir, ivDir) {

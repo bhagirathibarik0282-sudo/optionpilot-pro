@@ -19475,11 +19475,36 @@ const DHAN_LIVE_CACHE_TTL_MS = 30 * 1000; // matches the platform's live-refresh
 let dhanLastRequestAt = 0;
 const DHAN_MIN_REQUEST_GAP_MS = 3100; // Dhan's documented 1-req/3s limit, +100ms margin
 
+// PHASE 0 FIX (2026-08-14): dhanRateLimitedFetch previously used a naive
+// "check dhanLastRequestAt, await sleep, then set dhanLastRequestAt"
+// pattern. If two callers invoked it concurrently (e.g. the background
+// tradeLabDhanMultiExpiryRefreshCycle() and an on-demand dashboard/
+// diagnostic request landing at nearly the same instant), BOTH could read
+// the same stale dhanLastRequestAt before either updated it, both compute
+// the same "wait", both sleep the same duration, then both fetch() at
+// once — breaking Dhan's 1-req/3s limit. This is the confirmed root cause
+// of the "805 Too many requests" 429 failures seen twice in Railway
+// deploy logs on 2026-08-14 (BANKNIFTY optionchain). Same class of bug as
+// the earlier DHAN TOTP auto-refresh race, fixed the same way: chain every
+// call through a single queue so the wait-then-timestamp step can never be
+// entered by two callers at once. The actual network fetch() still runs
+// outside the chain, so slow responses don't block subsequent requests
+// beyond the mandatory spacing.
+let dhanFetchQueueTail: Promise<void> = Promise.resolve();
+
 async function dhanRateLimitedFetch(url: string, init: RequestInit): Promise<Response> {
-  const now = Date.now();
-  const wait = dhanLastRequestAt + DHAN_MIN_REQUEST_GAP_MS - now;
-  if (wait > 0) await sleep(wait);
-  dhanLastRequestAt = Date.now();
+  const reserveSlot = async () => {
+    const now = Date.now();
+    const wait = dhanLastRequestAt + DHAN_MIN_REQUEST_GAP_MS - now;
+    if (wait > 0) await sleep(wait);
+    dhanLastRequestAt = Date.now();
+  };
+  // Reassigning dhanFetchQueueTail happens synchronously (no await before
+  // it), so two concurrent calls can never both chain onto the same prior
+  // tail — this is what makes the reservation atomic.
+  const myTurn = dhanFetchQueueTail.then(reserveSlot, reserveSlot);
+  dhanFetchQueueTail = myTurn;
+  await myTurn;
   return fetch(url, init);
 }
 
@@ -20354,16 +20379,43 @@ app.get("/api/dhan/cross-validate", async (c) => {
       });
     }
 
+    // PHASE 0 FIX (2026-08-14): overallState previously looked ONLY at
+    // spotDivergencePct and completely ignored legComparisons (the actual
+    // CE/PE option-premium LTP divergence). Confirmed live on 2026-08-14:
+    // BANKNIFTY spot diverged 0.05% (fine) while CE LTP diverged 2.39% and
+    // PE LTP diverged 2.91% (both far past the 0.5% "major" threshold), yet
+    // the endpoint still reported "SOURCE_ALIGNED" — misleading for a card
+    // that exists specifically to catch option-premium mismatches. The
+    // worst leg divergence must now also drive the overall status.
+    const legDivergencePcts = legComparisons
+      .map((l: any) => (typeof l.ltpDivergencePct === "number" ? l.ltpDivergencePct : null))
+      .filter((v: number | null): v is number => v !== null);
+    const worstLegDivergencePct = legDivergencePcts.length > 0 ? Math.max(...legDivergencePcts) : null;
+    const worstDivergencePct = [spotDivergencePct, worstLegDivergencePct]
+      .filter((v): v is number => v !== null)
+      .reduce((max, v) => (v > max ? v : max), 0);
+
     let overallState: string;
-    if (spotDivergencePct === null) {
+    if (spotDivergencePct === null && worstLegDivergencePct === null) {
       overallState = "INSUFFICIENT_COMPARISON_DATA";
-    } else if (spotDivergencePct >= DHAN_D5_MAJOR_DIVERGENCE_PCT) {
+    } else if (worstDivergencePct >= DHAN_D5_MAJOR_DIVERGENCE_PCT) {
       overallState = "SOURCE_MAJOR_DIVERGENCE";
-    } else if (spotDivergencePct >= DHAN_D5_MINOR_DIVERGENCE_PCT) {
+    } else if (worstDivergencePct >= DHAN_D5_MINOR_DIVERGENCE_PCT) {
       overallState = "SOURCE_MINOR_DIVERGENCE";
     } else {
       overallState = "SOURCE_ALIGNED";
     }
+
+    // PHASE 0 FIX (2026-08-14): the staleness caveat previously only fired
+    // past 6 minutes — far too loose for option premiums, which can move
+    // several percent in under 2 minutes on BANKNIFTY (exactly what
+    // happened in the 2026-08-14 sample: kiteSnapshotAgeMs=122309 i.e.
+    // ~2min, alongside 2-3% leg LTP divergence). Lowered to 60s, and the
+    // field now also explicitly names which side is stale so this isn't
+    // read as a Dhan-side data problem when it's a Kite dashboard-refresh
+    // staleness problem instead. Labeling only — per divergenceThresholds
+    // note below, this does not gate any other module.
+    const kiteSnapshotStale = kiteSnapshotAgeMs !== null && kiteSnapshotAgeMs > 60 * 1000;
 
     return c.json({
       architectureRole: "D5_CROSS_VALIDATION",
@@ -20372,8 +20424,8 @@ app.get("/api/dhan/cross-validate", async (c) => {
       symbol: symbolParam,
       expiry: dhanNearestExpiry,
       kiteSnapshotAgeMs,
-      kiteSnapshotAgeCaveat: kiteSnapshotAgeMs !== null && kiteSnapshotAgeMs > 6 * 60 * 1000
-        ? "Kite snapshot is >6min old — divergence below may partly reflect staleness, not a true source disagreement."
+      kiteSnapshotAgeCaveat: kiteSnapshotStale
+        ? `Kite snapshot is ${Math.round((kiteSnapshotAgeMs as number) / 1000)}s old (Dhan side is fetched fresh on every call) — some or all of the divergence below may reflect Kite-side staleness rather than a true source disagreement. Refresh the OptionPilot dashboard tab immediately before re-running this check for a fair comparison.`
         : null,
       spot: { kite: kiteSpot, dhan: dhanSpot, divergenceAbs: spotDivergenceAbs, divergencePct: spotDivergencePct },
       atmStrike: kiteAtmStrike,

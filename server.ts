@@ -7298,6 +7298,14 @@ app.get("/", (c) => {
       m11DhanExpanded = !m11DhanExpanded;
       updateUI();
     }
+    // PHASE 2 (Complete card + premium selector, 2026-08-14): same
+    // collapsed-by-default detail pattern as M11 above, applied to the
+    // M12 candidate card.
+    let m12DetailsExpanded = false;
+    function toggleM12DetailsExpanded() {
+      m12DetailsExpanded = !m12DetailsExpanded;
+      updateUI();
+    }
     // ===== Freshness-gate fix (2026-08-13) — track when TradeLab was last
     // successfully fetched, and the server's own generatedAt/snapshotId, so
     // the UI can show FRESH/STALE/UNKNOWN honestly instead of trusting the
@@ -9194,9 +9202,59 @@ app.get("/", (c) => {
           : 'var(--gold)'; // WAIT_CONFLICT, WAIT_NO_DIRECTIONAL_EDGE, or any future/unknown state
         m12Html += tlRow('Decision', decision || '—', decisionColor);
         m12Html += tlRow('Selected side', String(d.m12CandidateSet.selectedSide || 'NONE'), null);
+
+        // PHASE 2 (Complete card + premium selector, 2026-08-14): the
+        // backend (buildV2CandidateSelection) already returns a full
+        // selectedCandidate object with strike/expiry/LTP/bid/ask/spread/
+        // OI/volume/Greeks/whyContract/alternatives — none of that was
+        // previously rendered. Prominent fields (side/strike/expiry/LTP)
+        // are always shown when a candidate exists; everything else is
+        // behind a "Show details" toggle, same collapsed-by-default
+        // pattern already used for Evidence Fusion (M11) after user
+        // feedback that showing everything at once was too dense.
+        const sc = d.m12CandidateSet.selectedCandidate;
+        const cm = (sc && sc.contractMetadata) || {};
+        if (sc) {
+          m12Html += tlRow('Strike', (sc.strike != null ? String(sc.strike) : '—') + ' ' + (sc.side || ''), null);
+          m12Html += tlRow('Expiry', cm.expiryDate ? String(cm.expiryDate) : '—', null);
+          m12Html += tlRow('LTP', sc.lastPrice != null ? '₹' + sc.lastPrice.toFixed(2) : '—', null);
+        }
         if (d.m12CandidateSet.reason) m12Html += '<div style="color:var(--muted-dim); font-size:0.65rem; margin-top:4px;">' + escapeHtml(d.m12CandidateSet.reason) + '</div>';
+        if (d.m12CandidateSet.whySide) m12Html += '<div style="color:var(--muted-dim); font-size:0.65rem; margin-top:4px;">' + escapeHtml(d.m12CandidateSet.whySide) + '</div>';
+
+        if (sc || (d.m12CandidateSet.whyContract && d.m12CandidateSet.whyContract.length)) {
+          m12Html += '<div onclick="toggleM12DetailsExpanded()" style="cursor:pointer; color:var(--gold); font-size:0.68rem; margin-top:8px; text-align:center; padding-top:6px; border-top:1px solid var(--border);">' +
+            (m12DetailsExpanded ? 'Hide details ▲' : 'Show details ▼') + '</div>';
+          if (m12DetailsExpanded) {
+            let detHtml = '';
+            if (sc) {
+              detHtml += tlRow('Bid / Ask', (sc.bid != null ? sc.bid.toFixed(2) : '—') + ' / ' + (sc.ask != null ? sc.ask.toFixed(2) : '—'), null);
+              detHtml += tlRow('Spread', sc.spreadPctOfMid != null ? sc.spreadPctOfMid.toFixed(3) + '% of mid' : '—', null);
+              detHtml += tlRow('OI', sc.oi != null ? String(sc.oi) : '—', null);
+              detHtml += tlRow('Volume', sc.volume != null ? String(sc.volume) : '—', null);
+              if (sc.iv != null || sc.delta != null) {
+                detHtml += tlRow('IV / Delta', (sc.iv != null ? sc.iv.toFixed(2) : '—') + ' / ' + (sc.delta != null ? sc.delta.toFixed(3) : '—'), null);
+              }
+              detHtml += tlRow('Lot size', cm.lotSize != null ? String(cm.lotSize) : '—', null);
+              detHtml += tlRow('Quote status', sc.reviewStatus || '—', null);
+            }
+            if (d.m12CandidateSet.whyContract && d.m12CandidateSet.whyContract.length) {
+              detHtml += '<div style="color:var(--muted); font-size:0.65rem; margin-top:6px; margin-bottom:2px;">Why this contract:</div>';
+              d.m12CandidateSet.whyContract.forEach(function(w) {
+                detHtml += '<div style="color:var(--muted-dim); font-size:0.62rem; padding:1px 0;">• ' + escapeHtml(String(w)) + '</div>';
+              });
+            }
+            const alts = d.m12CandidateSet.alternativeSameSide;
+            if (alts && alts.length) {
+              detHtml += '<div style="color:var(--muted); font-size:0.65rem; margin-top:6px;">' + alts.length + ' alternative contract(s) on the same side available.</div>';
+            }
+            detHtml += '<div style="color:var(--muted-dim); font-size:0.6rem; margin-top:6px;">Research/shadow display only — not an order-placement signal.</div>';
+            m12Html += '<div style="margin-top:6px;">' + detHtml + '</div>';
+          }
+        }
       }
       html += tlCard('8. Candidate Set (M12)', m12Html);
+
 
       let geHtml = '';
       if (d.greekEngine && d.greekEngine.status === 'OK') {

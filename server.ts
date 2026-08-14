@@ -9179,7 +9179,20 @@ app.get("/", (c) => {
 
       let m12Html = '';
       if (d.m12CandidateSet) {
-        m12Html += tlRow('Decision', String(d.m12CandidateSet.decision || '\u2014'), d.m12CandidateSet.decision === 'WAIT_NO_DIRECTIONAL_EDGE' ? 'var(--gold)' : 'var(--green)');
+        // BUGFIX (found live during Mobile Resync candidate-revalidation
+        // review, 2026-08-14): this previously colored EVERY decision
+        // except the literal string 'WAIT_NO_DIRECTIONAL_EDGE' green —
+        // including NO_TRADE_DATA_QUALITY and NO_TRADE_NO_CONTRACT, which
+        // mean "data failed a hard gate, do not trade this". A blocked/
+        // bad-data decision must never render the same color as an
+        // actionable BEST_CE/BEST_PE signal (mobile-resync spec rule 8:
+        // stale/bad data must never look like a valid live signal).
+        const decision = String(d.m12CandidateSet.decision || '');
+        const decisionColor =
+          decision === 'BEST_CE' || decision === 'BEST_PE' ? 'var(--green)'
+          : decision === 'NO_TRADE_DATA_QUALITY' || decision === 'NO_TRADE_NO_CONTRACT' ? 'var(--red)'
+          : 'var(--gold)'; // WAIT_CONFLICT, WAIT_NO_DIRECTIONAL_EDGE, or any future/unknown state
+        m12Html += tlRow('Decision', decision || '—', decisionColor);
         m12Html += tlRow('Selected side', String(d.m12CandidateSet.selectedSide || 'NONE'), null);
         if (d.m12CandidateSet.reason) m12Html += '<div style="color:var(--muted-dim); font-size:0.65rem; margin-top:4px;">' + escapeHtml(d.m12CandidateSet.reason) + '</div>';
       }

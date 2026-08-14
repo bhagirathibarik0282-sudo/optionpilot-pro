@@ -6035,16 +6035,29 @@ app.get("/", (c) => {
         ? Math.floor(countdownSeconds / 60) + ':' + String(countdownSeconds % 60).padStart(2, '0')
         : 'PAUSED';
       // Point 1: three distinct concepts, each explicitly labeled so they
-      // are never conflated \u2014 Kite Authentication Session is shown
+      // are never conflated — Kite Authentication Session is shown
       // separately in the header above (Status: Connected/email); this bar
       // covers only the Live Market Quote Feed and Last Successful Refresh.
-      // Visual styling (2026-08-08): terminal-ticker treatment \u2014
+      // Visual styling (2026-08-08): terminal-ticker treatment — 
       // monospace, pulsing live dot, subtle border glow matching state.
       const pulseAnim = state === 'LIVE' ? 'animation: tickerPulse 1.8s ease-in-out infinite;' : '';
       let html = '<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:rgba(0,0,0,0.25); border-radius:8px; margin-bottom:10px; font-size:0.7rem; flex-wrap:wrap; gap:4px; font-family:var(--font-mono); border:1px solid color-mix(in srgb, ' + color + ' 20%, transparent); box-shadow:0 0 12px color-mix(in srgb, ' + color + ' 10%, transparent);">';
       html += '<span style="display:inline-flex; align-items:center; gap:6px;"><span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:' + color + '; ' + pulseAnim + '"></span><span style="color:var(--muted);">FEED </span><span style="color:' + color + '; font-weight:700;">' + escapeHtml(state) + '</span></span>';
       html += '<span style="color:var(--muted);">SYNC ' + escapeHtml(lastUpdateText) + '</span>';
       html += '<span style="color:var(--muted);">NEXT ' + escapeHtml(nextRefreshText) + '</span>';
+      // PHASE 4 (Mobile Resync): the server's OWN freshness verdict from
+      // /api/market/latest-snapshot (Phase 2's LIVE/DEGRADED/FROZEN/LOCKED
+      // classification), shown alongside the client's own FEED state
+      // rather than replacing it — the two are computed differently
+      // (client: consecutive-failure/age heuristic; server: authoritative
+      // per-snapshot classification) and disagreement between them is
+      // itself useful information, not something to hide by merging.
+      if (serverConnectionState) {
+        const serverColor = serverConnectionState === 'LIVE' ? 'var(--green)'
+          : (serverConnectionState === 'DEGRADED' || serverConnectionState === 'FROZEN') ? 'var(--gold)'
+          : 'var(--red)';
+        html += '<span style="color:var(--muted);">SERVER <span style="color:' + serverColor + '; font-weight:700;">' + escapeHtml(serverConnectionState) + '</span></span>';
+      }
       html += '</div>';
       return html;
     }
@@ -13744,25 +13757,38 @@ app.get("/", (c) => {
     // exactly as before this phase, so a problem with this NEW,
     // additive check can never block the EXISTING refresh behaviour.
     let lastKnownServerRuntimeId = null;
+    // PHASE 4: the server's own connectionState (Phase 2 classification),
+    // read by renderConnectionStatusBar() above as an additional "SERVER"
+    // badge. null until the first successful resync check.
+    let serverConnectionState = null;
 
     async function checkBackendRuntimeAndResync() {
       const statusEl = document.getElementById('refreshStatus');
       if (statusEl) statusEl.textContent = 'Resyncing...';
+      let backendRestarted = false;
       try {
         const res = await fetch('/api/market/latest-snapshot', { cache: 'no-store' });
         const snap = await res.json();
+        if (snap && snap.connectionState) serverConnectionState = snap.connectionState;
         if (snap && snap.serverRuntimeId) {
           if (lastKnownServerRuntimeId && lastKnownServerRuntimeId !== snap.serverRuntimeId) {
+            backendRestarted = true;
             console.log('[MOBILE_RESYNC] Backend restarted since last check — refreshing fully.');
           }
           lastKnownServerRuntimeId = snap.serverRuntimeId;
         }
       } catch (err) {
-        // Fail open on THIS check only \u2014 the diagnostic call failing
+        // Fail open on THIS check only — the diagnostic call failing
         // must never block the real refresh below.
         console.log('[MOBILE_RESYNC] resync pre-check unavailable, proceeding with normal refresh:', err.message);
       }
       await refreshData();
+      // PHASE 4: surface the restart visibly, not just in the console —
+      // reuses the existing showSuccess() banner (auto-dismisses in 5s,
+      // same as every other status message on this dashboard already).
+      if (backendRestarted) {
+        showSuccess('Server restarted while this tab was in the background — data has been refreshed.');
+      }
     }
 
 

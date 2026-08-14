@@ -13728,8 +13728,43 @@ app.get("/", (c) => {
     setInterval(loadCommodities, 3 * 60 * 1000);
 
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && kiteConnected) refreshData();
+      if (document.visibilityState === 'visible' && kiteConnected) checkBackendRuntimeAndResync();
     });
+
+    // MOBILE RESYNC — PHASE 3: visibility-resume check (additive)
+    // Purpose: before repainting with possibly-stale in-memory data
+    // after the tab was backgrounded, briefly confirm (a) whether the
+    // Railway process restarted since we last checked (serverRuntimeId
+    // changed \u2014 mobile-resync spec: detect backend restart) and (b)
+    // the server's own freshness verdict (connectionState), then run
+    // the EXISTING refreshData() unchanged to do the actual repaint.
+    // Reuses the existing #refreshStatus element \u2014 no new DOM/CSS.
+    // Fails open on this check only: if /api/market/latest-snapshot
+    // itself is unreachable, we still fall through to refreshData()
+    // exactly as before this phase, so a problem with this NEW,
+    // additive check can never block the EXISTING refresh behaviour.
+    let lastKnownServerRuntimeId = null;
+
+    async function checkBackendRuntimeAndResync() {
+      const statusEl = document.getElementById('refreshStatus');
+      if (statusEl) statusEl.textContent = 'Resyncing...';
+      try {
+        const res = await fetch('/api/market/latest-snapshot', { cache: 'no-store' });
+        const snap = await res.json();
+        if (snap && snap.serverRuntimeId) {
+          if (lastKnownServerRuntimeId && lastKnownServerRuntimeId !== snap.serverRuntimeId) {
+            console.log('[MOBILE_RESYNC] Backend restarted since last check — refreshing fully.');
+          }
+          lastKnownServerRuntimeId = snap.serverRuntimeId;
+        }
+      } catch (err) {
+        // Fail open on THIS check only \u2014 the diagnostic call failing
+        // must never block the real refresh below.
+        console.log('[MOBILE_RESYNC] resync pre-check unavailable, proceeding with normal refresh:', err.message);
+      }
+      await refreshData();
+    }
+
 
     const params = new URLSearchParams(window.location.search);
     if (params.has('login_success')) {

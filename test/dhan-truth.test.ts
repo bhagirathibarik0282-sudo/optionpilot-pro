@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dhanTokenNeedsRefresh, evaluateDhanTruth, parseDhanIstTimestampMs } from "../dhan-truth.ts";
+import { dhanTokenNeedsRefresh, evaluateDhanTruth, parseDhanIstTimestampMs } from "../dhan-truth.js";
 
 test("parses Dhan zone-less expiryTime as IST, not Railway UTC", () => {
   assert.equal(

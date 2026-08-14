@@ -29698,7 +29698,27 @@ app.get("/api/tradelab", async (c) => {
   }
 
   const greekEngine = buildGreekEngine(d4);
-  const entryQuality = buildEntryQualityLayer(greekEngine, m?.futuresVwapBias);
+
+  // Futures adapter swap (2026-08-14): prefer the Dhan-sourced futures VWAP
+  // bias (dhanFuturesVwapBias) when it returned status "OK" for today, so
+  // Entry Quality's futures-confirmation gate no longer needs Kite for this
+  // input. Fails closed to the original Kite m?.futuresVwapBias if Dhan's
+  // computation is SKIPPED/FAIL/INSUFFICIENT (e.g. before market open) —
+  // never silently treated as UNKNOWN when a real Kite value exists.
+  let futuresVwapBiasPrimary = m?.futuresVwapBias;
+  let futuresVwapBiasProvenance = "KITE";
+  if (dhanConfigured) {
+    try {
+      const dhanFutBias = await dhanFuturesVwapBias(symbol);
+      if (dhanFutBias.status === "OK") {
+        futuresVwapBiasPrimary = dhanFutBias.bias;
+        futuresVwapBiasProvenance = "DHAN";
+      }
+    } catch {
+      // fails closed to Kite value already set above — no fabrication
+    }
+  }
+  const entryQuality = buildEntryQualityLayer(greekEngine, futuresVwapBiasPrimary);
 
   // TradeLab Dhan-only migration. Phase 1 (2026-08-12): M2/M3/M8/M9 computed
   // from Dhan only, via the shared multi-expiry layer above. Phase 2
@@ -29778,6 +29798,7 @@ app.get("/api/tradelab", async (c) => {
     m12CandidateSet: m12,
     greekEngine,
     entryQuality,
+    futuresVwapBiasProvenance,
     m2IvSkewDhan: m2Dhan,
     m3IvTermStructureDhan: m3Dhan,
     m4VixRegimeDhan: m4Dhan,

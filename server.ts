@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { createOutcomeRecord, evaluateOutcome, computeOutcomeStats, type OutcomeRecord, type SnapshotForOutcome, type Side as OutcomeSide, type IndexSymbol as OutcomeIndexSymbol } from "./outcome-engine.js";
 import { buildF5IvScience } from "./iv-science.js";
+import { dhanTokenNeedsRefresh, evaluateDhanTruth } from "./dhan-truth.js";
 
 interface Instrument {
   instrument_token: number;
@@ -19326,18 +19327,24 @@ async function refreshDhanAccessToken(): Promise<string | null> {
 // otherwise falls back to the legacy static env var so existing setups keep
 // working unchanged during migration.
 async function getValidDhanAccessToken(): Promise<string | null> {
-  const bufferMs = 5 * 60 * 1000; // refresh 5 minutes before reported expiry
+  const autoRefreshConfigured = Boolean(
+    process.env.DHAN_CLIENT_ID?.trim() && process.env.DHAN_PIN?.trim() && process.env.DHAN_TOTP_SECRET?.trim()
+  );
   if (dhanSession.accessTokenEncrypted && dhanSession.expiryTime) {
-    const expiresAt = new Date(dhanSession.expiryTime).getTime();
-    if (!Number.isNaN(expiresAt) && Date.now() < expiresAt - bufferMs) {
+    if (!dhanTokenNeedsRefresh(dhanSession.expiryTime)) {
       const decrypted = decryptToken(dhanSession.accessTokenEncrypted);
       if (decrypted) return decrypted;
     }
   }
   const refreshed = await refreshDhanAccessToken();
   if (refreshed) return refreshed;
-  // Fallback: legacy static token (pre-automation setups, or if auto-refresh
-  // is temporarily failing but a manually-pasted token is still valid).
+  // Fail closed when automatic authentication is configured. Falling back to
+  // a static token after a known session reaches its refresh window can
+  // silently reuse an expired/unverified token and mislabel the feed as live.
+  if (autoRefreshConfigured) return null;
+  // Legacy-only installations have no reported expiry to evaluate. They may
+  // keep using the static token, but /api/dhan/health remains the authority
+  // that verifies it with Dhan before data is trusted.
   const legacy = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
   return legacy || null;
 }
@@ -29303,6 +29310,64 @@ function v2CandidateHardDataGateDhan(
   const bundleFresh = classifyTruthField(dhanBundleGeneratedAt, TRUTH_THRESHOLDS_MS.options);
   if (bundleFresh.verdict !== "TRUE") hardBlockReasons.push(`DHAN_SNAPSHOT_${bundleFresh.verdict}`);
 
+  // Dhan Truth Layer: keep each freshness dimension explicit even though the
+  // current REST option-chain path can only supply one backend-receipt time.
+  // BACKEND_RECEIVED is intentionally a weaker proof than a provider/exchange
+  // timestamp, so this path is DEGRADED/REVIEW_ONLY rather than VERIFIED.
+  // Nothing here silently upgrades receipt time into exchange time.
+  const truth = evaluateDhanTruth({
+    symbol,
+    expectedSymbol: symbol,
+    expiry: candidate.contractMetadata.expiryDate,
+    expectedExpiry: currentExpiry.expiryDate instanceof Date
+      ? currentExpiry.expiryDate.toISOString().slice(0, 10)
+      : String(currentExpiry.expiryDate || ""),
+    optionType: candidate.side,
+    expectedOptionType: candidate.side,
+    securityId: candidate.contractMetadata.instrumentToken,
+    strike: candidate.strike,
+    fields: {
+      spot: {
+        timestamp: dhanBundleGeneratedAt,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.spot,
+        requiredForCandidate: true,
+      },
+      optionQuote: {
+        timestamp: candidate.quoteTimestamp,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: true,
+      },
+      optionChain: {
+        timestamp: dhanBundleGeneratedAt,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: true,
+      },
+      oi: {
+        timestamp: candidate.oi != null ? dhanBundleGeneratedAt : null,
+        source: candidate.oi != null ? "BACKEND_RECEIVED" : "UNAVAILABLE",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: true,
+      },
+      greeks: {
+        timestamp: dhanBundleGeneratedAt,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: false,
+      },
+      mobileDelivery: {
+        timestamp: dhanBundleGeneratedAt,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: false,
+      },
+    },
+  });
+  if (!truth.reviewEligible) hardBlockReasons.push(`DHAN_TRUTH_${truth.state}`);
+  if (!truth.candidateEligible && truth.reviewEligible) warnings.push("DHAN_TRUTH_DEGRADED_REVIEW_ONLY");
+
   if (!h2) hardBlockReasons.push("H2_DHAN_GATE_MISSING");
   else if (h2.status !== "PASS") hardBlockReasons.push(...h2.hardBlockReasons.map((r) => `H2_${r}`));
 
@@ -29323,14 +29388,15 @@ function v2CandidateHardDataGateDhan(
     hardBlockReasons: Array.from(new Set(hardBlockReasons)),
     warnings: Array.from(new Set(warnings)),
     dhanTruth: {
+      ...truth,
       snapshotFreshness: bundleFresh.verdict,
       snapshotAgeMs: bundleFresh.ageMs,
       futuresAdapterStatus: "NOT_YET_IMPLEMENTED",
-      note: "Dhan-path gate intentionally does not require spot-futures-options triple-sync TRUE (unlike Kite's H4) because no Dhan futures adapter exists yet — a disclosed, tracked gap, not a live failure. Revisit this gate once a Dhan futures adapter is built.",
+      note: "Dhan REST option-chain currently exposes backend-receipt proxies, not independent exchange timestamps. Fresh proxy data may be shown only as DEGRADED Review & Confirm; VERIFIED remains unavailable until stronger timestamp evidence exists. No Dhan futures adapter exists yet.",
     },
     h2Status: h2?.status || "MISSING",
     dte,
-    interpretationGuard: "Dhan-path H4 — PASS means this candidate's Dhan-sourced data is trustworthy enough to evaluate under Dhan's current real capability (no futures-sync claim). It is not a profitability guarantee or probability score.",
+    interpretationGuard: "Dhan-path H4 — PASS permits Review & Confirm only. dhanTruth.candidateEligible must be true before any future production candidate promotion; DEGRADED is never labelled VERIFIED. This is not a profitability guarantee or probability score.",
   };
 }
 

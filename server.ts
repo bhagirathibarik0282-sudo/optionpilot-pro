@@ -13843,6 +13843,49 @@ let marketResyncSnapshotSeq = 0;
 // so the frontend can detect a backend restart").
 const MARKET_SNAPSHOT_SERVER_RUNTIME_ID = `${Date.now()}-${randomBytes(4).toString("hex")}`;
 
+// ============================================================================
+// PHASE 2: FRESHNESS CLASSIFICATION (LIVE / DEGRADED / FROZEN / LOCKED)
+// ============================================================================
+// Configurable thresholds — centralized here per the mobile-resync spec's
+// "all thresholds must be configurable, not scattered as magic numbers"
+// rule. NOTE: the spec's own suggested test values (spot_live_max_age_ms:
+// 5000, etc.) are calibrated for a push/WebSocket feed. Bhagi Sir's
+// approved architecture for this phase is REST polling on the EXISTING
+// 3-minute cadence (SNAPSHOT_TTL_MS, already used by /api/data) — using
+// the spec's 5-second thresholds here would falsely show DEGRADED/FROZEN
+// on every normal page load. Thresholds below are instead calibrated as
+// multiples of the real poll cadence, so LIVE genuinely means "as fresh as
+// this architecture can be", not an unreachable bar.
+const MARKET_FRESHNESS_LIVE_MAX_AGE_MS = SNAPSHOT_TTL_MS; // 3 min — within one normal poll cycle
+const MARKET_FRESHNESS_DEGRADED_MAX_AGE_MS = SNAPSHOT_TTL_MS * 2; // 6 min — one missed cycle
+const MARKET_FRESHNESS_FROZEN_MAX_AGE_MS = SNAPSHOT_TTL_MS * 5; // 15 min — clearly stale, last-known-good only
+
+type MarketFreshnessState = "LIVE" | "DEGRADED" | "FROZEN" | "LOCKED";
+
+// Per mobile-resync spec rule 8/10: cached/frozen/errored data must never
+// be usable to produce a new CE/PE candidate, and a hard failure must
+// classify as LOCKED rather than silently substituting stale data.
+function classifyMarketFreshness(ageMs: number, hasError: boolean): MarketFreshnessState {
+  if (hasError) return "LOCKED";
+  if (ageMs <= MARKET_FRESHNESS_LIVE_MAX_AGE_MS) return "LIVE";
+  if (ageMs <= MARKET_FRESHNESS_DEGRADED_MAX_AGE_MS) return "DEGRADED";
+  if (ageMs <= MARKET_FRESHNESS_FROZEN_MAX_AGE_MS) return "FROZEN";
+  return "LOCKED";
+}
+
+// Worst-of ordering so the overall connectionState never overstates health
+// relative to any individual symbol.
+const MARKET_FRESHNESS_RANK: Record<MarketFreshnessState, number> = {
+  LIVE: 3,
+  DEGRADED: 2,
+  FROZEN: 1,
+  LOCKED: 0,
+};
+function worstMarketFreshness(states: MarketFreshnessState[]): MarketFreshnessState {
+  if (states.length === 0) return "LOCKED"; // no symbols at all — fail closed, not LIVE
+  return states.reduce((worst, s) => (MARKET_FRESHNESS_RANK[s] < MARKET_FRESHNESS_RANK[worst] ? s : worst));
+}
+
 app.get("/api/market/latest-snapshot", (c) => {
   c.header("Cache-Control", "no-store");
   const serverTime = new Date().toISOString();
@@ -13858,6 +13901,7 @@ app.get("/api/market/latest-snapshot", (c) => {
         serverTime,
         serverRuntimeId: MARKET_SNAPSHOT_SERVER_RUNTIME_ID,
         status: "NO_DATA",
+        connectionState: "LOCKED" as MarketFreshnessState,
         reason: !session
           ? "No active Kite session cookie on this request."
           : "Kite session found but no market snapshot has been collected yet — open the dashboard tab first so it refreshes, then retry.",
@@ -13873,14 +13917,22 @@ app.get("/api/market/latest-snapshot", (c) => {
   const spotUpdatedAt = new Date(session.snapshotTime).toISOString();
 
   const symbols: Record<string, unknown> = {};
+  const perSymbolStates: MarketFreshnessState[] = [];
   for (const sym of Object.keys(session.marketSnapshot)) {
     const m = session.marketSnapshot[sym];
     if (!m) continue;
+    const hasError = Boolean(m.error);
+    // PHASE 2 HONESTY NOTE: since spot/premium/chain/OI still share one
+    // timestamp (Phase 1 note below), they also share one freshness state
+    // for now — a single, real classification, not four independently
+    // fabricated ones.
+    const freshness = classifyMarketFreshness(snapshotAgeMs, hasError);
+    perSymbolStates.push(freshness);
     symbols[sym] = {
       spot: typeof m.spot === "number" ? m.spot : null,
       atmStrike: typeof m.atmStrike === "number" ? m.atmStrike : null,
       signal: m.signal ?? null,
-      hasError: Boolean(m.error),
+      hasError,
       error: m.error ?? null,
       // Pre-existing per-index Kite collection-cycle id — kept for
       // traceability, distinct from this endpoint's own snapshotId above.
@@ -13896,8 +13948,12 @@ app.get("/api/market/latest-snapshot", (c) => {
       premiumUpdatedAt: spotUpdatedAt,
       chainUpdatedAt: spotUpdatedAt,
       oiUpdatedAt: spotUpdatedAt,
+      freshness,
+      candidateEligible: freshness === "LIVE" || freshness === "DEGRADED",
     };
   }
+
+  const connectionState = worstMarketFreshness(perSymbolStates);
 
   return c.json(
     {
@@ -13906,11 +13962,18 @@ app.get("/api/market/latest-snapshot", (c) => {
       serverTime,
       serverRuntimeId: MARKET_SNAPSHOT_SERVER_RUNTIME_ID,
       status: "OK",
+      connectionState,
       snapshotId: marketResyncSnapshotSeq,
       sessionId: indiaTradingDate(),
       marketStatus: v2MarketPhaseNow(),
       marketOpen: isMarketOpenNowServer(),
       snapshotAgeMs,
+      freshnessThresholdsMs: {
+        live: MARKET_FRESHNESS_LIVE_MAX_AGE_MS,
+        degraded: MARKET_FRESHNESS_DEGRADED_MAX_AGE_MS,
+        frozen: MARKET_FRESHNESS_FROZEN_MAX_AGE_MS,
+        note: "Calibrated as multiples of the existing 3-min poll cadence (SNAPSHOT_TTL_MS), not the mobile-resync spec's push-feed defaults — this architecture is REST polling by explicit decision, not WebSocket/SSE.",
+      },
       symbols,
       dataQualityNote:
         "Per-field freshness (spot/premium/chain/OI) is currently a single shared timestamp because all four come from one Kite REST call in this phase. Honestly reported, not split into fabricated independent ages.",

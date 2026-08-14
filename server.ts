@@ -13810,6 +13810,115 @@ app.get("/api/data", async (c) => {
   }
 });
 
+// ============================================================================
+// MOBILE RESYNC — PHASE 1: SNAPSHOT MODEL FOUNDATION (read-only, additive)
+// Purpose: give the future mobile resume/resync flow a single endpoint that
+// returns the CURRENT server-held market state plus the metadata a client
+// needs to detect staleness and backend restarts — WITHOUT forcing a new
+// Kite fetch (reuses session.marketSnapshot exactly like /api/data does)
+// and WITHOUT changing any existing endpoint's behaviour.
+//
+// SCOPE (per Bhagi Sir's approved Phase 1 plan): groundwork only. No
+// RESYNCING state machine, no frontend changes yet, no persistence (Redis
+// explicitly deferred — in-memory only, resets on restart by design). No
+// SSE/WebSocket (deferred) — this stays a plain polled GET endpoint.
+//
+// NAMING NOTE: this file already uses "snapshotId" for two OTHER, older,
+// unrelated concepts (IndexMetrics.snapshotId = one Kite collection-cycle
+// per symbol; Recorder's "rec-..." id). This endpoint's snapshotId is a
+// THIRD, new concept: a monotonic counter for resync ordering, per the
+// mobile-resync spec. Likewise "sessionId" here means an Indian
+// trading-day identifier (spec's definition), NOT the session_id browser
+// cookie used by getSession(). Both are named to match the mobile-resync
+// spec's field names exactly in the JSON response; the comments above
+// exist so this isn't confused with the older same-named fields elsewhere.
+// ============================================================================
+
+let marketResyncSnapshotSeq = 0;
+
+// Generated once per process start. A future mobile client can compare this
+// against its last-seen value — a change means Railway restarted the
+// process and any locally-held candidate/incremental state must be
+// discarded (mobile-resync spec: "generate a new server runtime identifier
+// so the frontend can detect a backend restart").
+const MARKET_SNAPSHOT_SERVER_RUNTIME_ID = `${Date.now()}-${randomBytes(4).toString("hex")}`;
+
+app.get("/api/market/latest-snapshot", (c) => {
+  c.header("Cache-Control", "no-store");
+  const serverTime = new Date().toISOString();
+  const session = getSession(c);
+
+  if (!session || !session.marketSnapshot || !session.snapshotTime) {
+    // Fail-closed, per mobile-resync spec rule 10 — never invent a
+    // snapshot when none exists yet.
+    return c.json(
+      {
+        architectureRole: "MOBILE_RESYNC_M1_SNAPSHOT",
+        generatedAt: serverTime,
+        serverTime,
+        serverRuntimeId: MARKET_SNAPSHOT_SERVER_RUNTIME_ID,
+        status: "NO_DATA",
+        reason: !session
+          ? "No active Kite session cookie on this request."
+          : "Kite session found but no market snapshot has been collected yet — open the dashboard tab first so it refreshes, then retry.",
+        snapshotId: null,
+        sessionId: null,
+      },
+      200
+    );
+  }
+
+  marketResyncSnapshotSeq += 1;
+  const snapshotAgeMs = Date.now() - session.snapshotTime;
+  const spotUpdatedAt = new Date(session.snapshotTime).toISOString();
+
+  const symbols: Record<string, unknown> = {};
+  for (const sym of Object.keys(session.marketSnapshot)) {
+    const m = session.marketSnapshot[sym];
+    if (!m) continue;
+    symbols[sym] = {
+      spot: typeof m.spot === "number" ? m.spot : null,
+      atmStrike: typeof m.atmStrike === "number" ? m.atmStrike : null,
+      signal: m.signal ?? null,
+      hasError: Boolean(m.error),
+      error: m.error ?? null,
+      // Pre-existing per-index Kite collection-cycle id — kept for
+      // traceability, distinct from this endpoint's own snapshotId above.
+      indexSnapshotId: m.snapshotId ?? null,
+      // PHASE 1 HONESTY NOTE: spot/premium/chain/OI all currently come
+      // from the SAME single Kite refreshMarketSnapshot() call, so they
+      // genuinely share one freshness value today — this is reported
+      // truthfully as one shared timestamp rather than fabricating four
+      // independent ages that don't really exist yet. True per-field
+      // freshness (spec rule 7) needs a provider that updates these
+      // separately, which is later-phase work, not invented here.
+      spotUpdatedAt,
+      premiumUpdatedAt: spotUpdatedAt,
+      chainUpdatedAt: spotUpdatedAt,
+      oiUpdatedAt: spotUpdatedAt,
+    };
+  }
+
+  return c.json(
+    {
+      architectureRole: "MOBILE_RESYNC_M1_SNAPSHOT",
+      generatedAt: serverTime,
+      serverTime,
+      serverRuntimeId: MARKET_SNAPSHOT_SERVER_RUNTIME_ID,
+      status: "OK",
+      snapshotId: marketResyncSnapshotSeq,
+      sessionId: indiaTradingDate(),
+      marketStatus: v2MarketPhaseNow(),
+      marketOpen: isMarketOpenNowServer(),
+      snapshotAgeMs,
+      symbols,
+      dataQualityNote:
+        "Per-field freshness (spot/premium/chain/OI) is currently a single shared timestamp because all four come from one Kite REST call in this phase. Honestly reported, not split into fabricated independent ages.",
+    },
+    200
+  );
+});
+
 // News endpoint
 app.get("/api/news", async (c) => {
   try {

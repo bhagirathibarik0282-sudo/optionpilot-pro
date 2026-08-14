@@ -21,6 +21,7 @@ export interface DhanTruthInput {
   strike?: number | null;
   feedError?: boolean;
   sequenceGap?: boolean;
+  servedFromCache?: boolean;
   fields: Record<string, DhanTruthFieldInput>;
 }
 
@@ -96,10 +97,18 @@ export function dhanTokenNeedsRefresh(
   return expiresAt == null || nowMs >= expiresAt - refreshBufferMs;
 }
 
-function isoDate(value: string | null): string | null {
+export function normalizeDhanIsoDate(value: string | null): string | null {
   if (!value) return null;
-  const match = value.match(/^\d{4}-\d{2}-\d{2}/);
-  return match ? match[0] : null;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (
+    parsed.getUTCFullYear() !== Number(year) ||
+    parsed.getUTCMonth() !== Number(month) - 1 ||
+    parsed.getUTCDate() !== Number(day)
+  ) return null;
+  return `${year}-${month}-${day}`;
 }
 
 function assessField(input: DhanTruthFieldInput, nowMs: number): DhanTruthFieldReport {
@@ -111,6 +120,9 @@ function assessField(input: DhanTruthFieldInput, nowMs: number): DhanTruthFieldR
     requiredForCandidate: input.requiredForCandidate,
     strongTimestampProof: input.source === "EXCHANGE" || input.source === "PROVIDER",
   };
+  if (!Number.isFinite(nowMs) || !Number.isFinite(input.maxAgeMs) || input.maxAgeMs < 0) {
+    return { ...base, state: "INVALID", reason: "FRESHNESS_CONFIGURATION_INVALID" };
+  }
   if (!input.timestamp || input.source === "UNAVAILABLE") {
     return { ...base, state: "UNAVAILABLE", reason: "TIMESTAMP_UNAVAILABLE" };
   }
@@ -140,12 +152,15 @@ export function evaluateDhanTruth(input: DhanTruthInput): DhanTruthReport {
   const fields: Record<string, DhanTruthFieldReport> = {};
 
   if (!input.symbol || input.symbol !== input.expectedSymbol) hardBlockReasons.push("UNDERLYING_IDENTITY_MISMATCH");
-  if (!isoDate(input.expiry) || isoDate(input.expiry) !== isoDate(input.expectedExpiry)) hardBlockReasons.push("EXPIRY_IDENTITY_MISMATCH");
+  const actualExpiry = normalizeDhanIsoDate(input.expiry);
+  const expectedExpiry = normalizeDhanIsoDate(input.expectedExpiry);
+  if (!actualExpiry || !expectedExpiry || actualExpiry !== expectedExpiry) hardBlockReasons.push("EXPIRY_IDENTITY_MISMATCH");
   if (input.expectedOptionType && input.optionType !== input.expectedOptionType) hardBlockReasons.push("OPTION_TYPE_IDENTITY_MISMATCH");
   if (Object.prototype.hasOwnProperty.call(input, "securityId") && (!Number.isInteger(input.securityId) || (input.securityId as number) <= 0)) hardBlockReasons.push("SECURITY_ID_INVALID");
   if (Object.prototype.hasOwnProperty.call(input, "strike") && (!Number.isFinite(input.strike) || (input.strike as number) <= 0)) hardBlockReasons.push("STRIKE_INVALID");
   if (input.feedError) hardBlockReasons.push("PROVIDER_FEED_ERROR");
   if (input.sequenceGap) hardBlockReasons.push("SEQUENCE_GAP_RESYNC_REQUIRED");
+  if (input.servedFromCache) hardBlockReasons.push("CACHE_REVALIDATION_REQUIRED");
   if (Object.keys(input.fields).length === 0) hardBlockReasons.push("NO_TRUTH_FIELDS");
 
   for (const [name, field] of Object.entries(input.fields)) {
@@ -183,4 +198,8 @@ export function evaluateDhanTruth(input: DhanTruthInput): DhanTruthReport {
     interpretationGuard:
       "VERIFIED proves identity and independently fresh provider/exchange timestamps. DEGRADED may be shown for Review & Confirm only; it must not be presented as a verified live candidate. FROZEN/LOCKED must never create a candidate.",
   };
+}
+
+export function dhanTruthCandidateBlockReason(report: DhanTruthReport): string | null {
+  return report.candidateEligible ? null : `DHAN_TRUTH_${report.state}_NOT_CANDIDATE_ELIGIBLE`;
 }

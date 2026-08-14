@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dhanTokenNeedsRefresh, evaluateDhanTruth, parseDhanIstTimestampMs } from "../dhan-truth.js";
+import {
+  dhanTokenNeedsRefresh,
+  dhanTruthCandidateBlockReason,
+  evaluateDhanTruth,
+  normalizeDhanIsoDate,
+  parseDhanIstTimestampMs,
+} from "../dhan-truth.js";
 
 test("parses Dhan zone-less expiryTime as IST, not Railway UTC", () => {
   assert.equal(
@@ -134,4 +140,66 @@ test("missing required contract identity and empty freshness input fail closed",
   assert.ok(report.hardBlockReasons.includes("STRIKE_INVALID"));
   assert.ok(report.hardBlockReasons.includes("NO_TRUTH_FIELDS"));
   assert.ok(report.hardBlockReasons.includes("NO_REQUIRED_FRESHNESS_FIELDS"));
+});
+
+test("cached Dhan payload is locked until it is revalidated", () => {
+  const report = evaluateDhanTruth({
+    nowMs: Date.parse("2026-08-14T10:00:10.000Z"),
+    symbol: "NIFTY",
+    expectedSymbol: "NIFTY",
+    expiry: "2026-08-20",
+    expectedExpiry: "2026-08-20",
+    servedFromCache: true,
+    fields: {
+      optionChain: { timestamp: "2026-08-14T10:00:09.000Z", source: "BACKEND_RECEIVED", maxAgeMs: 30_000, requiredForCandidate: true },
+    },
+  });
+  assert.equal(report.state, "LOCKED");
+  assert.equal(report.candidateEligible, false);
+  assert.ok(report.hardBlockReasons.includes("CACHE_REVALIDATION_REQUIRED"));
+});
+
+test("invalid calendar expiry fails closed instead of normalizing or throwing", () => {
+  assert.equal(normalizeDhanIsoDate("2026-02-31"), null);
+  const report = evaluateDhanTruth({
+    symbol: "NIFTY",
+    expectedSymbol: "NIFTY",
+    expiry: "2026-02-31",
+    expectedExpiry: "2026-02-31",
+    fields: {
+      optionChain: { timestamp: new Date().toISOString(), source: "PROVIDER", maxAgeMs: 30_000, requiredForCandidate: true },
+    },
+  });
+  assert.equal(report.state, "LOCKED");
+  assert.ok(report.hardBlockReasons.includes("EXPIRY_IDENTITY_MISMATCH"));
+});
+
+test("invalid clock or freshness threshold cannot become fresh", () => {
+  const report = evaluateDhanTruth({
+    nowMs: Number.NaN,
+    symbol: "SENSEX",
+    expectedSymbol: "SENSEX",
+    expiry: "2026-08-21",
+    expectedExpiry: "2026-08-21",
+    fields: {
+      oi: { timestamp: "2026-08-14T10:00:00.000Z", source: "PROVIDER", maxAgeMs: Number.NaN, requiredForCandidate: true },
+    },
+  });
+  assert.equal(report.state, "LOCKED");
+  assert.ok(report.hardBlockReasons.includes("OI_TIMESTAMP_INVALID"));
+});
+
+test("DEGRADED truth always returns an explicit candidate block reason", () => {
+  const report = evaluateDhanTruth({
+    nowMs: Date.parse("2026-08-14T10:00:10.000Z"),
+    symbol: "BANKNIFTY",
+    expectedSymbol: "BANKNIFTY",
+    expiry: "2026-08-26",
+    expectedExpiry: "2026-08-26",
+    fields: {
+      optionQuote: { timestamp: "2026-08-14T10:00:09.000Z", source: "BACKEND_RECEIVED", maxAgeMs: 30_000, requiredForCandidate: true },
+    },
+  });
+  assert.equal(report.state, "DEGRADED");
+  assert.equal(dhanTruthCandidateBlockReason(report), "DHAN_TRUTH_DEGRADED_NOT_CANDIDATE_ELIGIBLE");
 });

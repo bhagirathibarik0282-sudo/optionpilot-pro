@@ -9000,6 +9000,8 @@ app.get("/", (c) => {
       let m10Html = '';
       if (d.m10MarketRegime) {
         const m10 = d.m10MarketRegime;
+        const m10Prov = d.m10MarketRegimeProvenance || 'KITE';
+        m10Html += '<span style="color:' + (m10Prov === 'DHAN' ? 'var(--green)' : 'var(--muted)') + '; font-size:0.6rem; background:rgba(0,200,120,0.1); padding:1px 6px; border-radius:4px;">Source: ' + escapeHtml(m10Prov) + '</span>';
         m10Html += tlRow('Regime', String((m10.regime && m10.regime.currentRegime) || '\u2014'), null);
         m10Html += tlRow('Structural bias', String((m10.regime && m10.regime.structuralBias) || '\u2014'), null);
         m10Html += tlRow('Transition', String((m10.regime && m10.regime.transition) || '\u2014'), null);
@@ -29627,6 +29629,15 @@ app.get("/api/tradelab", async (c) => {
     }
   }
 
+  // Step "M10 swap" (2026-08-14): m10MarketRegime now PREFERS the Dhan-sourced
+  // M10 (works for NIFTY/BANKNIFTY/SENSEX via DHAN_SPOT_HISTORY) when it
+  // returned status "OK" — verified field-for-field compatible with what the
+  // frontend M10 card actually reads (regime.currentRegime/structuralBias/
+  // transition, dataQuality). Fails closed to the original Kite m10 if Dhan's
+  // is missing/insufficient, so nothing breaks if Dhan data isn't ready yet.
+  const m10Primary = (dhanConfigured && m10Dhan && m10Dhan.status === "OK") ? m10Dhan : m10;
+  const m10PrimaryProvenance = (dhanConfigured && m10Dhan && m10Dhan.status === "OK") ? "DHAN" : "KITE";
+
   return c.json({
     architectureRole: "TRADELAB_PHASE_B_AGGREGATOR",
     generatedAt: new Date().toISOString(),
@@ -29635,7 +29646,8 @@ app.get("/api/tradelab", async (c) => {
     readOnly: true,
     dhanConfigured,
     dhanNormalized: d4,
-    m10MarketRegime: m10,
+    m10MarketRegime: m10Primary,
+    m10MarketRegimeProvenance: m10PrimaryProvenance,
     m11EvidenceFusion: m11,
     m12CandidateSet: m12,
     greekEngine,

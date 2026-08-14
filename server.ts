@@ -22027,6 +22027,132 @@ async function dhanScanScripMaster(
   return { headerCols, colIndex, totalRowsScanned, futRows, optRows, idxRows, exchangeFiltered: exchangeFilter, fetchOk: true, httpStatus: res.status };
 }
 
+// ============================================================================
+// DHAN FUTURES ADAPTER — Near-month futures VWAP bias (2026-08-14)
+//
+// Purpose: give TradeLab's Entry Quality layer a Dhan-sourced equivalent of
+// the existing Kite "Rule-14" futuresVwapBias signal, so it no longer needs
+// a Kite session for this one input. Reuses the SAME proven building blocks
+// already live-verified for the V3 Historical Store Brain's F1 futures
+// module: dhanScanScripMaster (above) for FUTIDX identity resolution, and
+// /v2/charts/intraday for minute data (the daily endpoint is confirmed
+// broken for FUTIDX with DH-905 — see fetchFuturesHistory elsewhere in this
+// file; intraday is the proven-working path).
+//
+// Kite's signal compares near-month futures LTP against Kite's own
+// session-traded average_price field. Dhan's intraday endpoint has no such
+// field, so this computes a genuine volume-weighted VWAP from TODAY's
+// minute bars (typical price = (H+L+C)/3 per candle, weighted by that
+// candle's volume — the standard VWAP formula used industry-wide, not a
+// fabricated number). If today has zero minute bars yet (market not open,
+// or no data returned), this reports INSUFFICIENT/UNKNOWN honestly rather
+// than silently substituting a stale day's data.
+// ============================================================================
+
+async function dhanFuturesVwapBias(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX") {
+  const accessToken = (await getValidDhanAccessToken()) || "";
+  const clientId = process.env.DHAN_CLIENT_ID?.trim() || "";
+  if (!accessToken || !clientId) {
+    return { status: "SKIPPED" as const, reason: "DHAN_NOT_CONFIGURED", bias: "UNKNOWN" as const };
+  }
+
+  const scan = await dhanScanScripMaster(symbol, 8);
+  if (!scan.fetchOk || !scan.headerCols || scan.futRows.length === 0) {
+    return { status: "FAIL" as const, reason: "NO_FUTIDX_ROW_IN_SCRIP_MASTER", bias: "UNKNOWN" as const };
+  }
+  const sortedFut = [...scan.futRows].sort((a, b) => {
+    const da = new Date(a["SEM_EXPIRY_DATE"] || "").getTime();
+    const db = new Date(b["SEM_EXPIRY_DATE"] || "").getTime();
+    return (isNaN(da) ? Infinity : da) - (isNaN(db) ? Infinity : db);
+  });
+  const nearest = sortedFut[0];
+  const securityId = nearest["SEM_SMST_SECURITY_ID"];
+  const tradingSymbol = nearest["SEM_TRADING_SYMBOL"] || null;
+  const expiry = nearest["SEM_EXPIRY_DATE"] || null;
+  if (!securityId) {
+    return { status: "FAIL" as const, reason: "FUTIDX_ROW_MISSING_SECURITY_ID", bias: "UNKNOWN" as const, tradingSymbol, expiry };
+  }
+
+  const futuresSegment = symbol === "SENSEX" ? "BSE_FNO" : "NSE_FNO";
+  const today = new Date().toISOString().slice(0, 10);
+  const requestBodyObj = {
+    securityId: String(securityId),
+    exchangeSegment: futuresSegment,
+    instrument: "FUTIDX",
+    interval: "1",
+    oi: false,
+    fromDate: `${today} 09:15:00`,
+    toDate: `${today} 23:59:59`,
+  };
+
+  try {
+    const res = await dhanRateLimitedFetch("https://api.dhan.co/v2/charts/intraday", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
+      body: JSON.stringify(requestBodyObj),
+    });
+    const raw = await res.text();
+    let payload: any = null;
+    try { payload = raw ? JSON.parse(raw) : null; } catch { payload = null; }
+
+    if (!res.ok || !payload || typeof payload !== "object") {
+      return { status: "FAIL" as const, reason: payload?.errorMessage || `intraday HTTP ${res.status}`, bias: "UNKNOWN" as const, tradingSymbol, expiry, securityId };
+    }
+
+    const highs: number[] = Array.isArray(payload.high) ? payload.high : [];
+    const lows: number[] = Array.isArray(payload.low) ? payload.low : [];
+    const closes: number[] = Array.isArray(payload.close) ? payload.close : [];
+    const volumes: number[] = Array.isArray(payload.volume) ? payload.volume : [];
+    const n = Math.min(highs.length, lows.length, closes.length, volumes.length);
+
+    if (n === 0) {
+      return { status: "INSUFFICIENT" as const, reason: "NO_INTRADAY_BARS_TODAY (market not yet open, or no data returned)", bias: "UNKNOWN" as const, tradingSymbol, expiry, securityId };
+    }
+
+    let sumPV = 0;
+    let sumV = 0;
+    for (let i = 0; i < n; i++) {
+      const typicalPrice = (highs[i] + lows[i] + closes[i]) / 3;
+      const vol = volumes[i] || 0;
+      sumPV += typicalPrice * vol;
+      sumV += vol;
+    }
+    const vwap = sumV > 0 ? sumPV / sumV : null;
+    const lastPrice = closes[n - 1];
+    const bias: "UP" | "DOWN" | "UNKNOWN" =
+      vwap == null ? "UNKNOWN" : lastPrice > vwap ? "UP" : lastPrice < vwap ? "DOWN" : "UNKNOWN";
+
+    return {
+      status: "OK" as const,
+      bias,
+      vwap,
+      lastPrice,
+      sampleCount: n,
+      totalVolume: sumV,
+      tradingSymbol,
+      expiry,
+      securityId,
+      methodology: "VWAP = volume-weighted typical price ((H+L+C)/3) across today's Dhan 1-minute FUTIDX bars so far. Dhan's intraday endpoint has no VWAP field of its own — this is computed here from genuine minute OHLCV data using the standard industry formula, not fabricated.",
+    };
+  } catch (e) {
+    return { status: "FAIL" as const, reason: e instanceof Error ? e.message : "intraday futures request failed", bias: "UNKNOWN" as const, tradingSymbol, expiry, securityId };
+  }
+}
+
+app.get("/api/audit/dhan-futures-vwap-bias-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+  const symbolParam = (c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(symbolParam)) {
+    return c.json({ status: "ERROR", error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const result = await dhanFuturesVwapBias(symbolParam as "NIFTY" | "BANKNIFTY" | "SENSEX");
+  return c.json({ architectureRole: "DHAN_FUTURES_VWAP_BIAS_PROOF", readOnlyMode: true, orderAccessUsed: false, tokenExposed: false, ...result }, 200);
+});
+
 app.get("/api/audit/dhan-instrument-master", async (c) => {
   const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
   const providedKey = c.req.query("key")?.trim() || "";

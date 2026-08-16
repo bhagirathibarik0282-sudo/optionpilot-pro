@@ -3602,6 +3602,94 @@ function calcGreeks(
   return { vega, theta: thetaPerDay, delta };
 }
 
+// ============== ADVANCED GREEKS (Vanna/Charm/Speed/Zomma/Color) — Phase 2 (2026-08-16) ==============
+// Extends calcGreeks() (Delta/Vega/Theta above) with the 2nd/3rd-order
+// Greeks plus the Intrinsic/Extrinsic premium split, requested for the
+// HFT-desk-inspired roadmap. Reuses the SAME normPdf/normCdf/
+// BS_RISK_FREE_RATE this file already uses for calcGreeks/
+// calcImpliedVolatility — no new math primitives, no new risk-free-rate
+// convention. Pure calculation only: no live fetch, no Kite/Dhan call.
+// ivPercent must come from a real source (live Dhan option-chain snapshot,
+// or calcImpliedVolatility() above) — Dhan's HISTORICAL IV endpoint is a
+// confirmed empty-array gap (see memory), so this must never be fed a
+// fabricated/placeholder IV.
+function calcAdvancedGreeks(
+  spot: number,
+  strike: number,
+  ivPercent: number,
+  daysToExpiry: number,
+  isCall: boolean
+): {
+  intrinsicValue: number; extrinsicValue: number; theoreticalPremium: number;
+  delta: number; gamma: number; vega: number; theta: number;
+  vanna: number; charm: number; speed: number; zomma: number; color: number;
+} | null {
+  if (spot <= 0 || strike <= 0 || ivPercent <= 0 || daysToExpiry < 0) return null;
+  const sigma = ivPercent / 100;
+  const T = Math.max(daysToExpiry / 365, 0.0001); // avoid divide-by-zero on expiry day
+  const r = BS_RISK_FREE_RATE;
+  const sqrtT = Math.sqrt(T);
+  const d1 = (Math.log(spot / strike) + (r + (sigma * sigma) / 2) * T) / (sigma * sqrtT);
+  const d2 = d1 - sigma * sqrtT;
+  const nd1 = normPdf(d1);
+  const Nd1 = normCdf(isCall ? d1 : -d1);
+
+  const intrinsic = isCall ? Math.max(0, spot - strike) : Math.max(0, strike - spot);
+  const premium = isCall
+    ? spot * normCdf(d1) - strike * Math.exp(-r * T) * normCdf(d2)
+    : strike * Math.exp(-r * T) * normCdf(-d2) - spot * normCdf(-d1);
+  const extrinsic = Math.max(0, premium - intrinsic);
+
+  const { vega, theta, delta } = calcGreeks(spot, strike, ivPercent, daysToExpiry, isCall);
+  const gamma = nd1 / (spot * sigma * sqrtT);
+  const vanna = (vega / spot) * (1 - d1 / (sigma * sqrtT));
+  const charm = (r * Nd1 - (nd1 * (2 * r * T - d2 * sigma * sqrtT)) / (2 * T * sigma * sqrtT)) / 365;
+  const speed = (-gamma / spot) * (d1 / (sigma * sqrtT) + 1);
+  const zomma = gamma * ((d1 * d2 - 1) / sigma);
+  const color = gamma * (r + (sigma * d1) / (2 * T));
+
+  return {
+    intrinsicValue: Math.round(intrinsic * 100) / 100,
+    extrinsicValue: Math.round(extrinsic * 100) / 100,
+    theoreticalPremium: Math.round(premium * 100) / 100,
+    delta: Math.round(delta * 10000) / 10000,
+    gamma: Math.round(gamma * 1e6) / 1e6,
+    vega: Math.round(vega * 10000) / 10000,
+    theta: Math.round(theta * 10000) / 10000,
+    vanna: Math.round(vanna * 1e6) / 1e6,
+    charm: Math.round(charm * 1e6) / 1e6,
+    speed: Math.round(speed * 1e8) / 1e8,
+    zomma: Math.round(zomma * 1e6) / 1e6,
+    color: Math.round(color * 1e6) / 1e6,
+  };
+}
+
+app.get("/api/audit/advanced-greeks-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+  const spot = Number(c.req.query("spot"));
+  const strike = Number(c.req.query("strike"));
+  const daysToExpiry = Number(c.req.query("dte"));
+  const ivPercent = Number(c.req.query("iv"));
+  const isCall = (c.req.query("type") || "CE").toUpperCase() !== "PE";
+  if (![spot, strike, daysToExpiry, ivPercent].every(Number.isFinite)) {
+    return c.json({ status: "ERROR", error: "Query params required: spot, strike, dte, iv, type=CE|PE." }, 400);
+  }
+  const result = calcAdvancedGreeks(spot, strike, ivPercent, daysToExpiry, isCall);
+  return c.json({
+    architectureRole: "ADVANCED_GREEKS_PURE_CALC_PROOF",
+    readOnlyMode: true,
+    orderAccessUsed: false,
+    tokenExposed: false,
+    input: { spot, strike, daysToExpiry, ivPercent, optionType: isCall ? "CE" : "PE" },
+    result,
+    note: "Pure Black-Scholes calculation (no live fetch). ivPercent must be sourced from a real live IV — this endpoint does not fetch or validate IV itself.",
+  }, 200);
+});
+
 
 function findActiveIndexFuture(
   instruments: Instrument[],

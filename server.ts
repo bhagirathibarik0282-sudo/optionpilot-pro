@@ -2081,6 +2081,13 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     void captureV2ShadowCycle(activeSession, entry).catch((err) =>
       console.error("[V2 Shadow] capture cycle error:", err instanceof Error ? err.message : err)
     );
+
+    // Telegram alerts (Phase 1, 2026-08-16): fire-and-forget, reuses the
+    // SAME activeSession.marketSnapshot just refreshed above — no extra
+    // Kite/Dhan API call. A failure here can never block the Recorder cycle.
+    void runTelegramAlertCycle(activeSession).catch((err) =>
+      console.error("[Telegram] alert cycle error:", err instanceof Error ? err.message : err)
+    );
   } catch (err) {
     recorderSession.status = "DEGRADED";
     recorderSession.lastErrorRedacted = err instanceof Error ? err.message : "Unknown recorder error";
@@ -2439,6 +2446,105 @@ function computeMarketDna(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"): MarketDnaRe
     evidence: `Computed from ${entries.length} Recorder snapshots (${badCount} INVALID/STALE, reduces confidence). wallPersistenceScore is DATA UNAVAILABLE by design \u2014 the Recorder does not capture Call/Put Wall state, only raw spot/futures/options fields; this is a disclosed feature gap, never a fabricated zero.`,
     computedAt: new Date().toISOString(),
   };
+}
+
+// ============== TELEGRAM ALERTS (Phase 1, 2026-08-16) ==============
+// Fire-and-forget notifications piggybacked on the existing 3-min Recorder
+// cycle (captureRecorderSnapshot) — reads the SAME already-refreshed
+// activeSession.marketSnapshot, so this adds ZERO extra Kite/Dhan API
+// calls. Sends only on state CHANGE (fingerprint-based dedup), never on
+// every 3-min tick, to avoid notification spam. M12 (BEST_CE/BEST_PE) is
+// an explicitly UNVALIDATED research construct (see H5 isolation guard on
+// buildV2CandidateSelection) — its alert is labeled accordingly and is
+// never phrased as a trade instruction.
+const TELEGRAM_LAST_REGIME: Map<string, string> = new Map();
+const TELEGRAM_LAST_M11_FINGERPRINT: Map<string, string> = new Map();
+const TELEGRAM_LAST_M12_FINGERPRINT: Map<string, string> = new Map();
+
+async function sendTelegramAlert(message: string): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
+  if (!token || !chatId) return; // not configured — silently skip, no error spam
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: "HTML" }),
+    });
+  } catch (err) {
+    console.error("[Telegram] send failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
+  const symbols: V2PremiumSymbol[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
+  const istTime = () => new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" });
+
+  for (const symbol of symbols) {
+    const m = session.marketSnapshot?.[symbol];
+
+    // --- M10: Regime shift alert ---
+    try {
+      const m10 = buildV2MarketBehaviourRegime(symbol, session, m);
+      const currentRegime = (m10 as any)?.regime?.currentRegime;
+      if (currentRegime) {
+        const prevRegime = TELEGRAM_LAST_REGIME.get(symbol);
+        if (prevRegime && prevRegime !== currentRegime) {
+          const spot = m?.spot != null ? m.spot.toFixed(2) : "—";
+          await sendTelegramAlert(
+            `📊 <b>REGIME SHIFT — ${symbol}</b>\n${prevRegime} → ${currentRegime}\nSpot: ${spot}\nTime: ${istTime()}`
+          );
+        }
+        TELEGRAM_LAST_REGIME.set(symbol, currentRegime);
+      }
+    } catch (err) {
+      console.error(`[Telegram] M10 check failed for ${symbol}:`, err instanceof Error ? err.message : err);
+    }
+
+    // --- M11: High-confidence evidence alert (readiness=COMPLETE, no conflicts) ---
+    try {
+      const m11 = await buildV2EvidenceFusion(symbol, session, 20);
+      const readiness = (m11 as any)?.readiness;
+      const conflictCount = (m11 as any)?.conflictCount ?? -1;
+      const isHighConfidence = readiness === "EVIDENCE_MATRIX_COMPLETE" && conflictCount === 0;
+      const fingerprint = `${readiness}|${conflictCount}`;
+      const prevFingerprint = TELEGRAM_LAST_M11_FINGERPRINT.get(symbol);
+      if (isHighConfidence && fingerprint !== prevFingerprint) {
+        await sendTelegramAlert(
+          `📈 <b>HIGH-CONVICTION EVIDENCE — ${symbol}</b>\nReadiness: EVIDENCE_MATRIX_COMPLETE | Conflicts: 0\n\n⚠️ Evidence/research summary — not an auto-trade signal. Check TradeLab card for full detail.\nTime: ${istTime()}`
+        );
+      }
+      TELEGRAM_LAST_M11_FINGERPRINT.set(symbol, fingerprint);
+    } catch (err) {
+      console.error(`[Telegram] M11 check failed for ${symbol}:`, err instanceof Error ? err.message : err);
+    }
+
+    // --- M12: Unvalidated research candidate alert (explicit label, per
+    // 2026-08-16 user decision — this is a SHADOW_ONLY construct, never
+    // phrased as a recommendation) ---
+    try {
+      const m12 = await buildV2CandidateSelection(symbol, session, 20);
+      const decision = (m12 as any)?.decision;
+      if (decision === "BEST_CE" || decision === "BEST_PE") {
+        const fingerprint = v2CandidateFingerprint(m12);
+        const prevFingerprint = TELEGRAM_LAST_M12_FINGERPRINT.get(symbol);
+        if (fingerprint !== prevFingerprint) {
+          const cand = (m12 as any)?.selectedCandidate;
+          const strike = cand?.strike ?? "—";
+          const role = cand?.moneynessRole ?? "";
+          const premium = cand?.lastPrice != null ? `₹${cand.lastPrice}` : "—";
+          await sendTelegramAlert(
+            `⚠️ <b>UNVALIDATED RESEARCH SIGNAL — ${symbol}</b>\n${decision} — Strike ${strike} (${role})\nCurrent premium: ${premium}\n\nThis is NOT a validated trade recommendation. Verify independently before acting.\nTime: ${istTime()}`
+          );
+        }
+        TELEGRAM_LAST_M12_FINGERPRINT.set(symbol, fingerprint);
+      } else {
+        TELEGRAM_LAST_M12_FINGERPRINT.set(symbol, `${decision}`);
+      }
+    } catch (err) {
+      console.error(`[Telegram] M12 check failed for ${symbol}:`, err instanceof Error ? err.message : err);
+    }
+  }
 }
 
 let lastRecorderSlot = -1;

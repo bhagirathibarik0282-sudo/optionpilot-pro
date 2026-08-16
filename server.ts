@@ -3664,33 +3664,6 @@ function calcAdvancedGreeks(
   };
 }
 
-app.get("/api/audit/advanced-greeks-proof", async (c) => {
-  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
-  const providedKey = c.req.query("key")?.trim() || "";
-  if (!auditKey || providedKey !== auditKey) {
-    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
-  }
-  const spot = Number(c.req.query("spot"));
-  const strike = Number(c.req.query("strike"));
-  const daysToExpiry = Number(c.req.query("dte"));
-  const ivPercent = Number(c.req.query("iv"));
-  const isCall = (c.req.query("type") || "CE").toUpperCase() !== "PE";
-  if (![spot, strike, daysToExpiry, ivPercent].every(Number.isFinite)) {
-    return c.json({ status: "ERROR", error: "Query params required: spot, strike, dte, iv, type=CE|PE." }, 400);
-  }
-  const result = calcAdvancedGreeks(spot, strike, ivPercent, daysToExpiry, isCall);
-  return c.json({
-    architectureRole: "ADVANCED_GREEKS_PURE_CALC_PROOF",
-    readOnlyMode: true,
-    orderAccessUsed: false,
-    tokenExposed: false,
-    input: { spot, strike, daysToExpiry, ivPercent, optionType: isCall ? "CE" : "PE" },
-    result,
-    note: "Pure Black-Scholes calculation (no live fetch). ivPercent must be sourced from a real live IV — this endpoint does not fetch or validate IV itself.",
-  }, 200);
-});
-
-
 function findActiveIndexFuture(
   instruments: Instrument[],
   symbol: "NIFTY" | "BANKNIFTY" | "SENSEX"
@@ -29581,6 +29554,32 @@ async function buildTradeLabDhanM12(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", po
     ],
   };
 }
+
+app.get("/api/audit/advanced-greeks-proof", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+  const spot = Number(c.req.query("spot"));
+  const strike = Number(c.req.query("strike"));
+  const daysToExpiry = Number(c.req.query("dte"));
+  const ivPercent = Number(c.req.query("iv"));
+  const isCall = (c.req.query("type") || "CE").toUpperCase() !== "PE";
+  if (![spot, strike, daysToExpiry, ivPercent].every(Number.isFinite)) {
+    return c.json({ status: "ERROR", error: "Query params required: spot, strike, dte, iv, type=CE|PE." }, 400);
+  }
+  const result = calcAdvancedGreeks(spot, strike, ivPercent, daysToExpiry, isCall);
+  return c.json({
+    architectureRole: "ADVANCED_GREEKS_PURE_CALC_PROOF",
+    readOnlyMode: true,
+    orderAccessUsed: false,
+    tokenExposed: false,
+    input: { spot, strike, daysToExpiry, ivPercent, optionType: isCall ? "CE" : "PE" },
+    result,
+    note: "Pure Black-Scholes calculation (no live fetch). ivPercent must be sourced from a real live IV — this endpoint does not fetch or validate IV itself.",
+  }, 200);
+});
 
 app.get("/api/audit/tradelab-dhan-m12-proof", async (c) => {
   const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";

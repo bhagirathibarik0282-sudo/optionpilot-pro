@@ -21738,11 +21738,103 @@ function dhanRecorderSourceMetrics(symbol: "NIFTY" | "BANKNIFTY"): IndexMetrics 
   return dhanToIndexMetricsShim(symbol, latest);
 }
 
-// Production router: NIFTY/BANKNIFTY -> Dhan, SENSEX -> Kite (unchanged —
-// no confirmed Dhan security ID for SENSEX).
+// ===== M1 (Dhan) for SENSEX — SENSEX Dhan migration sub-step 1 of 2
+// (2026-08-16). SENSEX securityId=51 is already confirmed and
+// TRADELAB_DHAN_MULTIEXPIRY_HISTORY already fetches SENSEX every 3
+// minutes independently of any request (same cadence M2/M3/M4/M8/M9/
+// M10/M5/M11/M12-Dhan already rely on for SENSEX) — so this adds ZERO
+// new Dhan API calls. M6 (buildV2PremiumAttribution) and M7
+// (buildV2OiPositioningEvidence) both call buildV2PremiumCompositionHistory
+// internally, so fixing the router below upgrades M1/M6/M7 together.
+// Does NOT touch the separate, deeper-wired Main Recorder/Truth-Engine
+// SENSEX path (dhanRecorderSourceMetrics, dhanM1BuildProductionSnapshot)
+// — those remain Kite-only, unchanged, pending a dedicated future step.
+function tradeLabDhanM1LegPoint(
+  snap: TradeLabDhanMultiExpirySnapshot,
+  side: V2PremiumSide,
+  strike: number
+): V2PremiumLegPoint | null {
+  const ed = tradeLabDhanNormalizedToExpiryData(snap.current);
+  if (!ed) return null;
+  const arr = side === "CE" ? ed.ceStrikes : ed.peStrikes;
+  const leg = (arr || []).find((l: any) => l.strike === strike) as any;
+  if (!leg || leg.lastPrice == null || leg.lastPrice <= 0) return null;
+  const spot = (snap.current as any)?.spot ?? 0;
+  const atmStrike = (snap.current as any)?.atmStrike ?? null;
+  const intrinsic = v2ComputeIntrinsicValue(side, spot, strike);
+  const extrinsic = Math.max(0, leg.lastPrice - intrinsic);
+  const moneyness: "ITM" | "ATM" | "OTM" = atmStrike === strike ? "ATM" : intrinsic > 0 ? "ITM" : "OTM";
+  return {
+    timestamp: leg.quoteTimestamp || snap.generatedAt,
+    snapshotId: `dhan_SENSEX_${snap.generatedAt}`,
+    snapshotStatus: "OK" as RecorderSnapshot["snapshotStatus"],
+    symbol: "SENSEX" as V2PremiumSymbol, side, strike, atmStrike, spot, moneyness,
+    premium: leg.lastPrice, intrinsic, extrinsic,
+    intrinsicPct: v2PctPart(intrinsic, leg.lastPrice),
+    extrinsicPct: v2PctPart(extrinsic, leg.lastPrice),
+    iv: leg.iv ?? null, theta: leg.theta ?? null, vega: leg.vega ?? null, delta: leg.delta ?? null, oi: leg.oi ?? null,
+  };
+}
+
+function buildDhanM1CompositionHistorySensex(maxSnapshots = 20) {
+  const all = TRADELAB_DHAN_MULTIEXPIRY_HISTORY.get("SENSEX") || [];
+  const eligible = all.slice(-Math.max(2, Math.min(maxSnapshots, TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS)));
+  const empty = { symbol: "SENSEX" as V2PremiumSymbol, provider: "DHAN" as const, generatedAt: new Date().toISOString(), snapshotCount: 0, comparisons: [] as V2PremiumCompositionComparison[], dataQuality: "INSUFFICIENT" as V2DataQuality };
+  if (eligible.length === 0) return empty;
+
+  const currentSnap = eligible[eligible.length - 1];
+  const curED = tradeLabDhanNormalizedToExpiryData(currentSnap.current);
+  if (!curED) return { ...empty, snapshotCount: eligible.length };
+
+  const targets: { side: V2PremiumSide; strike: number }[] = [
+    ...curED.ceStrikes.map((l) => ({ side: "CE" as V2PremiumSide, strike: l.strike })),
+    ...curED.peStrikes.map((l) => ({ side: "PE" as V2PremiumSide, strike: l.strike })),
+  ];
+
+  const comparisons: V2PremiumCompositionComparison[] = [];
+  for (const target of targets) {
+    const current = tradeLabDhanM1LegPoint(currentSnap, target.side, target.strike);
+    if (!current) continue;
+    let previous: V2PremiumLegPoint | null = null;
+    for (let i = eligible.length - 2; i >= 0; i--) {
+      previous = tradeLabDhanM1LegPoint(eligible[i], target.side, target.strike);
+      if (previous) break;
+    }
+    comparisons.push(v2BuildComparison(current, previous)); // M1's real, unmodified function
+  }
+
+  const overallQuality: V2DataQuality = comparisons.length === 0
+    ? "INSUFFICIENT"
+    : comparisons.every((x) => x.dataQuality === "OK") ? "OK"
+    : comparisons.some((x) => x.dataQuality === "OK" || x.dataQuality === "PARTIAL") ? "PARTIAL" : "INSUFFICIENT";
+
+  return {
+    symbol: "SENSEX" as V2PremiumSymbol,
+    provider: "DHAN" as const,
+    generatedAt: new Date().toISOString(),
+    latestSnapshotAt: currentSnap.generatedAt,
+    source: "Dhan normalized 3-minute TradeLab multi-expiry snapshots (current expiry) — same buffer M2/M3/M4/M8/M9/M10/M5/M11/M12-Dhan already use for SENSEX, zero new Dhan calls.",
+    scoringImpact: "NONE",
+    snapshotCount: eligible.length,
+    dataQuality: overallQuality,
+    comparisons,
+  };
+}
+
+// Production router — UPDATED 2026-08-16 (SENSEX M1/M6/M7 Dhan migration,
+// sub-step 1 of 2): SENSEX now also routes through Dhan here, same as
+// NIFTY/BANKNIFTY. Fail-closed: if the Dhan SENSEX buffer isn't warm yet
+// (snapshotCount 0, e.g. right after a fresh deploy), falls through to the
+// existing Kite path rather than returning an empty result. This does NOT
+// touch the separate Main Recorder/Truth-Engine SENSEX path (still Kite,
+// unchanged — that is a dedicated future step, deliberately deferred).
 function buildV2PremiumCompositionHistory(symbol: V2PremiumSymbol, maxSnapshots = 20) {
   if (symbol === "NIFTY" || symbol === "BANKNIFTY") {
     return buildDhanM1CompositionHistory(symbol, maxSnapshots);
+  }
+  if (symbol === "SENSEX" && isDhanConfigured()) {
+    const dhanResult = buildDhanM1CompositionHistorySensex(maxSnapshots);
+    if (dhanResult.snapshotCount > 0) return dhanResult;
   }
   return buildV2PremiumCompositionHistoryKite(symbol, maxSnapshots);
 }

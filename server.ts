@@ -68,6 +68,7 @@ interface PremiumData {
   vega: number; // Black-Scholes estimate — NOT from Kite (Kite doesn't publish Greeks)
   theta: number; // Black-Scholes estimate, per-day decay — NOT from Kite
   delta: number; // Black-Scholes estimate — NOT from Kite
+  gamma: number; // Black-Scholes estimate (2026-08-17, advanced chain) — NOT from Kite
 }
 
 interface GapScoreComponents {
@@ -379,30 +380,6 @@ interface RecorderIndexSnapshot {
   // pattern as the ATM fields above.
   ceStrikesNear: { strike: number; ltp: number | null; iv: number | null; theta: number | null; vega: number | null; delta: number | null; oi: number | null }[] | null;
   peStrikesNear: { strike: number; ltp: number | null; iv: number | null; theta: number | null; vega: number | null; delta: number | null; oi: number | null }[] | null;
-  // Plan 6 (2026-08-17, user-approved): 2nd/3rd-order Greeks, ATM CE/PE,
-  // current-week expiry only — same scope convention as the 1st-order
-  // block above. UNLIKE that block, these are NOT already computed
-  // elsewhere in the normal refresh cycle (calcAdvancedGreeks() is only
-  // invoked today inside the buy-probability/offline-research paths, not
-  // for every symbol every cycle) — so capturing these here is a small
-  // new computation (one calcAdvancedGreeks() call per CE/PE per index
-  // per cycle, pure math, no new network fetch), not pure pass-through.
-  ceGamma: number | null;
-  peGamma: number | null;
-  ceVanna: number | null;
-  peVanna: number | null;
-  ceCharm: number | null;
-  peCharm: number | null;
-  ceSpeed: number | null;
-  peSpeed: number | null;
-  ceZomma: number | null;
-  peZomma: number | null;
-  ceColor: number | null;
-  peColor: number | null;
-  ceVomma: number | null;
-  peVomma: number | null;
-  ceUltima: number | null;
-  peUltima: number | null;
   exchangeTimestamp: string | null;
   snapshotId: string | null;
 }
@@ -1869,35 +1846,6 @@ function extractNearStrikes(strikes: PremiumData[] | undefined, range: number): 
   }));
 }
 
-// Plan 6 (2026-08-17): shared helper so both Recorder snapshot builders
-// (Truth-validated and legacy) compute the 2nd/3rd-order Greeks the same
-// way. Mirrors calcAdvancedGreeks()'s own null-on-bad-input behaviour —
-// returns an all-null block rather than throwing, so a missing/invalid
-// spot/strike/iv/dte never breaks snapshot capture, it just leaves these
-// fields empty for that cycle (same fail-closed convention as the rest of
-// this Recorder pipeline).
-function computeRecorderAdvancedGreeks(
-  spot: number | null,
-  strike: number | null | undefined,
-  ivPercent: number | null | undefined,
-  expiryDate: Date | undefined,
-  isCall: boolean
-): {
-  gamma: number | null; vanna: number | null; charm: number | null; speed: number | null;
-  zomma: number | null; color: number | null; vomma: number | null; ultima: number | null;
-} {
-  const dte = expiryDate ? v2ExpiryDte(expiryDate) : null;
-  if (spot == null || spot <= 0 || strike == null || strike <= 0 || ivPercent == null || ivPercent <= 0 || dte == null) {
-    return { gamma: null, vanna: null, charm: null, speed: null, zomma: null, color: null, vomma: null, ultima: null };
-  }
-  const ag = calcAdvancedGreeks(spot, strike, ivPercent, dte, isCall);
-  if (!ag) return { gamma: null, vanna: null, charm: null, speed: null, zomma: null, color: null, vomma: null, ultima: null };
-  return {
-    gamma: ag.gamma, vanna: ag.vanna, charm: ag.charm, speed: ag.speed,
-    zomma: ag.zomma, color: ag.color, vomma: ag.vomma, ultima: ag.ultima,
-  };
-}
-
 // Module 2 (Recorder Engine) dependency on Module 1 (Truth Engine), per
 // the approved Architecture Specification: "Never records a raw
 // (non-Truth-validated) field." Each raw field is only included if the
@@ -1915,12 +1863,6 @@ function toTruthValidatedRecorderIndexSnapshot(m: IndexMetrics | undefined, trut
   const futuresOk = truth.fields.futures?.verdict === "TRUE";
   const ceOk = truth.fields.optionsCE?.verdict === "TRUE";
   const peOk = truth.fields.optionsPE?.verdict === "TRUE";
-
-  // Plan 6: same Truth-gating convention as the 1st-order block below —
-  // only computed when the underlying spot/CE/PE fields themselves passed
-  // Truth validation, so a Truth-rejected input never reaches these either.
-  const ceAdv = ceOk ? computeRecorderAdvancedGreeks(spotOk ? m.current : null, atmCe?.strike, atmCe?.iv, exp?.expiryDate, true) : null;
-  const peAdv = peOk ? computeRecorderAdvancedGreeks(spotOk ? m.current : null, atmPe?.strike, atmPe?.iv, exp?.expiryDate, false) : null;
 
   return {
     spot: spotOk && m.current > 0 ? m.current : null,
@@ -1945,14 +1887,6 @@ function toTruthValidatedRecorderIndexSnapshot(m: IndexMetrics | undefined, trut
     peDelta: peOk && atmPe ? atmPe.delta : null,
     ceStrikesNear: ceOk ? extractNearStrikes(exp?.ceStrikes, 3) : null,
     peStrikesNear: peOk ? extractNearStrikes(exp?.peStrikes, 3) : null,
-    ceGamma: ceAdv?.gamma ?? null, peGamma: peAdv?.gamma ?? null,
-    ceVanna: ceAdv?.vanna ?? null, peVanna: peAdv?.vanna ?? null,
-    ceCharm: ceAdv?.charm ?? null, peCharm: peAdv?.charm ?? null,
-    ceSpeed: ceAdv?.speed ?? null, peSpeed: peAdv?.speed ?? null,
-    ceZomma: ceAdv?.zomma ?? null, peZomma: peAdv?.zomma ?? null,
-    ceColor: ceAdv?.color ?? null, peColor: peAdv?.color ?? null,
-    ceVomma: ceAdv?.vomma ?? null, peVomma: peAdv?.vomma ?? null,
-    ceUltima: ceAdv?.ultima ?? null, peUltima: peAdv?.ultima ?? null,
     exchangeTimestamp: spotOk ? m.exchangeTimestamp || null : null,
     snapshotId: m.snapshotId || null,
   };
@@ -1966,8 +1900,6 @@ function toRecorderIndexSnapshot(m: IndexMetrics | undefined): RecorderIndexSnap
   const atmCe = exp ? (exp.ceStrikes || []).find((s) => s.isAtm) : undefined;
   const atmPe = exp ? (exp.peStrikes || []).find((s) => s.isAtm) : undefined;
   const contract = (m.futuresContracts && m.futuresContracts[0]) || null;
-  const ceAdv = computeRecorderAdvancedGreeks(m.current > 0 ? m.current : null, atmCe?.strike, atmCe?.iv, exp?.expiryDate, true);
-  const peAdv = computeRecorderAdvancedGreeks(m.current > 0 ? m.current : null, atmPe?.strike, atmPe?.iv, exp?.expiryDate, false);
   return {
     spot: m.current > 0 ? m.current : null,
     change: m.change,
@@ -1991,14 +1923,6 @@ function toRecorderIndexSnapshot(m: IndexMetrics | undefined): RecorderIndexSnap
     peDelta: atmPe ? atmPe.delta : null,
     ceStrikesNear: extractNearStrikes(exp?.ceStrikes, 3),
     peStrikesNear: extractNearStrikes(exp?.peStrikes, 3),
-    ceGamma: ceAdv.gamma, peGamma: peAdv.gamma,
-    ceVanna: ceAdv.vanna, peVanna: peAdv.vanna,
-    ceCharm: ceAdv.charm, peCharm: peAdv.charm,
-    ceSpeed: ceAdv.speed, peSpeed: peAdv.speed,
-    ceZomma: ceAdv.zomma, peZomma: peAdv.zomma,
-    ceColor: ceAdv.color, peColor: peAdv.color,
-    ceVomma: ceAdv.vomma, peVomma: peAdv.vomma,
-    ceUltima: ceAdv.ultima, peUltima: peAdv.ultima,
     exchangeTimestamp: m.exchangeTimestamp || null,
     snapshotId: m.snapshotId || null,
   };
@@ -2541,6 +2465,677 @@ const TELEGRAM_LAST_M12_FINGERPRINT: Map<string, string> = new Map();
 
 const TELEGRAM_LAST_BUY_FINGERPRINT: Map<string, string> = new Map();
 
+// ============== TELEGRAM MARKET SNAPSHOT (2026-08-18, user-requested) ==============
+// A dual-cadence market digest, separate from the M10-M12b state-change
+// alerts above. Two speeds, matching what actually changes at each speed:
+//   - FAST (every 1 min, market hours only): full-chain PCR, ATM CE/PE
+//     premium price, ATM CE/PE OI -- these genuinely move minute to minute.
+//     Needs a real extra Kite fetch (fetchOptionChainStats on the current
+//     week's expiry only) -- this is real added API load, not free.
+//   - SLOW (every 3 min, piggybacked on the existing Recorder cycle like
+//     M10-M12b -- zero extra API cost): Call/Put wall (OI leadership
+//     doesn't flip meaningfully faster than 3 min), the all-weekly-expiry
+//     PDH/PDL + intrinsic/extrinsic table (PDH/PDL are previous-day values,
+//     they never move intraday; extrinsic only needs the LTP already in
+//     the 3-min snapshot), the 5-stock/sector watchlist, and spot alignment.
+// The fast message re-renders every minute using the LATEST fast numbers
+// merged with whatever the slow cache last held -- so wall/expiry-table/
+// stocks visibly stay identical across 3 consecutive fast messages, exactly
+// matching the requested "wall changes every 3 min" behavior.
+
+interface TelegramSlowCache {
+  m: IndexMetrics;
+  stocks: Array<{ name: string; changePct: number | null }>;
+  updatedAt: number;
+}
+const TELEGRAM_SLOW_CACHE: Map<string, TelegramSlowCache> = new Map();
+// 2026-08-18: latest fast-cycle (1-min) OptionChainStats per symbol, kept
+// around so the 15/30/60-min periodic summary can read fullChainPcr/oiPcr
+// without a second fetch -- zero extra Kite cost.
+const TELEGRAM_LATEST_FAST: Map<string, OptionChainStats> = new Map();
+
+// NIFTY/SENSEX use the exact 5 names requested. BANKNIFTY reuses the
+// existing bank-focused constituent set from INDEX_KEY_STOCKS (Reliance
+// and Nifty IT aren't relevant to a bank index) -- defined locally here
+// (not by referencing INDEX_KEY_STOCKS, which is declared much later in
+// this file) to avoid a temporal-dead-zone issue at module load time.
+const TELEGRAM_STOCK_WATCHLIST: Record<string, Record<string, string>> = {
+  NIFTY: { "Reliance": "NSE:RELIANCE", "HDFC Bank": "NSE:HDFCBANK", "ICICI Bank": "NSE:ICICIBANK", "Nifty PSU Bank": "NSE:NIFTY PSU BANK", "Nifty IT": "NSE:NIFTY IT" },
+  SENSEX: { "Reliance": "NSE:RELIANCE", "HDFC Bank": "NSE:HDFCBANK", "ICICI Bank": "NSE:ICICIBANK", "Nifty PSU Bank": "NSE:NIFTY PSU BANK", "Nifty IT": "NSE:NIFTY IT" },
+  BANKNIFTY: { "HDFC Bank": "NSE:HDFCBANK", "ICICI Bank": "NSE:ICICIBANK", "SBI": "NSE:SBIN", "Axis Bank": "NSE:AXISBANK", "Kotak Mahindra Bank": "NSE:KOTAKBANK" },
+};
+
+async function fetchTelegramStockWatchlist(accessToken: string, symbol: string): Promise<Array<{ name: string; changePct: number | null }>> {
+  const map = TELEGRAM_STOCK_WATCHLIST[symbol];
+  if (!map) return [];
+  try {
+    const kiteSymbols = Object.values(map);
+    const quotes = await fetchKiteQuote(accessToken, kiteSymbols);
+    if (!quotes) return Object.keys(map).map((name) => ({ name, changePct: null }));
+    return Object.entries(map).map(([name, kiteSymbol]) => {
+      const q = quotes[kiteSymbol];
+      const changePct = q && q.ohlc?.close ? ((q.last_price - q.ohlc.close) / q.ohlc.close) * 100 : null;
+      return { name, changePct };
+    });
+  } catch (err) {
+    console.error(`[Telegram] Stock watchlist fetch failed for ${symbol}:`, err instanceof Error ? err.message : err);
+    return Object.keys(map).map((name) => ({ name, changePct: null }));
+  }
+}
+
+// Formats a Date/ISO-string/Date-like as "04 SEP" -- used to show each
+// weekly expiry's real date in the chronological all-expiry table
+// (server-side counterpart to the dashboard's formatExpiryDate, since that
+// one is client-side JS embedded in the HTML template).
+function telegramFormatExpiryDate(d: unknown): string {
+  if (!d) return "-";
+  const date = new Date(d as any);
+  if (isNaN(date.getTime())) return "-";
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  return String(date.getDate()).padStart(2, "0") + " " + months[date.getMonth()];
+}
+
+function telegramArrow(dir: "up" | "down" | "flat"): string {
+  return dir === "up" ? "▲" : dir === "down" ? "▼" : "●";
+}
+
+// Compact "7.45L" style OI formatting for the monospace comparison table
+// (2026-08-18) -- keeps every OI cell the same rough width regardless of
+// magnitude, unlike toLocaleString("en-IN") ("7,45,200" vs "13,89,000" are
+// very different lengths and would misalign a fixed-width table).
+function telegramFormatLakhs(n: number): string {
+  return (n / 100000).toFixed(2) + "L";
+}
+
+// Right-pads a string to a fixed width for <pre> table alignment. Telegram
+// renders <pre> in a monospace font, so plain space-padding lines up
+// correctly as long as every cell in a column uses ASCII (no emoji -- see
+// telegramDotTable above for why arrows, not emoji, are used inside tables).
+function telegramPad(s: string, width: number): string {
+  return s.length >= width ? s : s + " ".repeat(width - s.length);
+}
+
+function telegramPctColor(pct: number | null): string {
+  if (pct == null) return "⚪"; // white circle = unavailable
+  return pct >= 0 ? "🟢" : "🔴"; // green/red circle -- Telegram HTML has no text-color support
+}
+
+// Generic per-value increase/decrease dot (2026-08-18, CE/PE side rebuild):
+// EVERY field in the CE-side/PE-side blocks below (PDH, PDL, Day High, Day
+// Low, Intrinsic, Extrinsic, OI) gets its own independent tracker under this
+// ONE shared map, keyed by a fully-qualified string so no two fields ever
+// collide (e.g. "NIFTY_CE_04SEP_pdh"). First-ever reading has no prior
+// value to compare against, so it shows white (unavailable), not green --
+// showing green on the very first tick would be a false "increase" signal.
+const TELEGRAM_DOT_LAST_VALUE: Map<string, number> = new Map();
+function telegramDotDir(key: string, current: number): "up" | "down" | "flat" {
+  const prev = TELEGRAM_DOT_LAST_VALUE.get(key);
+  TELEGRAM_DOT_LAST_VALUE.set(key, current);
+  if (prev == null) return "flat"; // first reading -- no false "increase" signal
+  if (current > prev) return "up";
+  if (current < prev) return "down";
+  return "flat";
+}
+
+function telegramDot(key: string, current: number): string {
+  const dir = telegramDotDir(key, current);
+  return dir === "up" ? "🟢" : dir === "down" ? "🔴" : "⚪";
+}
+
+// Table-cell variant (2026-08-18, table rebuild): emoji are double-width in
+// some Telegram clients and break monospace <pre> column alignment -- the
+// arrow glyphs (▲▼●, already used for Full-Chain PCR/premium elsewhere in
+// this message) render single-width and stay aligned in a fixed-width block.
+function telegramDotTable(key: string, current: number): string {
+  return telegramArrow(telegramDotDir(key, current));
+}
+
+// Mirrors the dashboard's classifyIndexOverallBias (client-side JS) exactly,
+// using the same m.signal + m.gapScore.score inputs, both already available
+// server-side -- this is the "Spot Alignment" closing line.
+function telegramSpotAlignment(m: IndexMetrics): string {
+  if (!m || m.error) return "DATA UNAVAILABLE";
+  const gs = m.gapScore;
+  const score = gs ? gs.score : 0;
+  if (m.signal === "BUY" && score > 50) return "STRONG CE BIAS";
+  if (m.signal === "BUY") return "MILD CE BIAS";
+  if (m.signal === "SELL" && score < -50) return "STRONG PE BIAS";
+  if (m.signal === "SELL") return "MILD PE BIAS";
+  if (gs && Math.abs(score) < 10) return "SIDEWAYS / RANGE";
+  return "WAIT - CONFLICTING DATA";
+}
+
+// Fast-cycle change trackers (1-min cadence, separate key space from the
+// M10-M12b Maps above so neither system's dedup logic can interfere with
+// the other's).
+// ATM CE/PE OI trackers were removed here 2026-08-18 -- superseded by the
+// per-expiry OI dot in the CE-side/PE-side blocks below (telegramDot),
+// which covers OI for every fetched expiry, not just the fast 1-min ATM
+// value. fast.atmCeOi/atmPeOi are still fetched (zero marginal Kite cost,
+// same batch as fullChainPcr) but no longer separately displayed.
+const TELEGRAM_FAST_LAST_FULLCHAIN_PCR: Map<string, number> = new Map();
+// Added 2026-08-18 for the all-3-index PCR info box: OI PCR (ATM ±7 band)
+// direction, tracked separately from full-chain PCR above.
+const TELEGRAM_FAST_LAST_OI_PCR: Map<string, number> = new Map();
+// Added 2026-08-18 for the Intrinsic/Extrinsic ±3 table: Extrinsic value
+// % change per strike per side, keyed by "SYMBOL_ie3_CE/PE_extr_STRIKE".
+// (The old single-ATM ATM_CE_LTP/ATM_PE_LTP trackers were removed -- the
+// ATM row of this table now covers what those used to show.)
+const TELEGRAM_FAST_LAST_IE3: Map<string, number> = new Map();
+
+function telegramTrackDirection(key: string, current: number, lastMap: Map<string, number>): "up" | "down" | "flat" {
+  const prev = lastMap.get(key);
+  lastMap.set(key, current);
+  if (prev == null || current === prev) return "flat";
+  return current > prev ? "up" : "down";
+}
+
+// Combined direction + % change in ONE read-then-write pass (a single
+// bug-prone mistake to avoid: computing direction and % change as two
+// SEPARATE calls against the same map double-consumes the "previous value"
+// read, since the first call's set() would make the second call's get()
+// see the value that was just written instead of the real prior one).
+function telegramTrackWithPct(key: string, current: number, lastMap: Map<string, number>): { dir: "up" | "down" | "flat"; pctChange: number | null } {
+  const prev = lastMap.get(key);
+  lastMap.set(key, current);
+  if (prev == null) return { dir: "flat", pctChange: null };
+  const dir: "up" | "down" | "flat" = current === prev ? "flat" : current > prev ? "up" : "down";
+  const pctChange = prev !== 0 ? ((current - prev) / prev) * 100 : null;
+  return { dir, pctChange };
+}
+
+// The FAST fetch itself: current-week expiry only, real Kite call (see
+// module comment above -- this is genuine added load, once per symbol
+// per minute). Reuses the cached instrument master (fetchInstruments has
+// its own TTL cache) so this does NOT re-download the full instrument
+// list every minute -- only the option-chain quote batch is fresh.
+async function fetchTelegramFastPcrSnapshot(accessToken: string, symbol: string): Promise<OptionChainStats | null> {
+  try {
+    const instruments = await fetchInstruments(accessToken);
+    const availableExpiries = getExpiryDatesFromInstruments(instruments, symbol);
+    const currentWeekExpiry = availableExpiries[0] || null;
+    if (!currentWeekExpiry) return null;
+    const optionMap = buildOptionMap(instruments, symbol, currentWeekExpiry);
+    const cachedM = TELEGRAM_SLOW_CACHE.get(symbol)?.m;
+    const atmStrike = cachedM?.atmStrike;
+    if (!atmStrike) return null;
+    const strikeStep = STRIKE_STEP[symbol as keyof typeof STRIKE_STEP] || 100;
+    return await fetchOptionChainStats(
+      accessToken,
+      optionMap,
+      atmStrike,
+      strikeStep,
+      EXCHANGE_CODES[symbol as keyof typeof EXCHANGE_CODES],
+      7
+    );
+  } catch (err) {
+    console.error(`[Telegram Fast] PCR snapshot fetch failed for ${symbol}:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+// Builds the full message text from FAST numbers (just fetched) merged
+// with whatever the SLOW cache last held (wall, all-expiry table, stocks,
+// spot alignment) -- so those sections repeat unchanged across up to 3
+// consecutive fast messages, by design.
+function buildTelegramMarketSnapshotMessage(symbol: string, fast: OptionChainStats, allFast: Map<string, OptionChainStats>): string | null {
+  const slow = TELEGRAM_SLOW_CACHE.get(symbol);
+  if (!slow) return null;
+  const m = slow.m;
+  const istTime = () => new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" });
+
+  const lines: string[] = [];
+  lines.push(`🔔 <b>${symbol} MARKET SNAPSHOT</b>`);
+  lines.push("━━━━━━━━━━━━━━━━━━━━");
+
+  // 1. PCR info box (2026-08-18 follow-up): all 3 indices' Full-Chain PCR +
+  // OI PCR (ATM ±7 band) shown together, in EVERY message (NIFTY's message
+  // shows the same box as BANKNIFTY's and SENSEX's) -- not just this
+  // message's own symbol. Zero extra Kite cost: runTelegramFastCycle now
+  // fetches all 3 symbols before building any message and passes the full
+  // set in via `allFast`. Plus India VIX with its daily % change, read
+  // from the existing slow-cache snapshot (also zero extra cost).
+  lines.push(`📦 <b>PCR INFO BOX</b>`);
+  const pcrSymbols: string[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
+  pcrSymbols.forEach((sym) => {
+    const f = allFast.get(sym);
+    const nameCell = telegramPad(sym, 10);
+    if (!f) {
+      lines.push(`${nameCell}| DATA UNAVAILABLE`);
+      return;
+    }
+    const fcDir = f.fullChainPcr != null ? telegramTrackDirection(sym + "_fc_pcr", f.fullChainPcr, TELEGRAM_FAST_LAST_FULLCHAIN_PCR) : "flat";
+    const oiDir = f.oiPcr != null ? telegramTrackDirection(sym + "_oi_pcr", f.oiPcr, TELEGRAM_FAST_LAST_OI_PCR) : "flat";
+    const fcText = f.fullChainPcr != null ? f.fullChainPcr.toFixed(3) : "-";
+    const oiText = f.oiPcr != null ? f.oiPcr.toFixed(3) : "-";
+    lines.push(`${nameCell}| Full ${fcText}${telegramArrow(fcDir)} | OI(±7) ${oiText}${telegramArrow(oiDir)}`);
+  });
+  if (m.vix != null) {
+    const vixChangePct = m.vixChangePercent ?? null;
+    const vixDir = vixChangePct != null && vixChangePct > 0 ? "up" : vixChangePct != null && vixChangePct < 0 ? "down" : "flat";
+    const vixPctText = vixChangePct != null ? `${vixChangePct >= 0 ? "+" : ""}${vixChangePct.toFixed(2)}%` : "n/a";
+    lines.push(`India VIX: ${m.vix.toFixed(2)} ${telegramArrow(vixDir)} (${vixPctText})`);
+  }
+  lines.push("━━━━━━━━━━━━━━━━━━━━");
+
+  // 2. Wall line -- kept from before (current expiry's max-OI strikes).
+  const exp = (m.expiries || []).find((e) => e.expiry === "Current Expiry") || (m.expiries || [])[0];
+  let maxCallOiStrike: number | null = null, maxCallOi = -1;
+  let maxPutOiStrike: number | null = null, maxPutOi = -1;
+  if (exp) {
+    (exp.ceStrikes || []).forEach((s) => { if (s.oi != null && s.oi > maxCallOi) { maxCallOi = s.oi; maxCallOiStrike = s.strike; } });
+    (exp.peStrikes || []).forEach((s) => { if (s.oi != null && s.oi > maxPutOi) { maxPutOi = s.oi; maxPutOiStrike = s.strike; } });
+  }
+  lines.push(
+    `🧱 Call Wall <b>${maxCallOiStrike ?? "-"}</b> (OI ${maxCallOi >= 0 ? telegramFormatLakhs(maxCallOi) : "-"}) ` +
+    `| Put Wall <b>${maxPutOiStrike ?? "-"}</b> (OI ${maxPutOi >= 0 ? telegramFormatLakhs(maxPutOi) : "-"})`
+  );
+
+  // 3. Intrinsic/Extrinsic table -- ATM ±3 strikes, CURRENT expiry only
+  // (2026-08-18 follow-up: narrowed from "all expiry" to just this band,
+  // as a real strike ladder table rather than one row per expiry). Reuses
+  // `fast.bandStrikes` (already fetched ATM ±7 for OI PCR) -- zero extra
+  // Kite cost, just filtered down to ±3. Each cell shows Intrinsic/
+  // Extrinsic together (per the earlier "stay together" request) plus a
+  // % change on the Extrinsic leg (the volatile part -- Intrinsic's %
+  // change is often undefined/meaningless when it's 0).
+  const atmStrike = m.atmStrike;
+  const strikeStep = STRIKE_STEP[symbol as keyof typeof STRIKE_STEP] || 100;
+  const ieBand = (fast.bandStrikes || []).filter((b) => Math.abs(b.strike - atmStrike) <= strikeStep * 3);
+  lines.push(`<b>Intrinsic/Extrinsic (ATM ±3, Current Expiry)</b>`);
+  let ieTable = "Strike | CE Intr/Ext          | PE Intr/Ext\n";
+  let atmCeExtrDir: "up" | "down" | "flat" | null = null;
+  let atmPeExtrDir: "up" | "down" | "flat" | null = null;
+  ieBand.forEach((b) => {
+    const isAtm = b.strike === atmStrike;
+    const ceIntr = Math.max(0, m.current - b.strike);
+    const peIntr = Math.max(0, b.strike - m.current);
+    const ceIntrArrow = telegramDotTable(symbol + "_ie3_CE_intr_" + b.strike, ceIntr);
+    const peIntrArrow = telegramDotTable(symbol + "_ie3_PE_intr_" + b.strike, peIntr);
+    let ceCell = "-".padEnd(21);
+    if (b.ceLtp != null) {
+      const ceExtr = Math.max(0, b.ceLtp - ceIntr);
+      const { dir, pctChange } = telegramTrackWithPct(symbol + "_ie3_CE_extr_" + b.strike, ceExtr, TELEGRAM_FAST_LAST_IE3);
+      if (isAtm) atmCeExtrDir = dir;
+      const pctText = pctChange != null ? `(${pctChange >= 0 ? "+" : ""}${pctChange.toFixed(0)}%)` : "(--)";
+      ceCell = telegramPad(`${ceIntr.toFixed(1)}${ceIntrArrow}/${ceExtr.toFixed(1)}${telegramArrow(dir)} ${pctText}`, 21);
+    }
+    let peCell = "-".padEnd(21);
+    if (b.peLtp != null) {
+      const peExtr = Math.max(0, b.peLtp - peIntr);
+      const { dir, pctChange } = telegramTrackWithPct(symbol + "_ie3_PE_extr_" + b.strike, peExtr, TELEGRAM_FAST_LAST_IE3);
+      if (isAtm) atmPeExtrDir = dir;
+      const pctText = pctChange != null ? `(${pctChange >= 0 ? "+" : ""}${pctChange.toFixed(0)}%)` : "(--)";
+      peCell = telegramPad(`${peIntr.toFixed(1)}${peIntrArrow}/${peExtr.toFixed(1)}${telegramArrow(dir)} ${pctText}`, 21);
+    }
+    ieTable += `${telegramPad(String(b.strike), 7)}| ${ceCell}| ${peCell}${isAtm ? "  <- ATM" : ""}\n`;
+  });
+  lines.push(`<pre>${ieTable.trimEnd()}</pre>`);
+  // 2026-08-18 follow-up: single verdict line at the end -- compares the
+  // ATM CE vs ATM PE extrinsic direction (the volatile leg) to call a
+  // skew. CE falling + PE rising = bearish skew (puts gaining relative
+  // premium); CE rising + PE falling = bullish skew; anything else is
+  // read as neutral/mixed (both sides moving the same way tells us less).
+  if (atmCeExtrDir && atmPeExtrDir) {
+    let skew = "neutral/mixed";
+    if (atmCeExtrDir === "down" && atmPeExtrDir === "up") skew = "bearish skew";
+    else if (atmCeExtrDir === "up" && atmPeExtrDir === "down") skew = "bullish skew";
+    lines.push(`Verdict: CE extrinsic ${atmCeExtrDir === "flat" ? "flat" : atmCeExtrDir} at ATM, PE extrinsic ${atmPeExtrDir === "flat" ? "flat" : atmPeExtrDir} — <b>${skew}</b>`);
+  }
+
+  // 4. OI Ladder -- 2026-08-18 follow-up: rebuilt as a ROW-form table
+  // (Strike/CE-OI/PE-OI each their own horizontal row, not one row per
+  // strike) with a verdict line under CE and another under PE. Narrowed
+  // from ATM ±7 to ATM ±3 (reusing the same `ieBand` filter as Intr/Ext
+  // above) specifically because row-form puts every strike on one line --
+  // at ±7 (15 strikes) that line would run 100+ characters and wrap badly
+  // on a phone; at ±3 (7 strikes) it stays readable. Same `bandStrikes`
+  // data, zero extra Kite cost either way.
+  lines.push(`<b>OI Ladder (ATM ±3, Current Expiry)</b>`);
+  const oiCellW = 8;
+  const strikeRow = "Strike : " + ieBand.map((b) => telegramPad(String(b.strike), oiCellW)).join("");
+  const ceRow = "CE-OI  : " + ieBand.map((b) => b.ceOi != null ? telegramPad(telegramFormatLakhs(b.ceOi) + telegramDotTable(symbol + "_oiladder_CE_" + b.strike, b.ceOi), oiCellW) : telegramPad("-", oiCellW)).join("");
+  const peRow = "PE-OI  : " + ieBand.map((b) => b.peOi != null ? telegramPad(telegramFormatLakhs(b.peOi) + telegramDotTable(symbol + "_oiladder_PE_" + b.strike, b.peOi), oiCellW) : telegramPad("-", oiCellW)).join("");
+  lines.push(`<pre>${strikeRow}\n${ceRow}\n${peRow}</pre>`);
+
+  // Verdict (CE): the highest CE-OI strike WITHIN this ±3 band is read as
+  // near-term resistance; verdict (PE): highest PE-OI strike as near-term
+  // support. (These can differ from the full-chain Call/Put Wall shown
+  // above, which scans every strike, not just this ±3 band.)
+  let bandMaxCeStrike: number | null = null, bandMaxCeOi = -1;
+  let bandMaxPeStrike: number | null = null, bandMaxPeOi = -1;
+  ieBand.forEach((b) => {
+    if (b.ceOi != null && b.ceOi > bandMaxCeOi) { bandMaxCeOi = b.ceOi; bandMaxCeStrike = b.strike; }
+    if (b.peOi != null && b.peOi > bandMaxPeOi) { bandMaxPeOi = b.peOi; bandMaxPeStrike = b.strike; }
+  });
+  if (bandMaxCeStrike != null) {
+    const side = bandMaxCeStrike >= m.current ? "above" : "below";
+    lines.push(`Verdict (CE): OI highest at ${bandMaxCeStrike} (${telegramFormatLakhs(bandMaxCeOi)}) — resistance building ${side} spot`);
+  }
+  if (bandMaxPeStrike != null) {
+    const side = bandMaxPeStrike <= m.current ? "below" : "above";
+    lines.push(`Verdict (PE): OI highest at ${bandMaxPeStrike} (${telegramFormatLakhs(bandMaxPeOi)}) — support easing ${side} spot`);
+  }
+
+  // 5. DH/DL table -- kept unchanged, all 4 expiries (Current, Next, Next
+  // of Next, Monthly). PDH/PDL/DH/DL never fit in one 8-column table
+  // (measured ~65 chars, too wide for phones), so DH/DL stays its own
+  // narrow 4-column table here.
+  const expiryRows = (m.expiries || [])
+    .map((e) => ({
+      e,
+      dateLabel: telegramFormatExpiryDate(e.expiryDate),
+      atmCe: (e.ceStrikes || []).find((s) => s.isAtm),
+      atmPe: (e.peStrikes || []).find((s) => s.isAtm),
+    }))
+    .filter((r) => r.atmCe || r.atmPe);
+
+  lines.push(`<b>DH/DL (intraday, all expiries)</b>`);
+  let table2 = "Exp     | CE-DH  CE-DL  | PE-DH  PE-DL\n";
+  expiryRows.forEach(({ e, dateLabel, atmCe, atmPe }) => {
+    const kCe = symbol + "_CE_" + e.expiry;
+    const kPe = symbol + "_PE_" + e.expiry;
+    const cell = (v: number, key: string) => telegramPad(v.toFixed(1) + telegramDotTable(key, v), 7);
+    const ceCells = atmCe ? `${cell(atmCe.dayHigh, kCe + "_dh")}${cell(atmCe.dayLow, kCe + "_dl")}` : telegramPad("-", 14);
+    const peCells = atmPe ? `${cell(atmPe.dayHigh, kPe + "_dh")}${cell(atmPe.dayLow, kPe + "_dl")}` : telegramPad("-", 14);
+    table2 += `${telegramPad(dateLabel, 8)}| ${ceCells}| ${peCells}\n`;
+  });
+  lines.push(`<pre>${table2.trimEnd()}</pre>`);
+
+  // 2026-08-18 follow-up: reference lines under the DH/DL table -- just
+  // the CE-side strike list (labelled "at DH") and the PE-side strike
+  // list (labelled "at DL"), 2 lines only per the user's confirmed choice
+  // (not a full 4-line CE/PE x DH/DL breakdown).
+  const ceDhList = expiryRows.filter((r) => r.atmCe).map((r) => `${r.dateLabel}-${r.atmCe!.strike}`).join(", ");
+  const peDlList = expiryRows.filter((r) => r.atmPe).map((r) => `${r.dateLabel}-${r.atmPe!.strike}`).join(", ");
+  lines.push(`CE strikes: ${ceDhList || "-"} at DH`);
+  lines.push(`PE strikes: ${peDlList || "-"} at DL`);
+
+  // 2026-08-18 follow-up: PDH/PDL rebuilt as its own table, same layout as
+  // the DH/DL table above (rather than plain reference lines), with the
+  // same 2-line "CE strikes ... at PDH / PE strikes ... at PDL" reference
+  // pattern below it -- mirroring the DH/DL table + reference-line design
+  // exactly, per the user's explicit request. Kept as a SEPARATE table
+  // from DH/DL (not merged into one 8-column table) since that combined
+  // width was already measured at ~65 chars and rejected once before.
+  lines.push(`<b>PDH/PDL (all expiries)</b>`);
+  let table3 = "Exp     | CE-PDH CE-PDL | PE-PDH PE-PDL\n";
+  expiryRows.forEach(({ e, dateLabel, atmCe, atmPe }) => {
+    const kCe = symbol + "_CE_" + e.expiry;
+    const kPe = symbol + "_PE_" + e.expiry;
+    const cell = (v: number, key: string) => telegramPad(v.toFixed(1) + telegramDotTable(key, v), 7);
+    const ceCells = atmCe ? `${cell(atmCe.pdh, kCe + "_pdh")}${cell(atmCe.pdl, kCe + "_pdl")}` : telegramPad("-", 14);
+    const peCells = atmPe ? `${cell(atmPe.pdh, kPe + "_pdh")}${cell(atmPe.pdl, kPe + "_pdl")}` : telegramPad("-", 14);
+    table3 += `${telegramPad(dateLabel, 8)}| ${ceCells}| ${peCells}\n`;
+  });
+  lines.push(`<pre>${table3.trimEnd()}</pre>`);
+
+  const cePdhList = expiryRows.filter((r) => r.atmCe).map((r) => `${r.dateLabel}-${r.atmCe!.strike}`).join(", ");
+  const pePdlList = expiryRows.filter((r) => r.atmPe).map((r) => `${r.dateLabel}-${r.atmPe!.strike}`).join(", ");
+  lines.push(`CE strikes: ${cePdhList || "-"} at PDH`);
+  lines.push(`PE strikes: ${pePdlList || "-"} at PDL`);
+
+  lines.push("Legend: ▲ up since last cycle | ▼ down | ● first reading / unchanged");
+
+  // Weekly (Current Expiry) vs Monthly direction comparison -- kept from
+  // the previous version.
+  const weeklyExp = (m.expiries || []).find((e) => e.expiry === "Current Expiry");
+  const monthlyExp = (m.expiries || []).find((e) => e.expiry === "Monthly");
+  const weeklyCe = weeklyExp ? (weeklyExp.ceStrikes || []).find((s) => s.isAtm) : null;
+  const monthlyCe = monthlyExp ? (monthlyExp.ceStrikes || []).find((s) => s.isAtm) : null;
+  if (weeklyCe && monthlyCe) {
+    const wDir = weeklyCe.lastPrice >= weeklyCe.pdh ? "up" : weeklyCe.lastPrice <= weeklyCe.pdl ? "down" : "flat";
+    const mDir = monthlyCe.lastPrice >= monthlyCe.pdh ? "up" : monthlyCe.lastPrice <= monthlyCe.pdl ? "down" : "flat";
+    lines.push(`Weekly vs Monthly Direction: <b>${wDir === mDir ? "SAME" : "DIFFERENT"}</b>`);
+  }
+  lines.push("━━━━━━━━━━━━━━━━━━━━");
+
+  // 4. Key stocks/sectors (slow, 3-min)
+  lines.push(`📈 <b>Key Stocks/Sectors</b>`);
+  if (slow.stocks.length === 0) {
+    lines.push("DATA UNAVAILABLE");
+  } else {
+    slow.stocks.forEach((s) => {
+      lines.push(`${s.name}: ${telegramPctColor(s.changePct)} ${s.changePct != null ? (s.changePct >= 0 ? "+" : "") + s.changePct.toFixed(2) + "%" : "DATA UNAVAILABLE"}`);
+    });
+  }
+  lines.push("━━━━━━━━━━━━━━━━━━━━");
+
+  // Last line: spot alignment (slow, 3-min)
+  lines.push(`🎯 Spot Alignment: <b>${telegramSpotAlignment(m)}</b>`);
+  lines.push(`🕒 ${istTime()} IST`);
+
+  return lines.join("\n");
+}
+
+async function runTelegramFastCycle(): Promise<void> {
+  if (!isMarketOpenNowServer()) return;
+  let activeSession: KiteSession | undefined;
+  for (const s of sessions.values()) {
+    if (s.expiresAt > Date.now()) { activeSession = s; break; }
+  }
+  if (!activeSession) return;
+
+  const symbols: V2PremiumSymbol[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
+
+  // 2026-08-18: the PCR info box shows all 3 indices in every message, so
+  // all 3 symbols' fast snapshots are fetched FIRST (no new Kite cost --
+  // this cycle already fetched all 3 individually before, just not into a
+  // shared map) and only then are the 3 messages built/sent.
+  const allFast: Map<string, OptionChainStats> = new Map();
+  for (const symbol of symbols) {
+    try {
+      const fast = await fetchTelegramFastPcrSnapshot(activeSession.accessToken, symbol);
+      if (fast) {
+        allFast.set(symbol, fast);
+        TELEGRAM_LATEST_FAST.set(symbol, fast);
+      }
+    } catch (err) {
+      console.error(`[Telegram Fast] snapshot fetch failed for ${symbol}:`, err instanceof Error ? err.message : err);
+    }
+  }
+
+  for (const symbol of symbols) {
+    try {
+      const fast = allFast.get(symbol);
+      if (!fast) continue;
+      const message = buildTelegramMarketSnapshotMessage(symbol, fast, allFast);
+      if (message) await sendTelegramAlert(message);
+    } catch (err) {
+      console.error(`[Telegram Fast] message build/send failed for ${symbol}:`, err instanceof Error ? err.message : err);
+    }
+  }
+}
+
+// 2026-08-18: periodic "what changed / what didn't" summary, sent every
+// 15 min, 30 min, and 1 hour (each its own independent tag, so all 3 can
+// fire together at hour boundaries -- e.g. 12:00 IST fires all 3). Zero
+// extra Kite calls: reuses TELEGRAM_SLOW_CACHE (3-min) + TELEGRAM_LATEST_FAST
+// (1-min) + a regime read from the existing V2 regime detector, which
+// itself reads from session.snapshotHistory already in memory.
+type TelegramPeriodicTag = "15MIN" | "30MIN" | "60MIN";
+
+interface TelegramPeriodicSnapshot {
+  timestamp: number;
+  fullChainPcr: number | null;
+  oiPcr: number | null;
+  vix: number | null;
+  callWallStrike: number | null;
+  callWallOi: number | null;
+  putWallStrike: number | null;
+  putWallOi: number | null;
+  atmCeExtrinsic: number | null;
+  atmPeExtrinsic: number | null;
+  stocks: Array<{ name: string; changePct: number | null }>;
+  spotAlignment: string;
+  regime: string | null;
+  structuralBias: string | null;
+}
+
+const TELEGRAM_PERIODIC_SNAPSHOT_15: Map<string, TelegramPeriodicSnapshot> = new Map();
+const TELEGRAM_PERIODIC_SNAPSHOT_30: Map<string, TelegramPeriodicSnapshot> = new Map();
+const TELEGRAM_PERIODIC_SNAPSHOT_60: Map<string, TelegramPeriodicSnapshot> = new Map();
+
+function buildTelegramPeriodicSnapshot(symbol: string, session: KiteSession): TelegramPeriodicSnapshot | null {
+  const slow = TELEGRAM_SLOW_CACHE.get(symbol);
+  if (!slow || slow.m.error) return null;
+  const m = slow.m;
+  const fast = TELEGRAM_LATEST_FAST.get(symbol);
+
+  const exp = (m.expiries || []).find((e) => e.expiry === "Current Expiry") || (m.expiries || [])[0];
+  let callWallStrike: number | null = null, callWallOi = -1;
+  let putWallStrike: number | null = null, putWallOi = -1;
+  if (exp) {
+    (exp.ceStrikes || []).forEach((s) => { if (s.oi != null && s.oi > callWallOi) { callWallOi = s.oi; callWallStrike = s.strike; } });
+    (exp.peStrikes || []).forEach((s) => { if (s.oi != null && s.oi > putWallOi) { putWallOi = s.oi; putWallStrike = s.strike; } });
+  }
+  const atmCe = exp ? (exp.ceStrikes || []).find((s) => s.isAtm) : null;
+  const atmPe = exp ? (exp.peStrikes || []).find((s) => s.isAtm) : null;
+  const atmCeExtrinsic = atmCe ? Math.max(0, atmCe.lastPrice - Math.max(0, m.current - atmCe.strike)) : null;
+  const atmPeExtrinsic = atmPe ? Math.max(0, atmPe.lastPrice - Math.max(0, atmPe.strike - m.current)) : null;
+
+  let regime: string | null = null;
+  let structuralBias: string | null = null;
+  try {
+    const m10 = buildV2MarketBehaviourRegime(symbol as V2PremiumSymbol, session, m);
+    regime = (m10 as any)?.regime?.currentRegime ?? null;
+    structuralBias = (m10 as any)?.regime?.structuralBias ?? null;
+  } catch (err) {
+    console.error(`[Telegram Periodic] regime calc failed for ${symbol}:`, err instanceof Error ? err.message : err);
+  }
+
+  return {
+    timestamp: Date.now(),
+    fullChainPcr: fast?.fullChainPcr ?? null,
+    oiPcr: fast?.oiPcr ?? null,
+    vix: m.vix ?? null,
+    callWallStrike,
+    callWallOi: callWallOi >= 0 ? callWallOi : null,
+    putWallStrike,
+    putWallOi: putWallOi >= 0 ? putWallOi : null,
+    atmCeExtrinsic,
+    atmPeExtrinsic,
+    stocks: slow.stocks || [],
+    spotAlignment: telegramSpotAlignment(m),
+    regime,
+    structuralBias,
+  };
+}
+
+function telegramFormatIstTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit" });
+}
+
+function buildTelegramPeriodicSummaryMessage(
+  symbol: string,
+  tag: TelegramPeriodicTag,
+  prev: TelegramPeriodicSnapshot,
+  curr: TelegramPeriodicSnapshot
+): string {
+  const tagLabel = tag === "15MIN" ? "15-MIN SUMMARY" : tag === "30MIN" ? "30-MIN SUMMARY" : "1-HOUR SUMMARY";
+  const changed: string[] = [];
+  const unchanged: string[] = [];
+
+  const numField = (label: string, prevVal: number | null, currVal: number | null, decimals: number) => {
+    if (prevVal == null || currVal == null) return;
+    const prevText = prevVal.toFixed(decimals);
+    const currText = currVal.toFixed(decimals);
+    if (Math.abs(prevVal - currVal) > 1e-9) {
+      changed.push(`${label}: ${prevText} → ${currText} ${currVal > prevVal ? "▲" : "▼"}`);
+    } else {
+      unchanged.push(`${label}: ${currText} (flat)`);
+    }
+  };
+
+  numField("Full-Chain PCR", prev.fullChainPcr, curr.fullChainPcr, 3);
+  numField("OI PCR (±7)", prev.oiPcr, curr.oiPcr, 3);
+  numField("India VIX", prev.vix, curr.vix, 2);
+  numField("ATM CE Extrinsic", prev.atmCeExtrinsic, curr.atmCeExtrinsic, 1);
+  numField("ATM PE Extrinsic", prev.atmPeExtrinsic, curr.atmPeExtrinsic, 1);
+
+  if (prev.callWallStrike != null && curr.callWallStrike != null) {
+    if (prev.callWallStrike !== curr.callWallStrike || prev.callWallOi !== curr.callWallOi) {
+      changed.push(`Call Wall: ${prev.callWallStrike} (${telegramFormatLakhs(prev.callWallOi ?? 0)}) → ${curr.callWallStrike} (${telegramFormatLakhs(curr.callWallOi ?? 0)})`);
+    } else {
+      unchanged.push(`Call Wall: ${curr.callWallStrike} (${telegramFormatLakhs(curr.callWallOi ?? 0)})`);
+    }
+  }
+  if (prev.putWallStrike != null && curr.putWallStrike != null) {
+    if (prev.putWallStrike !== curr.putWallStrike || prev.putWallOi !== curr.putWallOi) {
+      changed.push(`Put Wall: ${prev.putWallStrike} (${telegramFormatLakhs(prev.putWallOi ?? 0)}) → ${curr.putWallStrike} (${telegramFormatLakhs(curr.putWallOi ?? 0)})`);
+    } else {
+      unchanged.push(`Put Wall: ${curr.putWallStrike} (${telegramFormatLakhs(curr.putWallOi ?? 0)})`);
+    }
+  }
+
+  if (curr.regime != null) {
+    if (prev.regime !== curr.regime) changed.push(`Regime: ${prev.regime ?? "-"} → ${curr.regime}`);
+    else unchanged.push(`Regime: ${curr.regime}`);
+  }
+  if (curr.structuralBias != null) {
+    if (prev.structuralBias !== curr.structuralBias) changed.push(`Structural Bias: ${prev.structuralBias ?? "-"} → ${curr.structuralBias}`);
+    else unchanged.push(`Structural Bias: ${curr.structuralBias}`);
+  }
+
+  curr.stocks.forEach((s) => {
+    const prevStock = prev.stocks.find((p) => p.name === s.name);
+    if (!prevStock || prevStock.changePct == null || s.changePct == null) return;
+    const prevText = `${prevStock.changePct >= 0 ? "+" : ""}${prevStock.changePct.toFixed(2)}%`;
+    const currText = `${s.changePct >= 0 ? "+" : ""}${s.changePct.toFixed(2)}%`;
+    if (Math.abs(prevStock.changePct - s.changePct) > 0.001) changed.push(`${s.name}: ${prevText} → ${currText}`);
+    else unchanged.push(`${s.name}: ${currText}`);
+  });
+
+  // PDH/PDL is static for the whole trading day by definition -- always
+  // reported unchanged, not diffed against a previous snapshot.
+  unchanged.push("PDH/PDL: static for the day");
+
+  if (prev.spotAlignment !== curr.spotAlignment) changed.push(`Spot Alignment: ${prev.spotAlignment} → ${curr.spotAlignment}`);
+  else unchanged.push(`Spot Alignment: ${curr.spotAlignment}`);
+
+  const lines: string[] = [];
+  lines.push(`📋 <b>${symbol} ${tagLabel}</b> (${telegramFormatIstTime(prev.timestamp)} → ${telegramFormatIstTime(curr.timestamp)} IST)`);
+  lines.push("━━━━━━━━━━━━━━━━━━━━");
+  if (changed.length > 0) {
+    lines.push("<b>CHANGED:</b>");
+    changed.forEach((c) => lines.push(c));
+  }
+  if (unchanged.length > 0) {
+    if (changed.length > 0) lines.push("");
+    lines.push("<b>UNCHANGED:</b>");
+    unchanged.forEach((c) => lines.push(c));
+  }
+  lines.push("━━━━━━━━━━━━━━━━━━━━");
+  return lines.join("\n");
+}
+
+async function runTelegramPeriodicSummaryCycle(tags: TelegramPeriodicTag[]): Promise<void> {
+  let activeSession: KiteSession | undefined;
+  for (const s of sessions.values()) {
+    if (s.expiresAt > Date.now()) { activeSession = s; break; }
+  }
+  if (!activeSession) return;
+
+  const symbols: V2PremiumSymbol[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
+  for (const symbol of symbols) {
+    const curr = buildTelegramPeriodicSnapshot(symbol, activeSession);
+    if (!curr) continue;
+    for (const tag of tags) {
+      const snapMap = tag === "15MIN" ? TELEGRAM_PERIODIC_SNAPSHOT_15 : tag === "30MIN" ? TELEGRAM_PERIODIC_SNAPSHOT_30 : TELEGRAM_PERIODIC_SNAPSHOT_60;
+      const prev = snapMap.get(symbol);
+      if (prev) {
+        try {
+          const message = buildTelegramPeriodicSummaryMessage(symbol, tag, prev, curr);
+          await sendTelegramAlert(message);
+        } catch (err) {
+          console.error(`[Telegram Periodic] ${tag} summary failed for ${symbol}:`, err instanceof Error ? err.message : err);
+        }
+      }
+      snapMap.set(symbol, curr);
+    }
+  }
+}
+
 async function sendTelegramAlert(message: string): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
@@ -2563,54 +3158,34 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
   for (const symbol of symbols) {
     const m = session.marketSnapshot?.[symbol];
 
+    // Market Snapshot slow cache (2026-08-18): refresh wall/expiry-table/
+    // stocks/spot-alignment context once per 3-min cycle (this function's
+    // own natural cadence, piggybacked exactly like M10-M12b -- zero extra
+    // Kite calls except the stock watchlist, which IS a genuine new call
+    // but only once per 3 min, not once per min). The 1-min fast cycle
+    // reads this cache directly rather than recomputing any of it.
+    if (m && !m.error) {
+      try {
+        const stocks = await fetchTelegramStockWatchlist(session.accessToken, symbol);
+        TELEGRAM_SLOW_CACHE.set(symbol, { m, stocks, updatedAt: Date.now() });
+      } catch (err) {
+        console.error(`[Telegram] Slow cache refresh failed for ${symbol}:`, err instanceof Error ? err.message : err);
+      }
+    }
+
     // --- M10: Regime shift alert ---
-    // NOTE: currentRegime alone (TRENDING_UP / OSCILLATING_OR_RANGE / ...) is
-    // a *behavioural* label, not a directional call — that's why the old
-    // message read as "regime change" with no stated bias. structuralBias
-    // ("UP_STRUCTURE" / "DOWN_STRUCTURE" / provisional variants /
-    // "NEUTRAL_OR_UNCONFIRMED") and pressure ("UP" / "DOWN" /
-    // "NEUTRAL_OR_MIXED") already exist on the same object (see the
-    // TradeLab "Structural bias" / m10.regime.structuralBias row) — they
-    // were just never included in the Telegram text. Both are now folded
-    // into the alert text AND into the dedup key, so a bias flip fires an
-    // alert even when currentRegime's label itself doesn't change (e.g.
-    // TRANSITIONAL -> TRANSITIONAL but UP_STRUCTURE -> DOWN_STRUCTURE).
     try {
       const m10 = buildV2MarketBehaviourRegime(symbol, session, m);
       const currentRegime = (m10 as any)?.regime?.currentRegime;
-      const structuralBias = (m10 as any)?.regime?.structuralBias ?? "NEUTRAL_OR_UNCONFIRMED";
-      const pressure = (m10 as any)?.regime?.pressure ?? "NEUTRAL_OR_MIXED";
       if (currentRegime) {
-        const biasLabel: Record<string, string> = {
-          UP_STRUCTURE: "Bullish structure",
-          UP_STRUCTURE_PROVISIONAL: "Bullish structure (provisional)",
-          DOWN_STRUCTURE: "Bearish structure",
-          DOWN_STRUCTURE_PROVISIONAL: "Bearish structure (provisional)",
-          NEUTRAL_OR_UNCONFIRMED: "Neutral / unconfirmed",
-        };
-        const pressureLabel: Record<string, string> = {
-          UP: "upward",
-          DOWN: "downward",
-          NEUTRAL_OR_MIXED: "neutral/mixed",
-          INSUFFICIENT_HISTORY: "insufficient history",
-        };
-        // fingerprint = regime label + bias + pressure, so ANY of the three
-        // changing triggers an alert, not just the regime label.
-        const fingerprint = `${currentRegime}|${structuralBias}|${pressure}`;
-        const prevFingerprint = TELEGRAM_LAST_REGIME.get(symbol);
-        if (prevFingerprint && prevFingerprint !== fingerprint) {
+        const prevRegime = TELEGRAM_LAST_REGIME.get(symbol);
+        if (prevRegime && prevRegime !== currentRegime) {
           const spot = m?.spot != null ? m.spot.toFixed(2) : "—";
-          const [prevRegime] = prevFingerprint.split("|");
           await sendTelegramAlert(
-            `📊 <b>REGIME SHIFT — ${symbol}</b>\n` +
-            `${prevRegime} → ${currentRegime}\n` +
-            `Bias: <b>${biasLabel[structuralBias] ?? structuralBias}</b>\n` +
-            `Pressure: ${pressureLabel[pressure] ?? pressure}\n` +
-            `Spot: ${spot}\nTime: ${istTime()}\n` +
-            `<i>Behavioural/structural read only — not the mandatory-alignment Final Verdict. Check TradeLab for the scored verdict before acting.</i>`
+            `📊 <b>REGIME SHIFT — ${symbol}</b>\n${prevRegime} → ${currentRegime}\nSpot: ${spot}\nTime: ${istTime()}`
           );
         }
-        TELEGRAM_LAST_REGIME.set(symbol, fingerprint);
+        TELEGRAM_LAST_REGIME.set(symbol, currentRegime);
       }
     } catch (err) {
       console.error(`[Telegram] M10 check failed for ${symbol}:`, err instanceof Error ? err.message : err);
@@ -2773,6 +3348,89 @@ setInterval(() => {
   lastRecorderSlot = slot;
   void captureRecorderSnapshot("SCHEDULED_3MIN");
 }, 30 * 1000); // check every 30s so we don't miss the 3-min boundary
+
+// Telegram Market Snapshot fast cycle (2026-08-18, user-requested): a
+// genuinely separate 1-minute cadence from the Recorder's 3-min cycle
+// above, gated the same way (market hours only). This does a REAL extra
+// Kite fetch per symbol per minute (fetchTelegramFastPcrSnapshot) --
+// explicitly a deliberate cost tradeoff the user chose (fresh PCR/premium/
+// OI every minute) over reusing the 3-min snapshot as-is. If TELEGRAM_SLOW_CACHE
+// hasn't been populated yet (first 3-min cycle hasn't run), this silently
+// no-ops per symbol (buildTelegramMarketSnapshotMessage returns null).
+// 2026-08-18 follow-up (user-confirmed fix): none of the Telegram
+// direction/pct-change trackers reset at day boundaries, including the
+// pre-existing TELEGRAM_LAST_REGIME tracker (not introduced this
+// session). On a server that stays up overnight (no redeploy), the first
+// comparison of a new trading day would silently diff against the
+// previous day's last value -- e.g. a 15-min summary at 09:15 comparing
+// against yesterday's 15:29 snapshot, producing a meaningless "overnight
+// change". Reset once per trading day, checked on every tick of this
+// same 15s interval (cheap: just a string compare) so it fires as soon
+// as the IST date rolls over, regardless of market-hours gating below.
+let lastTelegramTrackerResetDate = "";
+function resetTelegramDailyTrackers(): void {
+  TELEGRAM_DOT_LAST_VALUE.clear();
+  TELEGRAM_FAST_LAST_FULLCHAIN_PCR.clear();
+  TELEGRAM_FAST_LAST_OI_PCR.clear();
+  TELEGRAM_FAST_LAST_IE3.clear();
+  TELEGRAM_PERIODIC_SNAPSHOT_15.clear();
+  TELEGRAM_PERIODIC_SNAPSHOT_30.clear();
+  TELEGRAM_PERIODIC_SNAPSHOT_60.clear();
+  TELEGRAM_LAST_REGIME.clear();
+  console.log("[Telegram] daily tracker reset for new trading day");
+}
+
+let lastTelegramFastMinute = -1;
+setInterval(() => {
+  const today = indiaTradingDate();
+  if (today !== lastTelegramTrackerResetDate) {
+    lastTelegramTrackerResetDate = today;
+    resetTelegramDailyTrackers();
+  }
+  if (!isMarketOpenNowServer()) return;
+  const now = new Date();
+  const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+  const ist = new Date(istString);
+  const minutesSinceMidnight = ist.getHours() * 60 + ist.getMinutes();
+  if (minutesSinceMidnight === lastTelegramFastMinute) return; // already ran this minute
+  lastTelegramFastMinute = minutesSinceMidnight;
+  void runTelegramFastCycle().catch((err) =>
+    console.error("[Telegram Fast] cycle error:", err instanceof Error ? err.message : err)
+  );
+}, 15 * 1000); // check every 15s so we don't miss the 1-min boundary
+
+// 2026-08-18: 15/30/60-min periodic "what changed / what didn't" summary.
+// Each tag has its own independent last-fired-minute guard, so at hour
+// boundaries (e.g. 12:00 IST) all 3 tags can fire together in one pass --
+// that's expected, not a bug. Zero extra Kite calls (see
+// runTelegramPeriodicSummaryCycle above).
+let lastTelegram15Minute = -1;
+let lastTelegram30Minute = -1;
+let lastTelegram60Minute = -1;
+setInterval(() => {
+  if (!isMarketOpenNowServer()) return;
+  const now = new Date();
+  const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+  const ist = new Date(istString);
+  const minutesSinceMidnight = ist.getHours() * 60 + ist.getMinutes();
+  const tags: TelegramPeriodicTag[] = [];
+  if (minutesSinceMidnight % 15 === 0 && minutesSinceMidnight !== lastTelegram15Minute) {
+    lastTelegram15Minute = minutesSinceMidnight;
+    tags.push("15MIN");
+  }
+  if (minutesSinceMidnight % 30 === 0 && minutesSinceMidnight !== lastTelegram30Minute) {
+    lastTelegram30Minute = minutesSinceMidnight;
+    tags.push("30MIN");
+  }
+  if (minutesSinceMidnight % 60 === 0 && minutesSinceMidnight !== lastTelegram60Minute) {
+    lastTelegram60Minute = minutesSinceMidnight;
+    tags.push("60MIN");
+  }
+  if (tags.length === 0) return;
+  void runTelegramPeriodicSummaryCycle(tags).catch((err) =>
+    console.error("[Telegram Periodic] cycle error:", err instanceof Error ? err.message : err)
+  );
+}, 20 * 1000); // check every 20s so we don't miss any of the 15/30/60-min boundaries
 
 
 // In-memory instruments cache (fetched once per app startup)
@@ -2986,6 +3644,25 @@ const KITE_API_SECRET = process.env.KITE_API_SECRET?.trim() || "";
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const INDIA_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const SNAPSHOT_TTL_MS = 3 * 60 * 1000;
+// 2026-08-18: adaptive refresh cadence for the master snapshot loop.
+// Opening (09:15-10:00 IST) and closing (14:15-15:30 IST) windows get a
+// faster 1-min refresh -- these are when option premiums/PCR/OI move
+// fastest (opening range/gap resolution, and closing MTM squaring +
+// expiry pinning). The rest of the session (10:00-14:15, the typical
+// "lunch lull") keeps the existing 3-min cadence. This is safe for the
+// V2 regime detector: v2WindowPoints() windows by real elapsed time, not
+// sample count, so denser samples during the fast windows only improve
+// resolution there -- nothing downstream breaks.
+const SNAPSHOT_TTL_MS_FAST = 60 * 1000;
+function getAdaptiveSnapshotTtlMs(): number {
+  const now = new Date();
+  const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
+  const ist = new Date(istString);
+  const minutes = ist.getHours() * 60 + ist.getMinutes();
+  const openingFast = minutes >= 9 * 60 + 15 && minutes < 10 * 60; // 09:15-10:00
+  const closingFast = minutes >= 14 * 60 + 15 && minutes <= 15 * 60 + 30; // 14:15-15:30
+  return openingFast || closingFast ? SNAPSHOT_TTL_MS_FAST : SNAPSHOT_TTL_MS;
+}
 
 // Trading symbols for indices (exact Kite format)
 const INDEX_SYMBOLS = {
@@ -3249,6 +3926,19 @@ interface OptionChainStats {
   volumePcr: number | null;
   maxPain: number;
   fullChainPcr: number | null;
+  // Added 2026-08-18 for the Telegram 1-min fast cycle: the ATM CE/PE
+  // ltp+oi from the SAME already-fetched `quotes` batch this function
+  // builds for fullChainPcr/maxPain -- zero extra Kite calls. null when
+  // the ATM strike's CE/PE instrument or quote isn't found.
+  atmCeLtp: number | null;
+  atmCeOi: number | null;
+  atmPeLtp: number | null;
+  atmPeOi: number | null;
+  // Added 2026-08-18 for the Telegram Intr/Ext ±3 table and OI Ladder ±7
+  // table: per-strike CE/PE ltp+oi across the ATM ±bandSize band, from the
+  // SAME quotes batch already fetched for oiPcr/volumePcr above -- zero
+  // extra Kite calls. Sorted ascending by strike.
+  bandStrikes: Array<{ strike: number; ceOi: number | null; ceLtp: number | null; peOi: number | null; peLtp: number | null }>;
 }
 
 // OI PCR and Volume PCR use ATM ±7 strikes. Max Pain and full-chain PCR use
@@ -3263,21 +3953,27 @@ async function fetchOptionChainStats(
 ): Promise<OptionChainStats> {
   const bandCeSymbols: string[] = [];
   const bandPeSymbols: string[] = [];
+  // Per-strike lookup (strike -> {ceSymbol, peSymbol}) so we can build
+  // bandStrikes below without a second pass over optionMap.
+  const bandStrikeInfo: Array<{ strike: number; ceSymbol: string | null; peSymbol: string | null }> = [];
 
   for (let i = -bandSize; i <= bandSize; i++) {
     const strike = atmStrike + i * strikeStep;
     const ce = optionMap.get(`${strike}_CE`);
     const pe = optionMap.get(`${strike}_PE`);
-    if (ce) bandCeSymbols.push(`${optExchange}:${ce.tradingsymbol}`);
-    if (pe) bandPeSymbols.push(`${optExchange}:${pe.tradingsymbol}`);
+    const ceSymbol = ce ? `${optExchange}:${ce.tradingsymbol}` : null;
+    const peSymbol = pe ? `${optExchange}:${pe.tradingsymbol}` : null;
+    if (ceSymbol) bandCeSymbols.push(ceSymbol);
+    if (peSymbol) bandPeSymbols.push(peSymbol);
+    bandStrikeInfo.push({ strike, ceSymbol, peSymbol });
   }
 
   const allInstruments = Array.from(optionMap.values());
   const allSymbols = allInstruments.map((inst) => `${optExchange}:${inst.tradingsymbol}`);
-  if (allSymbols.length === 0) return { oiPcr: null, volumePcr: null, maxPain: 0, fullChainPcr: null };
+  if (allSymbols.length === 0) return { oiPcr: null, volumePcr: null, maxPain: 0, fullChainPcr: null, atmCeLtp: null, atmCeOi: null, atmPeLtp: null, atmPeOi: null, bandStrikes: [] };
 
   const quotes = await fetchKiteQuoteBatched(accessToken, allSymbols);
-  if (!quotes) return { oiPcr: null, volumePcr: null, maxPain: 0, fullChainPcr: null };
+  if (!quotes) return { oiPcr: null, volumePcr: null, maxPain: 0, fullChainPcr: null, atmCeLtp: null, atmCeOi: null, atmPeLtp: null, atmPeOi: null, bandStrikes: [] };
 
   let totalCallOI = 0;
   let totalPutOI = 0;
@@ -3291,6 +3987,14 @@ async function fetchOptionChainStats(
     totalPutOI += quotes[s]?.oi || 0;
     totalPutVolume += quotes[s]?.volume || 0;
   }
+
+  const bandStrikes = bandStrikeInfo.map(({ strike, ceSymbol, peSymbol }) => ({
+    strike,
+    ceOi: ceSymbol ? quotes[ceSymbol]?.oi ?? null : null,
+    ceLtp: ceSymbol ? quotes[ceSymbol]?.last_price ?? null : null,
+    peOi: peSymbol ? quotes[peSymbol]?.oi ?? null : null,
+    peLtp: peSymbol ? quotes[peSymbol]?.last_price ?? null : null,
+  }));
 
   // Full-chain OI PCR: every strike on this expiry, not just the ATM band.
   let fullChainCallOI = 0;
@@ -3326,11 +4030,21 @@ async function fetchOptionChainStats(
     }
   }
 
+  const atmCeInst = optionMap.get(`${atmStrike}_CE`);
+  const atmPeInst = optionMap.get(`${atmStrike}_PE`);
+  const atmCeQuote = atmCeInst ? quotes[`${optExchange}:${atmCeInst.tradingsymbol}`] : null;
+  const atmPeQuote = atmPeInst ? quotes[`${optExchange}:${atmPeInst.tradingsymbol}`] : null;
+
   return {
     oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : null,
     volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : null,
     maxPain,
     fullChainPcr: fullChainCallOI > 0 ? fullChainPutOI / fullChainCallOI : null,
+    atmCeLtp: atmCeQuote?.last_price ?? null,
+    atmCeOi: atmCeQuote?.oi ?? null,
+    atmPeLtp: atmPeQuote?.last_price ?? null,
+    atmPeOi: atmPeQuote?.oi ?? null,
+    bandStrikes,
   };
 }
 
@@ -4198,6 +4912,8 @@ async function fetchCommodityData(
             const levels = pdhPdlMap.get(ceInst.instrument_token) || { pdh: 0, pdl: 0 };
             const computedIv = calcImpliedVolatility(oq.last_price || 0, baseMetrics.current, strike, commodityDaysToExpiry, true);
             const greeks = calcGreeks(baseMetrics.current, strike, computedIv, commodityDaysToExpiry, true);
+            const advGreeksCeMcx = calcAdvancedGreeks(baseMetrics.current, strike, computedIv, commodityDaysToExpiry, true);
+            const gammaCeMcx = advGreeksCeMcx ? advGreeksCeMcx.gamma : 0;
             baseMetrics.ceStrikes.push({
               strike,
               isAtm,
@@ -4232,6 +4948,7 @@ async function fetchCommodityData(
               vega: greeks.vega,
               theta: greeks.theta,
               delta: greeks.delta,
+              gamma: gammaCeMcx,
             });
           }
         }
@@ -4245,6 +4962,8 @@ async function fetchCommodityData(
             const levels = pdhPdlMap.get(peInst.instrument_token) || { pdh: 0, pdl: 0 };
             const computedIv = calcImpliedVolatility(oq.last_price || 0, baseMetrics.current, strike, commodityDaysToExpiry, false);
             const greeks = calcGreeks(baseMetrics.current, strike, computedIv, commodityDaysToExpiry, false);
+            const advGreeksPeMcx = calcAdvancedGreeks(baseMetrics.current, strike, computedIv, commodityDaysToExpiry, false);
+            const gammaPeMcx = advGreeksPeMcx ? advGreeksPeMcx.gamma : 0;
             baseMetrics.peStrikes.push({
               strike,
               isAtm,
@@ -4279,6 +4998,7 @@ async function fetchCommodityData(
               vega: greeks.vega,
               theta: greeks.theta,
               delta: greeks.delta,
+              gamma: gammaPeMcx,
             });
           }
         }
@@ -4678,20 +5398,11 @@ async function fetchIndexData(
       console.error(`[${symbol}] Sector breadth error:`, err instanceof Error ? err.message : err);
     }
 
-    // Fetch option premiums for available expiries.
-    // Plan 2 (2026-08-17): these 4 expiries used to be fetched sequentially
-    // (for...of + await inside), so one index's own critical-path latency
-    // was ~4x a single expiry's round-trip even though NIFTY/BANKNIFTY/SENSEX
-    // themselves already run in parallel via Promise.all() in
-    // refreshMarketSnapshot(). Converted to Promise.all() here too — same
-    // per-expiry logic, just no longer blocking on the previous expiry
-    // before starting the next. Results are collected then pushed in the
-    // original expiryMap order so baseMetrics.expiries ordering is unchanged.
-    const expiryResults = await Promise.all(
-      Object.entries(expiryMap).map(async ([expiryName, expiryDate]) => {
+    // Fetch option premiums for available expiries
+    for (const [expiryName, expiryDate] of Object.entries(expiryMap)) {
       if (!expiryDate) {
         console.log(`[${symbol}] Skipping ${expiryName} (no expiry available)`);
-        return null;
+        continue;
       }
 
       const expiryDateObj = parseExpiryDate(expiryDate);
@@ -4741,7 +5452,8 @@ async function fetchIndexData(
           );
           expiry.ceError = "CE instruments not found";
           expiry.peError = "PE instruments not found";
-          return expiry;
+          baseMetrics.expiries.push(expiry);
+          continue;
         }
 
         const optionQuotes = await fetchKiteQuote(accessToken, symbolsToFetch);
@@ -4766,6 +5478,8 @@ async function fetchIndexData(
                 const daysToExpiry = daysToDerivativeExpiry(ceInst.expiry || expiryDate);
                 const computedIv = calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, true);
                 const greeks = calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true);
+                const advGreeksCe = calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true);
+                const gammaCe = advGreeksCe ? advGreeksCe.gamma : 0;
                 expiry.ceStrikes.push({
                   strike,
                   isAtm,
@@ -4800,6 +5514,7 @@ async function fetchIndexData(
                   vega: greeks.vega,
                   theta: greeks.theta,
               delta: greeks.delta,
+                  gamma: gammaCe,
                 });
               }
             }
@@ -4814,6 +5529,8 @@ async function fetchIndexData(
                 const daysToExpiry = daysToDerivativeExpiry(peInst.expiry || expiryDate);
                 const computedIv = calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, false);
                 const greeks = calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false);
+                const advGreeksPe = calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false);
+                const gammaPe = advGreeksPe ? advGreeksPe.gamma : 0;
                 expiry.peStrikes.push({
                   strike,
                   isAtm,
@@ -4848,6 +5565,7 @@ async function fetchIndexData(
                   vega: greeks.vega,
                   theta: greeks.theta,
               delta: greeks.delta,
+                  gamma: gammaPe,
                 });
               }
             }
@@ -4873,11 +5591,7 @@ async function fetchIndexData(
         expiry.peError = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
       }
 
-      return expiry;
-      })
-    );
-    for (const expiry of expiryResults) {
-      if (expiry) baseMetrics.expiries.push(expiry);
+      baseMetrics.expiries.push(expiry);
     }
 
     // Attach Gap Confirmation Score last, once all inputs are known. Trend is
@@ -10841,6 +11555,220 @@ app.get("/", (c) => {
       return html;
     }
 
+    function renderOptionsAdvancedChain(symbol, m) {
+      if (!m.expiries || m.expiries.length === 0) return '<div class="loading">DATA UNAVAILABLE</div>';
+      const exp = m.expiries.find((e) => e.expiry === 'Current Expiry') || m.expiries[0];
+      const ceStrikes = exp.ceStrikes || [];
+      const peStrikes = exp.peStrikes || [];
+      if (ceStrikes.length === 0 && peStrikes.length === 0) return '<div class="loading">DATA UNAVAILABLE</div>';
+
+      let maxCallOiStrike = null, maxCallOi = -1;
+      ceStrikes.forEach((s) => { if (s.oi != null && s.oi > maxCallOi) { maxCallOi = s.oi; maxCallOiStrike = s.strike; } });
+      let maxPutOiStrike = null, maxPutOi = -1;
+      peStrikes.forEach((s) => { if (s.oi != null && s.oi > maxPutOi) { maxPutOi = s.oi; maxPutOiStrike = s.strike; } });
+
+      const strikesSet = new Set([...ceStrikes.map((s) => s.strike), ...peStrikes.map((s) => s.strike)]);
+      const strikes = Array.from(strikesSet).sort((a, b) => a - b);
+
+      const atmCe = ceStrikes.find((s) => s.isAtm);
+      const atmPe = peStrikes.find((s) => s.isAtm);
+      const straddle = (atmCe && atmCe.lastPrice > 0 && atmPe && atmPe.lastPrice > 0) ? atmCe.lastPrice + atmPe.lastPrice : null;
+
+      let maxPainStrike = null;
+      if (m.maxPain > 0 && strikes.length > 0) {
+        maxPainStrike = strikes.reduce((a, b) => (Math.abs(b - m.maxPain) < Math.abs(a - m.maxPain) ? b : a));
+      }
+
+      let html = '<div class="premium-card" style="margin-bottom:12px;">';
+      html += '<div class="card-title">Advanced Chain Summary</div>';
+      html += rowLine('ATM Straddle Premium', straddle != null ? straddle.toFixed(2) : 'DATA UNAVAILABLE');
+      html += rowLine('Max Pain (nearest strike in band)', maxPainStrike != null ? maxPainStrike + ' (settlement calc: ' + m.maxPain.toFixed(0) + ')' : 'DATA UNAVAILABLE');
+      html += rowLine('Call Wall (resistance, max CE OI)', maxCallOiStrike != null ? maxCallOiStrike : 'DATA UNAVAILABLE');
+      html += rowLine('Put Wall (support, max PE OI)', maxPutOiStrike != null ? maxPutOiStrike : 'DATA UNAVAILABLE');
+      html += '</div>';
+
+      html += '<div class="premium-card" style="margin-bottom:12px;">';
+      html += '<div class="card-title">' + escapeHtml(exp.expiry) + ' - Advanced Chain (Greeks + per-strike PCR)</div>';
+      html += '<div class="table-scroll"><table style="width:100%; min-width:760px; font-family: var(--font-mono); font-size:0.68rem; border-collapse:collapse;">';
+      html += '<thead><tr style="color:var(--muted-dim);"><th colspan="5" style="text-align:center; padding:3px;">CALL (CE)</th><th style="text-align:center; padding:3px;">Strike</th><th colspan="5" style="text-align:center; padding:3px;">PUT (PE)</th><th style="text-align:center; padding:3px;">PCR</th></tr>';
+      html += '<tr style="color:var(--muted-dim);"><th style="text-align:right;">Delta</th><th style="text-align:right;">Gamma</th><th style="text-align:right;">Theta</th><th style="text-align:right;">Vega</th><th style="text-align:right;">OI</th><th></th><th style="text-align:right;">OI</th><th style="text-align:right;">Vega</th><th style="text-align:right;">Theta</th><th style="text-align:right;">Gamma</th><th style="text-align:right;">Delta</th><th style="text-align:right;">(PE/CE OI)</th></tr></thead><tbody>';
+
+      strikes.forEach((strike) => {
+        const ce = ceStrikes.find((s) => s.strike === strike);
+        const pe = peStrikes.find((s) => s.strike === strike);
+        const isAtm = (ce && ce.isAtm) || (pe && pe.isAtm);
+        const isMaxPain = strike === maxPainStrike;
+        const rowStyle = (isAtm ? 'background: rgba(201,162,39,0.08); ' : isMaxPain ? 'background: rgba(124,138,165,0.10); ' : '') + 'border-top:1px solid var(--border);';
+        const strikePcr = (ce && ce.oi > 0 && pe && pe.oi != null) ? (pe.oi / ce.oi) : null;
+        html += '<tr style="' + rowStyle + '">';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (ce ? ce.delta.toFixed(3) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (ce ? ce.gamma.toFixed(5) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (ce ? ce.theta.toFixed(2) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (ce ? ce.vega.toFixed(2) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:' + (strike === maxCallOiStrike ? 'var(--red)' : 'var(--text)') + ';">' + (ce && ce.oi != null ? ce.oi.toLocaleString('en-IN') : '-') + (strike === maxCallOiStrike ? ' [C]' : '') + '</td>';
+        html += '<td style="text-align:center; padding:3px; color:' + (isAtm ? 'var(--gold)' : 'var(--text)') + '; font-weight:' + (isAtm ? '700' : '400') + ';">' + strike + (isMaxPain ? ' [MP]' : '') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:' + (strike === maxPutOiStrike ? 'var(--green)' : 'var(--text)') + ';">' + (pe && pe.oi != null ? pe.oi.toLocaleString('en-IN') : '-') + (strike === maxPutOiStrike ? ' [P]' : '') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (pe ? pe.vega.toFixed(2) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (pe ? pe.theta.toFixed(2) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (pe ? pe.gamma.toFixed(5) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (pe ? pe.delta.toFixed(3) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:' + (strikePcr != null ? (strikePcr > 1.1 ? 'var(--green)' : strikePcr < 0.85 ? 'var(--red)' : 'var(--muted)') : 'var(--muted-dim)') + ';">' + (strikePcr != null ? strikePcr.toFixed(2) : '-') + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+      html += '<div style="margin-top:8px; font-size:0.7rem; color:var(--muted);">[C] Call Wall / [P] Put Wall / [MP] Max Pain (nearest strike in this band) - gold row = ATM</div>';
+      html += '<div class="timestamp">Gamma/Delta/Theta/Vega are Black-Scholes estimates (same model as the basic CHAIN tab, not published by Kite. PCR column is PE OI / CE OI at that individual strike, not the index-level OI PCR shown elsewhere (Walls &amp; PCR tab).</div>';
+      html += '</div>';
+
+      html += renderFuturesPcrAlignmentCard(symbol, m);
+      html += renderAllExpiryAlignmentTable(symbol, m);
+
+      return html;
+    }
+
+    function renderFuturesPcrAlignmentCard(symbol, m) {
+      let html = '<div class="premium-card" style="margin-bottom:12px;">';
+      html += '<div class="card-title">Futures + PCR Alignment</div>';
+
+      const contract = (m.futuresContracts && m.futuresContracts[0]) || null;
+      let futuresBuildup = null;
+      if (contract) {
+        const key = symbol + '_' + contract.tradingsymbol;
+        const priceDir = futuresDirection(key + '_price', contract.ltp);
+        const oiDir = contract.oi != null ? futuresDirection(key + '_oi', contract.oi) : 'flat';
+        futuresBuildup = classifyFuturesBuildup(priceDir, oiDir);
+        html += rowLine('Near-Month Futures (' + escapeHtml(contract.tradingsymbol) + ')', futuresBuildup.label);
+        html += rowLine('Futures Basis (Fut - Spot)', contract.basis != null ? (contract.basis >= 0 ? '+' : '') + contract.basis.toFixed(2) : 'DATA UNAVAILABLE');
+      } else {
+        html += rowLine('Near-Month Futures', 'DATA UNAVAILABLE');
+      }
+
+      const currentPcr = m.pcr;
+      let pcrBias = 'NEUTRAL';
+      if (currentPcr != null) {
+        if (currentPcr > 1.1) pcrBias = 'BULLISH (Put writing)';
+        else if (currentPcr < 0.85) pcrBias = 'BEARISH (Call writing)';
+      }
+      html += rowLine('Current-Expiry OI PCR', currentPcr != null ? currentPcr.toFixed(3) + ' (' + pcrBias + ')' : 'DATA UNAVAILABLE');
+
+      let alignmentText = 'DATA UNAVAILABLE';
+      let alignmentColor = 'var(--muted)';
+      if (futuresBuildup && currentPcr != null) {
+        const futuresBullish = futuresBuildup.label === 'LONG BUILD-UP' || futuresBuildup.label === 'SHORT COVERING';
+        const futuresBearish = futuresBuildup.label === 'SHORT BUILD-UP' || futuresBuildup.label === 'LONG UNWINDING';
+        const pcrBullish = currentPcr > 1.1;
+        const pcrBearish = currentPcr < 0.85;
+        if ((futuresBullish && pcrBullish) || (futuresBearish && pcrBearish)) {
+          alignmentText = 'ALIGNED - futures and options PCR agree';
+          alignmentColor = 'var(--green)';
+        } else if ((futuresBullish && pcrBearish) || (futuresBearish && pcrBullish)) {
+          alignmentText = 'DIVERGENT - futures and options PCR disagree';
+          alignmentColor = 'var(--red)';
+        } else {
+          alignmentText = 'MIXED - one side lacks a clear signal yet';
+          alignmentColor = 'var(--gold)';
+        }
+      }
+      html += rowLineColored('Futures vs PCR Alignment', alignmentText, alignmentColor);
+
+      const pcrRange = computeSessionPcrRange(symbol);
+      if (pcrRange) {
+        const fmtTime = (t) => { const d = new Date(t); return isNaN(d.getTime()) ? '-' : d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }); };
+        html += rowLine('Intraday PCR Swing High', pcrRange.high.toFixed(3) + ' at ' + fmtTime(pcrRange.highTime));
+        html += rowLine('Intraday PCR Swing Low', pcrRange.low.toFixed(3) + ' at ' + fmtTime(pcrRange.lowTime));
+        html += rowLine('Session Sample Count', pcrRange.sampleCount);
+      } else {
+        html += rowLine('Intraday PCR Swing High/Low', 'DATA UNAVAILABLE (not enough session history yet)');
+      }
+      html += '</div>';
+      html += '<div class="timestamp">Buildup classification uses price/OI direction since the last refresh only (same caveat as the FUTURES tab), not a noise-filtered signal. PCR swing high/low uses this session accumulated history (pcrHistory, real intraday samples going back to page load / server session start) - not a synthetic or estimated range.</div>';
+      return html;
+    }
+
+    function renderAllExpiryAlignmentTable(symbol, m) {
+      if (!m.expiries || m.expiries.length === 0) return '';
+      let html = '<div class="premium-card" style="margin-bottom:12px;">';
+      html += '<div class="card-title">All-Expiry Alignment (ATM CE/PE)</div>';
+      html += '<div class="table-scroll"><table style="width:100%; min-width:920px; font-family: var(--font-mono); font-size:0.66rem; border-collapse:collapse;">';
+      html += '<thead><tr style="color:var(--muted-dim);"><th colspan="6" style="text-align:center; padding:3px;">CALL (CE, ATM)</th><th style="text-align:center; padding:3px;">Expiry</th><th colspan="6" style="text-align:center; padding:3px;">PUT (PE, ATM)</th><th style="text-align:center; padding:3px;">Expiry PCR</th></tr>';
+      html += '<tr style="color:var(--muted-dim);"><th style="text-align:right;">Trend</th><th style="text-align:right;">PDH</th><th style="text-align:right;">PDL</th><th style="text-align:right;">Day H</th><th style="text-align:right;">Day L</th><th style="text-align:right;">Intr/Extr</th><th></th><th style="text-align:right;">Intr/Extr</th><th style="text-align:right;">Day L</th><th style="text-align:right;">Day H</th><th style="text-align:right;">PDL</th><th style="text-align:right;">PDH</th><th style="text-align:right;">Trend</th><th style="text-align:right;">(PE/CE OI)</th></tr></thead><tbody>';
+
+      let pcrBiasCount = { bullish: 0, bearish: 0, neutral: 0 };
+
+      m.expiries.forEach((exp) => {
+        const atmCe = (exp.ceStrikes || []).find((s) => s.isAtm);
+        const atmPe = (exp.peStrikes || []).find((s) => s.isAtm);
+
+        const expiryDte = (() => {
+          const d = new Date(exp.expiryDate);
+          if (isNaN(d.getTime())) return null;
+          return Math.ceil((d.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        })();
+
+        let ceTrendArrow = '-', ceTrendColor = 'var(--muted)';
+        let ceIntrExtr = '-';
+        if (atmCe) {
+          const dir = priceDirection(symbol + '_allexp_CE_' + exp.expiry + '_' + atmCe.strike, atmCe.lastPrice);
+          ceTrendArrow = dir === 'up' ? 'UP' : dir === 'down' ? 'DOWN' : 'FLAT';
+          ceTrendColor = dir === 'up' ? 'var(--green)' : dir === 'down' ? 'var(--red)' : 'var(--muted)';
+          const intrinsic = computeIntrinsicValue('CE', m.current, atmCe.strike);
+          const extrinsic = Math.max(0, atmCe.lastPrice - intrinsic);
+          ceIntrExtr = intrinsic.toFixed(1) + ' / ' + extrinsic.toFixed(1);
+        }
+
+        let peTrendArrow = '-', peTrendColor = 'var(--muted)';
+        let peIntrExtr = '-';
+        if (atmPe) {
+          const dir = priceDirection(symbol + '_allexp_PE_' + exp.expiry + '_' + atmPe.strike, atmPe.lastPrice);
+          peTrendArrow = dir === 'up' ? 'UP' : dir === 'down' ? 'DOWN' : 'FLAT';
+          peTrendColor = dir === 'up' ? 'var(--green)' : dir === 'down' ? 'var(--red)' : 'var(--muted)';
+          const intrinsic = computeIntrinsicValue('PE', m.current, atmPe.strike);
+          const extrinsic = Math.max(0, atmPe.lastPrice - intrinsic);
+          peIntrExtr = intrinsic.toFixed(1) + ' / ' + extrinsic.toFixed(1);
+        }
+
+        const ceOiTotal = (exp.ceStrikes || []).reduce((sum, s) => sum + (s.oi || 0), 0);
+        const peOiTotal = (exp.peStrikes || []).reduce((sum, s) => sum + (s.oi || 0), 0);
+        const expiryPcr = ceOiTotal > 0 ? peOiTotal / ceOiTotal : null;
+        let expiryPcrColor = 'var(--muted-dim)';
+        if (expiryPcr != null) {
+          if (expiryPcr > 1.1) { expiryPcrColor = 'var(--green)'; pcrBiasCount.bullish++; }
+          else if (expiryPcr < 0.85) { expiryPcrColor = 'var(--red)'; pcrBiasCount.bearish++; }
+          else pcrBiasCount.neutral++;
+        }
+
+        html += '<tr style="border-top:1px solid var(--border);">';
+        html += '<td style="text-align:right; padding:3px; color:' + ceTrendColor + ';">' + ceTrendArrow + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (atmCe ? atmCe.pdh.toFixed(1) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (atmCe ? atmCe.pdl.toFixed(1) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (atmCe ? atmCe.dayHigh.toFixed(1) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (atmCe ? atmCe.dayLow.toFixed(1) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + ceIntrExtr + '</td>';
+        html += '<td style="text-align:center; padding:3px; color:var(--text); font-weight:600;">' + escapeHtml(exp.expiry) + (expiryDte != null ? ' (' + expiryDte + 'd)' : '') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + peIntrExtr + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (atmPe ? atmPe.dayLow.toFixed(1) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (atmPe ? atmPe.dayHigh.toFixed(1) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (atmPe ? atmPe.pdl.toFixed(1) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:var(--muted);">' + (atmPe ? atmPe.pdh.toFixed(1) : '-') + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:' + peTrendColor + ';">' + peTrendArrow + '</td>';
+        html += '<td style="text-align:right; padding:3px; color:' + expiryPcrColor + ';">' + (expiryPcr != null ? expiryPcr.toFixed(2) : '-') + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+
+      const totalUsable = pcrBiasCount.bullish + pcrBiasCount.bearish + pcrBiasCount.neutral;
+      let crossExpiryAlignment = 'DATA UNAVAILABLE';
+      if (totalUsable > 0) {
+        if (pcrBiasCount.bullish === totalUsable) crossExpiryAlignment = 'ALIGNED BULLISH - every expiry PCR agrees';
+        else if (pcrBiasCount.bearish === totalUsable) crossExpiryAlignment = 'ALIGNED BEARISH - every expiry PCR agrees';
+        else crossExpiryAlignment = 'MIXED - expiries do not all agree (' + pcrBiasCount.bullish + ' bullish / ' + pcrBiasCount.bearish + ' bearish / ' + pcrBiasCount.neutral + ' neutral)';
+      }
+      html += rowLine('Cross-Expiry PCR Alignment', crossExpiryAlignment);
+      html += '<div class="timestamp">Trend column compares this expiry ATM premium to the LAST refresh only. Intr/Extr = Intrinsic / Extrinsic value, computed from current spot vs strike (same formula as the PREMIUM tab composition card). Expiry PCR is a live snapshot (sum PE OI / sum CE OI across that expiry fetched strikes) - only the current-expiry PCR is tracked as a historical trend elsewhere in this app.</div>';
+      html += '</div>';
+      return html;
+    }
+
     function classifyWallStatus(oiDir) {
       if (oiDir === 'up') return 'Building';
       if (oiDir === 'down') return 'Weakening';
@@ -11386,6 +12314,7 @@ app.get("/", (c) => {
         { key: 'CHAIN', label: 'CHAIN' },
         { key: 'EXPIRY', label: 'EXPIRY' },
         { key: 'WALLSPCR', label: 'WALLS & PCR' },
+        { key: 'ADVANCED', label: 'ADVANCED' },
       ];
       html += '<div class="chip-nav">';
       subs.forEach((s) => {
@@ -11398,6 +12327,7 @@ app.get("/", (c) => {
       else if (sub === 'CHAIN') html += renderOptionsChain(symbol, m);
       else if (sub === 'EXPIRY') html += renderOptionsExpiry(symbol, m);
       else if (sub === 'WALLSPCR') html += renderOptionsWallsPcr(symbol, m);
+      else if (sub === 'ADVANCED') html += renderOptionsAdvancedChain(symbol, m);
       else html += '<div class="loading">' + escapeHtml(sub) + ' — coming in a future step.</div>';
       return html;
     }
@@ -13158,13 +14088,10 @@ app.get("/", (c) => {
 
         // PCR trend (rule 6 needs 3 consecutive snapshots) — reuses Step
         // 6B's Immediate OI/Volume PCR computation, not recalculated.
-        // fullChainPcr (Plan 3, 2026-08-17) is read from the same already-
-        // computed gapScore field used elsewhere in this file (see the
-        // "Full-Chain PCR" row above) — no new fetch, just tracked here too.
         const step6b = computeStep6BConclusion(symbol, m);
         if (!step6b.blocked) {
           const hist = simplePcrTracker[symbol] || [];
-          hist.push({ oiPcr: step6b.immediateOiPcr, volPcr: step6b.immediateVolPcr, fullChainPcr: (m.gapScore && m.gapScore.fullChainPcr != null) ? m.gapScore.fullChainPcr : null, time: new Date() });
+          hist.push({ oiPcr: step6b.immediateOiPcr, volPcr: step6b.immediateVolPcr, time: new Date() });
           if (hist.length > 10) hist.shift();
           simplePcrTracker[symbol] = hist;
         }
@@ -13221,26 +14148,9 @@ app.get("/", (c) => {
       return 'INSIDE RANGE';
     }
 
-    // Rule 5: simplified premium alignment, same contract only, with expiry
-    // weighting (Monthly highest, Current lowest — used only as a
-    // confirmation weight in the final verdict, not shown here).
-    //
-    // Plan 4 (2026-08-17): originally only checked proximity to each
-    // contract's own PDH (ceTowardPdh/peTowardPdh below) — a PE-near-its-
-    // own-high-then-reversing setup was covered, but the mirror-image
-    // CE-breaks-its-own-low-then-reverses-up setup had no equivalent check,
-    // even though pt.cePdl/pt.pePdl were already being tracked and unused.
-    // Added ceTowardPdl/peTowardPdl (same 2% band convention as the PDH
-    // checks) and two new "reclaiming from low" states so Rule 5 covers
-    // both directions instead of being PDH-only. Grounded in the user's own
-    // chart observation plus 88 saved contract screenshots (Jul 2025-Sep
-    // 2026, 30% showing >=50% intraday swings) — see optionpilot_fix_plan.md
-    // Plan 4 for the full evidence trail. These two new states are additive
-    // (existing CE/PE CONFIRMED / MIXED / NO CONFIRMATION states and their
-    // callers are unchanged) — not yet wired into computeFinalVerdict's
-    // Step 7 premiumSupports/premiumConflicts check, which still only reads
-    // '(CE|PE) CONFIRMED'; that wiring is a separate follow-up, not implied
-    // by this change.
+    // Rule 5: simplified 5-state premium alignment, same contract only,
+    // with expiry weighting (Monthly highest, Current lowest — used only
+    // as a confirmation weight in the final verdict, not shown here).
     function classifySimplePremium(symbol) {
       const pt = simplePremiumTracker[symbol];
       if (!pt || pt.snapshotsSinceReset < 2) return 'DATA UNAVAILABLE';
@@ -13251,64 +14161,35 @@ app.get("/", (c) => {
       const ceWeakening = pt.cePriceDir === 'down';
       const ceTowardPdh = pt.cePdh > 0 && pt.ceLtp != null ? pt.ceLtp >= pt.cePdh * 0.98 : false;
       const peTowardPdh = pt.pePdh > 0 && pt.peLtp != null ? pt.peLtp >= pt.pePdh * 0.98 : false;
-      const ceTowardPdl = pt.cePdl > 0 && pt.ceLtp != null ? pt.ceLtp <= pt.cePdl * 1.02 : false;
-      const peTowardPdl = pt.pePdl > 0 && pt.peLtp != null ? pt.peLtp <= pt.pePdl * 1.02 : false;
       const peNotReclaiming = !peTowardPdh;
       const ceNotReclaiming = !ceTowardPdh;
 
       const ceConfirmed = ceStrengthening && ceTowardPdh && peWeakening && peNotReclaiming;
       const peConfirmed = peStrengthening && peTowardPdh && ceWeakening && ceNotReclaiming;
 
-      // Mirror-image of ceConfirmed/peConfirmed: contract was weak, is now
-      // near its own PDL, and has just turned back up — the CE-breaks-low-
-      // then-reverses-up / PE-breaks-low-then-reverses-up setup from the
-      // user's charts. Checked after the PDH-based states so an already-
-      // confirmed PDH setup keeps taking priority.
-      const ceReclaimingFromLow = !ceConfirmed && !peConfirmed && ceStrengthening && ceTowardPdl;
-      const peReclaimingFromLow = !ceConfirmed && !peConfirmed && peStrengthening && peTowardPdl;
-
       if (ceConfirmed && peConfirmed) return 'MIXED';
       if (ceConfirmed) return 'CE CONFIRMED';
       if (peConfirmed) return 'PE CONFIRMED';
-      if (ceReclaimingFromLow && peReclaimingFromLow) return 'MIXED';
-      if (ceReclaimingFromLow) return 'CE RECLAIMING FROM LOW';
-      if (peReclaimingFromLow) return 'PE RECLAIMING FROM LOW';
       if (ceStrengthening && peStrengthening) return 'MIXED';
       return 'NO CONFIRMATION';
     }
 
-    // Rule 6: simplified 5-state PCR.
-    // Plan 3 (2026-08-17): same-day correlation study (n=33/index, live
-    // Railway logs) showed narrow-band OI-PCR/Volume-PCR (the ATM-band
-    // figures this function used to classify on) are strongly NEGATIVELY
-    // correlated with spot for all three indices (r=-0.66 to -0.89) — mostly
-    // a mechanical echo of the same price move already driving the verdict,
-    // not independent confirmation. Full-chain PCR (all strikes, already
-    // computed every cycle as gapScore.fullChainPcr, now also tracked above)
-    // was close to uncorrelated with spot for NIFTY/SENSEX (r=0.06, -0.07) —
-    // i.e. it carries information the price move doesn't already explain —
-    // so it is now the PRIMARY signal here, using the same 1.1/0.85
-    // threshold convention already applied to fullChainPcr elsewhere in this
-    // file (see the "Full-Chain PCR" sentiment row). Narrow-band OI-PCR is
-    // kept only as a secondary disagreement check (PCR UNSTABLE), not
-    // dropped outright, since BANKNIFTY's full-chain PCR was NOT
-    // uncorrelated in the same study (r=0.65 — its ATM+/-6 band is already
-    // close to its full strike range) and hasn't been shown to diverge
-    // cleanly from the narrow band there yet.
+    // Rule 6: simplified 5-state PCR, OI PCR primary + Volume PCR
+    // supporting, trend over 3 consecutive snapshots.
     function classifySimplePcr(symbol) {
       const hist = simplePcrTracker[symbol] || [];
       if (hist.length < 3) return 'PCR DATA UNAVAILABLE';
       const recent = hist.slice(-3);
-      if (recent.some((h) => h.fullChainPcr == null)) return 'PCR DATA UNAVAILABLE';
-      const fcTrendUp = recent[2].fullChainPcr > recent[0].fullChainPcr;
-      const fcTrendDown = recent[2].fullChainPcr < recent[0].fullChainPcr;
-      const fcState = recent[2].fullChainPcr > 1.1 ? 'bullish' : recent[2].fullChainPcr < 0.85 ? 'bearish' : 'neutral';
-      const oiState = (recent[2].oiPcr != null) ? (recent[2].oiPcr > 1.1 ? 'bullish' : recent[2].oiPcr < 0.85 ? 'bearish' : 'neutral') : null;
+      if (recent.some((h) => h.oiPcr == null)) return 'PCR DATA UNAVAILABLE';
+      const oiTrendUp = recent[2].oiPcr > recent[0].oiPcr;
+      const oiTrendDown = recent[2].oiPcr < recent[0].oiPcr;
+      const oiState = recent[2].oiPcr > 1.1 ? 'bullish' : recent[2].oiPcr < 0.85 ? 'bearish' : 'neutral';
+      const volState = (recent[2].volPcr != null) ? (recent[2].volPcr > 1.1 ? 'bullish' : recent[2].volPcr < 0.85 ? 'bearish' : 'neutral') : null;
 
-      if (oiState && fcState !== 'neutral' && oiState !== 'neutral' && fcState !== oiState) return 'PCR UNSTABLE';
-      if (fcState === 'bullish' && (fcTrendUp || fcTrendDown === false)) return 'PCR BULLISH';
-      if (fcState === 'bearish' && (fcTrendDown || fcTrendUp === false)) return 'PCR BEARISH';
-      if (fcState === 'neutral') return 'PCR NEUTRAL';
+      if (volState && oiState !== 'neutral' && volState !== 'neutral' && oiState !== volState) return 'PCR UNSTABLE';
+      if (oiState === 'bullish' && (oiTrendUp || oiTrendDown === false)) return 'PCR BULLISH';
+      if (oiState === 'bearish' && (oiTrendDown || oiTrendUp === false)) return 'PCR BEARISH';
+      if (oiState === 'neutral') return 'PCR NEUTRAL';
       return 'PCR UNSTABLE';
     }
 
@@ -17972,12 +18853,7 @@ app.get("/api/v2/market-regime", (c) => {
 
 app.get("/api/recorder/session.csv", (c) => {
   const rows = [
-    // Plan 6 (2026-08-17): this endpoint (the direct-download CSV, as
-    // opposed to the Drive-archive CSV below) was found to be missing
-    // even the 1st-order Greek columns (ce_iv/pe_iv/ce_theta/etc) that
-    // the Drive-archive CSV already had since 2026-08-10 — brought up to
-    // parity here, plus the new 2nd/3rd-order columns.
-    "snapshot_id,backend_timestamp,reason,snapshot_status,truth_verdict,symbol,spot,change,pdh,pdl,vwap,futures_ltp,futures_oi,atm_strike,ce_ltp,pe_ltp,ce_oi,pe_oi,ce_iv,pe_iv,ce_theta,pe_theta,ce_vega,pe_vega,ce_delta,pe_delta,ce_gamma,pe_gamma,ce_vanna,pe_vanna,ce_charm,pe_charm,ce_speed,pe_speed,ce_zomma,pe_zomma,ce_color,pe_color,ce_vomma,pe_vomma,ce_ultima,pe_ultima,exchange_timestamp,snapshot_sync_id,fii_cash_cr,dii_cash_cr",
+    "snapshot_id,backend_timestamp,reason,snapshot_status,truth_verdict,symbol,spot,change,pdh,pdl,vwap,futures_ltp,futures_oi,atm_strike,ce_ltp,pe_ltp,ce_oi,pe_oi,exchange_timestamp,snapshot_sync_id,fii_cash_cr,dii_cash_cr",
   ];
   const esc = (v: unknown) => {
     if (v == null) return "";
@@ -17993,9 +18869,6 @@ app.get("/api/recorder/session.csv", (c) => {
           idx?.spot, idx?.change, idx?.pdh, idx?.pdl, idx?.vwap,
           idx?.futuresLtp, idx?.futuresOi, idx?.atmStrike,
           idx?.ceLtp, idx?.peLtp, idx?.ceOi, idx?.peOi,
-          idx?.ceIv, idx?.peIv, idx?.ceTheta, idx?.peTheta, idx?.ceVega, idx?.peVega, idx?.ceDelta, idx?.peDelta,
-          idx?.ceGamma, idx?.peGamma, idx?.ceVanna, idx?.peVanna, idx?.ceCharm, idx?.peCharm, idx?.ceSpeed, idx?.peSpeed,
-          idx?.ceZomma, idx?.peZomma, idx?.ceColor, idx?.peColor, idx?.ceVomma, idx?.peVomma, idx?.ceUltima, idx?.peUltima,
           idx?.exchangeTimestamp, idx?.snapshotId,
           snap.fiiCashCr, snap.diiCashCr,
         ].map(esc).join(",")
@@ -19624,8 +20497,7 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
     if (journalHtmlResult && journalHtmlResult.size > 0) record.fileIds.journalHtml = journalHtmlResult.id;
 
     const csvRows = [
-      // Plan 6 (2026-08-17): added ce/pe gamma,vanna,charm,speed,zomma,color,vomma,ultima
-      "snapshot_id,backend_timestamp,reason,snapshot_status,truth_verdict,symbol,spot,change,pdh,pdl,vwap,futures_ltp,futures_oi,atm_strike,ce_ltp,pe_ltp,ce_oi,pe_oi,ce_iv,pe_iv,ce_theta,pe_theta,ce_vega,pe_vega,ce_delta,pe_delta,ce_gamma,pe_gamma,ce_vanna,pe_vanna,ce_charm,pe_charm,ce_speed,pe_speed,ce_zomma,pe_zomma,ce_color,pe_color,ce_vomma,pe_vomma,ce_ultima,pe_ultima,exchange_timestamp,snapshot_sync_id,fii_cash_cr,dii_cash_cr",
+      "snapshot_id,backend_timestamp,reason,snapshot_status,truth_verdict,symbol,spot,change,pdh,pdl,vwap,futures_ltp,futures_oi,atm_strike,ce_ltp,pe_ltp,ce_oi,pe_oi,ce_iv,pe_iv,ce_theta,pe_theta,ce_vega,pe_vega,ce_delta,pe_delta,exchange_timestamp,snapshot_sync_id,fii_cash_cr,dii_cash_cr",
     ];
     const esc = (v: unknown) => {
       if (v == null) return "";
@@ -19642,8 +20514,6 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
             idx?.futuresLtp, idx?.futuresOi, idx?.atmStrike,
             idx?.ceLtp, idx?.peLtp, idx?.ceOi, idx?.peOi,
             idx?.ceIv, idx?.peIv, idx?.ceTheta, idx?.peTheta, idx?.ceVega, idx?.peVega, idx?.ceDelta, idx?.peDelta,
-            idx?.ceGamma, idx?.peGamma, idx?.ceVanna, idx?.peVanna, idx?.ceCharm, idx?.peCharm, idx?.ceSpeed, idx?.peSpeed,
-            idx?.ceZomma, idx?.peZomma, idx?.ceColor, idx?.peColor, idx?.ceVomma, idx?.peVomma, idx?.ceUltima, idx?.peUltima,
             idx?.exchangeTimestamp, idx?.snapshotId,
             snap.fiiCashCr, snap.diiCashCr,
           ].map(esc).join(",")
@@ -20493,28 +21363,6 @@ async function refreshDhanAccessToken(): Promise<string | null> {
     dhanRefreshInFlight = null;
   });
   return dhanRefreshInFlight;
-}
-
-// Plan 5 (2026-08-17): incident evidence — Railway deploy logs on 2026-08-17
-// showed [DHAN M4/D4 FAIL] httpStatus=401 "Authentication Failed" repeating
-// from 09:25-10:26 IST, then a TOTP auto-refresh success only at 13:50:23
-// IST — a ~4.5hr NIFTY/BANKNIFTY Recorder blackout (confirmed separately via
-// truth_verdict=INVALID in /api/recorder/session.csv for the same window).
-// Root cause: getValidDhanAccessToken() only re-refreshes when the LOCALLY
-// tracked dhanSession.expiryTime is within 5 minutes of now — if Dhan
-// invalidates the token server-side earlier than that recorded expiry (as
-// happened here), every caller keeps reusing the same dead cached token
-// until its self-reported expiry, with no signal from the 401s themselves
-// feeding back into the refresh decision. This function closes that gap:
-// call it wherever a Dhan API response comes back with an auth-failure
-// status, and the NEXT getValidDhanAccessToken() call is forced to fetch a
-// real fresh token (via TOTP) instead of trusting the stale cached one —
-// turning what was an unbounded blackout (this incident: 4.5 hours) into a
-// same-cycle self-heal (next 3-minute Recorder tick, worst case).
-function invalidateDhanSession(reason: string): void {
-  dhanSession.expiryTime = null;
-  dhanSession.lastError = reason;
-  console.warn(`[DHAN-AUTH] Session invalidated (${reason}) — next call will force a fresh TOTP refresh instead of reusing this token.`);
 }
 
 // Drop-in replacement for `process.env.DHAN_ACCESS_TOKEN?.trim() || ""`.
@@ -22266,18 +23114,7 @@ async function dhanM1BuildProductionSnapshot(symbol: "NIFTY" | "BANKNIFTY"): Pro
       const raw = await expiryRes.text();
       let parsed: any = null;
       try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
-      if (!expiryRes.ok || !parsed || !Array.isArray(parsed.data) || parsed.data.length === 0) {
-        // Plan 5: an auth-failure status here means Dhan has already rejected
-        // our cached token server-side, even though our locally-tracked
-        // expiryTime may not say so yet. Invalidate now so the NEXT
-        // getValidDhanAccessToken() call is forced to fetch a fresh token via
-        // TOTP, instead of every subsequent tick reusing the same dead token
-        // until its self-reported (and now proven-wrong) expiry.
-        if (expiryRes.status === 401 || expiryRes.status === 403) {
-          invalidateDhanSession(`expirylist ${symbol} httpStatus=${expiryRes.status}`);
-        }
-        return null;
-      }
+      if (!expiryRes.ok || !parsed || !Array.isArray(parsed.data) || parsed.data.length === 0) return null;
       expiries = parsed.data;
       DHAN_LIVE_CACHE.set(expiryCacheKey, { fetchedAt: Date.now(), payload: expiries });
     }
@@ -22298,16 +23135,7 @@ async function dhanM1BuildProductionSnapshot(symbol: "NIFTY" | "BANKNIFTY"): Pro
       const raw = await chainRes.text();
       let parsed: any = null;
       try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
-      if (!chainRes.ok || !parsed || !parsed.data || typeof parsed.data.oc !== "object") {
-        // Plan 5: same reasoning as the expirylist branch above — a 401/403
-        // here is proof-positive the cached token is dead server-side, so
-        // invalidate immediately rather than waiting out the locally-tracked
-        // expiry (this was the exact gap that caused the 4.5hr blackout).
-        if (chainRes.status === 401 || chainRes.status === 403) {
-          invalidateDhanSession(`optionchain ${symbol} httpStatus=${chainRes.status}`);
-        }
-        return null;
-      }
+      if (!chainRes.ok || !parsed || !parsed.data || typeof parsed.data.oc !== "object") return null;
       chainPayload = parsed;
       chainFetchedAt = Date.now();
       DHAN_LIVE_CACHE.set(chainCacheKey, { fetchedAt: chainFetchedAt, payload: chainPayload });
@@ -31600,24 +32428,18 @@ if (process.env.NODE_ENV !== "test") {
     console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);
   });
 
+  // 2026-08-18: outer tick tightened from SNAPSHOT_TTL_MS (3 min) to 30s so
+  // the adaptive 1-min fast-window threshold below is actually reachable --
+  // a 3-min outer tick could never refresh more often than every 3 min no
+  // matter what threshold this loop computed inside it.
   setInterval(() => {
-    // Plan 1 (2026-08-17): gate the background refresh to actual market
-    // hours. Confirmed live: NIFTY's OI PCR value was bit-identical across
-    // three consecutive 3-minute cycles at 16:47-16:53 IST (an hour after
-    // the 15:30 close) because this loop was still hitting the live Kite
-    // API on a frozen post-close order book. Session expiry cleanup below
-    // still runs every cycle regardless of market hours — only the Kite
-    // refresh call itself is skipped outside the live session, using the
-    // same isMarketOpenNowServer() window (9:15-15:30 IST, weekdays) already
-    // relied on elsewhere in this file.
-    const marketOpen = isMarketOpenNowServer();
+    const effectiveTtl = getAdaptiveSnapshotTtlMs();
     for (const [sessionId, session] of sessions) {
       if (Date.now() >= session.expiresAt) {
         sessions.delete(sessionId);
         continue;
       }
-      if (!marketOpen) continue;
-      if (!session.snapshotTime || Date.now() - session.snapshotTime >= SNAPSHOT_TTL_MS) {
+      if (!session.snapshotTime || Date.now() - session.snapshotTime >= effectiveTtl) {
         void refreshMarketSnapshot(session).catch((err) => {
           console.error(
             "[BACKGROUND] Market refresh failed:",
@@ -31626,7 +32448,7 @@ if (process.env.NODE_ENV !== "test") {
         });
       }
     }
-  }, SNAPSHOT_TTL_MS);
+  }, 30 * 1000);
 }
 
 // ============================================================================

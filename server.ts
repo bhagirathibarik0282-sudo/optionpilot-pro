@@ -21400,6 +21400,27 @@ function isDhanConfigured(): boolean {
   return hasClientId && (hasLegacyToken || hasAutoRefresh);
 }
 
+app.get("/api/audit/dhan-force-refresh", async (c) => {
+  const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
+  const providedKey = c.req.query("key")?.trim() || "";
+  if (!auditKey || providedKey !== auditKey) {
+    return c.json({ status: "ERROR", error: "Missing or invalid audit key." }, 403);
+  }
+  // 2026-08-19: manual escape hatch for when a stale-but-locally-unexpired
+  // cached token gets invalidated server-side (e.g. a second TOTP login
+  // elsewhere superseded it). Forces a fresh generateAccessToken call
+  // regardless of the cached expiryTime, bypassing the normal
+  // getValidDhanAccessToken() freshness check.
+  dhanSession.expiryTime = null;
+  const refreshed = await refreshDhanAccessToken();
+  return c.json({
+    status: refreshed ? "SUCCESS" : "FAILED",
+    newExpiryTime: dhanSession.expiryTime,
+    lastError: dhanSession.lastError,
+    tokenExposed: false,
+  }, refreshed ? 200 : 500);
+});
+
 app.get("/api/audit/dhan-auto-refresh-status", (c) => {
   const auditKey = process.env.DHAN_AUDIT_KEY?.trim() || "";
   const providedKey = c.req.query("key")?.trim() || "";

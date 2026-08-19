@@ -8,11 +8,16 @@
   },
   "scripts": {
     "start": "tsx server.ts",
-    "test": "NODE_ENV=test node --import tsx --test test/outcome-engine.test.ts test/iv-science.test.ts"
+    "test": "NODE_ENV=test node --import tsx --test test/outcome-engine.test.ts test/iv-science.test.ts test/dhan-truth.test.ts",
+    "typecheck:truth": "tsc --noEmit --skipLibCheck --module NodeNext --moduleResolution NodeNext --target ES2022 --types node dhan-truth.ts test/dhan-truth.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.11",
     "hono": "^4.9.9",
     "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "typescript": "5.9.3"
   }
 }

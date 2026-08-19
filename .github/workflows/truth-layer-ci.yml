@@ -1,0 +1,40 @@
+name: Truth Layer CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - agent/dhan-truth-layer
+
+permissions:
+  contents: read
+
+concurrency:
+  group: truth-layer-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Tests and targeted typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Run repository tests
+        run: npm test
+
+      - name: Type-check Dhan truth layer
+        run: npm run typecheck:truth

@@ -6,6 +6,7 @@ import { join as joinPath } from "node:path";
 import { setImmediate as nodeSetImmediate } from "node:timers";
 import { createOutcomeRecord, evaluateOutcome, computeOutcomeStats, type OutcomeRecord, type SnapshotForOutcome, type Side as OutcomeSide, type IndexSymbol as OutcomeIndexSymbol } from "./outcome-engine.js";
 import { buildF5IvScience } from "./iv-science.js";
+import { dhanTokenNeedsRefresh, dhanTruthCandidateBlockReason, evaluateDhanTruth, normalizeDhanIsoDate } from "./dhan-truth.js";
 
 interface Instrument {
   instrument_token: number;
@@ -21370,18 +21371,24 @@ async function refreshDhanAccessToken(): Promise<string | null> {
 // otherwise falls back to the legacy static env var so existing setups keep
 // working unchanged during migration.
 async function getValidDhanAccessToken(): Promise<string | null> {
-  const bufferMs = 5 * 60 * 1000; // refresh 5 minutes before reported expiry
+  const autoRefreshConfigured = Boolean(
+    process.env.DHAN_CLIENT_ID?.trim() && process.env.DHAN_PIN?.trim() && process.env.DHAN_TOTP_SECRET?.trim()
+  );
   if (dhanSession.accessTokenEncrypted && dhanSession.expiryTime) {
-    const expiresAt = new Date(dhanSession.expiryTime).getTime();
-    if (!Number.isNaN(expiresAt) && Date.now() < expiresAt - bufferMs) {
+    if (!dhanTokenNeedsRefresh(dhanSession.expiryTime)) {
       const decrypted = decryptToken(dhanSession.accessTokenEncrypted);
       if (decrypted) return decrypted;
     }
   }
   const refreshed = await refreshDhanAccessToken();
   if (refreshed) return refreshed;
-  // Fallback: legacy static token (pre-automation setups, or if auto-refresh
-  // is temporarily failing but a manually-pasted token is still valid).
+  // Fail closed when automatic authentication is configured. Falling back to
+  // a static token after a known session reaches its refresh window can
+  // silently reuse an expired/unverified token and mislabel the feed as live.
+  if (autoRefreshConfigured) return null;
+  // Legacy-only installations have no reported expiry to evaluate. They may
+  // keep using the static token, but /api/dhan/health remains the authority
+  // that verifies it with Dhan before data is trusted.
   const legacy = process.env.DHAN_ACCESS_TOKEN?.trim() || "";
   return legacy || null;
 }
@@ -22456,9 +22463,13 @@ app.get("/api/dhan/normalized", async (c) => {
 
     const chainCacheKey = `optionchain_${symbolParam}_${targetExpiry}`;
     let chainPayload: any;
+    let chainFetchedAt: number;
+    let servedFromCache = false;
     const cachedChain = DHAN_LIVE_CACHE.get(chainCacheKey);
     if (cachedChain && Date.now() - cachedChain.fetchedAt < DHAN_LIVE_CACHE_TTL_MS) {
       chainPayload = cachedChain.payload;
+      chainFetchedAt = cachedChain.fetchedAt;
+      servedFromCache = true;
     } else {
       const chainRes = await dhanRateLimitedFetch("https://api.dhan.co/v2/optionchain", {
         method: "POST",
@@ -22493,7 +22504,8 @@ app.get("/api/dhan/normalized", async (c) => {
         );
       }
       chainPayload = parsed;
-      DHAN_LIVE_CACHE.set(chainCacheKey, { fetchedAt: Date.now(), payload: chainPayload });
+      chainFetchedAt = Date.now();
+      DHAN_LIVE_CACHE.set(chainCacheKey, { fetchedAt: chainFetchedAt, payload: chainPayload });
     }
 
     const spot: number | null =
@@ -22557,9 +22569,13 @@ app.get("/api/dhan/normalized", async (c) => {
       normalized.push({ strike: s.val, ce: ceNorm, pe: peNorm });
     }
 
+    const generatedAt = new Date().toISOString();
     return c.json({
       architectureRole: "D4_NORMALIZED_ADAPTER",
-      generatedAt: new Date().toISOString(),
+      generatedAt,
+      sourceFetchedAt: new Date(chainFetchedAt).toISOString(),
+      sourceAgeMs: Math.max(0, Date.parse(generatedAt) - chainFetchedAt),
+      servedFromCache,
       status: "PASS",
       symbol: symbolParam,
       expiry: targetExpiry,
@@ -31225,8 +31241,10 @@ const DHAN_CONTRACT_METADATA: Record<"NIFTY" | "BANKNIFTY" | "SENSEX", { lotSize
 
 function tradeLabDhanNormalizedToExpiryData(d4Result: any): ExpiryData | null {
   if (!d4Result || d4Result.status !== "PASS" || !Array.isArray(d4Result.normalized)) return null;
+  const normalizedExpiry = normalizeDhanIsoDate(typeof d4Result.expiry === "string" ? d4Result.expiry : null);
+  if (!normalizedExpiry) return null;
   const atmStrike = d4Result.atmStrike;
-  const receiptTimestamp = d4Result.generatedAt || new Date().toISOString();
+  const sourceTimestamp = typeof d4Result.sourceFetchedAt === "string" ? d4Result.sourceFetchedAt : null;
   const meta = DHAN_CONTRACT_METADATA[d4Result.symbol as "NIFTY" | "BANKNIFTY" | "SENSEX"] || null;
   const toPD = (leg: any): PremiumData =>
     ({
@@ -31238,12 +31256,12 @@ function tradeLabDhanNormalizedToExpiryData(d4Result: any): ExpiryData | null {
       // Kite's instrumentToken.
       instrumentToken: typeof leg.securityId === "number" ? leg.securityId : null,
       exchangeToken: null,
-      expiryDate: d4Result.expiry,
+      expiryDate: normalizedExpiry,
       // Fixed 2026-08-13 (Sub-step 2): was hardcoded to "TradeLab_Dhan",
       // which could never equal currentExpiry.expiry and would always fail
       // H2's expiryBucketMatch check. Now set to the actual expiry string,
       // matching the field's real comparison target.
-      expiryBucket: d4Result.expiry,
+      expiryBucket: normalizedExpiry,
       optionType: leg.optionType,
       lotSize: meta ? meta.lotSize : (typeof leg.lotSize === "number" ? leg.lotSize : null),
       tickSize: leg.tickSize,
@@ -31260,7 +31278,7 @@ function tradeLabDhanNormalizedToExpiryData(d4Result: any): ExpiryData | null {
       volume: leg.volume,
       vwap: null,
       vwapSource: "VWAP UNAVAILABLE",
-      quoteTimestamp: receiptTimestamp, // honest backend-receipt proxy — same pattern M1 already uses for spot
+      quoteTimestamp: sourceTimestamp, // original Dhan fetch receipt time; never reset when D4 serves cached payload
       atDayHigh: false,
       atDayLow: false,
       dayHigh: leg.dayHigh,
@@ -31275,7 +31293,7 @@ function tradeLabDhanNormalizedToExpiryData(d4Result: any): ExpiryData | null {
 
   const ceStrikes = d4Result.normalized.filter((r: any) => r.ce).map((r: any) => toPD(r.ce)).sort((a: any, b: any) => a.strike - b.strike);
   const peStrikes = d4Result.normalized.filter((r: any) => r.pe).map((r: any) => toPD(r.pe)).sort((a: any, b: any) => a.strike - b.strike);
-  return { expiry: d4Result.expiry, expiryDate: new Date(d4Result.expiry), ceStrikes, peStrikes };
+  return { expiry: normalizedExpiry, expiryDate: new Date(`${normalizedExpiry}T00:00:00.000Z`), ceStrikes, peStrikes };
 }
 
 // ===== M3 (Dhan) — IV Term Structure =====
@@ -31502,18 +31520,18 @@ function buildTradeLabDhanM11(
 //
 // DELIBERATE, USER-CONFIRMED DEPARTURE FROM KITE'S H4: Kite's H4 additionally
 // requires the whole-snapshot Truth Report to reach overallVerdict === "TRUE",
-// which itself requires spot+futures+options to be in sync. No Dhan futures
-// adapter exists yet (a disclosed, tracked gap — see
-// /api/v2/d6/recorder-provider-audit), so Dhan-sourced Truth is PERMANENTLY
-// capped at PARTIAL under the existing computeTruthReport logic. Reusing that
+// which itself requires spot+futures+options to be in sync. A Dhan FUTIDX
+// VWAP-bias adapter now exists, but it does not provide the complete futures
+// identity/price/OI/freshness snapshot required by this gate. Dhan-sourced
+// Truth is therefore still capped below VERIFIED. Reusing that
 // requirement verbatim would make this gate BLOCKED forever — not an honest
 // safety signal, just a dead end. This Dhan gate instead hard-blocks on what
 // Dhan CAN actually prove today (snapshot/quote freshness, contract identity
 // via H2-Dhan, price validity) and does NOT require futures-sync.
 // futuresAdapterStatus is reported explicitly on every result so this is
-// never silently mistaken for Kite's stronger guarantee. When a Dhan futures
-// adapter is eventually built, this function is the one place to revisit and
-// add a real futures-sync requirement on top of what already exists here.
+// never silently mistaken for Kite's stronger guarantee. When a complete Dhan
+// futures truth snapshot is available, this function is the one place to add
+// the real futures-sync requirement on top of what already exists here.
 // ============================================================================
 
 function v2CandidateHardDataGateDhan(
@@ -31521,13 +31539,78 @@ function v2CandidateHardDataGateDhan(
   currentExpiry: ExpiryData,
   candidate: V2ReviewCandidate,
   h2: V2ContractIdentityGateResult | null,
-  dhanBundleGeneratedAt: string | null
+  dhanSourceFetchedAt: string | null,
+  dhanDeliveredAt: string | null,
+  servedFromCache: boolean
 ) {
   const hardBlockReasons: string[] = [];
   const warnings: string[] = [];
 
-  const bundleFresh = classifyTruthField(dhanBundleGeneratedAt, TRUTH_THRESHOLDS_MS.options);
+  const bundleFresh = classifyTruthField(dhanSourceFetchedAt, TRUTH_THRESHOLDS_MS.options);
   if (bundleFresh.verdict !== "TRUE") hardBlockReasons.push(`DHAN_SNAPSHOT_${bundleFresh.verdict}`);
+
+  // Dhan Truth Layer: keep each freshness dimension explicit even though the
+  // current REST option-chain path can only supply one backend-receipt time.
+  // BACKEND_RECEIVED is intentionally a weaker proof than a provider/exchange
+  // timestamp, so this path is DEGRADED/REVIEW_ONLY rather than VERIFIED.
+  // Nothing here silently upgrades receipt time into exchange time.
+  const currentExpiryMs = currentExpiry.expiryDate instanceof Date
+    ? currentExpiry.expiryDate.getTime()
+    : Date.parse(String(currentExpiry.expiryDate || ""));
+  const expectedExpiry = Number.isFinite(currentExpiryMs)
+    ? new Date(currentExpiryMs).toISOString().slice(0, 10)
+    : null;
+  const truth = evaluateDhanTruth({
+    symbol,
+    expectedSymbol: symbol,
+    expiry: candidate.contractMetadata.expiryDate,
+    expectedExpiry,
+    optionType: candidate.side,
+    expectedOptionType: candidate.side,
+    securityId: candidate.contractMetadata.instrumentToken,
+    strike: candidate.strike,
+    servedFromCache,
+    fields: {
+      spot: {
+        timestamp: dhanSourceFetchedAt,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.spot,
+        requiredForCandidate: true,
+      },
+      optionQuote: {
+        timestamp: candidate.quoteTimestamp,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: true,
+      },
+      optionChain: {
+        timestamp: dhanSourceFetchedAt,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: true,
+      },
+      oi: {
+        timestamp: candidate.oi != null ? dhanSourceFetchedAt : null,
+        source: candidate.oi != null ? "BACKEND_RECEIVED" : "UNAVAILABLE",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: true,
+      },
+      greeks: {
+        timestamp: dhanSourceFetchedAt,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: false,
+      },
+      mobileDelivery: {
+        timestamp: dhanDeliveredAt,
+        source: "BACKEND_RECEIVED",
+        maxAgeMs: TRUTH_THRESHOLDS_MS.options,
+        requiredForCandidate: false,
+      },
+    },
+  });
+  const truthBlockReason = dhanTruthCandidateBlockReason(truth);
+  if (truthBlockReason) hardBlockReasons.push(truthBlockReason);
 
   if (!h2) hardBlockReasons.push("H2_DHAN_GATE_MISSING");
   else if (h2.status !== "PASS") hardBlockReasons.push(...h2.hardBlockReasons.map((r) => `H2_${r}`));
@@ -31549,14 +31632,17 @@ function v2CandidateHardDataGateDhan(
     hardBlockReasons: Array.from(new Set(hardBlockReasons)),
     warnings: Array.from(new Set(warnings)),
     dhanTruth: {
+      ...truth,
       snapshotFreshness: bundleFresh.verdict,
       snapshotAgeMs: bundleFresh.ageMs,
-      futuresAdapterStatus: "NOT_YET_IMPLEMENTED",
-      note: "Dhan-path gate intentionally does not require spot-futures-options triple-sync TRUE (unlike Kite's H4) because no Dhan futures adapter exists yet — a disclosed, tracked gap, not a live failure. Revisit this gate once a Dhan futures adapter is built.",
+      sourceFetchedAt: dhanSourceFetchedAt,
+      servedFromCache,
+      futuresAdapterStatus: "VWAP_BIAS_ONLY_NOT_TRUTH_SYNCED",
+      note: "Dhan REST option-chain currently exposes backend-receipt proxies, not independent exchange timestamps. DEGRADED data can be displayed as raw review context, but this hard gate remains BLOCKED until candidateEligible is true. A Dhan FUTIDX VWAP-bias adapter exists, but it is not yet wired into this M12 spot-futures-options truth synchronization gate.",
     },
     h2Status: h2?.status || "MISSING",
     dte,
-    interpretationGuard: "Dhan-path H4 — PASS means this candidate's Dhan-sourced data is trustworthy enough to evaluate under Dhan's current real capability (no futures-sync claim). It is not a profitability guarantee or probability score.",
+    interpretationGuard: "Dhan-path H4 — PASS requires dhanTruth.candidateEligible === true. DEGRADED data may be displayed as raw context but cannot pass this candidate gate. This is not a profitability guarantee or probability score.",
   };
 }
 
@@ -31588,10 +31674,12 @@ async function buildTradeLabDhanM12(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", po
     if (p) candidates.push(v2ToReviewCandidate(p, side as any, role, m1, m6, m7));
   }
 
-  const generatedAt = bundle.current.generatedAt || (bundle as any).generatedAt || new Date().toISOString();
+  const sourceFetchedAt = typeof bundle.current.sourceFetchedAt === "string" ? bundle.current.sourceFetchedAt : null;
+  const deliveredAt = typeof bundle.current.generatedAt === "string" ? bundle.current.generatedAt : null;
+  const servedFromCache = bundle.current.servedFromCache === true;
   const gates = candidates.map((candidate) => {
     const h2 = v2GateCandidateIdentityDhan(symbol, curED, atmStrike, candidate);
-    return { side: candidate.side, strike: candidate.strike, moneynessRole: candidate.moneynessRole, ...v2CandidateHardDataGateDhan(symbol, curED, candidate, h2, generatedAt) };
+    return { side: candidate.side, strike: candidate.strike, moneynessRole: candidate.moneynessRole, ...v2CandidateHardDataGateDhan(symbol, curED, candidate, h2, sourceFetchedAt, deliveredAt, servedFromCache) };
   });
 
   const blocked = gates.filter((g: any) => g.status !== "PASS");
@@ -31608,7 +31696,7 @@ async function buildTradeLabDhanM12(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", po
     probabilityImpact: "NONE",
     aiCall: "NONE",
     knownLimitations: [
-      "No Dhan futures adapter exists yet — this gate does not require spot-futures-options sync TRUE, unlike Kite's H4. See dhanTruth.futuresAdapterStatus on each gate.",
+      "A Dhan FUTIDX VWAP-bias adapter exists, but M12 does not yet consume a full futures identity/price/OI/freshness snapshot. Therefore spot-futures-options truth sync remains unavailable and the limitation is reported as VWAP_BIAS_ONLY_NOT_TRUTH_SYNCED.",
       "This is the H4-equivalent data-quality gate only (M12 scope agreed 2026-08-13). It does not yet include the M12B-style directional BEST_CE/BEST_PE selection tree — that remains Kite-only for now.",
     ],
   };

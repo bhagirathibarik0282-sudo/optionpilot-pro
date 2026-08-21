@@ -155,7 +155,7 @@ test("tradingDate is carried through on the record for Journal cross-referencing
 // evict the oldest NON-PENDING record first; only fall back to the
 // oldest PENDING record if literally every record is still PENDING.
 // The actual server-side array logic isn't imported here (it's a thin
-// wrapper around outcomeRecords, not part of this pure module) \u2014 this
+// wrapper around outcomeRecords, not part of this pure module) — this
 // test exercises the same selection rule in isolation as a stand-in,
 // since a full server-level integration test is still a disclosed gap.
 function pickEvictionIndex(records: { status: string }[]): number {
@@ -171,4 +171,105 @@ test("eviction rule: prefers evicting a terminal record over a PENDING one", () 
 test("eviction rule: falls back to oldest PENDING only if nothing is terminal yet", () => {
   const records = [{ status: "PENDING" }, { status: "PENDING" }];
   assert.equal(pickEvictionIndex(records), 0);
+});
+
+// ============================================================================
+// TM_V1 forward-only validation plan additions (2026-08-21)
+// ============================================================================
+
+test("TM_V1: AMBIGUOUS_BOTH_HIT is provably unreachable from LTP-only snapshots (documented limitation, not a missed case)", () => {
+  // Proof by construction: evaluateOutcome returns on the FIRST snapshot
+  // that crosses any threshold, so at the start of every loop iteration
+  // the "previous" premium is always still strictly between SL and T1
+  // (either the initial `entry`, or an earlier snapshot that was already
+  // checked and found NOT to be a hit). A single later premium value
+  // cannot simultaneously be <= SL and >= T1/T2 (sl < entry < t1 <= t2
+  // always holds for a valid plan), so no observable snapshot sequence
+  // can ever produce AMBIGUOUS_BOTH_HIT from this engine. Even an extreme
+  // one-sample jump lands on exactly one side, never both:
+  const rec = baseInput({ entry: 150, sl: 120, t1: 180, t2: 220 });
+  const extremeJump = [snap(3, 24600, 100000, 1)]; // an absurd jump straight past every level
+  const result = evaluateOutcome(rec, extremeJump, BASE_MS + 10 * 60 * 1000);
+  assert.equal(result.status, "TARGET_T2_HIT"); // resolves cleanly, never AMBIGUOUS_BOTH_HIT
+  // A close-but-clean crossing (not a jump) also resolves cleanly, not ambiguously:
+  const closeCrossing = [snap(3, 24600, 178, 60), snap(6, 24600, 181, 55)]; // 178 (below t1=180, no hit) then 181 (>= t1)
+  const result2 = evaluateOutcome(rec, closeCrossing, BASE_MS + 10 * 60 * 1000);
+  assert.equal(result2.status, "TARGET_T1_HIT");
+});
+
+test("TM_V1: excursion (MAE/MFE) tracked correctly for a winning trade", () => {
+  const rec = baseInput({ entry: 150, sl: 120, t1: 180, t2: 220 }); // R = 30
+  // Dips to 135 first (adverse, 15 below entry), then rallies to 190 (favorable, 40 above entry) which is >= t1(180).
+  const snaps = [snap(3, 24600, 135, 60), snap(6, 24600, 190, 20)];
+  const result = evaluateOutcome(rec, snaps, BASE_MS + 10 * 60 * 1000);
+  assert.equal(result.status, "TARGET_T1_HIT");
+  assert.equal(result.maePremium, 15); // 150 - 135
+  assert.equal(result.mfePremium, 40); // 190 - 150
+  assert.equal(result.maeR, Number((15 / 30).toFixed(3)));
+  assert.equal(result.mfeR, Number((40 / 30).toFixed(3)));
+});
+
+test("TM_V1: excursion stays null when no strike-matched snapshots exist", () => {
+  const rec = baseInput({ windowMinutes: 10 });
+  const result = evaluateOutcome(rec, [], BASE_MS + 15 * 60 * 1000);
+  assert.equal(result.maePremium, null);
+  assert.equal(result.mfePremium, null);
+});
+
+test("TM_V1: excursion updates live while still PENDING (not just on terminal records)", () => {
+  const rec = baseInput({ windowMinutes: 60 });
+  const snaps = [snap(3, 24600, 160, 60)]; // above entry(142), below t1(213) -- no hit yet
+  const result = evaluateOutcome(rec, snaps, BASE_MS + 5 * 60 * 1000);
+  assert.equal(result.status, "PENDING");
+  assert.equal(result.mfePremium, 18); // 160 - 142
+  assert.equal(result.maePremium, 0); // never went below entry
+});
+
+test("TM_V1: pass-through fields (planId/horizon/clamp audit/context tags) survive create + evaluate unchanged", () => {
+  const rec = baseInput({
+    planId: "tm1-test-plan",
+    horizon: "30m",
+    rawRiskDistance: 45.6,
+    clampedRiskDistance: 42.6,
+    clampApplied: "MAX",
+    deltaSource: "OBSERVED",
+    marketRegime: "UP",
+    expiryType: "WEEKLY",
+    signalType: "M12b",
+  });
+  assert.equal(rec.tmVersion, "TM_V1");
+  assert.equal(rec.planId, "tm1-test-plan");
+  assert.equal(rec.horizon, "30m");
+  assert.equal(rec.observationResolution, "3MIN_LTP_SAMPLED");
+  assert.equal(rec.rawRiskDistance, 45.6);
+  assert.equal(rec.clampedRiskDistance, 42.6);
+  assert.equal(rec.clampApplied, "MAX");
+  assert.equal(rec.deltaSource, "OBSERVED");
+  assert.equal(rec.marketRegime, "UP");
+  assert.equal(rec.expiryType, "WEEKLY");
+  assert.equal(rec.signalType, "M12b");
+
+  const result = evaluateOutcome(rec, [snap(3, 24600, 300, 10)], BASE_MS + 60 * 60 * 1000);
+  // Fields must survive through evaluateOutcome unchanged (it never touches them).
+  assert.equal(result.planId, "tm1-test-plan");
+  assert.equal(result.clampApplied, "MAX");
+});
+
+test("TM_V1: pre-existing callers that omit the new optional fields still get sane defaults", () => {
+  const rec = baseInput(); // none of the TM_V1 fields passed
+  assert.equal(rec.tmVersion, "TM_V1");
+  assert.equal(rec.planId, null);
+  assert.equal(rec.horizon, null);
+  assert.equal(rec.rawRiskDistance, null);
+  assert.equal(rec.clampApplied, null);
+  assert.equal(rec.marketRegime, null);
+});
+
+test("computeOutcomeStats: AMBIGUOUS_BOTH_HIT records are excluded from determinate stats (never counted as a win or a loss)", () => {
+  const rec = baseInput({ entry: 150, sl: 120, t1: 180, t2: 220 });
+  const ambiguous = { ...rec, status: "AMBIGUOUS_BOTH_HIT" as const, evaluatedAt: new Date().toISOString(), outcomeDetail: "test" };
+  const stats = computeOutcomeStats([ambiguous]);
+  assert.equal(stats.totalRecords, 1);
+  assert.equal(stats.determinateRecords, 0);
+  assert.equal(stats.byStatus["AMBIGUOUS_BOTH_HIT"], 1);
 });

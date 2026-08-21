@@ -82,6 +82,15 @@
 // trailing, or outcome classification) ever changes, that must ship as a
 // NEW version string (e.g. "TM_V2"), never a silent in-place change —
 // TM_V1 and later records must stay separately identifiable by this field.
+//
+// computeOutcomeStats() dashboard additions (2026-08-21): byHorizon (per
+// 30m/60m/90m/EOD target/stop/neither breakdown, determinate records
+// only), clampFrequency (how often MIN/MAX/NONE was applied, over ALL
+// records since the clamp decision predates any outcome), and
+// avgMaeR/avgMfeR (mean adverse/favorable excursion in R-multiples,
+// determinate records with a real R only). Same rules as the rest of this
+// function: never fabricate, skip missing fields rather than defaulting
+// them to 0, null (not 0) when there is no qualifying data yet.
 // ============================================================================
 
 export type Side = "CE" | "PE";
@@ -91,6 +100,7 @@ export type OutcomeStatus =
   | "PENDING"
   | "TARGET_T1_HIT"
   | "TARGET_T2_HIT"
+  | "TARGET_T3_HIT"
   | "STOP_HIT"
   | "NEITHER_HIT"
   | "AMBIGUOUS_BOTH_HIT"
@@ -126,6 +136,12 @@ export interface OutcomeRecord {
   sl: number | null;
   t1: number | null;
   t2: number | null;
+  // TM_V1 "premium-only live tracking" addition (2026-08-21): a third
+  // target, T3 = entry x 2 (100% premium gain), per explicit user request
+  // for a dedicated Telegram group tracking BUY/SELL signals through to a
+  // clear win/loss mark. Optional/nullable exactly like t1/t2 -- absent
+  // when the plan itself is unavailable.
+  t3: number | null;
   // Signal state AT DECISION TIME — e.g. { futures_vwap: 1, oi_pcr: -1, ... }.
   signalContributions: Record<string, number> | null;
   windowMinutes: number;
@@ -177,6 +193,7 @@ export interface CreateOutcomeRecordInput {
   sl: number | null;
   t1: number | null;
   t2: number | null;
+  t3?: number | null;
   signalContributions: Record<string, number> | null;
   windowMinutes: number;
   nowMs: number;
@@ -214,6 +231,7 @@ export function createOutcomeRecord(input: CreateOutcomeRecordInput): OutcomeRec
     sl: input.sl,
     t1: input.t1,
     t2: input.t2,
+    t3: input.t3 ?? null,
     signalContributions: input.signalContributions,
     windowMinutes: input.windowMinutes,
     windowEndsAtMs: recordedAtMs + input.windowMinutes * 60 * 1000,
@@ -321,8 +339,12 @@ export function evaluateOutcome(record: OutcomeRecord, snapshots: SnapshotForOut
     const premium = record.side === "CE" ? snap.ceLtp : snap.peLtp;
     if (premium == null) continue;
 
-    // Check T2 before T1: if price gapped straight through both in one
-    // snapshot, T2 (the fuller target) is the more informative report.
+    // Check the fullest target first: if price gapped straight through
+    // several thresholds in one snapshot, the fullest one reached is the
+    // more informative report. T3 (2026-08-21 addition) > T2 > T1.
+    if (record.t3 != null && premium >= record.t3) {
+      return { ...withExcursion, status: "TARGET_T3_HIT", evaluatedAt: snap.backendTimestamp, outcomeDetail: `Premium reached ₹${premium} ≥ T3 ₹${record.t3} at ${snap.backendTimestamp}.` };
+    }
     if (record.t2 != null && premium >= record.t2) {
       return { ...withExcursion, status: "TARGET_T2_HIT", evaluatedAt: snap.backendTimestamp, outcomeDetail: `Premium reached ₹${premium} ≥ T2 ₹${record.t2} at ${snap.backendTimestamp}.` };
     }
@@ -364,6 +386,24 @@ export interface OutcomeStats {
   byVerdict: Record<string, { total: number; targetHit: number; stopHit: number; neither: number }>;
   bySignal: Record<string, { total: number; targetHit: number; stopHit: number; neither: number; sufficientSample: boolean }>;
   minSampleSize: number;
+
+  // ---- TM_V1 dashboard additions (2026-08-21) ----
+  // Computed the same way as the rest of this function: only over
+  // DETERMINATE records for hit/stop/neither breakdowns (never PENDING or
+  // INCOMPLETE_*/AMBIGUOUS_BOTH_HIT), pure and deterministic, no
+  // fabrication when a field is missing (nulls are simply skipped, never
+  // treated as zero).
+  byHorizon: Record<string, { total: number; targetHit: number; stopHit: number; neither: number }>;
+  // Clamp frequency is a property of the ORIGINAL plan (decided before any
+  // outcome is known), so it's counted over ALL records with a known
+  // clampApplied value, not just determinate ones.
+  clampFrequency: { MIN: number; MAX: number; NONE: number; unknown: number };
+  // Average excursion, in R-multiples, over determinate records that have
+  // a real maeR/mfeR (i.e. sl was set and entry - sl > 0). null if no
+  // record qualifies yet -- never defaulted to 0.
+  avgMaeR: number | null;
+  avgMfeR: number | null;
+  tmV1RecordCount: number;
 }
 
 // PROVISIONAL, not backtested — just a sane floor before a per-signal
@@ -372,7 +412,7 @@ export const MIN_SAMPLE_SIZE = 5;
 
 export function computeOutcomeStats(records: OutcomeRecord[]): OutcomeStats {
   const determinate = records.filter(
-    (r) => r.status === "TARGET_T1_HIT" || r.status === "TARGET_T2_HIT" || r.status === "STOP_HIT" || r.status === "NEITHER_HIT"
+    (r) => r.status === "TARGET_T1_HIT" || r.status === "TARGET_T2_HIT" || r.status === "TARGET_T3_HIT" || r.status === "STOP_HIT" || r.status === "NEITHER_HIT"
   );
 
   const byStatus: Record<string, number> = {};
@@ -382,7 +422,7 @@ export function computeOutcomeStats(records: OutcomeRecord[]): OutcomeStats {
   const bySignal: OutcomeStats["bySignal"] = {};
 
   for (const r of determinate) {
-    const isTarget = r.status === "TARGET_T1_HIT" || r.status === "TARGET_T2_HIT";
+    const isTarget = r.status === "TARGET_T1_HIT" || r.status === "TARGET_T2_HIT" || r.status === "TARGET_T3_HIT";
     const isStop = r.status === "STOP_HIT";
     const isNeither = r.status === "NEITHER_HIT";
 
@@ -408,6 +448,35 @@ export function computeOutcomeStats(records: OutcomeRecord[]): OutcomeStats {
     bySignal[key].sufficientSample = bySignal[key].total >= MIN_SAMPLE_SIZE;
   }
 
+  // ---- TM_V1 dashboard additions (2026-08-21) ----
+  const byHorizon: OutcomeStats["byHorizon"] = {};
+  for (const r of determinate) {
+    if (!r.horizon) continue; // pre-TM_V1 or unknown-horizon records are simply skipped, not fabricated in
+    const isTarget = r.status === "TARGET_T1_HIT" || r.status === "TARGET_T2_HIT" || r.status === "TARGET_T3_HIT";
+    const isStop = r.status === "STOP_HIT";
+    const isNeither = r.status === "NEITHER_HIT";
+    if (!byHorizon[r.horizon]) byHorizon[r.horizon] = { total: 0, targetHit: 0, stopHit: 0, neither: 0 };
+    byHorizon[r.horizon].total++;
+    if (isTarget) byHorizon[r.horizon].targetHit++;
+    if (isStop) byHorizon[r.horizon].stopHit++;
+    if (isNeither) byHorizon[r.horizon].neither++;
+  }
+
+  const clampFrequency = { MIN: 0, MAX: 0, NONE: 0, unknown: 0 };
+  for (const r of records) {
+    if (r.clampApplied === "MIN") clampFrequency.MIN++;
+    else if (r.clampApplied === "MAX") clampFrequency.MAX++;
+    else if (r.clampApplied === "NONE") clampFrequency.NONE++;
+    else clampFrequency.unknown++;
+  }
+
+  const maeRValues = determinate.map((r) => r.maeR).filter((v): v is number => v != null);
+  const mfeRValues = determinate.map((r) => r.mfeR).filter((v): v is number => v != null);
+  const avgMaeR = maeRValues.length > 0 ? Number((maeRValues.reduce((a, b) => a + b, 0) / maeRValues.length).toFixed(3)) : null;
+  const avgMfeR = mfeRValues.length > 0 ? Number((mfeRValues.reduce((a, b) => a + b, 0) / mfeRValues.length).toFixed(3)) : null;
+
+  const tmV1RecordCount = records.filter((r) => r.tmVersion === "TM_V1").length;
+
   return {
     totalRecords: records.length,
     determinateRecords: determinate.length,
@@ -415,5 +484,10 @@ export function computeOutcomeStats(records: OutcomeRecord[]): OutcomeStats {
     byVerdict,
     bySignal,
     minSampleSize: MIN_SAMPLE_SIZE,
+    byHorizon,
+    clampFrequency,
+    avgMaeR,
+    avgMfeR,
+    tmV1RecordCount,
   };
 }

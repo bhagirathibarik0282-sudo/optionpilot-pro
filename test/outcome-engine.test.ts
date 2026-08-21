@@ -273,3 +273,96 @@ test("computeOutcomeStats: AMBIGUOUS_BOTH_HIT records are excluded from determin
   assert.equal(stats.determinateRecords, 0);
   assert.equal(stats.byStatus["AMBIGUOUS_BOTH_HIT"], 1);
 });
+
+// ============================================================================
+// T3 (2026-08-21, "premium-only" live-tracking group addition): a third,
+// fuller target beyond T1/T2.
+// ============================================================================
+
+test("T3: hit directly when premium gaps straight through T1/T2/T3 in one snapshot", () => {
+  const rec = baseInput({ entry: 150, sl: 120, t1: 180, t2: 220, t3: 300 });
+  const snaps = [snap(3, 24600, 350, 10)]; // 350 >= t3 (300)
+  const result = evaluateOutcome(rec, snaps, BASE_MS + 10 * 60 * 1000);
+  assert.equal(result.status, "TARGET_T3_HIT");
+  assert.ok(result.outcomeDetail?.includes("T3"));
+});
+
+test("T3: T2 still resolves correctly when premium reaches T2 but not T3", () => {
+  const rec = baseInput({ entry: 150, sl: 120, t1: 180, t2: 220, t3: 300 });
+  const snaps = [snap(3, 24600, 250, 10)]; // >= t2 (220), < t3 (300)
+  const result = evaluateOutcome(rec, snaps, BASE_MS + 10 * 60 * 1000);
+  assert.equal(result.status, "TARGET_T2_HIT");
+});
+
+test("T3: a record created without t3 (pre-T3 caller) never produces TARGET_T3_HIT, falls through to T2/T1 as before", () => {
+  const rec = baseInput({ entry: 150, sl: 120, t1: 180, t2: 220 }); // t3 omitted -> null
+  assert.equal(rec.t3, null);
+  const snaps = [snap(3, 24600, 1000, 1)]; // an absurd premium -- still can't match a null t3
+  const result = evaluateOutcome(rec, snaps, BASE_MS + 10 * 60 * 1000);
+  assert.equal(result.status, "TARGET_T2_HIT"); // falls through to T2, the next real threshold
+});
+
+test("computeOutcomeStats: TARGET_T3_HIT counts as a determinate target hit everywhere (byVerdict, byHorizon)", () => {
+  const rec = { ...baseInput({ entry: 150, sl: 120, t1: 180, t2: 220, t3: 300, horizon: "30m" }), status: "TARGET_T3_HIT" as const };
+  const stats = computeOutcomeStats([rec]);
+  assert.equal(stats.determinateRecords, 1);
+  assert.equal(stats.byVerdict["Bullish Biased"].targetHit, 1);
+  assert.equal(stats.byHorizon["30m"].targetHit, 1);
+});
+
+// ============================================================================
+// TM_V1 dashboard stat additions (2026-08-21): byHorizon, clampFrequency,
+// avgMaeR/avgMfeR
+// ============================================================================
+
+test("computeOutcomeStats: byHorizon groups determinate records by their observation horizon", () => {
+  const rec30 = { ...baseInput({ entry: 150, sl: 120, t1: 180, t2: 220, horizon: "30m" }), status: "TARGET_T1_HIT" as const };
+  const rec60a = { ...baseInput({ idSuffix: "b", entry: 150, sl: 120, t1: 180, t2: 220, horizon: "60m" }), status: "STOP_HIT" as const };
+  const rec60b = { ...baseInput({ idSuffix: "c", entry: 150, sl: 120, t1: 180, t2: 220, horizon: "60m" }), status: "TARGET_T2_HIT" as const };
+  const pendingNoHorizon = baseInput({ idSuffix: "d" }); // stays PENDING, excluded from byHorizon (not determinate)
+  const stats = computeOutcomeStats([rec30, rec60a, rec60b, pendingNoHorizon]);
+  assert.equal(stats.byHorizon["30m"].total, 1);
+  assert.equal(stats.byHorizon["30m"].targetHit, 1);
+  assert.equal(stats.byHorizon["60m"].total, 2);
+  assert.equal(stats.byHorizon["60m"].targetHit, 1);
+  assert.equal(stats.byHorizon["60m"].stopHit, 1);
+  assert.equal(stats.byHorizon["EOD"], undefined); // never fabricates an entry for a horizon with zero records
+});
+
+test("computeOutcomeStats: pre-TM_V1 / horizon-less records are skipped from byHorizon, not fabricated in", () => {
+  const rec = { ...baseInput({ entry: 150, sl: 120, t1: 180, t2: 220 }), status: "TARGET_T1_HIT" as const }; // horizon defaults to null
+  const stats = computeOutcomeStats([rec]);
+  assert.deepEqual(stats.byHorizon, {});
+});
+
+test("computeOutcomeStats: clampFrequency counts MIN/MAX/NONE across ALL records (clamp decided at plan time, not outcome time)", () => {
+  const min1 = baseInput({ idSuffix: "a", clampApplied: "MIN" }); // stays PENDING -- still counted, clamp is plan-time
+  const max1 = baseInput({ idSuffix: "b", clampApplied: "MAX" });
+  const none1 = { ...baseInput({ idSuffix: "c", clampApplied: "NONE" }), status: "STOP_HIT" as const };
+  const unknown1 = baseInput({ idSuffix: "d" }); // clampApplied omitted -> null
+  const stats = computeOutcomeStats([min1, max1, none1, unknown1]);
+  assert.equal(stats.clampFrequency.MIN, 1);
+  assert.equal(stats.clampFrequency.MAX, 1);
+  assert.equal(stats.clampFrequency.NONE, 1);
+  assert.equal(stats.clampFrequency.unknown, 1);
+});
+
+test("computeOutcomeStats: avgMaeR/avgMfeR average only determinate records with a real R, stay null with no qualifying data", () => {
+  const noData = computeOutcomeStats([baseInput()]); // PENDING, no excursion computed yet
+  assert.equal(noData.avgMaeR, null);
+  assert.equal(noData.avgMfeR, null);
+
+  // Two determinate records with pre-set maeR/mfeR (as evaluateOutcome would attach them).
+  const rec1 = { ...baseInput({ idSuffix: "a", entry: 150, sl: 120, t1: 180, t2: 220 }), status: "TARGET_T1_HIT" as const, maeR: 0.2, mfeR: 1.1 };
+  const rec2 = { ...baseInput({ idSuffix: "b", entry: 150, sl: 120, t1: 180, t2: 220 }), status: "STOP_HIT" as const, maeR: 1.0, mfeR: 0.3 };
+  const stats = computeOutcomeStats([rec1, rec2]);
+  assert.equal(stats.avgMaeR, Number(((0.2 + 1.0) / 2).toFixed(3)));
+  assert.equal(stats.avgMfeR, Number(((1.1 + 0.3) / 2).toFixed(3)));
+});
+
+test("computeOutcomeStats: tmV1RecordCount counts every TM_V1-stamped record regardless of status", () => {
+  const a = baseInput({ idSuffix: "a" }); // PENDING
+  const b = { ...baseInput({ idSuffix: "b" }), status: "INCOMPLETE_WINDOW" as const };
+  const stats = computeOutcomeStats([a, b]);
+  assert.equal(stats.tmV1RecordCount, 2); // both stamped tmVersion: "TM_V1" by createOutcomeRecord
+});

@@ -1,0 +1,45 @@
+--- "/mnt/data/server - 2026-08-21T114843.882.ts"	2026-08-21 07:06:22.324818308 +0000
++++ /mnt/data/server_deployment_identity_verified.ts	2026-08-21 07:07:45.532821317 +0000
+@@ -16717,6 +16717,30 @@
+   return c.json(computeSystemHealth());
+ });
+ 
++// ============== RAILWAY DEPLOYMENT IDENTITY PROOF (read-only) ==============
++// Additive observability only. Reuses the existing System Health engine and
++// exposes only Railway-provided non-secret deployment metadata. It never reads
++// application secrets/tokens and has no scoring, trading, broker, DB-write,
++// GitHub-push, Railway-deploy, AI, or order-execution side effects.
++app.get("/api/system/deployment-proof", (c) => {
++  const health = computeSystemHealth();
++  return c.json({
++    architectureRole: "RAILWAY_DEPLOYMENT_IDENTITY_PROOF",
++    status: "RUNNING",
++    deploymentId: process.env.RAILWAY_DEPLOYMENT_ID?.trim() || null,
++    gitCommitSha: process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || null,
++    gitBranch: process.env.RAILWAY_GIT_BRANCH?.trim() || null,
++    serviceName: process.env.RAILWAY_SERVICE_NAME?.trim() || null,
++    environmentName: process.env.RAILWAY_ENVIRONMENT_NAME?.trim() || null,
++    replicaId: process.env.RAILWAY_REPLICA_ID?.trim() || null,
++    uptimeSeconds: Math.floor(process.uptime()),
++    systemHealth: health.overallStatus,
++    generatedAt: new Date().toISOString(),
++    secretsExposed: false,
++    readOnly: true,
++  });
++});
++
+ app.post("/api/research/query", async (c) => {
+   let body: { date?: string; index?: string; eventType?: string | null };
+   try {
+@@ -33608,6 +33632,11 @@
+   void restorePersistedState().finally(() => {
+     serve({ fetch: app.fetch, port: PORT }, (info) => {
+       console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);
++      const deploymentId = process.env.RAILWAY_DEPLOYMENT_ID?.trim() || "UNAVAILABLE";
++      const gitCommitSha = process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || "UNAVAILABLE";
++      const environmentName = process.env.RAILWAY_ENVIRONMENT_NAME?.trim() || "UNAVAILABLE";
++      const serviceName = process.env.RAILWAY_SERVICE_NAME?.trim() || "UNAVAILABLE";
++      console.log(`[DEPLOY-PROOF] deployment=${deploymentId} commit=${gitCommitSha} environment=${environmentName} service=${serviceName}`);
+     });
+   });
+ 

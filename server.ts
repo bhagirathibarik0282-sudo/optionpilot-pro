@@ -10447,7 +10447,7 @@ app.get("/", (c) => {
       const state = haikuEvidenceExplanations[symbol];
       let html = '<div class="premium-card" style="margin-bottom:10px;">';
       html += '<div class="card-title">' + symbol + ' -- Evidence Verdict (Beta)</div>';
-      html += '<button class="btn" style="margin-bottom:8px;" onclick="triggerHaikuEvidenceVerdict(\'' + symbol + '\')"' + (state && state.loading ? ' disabled' : '') + '>';
+      html += '<button class="btn" style="margin-bottom:8px;" onclick="triggerHaikuEvidenceVerdict(\\'' + symbol + '\\')"' + (state && state.loading ? ' disabled' : '') + '>';
       html += state && state.loading ? 'Checking...' : 'Check evidence verdict';
       html += '</button>';
       if (state && state.error) {

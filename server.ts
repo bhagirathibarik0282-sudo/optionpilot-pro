@@ -10247,6 +10247,225 @@ app.get("/", (c) => {
       };
     }
 
+    // ============== HAIKU EVIDENCE ARCHITECTURE (2026-08-22) — SHADOW LAYER ==============
+    // Additive, non-invasive. Reuses runRuleEngine()'s already-computed
+    // contributions -- never recomputes any signal, never mutates any
+    // tracker. Does NOT feed the live verdict/suggestion/order flow.
+    // Purpose: group signals into independent evidence groups, classify
+    // conflict severity, and (later) feed a redesigned Haiku prompt --
+    // WITHOUT Haiku ever changing verdict/confidence/driver/invalidation.
+
+    // Independence groups. Each signal belongs to exactly one group so a
+    // single underlying data source (e.g. options chain) cannot count as
+    // multiple "independent" confirmations. Premium/EV/IV are NOT split
+    // into separate groups (per mandatory_rules) -- they all live under
+    // options_positioning.
+    const EVIDENCE_GROUP_MAP = {
+      futures_vwap: 'price_action_level',
+      pdh_pdl: 'price_action_level',
+      gap_type: 'price_action_level',
+      fib_pivot: 'price_action_level',
+      oi_pcr: 'options_positioning',
+      max_pain: 'options_positioning',
+      call_put_wall: 'options_positioning',
+      atm_oi_buildup: 'options_positioning',
+      straddle_behaviour: 'options_positioning',
+      expiry_alignment: 'options_positioning',
+      pcr_trend: 'options_positioning',
+      india_vix: 'volatility_context',
+      futures_oi_buildup: 'cross_market',
+      sector_heatmap: 'cross_market',
+    };
+
+    // Builds independent evidence groups from an already-computed
+    // runRuleEngine() result. Returns at most 3 strongest groups
+    // (by absolute net contribution), each with its evidence IDs.
+    function buildEvidenceGroups(ruleEngineResult) {
+      const contributions = ruleEngineResult.contributions || {};
+      const groups = {};
+      Object.keys(contributions).forEach((signal) => {
+        const groupId = EVIDENCE_GROUP_MAP[signal] || 'other';
+        const value = contributions[signal];
+        if (!groups[groupId]) groups[groupId] = { groupId, evidenceIds: [], net: 0 };
+        groups[groupId].evidenceIds.push(signal + '=' + value);
+        groups[groupId].net += value;
+      });
+      const list = Object.keys(groups).map((k) => {
+        const g = groups[k];
+        return {
+          groupId: g.groupId,
+          direction: g.net > 0 ? 'CE' : g.net < 0 ? 'PE' : 'NEUTRAL',
+          strength: Math.round(Math.abs(g.net) * 10) / 10,
+          evidenceIds: g.evidenceIds,
+        };
+      });
+      list.sort((a, b) => b.strength - a.strength);
+      return list.slice(0, 3);
+    }
+
+    // Reliability: maps Step 2's validateData() output to PASS/DEGRADED/FAIL.
+    // FAIL = blocked (overallValid false). DEGRADED = valid but at least
+    // one signal NOT_AVAILABLE/NULL/STALE. PASS = all signals OK.
+    function classifyReliability(validation) {
+      if (!validation.overallValid) return 'FAIL';
+      const notOk = (validation.signals || []).filter((s) => s.status !== 'OK');
+      return notOk.length > 0 ? 'DEGRADED' : 'PASS';
+    }
+
+    // Conflict classifier. primaryDir is the deterministic verdict's own
+    // direction (CE/PE), derived the same way runRuleEngine() already
+    // derives its suggestion.side -- never recomputed differently here.
+    // NO_CONFLICT: no group opposes.
+    // EXPLAINED_DIVERGENCE: exactly one group opposes and it is weaker
+    //   than the strongest supporting group (a genuinely smaller,
+    //   nameable disagreement, not swept under the rug).
+    // UNRESOLVED_CONFLICT: an opposing group is as strong as or stronger
+    //   than the strongest supporting group.
+    // CRITICAL_DATA_CONFLICT: reliability is FAIL, or two groups
+    //   opposing at similar strength while reliability is DEGRADED --
+    //   i.e. the conflict itself may be a data-quality artifact.
+    function classifyEvidenceConflict(groups, primaryDir, reliability) {
+      if (reliability === 'FAIL') return 'CRITICAL_DATA_CONFLICT';
+      if (!primaryDir) return 'NO_CONFLICT';
+      const opposing = groups.filter((g) => g.direction !== 'NEUTRAL' && g.direction !== primaryDir);
+      const supporting = groups.filter((g) => g.direction === primaryDir);
+      if (opposing.length === 0) return 'NO_CONFLICT';
+      const maxOpposing = Math.max.apply(null, opposing.map((g) => g.strength));
+      const maxSupporting = supporting.length ? Math.max.apply(null, supporting.map((g) => g.strength)) : 0;
+      if (reliability === 'DEGRADED' && opposing.length >= 2 && maxOpposing >= maxSupporting) {
+        return 'CRITICAL_DATA_CONFLICT';
+      }
+      if (maxOpposing >= maxSupporting) return 'UNRESOLVED_CONFLICT';
+      return 'EXPLAINED_DIVERGENCE';
+    }
+
+    // Classifies whether an ATM leg's premium move is best explained by
+    // direction (delta), volatility (vega), or decay (theta) -- a rough,
+    // disclosed apportionment, not a precise attribution model. Never
+    // invents data: missing greeks -> UNEXPLAINED, not a guess.
+    function classifyLegDriver(leg, spotChangePercent, ivChangePercent) {
+      if (!leg || leg.delta == null || leg.vega == null || leg.theta == null) return 'UNEXPLAINED';
+      const deltaComponent = Math.abs(leg.delta * (spotChangePercent || 0));
+      const vegaComponent = Math.abs(leg.vega * (ivChangePercent || 0));
+      const thetaComponent = Math.abs(leg.theta);
+      const total = deltaComponent + vegaComponent + thetaComponent;
+      if (total === 0) return 'UNEXPLAINED';
+      const shares = { DIRECTION: deltaComponent / total, VOLATILITY: vegaComponent / total, DECAY: thetaComponent / total };
+      const maxKey = Object.keys(shares).reduce((a, b) => (shares[a] >= shares[b] ? a : b));
+      if (shares[maxKey] < 0.45) return 'MIXED';
+      return maxKey;
+    }
+
+    // Assembles the full haiku_input payload (per the approved 2026-08-22
+    // evidence-interpreter spec). Reuses buildEvidenceGroups/
+    // classifyReliability/classifyEvidenceConflict/classifyLegDriver --
+    // never recomputes a signal, never mutates a tracker. Pure function
+    // of already-computed state; safe to call as often as needed.
+    function buildHaikuEvidenceInput(symbol, m, validation, ruleEngineResult) {
+      const reliability = classifyReliability(validation);
+      const groups = buildEvidenceGroups(ruleEngineResult);
+      const primaryDir = ruleEngineResult.suggestion ? ruleEngineResult.suggestion.side : null;
+      const conflict = classifyEvidenceConflict(groups, primaryDir, reliability);
+
+      const exp = m && m.expiries && m.expiries[0];
+      const atmCe = exp && (exp.ceStrikes || []).find((s) => s.isAtm);
+      const atmPe = exp && (exp.peStrikes || []).find((s) => s.isAtm);
+      const spotChangePercent = (m && m.current > 0 && m.change != null && (m.current - m.change) !== 0)
+        ? (m.change / (m.current - m.change)) * 100 : null;
+      const ivChangePercent = (m && m.vixChangePercent != null) ? m.vixChangePercent : null;
+
+      let action;
+      if (reliability === 'FAIL' || conflict === 'CRITICAL_DATA_CONFLICT') action = 'NO_ACTION';
+      else if (conflict === 'UNRESOLVED_CONFLICT') action = 'WAIT';
+      else if (reliability === 'DEGRADED') action = 'REVIEW_ELIGIBLE';
+      else action = 'WATCH';
+
+      let verdict = ruleEngineResult.verdict;
+      if (action === 'NO_ACTION') verdict = 'NO_RELIABLE_VERDICT';
+      else if (action === 'WAIT') verdict = 'WAIT_CONFLICT';
+
+      const badSignals = (validation.signals || []).filter((s) => s.status !== 'OK');
+
+      return {
+        symbol,
+        reliability,
+        verdict,
+        confidence: ruleEngineResult.confidence ? ruleEngineResult.confidence.toUpperCase() : 'LOW',
+        action,
+        ce_driver: classifyLegDriver(atmCe, spotChangePercent, ivChangePercent),
+        pe_driver: classifyLegDriver(atmPe, spotChangePercent, ivChangePercent),
+        conflict,
+        evidence_groups: groups.map((g) => ({ group: g.groupId, direction: g.direction, strength: g.strength, evidence: g.evidenceIds })),
+        volatility_context: (m && m.vix != null) ? ('VIX ' + m.vix + (ivChangePercent != null ? ' (' + ivChangePercent.toFixed(2) + '%)' : '')) : 'unavailable',
+        price_action_context: (m && m.pdh > 0 && m.pdl > 0 && m.current != null) ? (m.current + ' vs PDH ' + m.pdh + ' / PDL ' + m.pdl) : 'unavailable',
+        invalidation: (ruleEngineResult.suggestion && ruleEngineResult.suggestion.sl != null) ? ('SL ' + ruleEngineResult.suggestion.sl) : 'no active suggestion',
+        data_warning: badSignals.length === 0 ? 'none' : badSignals.map((s) => s.signal + ':' + s.status).join(', '),
+      };
+    }
+
+    // ============== END HAIKU EVIDENCE ARCHITECTURE (shadow layer) ==============
+
+    // Manual-trigger UI state (Beta card). Deliberately NOT auto-polled
+    // like triggerHaikuVerdicts() -- user taps a button per symbol, per
+    // the agreed "test-only card" first step. Server-side cost guard
+    // (haikuEvidenceCache, 15 min / verdict-change) still applies even
+    // on manual taps.
+    let haikuEvidenceExplanations = {};
+
+    async function triggerHaikuEvidenceVerdict(symbol) {
+      const m = data[symbol];
+      if (!m || m.error) return;
+      const validation = validateData(symbol, m);
+      const ruleEngineResult = runRuleEngine(symbol, m, validation);
+      if (ruleEngineResult.verdict === 'DATA UNAVAILABLE') {
+        haikuEvidenceExplanations[symbol] = { error: 'DATA UNAVAILABLE -- nothing to explain yet', loading: false };
+        updateUI();
+        return;
+      }
+      const input = buildHaikuEvidenceInput(symbol, m, validation, ruleEngineResult);
+      haikuEvidenceExplanations[symbol] = Object.assign({}, haikuEvidenceExplanations[symbol], { loading: true });
+      updateUI();
+      try {
+        const resp = await fetch('/api/haiku-evidence-verdict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(input),
+        });
+        const json = await resp.json();
+        if (!resp.ok || json.error) {
+          haikuEvidenceExplanations[symbol] = { error: json.error || ('HTTP ' + resp.status), loading: false };
+        } else {
+          haikuEvidenceExplanations[symbol] = Object.assign({}, json, { loading: false, input });
+        }
+      } catch (err) {
+        haikuEvidenceExplanations[symbol] = { error: err.message, loading: false };
+      }
+      updateUI();
+    }
+
+    function renderHaikuEvidenceCard(symbol, m) {
+      const state = haikuEvidenceExplanations[symbol];
+      let html = '<div class="premium-card" style="margin-bottom:10px;">';
+      html += '<div class="card-title">' + symbol + ' -- Evidence Verdict (Beta)</div>';
+      html += '<button class="btn" style="margin-bottom:8px;" onclick="triggerHaikuEvidenceVerdict(\'' + symbol + '\')"' + (state && state.loading ? ' disabled' : '') + '>';
+      html += state && state.loading ? 'Checking...' : 'Check evidence verdict';
+      html += '</button>';
+      if (state && state.error) {
+        html += '<div style="color:var(--red); font-size:0.75rem;">' + escapeHtml(state.error) + '</div>';
+      } else if (state && state.explanation) {
+        html += '<div style="font-size:0.8rem; color:var(--text); margin-bottom:6px;">' +
+          'Verdict: <b>' + escapeHtml(state.verdict) + '</b> | Confidence: ' + escapeHtml(state.confidence) +
+          ' | Action: ' + escapeHtml(state.action) + '</div>';
+        html += '<div style="font-size:0.75rem; color:var(--muted); margin-bottom:6px;">' +
+          'CE driver: ' + escapeHtml(state.ce_driver) + ' | PE driver: ' + escapeHtml(state.pe_driver) +
+          ' | Conflict: ' + escapeHtml(state.conflict) + ' | Reliability: ' + escapeHtml(state.reliability) + '</div>';
+        html += '<div style="font-size:0.8rem; color:var(--text);">' + escapeHtml(state.explanation) + '</div>';
+        html += '<div style="color:var(--muted); font-size:0.6rem; margin-top:4px;">' + (state.fromCache ? 'Cached' : 'Fresh Haiku call') + ' \u2022 ' + escapeHtml(new Date(state.calledAt).toLocaleTimeString()) + '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
     function isMarketOpenNow() {
       const now = new Date();
       const istString = now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
@@ -11957,6 +12176,7 @@ app.get("/", (c) => {
       const dataIntegrityBadge = totalBlocked > 0 ? { text: totalBlocked + ' blocked', color: 'var(--gold)' } : { text: 'clear', color: 'var(--green)' };
       let dataIntegrityContent = renderDataReliabilityCard() + renderHaikuValidationCard();
       ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { dataIntegrityContent += renderRuleEngineCard(sym, data[sym]); });
+      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { dataIntegrityContent += renderHaikuEvidenceCard(sym, data[sym]); });
       dataIntegrityContent += renderTruthEngineCard() + renderMarketDnaCard();
       html += renderAccordionChapter('data_integrity', '01', 'Data integrity + rule engine', dataIntegrityBadge,
         'Signals with stale or missing data right now, plus the deterministic verdict for each index.', dataIntegrityContent,
@@ -17560,6 +17780,103 @@ app.post("/api/haiku-verdict", async (c) => {
     return c.json({ error: `Haiku call failed: ${err.message}` }, 500);
   }
 });
+
+// ============== HAIKU EVIDENCE ARCHITECTURE (2026-08-22) — STEP 5 (JSON) ==============
+// Separate cache and endpoint from /api/haiku-verdict above -- does not
+// touch or replace it. Same cost-guard shape (15 min or verdict change).
+// System prompt is deliberately narrow: Haiku receives the ALREADY-
+// DECIDED verdict/confidence/action/drivers and must copy them back
+// unchanged, only adding a short JSON explanation. Enforced twice: once
+// in the prompt, once server-side by overwriting any field Haiku tried
+// to change with the original deterministic value before returning.
+interface HaikuEvidenceCacheEntry {
+  verdict: string;
+  responseJson: any;
+  calledAt: number;
+}
+const haikuEvidenceCache = new Map<string, HaikuEvidenceCacheEntry>();
+
+app.post("/api/haiku-evidence-verdict", async (c) => {
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid request body \u2014 expected JSON." }, 400);
+  }
+  const symbol = body.symbol;
+  const verdict = body.verdict;
+  if (!symbol || !verdict) return c.json({ error: "symbol and verdict are required" }, 400);
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return c.json({ error: "ANTHROPIC_API_KEY is not configured on the server" }, 500);
+
+  const now = Date.now();
+  const cached = haikuEvidenceCache.get(symbol);
+  const verdictChanged = !cached || cached.verdict !== verdict;
+  const guardWindowPassed = !cached || (now - cached.calledAt) >= HAIKU_COST_GUARD_MS;
+
+  if (cached && !verdictChanged && !guardWindowPassed) {
+    return c.json({ ...cached.responseJson, fromCache: true });
+  }
+
+  const systemPrompt =
+    "You explain an ALREADY-DECIDED options-trading verdict for a retail trader. A deterministic rule engine -- not you -- has already set verdict, confidence, action, ce_driver, and pe_driver. You must copy those five fields back EXACTLY as given, never change them, never compute a new score/target/stop-loss/probability. " +
+    "Use evidence_groups, volatility_context, price_action_context, conflict, and data_warning only to write a short plain-language reason. " +
+    "Vega is sensitivity, not direction. Theta is decay sensitivity, not guaranteed future loss. IV is volatility context, not direction. Never infer smart-money, stop-hunting, or manipulation. " +
+    "Respond with ONLY a JSON object, no markdown, no preamble: " +
+    '{"verdict": string, "confidence": string, "action": string, "ce_driver": string, "pe_driver": string, "explanation": string}. ' +
+    "The explanation field must be under 120 words.";
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 400,
+        system: systemPrompt,
+        messages: [{ role: "user", content: JSON.stringify(body) }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return c.json({ error: `Anthropic API error ${response.status}: ${errText}` }, 502);
+    }
+
+    const json: any = await response.json();
+    const textBlock = Array.isArray(json.content) ? json.content.find((b: any) => b.type === "text") : null;
+    const raw = textBlock ? textBlock.text : null;
+    let parsed: any = null;
+    try {
+      parsed = raw ? JSON.parse(raw.replace(/```json|```/g, "").trim()) : null;
+    } catch {
+      parsed = null;
+    }
+
+    // Enforcement: the deterministic fields ALWAYS win, regardless of
+    // what Haiku returned -- this is not optional and not a fallback,
+    // it runs on every response.
+    const responseJson = {
+      symbol,
+      verdict: body.verdict,
+      confidence: body.confidence,
+      action: body.action,
+      ce_driver: body.ce_driver,
+      pe_driver: body.pe_driver,
+      conflict: body.conflict,
+      reliability: body.reliability,
+      explanation: (parsed && typeof parsed.explanation === "string") ? parsed.explanation : "No explanation returned.",
+      calledAt: new Date(now).toISOString(),
+    };
+
+    haikuEvidenceCache.set(symbol, { verdict, responseJson, calledAt: now });
+    return c.json({ ...responseJson, fromCache: false });
+  } catch (err: any) {
+    return c.json({ error: `Haiku call failed: ${err.message}` }, 500);
+  }
+});
+// ============== END HAIKU EVIDENCE ARCHITECTURE STEP 5 ==============
 
 app.get("/api/recovery/active", (c) => {
   const active = recoveryAttempts.filter((r) => r.status === "RETRYING" || r.status === "MANUAL_ACTION_REQUIRED");

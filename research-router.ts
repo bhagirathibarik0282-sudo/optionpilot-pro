@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import {
+  getResearchIndexReadiness,
   getResearchIndexSnapshot,
   importHistoricalResearchIndexCsv,
   initResearchIndexRuntime,
@@ -24,6 +25,21 @@ researchRouter.get("/broad-market-size/dashboard", async (c) => {
   await initResearchIndexRuntime();
   const snapshot = await getResearchIndexSnapshot();
   return c.json(buildResearchDashboardModel(snapshot));
+});
+
+researchRouter.get("/broad-market-size/readiness", async (c) => {
+  const ready = await initResearchIndexRuntime();
+  if (!ready) {
+    return c.json({
+      ok: false,
+      mode: "RESEARCH_MODE",
+      productionImpact: "NONE",
+      ready: false,
+      reason: "RESEARCH_DB_UNAVAILABLE",
+    }, 503);
+  }
+  const audit = await getResearchIndexReadiness();
+  return c.json({ ok: true, ...audit });
 });
 
 researchRouter.get("/broad-market-size/status", async (c) => {

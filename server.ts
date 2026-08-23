@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { mountResearchRoutes } from "./research-server-hook.js";
 import { serve } from "@hono/node-server";
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -6852,6 +6853,7 @@ async function fetchFinancialNews(): Promise<{ title: string; source: string; pu
 }
 
 const app = new Hono();
+mountResearchRoutes(app);
 
 app.use("*", async (c, next) => {
   await next();

@@ -17,9 +17,9 @@ export const RESEARCH_INDEX_NAMES: Record<ResearchIndexCode, string> = {
 
 export interface ResearchIndexRawRow {
   date: string;
-  open: string | number;
-  high: string | number;
-  low: string | number;
+  open: string | number | null;
+  high: string | number | null;
+  low: string | number | null;
   close: string | number;
   triClose?: string | number | null;
   sourceTimestamp?: string | null;
@@ -36,8 +36,10 @@ function numberOrNaN(value: string | number): number {
 }
 
 function nullableNumber(value: string | number | null | undefined): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = numberOrNaN(value);
+  if (value === null || value === undefined) return null;
+  const normalized = typeof value === "string" ? value.trim() : value;
+  if (normalized === "" || normalized === "-" || normalized === "--" || normalized === "NA" || normalized === "N/A") return null;
+  const parsed = numberOrNaN(normalized as string | number);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -55,13 +57,13 @@ export function normalizeResearchIndexRow(
   source = "NIFTY_INDICES_OFFICIAL",
 ): ResearchIndexDailyRecord {
   const tradeDate = normalizeDate(raw.date);
-  const record: ResearchIndexDailyRecord = {
+  return {
     tradeDate,
     indexCode,
     indexName: RESEARCH_INDEX_NAMES[indexCode],
-    open: numberOrNaN(raw.open),
-    high: numberOrNaN(raw.high),
-    low: numberOrNaN(raw.low),
+    open: nullableNumber(raw.open),
+    high: nullableNumber(raw.high),
+    low: nullableNumber(raw.low),
     close: numberOrNaN(raw.close),
     triClose: nullableNumber(raw.triClose),
     source,
@@ -69,7 +71,6 @@ export function normalizeResearchIndexRow(
     freshnessStatus: "UNKNOWN",
     validationStatus: "PARTIAL",
   };
-  return record;
 }
 
 export class DefaultResearchIndexImporter implements ResearchIndexImporter {

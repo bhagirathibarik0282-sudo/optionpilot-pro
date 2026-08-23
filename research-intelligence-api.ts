@@ -4,14 +4,14 @@ import type {
   ResearchIndexMetrics,
 } from "./research-index-types.js";
 import { evaluateResearchIndexHealth, RESEARCH_INDEX_CODES } from "./research-index-health.js";
-import { classifySizeRegime, type SizeRegimeResult } from "./research-size-regime.js";
+import { classifySizeRegime, type SizeRegimeOutput } from "./research-size-regime.js";
 
 export interface ResearchIndexApiSnapshot {
   mode: "RESEARCH_MODE";
   layer: "BROAD_MARKET_SIZE";
   generatedAt: string;
   health: ReturnType<typeof evaluateResearchIndexHealth>;
-  regime: SizeRegimeResult;
+  regime: SizeRegimeOutput;
   latest: Partial<Record<ResearchIndexCode, ResearchIndexDailyRecord>>;
   metrics: Partial<Record<ResearchIndexCode, ResearchIndexMetrics>>;
   productionImpact: "NONE";
@@ -41,7 +41,7 @@ export function buildResearchIndexApiSnapshot(
     if (metric) metrics[code] = metric;
   }
 
-  const regime = classifySizeRegime(metrics, health);
+  const regime = classifySizeRegime({ metrics, dataQuality: health.overall });
 
   return {
     mode: "RESEARCH_MODE",

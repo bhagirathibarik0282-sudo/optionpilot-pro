@@ -56,7 +56,10 @@ for (const indexCode of RESEARCH_INDEX_POPULATION_ORDER) {
 const latestDates = new Set(report.filter((x) => x.lastDate).map((x) => x.lastDate));
 const alignedLatestDate = latestDates.size <= 1;
 if (!alignedLatestDate) {
-  for (const item of report) item.blockers.push("LATEST_DATE_MISMATCH");
+  for (const item of report) {
+    item.blockers.push("LATEST_DATE_MISMATCH");
+    item.ready = false;
+  }
 }
 
 const ready = report.every((x) => x.ready) && alignedLatestDate;

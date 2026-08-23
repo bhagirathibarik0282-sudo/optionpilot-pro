@@ -37,6 +37,11 @@ function getField(row: Record<string, string>, aliases: string[]): string {
   return "";
 }
 
+function missingNumeric(value: string): boolean {
+  const normalized = value.trim().toUpperCase();
+  return normalized === "" || normalized === "-" || normalized === "--" || normalized === "NA" || normalized === "N/A";
+}
+
 function parseDateMs(value: string): number | null {
   const direct = Date.parse(value);
   if (Number.isFinite(direct)) return direct;
@@ -51,6 +56,7 @@ export interface HistoricalCsvParseAudit {
   indexCode: ResearchIndexCode;
   parsedRows: number;
   skippedRows: number;
+  partialOhlRows: number;
   firstDate: string | null;
   lastDate: string | null;
   warnings: string[];
@@ -70,13 +76,14 @@ export function parseOfficialHistoricalIndexCsv(
   if (lines.length < 2) {
     return {
       rows: [],
-      audit: { indexCode, parsedRows: 0, skippedRows: 0, firstDate: null, lastDate: null, warnings: ["EMPTY_OR_HEADER_ONLY_CSV"] },
+      audit: { indexCode, parsedRows: 0, skippedRows: 0, partialOhlRows: 0, firstDate: null, lastDate: null, warnings: ["EMPTY_OR_HEADER_ONLY_CSV"] },
     };
   }
 
   const headers = splitCsvLine(lines[0]).map(normalizeHeader);
   const rows: ResearchIndexRawRow[] = [];
   let skippedRows = 0;
+  let partialOhlRows = 0;
 
   for (const line of lines.slice(1)) {
     const cells = splitCsvLine(line);
@@ -91,15 +98,28 @@ export function parseOfficialHistoricalIndexCsv(
     const low = getField(mapped, ["Low", "Low Index Value"]);
     const close = getField(mapped, ["Close", "Closing Index Value"]);
 
-    if (!date || !open || !high || !low || !close) {
+    // Date + Close are the minimum safe requirements for return/RS research.
+    // Missing official O/H/L are preserved as null and never fabricated.
+    if (!date || missingNumeric(close)) {
       skippedRows += 1;
       continue;
     }
 
-    rows.push({ date, open, high, low, close, sourceTimestamp: null });
+    const partial = [open, high, low].some(missingNumeric);
+    if (partial) partialOhlRows += 1;
+
+    rows.push({
+      date,
+      open: missingNumeric(open) ? null : open,
+      high: missingNumeric(high) ? null : high,
+      low: missingNumeric(low) ? null : low,
+      close,
+      sourceTimestamp: null,
+    });
   }
 
   if (skippedRows > 0) warnings.push(`SKIPPED_ROWS_${skippedRows}`);
+  if (partialOhlRows > 0) warnings.push(`PARTIAL_OHL_ROWS_${partialOhlRows}`);
 
   const datedRows = rows
     .map((row) => ({ row, ms: parseDateMs(row.date) }))
@@ -114,6 +134,7 @@ export function parseOfficialHistoricalIndexCsv(
       indexCode,
       parsedRows: rows.length,
       skippedRows,
+      partialOhlRows,
       firstDate: datedRows[0]?.row.date ?? null,
       lastDate: datedRows.at(-1)?.row.date ?? null,
       warnings,
@@ -126,5 +147,5 @@ export const historicalCsvPolicy = {
   use: "ONE_TIME_OR_PERIODIC_RESEARCH_BACKFILL",
   liveTradingUse: false,
   productionImpact: "NONE",
-  note: "Use the official Historical Index Data CSV export for long backfills; do not scrape undocumented private endpoints.",
+  note: "Use the official Historical Index Data CSV export for long backfills; preserve legitimate missing O/H/L as null and never fabricate values.",
 } as const;

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import {
   getResearchIndexSnapshot,
+  importHistoricalResearchIndexCsv,
   initResearchIndexRuntime,
   loadHistoricalResearchIndexRange,
   loadLatestResearchIndexData,
@@ -8,6 +9,8 @@ import {
   researchIndexRuntimeStatus,
 } from "./research-index-runtime.js";
 import { buildResearchDashboardModel } from "./research-dashboard-model.js";
+import type { ResearchIndexCode } from "./research-index-types.js";
+import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 
 export const researchRouter = new Hono();
 
@@ -77,6 +80,47 @@ researchRouter.post("/broad-market-size/load-history", async (c) => {
   }
 
   return c.json({ ok: true, ...audit });
+});
+
+researchRouter.post("/broad-market-size/import-csv", async (c) => {
+  const indexCode = c.req.query("indexCode") as ResearchIndexCode | undefined;
+  if (!indexCode || !RESEARCH_INDEX_CODES.includes(indexCode)) {
+    return c.json({
+      ok: false,
+      mode: "RESEARCH_MODE",
+      productionImpact: "NONE",
+      reason: "INVALID_INDEX_CODE",
+      allowed: RESEARCH_INDEX_CODES,
+    }, 400);
+  }
+
+  const csv = await c.req.text();
+  if (!csv.trim()) {
+    return c.json({
+      ok: false,
+      mode: "RESEARCH_MODE",
+      productionImpact: "NONE",
+      reason: "EMPTY_CSV_BODY",
+    }, 400);
+  }
+
+  const result = await importHistoricalResearchIndexCsv(indexCode, csv);
+  if (!result) {
+    return c.json({
+      ok: false,
+      mode: "RESEARCH_MODE",
+      productionImpact: "NONE",
+      reason: "RESEARCH_DB_UNAVAILABLE",
+    }, 503);
+  }
+
+  return c.json({
+    ok: true,
+    mode: "RESEARCH_MODE",
+    productionImpact: "NONE",
+    audit: result.audit,
+    metricWrites: result.metricWrites,
+  });
 });
 
 researchRouter.post("/broad-market-size/rebuild-metrics", async (c) => {

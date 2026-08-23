@@ -2540,6 +2540,7 @@ const TELEGRAM_LAST_M11_FINGERPRINT: Map<string, string> = new Map();
 const TELEGRAM_LAST_M12_FINGERPRINT: Map<string, string> = new Map();
 
 const TELEGRAM_LAST_BUY_FINGERPRINT: Map<string, string> = new Map();
+const TELEGRAM_LAST_STRUCTURE_FINGERPRINT: Map<string, string> = new Map();
 
 // Previous cycle's futures LTP + OI per symbol, used ONLY to classify
 // Long Buildup / Short Buildup / Short Covering / Long Unwinding for the
@@ -4004,6 +4005,25 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
     try {
       const m12 = await buildV2CandidateSelection(symbol, session, 20);
       const decision = (m12 as any)?.decision;
+      const structure = (m12 as any)?.structureEngine as OptionBuyingStructureResult | undefined;
+      if (structure?.signal === "NO TRADE") {
+        const blockedGateNames = structure.gates.filter((gate) => gate.blocking).map((gate) => gate.name).slice(0, 4);
+        const structureFingerprint = `NO_TRADE|${blockedGateNames.join("|")}`;
+        if (TELEGRAM_LAST_STRUCTURE_FINGERPRINT.get(symbol) !== structureFingerprint) {
+          const blockingText = structure.hardBlockReasons.slice(0, 4).map((reason) => `• ${telegramEscapeHtml(reason)}`).join("\n");
+          await sendAlertSpaced(
+            `⛔ <b>NO TRADE — ${symbol}</b>\n` +
+            `Deep validation: <b>BLOCKED</b> | Truth: ${structure.truthVerdict}\n` +
+            `Spot: ${structure.price.spot ?? "—"} | VWAP: ${structure.price.vwap ?? "—"} | Pivot: ${structure.price.pivot ?? "—"}\n` +
+            `Current expiry: ${structure.premiums.current?.alignment || "MISSING"} | Next expiry: ${structure.premiums.next?.alignment || "MISSING"}\n` +
+            `Blocking conditions:\n${blockingText || "• No confirmed directional option-buying setup."}\n` +
+            `Wait for spot/VWAP acceptance, favored-premium expansion, opposite-premium weakness and independent PCR/OI or VIX support.\n` +
+            `⏰ ${istTime()} | Forward-test only; no automatic order.`,
+            symbol
+          );
+          TELEGRAM_LAST_STRUCTURE_FINGERPRINT.set(symbol, structureFingerprint);
+        }
+      }
 
       // --- M12a: existing "unvalidated research candidate" alert (unchanged behavior) ---
       if (decision === "BEST_CE" || decision === "BEST_PE") {
@@ -4090,11 +4110,11 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
           // almost never repeat exactly, so including it here would
           // re-alert on nearly every poll. Grade buckets (A+/A/B/C/D/F)
           // change far less often, which is what dedup is actually for.
-          const fingerprint = `${decision}|${prob.grade}`;
+          const fingerprint = `${decision}|${structure?.signal || "UNVERIFIED"}|${prob.grade}`;
           const prevFingerprint = TELEGRAM_LAST_BUY_FINGERPRINT.get(symbol);
 
           if (prob.probability >= 70 && fingerprint !== prevFingerprint) {
-            const label = decision === "BEST_CE" ? "BUY" : "SELL";
+            const label = structure?.signal || (decision === "BEST_CE" ? "BUY CE" : "BUY PE");
             const strike = cand?.strike ?? "—";
             const role = cand?.moneynessRole ?? "";
             const premium = cand?.lastPrice != null ? `₹${cand.lastPrice}` : "—";
@@ -4138,35 +4158,6 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
               ? `\n⚠️ Risks (${prob.riskFlags.length}):\n${prob.riskFlags.map((r) => `• ${r}`).join("\n")}`
               : "";
 
-            // Haiku "why" explanation (2026-08-19) -- explain-only, never
-            // decide, per this file's standing Haiku boundary. The prompt
-            // bakes in the user-supplied Permitted/Forbidden Interpretation
-            // guardrail directly: Haiku may use IV/skew/VIX language only as
-            // supporting CONTEXT alongside the already-computed reasons, and
-            // is explicitly told never to justify BUY/SELL from IV alone.
-            // callHaikuPlain() never throws and returns null on any failure
-            // (no key, network error, bad response) -- the alert always
-            // sends with or without this footer. telegramEscapeHtml() is
-            // mandatory since this is free-form model text going into an
-            // HTML-parse-mode message.
-            let haikuWhy: string | null = null;
-            try {
-              const haikuPrompt =
-                `You are explaining an options trading signal to a retail trader in 2-3 short sentences, plain language, no markdown.\n` +
-                `Signal: ${label} ${symbol} ${strike} (${role}), score ${prob.probability}% grade ${prob.grade}.\n` +
-                `Reasons already computed: ${prob.reasons.join("; ")}.\n` +
-                `Risks already computed: ${prob.riskFlags.join("; ") || "none"}.\n` +
-                `RULES: Only summarize/explain the reasons and risks already listed above -- do NOT introduce new claims or data. ` +
-                `Never say IV or VIX alone justifies a BUY or SELL -- if you mention IV/VIX/skew, frame it only as supporting context alongside OI/price action, never as the reason by itself. ` +
-                `Do not use the characters < or > anywhere in your reply.`;
-              haikuWhy = await callHaikuPlain(haikuPrompt);
-            } catch (err) {
-              console.error(`[Telegram] M12b Haiku why-explanation failed for ${symbol}:`, err instanceof Error ? err.message : err);
-            }
-            const haikuText = haikuWhy
-              ? `\n━━━━━━━━━━━━━━━━━━━━\n🤖 <b>Why (AI context, not advice):</b>\n${telegramEscapeHtml(haikuWhy)}`
-              : "";
-
             // Provisional Trade Management Plan (2026-08-21) -- Entry/SL/T1/T2/
             // Trailing. See computeProvisionalTradeManagementPlan's own doc
             // comment for the full method disclosure.
@@ -4191,6 +4182,40 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
             } catch (err) {
               console.error(`[Telegram] M12b trade-management plan failed for ${symbol}:`, err instanceof Error ? err.message : err);
             }
+            const lotSize = cand?.contractMetadata?.lotSize;
+            const estimatedLotLoss = tmPlan?.status === "OK" && tmPlan.rPremium != null && Number.isFinite(lotSize) && lotSize > 0
+              ? Number((tmPlan.rPremium * lotSize).toFixed(2))
+              : null;
+            if (!tmPlan || tmPlan.status !== "OK" || estimatedLotLoss == null || (structure && estimatedLotLoss > structure.risk.maxLoss)) {
+              const reason = estimatedLotLoss == null
+                ? "A complete ATR/Delta stop and verified lot size are required before any buying alert."
+                : `One-lot planned loss ₹${estimatedLotLoss} exceeds the configured maximum ₹${structure?.risk.maxLoss}.`;
+              const riskFingerprint = `NO_TRADE_RISK|${reason}`;
+              if (TELEGRAM_LAST_STRUCTURE_FINGERPRINT.get(symbol) !== riskFingerprint) {
+                await sendAlertSpaced(`⛔ <b>NO TRADE — ${symbol}</b>\nRisk gate: ${telegramEscapeHtml(reason)}\n⏰ ${istTime()} | No automatic order.`, symbol);
+                TELEGRAM_LAST_STRUCTURE_FINGERPRINT.set(symbol, riskFingerprint);
+              }
+              continue;
+            }
+            // Spend Haiku tokens only after every structure, liquidity and
+            // one-lot risk gate has passed. NO TRADE remains fully deterministic.
+            let haikuWhy: string | null = null;
+            try {
+              const haikuPrompt =
+                `Explain this deterministic Indian index-option-buying setup in 2-3 short Odia sentences; keep trading terms in English. No markdown.\n` +
+                `IMMUTABLE signal: ${label} ${symbol} ${strike} (${role}). Internal uncalibrated alignment score: ${prob.probability}/100; grade ${prob.grade}.\n` +
+                `Validated observations: ${structure?.explanationPacket.observations.join(" ") || prob.reasons.join("; ")}.\n` +
+                `Risks: ${[...(structure?.warnings || []), ...prob.riskFlags].join("; ") || "none recorded"}.\n` +
+                `RULES: Explain only supplied price/VWAP, premium-pair, expiry, IV/extrinsic, PCR/OI and risk evidence. ` +
+                `Never alter the signal, invent missing data/candles, call the score win probability, promise targets, suggest automatic execution, or infer direction from IV/VIX/PCR/OI alone. ` +
+                `If evidence conflicts, say NO TRADE. Do not use the characters < or >.`;
+              haikuWhy = await callHaikuPlain(haikuPrompt);
+            } catch (err) {
+              console.error(`[Telegram] M12b Haiku why-explanation failed for ${symbol}:`, err instanceof Error ? err.message : err);
+            }
+            const haikuText = haikuWhy
+              ? `\n━━━━━━━━━━━━━━━━━━━━\n🤖 <b>Why (AI context, not advice):</b>\n${telegramEscapeHtml(haikuWhy)}`
+              : "";
             const tmText = tmPlan && tmPlan.status === "OK"
               ? `\n━━━━━━━━━━━━━━━━━━━━\n🎯 <b>Provisional Trade Plan (forward-test only — NOT backtested):</b>\n` +
                 `Entry: <b>₹${tmPlan.entry}</b> | SL: <b>₹${tmPlan.sl}</b> | T1: <b>₹${tmPlan.t1}</b> | T2: <b>₹${tmPlan.t2}</b> | T3: <b>₹${tmPlan.t3}</b> (100%)\n` +
@@ -4200,12 +4225,16 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
               : `\n━━━━━━━━━━━━━━━━━━━━\n🎯 <b>Trade Plan:</b> UNAVAILABLE (${tmPlan?.reason || "data insufficient"}) — no numbers fabricated.`;
 
             await sendAlertSpaced(
-              `${emoji} <b>${label} SIGNAL — ${symbol}</b> (${decision === "BEST_CE" ? "Buy CE" : "Buy PE"})\n` +
+              `${emoji} <b>${label} — ${symbol}</b> (option buying only)\n` +
               `━━━━━━━━━━━━━━━━━━━━\n` +
               `📊 Strike: <b>${strike}</b> (${role})\n` +
               `💰 Premium: <b>${premium}</b> | Spot: <b>${spot}</b>\n` +
-              `📈 Score: <b>${prob.probability}%</b> | Grade: <b>${prob.grade}</b> | Confidence: <b>${prob.confidence}</b>\n` +
-              `🕒 DTE: <b>${dte}</b>\n` +
+              `📈 Alignment score: <b>${prob.probability}/100</b> | Grade: <b>${prob.grade}</b> | Confidence: <b>${structure?.confidence || prob.confidence}</b>\n` +
+              `🕒 Calendar DTE: <b>${structure?.dte ?? dte}</b> (${structure?.dteClass || "UNVERIFIED"})\n` +
+              `🧭 Structure: spot/VWAP ${structure?.price.acceptanceSamples ?? 0}/2 | Current ${structure?.premiums.current?.alignment || "MISSING"} | Next ${structure?.premiums.next?.alignment || "MISSING"} | Monthly ${structure?.premiums.monthly?.alignment || "MISSING"}\n` +
+              `🔬 Premium change: favored ${structure?.premiums.favoredChange ?? "—"} | opposite ${structure?.premiums.oppositeChange ?? "—"} | intrinsic ${structure?.premiums.intrinsicChange ?? "—"} | extrinsic ${structure?.premiums.extrinsicChange ?? "—"}\n` +
+              `📉 PCR: ${structure?.positioning.pcr ?? "—"} (${structure?.positioning.pcrTrend || "MISSING"}) | India VIX: ${structure?.volatility.indiaVix ?? "—"}\n` +
+              `🛡 One-lot planned risk: <b>₹${estimatedLotLoss}</b> / max <b>₹${structure?.risk.maxLoss ?? "—"}</b>\n` +
               `📋 Criteria met: <b>${scoreReasons.length}</b> | Risk flags: <b>${prob.riskFlags.length}</b>\n` +
               `━━━━━━━━━━━━━━━━━━━━\n` +
               `✅ Criteria Met (${scoreReasons.length}):\n${reasonsText}` +
@@ -4215,10 +4244,10 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
               `${tmText}\n` +
               `━━━━━━━━━━━━━━━━━━━━\n` +
               `⏰ Time: ${istTime()}\n` +
-              `⚠️ This score is an internal unvalidated heuristic (see 2026-08-16 decision on M12) — ` +
-              `it is NOT a statistically validated probability. Research signal only. Verify before trading.`,
+              `⚠️ Internal alignment score only — NOT win probability, NOT backtested profitability, and NOT an automatic order. Review and confirm manually.`,
               symbol
             );
+            TELEGRAM_LAST_STRUCTURE_FINGERPRINT.set(symbol, `${label}|${structure?.side || "NONE"}`);
 
             // Forward-test recording -- TM_V1 (2026-08-21). Pushes this plan
             // into the EXISTING outcome-engine (outcome-engine.ts, built
@@ -4420,6 +4449,7 @@ function resetTelegramDailyTrackers(): void {
   TELEGRAM_PERIODIC_SNAPSHOT_30.clear();
   TELEGRAM_PERIODIC_SNAPSHOT_60.clear();
   TELEGRAM_LAST_REGIME.clear();
+  TELEGRAM_LAST_STRUCTURE_FINGERPRINT.clear();
   // 2026-08-19 bug fix (found during a self-initiated re-check, not
   // user-reported): TELEGRAM_PREV_DAY_HIGH (added for the Opposite-Premium
   // Higher-High caution) was never being cleared here. Without this, the
@@ -10215,11 +10245,11 @@ app.get("/", (c) => {
 
       const confidence = maxScore >= 6 && Math.abs(score) >= maxScore * 0.7 ? 'Medium' : 'Low';
 
-      // ATM CE/PE suggestion: strike + real current premium as Entry.
-      // SL/T1/T2 use a simple, disclosed percentage-of-premium formula
-      // (user-approved 2026-08-08, since the source document never
-      // defined one): SL = Entry −30%, T1 = Entry +50% (partial),
-      // T2 = Entry +100% (full). Fixed rule — not Haiku-generated.
+      // Legacy dashboard candidate only. Risk levels are intentionally null:
+      // the fail-closed Option Buying Structure Engine owns entry eligibility
+      // and its ATR/Delta plan owns risk. A fixed premium-percentage stop can
+      // conflict with VWAP/PDH/PDL/pivot invalidation and must not be surfaced
+      // as though it were the validated structure plan.
       let suggestion = null;
       const dir3 = verdict.indexOf('Bullish') !== -1 ? 'CE' : verdict.indexOf('Bearish') !== -1 ? 'PE' : null;
       if (dir3 && m.expiries && m.expiries[0]) {
@@ -10231,10 +10261,10 @@ app.get("/", (c) => {
             strike: atmLeg.strike + ' ' + dir3,
             side: dir3,
             entry,
-            sl: Math.round(entry * 0.7 * 100) / 100,
-            t1: Math.round(entry * 1.5 * 100) / 100,
-            t2: Math.round(entry * 2.0 * 100) / 100,
-            slNote: 'SL = Entry −30% | T1 = Entry +50% (partial) | T2 = Entry +100% (full) — fixed percentage rule, not from Haiku',
+            sl: null,
+            t1: null,
+            t2: null,
+            slNote: 'Legacy candidate only — use /api/v2/option-buying-structure and its ATR/Delta risk gate before any manual confirmation.',
           };
         } else if (atmLeg) {
           suggestion = { strike: atmLeg.strike + ' ' + dir3, side: dir3, entry: atmLeg.lastPrice, sl: null, t1: null, t2: null, slNote: 'Entry premium is 0/unavailable — cannot compute SL/T1/T2 from it' };
@@ -10247,20 +10277,11 @@ app.get("/", (c) => {
       };
     }
 
-    // ============== HAIKU EVIDENCE ARCHITECTURE (2026-08-22) — SHADOW LAYER ==============
-    // Additive, non-invasive. Reuses runRuleEngine()'s already-computed
-    // contributions -- never recomputes any signal, never mutates any
-    // tracker. Does NOT feed the live verdict/suggestion/order flow.
-    // Purpose: group signals into independent evidence groups, classify
-    // conflict severity, and (later) feed a redesigned Haiku prompt --
-    // WITHOUT Haiku ever changing verdict/confidence/driver/invalidation.
-
-    // Independence groups. Each signal belongs to exactly one group so a
-    // single underlying data source (e.g. options chain) cannot count as
-    // multiple "independent" confirmations. Premium/EV/IV are NOT split
-    // into separate groups (per mandatory_rules) -- they all live under
-    // options_positioning.
-    const EVIDENCE_GROUP_MAP = {
+    // ============== HAIKU EVIDENCE ARCHITECTURE — HARDENED SHADOW LAYER ==============
+    // Merged from the latest GitHub copy. This groups the legacy Rule Engine's
+    // already-computed contributions for explanation only. It does not feed
+    // the Option Buying Structure Engine, Telegram, outcomes, or execution.
+    const HAIKU_EVIDENCE_GROUP_MAP = {
       futures_vwap: 'price_action_level',
       pdh_pdl: 'price_action_level',
       gap_type: 'price_action_level',
@@ -10277,139 +10298,89 @@ app.get("/", (c) => {
       sector_heatmap: 'cross_market',
     };
 
-    // Builds independent evidence groups from an already-computed
-    // runRuleEngine() result. Returns at most 3 strongest groups
-    // (by absolute net contribution), each with its evidence IDs.
-    function buildEvidenceGroups(ruleEngineResult) {
-      const contributions = ruleEngineResult.contributions || {};
+    function buildHaikuEvidenceGroups(ruleEngineResult) {
       const groups = {};
-      Object.keys(contributions).forEach((signal) => {
-        const groupId = EVIDENCE_GROUP_MAP[signal] || 'other';
-        const value = contributions[signal];
+      Object.keys(ruleEngineResult.contributions || {}).forEach((signal) => {
+        const groupId = HAIKU_EVIDENCE_GROUP_MAP[signal] || 'other';
+        const value = Number(ruleEngineResult.contributions[signal]);
+        if (!Number.isFinite(value)) return;
         if (!groups[groupId]) groups[groupId] = { groupId, evidenceIds: [], net: 0 };
         groups[groupId].evidenceIds.push(signal + '=' + value);
         groups[groupId].net += value;
       });
-      const list = Object.keys(groups).map((k) => {
-        const g = groups[k];
+      const list = Object.keys(groups).map((key) => {
+        const group = groups[key];
         return {
-          groupId: g.groupId,
-          direction: g.net > 0 ? 'CE' : g.net < 0 ? 'PE' : 'NEUTRAL',
-          strength: Math.round(Math.abs(g.net) * 10) / 10,
-          evidenceIds: g.evidenceIds,
+          groupId: group.groupId,
+          direction: group.net > 0 ? 'CE' : group.net < 0 ? 'PE' : 'NEUTRAL',
+          strength: Math.round(Math.abs(group.net) * 10) / 10,
+          evidenceIds: group.evidenceIds,
         };
       });
       list.sort((a, b) => b.strength - a.strength);
-      return list.slice(0, 3);
+      return list; // never truncate before conflict classification
     }
 
-    // Reliability: maps Step 2's validateData() output to PASS/DEGRADED/FAIL.
-    // FAIL = blocked (overallValid false). DEGRADED = valid but at least
-    // one signal NOT_AVAILABLE/NULL/STALE. PASS = all signals OK.
-    function classifyReliability(validation) {
-      if (!validation.overallValid) return 'FAIL';
-      const notOk = (validation.signals || []).filter((s) => s.status !== 'OK');
+    function classifyHaikuEvidenceReliability(validation) {
+      if (!validation || !validation.overallValid) return 'FAIL';
+      const notOk = (validation.signals || []).filter((signal) => signal.status !== 'OK');
       return notOk.length > 0 ? 'DEGRADED' : 'PASS';
     }
 
-    // Conflict classifier. primaryDir is the deterministic verdict's own
-    // direction (CE/PE), derived the same way runRuleEngine() already
-    // derives its suggestion.side -- never recomputed differently here.
-    // NO_CONFLICT: no group opposes.
-    // EXPLAINED_DIVERGENCE: exactly one group opposes and it is weaker
-    //   than the strongest supporting group (a genuinely smaller,
-    //   nameable disagreement, not swept under the rug).
-    // UNRESOLVED_CONFLICT: an opposing group is as strong as or stronger
-    //   than the strongest supporting group.
-    // CRITICAL_DATA_CONFLICT: reliability is FAIL, or two groups
-    //   opposing at similar strength while reliability is DEGRADED --
-    //   i.e. the conflict itself may be a data-quality artifact.
-    function classifyEvidenceConflict(groups, primaryDir, reliability) {
+    function classifyHaikuEvidenceConflict(groups, primaryDirection, reliability) {
       if (reliability === 'FAIL') return 'CRITICAL_DATA_CONFLICT';
-      if (!primaryDir) return 'NO_CONFLICT';
-      const opposing = groups.filter((g) => g.direction !== 'NEUTRAL' && g.direction !== primaryDir);
-      const supporting = groups.filter((g) => g.direction === primaryDir);
-      if (opposing.length === 0) return 'NO_CONFLICT';
-      const maxOpposing = Math.max.apply(null, opposing.map((g) => g.strength));
-      const maxSupporting = supporting.length ? Math.max.apply(null, supporting.map((g) => g.strength)) : 0;
-      if (reliability === 'DEGRADED' && opposing.length >= 2 && maxOpposing >= maxSupporting) {
-        return 'CRITICAL_DATA_CONFLICT';
-      }
-      if (maxOpposing >= maxSupporting) return 'UNRESOLVED_CONFLICT';
-      return 'EXPLAINED_DIVERGENCE';
+      if (!primaryDirection) return 'NO_DIRECTIONAL_VERDICT';
+      const opposing = groups.filter((group) => group.direction !== 'NEUTRAL' && group.direction !== primaryDirection);
+      const supporting = groups.filter((group) => group.direction === primaryDirection);
+      if (!opposing.length) return 'NO_CONFLICT';
+      const maxOpposing = Math.max.apply(null, opposing.map((group) => group.strength));
+      const maxSupporting = supporting.length ? Math.max.apply(null, supporting.map((group) => group.strength)) : 0;
+      if (reliability === 'DEGRADED' && opposing.length >= 2 && maxOpposing >= maxSupporting) return 'CRITICAL_DATA_CONFLICT';
+      return maxOpposing >= maxSupporting ? 'UNRESOLVED_CONFLICT' : 'EXPLAINED_DIVERGENCE';
     }
 
-    // Classifies whether an ATM leg's premium move is best explained by
-    // direction (delta), volatility (vega), or decay (theta) -- a rough,
-    // disclosed apportionment, not a precise attribution model. Never
-    // invents data: missing greeks -> UNEXPLAINED, not a guess.
-    function classifyLegDriver(leg, spotChangePercent, ivChangePercent) {
-      if (!leg || leg.delta == null || leg.vega == null || leg.theta == null) return 'UNEXPLAINED';
-      const deltaComponent = Math.abs(leg.delta * (spotChangePercent || 0));
-      const vegaComponent = Math.abs(leg.vega * (ivChangePercent || 0));
-      const thetaComponent = Math.abs(leg.theta);
-      const total = deltaComponent + vegaComponent + thetaComponent;
-      if (total === 0) return 'UNEXPLAINED';
-      const shares = { DIRECTION: deltaComponent / total, VOLATILITY: vegaComponent / total, DECAY: thetaComponent / total };
-      const maxKey = Object.keys(shares).reduce((a, b) => (shares[a] >= shares[b] ? a : b));
-      if (shares[maxKey] < 0.45) return 'MIXED';
-      return maxKey;
+    // The latest GitHub copy used India VIX % change as if it were the exact
+    // selected option's IV change and mixed percentage, point, and per-day
+    // Greek units. That attribution is not dimensionally valid. Until exact
+    // same-contract spot-point, IV-point, and elapsed-time changes are supplied,
+    // the honest driver is UNEXPLAINED. M6 remains the proper attribution source.
+    function classifyHaikuLegDriver() {
+      return 'UNEXPLAINED';
     }
 
-    // Assembles the full haiku_input payload (per the approved 2026-08-22
-    // evidence-interpreter spec). Reuses buildEvidenceGroups/
-    // classifyReliability/classifyEvidenceConflict/classifyLegDriver --
-    // never recomputes a signal, never mutates a tracker. Pure function
-    // of already-computed state; safe to call as often as needed.
     function buildHaikuEvidenceInput(symbol, m, validation, ruleEngineResult) {
-      const reliability = classifyReliability(validation);
-      const groups = buildEvidenceGroups(ruleEngineResult);
-      const primaryDir = ruleEngineResult.suggestion ? ruleEngineResult.suggestion.side : null;
-      const conflict = classifyEvidenceConflict(groups, primaryDir, reliability);
-
-      const exp = m && m.expiries && m.expiries[0];
-      const atmCe = exp && (exp.ceStrikes || []).find((s) => s.isAtm);
-      const atmPe = exp && (exp.peStrikes || []).find((s) => s.isAtm);
-      const spotChangePercent = (m && m.current > 0 && m.change != null && (m.current - m.change) !== 0)
-        ? (m.change / (m.current - m.change)) * 100 : null;
-      const ivChangePercent = (m && m.vixChangePercent != null) ? m.vixChangePercent : null;
-
-      let action;
+      const reliability = classifyHaikuEvidenceReliability(validation);
+      const allGroups = buildHaikuEvidenceGroups(ruleEngineResult);
+      const primaryDirection = ruleEngineResult.suggestion ? ruleEngineResult.suggestion.side : null;
+      const conflict = classifyHaikuEvidenceConflict(allGroups, primaryDirection, reliability);
+      let action = 'WATCH';
       if (reliability === 'FAIL' || conflict === 'CRITICAL_DATA_CONFLICT') action = 'NO_ACTION';
-      else if (conflict === 'UNRESOLVED_CONFLICT') action = 'WAIT';
+      else if (conflict === 'UNRESOLVED_CONFLICT' || conflict === 'NO_DIRECTIONAL_VERDICT') action = 'WAIT';
       else if (reliability === 'DEGRADED') action = 'REVIEW_ELIGIBLE';
-      else action = 'WATCH';
-
       let verdict = ruleEngineResult.verdict;
       if (action === 'NO_ACTION') verdict = 'NO_RELIABLE_VERDICT';
       else if (action === 'WAIT') verdict = 'WAIT_CONFLICT';
-
-      const badSignals = (validation.signals || []).filter((s) => s.status !== 'OK');
-
+      const badSignals = (validation.signals || []).filter((signal) => signal.status !== 'OK');
       return {
         symbol,
         reliability,
         verdict,
         confidence: ruleEngineResult.confidence ? ruleEngineResult.confidence.toUpperCase() : 'LOW',
         action,
-        ce_driver: classifyLegDriver(atmCe, spotChangePercent, ivChangePercent),
-        pe_driver: classifyLegDriver(atmPe, spotChangePercent, ivChangePercent),
+        ce_driver: classifyHaikuLegDriver(),
+        pe_driver: classifyHaikuLegDriver(),
+        driver_note: 'Exact option IV-change inputs are unavailable here; use M6 premium attribution for driver analysis.',
         conflict,
-        evidence_groups: groups.map((g) => ({ group: g.groupId, direction: g.direction, strength: g.strength, evidence: g.evidenceIds })),
-        volatility_context: (m && m.vix != null) ? ('VIX ' + m.vix + (ivChangePercent != null ? ' (' + ivChangePercent.toFixed(2) + '%)' : '')) : 'unavailable',
-        price_action_context: (m && m.pdh > 0 && m.pdl > 0 && m.current != null) ? (m.current + ' vs PDH ' + m.pdh + ' / PDL ' + m.pdl) : 'unavailable',
-        invalidation: (ruleEngineResult.suggestion && ruleEngineResult.suggestion.sl != null) ? ('SL ' + ruleEngineResult.suggestion.sl) : 'no active suggestion',
-        data_warning: badSignals.length === 0 ? 'none' : badSignals.map((s) => s.signal + ':' + s.status).join(', '),
+        evidence_groups: allGroups.slice(0, 3).map((group) => ({ group: group.groupId, direction: group.direction, strength: group.strength, evidence: group.evidenceIds })),
+        all_group_count: allGroups.length,
+        volatility_context: m && m.vix != null ? ('India VIX ' + m.vix + (m.vixChangePercent != null ? ' (' + m.vixChangePercent.toFixed(2) + '%)' : '')) : 'unavailable',
+        price_action_context: m && m.pdh > 0 && m.pdl > 0 && m.current != null ? (m.current + ' vs PDH ' + m.pdh + ' / PDL ' + m.pdl) : 'unavailable',
+        invalidation: 'Use the fail-closed Option Buying Structure Engine; the legacy fixed-% stop is disabled.',
+        data_warning: badSignals.length ? badSignals.map((signal) => signal.signal + ':' + signal.status).join(', ') : 'none',
+        architecture_boundary: 'SHADOW_EXPLANATION_ONLY_NOT_OPTION_BUYING_SIGNAL',
       };
     }
 
-    // ============== END HAIKU EVIDENCE ARCHITECTURE (shadow layer) ==============
-
-    // Manual-trigger UI state (Beta card). Deliberately NOT auto-polled
-    // like triggerHaikuVerdicts() -- user taps a button per symbol, per
-    // the agreed "test-only card" first step. Server-side cost guard
-    // (haikuEvidenceCache, 15 min / verdict-change) still applies even
-    // on manual taps.
     let haikuEvidenceExplanations = {};
 
     async function triggerHaikuEvidenceVerdict(symbol) {
@@ -10418,7 +10389,7 @@ app.get("/", (c) => {
       const validation = validateData(symbol, m);
       const ruleEngineResult = runRuleEngine(symbol, m, validation);
       if (ruleEngineResult.verdict === 'DATA UNAVAILABLE') {
-        haikuEvidenceExplanations[symbol] = { error: 'DATA UNAVAILABLE -- nothing to explain yet', loading: false };
+        haikuEvidenceExplanations[symbol] = { error: 'DATA UNAVAILABLE — nothing to explain yet', loading: false };
         updateUI();
         return;
       }
@@ -10426,45 +10397,41 @@ app.get("/", (c) => {
       haikuEvidenceExplanations[symbol] = Object.assign({}, haikuEvidenceExplanations[symbol], { loading: true });
       updateUI();
       try {
-        const resp = await fetch('/api/haiku-evidence-verdict', {
+        const response = await fetch('/api/haiku-evidence-verdict', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(input),
         });
-        const json = await resp.json();
-        if (!resp.ok || json.error) {
-          haikuEvidenceExplanations[symbol] = { error: json.error || ('HTTP ' + resp.status), loading: false };
-        } else {
-          haikuEvidenceExplanations[symbol] = Object.assign({}, json, { loading: false, input });
-        }
+        const json = await response.json();
+        haikuEvidenceExplanations[symbol] = !response.ok || json.error
+          ? { error: json.error || ('HTTP ' + response.status), loading: false }
+          : Object.assign({}, json, { loading: false, input });
       } catch (err) {
         haikuEvidenceExplanations[symbol] = { error: err.message, loading: false };
       }
       updateUI();
     }
 
-    function renderHaikuEvidenceCard(symbol, m) {
+    function renderHaikuEvidenceCard(symbol) {
       const state = haikuEvidenceExplanations[symbol];
       let html = '<div class="premium-card" style="margin-bottom:10px;">';
-      html += '<div class="card-title">' + symbol + ' -- Evidence Verdict (Beta)</div>';
+      html += '<div class="card-title">' + symbol + ' — Evidence Verdict (Beta)</div>';
+      html += '<div style="color:var(--muted); font-size:0.65rem; margin-bottom:7px;">Shadow explanation only — use Option Buying Structure for BUY/NO TRADE.</div>';
       html += '<button class="btn" style="margin-bottom:8px;" onclick="triggerHaikuEvidenceVerdict(\\'' + symbol + '\\')"' + (state && state.loading ? ' disabled' : '') + '>';
-      html += state && state.loading ? 'Checking...' : 'Check evidence verdict';
+      html += state && state.loading ? 'Checking…' : 'Check evidence verdict';
       html += '</button>';
       if (state && state.error) {
         html += '<div style="color:var(--red); font-size:0.75rem;">' + escapeHtml(state.error) + '</div>';
       } else if (state && state.explanation) {
-        html += '<div style="font-size:0.8rem; color:var(--text); margin-bottom:6px;">' +
-          'Verdict: <b>' + escapeHtml(state.verdict) + '</b> | Confidence: ' + escapeHtml(state.confidence) +
-          ' | Action: ' + escapeHtml(state.action) + '</div>';
-        html += '<div style="font-size:0.75rem; color:var(--muted); margin-bottom:6px;">' +
-          'CE driver: ' + escapeHtml(state.ce_driver) + ' | PE driver: ' + escapeHtml(state.pe_driver) +
-          ' | Conflict: ' + escapeHtml(state.conflict) + ' | Reliability: ' + escapeHtml(state.reliability) + '</div>';
-        html += '<div style="font-size:0.8rem; color:var(--text);">' + escapeHtml(state.explanation) + '</div>';
-        html += '<div style="color:var(--muted); font-size:0.6rem; margin-top:4px;">' + (state.fromCache ? 'Cached' : 'Fresh Haiku call') + ' \u2022 ' + escapeHtml(new Date(state.calledAt).toLocaleTimeString()) + '</div>';
+        html += '<div style="font-size:0.8rem; margin-bottom:6px;">Verdict: <b>' + escapeHtml(state.verdict) + '</b> | Confidence: ' + escapeHtml(state.confidence) + ' | Action: ' + escapeHtml(state.action) + '</div>';
+        html += '<div style="font-size:0.75rem; color:var(--muted); margin-bottom:6px;">CE driver: ' + escapeHtml(state.ce_driver) + ' | PE driver: ' + escapeHtml(state.pe_driver) + ' | Conflict: ' + escapeHtml(state.conflict) + ' | Reliability: ' + escapeHtml(state.reliability) + '</div>';
+        html += '<div style="font-size:0.8rem;">' + escapeHtml(state.explanation) + '</div>';
+        html += '<div style="color:var(--muted); font-size:0.6rem; margin-top:4px;">' + (state.fromCache ? 'Cached' : 'Fresh Haiku call') + ' • ' + escapeHtml(new Date(state.calledAt).toLocaleTimeString()) + '</div>';
       }
       html += '</div>';
       return html;
     }
+    // ============== END HAIKU EVIDENCE ARCHITECTURE ==============
 
     function isMarketOpenNow() {
       const now = new Date();
@@ -12176,7 +12143,7 @@ app.get("/", (c) => {
       const dataIntegrityBadge = totalBlocked > 0 ? { text: totalBlocked + ' blocked', color: 'var(--gold)' } : { text: 'clear', color: 'var(--green)' };
       let dataIntegrityContent = renderDataReliabilityCard() + renderHaikuValidationCard();
       ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { dataIntegrityContent += renderRuleEngineCard(sym, data[sym]); });
-      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { dataIntegrityContent += renderHaikuEvidenceCard(sym, data[sym]); });
+      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((sym) => { dataIntegrityContent += renderHaikuEvidenceCard(sym); });
       dataIntegrityContent += renderTruthEngineCard() + renderMarketDnaCard();
       html += renderAccordionChapter('data_integrity', '01', 'Data integrity + rule engine', dataIntegrityBadge,
         'Signals with stale or missing data right now, plus the deterministic verdict for each index.', dataIntegrityContent,
@@ -17781,102 +17748,92 @@ app.post("/api/haiku-verdict", async (c) => {
   }
 });
 
-// ============== HAIKU EVIDENCE ARCHITECTURE (2026-08-22) — STEP 5 (JSON) ==============
-// Separate cache and endpoint from /api/haiku-verdict above -- does not
-// touch or replace it. Same cost-guard shape (15 min or verdict change).
-// System prompt is deliberately narrow: Haiku receives the ALREADY-
-// DECIDED verdict/confidence/action/drivers and must copy them back
-// unchanged, only adding a short JSON explanation. Enforced twice: once
-// in the prompt, once server-side by overwriting any field Haiku tried
-// to change with the original deterministic value before returning.
+// Hardened merge of the latest GitHub Haiku Evidence endpoint. The payload is
+// a legacy Rule Engine SHADOW explanation packet, never an option-buying
+// decision. Authentication protects Anthropic credits; cache identity covers
+// every immutable field instead of symbol+verdict alone.
 interface HaikuEvidenceCacheEntry {
-  verdict: string;
-  responseJson: any;
+  fingerprint: string;
+  responseJson: Record<string, unknown>;
   calledAt: number;
 }
 const haikuEvidenceCache = new Map<string, HaikuEvidenceCacheEntry>();
 
 app.post("/api/haiku-evidence-verdict", async (c) => {
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite session required for Haiku evidence review." }, 401);
+
   let body: any;
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "Invalid request body \u2014 expected JSON." }, 400);
+    return c.json({ error: "Invalid request body — expected JSON." }, 400);
   }
-  const symbol = body.symbol;
-  const verdict = body.verdict;
-  if (!symbol || !verdict) return c.json({ error: "symbol and verdict are required" }, 400);
+  if (JSON.stringify(body || {}).length > 20_000) return c.json({ error: "Evidence payload is too large." }, 413);
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return c.json({ error: "ANTHROPIC_API_KEY is not configured on the server" }, 500);
+  const symbols = new Set(["NIFTY", "BANKNIFTY", "SENSEX"]);
+  const reliabilities = new Set(["PASS", "DEGRADED", "FAIL"]);
+  const actions = new Set(["WATCH", "REVIEW_ELIGIBLE", "WAIT", "NO_ACTION"]);
+  const drivers = new Set(["UNEXPLAINED", "DIRECTION", "VOLATILITY", "DECAY", "MIXED"]);
+  const conflicts = new Set(["NO_CONFLICT", "NO_DIRECTIONAL_VERDICT", "EXPLAINED_DIVERGENCE", "UNRESOLVED_CONFLICT", "CRITICAL_DATA_CONFLICT"]);
+  const confidenceValues = new Set(["HIGH", "MEDIUM", "LOW"]);
+  const symbol = String(body?.symbol || "").toUpperCase();
+  const verdict = String(body?.verdict || "").slice(0, 80);
+  const reliability = String(body?.reliability || "");
+  const action = String(body?.action || "");
+  const confidence = String(body?.confidence || "").toUpperCase();
+  const ceDriver = String(body?.ce_driver || "");
+  const peDriver = String(body?.pe_driver || "");
+  const conflict = String(body?.conflict || "");
+  if (!symbols.has(symbol) || !verdict || !reliabilities.has(reliability) || !actions.has(action)
+      || !confidenceValues.has(confidence) || !drivers.has(ceDriver) || !drivers.has(peDriver) || !conflicts.has(conflict)) {
+    return c.json({ error: "Invalid or unsupported evidence fields." }, 400);
+  }
+  if (body?.architecture_boundary !== "SHADOW_EXPLANATION_ONLY_NOT_OPTION_BUYING_SIGNAL") {
+    return c.json({ error: "Architecture boundary missing; evidence endpoint cannot be used as a trade signal." }, 400);
+  }
 
+  const evidenceGroups = Array.isArray(body.evidence_groups) ? body.evidence_groups.slice(0, 3).map((group: any) => ({
+    group: String(group?.group || "").slice(0, 60),
+    direction: ["CE", "PE", "NEUTRAL"].includes(String(group?.direction)) ? String(group.direction) : "NEUTRAL",
+    strength: Number.isFinite(Number(group?.strength)) ? Number(group.strength) : 0,
+    evidence: Array.isArray(group?.evidence) ? group.evidence.slice(0, 12).map((item: unknown) => String(item).slice(0, 100)) : [],
+  })) : [];
+  const immutablePacket = {
+    symbol, verdict, confidence, action, ce_driver: ceDriver, pe_driver: peDriver,
+    conflict, reliability, evidence_groups: evidenceGroups,
+    volatility_context: String(body?.volatility_context || "unavailable").slice(0, 300),
+    price_action_context: String(body?.price_action_context || "unavailable").slice(0, 300),
+    invalidation: String(body?.invalidation || "unavailable").slice(0, 300),
+    data_warning: String(body?.data_warning || "none").slice(0, 500),
+    driver_note: String(body?.driver_note || "").slice(0, 300),
+    architecture_boundary: body.architecture_boundary,
+  };
+  const fingerprint = createHash("sha256").update(JSON.stringify(immutablePacket)).digest("hex");
   const now = Date.now();
   const cached = haikuEvidenceCache.get(symbol);
-  const verdictChanged = !cached || cached.verdict !== verdict;
-  const guardWindowPassed = !cached || (now - cached.calledAt) >= HAIKU_COST_GUARD_MS;
-
-  if (cached && !verdictChanged && !guardWindowPassed) {
+  if (cached && cached.fingerprint === fingerprint && now - cached.calledAt < HAIKU_COST_GUARD_MS) {
     return c.json({ ...cached.responseJson, fromCache: true });
   }
+  if (!process.env.ANTHROPIC_API_KEY) return c.json({ error: "ANTHROPIC_API_KEY is not configured on the server" }, 503);
 
-  const systemPrompt =
-    "You explain an ALREADY-DECIDED options-trading verdict for a retail trader. A deterministic rule engine -- not you -- has already set verdict, confidence, action, ce_driver, and pe_driver. You must copy those five fields back EXACTLY as given, never change them, never compute a new score/target/stop-loss/probability. " +
-    "Use evidence_groups, volatility_context, price_action_context, conflict, and data_warning only to write a short plain-language reason. " +
-    "Vega is sensitivity, not direction. Theta is decay sensitivity, not guaranteed future loss. IV is volatility context, not direction. Never infer smart-money, stop-hunting, or manipulation. " +
-    "Respond with ONLY a JSON object, no markdown, no preamble: " +
-    '{"verdict": string, "confidence": string, "action": string, "ce_driver": string, "pe_driver": string, "explanation": string}. ' +
-    "The explanation field must be under 120 words.";
+  const prompt =
+    `Explain this already-decided SHADOW evidence verdict in 2-3 short Odia sentences, keeping familiar trading terms in English. ` +
+    `Immutable packet: ${JSON.stringify(immutablePacket)}. ` +
+    `Do not change verdict, confidence, action, drivers, conflict, or reliability. Do not create a BUY/SELL signal, score, probability, target, or stop. ` +
+    `India VIX is context, not the selected option's IV. CE/PE drivers are UNEXPLAINED unless exact M6 attribution is supplied. No markdown.`;
+  const explanation = await callHaikuPlain(prompt);
+  if (!explanation) return c.json({ error: "Haiku explanation unavailable; deterministic fields remain unchanged." }, 502);
 
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 400,
-        system: systemPrompt,
-        messages: [{ role: "user", content: JSON.stringify(body) }],
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      return c.json({ error: `Anthropic API error ${response.status}: ${errText}` }, 502);
-    }
-
-    const json: any = await response.json();
-    const textBlock = Array.isArray(json.content) ? json.content.find((b: any) => b.type === "text") : null;
-    const raw = textBlock ? textBlock.text : null;
-    let parsed: any = null;
-    try {
-      parsed = raw ? JSON.parse(raw.replace(/```json|```/g, "").trim()) : null;
-    } catch {
-      parsed = null;
-    }
-
-    // Enforcement: the deterministic fields ALWAYS win, regardless of
-    // what Haiku returned -- this is not optional and not a fallback,
-    // it runs on every response.
-    const responseJson = {
-      symbol,
-      verdict: body.verdict,
-      confidence: body.confidence,
-      action: body.action,
-      ce_driver: body.ce_driver,
-      pe_driver: body.pe_driver,
-      conflict: body.conflict,
-      reliability: body.reliability,
-      explanation: (parsed && typeof parsed.explanation === "string") ? parsed.explanation : "No explanation returned.",
-      calledAt: new Date(now).toISOString(),
-    };
-
-    haikuEvidenceCache.set(symbol, { verdict, responseJson, calledAt: now });
-    return c.json({ ...responseJson, fromCache: false });
-  } catch (err: any) {
-    return c.json({ error: `Haiku call failed: ${err.message}` }, 500);
-  }
+  const responseJson = {
+    ...immutablePacket,
+    explanation,
+    calledAt: new Date(now).toISOString(),
+    aiRole: "EXPLAIN_ONLY_SHADOW",
+  };
+  haikuEvidenceCache.set(symbol, { fingerprint, responseJson, calledAt: now });
+  return c.json({ ...responseJson, fromCache: false });
 });
-// ============== END HAIKU EVIDENCE ARCHITECTURE STEP 5 ==============
 
 app.get("/api/recovery/active", (c) => {
   const active = recoveryAttempts.filter((r) => r.status === "RETRYING" || r.status === "MANUAL_ACTION_REQUIRED");
@@ -19836,6 +19793,352 @@ function v2ContractQualitySort(a: V2ReviewCandidate, b: V2ReviewCandidate): numb
   return a.strike - b.strike;
 }
 
+// ============================================================================
+// OPTION BUYING STRUCTURE ENGINE — FAIL-CLOSED, FORWARD-TEST ONLY
+//
+// Price structure chooses direction. Premium behaviour confirms whether that
+// direction is actually buyable. PCR/OI and VIX remain independent supporting
+// evidence, never standalone direction. Recorder samples are observations,
+// NOT exchange OHLC candles; a sampled breach/reclaim is never called a wick.
+// ============================================================================
+type OptionBuyingSignal = "STRONG BUY CE" | "BUY CE" | "STRONG BUY PE" | "BUY PE" | "NO TRADE";
+type OptionBuyingGateStatus = "PASS" | "FAIL" | "WARN" | "MISSING";
+type OptionBuyingExpiryRole = "ENTRY_CURRENT" | "CONFIRM_NEXT" | "CONTEXT_MONTHLY";
+
+interface OptionBuyingGate {
+  name: string;
+  status: OptionBuyingGateStatus;
+  blocking: boolean;
+  reason: string;
+}
+
+interface OptionBuyingExpiryEvidence {
+  role: OptionBuyingExpiryRole;
+  expiryDate: string | null;
+  calendarDte: number | null;
+  strike: number | null;
+  sameStrike: boolean;
+  favoredPremium: number | null;
+  oppositePremium: number | null;
+  favoredPdh: number | null;
+  favoredPdl: number | null;
+  favoredPivot: number | null;
+  oppositePdh: number | null;
+  oppositePdl: number | null;
+  oppositePivot: number | null;
+  favoredLocation: "ABOVE_PDH" | "ABOVE_PIVOT" | "BELOW_PIVOT" | "BELOW_PDL" | "LEVELS_MISSING";
+  oppositeLocation: "ABOVE_PDH" | "ABOVE_PIVOT" | "BELOW_PIVOT" | "BELOW_PDL" | "LEVELS_MISSING";
+  alignment: "SUPPORTIVE" | "CONFLICT" | "MIXED" | "MISSING";
+}
+
+interface OptionBuyingStructureResult {
+  symbol: V2PremiumSymbol;
+  generatedAt: string;
+  signal: OptionBuyingSignal;
+  side: V2PremiumSide | null;
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  validationMode: "DEEP_VALIDATE_BY_DEFAULT";
+  validationStatus: "UNCALIBRATED_FORWARD_TEST_ONLY";
+  executionMode: "ALERT_AND_MANUAL_CONFIRMATION_ONLY";
+  marketPhase: V2MarketPhase;
+  dte: number | null;
+  dteClass: "EXPIRY_DAY" | "NEAR_EXPIRY" | "STANDARD" | "POSITIONAL" | "UNAVAILABLE";
+  truthVerdict: TruthVerdict;
+  gates: OptionBuyingGate[];
+  hardBlockReasons: string[];
+  warnings: string[];
+  evidenceGroups: {
+    priceStructure: boolean;
+    premiumBehaviour: boolean;
+    pcrOi: boolean;
+    volatilityContext: boolean;
+    supportiveCount: number;
+  };
+  price: {
+    spot: number | null;
+    vwap: number | null;
+    pdh: number | null;
+    pdl: number | null;
+    pivot: number | null;
+    acceptanceSamples: number;
+    liquidityEvent: "SAMPLED_PDL_SWEEP_RECLAIM" | "SAMPLED_PDH_SWEEP_REJECTION" | "NONE" | "INSUFFICIENT_HISTORY";
+  };
+  premiums: {
+    current: OptionBuyingExpiryEvidence | null;
+    next: OptionBuyingExpiryEvidence | null;
+    monthly: OptionBuyingExpiryEvidence | null;
+    favoredChange: number | null;
+    oppositeChange: number | null;
+    intrinsicChange: number | null;
+    extrinsicChange: number | null;
+    ivChange: number | null;
+    dominantDriver: string | null;
+  };
+  positioning: { pcr: number | null; pcrTrend: "RISING" | "FALLING" | "FLAT" | "MISSING"; oiState: string | null };
+  volatility: { indiaVix: number | null; vixChangePercent: number | null; warning: string | null };
+  risk: { capital: number; maxLoss: number; lotSize: number | null; spreadPct: number | null; minimumRewardRisk: number };
+  explanationPacket: {
+    immutableSignal: OptionBuyingSignal;
+    observations: string[];
+    risks: string[];
+    forbiddenClaims: string[];
+  };
+  interpretationGuard: string;
+}
+
+function optionBuyingCalendarDte(expiryDate: Date): number | null {
+  if (!(expiryDate instanceof Date) || !Number.isFinite(expiryDate.getTime())) return null;
+  const today = indiaTradingDate();
+  const expiry = expiryDate.toISOString().slice(0, 10);
+  const todayMs = Date.parse(`${today}T00:00:00Z`);
+  const expiryMs = Date.parse(`${expiry}T00:00:00Z`);
+  return Number.isFinite(todayMs) && Number.isFinite(expiryMs)
+    ? Math.round((expiryMs - todayMs) / 86_400_000)
+    : null;
+}
+
+function optionBuyingPivot(high: number | null | undefined, low: number | null | undefined, close: number | null | undefined): number | null {
+  return high != null && low != null && close != null && high > 0 && low > 0 && close > 0 && high >= low
+    ? Number(((high + low + close) / 3).toFixed(2))
+    : null;
+}
+
+function optionBuyingPremiumLocation(leg: PremiumData | null): OptionBuyingExpiryEvidence["favoredLocation"] {
+  if (!leg || !(leg.lastPrice > 0) || !(leg.pdh > 0) || !(leg.pdl > 0)) return "LEVELS_MISSING";
+  if (leg.lastPrice > leg.pdh) return "ABOVE_PDH";
+  if (leg.lastPrice < leg.pdl) return "BELOW_PDL";
+  const pivot = optionBuyingPivot(leg.pdh, leg.pdl, leg.pdc);
+  if (pivot == null) return "LEVELS_MISSING";
+  return leg.lastPrice >= pivot ? "ABOVE_PIVOT" : "BELOW_PIVOT";
+}
+
+function optionBuyingExpiryEvidence(
+  exp: ExpiryData | null,
+  side: V2PremiumSide,
+  preferredStrike: number,
+  role: OptionBuyingExpiryRole,
+  atmStrike: number
+): OptionBuyingExpiryEvidence | null {
+  if (!exp || !(exp.expiryDate instanceof Date) || !Number.isFinite(exp.expiryDate.getTime())) return null;
+  const favoredLegs = side === "CE" ? exp.ceStrikes || [] : exp.peStrikes || [];
+  const oppositeLegs = side === "CE" ? exp.peStrikes || [] : exp.ceStrikes || [];
+  const favored = favoredLegs.find((leg) => leg.strike === preferredStrike)
+    || favoredLegs.find((leg) => leg.strike === atmStrike)
+    || favoredLegs.find((leg) => leg.isAtm)
+    || null;
+  const opposite = favored
+    ? oppositeLegs.find((leg) => leg.strike === favored.strike) || oppositeLegs.find((leg) => leg.isAtm) || null
+    : null;
+  const favoredLocation = optionBuyingPremiumLocation(favored);
+  const oppositeLocation = optionBuyingPremiumLocation(opposite);
+  const favoredStrong = favoredLocation === "ABOVE_PDH" || favoredLocation === "ABOVE_PIVOT";
+  const oppositeWeak = oppositeLocation === "BELOW_PDL" || oppositeLocation === "BELOW_PIVOT";
+  const favoredWeak = favoredLocation === "BELOW_PDL" || favoredLocation === "BELOW_PIVOT";
+  const oppositeStrong = oppositeLocation === "ABOVE_PDH" || oppositeLocation === "ABOVE_PIVOT";
+  const alignment: OptionBuyingExpiryEvidence["alignment"] = !favored || !opposite
+    || favoredLocation === "LEVELS_MISSING" || oppositeLocation === "LEVELS_MISSING"
+    ? "MISSING"
+    : favoredStrong && oppositeWeak ? "SUPPORTIVE" : favoredWeak && oppositeStrong ? "CONFLICT" : "MIXED";
+  return {
+    role,
+    expiryDate: exp.expiryDate.toISOString().slice(0, 10),
+    calendarDte: optionBuyingCalendarDte(exp.expiryDate),
+    strike: favored?.strike ?? null,
+    sameStrike: favored?.strike === preferredStrike,
+    favoredPremium: favored?.lastPrice ?? null,
+    oppositePremium: opposite?.lastPrice ?? null,
+    favoredPdh: favored?.pdh || null,
+    favoredPdl: favored?.pdl || null,
+    favoredPivot: favored ? optionBuyingPivot(favored.pdh, favored.pdl, favored.pdc) : null,
+    oppositePdh: opposite?.pdh || null,
+    oppositePdl: opposite?.pdl || null,
+    oppositePivot: opposite ? optionBuyingPivot(opposite.pdh, opposite.pdl, opposite.pdc) : null,
+    favoredLocation,
+    oppositeLocation,
+    alignment,
+  };
+}
+
+function buildOptionBuyingStructure(
+  symbol: V2PremiumSymbol,
+  session: KiteSession,
+  candidateResult: any,
+  maxSnapshots = 20
+): OptionBuyingStructureResult {
+  const m = session.marketSnapshot?.[symbol];
+  const candidate = candidateResult?.selectedCandidate as V2ReviewCandidate | null | undefined;
+  const side: V2PremiumSide | null = candidate?.side || null;
+  const marketPhase = v2MarketPhaseNow();
+  const truth = computeTruthReport(m);
+  const gates: OptionBuyingGate[] = [];
+  const warnings: string[] = [];
+  const pushGate = (name: string, passed: boolean, reason: string, blocking = true, missing = false): void => {
+    gates.push({ name, status: passed ? "PASS" : missing ? "MISSING" : blocking ? "FAIL" : "WARN", blocking: !passed && blocking, reason });
+    if (!passed && !blocking) warnings.push(reason);
+  };
+  const capitalConfig = Number(process.env.OPTION_BUYING_CAPITAL || 50_000);
+  const capital = Number.isFinite(capitalConfig) && capitalConfig > 0 ? capitalConfig : 50_000;
+  const configuredMaxDte = Number(process.env.OPTION_BUYING_MAX_DTE || 45);
+  const maximumDte = Number.isFinite(configuredMaxDte) && configuredMaxDte >= 0 ? configuredMaxDte : 45;
+  const maxLoss = Number(Math.min(capital * 0.01, 750).toFixed(2));
+  const currentExpiry = v2CurrentExpiry(m);
+  const dte = currentExpiry ? optionBuyingCalendarDte(currentExpiry.expiryDate) : null;
+  const dteClass: OptionBuyingStructureResult["dteClass"] = dte == null ? "UNAVAILABLE"
+    : dte === 0 ? "EXPIRY_DAY" : dte <= 2 ? "NEAR_EXPIRY" : dte <= 15 ? "STANDARD" : "POSITIONAL";
+  const nowIst = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const istMinutes = nowIst.getHours() * 60 + nowIst.getMinutes();
+
+  pushGate("LIVE_MARKET", marketPhase === "LIVE_SESSION", `Market phase: ${marketPhase}.`);
+  pushGate("FIRST_15_MINUTES", istMinutes >= 9 * 60 + 30, "Wait until the first 15-minute opening structure has completed.");
+  pushGate("TRUTH_AND_SYNC", truth.overallVerdict === "TRUE", `Truth verdict ${truth.overallVerdict}; rejected: ${truth.rejectedFields.join(", ") || "none"}.`);
+  pushGate("REVIEWABLE_CONTRACT", !!candidate && candidate.reviewStatus === "REVIEWABLE_DATA", "Selected ATM/1-ITM contract must have complete live quote/liquidity data.", true, !candidate);
+  pushGate("H2_CONTRACT_IDENTITY", candidateResult?.h2Gate?.status === "PASS", "Contract identity, expiry, strike and exchange timestamp must pass H2.");
+  pushGate("H4_DATA_QUALITY", candidateResult?.h4Gate?.status === "PASS", "Selected contract must pass the H4 hard data-quality gate.");
+  pushGate("H10_INTEGRITY", candidateResult?.h10Detector?.hardBlock !== true, "Objective engine/data contradictions must not be present.");
+  pushGate("EXPIRY_RANGE", dte != null && dte >= 0 && dte <= maximumDte, `Calendar DTE must be between 0 and ${maximumDte}; observed ${dte ?? "missing"}.`, true, dte == null);
+  if (dte === 0) {
+    pushGate("EXPIRY_DAY_CUTOFF", istMinutes < 14 * 60 + 30, "No new 0-DTE buying setup after 14:30 IST.");
+    warnings.push("0 DTE: accelerated theta/gamma risk; next-expiry confirmation and tight liquidity are mandatory.");
+  } else if (dte != null && dte <= 2) {
+    warnings.push(`${dte} DTE: near-expiry theta sensitivity requires next-expiry confirmation.`);
+  }
+  if (istMinutes >= 12 * 60 + 30 && istMinutes < 13 * 60 + 30) warnings.push("12:30–13:30 IST is a lower-quality intraday window; require exceptional structure.");
+
+  const sortedExpiries = [...(m?.expiries || [])]
+    .filter((exp) => exp.expiryDate instanceof Date && Number.isFinite(exp.expiryDate.getTime()))
+    .sort((a, b) => a.expiryDate.getTime() - b.expiryDate.getTime())
+    .filter((exp, index, all) => index === 0 || exp.expiryDate.toISOString().slice(0, 10) !== all[index - 1].expiryDate.toISOString().slice(0, 10));
+  const nextExpiry = sortedExpiries.find((exp) => currentExpiry && exp.expiryDate.getTime() > currentExpiry.expiryDate.getTime()) || null;
+  const monthlyExpiry = [...sortedExpiries].reverse().find((exp) => exp.expiry === "Monthly" || v2ExpirySeriesType(exp, sortedExpiries) === "MONTH_END_SERIES") || null;
+  const current = side && candidate && m ? optionBuyingExpiryEvidence(currentExpiry, side, candidate.strike, "ENTRY_CURRENT", m.atmStrike) : null;
+  const next = side && candidate && m ? optionBuyingExpiryEvidence(nextExpiry, side, candidate.strike, "CONFIRM_NEXT", m.atmStrike) : null;
+  const monthly = side && candidate && m && monthlyExpiry && monthlyExpiry !== currentExpiry && monthlyExpiry !== nextExpiry
+    ? optionBuyingExpiryEvidence(monthlyExpiry, side, candidate.strike, "CONTEXT_MONTHLY", m.atmStrike)
+    : null;
+  pushGate("CURRENT_PREMIUM_STRUCTURE", current?.alignment === "SUPPORTIVE", `Current-expiry favored/opposite premium alignment: ${current?.alignment || "MISSING"}.`, true, !current || current.alignment === "MISSING");
+  if (dte != null && dte <= 2) {
+    pushGate("NEXT_EXPIRY_CONFIRMATION", next?.alignment === "SUPPORTIVE", `Near-expiry entry requires supportive next expiry; observed ${next?.alignment || "MISSING"}.`, true, !next);
+  } else if (next?.alignment === "CONFLICT") {
+    pushGate("NEXT_EXPIRY_CONFIRMATION", false, "Next-expiry favored premium contradicts the current-expiry setup.");
+  } else if (!next || next.alignment === "MISSING") {
+    pushGate("NEXT_EXPIRY_CONFIRMATION", false, "Next-expiry confirmation is unavailable; strong classification is prohibited.", false, true);
+  } else {
+    pushGate("NEXT_EXPIRY_CONFIRMATION", true, `Next-expiry structure: ${next.alignment}.`);
+  }
+  if (monthly?.alignment === "CONFLICT") warnings.push("Monthly-expiry premium structure conflicts with the entry expiry; classification cannot be STRONG.");
+  if (next && !next.sameStrike) warnings.push("Next expiry uses its nearest available ATM strike; raw premiums are not compared across different strikes/DTE.");
+
+  const recentSnapshots = recorderSession.snapshots
+    .filter((snap) => snap.snapshotStatus === "LIVE" && snap.truthVerdicts?.[symbol] === "TRUE" && snap[symbol]?.spot != null)
+    .slice(-Math.max(2, Math.min(maxSnapshots, RECORDER_MAX_SNAPSHOTS)));
+  const lastTwo = recentSnapshots.slice(-2);
+  const spot = m?.spot && Number.isFinite(m.spot) ? m.spot : null;
+  const vwap = m?.vwap && Number.isFinite(m.vwap) ? m.vwap : null;
+  const pricePivot = m ? optionBuyingPivot(m.pdh, m.pdl, m.pdcClose) : null;
+  const acceptanceSamples = lastTwo.filter((snap) => {
+    const point = snap[symbol];
+    return point?.spot != null && vwap != null && side != null && (side === "CE" ? point.spot > vwap : point.spot < vwap);
+  }).length;
+  const priceStructure = !!m && !!side && vwap != null && pricePivot != null && acceptanceSamples === 2
+    && (side === "CE" ? m.spot > vwap && m.spot > pricePivot : m.spot < vwap && m.spot < pricePivot);
+  pushGate("SPOT_VWAP_PIVOT_ACCEPTANCE", priceStructure, "Spot must hold its directional side of real index VWAP and daily Fibonacci Pivot for two completed recorder observations.", true, vwap == null || pricePivot == null || lastTwo.length < 2);
+  const regime = m ? buildV2MarketBehaviourRegime(symbol, session, m) : null;
+  pushGate("REGIME_STRUCTURE_ALIGNMENT", !!side && !!regime && !regime.structure?.conflict
+    && v2NormalizeDirectionalWord(regime.regime?.pressure) === (side === "CE" ? "UP" : "DOWN"),
+  "Opening bias, structural bias and current pressure must not conflict with the selected option side.");
+
+  const sampledSpots = recentSnapshots.map((snap) => snap[symbol]?.spot).filter((value): value is number => value != null);
+  let liquidityEvent: OptionBuyingStructureResult["price"]["liquidityEvent"] = sampledSpots.length < 2 ? "INSUFFICIENT_HISTORY" : "NONE";
+  if (m && side === "CE" && m.pdl > 0 && sampledSpots.some((value) => value < m.pdl) && m.spot > m.pdl) liquidityEvent = "SAMPLED_PDL_SWEEP_RECLAIM";
+  if (m && side === "PE" && m.pdh > 0 && sampledSpots.some((value) => value > m.pdh) && m.spot < m.pdh) liquidityEvent = "SAMPLED_PDH_SWEEP_REJECTION";
+
+  const history = buildV2PremiumCompositionHistory(symbol, maxSnapshots);
+  const favored = candidate && side ? history.comparisons.find((row) => row.side === side && row.strike === candidate.strike) : undefined;
+  const oppositeSide = side === "CE" ? "PE" : "CE";
+  const opposite = candidate && side ? history.comparisons.find((row) => row.side === oppositeSide && row.strike === candidate.strike) : undefined;
+  const favoredChange = favored?.change.premium.amount ?? null;
+  const oppositeChange = opposite?.change.premium.amount ?? null;
+  const intrinsicChange = favored?.change.intrinsic.amount ?? null;
+  const extrinsicChange = favored?.change.extrinsic.amount ?? null;
+  const ivChange = favored?.change.iv.amount ?? null;
+  const premiumBehaviour = favoredChange != null && favoredChange > 0 && oppositeChange != null && oppositeChange < 0;
+  pushGate("FAVORED_UP_OPPOSITE_DOWN", premiumBehaviour, "Same-strike recorder history must show the selected premium expanding while the opposite premium weakens.", true, favoredChange == null || oppositeChange == null);
+  if (favoredChange != null && oppositeChange != null && favoredChange > 0 && oppositeChange > 0) warnings.push("Both CE and PE premiums are rising; IV expansion can imitate directional strength.");
+  if (favoredChange != null && oppositeChange != null && favoredChange < 0 && oppositeChange < 0) warnings.push("Both CE and PE premiums are falling; theta/IV contraction dominates the pair.");
+  if (intrinsicChange != null && intrinsicChange <= 0 && extrinsicChange != null && extrinsicChange > 0) warnings.push("Selected premium expansion is extrinsic-led; underlying participation is not yet confirmed.");
+
+  const snapshotPcr = (session.snapshotHistory || [])
+    .map((entry) => entry[symbol]?.pcr)
+    .filter((value): value is number => value != null && Number.isFinite(value));
+  const priorPcr = snapshotPcr.length >= 2 ? snapshotPcr[snapshotPcr.length - 2] : null;
+  const pcr = m?.pcr != null && Number.isFinite(m.pcr) ? m.pcr : null;
+  const pcrTrend: OptionBuyingStructureResult["positioning"]["pcrTrend"] = pcr == null || priorPcr == null ? "MISSING"
+    : pcr > priorPcr ? "RISING" : pcr < priorPcr ? "FALLING" : "FLAT";
+  const oiEvidence = buildV2OiPositioningEvidence(symbol, maxSnapshots);
+  const pcrOi = side === "CE" ? pcr != null && pcr >= 0.95 && pcrTrend === "RISING"
+    : side === "PE" ? pcr != null && pcr <= 0.95 && pcrTrend === "FALLING" : false;
+  const indiaVix = m?.vix && Number.isFinite(m.vix) ? m.vix : null;
+  const vixChangePercent = m && Number.isFinite(m.vixChangePercent) ? m.vixChangePercent : null;
+  const volatilityContext = side === "CE" ? vixChangePercent != null && vixChangePercent <= 0
+    : side === "PE" ? vixChangePercent != null && vixChangePercent >= 0 : false;
+  const vixWarning = indiaVix != null && indiaVix >= 15.65 ? "Elevated India VIX: reduce risk and expect unstable option premiums." : null;
+  if (vixWarning) warnings.push(vixWarning);
+  pushGate("INDEPENDENT_SUPPORT", pcrOi || volatilityContext, "Price and premium confirmation require independent PCR/OI or volatility-context support.", true, pcr == null && vixChangePercent == null);
+  if (dte != null && dte <= 2) pushGate("NEAR_EXPIRY_POSITIONING", pcrOi, "0–2 DTE setups additionally require the directional PCR trend to agree.", true, pcrTrend === "MISSING");
+
+  const spreadPct = candidate?.spreadPctOfMid ?? null;
+  const maxSpread = dte != null && dte <= 2 ? 2.5 : 4;
+  pushGate("EXECUTABLE_SPREAD", spreadPct != null && spreadPct <= maxSpread, `Bid/ask spread must be at most ${maxSpread}% of mid; observed ${spreadPct == null ? "missing" : spreadPct.toFixed(2) + "%"}.`, true, spreadPct == null);
+  pushGate("POSITIVE_VOLUME_OI", !!candidate && (candidate.volume || 0) > 0 && (candidate.oi || 0) > 0, "Selected contract must have positive observed volume and open interest.");
+  const hardBlockReasons = gates.filter((gate) => gate.blocking).map((gate) => `${gate.name}: ${gate.reason}`);
+  const supportiveCount = [priceStructure, premiumBehaviour, pcrOi, volatilityContext].filter(Boolean).length;
+  const strong = hardBlockReasons.length === 0 && supportiveCount === 4 && next?.alignment === "SUPPORTIVE"
+    && monthly?.alignment !== "CONFLICT" && !vixWarning && !(dte != null && dte <= 2);
+  const signal: OptionBuyingSignal = hardBlockReasons.length > 0 || !side ? "NO TRADE"
+    : side === "CE" ? strong ? "STRONG BUY CE" : "BUY CE"
+    : strong ? "STRONG BUY PE" : "BUY PE";
+  const observations = [
+    `Spot ${spot ?? "missing"}; VWAP ${vwap ?? "missing"}; daily Pivot ${pricePivot ?? "missing"}; accepted samples ${acceptanceSamples}/2.`,
+    `Premium ${side || "none"}: current ${current?.alignment || "MISSING"}, next ${next?.alignment || "MISSING"}, monthly ${monthly?.alignment || "MISSING"}.`,
+    `Same-strike premium changes: favored ${favoredChange ?? "missing"}; opposite ${oppositeChange ?? "missing"}; intrinsic ${intrinsicChange ?? "missing"}; extrinsic ${extrinsicChange ?? "missing"}; IV ${ivChange ?? "missing"}.`,
+    `OI PCR ${pcr ?? "missing"} (${pcrTrend}); India VIX ${indiaVix ?? "missing"}; VIX change ${vixChangePercent ?? "missing"}%.`,
+    `Calendar DTE ${dte ?? "missing"} (${dteClass}); spread ${spreadPct ?? "missing"}%; sampled liquidity event ${liquidityEvent}.`,
+  ];
+  return {
+    symbol,
+    generatedAt: new Date().toISOString(),
+    signal,
+    side,
+    confidence: signal === "NO TRADE" ? "LOW" : strong ? "HIGH" : "MEDIUM",
+    validationMode: "DEEP_VALIDATE_BY_DEFAULT",
+    validationStatus: "UNCALIBRATED_FORWARD_TEST_ONLY",
+    executionMode: "ALERT_AND_MANUAL_CONFIRMATION_ONLY",
+    marketPhase,
+    dte,
+    dteClass,
+    truthVerdict: truth.overallVerdict,
+    gates,
+    hardBlockReasons,
+    warnings,
+    evidenceGroups: { priceStructure, premiumBehaviour, pcrOi, volatilityContext, supportiveCount },
+    price: { spot, vwap, pdh: m?.pdh || null, pdl: m?.pdl || null, pivot: pricePivot, acceptanceSamples, liquidityEvent },
+    premiums: {
+      current, next, monthly, favoredChange, oppositeChange, intrinsicChange, extrinsicChange, ivChange,
+      dominantDriver: candidate?.evidence.premiumAttributionDriver || null,
+    },
+    positioning: { pcr, pcrTrend, oiState: oiEvidence.aggregateState || null },
+    volatility: { indiaVix, vixChangePercent, warning: vixWarning },
+    risk: { capital, maxLoss, lotSize: candidate?.contractMetadata.lotSize || null, spreadPct, minimumRewardRisk: 1.5 },
+    explanationPacket: {
+      immutableSignal: signal,
+      observations,
+      risks: [...hardBlockReasons, ...warnings],
+      forbiddenClaims: ["Do not change the deterministic signal.", "Do not invent missing values or exchange candles.", "Do not call an uncalibrated score a probability or win rate.", "Do not use IV, VIX, PCR or OI as a standalone directional signal.", "Do not claim backtested profitability, guaranteed targets or automatic execution."],
+    },
+    interpretationGuard: "Deterministic evidence alignment only; uncalibrated, forward-test-only, and never an order. Recorder acceptance/sweeps are sampled observations, not verified exchange candles or wick events.",
+  };
+}
+
 // ===== OPTION BUY PROBABILITY ENGINE FUNCTIONS =====
 
 function filterForBuyContext(
@@ -19846,10 +20149,15 @@ function filterForBuyContext(
   const reasons: string[] = [];
   let scoreDeduct = 0;
 
-  // RULE 1: DTE must be >= 3 days (avoid theta crush)
-  if (dte < 3) {
-    reasons.push(`DTE ${dte} < 3 — too close to expiry for buying`);
-    scoreDeduct += 30;
+  // 0–2 DTE is a distinct strategy, not an automatic rejection. Its actual
+  // expiry cutoff, next-expiry agreement and tighter spread are hard-gated
+  // by buildOptionBuyingStructure(); this legacy filter only flags the risk.
+  if (dte < 0) {
+    reasons.push(`DTE ${dte} — expired contract`);
+    scoreDeduct += 50;
+  } else if (dte < 3) {
+    reasons.push(`DTE ${dte.toFixed(2)} — elevated expiry/theta risk; strict structure confirmation required`);
+    scoreDeduct += 10;
   } else if (dte > 15) {
     reasons.push(`DTE ${dte} > 15 — far expiry, capital inefficient`);
     scoreDeduct += 5;
@@ -19884,7 +20192,7 @@ function filterForBuyContext(
   // RULE 5: IV should not be extreme
   const iv = candidate.iv ?? 0;
   const vix = marketSnapshot.vix ?? 0;
-  if (iv > vix * 1.5) {
+  if (iv > 0 && vix > 0 && iv > vix * 1.5) {
     reasons.push(`IV ${iv.toFixed(1)} > 1.5x VIX ${vix.toFixed(1)} — IV too expensive`);
     scoreDeduct += 15;
   }
@@ -20590,7 +20898,11 @@ async function buildV2CandidateSelectionCore(
       probability: buyProbability,
     },
     marketContext: review.evidenceContext,
-    empiricalProbability: buyProbability?.probability ?? null,
+    // The legacy field was incorrectly populated with a heuristic score.
+    // Until outcomes are calibrated, no empirical win probability exists.
+    empiricalProbability: null,
+    alignmentScore: buyProbability?.probability ?? null,
+    scoreCalibrationStatus: "UNCALIBRATED_HEURISTIC_NOT_WIN_PROBABILITY",
     numericScore: buyProbability?.probability ?? null,
     scoringImpact: "NONE",
     aiCall: "NONE",
@@ -20609,6 +20921,7 @@ async function buildV2CandidateSelection(
   const core = await buildV2CandidateSelectionCore(symbol, session, maxSnapshots);
   const h5 = buildV2ProvisionalIsolationReport(core);
   const h10 = buildV2DevilDetector(symbol, session, core);
+  const structureEngine = buildOptionBuyingStructure(symbol, session, { ...core, h10Detector: h10 }, maxSnapshots);
 
   // H10 may hard-block only objective integrity/engine contradictions.
   // Heuristic market anomalies remain shadow warnings and never auto-block.
@@ -20619,6 +20932,7 @@ async function buildV2CandidateSelection(
       blockedCandidate: core.selectedCandidate || null,
       selectedCandidate: null,
       reason: `H10 Devil Detector blocked the shadow candidate: ${h10.hardBlockReasons.join("; ")}`,
+      structureEngine,
       h5Isolation: h5,
       h10Detector: h10,
       executionEligibility: "BLOCKED_BY_H10",
@@ -20633,8 +20947,28 @@ async function buildV2CandidateSelection(
     };
   }
 
+  if ((core.decision === "BEST_CE" || core.decision === "BEST_PE") && structureEngine.signal === "NO TRADE") {
+    const dataGateNames = new Set(["LIVE_MARKET", "TRUTH_AND_SYNC", "REVIEWABLE_CONTRACT", "H2_CONTRACT_IDENTITY", "H4_DATA_QUALITY", "H10_INTEGRITY", "EXPIRY_RANGE", "EXECUTABLE_SPREAD", "POSITIVE_VOLUME_OI"]);
+    const dataBlocked = structureEngine.gates.some((gate) => gate.blocking && dataGateNames.has(gate.name));
+    return {
+      ...core,
+      decision: (dataBlocked ? "NO_TRADE_DATA_QUALITY" : "WAIT_CONFLICT") as V2CandidateDecisionState,
+      blockedCandidate: core.selectedCandidate || null,
+      selectedCandidate: null,
+      reason: `Deep validation blocked the option-buying setup: ${structureEngine.hardBlockReasons.join("; ")}`,
+      structureEngine,
+      h5Isolation: h5,
+      h10Detector: h10,
+      executionEligibility: "BLOCKED_BY_STRUCTURE_ENGINE",
+      productionPipelineIsolation: { ruleEngineFeed: "BLOCKED", aiVerdictFeed: "BLOCKED", orderExecutionFeed: "BLOCKED" },
+      outcomeRecordingEligible: false,
+      interpretationGuardH5: "Fail-closed option-buying validation cannot promote a provisional candidate into execution or a validated probability."
+    };
+  }
+
   return {
     ...core,
+    structureEngine,
     h5Isolation: h5,
     h10Detector: h10,
     executionEligibility: "SHADOW_ONLY",
@@ -20659,6 +20993,51 @@ app.get("/api/v2/candidate-selection", async (c) => {
   const session = getSession(c);
   if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
   return c.json(await buildV2CandidateSelection(rawSymbol as V2PremiumSymbol, session, limit));
+});
+
+app.get("/api/v2/option-buying-structure", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  const rawLimit = Number(c.req.query("limit") || 20);
+  const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
+  const result = await buildV2CandidateSelection(rawSymbol as V2PremiumSymbol, session, limit);
+  return c.json(result.structureEngine || buildOptionBuyingStructure(rawSymbol as V2PremiumSymbol, session, result, limit));
+});
+
+app.post("/api/v2/option-buying-explanation", async (c) => {
+  let payload: { symbol?: string };
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid request body; expected JSON." }, 400);
+  }
+  const rawSymbol = String(payload.symbol || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  const selection = await buildV2CandidateSelection(rawSymbol as V2PremiumSymbol, session, 20);
+  const structure = selection.structureEngine;
+  if (structure.signal === "NO TRADE") {
+    return c.json({ symbol: rawSymbol, signal: structure.signal, explanation: structure.hardBlockReasons.slice(0, 3).join(" ") || "No validated option-buying setup is available.", fromCache: false, aiCall: "SKIPPED_NO_TRADE", structure });
+  }
+  const cacheKey = `OPTION_BUYING_STRUCTURE:${rawSymbol}`;
+  const cached = haikuCache.get(cacheKey);
+  if (cached && cached.verdict === structure.signal && Date.now() - cached.calledAt < HAIKU_COST_GUARD_MS) {
+    return c.json({ symbol: rawSymbol, signal: structure.signal, explanation: cached.explanation, fromCache: true, aiCall: "NONE_CACHE_HIT", structure });
+  }
+  const prompt = `Explain this immutable Indian index-option signal in 2-3 short Odia sentences with familiar English trading terms. Signal: ${structure.signal}. Facts: ${structure.explanationPacket.observations.join(" ")} Risks: ${structure.explanationPacket.risks.join("; ") || "none recorded"}. Rules: ${structure.explanationPacket.forbiddenClaims.join(" ")}`;
+  const explanation = await callHaikuPlain(prompt);
+  if (!explanation) {
+    return c.json({ symbol: rawSymbol, signal: structure.signal, explanation: structure.explanationPacket.observations.slice(0, 2).join(" "), fromCache: false, aiCall: "UNAVAILABLE_DETERMINISTIC_FALLBACK", structure });
+  }
+  haikuCache.set(cacheKey, { verdict: structure.signal, explanation, calledAt: Date.now() });
+  return c.json({ symbol: rawSymbol, signal: structure.signal, explanation, fromCache: false, aiCall: "HAIKU_EXPLAIN_ONLY", structure });
 });
 
 

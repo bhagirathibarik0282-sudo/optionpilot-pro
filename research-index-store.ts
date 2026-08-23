@@ -12,9 +12,9 @@ CREATE TABLE IF NOT EXISTS research_index_daily (
   trade_date DATE NOT NULL,
   index_code TEXT NOT NULL,
   index_name TEXT NOT NULL,
-  open DOUBLE PRECISION NOT NULL CHECK (open > 0),
-  high DOUBLE PRECISION NOT NULL CHECK (high > 0),
-  low DOUBLE PRECISION NOT NULL CHECK (low > 0),
+  open DOUBLE PRECISION NULL CHECK (open IS NULL OR open > 0),
+  high DOUBLE PRECISION NULL CHECK (high IS NULL OR high > 0),
+  low DOUBLE PRECISION NULL CHECK (low IS NULL OR low > 0),
   close DOUBLE PRECISION NOT NULL CHECK (close > 0),
   tri_close DOUBLE PRECISION NULL CHECK (tri_close IS NULL OR tri_close > 0),
   source TEXT NOT NULL,
@@ -23,9 +23,19 @@ CREATE TABLE IF NOT EXISTS research_index_daily (
   validation_status TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT research_index_daily_ohlc_check CHECK (high >= low AND high >= open AND high >= close AND low <= open AND low <= close),
+  CONSTRAINT research_index_daily_ohlc_check CHECK (
+    (high IS NULL OR low IS NULL OR high >= low) AND
+    (high IS NULL OR open IS NULL OR high >= open) AND
+    (high IS NULL OR high >= close) AND
+    (low IS NULL OR open IS NULL OR low <= open) AND
+    (low IS NULL OR low <= close)
+  ),
   CONSTRAINT research_index_daily_unique UNIQUE (trade_date, index_code)
 );
+
+ALTER TABLE research_index_daily ALTER COLUMN open DROP NOT NULL;
+ALTER TABLE research_index_daily ALTER COLUMN high DROP NOT NULL;
+ALTER TABLE research_index_daily ALTER COLUMN low DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS research_index_daily_code_date_idx
   ON research_index_daily (index_code, trade_date DESC);
@@ -64,9 +74,9 @@ type DailyRow = {
   trade_date: string | Date;
   index_code: ResearchIndexCode;
   index_name: string;
-  open: number;
-  high: number;
-  low: number;
+  open: number | null;
+  high: number | null;
+  low: number | null;
   close: number;
   tri_close: number | null;
   source: string;
@@ -98,14 +108,18 @@ function isoOrNull(value: string | Date | null): string | null {
   return value instanceof Date ? value.toISOString() : String(value);
 }
 
+function numberOrNull(value: number | null): number | null {
+  return value === null ? null : Number(value);
+}
+
 function mapDaily(row: DailyRow): ResearchIndexDailyRecord {
   return {
     tradeDate: dateOnly(row.trade_date),
     indexCode: row.index_code,
     indexName: row.index_name,
-    open: Number(row.open),
-    high: Number(row.high),
-    low: Number(row.low),
+    open: numberOrNull(row.open),
+    high: numberOrNull(row.high),
+    low: numberOrNull(row.low),
     close: Number(row.close),
     triClose: row.tri_close === null ? null : Number(row.tri_close),
     source: row.source,

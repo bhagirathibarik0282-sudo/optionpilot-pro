@@ -10,7 +10,7 @@
     "start": "tsx server.ts",
     "research:preflight": "tsx scripts/research-preflight.ts",
     "research:populate": "tsx scripts/populate-research-indices.ts",
-    "test": "NODE_ENV=test node --import tsx --test test/outcome-engine.test.ts test/iv-science.test.ts test/fii-dii-import.test.ts test/research-index.test.ts test/research-index-historical-csv.test.ts test/research-router-auth.test.ts"
+    "test": "NODE_ENV=test node --import tsx --test test/outcome-engine.test.ts test/iv-science.test.ts test/fii-dii-import.test.ts test/research-index.test.ts test/research-index-historical-csv.test.ts test/research-index-partial-ohl.test.ts test/research-router-auth.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.11",

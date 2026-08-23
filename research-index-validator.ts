@@ -21,23 +21,28 @@ export function validateResearchIndexRecord(
   if (!record.indexCode) errors.push("MISSING_INDEX_CODE");
   if (!record.indexName?.trim()) errors.push("MISSING_INDEX_NAME");
   if (!record.source?.trim()) errors.push("MISSING_SOURCE");
+  if (!isFinitePositive(record.close)) errors.push("INVALID_CLOSE_VALUE");
 
-  const ohlc = [record.open, record.high, record.low, record.close];
-  if (!ohlc.every(isFinitePositive)) errors.push("INVALID_OHLC_VALUE");
+  const optionalOhl = [record.open, record.high, record.low];
+  const presentOhl = optionalOhl.filter((value): value is number => value !== null);
+  if (presentOhl.some((value) => !isFinitePositive(value))) errors.push("INVALID_OHL_VALUE");
 
-  if (Number.isFinite(record.high) && Number.isFinite(record.low) && record.high < record.low) {
+  const missingCount = optionalOhl.filter((value) => value === null).length;
+  if (missingCount > 0) warnings.push(`PARTIAL_OHL_MISSING_${missingCount}`);
+
+  if (record.high !== null && record.low !== null && record.high < record.low) {
     errors.push("HIGH_BELOW_LOW");
   }
-  if (Number.isFinite(record.high) && Number.isFinite(record.open) && record.high < record.open) {
+  if (record.high !== null && record.open !== null && record.high < record.open) {
     errors.push("HIGH_BELOW_OPEN");
   }
-  if (Number.isFinite(record.high) && Number.isFinite(record.close) && record.high < record.close) {
+  if (record.high !== null && record.high < record.close) {
     errors.push("HIGH_BELOW_CLOSE");
   }
-  if (Number.isFinite(record.low) && Number.isFinite(record.open) && record.low > record.open) {
+  if (record.low !== null && record.open !== null && record.low > record.open) {
     errors.push("LOW_ABOVE_OPEN");
   }
-  if (Number.isFinite(record.low) && Number.isFinite(record.close) && record.low > record.close) {
+  if (record.low !== null && record.low > record.close) {
     errors.push("LOW_ABOVE_CLOSE");
   }
 

@@ -3693,6 +3693,13 @@ interface PremiumOnlyLiveTracker {
     advancedGreeks: TradeCardAdvancedGreeks | null;
     futuresOiBuildup: string | null;
     marketRegime: string | null;
+    // Frozen once from the same fail-closed dashboard/Telegram decision so
+    // premium-only edits preserve the exact original setup and risk values.
+    compactSignal?: string;
+    compactDte?: number | null;
+    compactLotRisk?: number | null;
+    compactMaxRisk?: number | null;
+    compactWhy?: string | null;
   };
 }
 
@@ -3756,6 +3763,20 @@ function buildPremiumOnlyTradeCardText(t: PremiumOnlyLiveTracker, finalStatus: s
   if (!s) return buildPremiumOnlyMessageText(t, finalStatus);
 
   const elapsedMin = Math.max(0, Math.round((Date.now() - t.createdAtMs) / 60000));
+  if (s.compactSignal && s.compactDte != null && s.compactLotRisk != null
+      && s.compactMaxRisk != null && t.strike != null && t.sl != null
+      && t.t1 != null && t.t2 != null) {
+    const emoji = t.side === "CE" ? "🟢" : "🔴";
+    const why = s.compactWhy || "Validated price, premium, and risk structure.";
+    return `${emoji} <b>${telegramEscapeHtml(t.symbol)} | ${telegramEscapeHtml(s.compactSignal)}</b>\n` +
+      `📊 ${t.strike} ${telegramEscapeHtml(t.side)} | Premium ₹${t.entry} | ${s.compactDte} DTE\n` +
+      `🎯 Entry ₹${t.entry} | SL ₹${t.sl} | T1 ₹${t.t1} | T2 ₹${t.t2}\n` +
+      `🛡 Risk ₹${s.compactLotRisk} / max ₹${s.compactMaxRisk}\n` +
+      `💡 Why: ${telegramEscapeHtml(why)}\n` +
+      `Status: ${premiumOnlyStatusLine(finalStatus)}\n` +
+      `<i>${elapsedMin} min | Manual review only; forward-test only.</i>`;
+  }
+
   const tmPlanForCard: TradeCardTmPlan | null =
     t.sl != null && t.t1 != null && t.t2 != null && t.t3 != null &&
     s.tmRPremium != null && s.tmAtrUnderlying != null && s.tmDeltaUsed != null && s.tmTrailingRule != null
@@ -4010,15 +4031,11 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
         const blockedGateNames = structure.gates.filter((gate) => gate.blocking).map((gate) => gate.name).slice(0, 4);
         const structureFingerprint = `NO_TRADE|${blockedGateNames.join("|")}`;
         if (TELEGRAM_LAST_STRUCTURE_FINGERPRINT.get(symbol) !== structureFingerprint) {
-          const blockingText = structure.hardBlockReasons.slice(0, 4).map((reason) => `• ${telegramEscapeHtml(reason)}`).join("\n");
+          const reason = structure.hardBlockReasons[0] || "No validated option-buying setup is available.";
           await sendAlertSpaced(
-            `⛔ <b>NO TRADE — ${symbol}</b>\n` +
-            `Deep validation: <b>BLOCKED</b> | Truth: ${structure.truthVerdict}\n` +
-            `Spot: ${structure.price.spot ?? "—"} | VWAP: ${structure.price.vwap ?? "—"} | Pivot: ${structure.price.pivot ?? "—"}\n` +
-            `Current expiry: ${structure.premiums.current?.alignment || "MISSING"} | Next expiry: ${structure.premiums.next?.alignment || "MISSING"}\n` +
-            `Blocking conditions:\n${blockingText || "• No confirmed directional option-buying setup."}\n` +
-            `Wait for spot/VWAP acceptance, favored-premium expansion, opposite-premium weakness and independent PCR/OI or VIX support.\n` +
-            `⏰ ${istTime()} | Forward-test only; no automatic order.`,
+            `⛔ <b>${telegramEscapeHtml(symbol)} | NO TRADE</b>\n` +
+            `Reason: ${telegramEscapeHtml(reason)}\n` +
+            `⏰ ${istTime()} | Manual review only.`,
             symbol
           );
           TELEGRAM_LAST_STRUCTURE_FINGERPRINT.set(symbol, structureFingerprint);
@@ -4118,7 +4135,6 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
             const strike = cand?.strike ?? "—";
             const role = cand?.moneynessRole ?? "";
             const premium = cand?.lastPrice != null ? `₹${cand.lastPrice}` : "—";
-            const spot = m?.spot != null ? m.spot.toFixed(2) : "—";
             const emoji = prob.probability >= 85 ? "🟢" : prob.probability >= 75 ? "🟡" : "🟠";
             // 2026-08-19 "check now" fix: originally capped at 7 (widened
             // from the prior 4), but a fresh re-check found that cap could
@@ -4148,15 +4164,6 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
             // is exactly the same as before.
             const scoreReasons = prob.reasons.filter((r) => r.startsWith("✅"));
             const contextNotes = prob.reasons.filter((r) => r.startsWith("ℹ️"));
-            const reasonsText = scoreReasons.length > 0
-              ? scoreReasons.join("\n")
-              : "(no individually-favorable criteria fired — score is driven by the base filter/context factors below)";
-            const contextText = contextNotes.length > 0
-              ? `\nℹ️ Context (informational only, not scored):\n${contextNotes.join("\n")}\n`
-              : "";
-            const riskText = prob.riskFlags.length > 0
-              ? `\n⚠️ Risks (${prob.riskFlags.length}):\n${prob.riskFlags.map((r) => `• ${r}`).join("\n")}`
-              : "";
 
             // Provisional Trade Management Plan (2026-08-21) -- Entry/SL/T1/T2/
             // Trailing. See computeProvisionalTradeManagementPlan's own doc
@@ -4192,59 +4199,50 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
                 : `One-lot planned loss ₹${estimatedLotLoss} exceeds the configured maximum ₹${structure?.risk.maxLoss}.`;
               const riskFingerprint = `NO_TRADE_RISK|${reason}`;
               if (TELEGRAM_LAST_STRUCTURE_FINGERPRINT.get(symbol) !== riskFingerprint) {
-                await sendAlertSpaced(`⛔ <b>NO TRADE — ${symbol}</b>\nRisk gate: ${telegramEscapeHtml(reason)}\n⏰ ${istTime()} | No automatic order.`, symbol);
+                await sendAlertSpaced(
+                  `⛔ <b>${telegramEscapeHtml(symbol)} | NO TRADE</b>\n` +
+                  `Reason: ${telegramEscapeHtml(reason)}\n` +
+                  `⏰ ${istTime()} | Manual review only.`,
+                  symbol
+                );
                 TELEGRAM_LAST_STRUCTURE_FINGERPRINT.set(symbol, riskFingerprint);
               }
               continue;
             }
             // Spend Haiku tokens only after every structure, liquidity and
-            // one-lot risk gate has passed. NO TRADE remains fully deterministic.
+            // one-lot risk gate has passed. Reuse the dashboard explanation
+            // cache so the same setup never spends tokens twice in 15 minutes.
             let haikuWhy: string | null = null;
             try {
-              const haikuPrompt =
-                `Explain this deterministic Indian index-option-buying setup in 2-3 short Odia sentences; keep trading terms in English. No markdown.\n` +
-                `IMMUTABLE signal: ${label} ${symbol} ${strike} (${role}). Internal uncalibrated alignment score: ${prob.probability}/100; grade ${prob.grade}.\n` +
-                `Validated observations: ${structure?.explanationPacket.observations.join(" ") || prob.reasons.join("; ")}.\n` +
-                `Risks: ${[...(structure?.warnings || []), ...prob.riskFlags].join("; ") || "none recorded"}.\n` +
-                `RULES: Explain only supplied price/VWAP, premium-pair, expiry, IV/extrinsic, PCR/OI and risk evidence. ` +
-                `Never alter the signal, invent missing data/candles, call the score win probability, promise targets, suggest automatic execution, or infer direction from IV/VIX/PCR/OI alone. ` +
-                `If evidence conflicts, say NO TRADE. Do not use the characters < or >.`;
-              haikuWhy = await callHaikuPlain(haikuPrompt);
+              const cacheKey = `OPTION_BUYING_STRUCTURE:${symbol}`;
+              const cached = haikuCache.get(cacheKey);
+              if (cached && cached.verdict === label && Date.now() - cached.calledAt < HAIKU_COST_GUARD_MS) {
+                haikuWhy = cached.explanation;
+              } else {
+                const haikuPrompt =
+                  `Explain ${label} ${symbol} ${strike} (${role}) in one short Odia sentence; keep trading terms in English. ` +
+                  `Facts: ${(structure?.explanationPacket.observations || []).slice(0, 3).join(" ")} ` +
+                  `Do not change the signal or invent data, probability, targets, or automatic orders.`;
+                haikuWhy = await callHaikuPlain(haikuPrompt);
+                if (haikuWhy) haikuCache.set(cacheKey, { verdict: label, explanation: haikuWhy, calledAt: Date.now() });
+              }
             } catch (err) {
               console.error(`[Telegram] M12b Haiku why-explanation failed for ${symbol}:`, err instanceof Error ? err.message : err);
             }
-            const haikuText = haikuWhy
-              ? `\n━━━━━━━━━━━━━━━━━━━━\n🤖 <b>Why (AI context, not advice):</b>\n${telegramEscapeHtml(haikuWhy)}`
-              : "";
-            const tmText = tmPlan && tmPlan.status === "OK"
-              ? `\n━━━━━━━━━━━━━━━━━━━━\n🎯 <b>Provisional Trade Plan (forward-test only — NOT backtested):</b>\n` +
-                `Entry: <b>₹${tmPlan.entry}</b> | SL: <b>₹${tmPlan.sl}</b> | T1: <b>₹${tmPlan.t1}</b> | T2: <b>₹${tmPlan.t2}</b> | T3: <b>₹${tmPlan.t3}</b> (100%)\n` +
-                `R (risk/unit): ₹${tmPlan.rPremium} | Underlying ATR(14): ${tmPlan.atrUnderlying} | Delta used: ${tmPlan.deltaUsed}\n` +
-                `🔁 Trailing: ${tmPlan.trailingRule}\n` +
-                `⚠️ Method: underlying-ATR + Delta + R-multiple (published concepts, NOT yet validated on this system's own data). Being forward-tested — see /api/outcome/stats for accumulating results.`
-              : `\n━━━━━━━━━━━━━━━━━━━━\n🎯 <b>Trade Plan:</b> UNAVAILABLE (${tmPlan?.reason || "data insufficient"}) — no numbers fabricated.`;
+            const compactEvidence: string[] = [];
+            if (structure?.evidenceGroups.priceStructure) compactEvidence.push("Price/VWAP confirmed");
+            if (structure?.evidenceGroups.premiumBehaviour) compactEvidence.push(`${structure.side} premium strong`);
+            if (structure?.premiums.next?.alignment === "SUPPORTIVE") compactEvidence.push("next expiry confirms");
+            else if (structure?.evidenceGroups.pcrOi) compactEvidence.push("PCR/OI agrees");
+            const compactWhy = haikuWhy || compactEvidence.slice(0, 3).join("; ") || "Validated price, premium, and risk structure.";
 
             await sendAlertSpaced(
-              `${emoji} <b>${label} — ${symbol}</b> (option buying only)\n` +
-              `━━━━━━━━━━━━━━━━━━━━\n` +
-              `📊 Strike: <b>${strike}</b> (${role})\n` +
-              `💰 Premium: <b>${premium}</b> | Spot: <b>${spot}</b>\n` +
-              `📈 Alignment score: <b>${prob.probability}/100</b> | Grade: <b>${prob.grade}</b> | Confidence: <b>${structure?.confidence || prob.confidence}</b>\n` +
-              `🕒 Calendar DTE: <b>${structure?.dte ?? dte}</b> (${structure?.dteClass || "UNVERIFIED"})\n` +
-              `🧭 Structure: spot/VWAP ${structure?.price.acceptanceSamples ?? 0}/2 | Current ${structure?.premiums.current?.alignment || "MISSING"} | Next ${structure?.premiums.next?.alignment || "MISSING"} | Monthly ${structure?.premiums.monthly?.alignment || "MISSING"}\n` +
-              `🔬 Premium change: favored ${structure?.premiums.favoredChange ?? "—"} | opposite ${structure?.premiums.oppositeChange ?? "—"} | intrinsic ${structure?.premiums.intrinsicChange ?? "—"} | extrinsic ${structure?.premiums.extrinsicChange ?? "—"}\n` +
-              `📉 PCR: ${structure?.positioning.pcr ?? "—"} (${structure?.positioning.pcrTrend || "MISSING"}) | India VIX: ${structure?.volatility.indiaVix ?? "—"}\n` +
-              `🛡 One-lot planned risk: <b>₹${estimatedLotLoss}</b> / max <b>₹${structure?.risk.maxLoss ?? "—"}</b>\n` +
-              `📋 Criteria met: <b>${scoreReasons.length}</b> | Risk flags: <b>${prob.riskFlags.length}</b>\n` +
-              `━━━━━━━━━━━━━━━━━━━━\n` +
-              `✅ Criteria Met (${scoreReasons.length}):\n${reasonsText}` +
-              `${contextText}` +
-              `${riskText}` +
-              `${haikuText}` +
-              `${tmText}\n` +
-              `━━━━━━━━━━━━━━━━━━━━\n` +
-              `⏰ Time: ${istTime()}\n` +
-              `⚠️ Internal alignment score only — NOT win probability, NOT backtested profitability, and NOT an automatic order. Review and confirm manually.`,
+              `${emoji} <b>${telegramEscapeHtml(symbol)} | ${telegramEscapeHtml(label)}</b>\n` +
+              `📊 ${telegramEscapeHtml(String(strike))} ${telegramEscapeHtml(structure?.side || "")} | Premium ${telegramEscapeHtml(premium)} | ${structure?.dte ?? dte} DTE\n` +
+              `🎯 Entry ₹${tmPlan.entry} | SL ₹${tmPlan.sl} | T1 ₹${tmPlan.t1} | T2 ₹${tmPlan.t2}\n` +
+              `🛡 Risk ₹${estimatedLotLoss} / max ₹${structure?.risk.maxLoss ?? "—"}\n` +
+              `💡 Why: ${telegramEscapeHtml(compactWhy)}\n` +
+              `⏰ ${istTime()} | Manual review only; forward-test only.`,
               symbol
             );
             TELEGRAM_LAST_STRUCTURE_FINGERPRINT.set(symbol, `${label}|${structure?.side || "NONE"}`);
@@ -4377,6 +4375,11 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
                       : null,
                     futuresOiBuildup: futuresOiBuildup ?? null,
                     marketRegime: m10?.regime?.pressure ?? null,
+                    compactSignal: label,
+                    compactDte: structure?.dte ?? dte,
+                    compactLotRisk: estimatedLotLoss,
+                    compactMaxRisk: structure?.risk.maxLoss ?? null,
+                    compactWhy,
                   },
                 };
                 const initialText = buildPremiumOnlyTradeCardText(tracker, null);
@@ -8373,6 +8376,7 @@ app.get("/", (c) => {
         updateRefreshStatus();
         clearError();
         triggerHaikuVerdicts();
+        refreshOptionBuyingCards();
       } catch (err) {
         consecutiveFetchFailures++;
         connectionState = computeConnectionState();
@@ -10431,6 +10435,117 @@ app.get("/", (c) => {
       html += '</div>';
       return html;
     }
+
+    // Compact, deterministic trading cards. Market refresh loads their data;
+    // an Anthropic call is made only when the user explicitly taps Explain.
+    let optionBuyingCardState = {};
+    let optionBuyingCardsLoading = false;
+
+    async function refreshOptionBuyingCards() {
+      if (!kiteConnected || !data || optionBuyingCardsLoading) return;
+      optionBuyingCardsLoading = true;
+      try {
+        await Promise.all(['NIFTY', 'BANKNIFTY', 'SENSEX'].map(async (symbol) => {
+          try {
+            const response = await fetch('/api/v2/option-buying-card?symbol=' + encodeURIComponent(symbol));
+            const json = await response.json();
+            if (!response.ok || json.error) throw new Error(json.error || ('HTTP ' + response.status));
+            const previous = optionBuyingCardState[symbol];
+            const sameSetup = previous && previous.card && previous.card.signal === json.signal
+              && previous.card.strike === json.strike && previous.card.expiryDate === json.expiryDate;
+            optionBuyingCardState[symbol] = {
+              card: json,
+              explanation: sameSetup ? previous.explanation : null,
+              explanationError: null,
+              explanationLoading: false,
+              error: null,
+            };
+          } catch (err) {
+            optionBuyingCardState[symbol] = { card: null, error: err.message || 'Verified option data unavailable.' };
+          }
+        }));
+      } finally {
+        optionBuyingCardsLoading = false;
+        updateUI();
+      }
+    }
+
+    async function loadOptionBuyingExplanation(symbol) {
+      const state = optionBuyingCardState[symbol];
+      if (!state || !state.card || state.card.signal === 'NO TRADE' || state.explanationLoading) return;
+      state.explanationLoading = true;
+      state.explanationError = null;
+      updateUI();
+      try {
+        const response = await fetch('/api/v2/option-buying-explanation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol }),
+        });
+        const json = await response.json();
+        if (!response.ok || json.error) throw new Error(json.error || ('HTTP ' + response.status));
+        if (json.signal !== state.card.signal) {
+          state.card.signal = 'NO TRADE';
+          state.card.reason = 'Signal changed during explanation; wait for the next live refresh.';
+          state.card.tradePlan = null;
+          state.explanation = null;
+        } else {
+          state.explanation = json.explanation || null;
+        }
+      } catch (err) {
+        state.explanationError = err.message || 'Explanation unavailable.';
+      } finally {
+        state.explanationLoading = false;
+        updateUI();
+      }
+    }
+
+    function renderOptionBuyingCard(symbol) {
+      const state = optionBuyingCardState[symbol];
+      const card = state && state.card;
+      const generatedAt = card && card.generatedAt ? Date.parse(card.generatedAt) : NaN;
+      const stale = Number.isFinite(generatedAt) && Date.now() - generatedAt > 210000;
+      const feedBlocked = connectionState !== 'LIVE'
+        || serverConnectionState === 'FROZEN' || serverConnectionState === 'LOCKED';
+      const unavailable = !card || stale || feedBlocked || (state && state.error);
+      const signal = unavailable ? 'NO TRADE' : card.signal;
+      const active = signal !== 'NO TRADE';
+      const color = active ? (signal.indexOf('PE') !== -1 ? '#ff627d' : '#34e5a3') : 'var(--gold)';
+      let html = '<div class="premium-card" style="margin-bottom:10px; padding:11px 12px; border:1px solid ' + color + '; box-shadow:0 0 12px color-mix(in srgb, ' + color + ' 12%, transparent);">';
+      html += '<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:7px;">';
+      html += '<strong style="font-size:0.78rem;">' + escapeHtml(symbol) + '</strong>';
+      html += '<strong style="color:' + color + '; font-size:0.82rem;">' + escapeHtml(signal) + '</strong></div>';
+
+      if (!active) {
+        const reason = feedBlocked ? 'Live data unavailable; reconnect or wait for fresh quotes.'
+          : stale ? 'Card data is stale; wait for the next verified refresh.'
+          : state && state.error ? state.error
+          : card && card.reason ? card.reason
+          : optionBuyingCardsLoading ? 'Checking live option structure...' : 'Waiting for verified option data.';
+        html += '<div style="color:var(--muted); font-size:0.72rem; line-height:1.4;">' + escapeHtml(reason) + '</div></div>';
+        return html;
+      }
+
+      const money = (value) => Number.isFinite(Number(value)) ? '₹' + Number(value).toFixed(2) : '—';
+      const plan = card.tradePlan;
+      html += '<div style="font-size:0.73rem; margin-bottom:6px;">';
+      html += '<strong>' + escapeHtml(card.strike) + ' ' + escapeHtml(card.side) + '</strong>';
+      html += ' <span style="color:var(--muted);">| Premium ' + escapeHtml(money(card.premium)) + ' | ' + escapeHtml(card.dte) + ' DTE</span></div>';
+      html += '<div style="font-size:0.71rem; line-height:1.6;">';
+      html += 'Entry <strong>' + escapeHtml(money(plan.entry)) + '</strong>';
+      html += ' <span style="color:var(--red);">SL ' + escapeHtml(money(plan.sl)) + '</span>';
+      html += ' <span style="color:var(--green);">T1 ' + escapeHtml(money(plan.t1)) + ' | T2 ' + escapeHtml(money(plan.t2)) + '</span></div>';
+      html += '<div style="font-size:0.7rem; color:var(--muted); margin-top:4px;">Risk ' + escapeHtml(money(card.plannedLotLoss)) + ' / max ' + escapeHtml(money(card.maxLoss)) + '</div>';
+      html += '<div style="font-size:0.7rem; margin-top:5px; line-height:1.4;">Why: ' + escapeHtml(state.explanation || card.reason) + '</div>';
+      if (state.explanationError) html += '<div style="color:var(--red); font-size:0.67rem; margin-top:4px;">' + escapeHtml(state.explanationError) + '</div>';
+      if (!state.explanation) {
+        html += '<button class="btn" style="padding:4px 9px; margin-top:7px; font-size:0.68rem;" onclick="loadOptionBuyingExplanation(&quot;' + escapeHtml(symbol) + '&quot;)"' + (state.explanationLoading ? ' disabled' : '') + '>';
+        html += state.explanationLoading ? 'Explaining...' : 'Explain in Odia';
+        html += '</button>';
+      }
+      html += '<div style="color:var(--muted); font-size:0.6rem; margin-top:6px;">Manual review only · forward-test only</div></div>';
+      return html;
+    }
     // ============== END HAIKU EVIDENCE ARCHITECTURE ==============
 
     function isMarketOpenNow() {
@@ -11571,6 +11686,11 @@ app.get("/", (c) => {
         }
         return html + '<div class="loading">Loading verdict...</div>';
       }
+
+      html += '<div style="color:var(--muted); font-size:0.68rem; font-weight:700; letter-spacing:0.6px; margin:10px 0 7px;">OPTION BUYING</div>';
+      ['NIFTY', 'BANKNIFTY', 'SENSEX'].forEach((symbol) => {
+        html += renderOptionBuyingCard(symbol);
+      });
 
       // Dashboard reform (user-approved 2026-08-09), same book-index
       // accordion pattern as the System tab, own toggle state
@@ -16088,7 +16208,7 @@ app.get("/", (c) => {
 
       const tab = indexInternalTab[symbol];
       let body = '';
-      if (tab === 'OVERVIEW') body += renderOverviewTab(symbol, m);
+      if (tab === 'OVERVIEW') body += renderOptionBuyingCard(symbol) + renderOverviewTab(symbol, m);
       else if (tab === 'FUTURES') body += renderFuturesTab(symbol, m);
       else if (tab === 'OPTIONS') body += renderOptionsTab(symbol, m);
       else body += renderAlignmentTab(symbol, m);
@@ -21006,6 +21126,96 @@ app.get("/api/v2/option-buying-structure", async (c) => {
   const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
   const result = await buildV2CandidateSelection(rawSymbol as V2PremiumSymbol, session, limit);
   return c.json(result.structureEngine || buildOptionBuyingStructure(rawSymbol as V2PremiumSymbol, session, result, limit));
+});
+
+// One compact, fail-closed view for dashboard cards. A BUY remains blocked
+// until the same cached ATR/Delta plan and one-lot risk checks used by
+// Telegram are available. This endpoint never invokes Haiku or places orders.
+app.get("/api/v2/option-buying-card", async (c) => {
+  const rawSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!(["NIFTY", "BANKNIFTY", "SENSEX"] as string[]).includes(rawSymbol)) {
+    return c.json({ error: "Unsupported symbol. Use NIFTY, BANKNIFTY, or SENSEX." }, 400);
+  }
+  const session = getSession(c);
+  if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+
+  const symbol = rawSymbol as V2PremiumSymbol;
+  const selection = await buildV2CandidateSelection(symbol, session, 20);
+  const structure = selection.structureEngine;
+  const candidate = selection.selectedCandidate;
+  const base = {
+    symbol,
+    generatedAt: structure.generatedAt,
+    signal: structure.signal,
+    side: structure.side,
+    dte: structure.dte,
+    maxLoss: structure.risk.maxLoss,
+    executionMode: "ALERT_AND_MANUAL_CONFIRMATION_ONLY" as const,
+    validationStatus: "UNCALIBRATED_FORWARD_TEST_ONLY" as const,
+  };
+
+  if (structure.signal === "NO TRADE" || !candidate || !structure.side) {
+    return c.json({
+      ...base,
+      signal: "NO TRADE",
+      reason: structure.hardBlockReasons[0] || selection.reason || "No validated option-buying setup is available.",
+      strike: null,
+      premium: null,
+      expiryDate: null,
+      plannedLotLoss: null,
+      tradePlan: null,
+    });
+  }
+
+  const dailyLevels = await v2FetchDailyLevelsKite(symbol, session.accessToken);
+  const tradePlan = computeProvisionalTradeManagementPlan(
+    structure.side,
+    candidate.lastPrice,
+    candidate.delta,
+    dailyLevels.atr14
+  );
+  const lotSize = candidate.contractMetadata.lotSize;
+  const plannedLotLoss = tradePlan.status === "OK" && tradePlan.rPremium != null
+    && lotSize != null && Number.isFinite(lotSize) && lotSize > 0
+    ? Number((tradePlan.rPremium * lotSize).toFixed(2))
+    : null;
+
+  if (tradePlan.status !== "OK" || plannedLotLoss == null || plannedLotLoss > structure.risk.maxLoss) {
+    return c.json({
+      ...base,
+      signal: "NO TRADE",
+      reason: plannedLotLoss == null
+        ? tradePlan.reason || "A verified ATR/Delta stop and lot size are required."
+        : `One-lot risk ₹${plannedLotLoss} exceeds maximum ₹${structure.risk.maxLoss}.`,
+      strike: null,
+      premium: null,
+      expiryDate: null,
+      plannedLotLoss,
+      tradePlan: null,
+    });
+  }
+
+  const evidence: string[] = [];
+  if (structure.evidenceGroups.priceStructure) evidence.push("Price/VWAP confirmed");
+  if (structure.evidenceGroups.premiumBehaviour) evidence.push(`${structure.side} premium strong`);
+  if (structure.premiums.next?.alignment === "SUPPORTIVE") evidence.push("next expiry confirms");
+  else if (structure.evidenceGroups.pcrOi) evidence.push("PCR/OI agrees");
+
+  return c.json({
+    ...base,
+    strike: candidate.strike,
+    premium: candidate.lastPrice,
+    expiryDate: candidate.contractMetadata.expiryDate,
+    plannedLotLoss,
+    reason: evidence.slice(0, 3).join("; ") || "Deterministic price, premium, and risk checks passed.",
+    tradePlan: {
+      entry: tradePlan.entry,
+      sl: tradePlan.sl,
+      t1: tradePlan.t1,
+      t2: tradePlan.t2,
+      method: tradePlan.method,
+    },
+  });
 });
 
 app.post("/api/v2/option-buying-explanation", async (c) => {

@@ -15,9 +15,9 @@ export interface ResearchIndexDailyRecord {
   tradeDate: string;
   indexCode: ResearchIndexCode;
   indexName: string;
-  open: number;
-  high: number;
-  low: number;
+  open: number | null;
+  high: number | null;
+  low: number | null;
   close: number;
   triClose: number | null;
   source: string;

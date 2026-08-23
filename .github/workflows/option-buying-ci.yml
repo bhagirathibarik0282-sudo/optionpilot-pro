@@ -7,6 +7,9 @@ on:
     paths:
       - server.ts
       - package.json
+      - db.ts
+      - research-*.ts
+      - test/research-index.test.ts
       - .github/workflows/option-buying-ci.yml
   workflow_dispatch:
 

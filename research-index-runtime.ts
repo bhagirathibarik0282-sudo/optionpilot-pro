@@ -12,6 +12,12 @@ import {
   type ResearchIndexLoadAudit,
 } from "./research-index-loader.js";
 import { importOfficialHistoricalCsv, type HistoricalCsvImportAudit } from "./research-index-csv-import.js";
+import {
+  importSevenIndexHistoricalBundle,
+  type BulkHistoricalImportAudit,
+  type ResearchIndexCsvBundle,
+} from "./research-index-bulk-import.js";
+import { buildResearchIndexReadinessAudit, type ResearchIndexReadinessAudit } from "./research-index-readiness.js";
 
 const store = new PostgresResearchIndexStore(safeResearchDbClient);
 const derived = new DefaultResearchIndexDerivedEngine();
@@ -53,6 +59,17 @@ export async function importHistoricalResearchIndexCsv(
   return { audit, metricWrites };
 }
 
+export async function importHistoricalResearchIndexBundle(
+  bundle: ResearchIndexCsvBundle,
+): Promise<{ audit: BulkHistoricalImportAudit; metricWrites: number; readiness: ResearchIndexReadinessAudit } | null> {
+  const ready = await initResearchIndexRuntime();
+  if (!ready) return null;
+  const audit = await importSevenIndexHistoricalBundle(bundle, store);
+  const metricWrites = audit.totalWrittenRows > 0 ? await rebuildResearchIndexMetrics() : 0;
+  const readiness = await getResearchIndexReadiness();
+  return { audit, metricWrites, readiness };
+}
+
 export async function rebuildResearchIndexMetrics(): Promise<number> {
   const histories: Partial<Record<ResearchIndexCode, ResearchIndexDailyRecord[]>> = {};
   for (const code of RESEARCH_INDEX_CODES) histories[code] = await store.getHistory(code, 320);
@@ -70,6 +87,16 @@ export async function rebuildResearchIndexMetrics(): Promise<number> {
     }
   }
   return writes;
+}
+
+export async function getResearchIndexReadiness(): Promise<ResearchIndexReadinessAudit> {
+  const histories: Partial<Record<ResearchIndexCode, ResearchIndexDailyRecord[]>> = {};
+  const metrics: Partial<Record<ResearchIndexCode, ResearchIndexMetrics[]>> = {};
+  for (const code of RESEARCH_INDEX_CODES) {
+    histories[code] = await store.getHistory(code, 320);
+    metrics[code] = await store.getMetrics(code, 320);
+  }
+  return buildResearchIndexReadinessAudit(histories, metrics);
 }
 
 export async function getResearchIndexSnapshot(): Promise<ResearchIndexApiSnapshot> {

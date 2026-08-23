@@ -5,6 +5,7 @@ import {
   rebuildResearchIndexMetrics,
   researchIndexRuntimeStatus,
 } from "./research-index-runtime.js";
+import { buildResearchDashboardModel } from "./research-dashboard-model.js";
 
 export const researchRouter = new Hono();
 
@@ -12,6 +13,12 @@ researchRouter.get("/broad-market-size", async (c) => {
   await initResearchIndexRuntime();
   const snapshot = await getResearchIndexSnapshot();
   return c.json(snapshot);
+});
+
+researchRouter.get("/broad-market-size/dashboard", async (c) => {
+  await initResearchIndexRuntime();
+  const snapshot = await getResearchIndexSnapshot();
+  return c.json(buildResearchDashboardModel(snapshot));
 });
 
 researchRouter.get("/broad-market-size/status", async (c) => {

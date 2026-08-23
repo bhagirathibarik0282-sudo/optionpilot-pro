@@ -15,13 +15,33 @@ test("historical CSV parser reads OHLC rows and preserves raw dates", () => {
   assert.equal(result.rows[1].close, "25,150.00");
   assert.equal(result.audit.parsedRows, 2);
   assert.equal(result.audit.skippedRows, 0);
+  assert.equal(result.audit.partialOhlRows, 0);
 });
 
-test("historical CSV parser skips rows with missing OHLC instead of fabricating data", () => {
+test("historical CSV parser preserves official close-only rows without fabricating OHL", () => {
+  const csv = [
+    "Index Name,Date,Open,High,Low,Close",
+    "NIFTY MIDCAP 150,01 Jan 2018,-,-,-,5000",
+    "NIFTY MIDCAP 150,02 Jan 2018,5010,,4990,5020",
+  ].join("\n");
+
+  const result = parseOfficialHistoricalIndexCsv("MIDCAP150", csv);
+  assert.equal(result.rows.length, 2);
+  assert.equal(result.rows[0].open, null);
+  assert.equal(result.rows[0].high, null);
+  assert.equal(result.rows[0].low, null);
+  assert.equal(result.rows[0].close, "5000");
+  assert.equal(result.rows[1].high, null);
+  assert.equal(result.audit.skippedRows, 0);
+  assert.equal(result.audit.partialOhlRows, 2);
+  assert.ok(result.audit.warnings.includes("PARTIAL_OHL_ROWS_2"));
+});
+
+test("historical CSV parser skips rows with missing close", () => {
   const csv = [
     "Index Name,Date,Open,High,Low,Close",
     "NIFTY 50,01 Jan 2026,25000,25100,24900,25050",
-    "NIFTY 50,02 Jan 2026,25050,,25000,25150",
+    "NIFTY 50,02 Jan 2026,25050,25200,25000,-",
   ].join("\n");
 
   const result = parseOfficialHistoricalIndexCsv("NIFTY50", csv);

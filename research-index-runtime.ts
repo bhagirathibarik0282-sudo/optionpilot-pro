@@ -11,6 +11,7 @@ import {
   loadLatestResearchIndices,
   type ResearchIndexLoadAudit,
 } from "./research-index-loader.js";
+import { importOfficialHistoricalCsv, type HistoricalCsvImportAudit } from "./research-index-csv-import.js";
 
 const store = new PostgresResearchIndexStore(safeResearchDbClient);
 const derived = new DefaultResearchIndexDerivedEngine();
@@ -39,6 +40,17 @@ export async function loadHistoricalResearchIndexRange(
   const ready = await initResearchIndexRuntime();
   if (!ready) return null;
   return loadHistoricalResearchIndices(importer, store, from, to);
+}
+
+export async function importHistoricalResearchIndexCsv(
+  indexCode: ResearchIndexCode,
+  csv: string,
+): Promise<{ audit: HistoricalCsvImportAudit; metricWrites: number } | null> {
+  const ready = await initResearchIndexRuntime();
+  if (!ready) return null;
+  const audit = await importOfficialHistoricalCsv(indexCode, csv, store);
+  const metricWrites = audit.writtenRows > 0 ? await rebuildResearchIndexMetrics() : 0;
+  return { audit, metricWrites };
 }
 
 export async function rebuildResearchIndexMetrics(): Promise<number> {

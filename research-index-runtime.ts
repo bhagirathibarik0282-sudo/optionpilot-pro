@@ -4,9 +4,17 @@ import { DefaultResearchIndexDerivedEngine } from "./research-index-derived.js";
 import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 import { buildResearchIndexApiSnapshot, type ResearchIndexApiSnapshot } from "./research-intelligence-api.js";
 import type { ResearchIndexCode, ResearchIndexDailyRecord, ResearchIndexMetrics } from "./research-index-types.js";
+import { DefaultResearchIndexImporter } from "./research-index-importer.js";
+import { OfficialNiftyDailySnapshotTransport } from "./research-index-official-daily.js";
+import {
+  loadHistoricalResearchIndices,
+  loadLatestResearchIndices,
+  type ResearchIndexLoadAudit,
+} from "./research-index-loader.js";
 
 const store = new PostgresResearchIndexStore(safeResearchDbClient);
 const derived = new DefaultResearchIndexDerivedEngine();
+const importer = new DefaultResearchIndexImporter(new OfficialNiftyDailySnapshotTransport());
 
 let schemaInitAttempted = false;
 let schemaReady = false;
@@ -16,6 +24,21 @@ export async function initResearchIndexRuntime(): Promise<boolean> {
   schemaInitAttempted = true;
   schemaReady = await store.ensureSchema();
   return schemaReady;
+}
+
+export async function loadLatestResearchIndexData(): Promise<ResearchIndexLoadAudit | null> {
+  const ready = await initResearchIndexRuntime();
+  if (!ready) return null;
+  return loadLatestResearchIndices(importer, store);
+}
+
+export async function loadHistoricalResearchIndexRange(
+  from: string,
+  to: string,
+): Promise<ResearchIndexLoadAudit | null> {
+  const ready = await initResearchIndexRuntime();
+  if (!ready) return null;
+  return loadHistoricalResearchIndices(importer, store, from, to);
 }
 
 export async function rebuildResearchIndexMetrics(): Promise<number> {

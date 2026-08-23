@@ -15,6 +15,30 @@ import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 
 export const researchRouter = new Hono();
 
+function authorizeResearchMutation(c: Parameters<(typeof researchRouter)["post"]>[1] extends (arg: infer C) => unknown ? C : never) {
+  const configured = process.env.RESEARCH_ADMIN_TOKEN?.trim();
+  if (!configured) {
+    return c.json({
+      ok: false,
+      mode: "RESEARCH_MODE",
+      productionImpact: "NONE",
+      reason: "RESEARCH_MUTATIONS_DISABLED",
+    }, 503);
+  }
+
+  const supplied = c.req.header("x-research-admin-token")?.trim();
+  if (!supplied || supplied !== configured) {
+    return c.json({
+      ok: false,
+      mode: "RESEARCH_MODE",
+      productionImpact: "NONE",
+      reason: "RESEARCH_MUTATION_FORBIDDEN",
+    }, 403);
+  }
+
+  return null;
+}
+
 researchRouter.get("/broad-market-size", async (c) => {
   await initResearchIndexRuntime();
   const snapshot = await getResearchIndexSnapshot();
@@ -47,6 +71,9 @@ researchRouter.get("/broad-market-size/status", async (c) => {
 });
 
 researchRouter.post("/broad-market-size/load-latest", async (c) => {
+  const denied = authorizeResearchMutation(c);
+  if (denied) return denied;
+
   const audit = await loadLatestResearchIndexData();
   if (!audit) {
     return c.json({
@@ -60,6 +87,9 @@ researchRouter.post("/broad-market-size/load-latest", async (c) => {
 });
 
 researchRouter.post("/broad-market-size/load-history", async (c) => {
+  const denied = authorizeResearchMutation(c);
+  if (denied) return denied;
+
   const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
   const from = typeof body.from === "string" ? body.from : "";
   const to = typeof body.to === "string" ? body.to : "";
@@ -99,6 +129,9 @@ researchRouter.post("/broad-market-size/load-history", async (c) => {
 });
 
 researchRouter.post("/broad-market-size/import-csv", async (c) => {
+  const denied = authorizeResearchMutation(c);
+  if (denied) return denied;
+
   const indexCode = c.req.query("indexCode") as ResearchIndexCode | undefined;
   if (!indexCode || !RESEARCH_INDEX_CODES.includes(indexCode)) {
     return c.json({
@@ -140,6 +173,9 @@ researchRouter.post("/broad-market-size/import-csv", async (c) => {
 });
 
 researchRouter.post("/broad-market-size/rebuild-metrics", async (c) => {
+  const denied = authorizeResearchMutation(c);
+  if (denied) return denied;
+
   const ready = await initResearchIndexRuntime();
   if (!ready) {
     return c.json({

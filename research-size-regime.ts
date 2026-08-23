@@ -1,4 +1,4 @@
-import type { DataQualityStatus, ResearchIndexCode, ResearchIndexMetrics } from "./research-index-types";
+import type { DataQualityStatus, ResearchIndexCode, ResearchIndexMetrics } from "./research-index-types.js";
 
 export type SizeRegimeState =
   | "BROAD_RISK_ON"
@@ -35,6 +35,11 @@ function rs(m: ResearchIndexMetrics | undefined, horizon: "5d" | "20d" | "60d"):
   return m.rsVsNifty50_60d;
 }
 
+function absoluteReturn(m: ResearchIndexMetrics | undefined, horizon: "5d" | "20d"): number | null {
+  if (!m) return null;
+  return horizon === "5d" ? m.return5d : m.return20d;
+}
+
 function positive(value: number | null, threshold = 0): boolean {
   return value !== null && value > threshold;
 }
@@ -69,24 +74,34 @@ export function classifySizeRegime(input: SizeRegimeInput): SizeRegimeOutput {
   const broad5 = rs(metrics.NIFTY500, "5d");
   const broad60 = rs(metrics.NIFTY500, "60d");
 
+  const broadAbs20 = absoluteReturn(metrics.NIFTY500, "20d");
+  const midAbs20 = absoluteReturn(metrics.MIDCAP150, "20d");
+  const smallAbs20 = absoluteReturn(metrics.SMALLCAP250, "20d");
+  const broadAbs5 = absoluteReturn(metrics.NIFTY500, "5d");
+
   const broadening = positive(broad20) && positive(mid20) && positive(small20);
   const narrowing = negative(broad20) && negative(mid20) && negative(small20);
   const midLeadership = positive(mid20) && positive(mid5) && (small20 === null || mid20 >= small20);
   const smallLeadership = positive(small20) && positive(small5) && (mid20 === null || small20 > mid20);
   const nextLeadership = positive(next20) && (mid20 === null || next20 > mid20) && (small20 === null || next20 > small20);
-  const riskOff = negative(broad20) && negative(mid20) && negative(small20) && negative(broad5);
+  const riskOff =
+    narrowing &&
+    negative(broadAbs20) &&
+    negative(midAbs20) &&
+    negative(smallAbs20) &&
+    (broadAbs5 === null || negative(broadAbs5));
 
   let state: SizeRegimeState = "MIXED_UNCLASSIFIED";
 
   if (riskOff) {
     state = "BROAD_RISK_OFF";
-    evidence.push("NIFTY500, Midcap150 and Smallcap250 are all underperforming NIFTY50.");
+    evidence.push("Broad, mid and small-cap absolute returns are negative and all underperform NIFTY50.");
   } else if (broadening) {
     state = "BROAD_RISK_ON";
     evidence.push("Broad market, midcaps and smallcaps are outperforming NIFTY50 on 20D horizon.");
   } else if (narrowing) {
     state = "NARROW_LARGECAP_RALLY";
-    evidence.push("Broad, mid and small-cap relative strength is weaker than NIFTY50.");
+    evidence.push("Broad, mid and small-cap relative strength is weaker than NIFTY50 without sufficient absolute-return evidence for broad risk-off.");
   } else if (midLeadership) {
     state = "MIDCAP_EXPANSION";
     evidence.push("Midcap150 shows positive 5D and 20D relative strength leadership.");

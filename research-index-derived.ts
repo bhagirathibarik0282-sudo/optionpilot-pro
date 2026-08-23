@@ -2,15 +2,21 @@ import type {
   ResearchIndexDailyRecord,
   ResearchIndexDerivedEngine,
   ResearchIndexMetrics,
-} from "./research-index-types";
+} from "./research-index-types.js";
 
 const LOOKBACKS = [1, 5, 20, 60, 120, 252] as const;
 
 type Lookback = (typeof LOOKBACKS)[number];
 
+function normalizeMachineNoise(value: number): number {
+  const nearestInteger = Math.round(value);
+  if (Math.abs(value - nearestInteger) < 1e-12) return nearestInteger;
+  return value;
+}
+
 function pctReturn(current: number, previous: number | undefined): number | null {
   if (!Number.isFinite(current) || !Number.isFinite(previous) || !previous || previous <= 0) return null;
-  return (current / previous - 1) * 100;
+  return normalizeMachineNoise((current / previous - 1) * 100);
 }
 
 function byTradeDate(history: ResearchIndexDailyRecord[]): ResearchIndexDailyRecord[] {
@@ -44,7 +50,7 @@ function benchmarkReturns(
 
 function relativeStrength(indexReturn: number | null, benchmarkReturn: number | null): number | null {
   if (indexReturn === null || benchmarkReturn === null) return null;
-  return indexReturn - benchmarkReturn;
+  return normalizeMachineNoise(indexReturn - benchmarkReturn);
 }
 
 export class DefaultResearchIndexDerivedEngine implements ResearchIndexDerivedEngine {

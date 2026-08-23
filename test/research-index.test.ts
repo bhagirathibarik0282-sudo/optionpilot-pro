@@ -4,6 +4,8 @@ import { validateResearchIndexBatch, validateResearchIndexRecord } from "../rese
 import { DefaultResearchIndexDerivedEngine } from "../research-index-derived.js";
 import { evaluateResearchIndexHealth } from "../research-index-health.js";
 import { classifySizeRegime } from "../research-size-regime.js";
+import { normalizeResearchIndexRow } from "../research-index-importer.js";
+import { buildResearchIndexApiSnapshot } from "../research-intelligence-api.js";
 import type {
   ResearchIndexDailyRecord,
   ResearchIndexCode,
@@ -214,4 +216,45 @@ test("mixed positive and negative size evidence is explicitly marked conflict", 
   });
   assert.equal(result.conflict, true);
   assert.notEqual(result.state, "BROAD_RISK_ON");
+});
+
+test("importer normalizer strips commas and does not fabricate freshness", () => {
+  const normalized = normalizeResearchIndexRow("NIFTY50", {
+    date: "2026-08-21",
+    open: "25,000.00",
+    high: "25,100.00",
+    low: "24,900.00",
+    close: "25,050.00",
+    triClose: "41,234.56",
+  });
+  assert.equal(normalized.open, 25000);
+  assert.equal(normalized.close, 25050);
+  assert.equal(normalized.triClose, 41234.56);
+  assert.equal(normalized.freshnessStatus, "UNKNOWN");
+  assert.equal(normalized.validationStatus, "PARTIAL");
+});
+
+test("Research API is explicitly non-production and exposes raw plus derived state", () => {
+  const date = "2026-08-21";
+  const rows = {
+    NIFTY50: [row(date, 100, "NIFTY50")],
+    NIFTY100: [row(date, 100, "NIFTY100")],
+    NIFTY200: [row(date, 100, "NIFTY200")],
+    NIFTY500: [row(date, 100, "NIFTY500")],
+    NEXT50: [row(date, 100, "NEXT50")],
+    MIDCAP150: [row(date, 100, "MIDCAP150")],
+    SMALLCAP250: [row(date, 100, "SMALLCAP250")],
+  };
+  const metrics = {
+    NIFTY500: [metric("NIFTY500", 1.5, 2.0)],
+    NEXT50: [metric("NEXT50", 1.0, 1.2)],
+    MIDCAP150: [metric("MIDCAP150", 2.0, 2.5)],
+    SMALLCAP250: [metric("SMALLCAP250", 2.5, 3.0)],
+  };
+  const snapshot = buildResearchIndexApiSnapshot(rows, metrics, "2026-08-21T16:00:00.000Z");
+  assert.equal(snapshot.mode, "RESEARCH_MODE");
+  assert.equal(snapshot.productionImpact, "NONE");
+  assert.equal(snapshot.health.overall, "GOOD");
+  assert.equal(snapshot.regime.state, "BROAD_RISK_ON");
+  assert.equal(snapshot.latest.NIFTY50?.close, 100);
 });

@@ -37,6 +37,16 @@ function getField(row: Record<string, string>, aliases: string[]): string {
   return "";
 }
 
+function parseDateMs(value: string): number | null {
+  const direct = Date.parse(value);
+  if (Number.isFinite(direct)) return direct;
+  const match = value.trim().match(/^(\d{1,2})[-\/]([A-Za-z]{3}|\d{1,2})[-\/](\d{4})$/);
+  if (!match) return null;
+  const normalized = `${match[1]}-${match[2]}-${match[3]}`;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export interface HistoricalCsvParseAudit {
   indexCode: ResearchIndexCode;
   parsedRows: number;
@@ -51,12 +61,6 @@ export interface HistoricalCsvParseResult {
   audit: HistoricalCsvParseAudit;
 }
 
-/**
- * Parses the CSV exported by NSE Indices' public Historical Index Data page.
- * Expected logical columns are Index Name, Date, Open, High, Low, Close.
- * The parser is deliberately tolerant to small header-name variations but
- * never fabricates missing OHLC values.
- */
 export function parseOfficialHistoricalIndexCsv(
   indexCode: ResearchIndexCode,
   csv: string,
@@ -97,14 +101,21 @@ export function parseOfficialHistoricalIndexCsv(
 
   if (skippedRows > 0) warnings.push(`SKIPPED_ROWS_${skippedRows}`);
 
+  const datedRows = rows
+    .map((row) => ({ row, ms: parseDateMs(row.date) }))
+    .filter((item): item is { row: ResearchIndexRawRow; ms: number } => item.ms !== null)
+    .sort((a, b) => a.ms - b.ms);
+
+  if (rows.length > 0 && datedRows.length !== rows.length) warnings.push("UNPARSEABLE_DATE_PRESENT");
+
   return {
     rows,
     audit: {
       indexCode,
       parsedRows: rows.length,
       skippedRows,
-      firstDate: rows[0]?.date ?? null,
-      lastDate: rows.at(-1)?.date ?? null,
+      firstDate: datedRows[0]?.row.date ?? null,
+      lastDate: datedRows.at(-1)?.row.date ?? null,
       warnings,
     },
   };

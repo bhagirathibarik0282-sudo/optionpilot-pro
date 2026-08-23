@@ -45,9 +45,6 @@ jobs:
       - name: Validate research server mount markers
         run: npx tsx scripts/verify-research-server-mount.ts
 
-      - name: Dry-run research server mount codemod
-        run: npx tsx scripts/apply-research-server-mount.ts --dry-run
-
       - name: Validate option-buying safety contracts
         run: |
           node <<'NODE'

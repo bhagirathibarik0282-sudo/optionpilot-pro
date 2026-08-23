@@ -1,0 +1,100 @@
+name: Option Buying CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - server.ts
+      - package.json
+      - .github/workflows/option-buying-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-option-buying:
+    name: Validate option-buying engine
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate package.json
+        run: node -e "JSON.parse(require('fs').readFileSync('package.json', 'utf8')); console.log('package.json valid')"
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Validate server.ts syntax
+        run: node --check server.ts
+
+      - name: Validate option-buying safety contracts
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const source = fs.readFileSync("server.ts", "utf8");
+
+          const required = [
+            ["Structure API", "/api/v2/option-buying-structure"],
+            ["Explanation API", "/api/v2/option-buying-explanation"],
+            ["Haiku evidence API", "/api/haiku-evidence-verdict"],
+            ["BUY CE signal", "STRONG BUY CE"],
+            ["BUY PE signal", "STRONG BUY PE"],
+            ["Fail-closed signal", "NO TRADE"],
+            ["Contract identity gate", "H2_CONTRACT_IDENTITY"],
+            ["Data quality gate", "H4_DATA_QUALITY"],
+            ["Integrity gate", "H10_INTEGRITY"],
+            ["Expiry validation", "EXPIRY_RANGE"],
+            ["Next expiry confirmation", "NEXT_EXPIRY_CONFIRMATION"],
+            ["Capital configuration", "OPTION_BUYING_CAPITAL"],
+            ["Maximum DTE configuration", "OPTION_BUYING_MAX_DTE"],
+            ["Manual execution boundary", "ALERT_AND_MANUAL_CONFIRMATION_ONLY"],
+            ["Evidence architecture boundary", "SHADOW_EXPLANATION_ONLY_NOT_OPTION_BUYING_SIGNAL"],
+            ["Telegram duplicate protection", "TELEGRAM_LAST_STRUCTURE_FINGERPRINT"],
+            ["No-trade AI protection", "SKIPPED_NO_TRADE"]
+          ];
+
+          const missing = required.filter(([, marker]) => !source.includes(marker));
+
+          for (const [label, marker] of required) {
+            console.log(`${source.includes(marker) ? "PASS" : "FAIL"}: ${label}`);
+          }
+
+          const evidenceStart = source.indexOf('app.post("/api/haiku-evidence-verdict"');
+          const evidenceBlock = source.slice(evidenceStart, evidenceStart + 1200);
+
+          if (
+            evidenceStart < 0 ||
+            !evidenceBlock.includes("getSession(c)") ||
+            !evidenceBlock.includes("401")
+          ) {
+            missing.push(["Haiku session authentication", "getSession(c) + 401"]);
+            console.error("FAIL: Haiku endpoint session authentication");
+          } else {
+            console.log("PASS: Haiku endpoint session authentication");
+          }
+
+          if (missing.length > 0) {
+            console.error("\nMissing required safety contracts:");
+            for (const [label] of missing) console.error(`- ${label}`);
+            process.exit(1);
+          }
+
+          console.log("\nAll option-buying safety contracts passed.");
+          NODE
+
+      - name: Run existing package tests when available
+        run: |
+          if node -e 'const p=require("./package.json"); process.exit(p.scripts?.test && !p.scripts.test.includes("no test specified") ? 0 : 1)'; then
+            npm test
+          else
+            echo "No existing package test script configured."
+          fi

@@ -40,12 +40,12 @@ function absoluteReturn(m: ResearchIndexMetrics | undefined, horizon: "5d" | "20
   return horizon === "5d" ? m.return5d : m.return20d;
 }
 
-function positive(value: number | null, threshold = 0): boolean {
-  return value !== null && value > threshold;
+function positive(value: number | null): boolean {
+  return value !== null && value > 0;
 }
 
-function negative(value: number | null, threshold = 0): boolean {
-  return value !== null && value < threshold;
+function negative(value: number | null): boolean {
+  return value !== null && value < 0;
 }
 
 export function classifySizeRegime(input: SizeRegimeInput): SizeRegimeOutput {
@@ -117,15 +117,14 @@ export function classifySizeRegime(input: SizeRegimeInput): SizeRegimeOutput {
     evidence.push("Size segments disagree; treating the tape as rotation rather than forcing a directional regime.");
   }
 
-  const finiteRs = [broad20, mid20, small20, next20].filter((v): v is number => v !== null && Number.isFinite(v));
-  const avgAbs = finiteRs.length ? finiteRs.reduce((a, b) => a + Math.abs(b), 0) / finiteRs.length : 0;
-  const strength: RegimeStrength = finiteRs.length < 3 ? "UNKNOWN" : avgAbs >= 3 ? "STRONG" : avgAbs >= 1 ? "MODERATE" : "WEAK";
+  // Strength thresholds are deliberately not frozen before historical/OOS validation.
+  const strength: RegimeStrength = "UNKNOWN";
+  warnings.push("STRENGTH_UNCALIBRATED: regime strength is withheld until historical and out-of-sample calibration is complete.");
 
   let transition: RegimeTransition = "UNKNOWN";
-  if (broad5 !== null && broad20 !== null) {
-    if (broad5 > broad20 && (mid5 ?? 0) > (mid20 ?? 0) && (small5 ?? 0) > (small20 ?? 0)) transition = "ACCELERATING";
-    else if (broad5 < broad20 && (mid5 ?? 0) < (mid20 ?? 0) && (small5 ?? 0) < (small20 ?? 0)) transition = "DECELERATING";
-    else if (Math.abs(broad5 - broad20) < 0.5) transition = "STABLE";
+  if (broad5 !== null && broad20 !== null && mid5 !== null && mid20 !== null && small5 !== null && small20 !== null) {
+    if (broad5 > broad20 && mid5 > mid20 && small5 > small20) transition = "ACCELERATING";
+    else if (broad5 < broad20 && mid5 < mid20 && small5 < small20) transition = "DECELERATING";
     else transition = "EARLY";
   }
 
@@ -133,6 +132,7 @@ export function classifySizeRegime(input: SizeRegimeInput): SizeRegimeOutput {
     warnings.push("20D and 60D broad-market relative strength disagree; structural transition may be in progress.");
   }
 
+  const finiteRs = [broad20, mid20, small20, next20].filter((v): v is number => v !== null && Number.isFinite(v));
   const signs = finiteRs.map((v) => Math.sign(v)).filter((s) => s !== 0);
   const conflict = signs.includes(1) && signs.includes(-1);
   if (dataQuality !== "GOOD") warnings.push(`Data quality is ${dataQuality}; confidence must not exceed this gate.`);

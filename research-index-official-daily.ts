@@ -166,6 +166,8 @@ export async function fetchOfficialHistoricalBundle(
 }
 
 export class OfficialNiftyDailySnapshotTransport implements ResearchIndexTransport {
+  private historicalBundleCache = new Map<string, Promise<Partial<Record<ResearchIndexCode, ResearchIndexRawRow[]>>>>();
+
   constructor(private readonly latestLookbackCalendarDays = 10) {}
 
   async fetchLatestRows(indexCode: ResearchIndexCode): Promise<ResearchIndexRawRow[]> {
@@ -181,8 +183,20 @@ export class OfficialNiftyDailySnapshotTransport implements ResearchIndexTranspo
   }
 
   async fetchHistoricalRows(indexCode: ResearchIndexCode, from: string, to: string): Promise<ResearchIndexRawRow[]> {
-    const bundle = await fetchOfficialHistoricalBundle(from, to);
-    return bundle[indexCode] ?? [];
+    const key = `${from}|${to}`;
+    let promise = this.historicalBundleCache.get(key);
+    if (!promise) {
+      promise = fetchOfficialHistoricalBundle(from, to);
+      this.historicalBundleCache.set(key, promise);
+    }
+
+    try {
+      const bundle = await promise;
+      return bundle[indexCode] ?? [];
+    } catch (error) {
+      this.historicalBundleCache.delete(key);
+      throw error;
+    }
   }
 }
 
@@ -191,5 +205,6 @@ export const officialDailySnapshotSourceInfo = {
   indexNames: RESEARCH_INDEX_NAMES,
   historicalBackfillPolicy: "<=370 calendar days via daily snapshots; larger backfill must use official historical CSV export",
   optimizedBundleFetch: true,
+  cachedPerRange: true,
   productionImpact: "NONE",
 } as const;

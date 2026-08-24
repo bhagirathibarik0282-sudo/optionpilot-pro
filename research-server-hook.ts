@@ -1,6 +1,8 @@
 import type { Hono } from "hono";
 import { researchRouter } from "./research-router.js";
 
+const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
+
 /**
  * Mounts research-only endpoints without changing any production verdict,
  * scoring, Telegram, or trading execution path.
@@ -9,6 +11,40 @@ import { researchRouter } from "./research-router.js";
  *   mountResearchRoutes(app);
  */
 export function mountResearchRoutes(app: Hono): void {
+  // UI-only middleware: after the existing main dashboard renders, inject a
+  // small floating shortcut to the already-existing Intelligence Layer page.
+  // It does not alter dashboard data, scoring, verdicts, Telegram, or execution.
+  app.use("/", async (c, next) => {
+    await next();
+
+    if (c.req.method !== "GET") return;
+    const response = c.res;
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html")) return;
+
+    const html = await response.text();
+    if (!html.includes("</body>") || html.includes("data-optionpilot-intelligence-shortcut")) return;
+
+    const shortcut = `
+      <a
+        data-optionpilot-intelligence-shortcut="true"
+        href="${INTELLIGENCE_LAYER_HREF}"
+        aria-label="Open Intelligence Layer"
+        style="position:fixed;right:12px;bottom:62px;z-index:9999;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;border:1px solid rgba(0,255,200,.55);border-radius:999px;background:rgba(8,18,24,.94);color:#55ffd8;text-decoration:none;font:700 12px/1.1 system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:.02em;box-shadow:0 0 18px rgba(0,255,200,.18);backdrop-filter:blur(8px)">
+        <span aria-hidden="true">✦</span>
+        <span>Intelligence Layer</span>
+      </a>
+    `;
+
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    c.res = new Response(html.replace("</body>", `${shortcut}</body>`), {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  });
+
   app.route("/api/research", researchRouter);
 }
 

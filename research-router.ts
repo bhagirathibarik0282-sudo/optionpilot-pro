@@ -10,6 +10,7 @@ import {
   researchIndexRuntimeStatus,
 } from "./research-index-runtime.js";
 import { buildResearchDashboardModel } from "./research-dashboard-model.js";
+import { renderResearchDashboardHtml } from "./research-dashboard-view.js";
 import type { ResearchIndexCode } from "./research-index-types.js";
 import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 
@@ -49,6 +50,13 @@ researchRouter.get("/broad-market-size/dashboard", async (c) => {
   await initResearchIndexRuntime();
   const snapshot = await getResearchIndexSnapshot();
   return c.json(buildResearchDashboardModel(snapshot));
+});
+
+researchRouter.get("/broad-market-size/view", async (c) => {
+  await initResearchIndexRuntime();
+  const snapshot = await getResearchIndexSnapshot();
+  const model = buildResearchDashboardModel(snapshot);
+  return c.html(renderResearchDashboardHtml(model));
 });
 
 researchRouter.get("/broad-market-size/readiness", async (c) => {

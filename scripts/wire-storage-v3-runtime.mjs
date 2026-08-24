@@ -4,9 +4,11 @@ const path = new URL("../server.ts", import.meta.url);
 let source = readFileSync(path, "utf8");
 
 const IMPORT_MARKER = 'import { persistStorageV3FromExistingSnapshot } from "./storage-v3-adapter.js";';
+const HEALTH_IMPORT = 'import { mountStorageHealthRoutes } from "./storage-health.js";';
 const DB_IMPORT = 'import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";';
 const SNAPSHOT_ANCHOR = `    session.marketSnapshot = snapshot;\n    session.snapshotTime = Date.now();`;
 const WIRE_MARKER = "// STORAGE_V3_RUNTIME_WIRE_BEGIN";
+const HEALTH_MOUNT_MARKER = "// STORAGE_V3_HEALTH_ROUTE_MOUNT";
 
 if (!source.includes(IMPORT_MARKER)) {
   if (!source.includes(DB_IMPORT)) {
@@ -14,6 +16,10 @@ if (!source.includes(IMPORT_MARKER)) {
     process.exit(0);
   }
   source = source.replace(DB_IMPORT, `${DB_IMPORT}\n${IMPORT_MARKER}`);
+}
+
+if (!source.includes(HEALTH_IMPORT)) {
+  source = source.replace(IMPORT_MARKER, `${IMPORT_MARKER}\n${HEALTH_IMPORT}`);
 }
 
 if (!source.includes(WIRE_MARKER)) {
@@ -26,6 +32,25 @@ if (!source.includes(WIRE_MARKER)) {
   const wiring = `${SNAPSHOT_ANCHOR}\n\n    ${WIRE_MARKER}\n    // Storage-only persistence of data already fetched/calculated by this refresh.\n    // No extra Kite request, no scoring/verdict/Telegram/execution side effect.\n    for (const storageSym of [\"NIFTY\", \"BANKNIFTY\", \"SENSEX\"] as const) {\n      const storageMarket = snapshot[storageSym];\n      if (!storageMarket || storageMarket.error) continue;\n      void persistStorageV3FromExistingSnapshot(storageSym, storageMarket, {\n        oiPcr: storageMarket.pcr,\n        volumePcr: storageMarket.volumePcr,\n        fullChainPcr: storageMarket.gapScore?.fullChainPcr ?? null,\n        maxPain: storageMarket.maxPain,\n      }).then((result) => {\n        if (!result.ok && !result.skipped) {\n          console.warn(\"[Storage V3] write returned not-ok\", storageSym, result.reason ?? \"UNKNOWN\");\n        }\n      }).catch((err) => {\n        console.error(\"[Storage V3] persistence call failed without affecting live cycle:\", err instanceof Error ? err.message : err);\n      });\n    }\n    // STORAGE_V3_RUNTIME_WIRE_END`;
 
   source = source.replace(SNAPSHOT_ANCHOR, wiring);
+}
+
+if (!source.includes(HEALTH_MOUNT_MARKER)) {
+  const appPatterns = [
+    /const app = new Hono\(\);/,
+    /const app = new Hono<[^;]+>\(\);/,
+  ];
+  let mounted = false;
+  for (const pattern of appPatterns) {
+    const match = source.match(pattern);
+    if (!match) continue;
+    const original = match[0];
+    source = source.replace(original, `${original}\n${HEALTH_MOUNT_MARKER}\nmountStorageHealthRoutes(app);`);
+    mounted = true;
+    break;
+  }
+  if (!mounted) {
+    console.warn("[Storage V3 wire] Hono app anchor not found; health route not mounted");
+  }
 }
 
 writeFileSync(path, source, "utf8");

@@ -1,6 +1,8 @@
 export type TelegramTruthState = "TRUE" | "STALE" | "PARTIAL" | "INVALID";
 export type TelegramDirection = "BULLISH" | "BEARISH" | "NEUTRAL" | "CONFLICTING" | "INSUFFICIENT_DATA";
 export type TelegramHealth = "IMPROVING" | "STABLE" | "DETERIORATING" | "INVALID" | "UNAVAILABLE";
+export type TelegramSymbol = "NIFTY" | "BANKNIFTY" | "SENSEX";
+export type TelegramGroupName = "NIFTY" | "BANKNIFTY" | "SENSEX";
 export type TelegramTfState =
   | "WARNING_ONLY"
   | "PROMOTED"
@@ -39,10 +41,22 @@ export interface TelegramTradePlanBlock {
   status: "PENDING" | "ACTIVE" | "HOLD" | "TRAIL" | "REDUCE" | "EXIT" | "TARGET_HIT" | "INVALID" | "UNAVAILABLE";
 }
 
+export const TELEGRAM_INDEX_GROUP_ROUTING: Readonly<Record<TelegramSymbol, TelegramGroupName>> = {
+  NIFTY: "NIFTY",
+  BANKNIFTY: "BANKNIFTY",
+  SENSEX: "SENSEX",
+};
+
 export interface CanonicalTelegramCard {
   schemaVersion: "TELEGRAM_CARD_V1";
-  symbol: "NIFTY" | "BANKNIFTY" | "SENSEX";
+  symbol: TelegramSymbol;
   generatedAt: string;
+
+  routing: {
+    groupName: TelegramGroupName;
+    strictIndexIsolation: true;
+    crossPostAllowed: false;
+  };
 
   headline: {
     verdict: TelegramDirection;
@@ -80,9 +94,19 @@ export interface CanonicalTelegramCard {
 /**
  * Canonical Telegram card contract only.
  *
- * This file freezes output shape. It deliberately does not send Telegram,
- * select a candidate, compute a verdict, change scoring, or create orders.
- * Missing data must stay null/UNAVAILABLE/INSUFFICIENT_DATA; never fabricate.
+ * Routing is strict and index-isolated:
+ * NIFTY -> Telegram group named NIFTY
+ * BANKNIFTY -> Telegram group named BANKNIFTY
+ * SENSEX -> Telegram group named SENSEX
+ *
+ * No card may be cross-posted to another index group. A future sender must
+ * resolve the destination only through TELEGRAM_INDEX_GROUP_ROUTING and must
+ * fail closed if the configured group/chat id does not match the card symbol.
+ *
+ * This file freezes output shape and routing intent. It deliberately does not
+ * send Telegram, select a candidate, compute a verdict, change scoring, or
+ * create orders. Missing data must stay null/UNAVAILABLE/INSUFFICIENT_DATA;
+ * never fabricate.
  */
 export const TELEGRAM_CARD_SECTIONS = [
   "INDEX + FINAL VERDICT",

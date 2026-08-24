@@ -6,6 +6,7 @@ import {
   type OptionSnapshot1mRow,
   type ChainState1mRow,
 } from "./db.js";
+import { persistClosedTimeframesFromMinute } from "./timeframe-storage.js";
 
 export type StorageV3Symbol = "NIFTY" | "BANKNIFTY" | "SENSEX";
 
@@ -58,6 +59,11 @@ export async function persistStorageV3Minute(payload: StorageV3MinutePayload): P
     await dbUpsertMarketSnapshot1m(payload.market);
     for (const row of options) await dbUpsertOptionSnapshot1m(row);
     for (const row of chains) await dbUpsertChainState1m(row);
+
+    // Archive only formally-closed 3M/15M/30M/60M blocks.
+    // Failures are isolated inside the storage path and never alter live logic.
+    await persistClosedTimeframesFromMinute(payload.market.symbol, payload.market.minuteBucket);
+
     return {
       ok: true,
       marketWrites: 1,

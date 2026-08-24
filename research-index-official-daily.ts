@@ -1,6 +1,7 @@
 import type { ResearchIndexCode } from "./research-index-types.js";
 import type { ResearchIndexRawRow, ResearchIndexTransport } from "./research-index-importer.js";
 import { RESEARCH_INDEX_NAMES } from "./research-index-importer.js";
+import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 
 const INDEX_NAME_ALIASES: Record<ResearchIndexCode, string[]> = {
   NIFTY50: ["NIFTY 50", "Nifty 50"],
@@ -97,10 +98,6 @@ function ddmmyyyy(date: Date): string {
   return `${dd}${mm}${date.getUTCFullYear()}`;
 }
 
-function isoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
 function startOfUtcDay(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`);
 }
@@ -109,7 +106,7 @@ export function officialDailySnapshotUrl(date: Date): string {
   return `https://www.niftyindices.com/Daily_Snapshot/ind_close_all_${ddmmyyyy(date)}.csv`;
 }
 
-async function fetchSnapshotForDate(date: Date): Promise<string | null> {
+export async function fetchOfficialSnapshotCsvForDate(date: Date): Promise<string | null> {
   const url = officialDailySnapshotUrl(date);
   try {
     const response = await fetch(url, {
@@ -127,7 +124,7 @@ async function fetchSnapshotForDate(date: Date): Promise<string | null> {
   }
 }
 
-function toRaw(code: ResearchIndexCode, row: OfficialDailySnapshotRow): ResearchIndexRawRow {
+function toRaw(row: OfficialDailySnapshotRow): ResearchIndexRawRow {
   return {
     date: row.indexDate,
     open: row.open,
@@ -138,6 +135,36 @@ function toRaw(code: ResearchIndexCode, row: OfficialDailySnapshotRow): Research
   };
 }
 
+export async function fetchOfficialHistoricalBundle(
+  from: string,
+  to: string,
+): Promise<Partial<Record<ResearchIndexCode, ResearchIndexRawRow[]>>> {
+  const start = startOfUtcDay(from);
+  const end = startOfUtcDay(to);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) return {};
+
+  const spanDays = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  if (spanDays > 370) {
+    throw new Error("DAILY_SNAPSHOT_BACKFILL_RANGE_TOO_LARGE_USE_OFFICIAL_HISTORICAL_CSV");
+  }
+
+  const bundle: Partial<Record<ResearchIndexCode, ResearchIndexRawRow[]>> = {};
+  for (const code of RESEARCH_INDEX_CODES) bundle[code] = [];
+
+  for (let cursor = new Date(start); cursor <= end; cursor = new Date(cursor.getTime() + 86_400_000)) {
+    if (cursor.getUTCDay() === 0 || cursor.getUTCDay() === 6) continue;
+    const csv = await fetchOfficialSnapshotCsvForDate(cursor);
+    if (!csv) continue;
+    const rows = parseOfficialDailySnapshotCsv(csv);
+    for (const code of RESEARCH_INDEX_CODES) {
+      const match = rows.find((row) => matchesIndex(code, row.indexName));
+      if (match) bundle[code]!.push(toRaw(match));
+    }
+  }
+
+  return bundle;
+}
+
 export class OfficialNiftyDailySnapshotTransport implements ResearchIndexTransport {
   constructor(private readonly latestLookbackCalendarDays = 10) {}
 
@@ -145,33 +172,17 @@ export class OfficialNiftyDailySnapshotTransport implements ResearchIndexTranspo
     const now = new Date();
     for (let offset = 0; offset <= this.latestLookbackCalendarDays; offset += 1) {
       const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - offset));
-      const csv = await fetchSnapshotForDate(date);
+      const csv = await fetchOfficialSnapshotCsvForDate(date);
       if (!csv) continue;
       const match = parseOfficialDailySnapshotCsv(csv).find((row) => matchesIndex(indexCode, row.indexName));
-      if (match) return [toRaw(indexCode, match)];
+      if (match) return [toRaw(match)];
     }
     return [];
   }
 
   async fetchHistoricalRows(indexCode: ResearchIndexCode, from: string, to: string): Promise<ResearchIndexRawRow[]> {
-    const start = startOfUtcDay(from);
-    const end = startOfUtcDay(to);
-    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) return [];
-
-    const spanDays = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1;
-    if (spanDays > 370) {
-      throw new Error("DAILY_SNAPSHOT_BACKFILL_RANGE_TOO_LARGE_USE_OFFICIAL_HISTORICAL_CSV");
-    }
-
-    const out: ResearchIndexRawRow[] = [];
-    for (let cursor = new Date(start); cursor <= end; cursor = new Date(cursor.getTime() + 86_400_000)) {
-      if (cursor.getUTCDay() === 0 || cursor.getUTCDay() === 6) continue;
-      const csv = await fetchSnapshotForDate(cursor);
-      if (!csv) continue;
-      const match = parseOfficialDailySnapshotCsv(csv).find((row) => matchesIndex(indexCode, row.indexName));
-      if (match) out.push(toRaw(indexCode, match));
-    }
-    return out;
+    const bundle = await fetchOfficialHistoricalBundle(from, to);
+    return bundle[indexCode] ?? [];
   }
 }
 
@@ -179,5 +190,6 @@ export const officialDailySnapshotSourceInfo = {
   source: "NIFTY_INDICES_OFFICIAL_DAILY_SNAPSHOT",
   indexNames: RESEARCH_INDEX_NAMES,
   historicalBackfillPolicy: "<=370 calendar days via daily snapshots; larger backfill must use official historical CSV export",
+  optimizedBundleFetch: true,
   productionImpact: "NONE",
 } as const;

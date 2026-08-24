@@ -5,10 +5,12 @@ let source = readFileSync(path, "utf8");
 
 const IMPORT_MARKER = 'import { persistStorageV3FromExistingSnapshot } from "./storage-v3-adapter.js";';
 const HEALTH_IMPORT = 'import { mountStorageHealthRoutes } from "./storage-health.js";';
+const TEF_INSPECT_IMPORT = 'import { mountTefInspectRoutes } from "./tef-inspect.js";';
 const DB_IMPORT = 'import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";';
 const SNAPSHOT_ANCHOR = `    session.marketSnapshot = snapshot;\n    session.snapshotTime = Date.now();`;
 const WIRE_MARKER = "// STORAGE_V3_RUNTIME_WIRE_BEGIN";
 const HEALTH_MOUNT_MARKER = "// STORAGE_V3_HEALTH_ROUTE_MOUNT";
+const TEF_MOUNT_MARKER = "// TEF_INSPECT_ROUTE_MOUNT";
 
 if (!source.includes(IMPORT_MARKER)) {
   if (!source.includes(DB_IMPORT)) {
@@ -20,6 +22,10 @@ if (!source.includes(IMPORT_MARKER)) {
 
 if (!source.includes(HEALTH_IMPORT)) {
   source = source.replace(IMPORT_MARKER, `${IMPORT_MARKER}\n${HEALTH_IMPORT}`);
+}
+
+if (!source.includes(TEF_INSPECT_IMPORT)) {
+  source = source.replace(HEALTH_IMPORT, `${HEALTH_IMPORT}\n${TEF_INSPECT_IMPORT}`);
 }
 
 if (!source.includes(WIRE_MARKER)) {
@@ -34,24 +40,34 @@ if (!source.includes(WIRE_MARKER)) {
   source = source.replace(SNAPSHOT_ANCHOR, wiring);
 }
 
-if (!source.includes(HEALTH_MOUNT_MARKER)) {
-  const appPatterns = [
-    /const app = new Hono\(\);/,
-    /const app = new Hono<[^;]+>\(\);/,
-  ];
-  let mounted = false;
+const appPatterns = [
+  /const app = new Hono\(\);/,
+  /const app = new Hono<[^;]+>\(\);/,
+];
+
+function mountAfterApp(marker, line, warning) {
+  if (source.includes(marker)) return;
   for (const pattern of appPatterns) {
     const match = source.match(pattern);
     if (!match) continue;
     const original = match[0];
-    source = source.replace(original, `${original}\n${HEALTH_MOUNT_MARKER}\nmountStorageHealthRoutes(app);`);
-    mounted = true;
-    break;
+    source = source.replace(original, `${original}\n${marker}\n${line}`);
+    return;
   }
-  if (!mounted) {
-    console.warn("[Storage V3 wire] Hono app anchor not found; health route not mounted");
-  }
+  console.warn(warning);
 }
+
+mountAfterApp(
+  HEALTH_MOUNT_MARKER,
+  "mountStorageHealthRoutes(app);",
+  "[Storage V3 wire] Hono app anchor not found; health route not mounted",
+);
+
+mountAfterApp(
+  TEF_MOUNT_MARKER,
+  "mountTefInspectRoutes(app);",
+  "[Storage V3 wire] Hono app anchor not found; TEF inspection routes not mounted",
+);
 
 writeFileSync(path, source, "utf8");
 console.log("[Storage V3 wire] runtime storage wiring ready");

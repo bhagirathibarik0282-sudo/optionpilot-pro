@@ -35,15 +35,9 @@ function getPool(): InstanceType<typeof Pool> | null {
   const url = process.env.DATABASE_URL?.trim();
   if (!url) return null;
   if (pool) return pool;
-  if (poolInitAttempted) return null; // already tried and failed to construct -- don't retry-loop on every call
+  if (poolInitAttempted) return null;
   poolInitAttempted = true;
   try {
-    // Railway's managed Postgres (and most hosted Postgres providers) sit
-    // behind a proxy that presents a self-signed certificate chain -- the
-    // standard `ssl: { rejectUnauthorized: false }` relaxation is required
-    // here or every connection attempt fails outright. A bare `localhost`
-    // DATABASE_URL (this file's own local test setup) needs no SSL at all,
-    // so SSL is only requested when the host isn't localhost/127.0.0.1.
     const isLocal = /localhost|127\.0\.0\.1/.test(url);
     pool = new Pool({
       connectionString: url,
@@ -51,10 +45,6 @@ function getPool(): InstanceType<typeof Pool> | null {
       ssl: isLocal ? undefined : { rejectUnauthorized: false },
     });
     pool.on("error", (err: Error) => {
-      // Fired for errors on idle clients in the pool (e.g. the DB restarting
-      // underneath us) -- NOT the same as a query-time error, which is
-      // already caught individually below. Must still be handled or an
-      // unhandled 'error' event on this EventEmitter crashes the process.
       console.error("[DB] idle client error (pool stays usable):", err.message);
     });
   } catch (err) {
@@ -82,12 +72,6 @@ export async function dbInit(): Promise<void> {
     await p.query(`CREATE INDEX IF NOT EXISTS idx_app_state_log_kind_created ON app_state_log (kind, created_at DESC);`);
     console.log("[DB] connected, schema ready");
   } catch (err) {
-    // If even the migration fails (bad credentials, DB not reachable yet,
-    // etc.) fall back to fully in-memory behavior for this run rather than
-    // leaving `pool` pointing at a DB that can't be written to -- every
-    // subsequent dbInsert/dbLoadRecent call will then also no-op via the
-    // getPool() null-pool guard... except getPool() would still return the
-    // already-constructed pool object. So explicitly null it out here too.
     console.error("[DB] schema init failed -- persistence disabled for this run:", err instanceof Error ? err.message : err);
     pool = null;
   }
@@ -103,9 +87,6 @@ export async function dbInsert(kind: string, payload: unknown): Promise<void> {
   }
 }
 
-// Returns rows OLDEST-FIRST (matching the order code already expects when
-// it does `arr.push(...)` in a loop, since every in-memory array in this
-// codebase is appended-to in chronological order).
 export async function dbLoadRecent<T>(kind: string, limit: number): Promise<T[]> {
   const p = getPool();
   if (!p) return [];
@@ -115,6 +96,24 @@ export async function dbLoadRecent<T>(kind: string, limit: number): Promise<T[]>
   } catch (err) {
     console.error(`[DB] load failed for kind="${kind}" (falling back to empty -- app starts as if no history existed):`, err instanceof Error ? err.message : err);
     return [];
+  }
+}
+
+// Additive escape hatch for dedicated normalized research tables.
+// It preserves this module's hard safety rule: callers receive null instead
+// of an exception when Postgres is unavailable or a query fails.
+export async function dbQuerySafe<T = Record<string, unknown>>(
+  sql: string,
+  params: unknown[] = [],
+): Promise<{ rows: T[] } | null> {
+  const p = getPool();
+  if (!p) return null;
+  try {
+    const res = await p.query(sql, params);
+    return { rows: res.rows as T[] };
+  } catch (err) {
+    console.error("[DB] normalized research query failed (caller must degrade safely):", err instanceof Error ? err.message : err);
+    return null;
   }
 }
 

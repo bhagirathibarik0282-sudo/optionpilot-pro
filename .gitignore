@@ -1,0 +1,9 @@
+# Local research data inputs
+research-data/*.csv
+
+# Node
+node_modules/
+
+# Local env
+.env
+.env.*

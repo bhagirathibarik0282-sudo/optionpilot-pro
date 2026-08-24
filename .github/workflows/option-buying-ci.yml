@@ -7,6 +7,12 @@ on:
     paths:
       - server.ts
       - package.json
+      - db.ts
+      - research-*.ts
+      - scripts/verify-research-server-mount.ts
+      - scripts/apply-research-server-mount.ts
+      - test/research-index.test.ts
+      - test/research-router-auth.test.ts
       - .github/workflows/option-buying-ci.yml
   workflow_dispatch:
 
@@ -35,6 +41,9 @@ jobs:
 
       - name: Validate server.ts syntax
         run: node --check server.ts
+
+      - name: Validate research server mount markers
+        run: npx tsx scripts/verify-research-server-mount.ts
 
       - name: Validate option-buying safety contracts
         run: |

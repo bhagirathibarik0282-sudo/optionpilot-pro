@@ -14,6 +14,8 @@ const report: Array<{
   skipped: number;
   firstDate: string | null;
   lastDate: string | null;
+  detectedIndexNames: string[];
+  unexpectedIndexNames: string[];
   ready: boolean;
   blockers: string[];
 }> = [];
@@ -31,7 +33,19 @@ for (const indexCode of RESEARCH_INDEX_POPULATION_ORDER) {
   }
 
   if (!csv.trim()) {
-    report.push({ indexCode, file, exists: false, rows: 0, skipped: 0, firstDate: null, lastDate: null, ready: false, blockers });
+    report.push({
+      indexCode,
+      file,
+      exists: false,
+      rows: 0,
+      skipped: 0,
+      firstDate: null,
+      lastDate: null,
+      detectedIndexNames: [],
+      unexpectedIndexNames: [],
+      ready: false,
+      blockers,
+    });
     continue;
   }
 
@@ -39,6 +53,8 @@ for (const indexCode of RESEARCH_INDEX_POPULATION_ORDER) {
   if (parsed.audit.parsedRows < MIN_ROWS) blockers.push(`INSUFFICIENT_ROWS_${parsed.audit.parsedRows}_NEED_${MIN_ROWS}`);
   if (!parsed.audit.firstDate || !parsed.audit.lastDate) blockers.push("MISSING_DATE_RANGE");
   if (parsed.audit.skippedRows > 0) blockers.push(`SKIPPED_ROWS_${parsed.audit.skippedRows}`);
+  if (parsed.audit.detectedIndexNames.length === 0) blockers.push("INDEX_NAME_NOT_PRESENT_FOR_CROSSCHECK");
+  if (parsed.audit.unexpectedIndexNames.length > 0) blockers.push("INDEX_IDENTITY_MISMATCH");
 
   report.push({
     indexCode,
@@ -48,6 +64,8 @@ for (const indexCode of RESEARCH_INDEX_POPULATION_ORDER) {
     skipped: parsed.audit.skippedRows,
     firstDate: parsed.audit.firstDate,
     lastDate: parsed.audit.lastDate,
+    detectedIndexNames: parsed.audit.detectedIndexNames,
+    unexpectedIndexNames: parsed.audit.unexpectedIndexNames,
     ready: blockers.length === 0,
     blockers,
   });

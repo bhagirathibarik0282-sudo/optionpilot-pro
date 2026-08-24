@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "tsx server.ts",
-    "test": "NODE_ENV=test node --import tsx --test test/outcome-engine.test.ts test/iv-science.test.ts test/fii-dii-import.test.ts"
+    "test": "NODE_ENV=test node --import tsx --test test/outcome-engine.test.ts test/iv-science.test.ts test/fii-dii-import.test.ts",
+    "research:update:daily": "node research-index-daily-updater.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.11",

@@ -23,6 +23,32 @@ export interface StorageV3WriteResult {
   chainWrites: number;
 }
 
+const INDIA_TIME_ZONE = "Asia/Kolkata";
+const MARKET_OPEN_MINUTE_IST = 9 * 60 + 15;
+const MARKET_CLOSE_MINUTE_IST = 15 * 60 + 30;
+
+function storageSessionAllowed(now: Date = new Date()): boolean {
+  if (!Number.isFinite(now.getTime())) return false;
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: INDIA_TIME_ZONE,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+
+  const weekday = parts.find((part) => part.type === "weekday")?.value;
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return false;
+  if (weekday === "Sat" || weekday === "Sun") return false;
+
+  const minuteOfDay = hour * 60 + minute;
+  return minuteOfDay >= MARKET_OPEN_MINUTE_IST && minuteOfDay <= MARKET_CLOSE_MINUTE_IST;
+}
+
 function validSymbol(symbol: string): symbol is StorageV3Symbol {
   return symbol === "NIFTY" || symbol === "BANKNIFTY" || symbol === "SENSEX";
 }
@@ -43,6 +69,14 @@ function sameMinuteBucket(payload: StorageV3MinutePayload): boolean {
  * already fetched/calculated in the live cycle.
  */
 export async function persistStorageV3Minute(payload: StorageV3MinutePayload): Promise<StorageV3WriteResult> {
+  // Universal final-write guard. Even if a caller bypasses an adapter-level
+  // session check, Storage V3 cannot create market/option/chain rows outside
+  // the regular Indian market session. The 15:30 IST minute is allowed;
+  // writes are blocked from 15:31 until 09:15 on the next weekday.
+  if (!storageSessionAllowed()) {
+    return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0 };
+  }
+
   if (!validSymbol(payload.market.symbol)) {
     console.error(`[Storage V3] rejected unsupported symbol: ${payload.market.symbol}`);
     return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0 };

@@ -97,6 +97,42 @@ function quoteAgeSeconds(quoteTimestamp: string | null | undefined, backendIso: 
   return Math.max(0, Math.round((backend - quote) / 1000));
 }
 
+const INDIA_TIME_ZONE = "Asia/Kolkata";
+const MARKET_OPEN_MINUTE_IST = 9 * 60 + 15;
+const MARKET_CLOSE_MINUTE_IST = 15 * 60 + 30;
+
+function storageSessionGate(now: Date = new Date()): { allowed: boolean; reason?: string } {
+  if (!Number.isFinite(now.getTime())) return { allowed: false, reason: "INVALID_SERVER_TIME" };
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: INDIA_TIME_ZONE,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+
+  const weekday = parts.find((part) => part.type === "weekday")?.value;
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return { allowed: false, reason: "INVALID_IST_TIME" };
+  }
+  if (weekday === "Sat" || weekday === "Sun") {
+    return { allowed: false, reason: "MARKET_CLOSED_DAY" };
+  }
+
+  const minuteOfDay = hour * 60 + minute;
+  if (minuteOfDay < MARKET_OPEN_MINUTE_IST) {
+    return { allowed: false, reason: "BEFORE_MARKET_OPEN" };
+  }
+  if (minuteOfDay > MARKET_CLOSE_MINUTE_IST) {
+    return { allowed: false, reason: "AFTER_MARKET_CLOSE" };
+  }
+  return { allowed: true };
+}
+
 function chooseBand(strikes: number[], atm: number, radius = 7): Set<number> {
   const unique = [...new Set(strikes.filter(Number.isFinite))].sort((a, b) => a - b);
   if (!unique.length) return new Set<number>();
@@ -188,6 +224,15 @@ export async function persistStorageV3FromExistingSnapshot(
   fast: ExistingFastChainLike | null | undefined,
 ): Promise<StorageV3AdapterResult> {
   if (!market) return { ok: false, skipped: true, reason: "NO_EXISTING_MARKET_SNAPSHOT", marketWrites: 0, optionWrites: 0, chainWrites: 0 };
+
+  // Storage V3 is a live intraday research archive. Use the server clock in
+  // Asia/Kolkata so a stale/cached market timestamp cannot keep creating rows
+  // after the exchange session has ended. The 15:30 minute itself is allowed;
+  // from 15:31 IST onward writes are skipped until the next trading session.
+  const session = storageSessionGate();
+  if (!session.allowed) {
+    return { ok: false, skipped: true, reason: session.reason, marketWrites: 0, optionWrites: 0, chainWrites: 0 };
+  }
 
   const backendIso = market.timestamp && Number.isFinite(new Date(market.timestamp).getTime()) ? market.timestamp : new Date().toISOString();
   const minuteBucket = minuteBucketUtcIso(backendIso);

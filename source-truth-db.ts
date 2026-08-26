@@ -161,7 +161,7 @@ export async function persistSourceTruthRecords(rows: SourceTruthPersistenceReco
       row.sourceVersion ?? null,
       row.calculationVersion ?? null,
     ]);
-    if (result?.rows.length) writes += 1;
+    if (result?.rows?.length) writes += 1;
   }
   return writes;
 }

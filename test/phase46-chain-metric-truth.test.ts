@@ -8,6 +8,7 @@ import {
   PHASE46_CHAIN_METRIC_SAFETY,
   type Phase46UniverseMetadata,
 } from "../chain-metric-truth.js";
+import { MAX_PAIN_CALCULATION_VERSION } from "../max-pain-provenance.js";
 
 function metadata(): Phase46UniverseMetadata {
   const strikes = [22000,22100,22200];
@@ -26,26 +27,26 @@ function metadata(): Phase46UniverseMetadata {
   };
 }
 
-function build(m: Phase46UniverseMetadata = metadata()) {
+function build(m: Phase46UniverseMetadata = metadata(), maxPain:number|null=22100) {
   return buildPhase46ChainMetricTruth({
     symbol:"NIFTY", minuteBucket:"2026-08-26T04:30:00.000Z", expiry:"2026-08-27",
     metadata:m, atmStraddle:205, band7OiPcr:1.1, band7VolumePcr:0.95,
-    fullChainOiPcr:1.25, maxPain:22100,
+    fullChainOiPcr:1.25, maxPain,
   });
 }
 
 test("complete master universe produces metric-specific valid provenance but receipt-time context only", () => {
   const rows = build();
-  for (const metric of ["ATM_STRADDLE","BAND7_OI_PCR","BAND7_VOLUME_PCR","FULL_CHAIN_OI_PCR","FULL_CHAIN_VOLUME_PCR","CALL_WALL","PUT_WALL"]) {
+  for (const metric of ["ATM_STRADDLE","BAND7_OI_PCR","BAND7_VOLUME_PCR","FULL_CHAIN_OI_PCR","FULL_CHAIN_VOLUME_PCR","CALL_WALL","PUT_WALL","MAX_PAIN"]) {
     const row = rows.find((r) => r.metric === metric)!;
     assert.equal(row.truthState, "VALID", metric);
     assert.equal(row.usability, "CONTEXT_ONLY", metric);
     assert.ok(row.reasonCodes.includes("QUOTE_TIME_BASIS_RESPONSE_RECEIPT"));
   }
   const maxPain = rows.find((r) => r.metric === "MAX_PAIN")!;
-  assert.equal(maxPain.truthState, "BLOCKED");
-  assert.equal(maxPain.usability, "BLOCKED");
-  assert.ok(maxPain.reasonCodes.includes("MAX_PAIN_CALCULATION_PROVENANCE_NOT_AUDITED"));
+  assert.equal(maxPain.detail?.calculationVersion,MAX_PAIN_CALCULATION_VERSION);
+  assert.match(String(maxPain.detail?.interpretationGuard),/not a seller target/i);
+  assert.equal(maxPain.detail?.tieBreak,"LOWEST_STRIKE_ON_EQUAL_MINIMUM_PAYOUT");
 });
 
 test("missing full-universe quote blocks full-chain metrics without blocking exact ATM pair", () => {
@@ -54,11 +55,19 @@ test("missing full-universe quote blocks full-chain metrics without blocking exa
   m.allOiPresent = false; m.allVolumePresent = false;
   const rows = build(m);
   assert.equal(rows.find((r)=>r.metric==="ATM_STRADDLE")?.truthState, "VALID");
-  for (const metric of ["FULL_CHAIN_OI_PCR","FULL_CHAIN_VOLUME_PCR","CALL_WALL","PUT_WALL"]) {
+  for (const metric of ["FULL_CHAIN_OI_PCR","FULL_CHAIN_VOLUME_PCR","CALL_WALL","PUT_WALL","MAX_PAIN"]) {
     const row = rows.find((r)=>r.metric===metric)!;
     assert.equal(row.truthState,"BLOCKED",metric);
     assert.ok(row.reasonCodes.includes("FULL_UNIVERSE_QUOTE_COVERAGE_INCOMPLETE"));
   }
+});
+
+test("missing OI blocks audited Max Pain even when legacy numeric value exists", () => {
+  const m=metadata(); m.allOiPresent=false;
+  const row=build(m,22100).find((r)=>r.metric==="MAX_PAIN")!;
+  assert.equal(row.truthState,"BLOCKED");
+  assert.equal(row.usability,"BLOCKED");
+  assert.ok(row.reasonCodes.includes("MAX_PAIN_OI_FIELD_COVERAGE_INCOMPLETE"));
 });
 
 test("band OI and band Volume PCR are independently gated and never mislabeled full-chain", () => {
@@ -71,9 +80,11 @@ test("band OI and band Volume PCR are independently gated and never mislabeled f
 
 test("duplicate instrument token universe fails closed", () => {
   const m = metadata(); m.uniqueTokenCount = 5;
-  const row = build(m).find((r)=>r.metric==="FULL_CHAIN_OI_PCR")!;
-  assert.equal(row.truthState,"BLOCKED");
-  assert.ok(row.reasonCodes.includes("INSTRUMENT_TOKEN_UNIQUENESS_FAILED"));
+  for (const metric of ["FULL_CHAIN_OI_PCR","MAX_PAIN"]) {
+    const row = build(m).find((r)=>r.metric===metric)!;
+    assert.equal(row.truthState,"BLOCKED");
+    assert.ok(row.reasonCodes.includes("INSTRUMENT_TOKEN_UNIQUENESS_FAILED"));
+  }
 });
 
 test("universe fingerprint is deterministic and changes with expected universe", () => {

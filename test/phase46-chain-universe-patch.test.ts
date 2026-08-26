@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { applyPhase46ChainUniversePatch, PHASE46_MARKER } from "../scripts/phase46-chain-universe-patch-core.mjs";
+import { applyPhase33Patch } from "../scripts/phase33-live-metadata-patch-core.mjs";
 
 const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 
@@ -18,6 +19,13 @@ test("Phase 46 patch captures master universe and quote coverage without extra b
   const beforeFetches = (server.match(/fetchKiteQuoteBatched\(/g) ?? []).length;
   const afterFetches = (result.source.match(/fetchKiteQuoteBatched\(/g) ?? []).length;
   assert.equal(afterFetches, beforeFetches, "patch must reuse existing quote batch, not add broker calls");
+});
+
+test("Phase 46 patch remains compatible after Phase 33 startup patch", () => {
+  const phase33 = applyPhase33Patch(server);
+  const phase46 = applyPhase46ChainUniversePatch(phase33.source);
+  assert.equal(phase46.changed, true);
+  assert.ok(phase46.source.includes(PHASE46_MARKER));
 });
 
 test("Phase 46 patch is idempotent and generated server remains syntactically valid", () => {

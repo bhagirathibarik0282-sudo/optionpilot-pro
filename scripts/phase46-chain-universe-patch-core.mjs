@@ -6,6 +6,14 @@ function replaceOnce(source, anchor, replacement, label) {
   return source.replace(anchor, replacement);
 }
 
+function replaceRegexOnce(source, pattern, replacement, label) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  const matcher = new RegExp(pattern.source, flags);
+  const matches = [...source.matchAll(matcher)];
+  if (matches.length !== 1) throw new Error(`[Phase46 patch] expected one ${label} anchor, found ${matches.length}`);
+  return source.replace(pattern, replacement);
+}
+
 export function applyPhase46ChainUniversePatch(input) {
   let source = input;
   if (source.includes(PHASE46_MARKER)) return { source, changed: false };
@@ -26,8 +34,13 @@ export function applyPhase46ChainUniversePatch(input) {
   const returnAnchor = "    bandStrikes,\n  };";
   source = replaceOnce(source, returnAnchor, `    bandStrikes,\n    phase46Universe: {\n      provenance: \"KITE_LIVE_INSTRUMENT_MASTER_OPTION_MAP\",\n      expiry: phase46Expiry,\n      quoteReceivedAt: phase46QuoteReceivedAt,\n      expectedContractCount: allInstruments.length,\n      expectedCeCount: phase46ExpectedCe.length,\n      expectedPeCount: phase46ExpectedPe.length,\n      expectedStrikes: phase46ExpectedStrikes,\n      expectedContractKeys: phase46ExpectedContractKeys,\n      uniqueTokenCount: phase46UniqueTokens.size,\n      quotedContractCount: phase46Rows.filter((row) => !!row.quote).length,\n      missingQuoteKeys: phase46MissingQuoteKeys,\n      allQuotesPresent: phase46AllQuotesPresent,\n      allOiPresent: phase46AllOiPresent,\n      allVolumePresent: phase46AllVolumePresent,\n      bandOiCoverageComplete: phase46BandOiCoverageComplete,\n      bandVolumeCoverageComplete: phase46BandVolumeCoverageComplete,\n      atmPairCoverageComplete: phase46AtmPairCoverageComplete,\n      atmCeLtp: Number.isFinite(atmCeQuote?.last_price) ? Number(atmCeQuote.last_price) : null,\n      atmPeLtp: Number.isFinite(atmPeQuote?.last_price) ? Number(atmPeQuote.last_price) : null,\n      fullChainVolumePcr: phase46FullChainVolumePcr,\n      fullChainCallWallStrike: phase46CallWall.strike,\n      fullChainCallWallOi: phase46CallWall.oi,\n      fullChainPutWallStrike: phase46PutWall.strike,\n      fullChainPutWallOi: phase46PutWall.oi,\n    },\n  };`, "OptionChainStats returned bandStrikes");
 
-  const assignmentAnchor = "      baseMetrics.maxPain = chainStats.maxPain;\n      fullChainPcr = chainStats.fullChainPcr;";
-  source = replaceOnce(source, assignmentAnchor, `${assignmentAnchor}\n      // Phase 46 companion truth only; does not alter legacy trading calculations.\n      (baseMetrics as any).phase46ChainTruth = chainStats.phase46Universe ?? null;`, "main snapshot chain assignment");
+  const assignmentPattern = /(\s*baseMetrics\.maxPain\s*=\s*chainStats\.maxPain;\r?\n\s*fullChainPcr\s*=\s*chainStats\.fullChainPcr;)/;
+  source = replaceRegexOnce(
+    source,
+    assignmentPattern,
+    `$1\n      // Phase 46 companion truth only; does not alter legacy trading calculations.\n      (baseMetrics as any).phase46ChainTruth = chainStats.phase46Universe ?? null;`,
+    "main snapshot chain assignment",
+  );
 
   return { source, changed: true };
 }

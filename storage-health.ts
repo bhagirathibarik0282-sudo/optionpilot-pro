@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { dbIsConfigured, dbQuerySafe } from "./db.js";
+import { mountSourceHealthRoutes } from "./source-health-api.js";
 
 type CountRow = { count: string | number };
 type LatestRow = { symbol: string; minute_bucket: string | Date | null; spot_ltp: number | null };
@@ -89,4 +90,7 @@ export function mountStorageHealthRoutes(app: Hono): void {
       affectsExecution: false,
     });
   });
+
+  // Phase 41 owner-facing source/evidence health. Read-only and shadow-only.
+  mountSourceHealthRoutes(app);
 }

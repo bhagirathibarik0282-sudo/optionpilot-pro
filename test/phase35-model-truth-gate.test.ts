@@ -25,8 +25,9 @@ test("existing snapshot Greeks with no provenance are persisted as blocked model
   assert.ok(row.audit.reasons.includes("GREEKS_PROVENANCE_UNKNOWN"));
 });
 
-test("Storage V3 shadow path persists model-truth absence explicitly", () => {
-  assert.ok(writerSource.includes("persistUnknownModelTruthForOptions"));
+test("Storage V3 shadow path persists explicit model-truth companion records", () => {
+  assert.ok(writerSource.includes("persistOptionModelTruthRecords"));
+  assert.ok(writerSource.includes("buildPhase38ModelTruth"));
   assert.ok(writerSource.includes("sourceTruthShadowEnabled()"));
 });
 

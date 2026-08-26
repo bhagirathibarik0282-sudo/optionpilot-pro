@@ -55,6 +55,9 @@ test("revision implementation never updates or deletes the original known-then o
   assert.doesNotMatch(source, /DELETE\s+FROM\s+source_truth_observation_1m/i);
   assert.match(source, /originalObservationMutated: false/);
   assert.match(source, /autoAppliedToEvidence: false/);
+  assert.match(source, /affectsVerdict: false/);
+  assert.match(source, /affectsTelegram: false/);
+  assert.match(source, /affectsExecution: false/);
 });
 
 test("revision mutation endpoint is disabled when token is absent", async () => {

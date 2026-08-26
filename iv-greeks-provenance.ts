@@ -25,7 +25,8 @@ export type ModelTruthReason =
   | "NON_FINITE_MODEL_INPUT"
   | "GAMMA_PROVENANCE_UNVERIFIED"
   | "IV_SOLVER_ILL_CONDITIONED"
-  | "IV_SOLVER_CONDITIONING_UNKNOWN";
+  | "IV_SOLVER_CONDITIONING_UNKNOWN"
+  | "ZERO_DTE_GREEK_SEMANTIC_CONFLICT";
 
 export interface OptionModelTruthInput {
   iv?: number | null;

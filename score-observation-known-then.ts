@@ -122,6 +122,14 @@ export function scoreObservationShadowEnabled(env: NodeJS.ProcessEnv = process.e
   return /^(1|true|yes|on)$/i.test(String(env.PHASE50_SCORE_SHADOW ?? ""));
 }
 
+export function resolvePersistedObservationId(
+  queryResult: { rows?: Array<{ observation_id: string }> } | null,
+  stableObservationId: string,
+): string | null {
+  if (!queryResult) return null;
+  return queryResult.rows?.[0]?.observation_id ?? stableObservationId;
+}
+
 export async function persistKnownThenScoreObservation(input: KnownThenScoreObservationInput): Promise<string | null> {
   if (!scoreObservationShadowEnabled()) return null;
   const row = buildKnownThenScoreObservation(input);
@@ -139,7 +147,7 @@ export async function persistKnownThenScoreObservation(input: KnownThenScoreObse
     row.legacyVerdict, JSON.stringify(row.contributions), JSON.stringify(row.overrides),
     row.legacyCandidate, row.maxPainContribution, row.sourcePath, row.version,
   ]);
-  return r?.rows?.[0]?.observation_id ?? row.observationId;
+  return resolvePersistedObservationId(r, row.observationId);
 }
 
 export async function loadKnownThenScoreObservations(symbol?: string, limit = 5000): Promise<KnownThenScoreObservation[]> {

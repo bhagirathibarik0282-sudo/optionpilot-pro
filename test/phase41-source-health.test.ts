@@ -38,12 +38,15 @@ test("no rows is explicit NO_DATA", () => {
   assert.equal(classifyOwnerHealth({ ...base, row_count: 0, usable_count: 0 }), "NO_DATA");
 });
 
-test("source health query evaluates the latest minute per symbol and family", () => {
+test("source health query evaluates the latest minute per symbol and family without reason-code count inflation", () => {
   const sql = sourceHealthSql();
   assert.match(sql, /MAX\(minute_bucket\)/);
   assert.match(sql, /GROUP BY symbol, record_kind/);
   assert.match(sql, /source_truth_observation_1m/);
-  assert.match(sql, /COUNT\(\*\) FILTER \(WHERE st\.usability = 'BLOCKED'\)/);
+  assert.match(sql, /COUNT\(\*\) FILTER \(WHERE usability = 'BLOCKED'\)/);
+  assert.match(sql, /base AS/);
+  assert.match(sql, /reason_agg AS/);
+  assert.match(sql, /jsonb_array_elements_text\(lr\.reason_codes\)/);
 });
 
 test("health API exposes reconstruction and model truth companion stores", () => {

@@ -7,6 +7,11 @@ import {
   type ChainState1mRow,
 } from "./db.js";
 import { persistClosedTimeframesFromMinute } from "./timeframe-storage.js";
+import {
+  persistSourceTruthRecords,
+  sourceTruthShadowEnabled,
+  type SourceTruthPersistenceRecord,
+} from "./source-truth-db.js";
 
 export type StorageV3Symbol = "NIFTY" | "BANKNIFTY" | "SENSEX";
 
@@ -14,6 +19,7 @@ export interface StorageV3MinutePayload {
   market: MarketSnapshot1mRow;
   options?: OptionSnapshot1mRow[];
   chains?: ChainState1mRow[];
+  sourceTruth?: SourceTruthPersistenceRecord[];
 }
 
 export interface StorageV3WriteResult {
@@ -21,6 +27,7 @@ export interface StorageV3WriteResult {
   marketWrites: number;
   optionWrites: number;
   chainWrites: number;
+  truthWrites?: number;
 }
 
 const INDIA_TIME_ZONE = "Asia/Kolkata";
@@ -57,7 +64,8 @@ function sameMinuteBucket(payload: StorageV3MinutePayload): boolean {
   const bucket = payload.market.minuteBucket;
   return (
     (payload.options ?? []).every((row) => row.minuteBucket === bucket) &&
-    (payload.chains ?? []).every((row) => row.minuteBucket === bucket)
+    (payload.chains ?? []).every((row) => row.minuteBucket === bucket) &&
+    (payload.sourceTruth ?? []).every((row) => row.minuteBucket === bucket)
   );
 }
 
@@ -74,25 +82,33 @@ export async function persistStorageV3Minute(payload: StorageV3MinutePayload): P
   // the regular Indian market session. The 15:30 IST minute is allowed;
   // writes are blocked from 15:31 until 09:15 on the next weekday.
   if (!storageSessionAllowed()) {
-    return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0 };
+    return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0, truthWrites: 0 };
   }
 
   if (!validSymbol(payload.market.symbol)) {
     console.error(`[Storage V3] rejected unsupported symbol: ${payload.market.symbol}`);
-    return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0 };
+    return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0, truthWrites: 0 };
   }
   if (!payload.market.minuteBucket || !sameMinuteBucket(payload)) {
     console.error("[Storage V3] rejected payload with missing/mixed minute bucket");
-    return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0 };
+    return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0, truthWrites: 0 };
   }
 
   const options = (payload.options ?? []).filter((row) => row.symbol === payload.market.symbol);
   const chains = (payload.chains ?? []).filter((row) => row.symbol === payload.market.symbol);
+  const truth = (payload.sourceTruth ?? []).filter((row) => row.symbol === payload.market.symbol);
 
   try {
     await dbUpsertMarketSnapshot1m(payload.market);
     for (const row of options) await dbUpsertOptionSnapshot1m(row);
     for (const row of chains) await dbUpsertChainState1m(row);
+
+    // Source-truth persistence is deliberately opt-in and additive. Failure or
+    // disablement cannot alter the legacy normalized storage or live logic.
+    let truthWrites = 0;
+    if (sourceTruthShadowEnabled() && truth.length) {
+      truthWrites = await persistSourceTruthRecords(truth);
+    }
 
     // Archive only formally-closed 3M/15M/30M/60M blocks.
     // Failures are isolated inside the storage path and never alter live logic.
@@ -103,11 +119,12 @@ export async function persistStorageV3Minute(payload: StorageV3MinutePayload): P
       marketWrites: 1,
       optionWrites: options.length,
       chainWrites: chains.length,
+      truthWrites,
     };
   } catch (err) {
     // db helpers are already no-throw; this is defense-in-depth only.
     console.error("[Storage V3] unexpected write failure:", err instanceof Error ? err.message : err);
-    return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0 };
+    return { ok: false, marketWrites: 0, optionWrites: 0, chainWrites: 0, truthWrites: 0 };
   }
 }
 

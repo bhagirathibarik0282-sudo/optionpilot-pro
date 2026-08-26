@@ -74,45 +74,54 @@ export function sourceHealthSql(): string {
       FROM source_truth_observation_1m
       WHERE symbol IN ('NIFTY','BANKNIFTY','SENSEX')
       GROUP BY symbol, record_kind
+    ), latest_rows AS (
+      SELECT st.*
+      FROM source_truth_observation_1m st
+      JOIN latest_minute lm
+        ON lm.symbol = st.symbol AND lm.record_kind = st.record_kind AND lm.minute_bucket = st.minute_bucket
+    ), base AS (
+      SELECT
+        symbol, record_kind, minute_bucket,
+        CASE
+          WHEN BOOL_OR(freshness_state = 'STALE') THEN 'STALE'
+          WHEN BOOL_OR(freshness_state = 'UNKNOWN') THEN 'UNKNOWN'
+          WHEN BOOL_OR(freshness_state = 'AGING') THEN 'AGING'
+          ELSE 'FRESH'
+        END AS freshness_state,
+        CASE
+          WHEN BOOL_OR(identity_state IN ('MISMATCH','AMBIGUOUS')) THEN 'MISMATCH'
+          WHEN BOOL_OR(identity_state = 'UNKNOWN') THEN 'UNKNOWN'
+          WHEN BOOL_OR(identity_state = 'PARTIAL') THEN 'PARTIAL'
+          ELSE 'VALID'
+        END AS identity_state,
+        CASE
+          WHEN BOOL_OR(quality_state = 'INVALID') THEN 'INVALID'
+          WHEN BOOL_OR(quality_state = 'UNKNOWN') THEN 'UNKNOWN'
+          WHEN BOOL_OR(quality_state = 'PARTIAL') THEN 'PARTIAL'
+          ELSE 'VALID'
+        END AS quality_state,
+        CASE
+          WHEN BOOL_OR(usability = 'BLOCKED') THEN 'BLOCKED'
+          WHEN BOOL_OR(usability = 'CONTEXT_ONLY') THEN 'CONTEXT_ONLY'
+          ELSE 'USABLE'
+        END AS usability,
+        MAX(data_age_ms) AS data_age_ms,
+        COUNT(*)::bigint AS row_count,
+        COUNT(*) FILTER (WHERE usability = 'USABLE')::bigint AS usable_count,
+        COUNT(*) FILTER (WHERE usability = 'BLOCKED')::bigint AS blocked_count
+      FROM latest_rows
+      GROUP BY symbol, record_kind, minute_bucket
+    ), reason_agg AS (
+      SELECT lr.symbol, lr.record_kind, lr.minute_bucket,
+        COALESCE(jsonb_agg(DISTINCT reason.value) FILTER (WHERE reason.value IS NOT NULL), '[]'::jsonb) AS reason_codes
+      FROM latest_rows lr
+      LEFT JOIN LATERAL jsonb_array_elements_text(lr.reason_codes) reason(value) ON TRUE
+      GROUP BY lr.symbol, lr.record_kind, lr.minute_bucket
     )
-    SELECT
-      st.symbol,
-      st.record_kind,
-      st.minute_bucket,
-      CASE
-        WHEN BOOL_OR(st.freshness_state = 'STALE') THEN 'STALE'
-        WHEN BOOL_OR(st.freshness_state = 'UNKNOWN') THEN 'UNKNOWN'
-        WHEN BOOL_OR(st.freshness_state = 'AGING') THEN 'AGING'
-        ELSE 'FRESH'
-      END AS freshness_state,
-      CASE
-        WHEN BOOL_OR(st.identity_state IN ('MISMATCH','AMBIGUOUS')) THEN 'MISMATCH'
-        WHEN BOOL_OR(st.identity_state = 'UNKNOWN') THEN 'UNKNOWN'
-        WHEN BOOL_OR(st.identity_state = 'PARTIAL') THEN 'PARTIAL'
-        ELSE 'VALID'
-      END AS identity_state,
-      CASE
-        WHEN BOOL_OR(st.quality_state = 'INVALID') THEN 'INVALID'
-        WHEN BOOL_OR(st.quality_state = 'UNKNOWN') THEN 'UNKNOWN'
-        WHEN BOOL_OR(st.quality_state = 'PARTIAL') THEN 'PARTIAL'
-        ELSE 'VALID'
-      END AS quality_state,
-      CASE
-        WHEN BOOL_OR(st.usability = 'BLOCKED') THEN 'BLOCKED'
-        WHEN BOOL_OR(st.usability = 'CONTEXT_ONLY') THEN 'CONTEXT_ONLY'
-        ELSE 'USABLE'
-      END AS usability,
-      MAX(st.data_age_ms) AS data_age_ms,
-      COALESCE(jsonb_agg(DISTINCT reason.value) FILTER (WHERE reason.value IS NOT NULL), '[]'::jsonb) AS reason_codes,
-      COUNT(*)::bigint AS row_count,
-      COUNT(*) FILTER (WHERE st.usability = 'USABLE')::bigint AS usable_count,
-      COUNT(*) FILTER (WHERE st.usability = 'BLOCKED')::bigint AS blocked_count
-    FROM source_truth_observation_1m st
-    JOIN latest_minute lm
-      ON lm.symbol = st.symbol AND lm.record_kind = st.record_kind AND lm.minute_bucket = st.minute_bucket
-    LEFT JOIN LATERAL jsonb_array_elements_text(st.reason_codes) reason(value) ON TRUE
-    GROUP BY st.symbol, st.record_kind, st.minute_bucket
-    ORDER BY st.symbol, st.record_kind
+    SELECT b.*, r.reason_codes
+    FROM base b
+    JOIN reason_agg r USING (symbol, record_kind, minute_bucket)
+    ORDER BY b.symbol, b.record_kind
   `;
 }
 
@@ -182,21 +191,24 @@ export function mountSourceHealthRoutes(app: Hono): void {
       }, 503);
     }
 
-    const symbols: Record<string, any> = {};
+    const symbols: Record<string, unknown> = {};
     for (const symbol of ["NIFTY","BANKNIFTY","SENSEX"]) {
-      const families = source.rows.filter((r) => r.symbol === symbol).map((r) => ({
-        family: r.record_kind,
-        state: classifyOwnerHealth(r),
-        minuteBucket: iso(r.minute_bucket),
-        freshness: r.freshness_state,
-        identity: r.identity_state,
-        quality: r.quality_state,
-        usability: r.usability,
-        dataAgeMs: r.data_age_ms == null ? null : num(r.data_age_ms),
-        reasons: reasons(r.reason_codes),
-        counts: { total: num(r.row_count), usable: num(r.usable_count), blocked: num(r.blocked_count) },
-        newEvidenceAllowed: classifyOwnerHealth(r) === "HEALTHY",
-      }));
+      const families = source.rows.filter((r) => r.symbol === symbol).map((r) => {
+        const state = classifyOwnerHealth(r);
+        return {
+          family: r.record_kind,
+          state,
+          minuteBucket: iso(r.minute_bucket),
+          freshness: r.freshness_state,
+          identity: r.identity_state,
+          quality: r.quality_state,
+          usability: r.usability,
+          dataAgeMs: r.data_age_ms == null ? null : num(r.data_age_ms),
+          reasons: reasons(r.reason_codes),
+          counts: { total: num(r.row_count), usable: num(r.usable_count), blocked: num(r.blocked_count) },
+          newEvidenceAllowed: state === "HEALTHY",
+        };
+      });
       const reconstructionRows = reconstruction.rows.filter((r) => r.symbol === symbol).map((r) => ({
         metric: r.metric,
         state: r.state,

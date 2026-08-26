@@ -12,8 +12,8 @@ function windows(source: string, needle: string, radius = 55) {
 
 test("extract exact premium diagnostic route implementation before Phase 50 persistence wiring", () => {
   const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
-  const route = windows(source, 'app.post("/api/v2/premium-diagnostic-snapshot"', 70);
-  const routeSingle = windows(source, "app.post('/api/v2/premium-diagnostic-snapshot'", 70);
+  const route = windows(source, 'app.post("/api/premium-diagnostic/snapshot"', 70);
+  const routeSingle = windows(source, "app.post('/api/premium-diagnostic/snapshot'", 70);
   const evidence = route.concat(routeSingle);
   console.log("[Phase50PremiumDiagnosticRouteAudit]", JSON.stringify(evidence));
   assert.equal(evidence.length, 1, `expected exactly one premium diagnostic POST route, saw ${evidence.length}`);

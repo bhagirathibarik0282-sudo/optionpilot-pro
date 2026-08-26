@@ -22,17 +22,9 @@ if (!source.includes(IMPORT_MARKER)) {
   source = source.replace(DB_IMPORT, `${DB_IMPORT}\n${IMPORT_MARKER}`);
 }
 
-if (!source.includes(HEALTH_IMPORT)) {
-  source = source.replace(IMPORT_MARKER, `${IMPORT_MARKER}\n${HEALTH_IMPORT}`);
-}
-
-if (!source.includes(TEF_INSPECT_IMPORT)) {
-  source = source.replace(HEALTH_IMPORT, `${HEALTH_IMPORT}\n${TEF_INSPECT_IMPORT}`);
-}
-
-if (!source.includes(TELEGRAM_PREVIEW_IMPORT)) {
-  source = source.replace(TEF_INSPECT_IMPORT, `${TEF_INSPECT_IMPORT}\n${TELEGRAM_PREVIEW_IMPORT}`);
-}
+if (!source.includes(HEALTH_IMPORT)) source = source.replace(IMPORT_MARKER, `${IMPORT_MARKER}\n${HEALTH_IMPORT}`);
+if (!source.includes(TEF_INSPECT_IMPORT)) source = source.replace(HEALTH_IMPORT, `${HEALTH_IMPORT}\n${TEF_INSPECT_IMPORT}`);
+if (!source.includes(TELEGRAM_PREVIEW_IMPORT)) source = source.replace(TEF_INSPECT_IMPORT, `${TEF_INSPECT_IMPORT}\n${TELEGRAM_PREVIEW_IMPORT}`);
 
 if (!source.includes(WIRE_MARKER)) {
   const matches = source.split(SNAPSHOT_ANCHOR).length - 1;
@@ -41,15 +33,12 @@ if (!source.includes(WIRE_MARKER)) {
     process.exit(0);
   }
 
-  const wiring = `${SNAPSHOT_ANCHOR}\n\n    ${WIRE_MARKER}\n    // Storage-only persistence of data already fetched/calculated by this refresh.\n    // Phase 32 also carries non-directional Kite provenance into the shadow path.\n    // No extra Kite request, no scoring/verdict/Telegram/execution side effect.\n    for (const storageSym of [\"NIFTY\", \"BANKNIFTY\", \"SENSEX\"] as const) {\n      const storageMarket = snapshot[storageSym];\n      if (!storageMarket || storageMarket.error) continue;\n\n      // IndexMetrics.timestamp is the backend snapshot/receipt proxy for this\n      // collection cycle. It is deliberately labelled as a proxy below and is\n      // never rewritten as a genuine exchange trade timestamp.\n      const storageReceivedAt = storageMarket.timestamp ?? new Date().toISOString();\n      const storageMarketForTruth = {\n        ...storageMarket,\n        sourceProvider: \"KITE\",\n        receivedAt: storageReceivedAt,\n        sourceVersion: \"KITE_INDEX_SNAPSHOT_RECEIPT_PROXY\",\n        futuresContracts: (storageMarket.futuresContracts ?? []).map((future) => ({\n          ...future,\n          sourceProvider: \"KITE\",\n          receivedAt: storageReceivedAt,\n          sourceVersion: \"KITE_FUTURES_SNAPSHOT_RECEIPT_PROXY\",\n        })),\n        expiries: (storageMarket.expiries ?? []).map((expiry) => ({\n          ...expiry,\n          ceStrikes: (expiry.ceStrikes ?? []).map((row) => ({\n            ...row,\n            sourceProvider: \"KITE\",\n            receivedAt: storageReceivedAt,\n            sourceVersion: row.contractRegime === \"LIVE_CONTRACT_MASTER\"\n              ? \"KITE_LIVE_CONTRACT_MASTER|SNAPSHOT_RECEIPT_PROXY\"\n              : \"KITE_OPTION_SNAPSHOT_RECEIPT_PROXY\",\n          })),\n          peStrikes: (expiry.peStrikes ?? []).map((row) => ({\n            ...row,\n            sourceProvider: \"KITE\",\n            receivedAt: storageReceivedAt,\n            sourceVersion: row.contractRegime === \"LIVE_CONTRACT_MASTER\"\n              ? \"KITE_LIVE_CONTRACT_MASTER|SNAPSHOT_RECEIPT_PROXY\"\n              : \"KITE_OPTION_SNAPSHOT_RECEIPT_PROXY\",\n          })),\n        })),\n      };\n\n      void persistStorageV3FromExistingSnapshot(storageSym, storageMarketForTruth, {\n        oiPcr: storageMarket.pcr,\n        volumePcr: storageMarket.volumePcr,\n        fullChainPcr: storageMarket.gapScore?.fullChainPcr ?? null,\n        maxPain: storageMarket.maxPain,\n        sourceProvider: \"KITE\",\n        receivedAt: storageReceivedAt,\n        sourceVersion: \"KITE_CHAIN_DERIVED|SNAPSHOT_RECEIPT_PROXY\",\n        sourceTimestamp: null,\n      }).then((result) => {\n        if (!result.ok && !result.skipped) {\n          console.warn(\"[Storage V3] write returned not-ok\", storageSym, result.reason ?? \"UNKNOWN\");\n        }\n      }).catch((err) => {\n        console.error(\"[Storage V3] persistence call failed without affecting live cycle:\", err instanceof Error ? err.message : err);\n      });\n    }\n    // STORAGE_V3_RUNTIME_WIRE_END`;
+  const wiring = `${SNAPSHOT_ANCHOR}\n\n    ${WIRE_MARKER}\n    // Storage-only persistence of data already fetched/calculated by this refresh.\n    // Phase 33 carries exact futures master identity and the backend quote-batch\n    // response receipt boundary when available. This is not an exchange timestamp.\n    // No extra Kite request, no scoring/verdict/Telegram/execution side effect.\n    for (const storageSym of [\"NIFTY\", \"BANKNIFTY\", \"SENSEX\"] as const) {\n      const storageMarket = snapshot[storageSym];\n      if (!storageMarket || storageMarket.error) continue;\n\n      const storageReceivedAt = storageMarket.timestamp ?? new Date().toISOString();\n      const storageMarketForTruth = {\n        ...storageMarket,\n        sourceProvider: \"KITE\",\n        receivedAt: storageReceivedAt,\n        sourceVersion: \"KITE_INDEX_SNAPSHOT_RECEIPT_PROXY\",\n        futuresContracts: (storageMarket.futuresContracts ?? []).map((future) => ({\n          ...future,\n          tradingSymbol: future.tradingsymbol ?? null,\n          sourceProvider: \"KITE\",\n          receivedAt: future.receivedAt ?? storageReceivedAt,\n          sourceVersion: future.receivedAt && future.instrumentToken != null && future.segment && future.exchange\n            ? \"KITE_FUTURES_LIVE_CONTRACT_MASTER|QUOTE_RESPONSE_RECEIPT\"\n            : \"KITE_FUTURES_SNAPSHOT_RECEIPT_PROXY\",\n        })),\n        expiries: (storageMarket.expiries ?? []).map((expiry) => ({\n          ...expiry,\n          ceStrikes: (expiry.ceStrikes ?? []).map((row) => ({\n            ...row,\n            sourceProvider: \"KITE\",\n            receivedAt: storageReceivedAt,\n            sourceVersion: row.contractRegime === \"LIVE_CONTRACT_MASTER\"\n              ? \"KITE_LIVE_CONTRACT_MASTER|SNAPSHOT_RECEIPT_PROXY\"\n              : \"KITE_OPTION_SNAPSHOT_RECEIPT_PROXY\",\n          })),\n          peStrikes: (expiry.peStrikes ?? []).map((row) => ({\n            ...row,\n            sourceProvider: \"KITE\",\n            receivedAt: storageReceivedAt,\n            sourceVersion: row.contractRegime === \"LIVE_CONTRACT_MASTER\"\n              ? \"KITE_LIVE_CONTRACT_MASTER|SNAPSHOT_RECEIPT_PROXY\"\n              : \"KITE_OPTION_SNAPSHOT_RECEIPT_PROXY\",\n          })),\n        })),\n      };\n\n      void persistStorageV3FromExistingSnapshot(storageSym, storageMarketForTruth, {\n        oiPcr: storageMarket.pcr,\n        volumePcr: storageMarket.volumePcr,\n        fullChainPcr: storageMarket.gapScore?.fullChainPcr ?? null,\n        maxPain: storageMarket.maxPain,\n        sourceProvider: \"KITE\",\n        receivedAt: storageReceivedAt,\n        sourceVersion: \"KITE_CHAIN_DERIVED|SNAPSHOT_RECEIPT_PROXY\",\n        sourceTimestamp: null,\n      }).then((result) => {\n        if (!result.ok && !result.skipped) console.warn(\"[Storage V3] write returned not-ok\", storageSym, result.reason ?? \"UNKNOWN\");\n      }).catch((err) => {\n        console.error(\"[Storage V3] persistence call failed without affecting live cycle:\", err instanceof Error ? err.message : err);\n      });\n    }\n    // STORAGE_V3_RUNTIME_WIRE_END`;
 
   source = source.replace(SNAPSHOT_ANCHOR, wiring);
 }
 
-const appPatterns = [
-  /const app = new Hono\(\);/,
-  /const app = new Hono<[^;]+>\(\);/,
-];
+const appPatterns = [/const app = new Hono\(\);/, /const app = new Hono<[^;]+>\(\);/];
 
 function mountAfterApp(marker, line, warning) {
   if (source.includes(marker)) return;
@@ -63,23 +52,9 @@ function mountAfterApp(marker, line, warning) {
   console.warn(warning);
 }
 
-mountAfterApp(
-  HEALTH_MOUNT_MARKER,
-  "mountStorageHealthRoutes(app);",
-  "[Storage V3 wire] Hono app anchor not found; health route not mounted",
-);
-
-mountAfterApp(
-  TEF_MOUNT_MARKER,
-  "mountTefInspectRoutes(app);",
-  "[Storage V3 wire] Hono app anchor not found; TEF inspection routes not mounted",
-);
-
-mountAfterApp(
-  TELEGRAM_PREVIEW_MOUNT_MARKER,
-  "mountTelegramPreviewRoutes(app);",
-  "[Storage V3 wire] Hono app anchor not found; Telegram preview route not mounted",
-);
+mountAfterApp(HEALTH_MOUNT_MARKER, "mountStorageHealthRoutes(app);", "[Storage V3 wire] Hono app anchor not found; health route not mounted");
+mountAfterApp(TEF_MOUNT_MARKER, "mountTefInspectRoutes(app);", "[Storage V3 wire] Hono app anchor not found; TEF inspection routes not mounted");
+mountAfterApp(TELEGRAM_PREVIEW_MOUNT_MARKER, "mountTelegramPreviewRoutes(app);", "[Storage V3 wire] Hono app anchor not found; Telegram preview route not mounted");
 
 writeFileSync(path, source, "utf8");
 console.log("[Storage V3 wire] runtime storage wiring ready");

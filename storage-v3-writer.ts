@@ -13,7 +13,8 @@ import {
   type SourceTruthPersistenceRecord,
 } from "./source-truth-db.js";
 import { promoteSourceTruthRecords } from "./source-truth-promotion.js";
-import { persistUnknownModelTruthForOptions } from "./option-model-truth-db.js";
+import { persistOptionModelTruthRecords } from "./option-model-truth-db.js";
+import { buildPhase38ModelTruth } from "./phase38-model-provenance.js";
 
 export type StorageV3Symbol = "NIFTY" | "BANKNIFTY" | "SENSEX";
 
@@ -79,9 +80,13 @@ export async function persistStorageV3Minute(payload: StorageV3MinutePayload): P
     let modelTruthWrites = 0;
     if (sourceTruthShadowEnabled()) {
       if (truth.length) truthWrites = await persistSourceTruthRecords(truth);
-      // Current live snapshot does not yet prove IV/Greek model provenance.
-      // Persist that absence explicitly so Greek-dependent research fails closed.
-      if (options.length) modelTruthWrites = await persistUnknownModelTruthForOptions(options);
+      // Phase 38 persists exact model inputs already available in Storage V3.
+      // IV permission can become true only when provenance + conditioning pass.
+      // Greek permission deliberately remains false until Gamma provenance is audited.
+      if (options.length) {
+        const modelRows = options.map((option) => buildPhase38ModelTruth(option, payload.market));
+        modelTruthWrites = await persistOptionModelTruthRecords(modelRows);
+      }
     }
 
     await persistClosedTimeframesFromMinute(payload.market.symbol, payload.market.minuteBucket);

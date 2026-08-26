@@ -1,62 +1,43 @@
+function replaceExactlyOnce(source, regex, replacement, label) {
+  const matches = [...source.matchAll(regex)];
+  if (matches.length !== 1) throw new Error(`${label} expected exactly once, saw ${matches.length}`);
+  return source.replace(regex, replacement);
+}
+
 export function applyPhase50ScoreObservationPatch(source) {
   const marker = "PHASE50_KNOWN_THEN_SCORE_WIRING_V1";
   if (source.includes(marker)) return { source, changed: false };
 
   let out = source;
   const importAnchor = 'import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";';
-  if (!out.includes(importAnchor)) throw new Error("db import anchor missing");
+  if (out.split(importAnchor).length - 1 !== 1) throw new Error("db import anchor expected exactly once");
   out = out.replace(importAnchor, importAnchor + '\nimport { persistKnownThenScoreObservation, replayPersistedScoresWithoutMaxPain } from "./score-observation-known-then.js"; // PHASE50_KNOWN_THEN_SCORE_WIRING_V1');
 
-  const snapshotAnchor = '      structuralBias: classifyIndexOverallBias(m),\n    };';
-  if (!out.includes(snapshotAnchor)) throw new Error("premium diagnostic client snapshot anchor missing");
-  out = out.replace(snapshotAnchor,
-`      structuralBias: classifyIndexOverallBias(m),
-      // Phase 50: exact already-computed deterministic decision-time state.
-      // No recomputation, no new market-data call, no trading side effect.
-      ruleScore: result.score,
-      ruleMaxScore: result.maxScore,
-      ruleVerdict: result.verdict,
-      ruleContributions: result.contributions || {},
-      ruleOverrides: result.overrides || [],
-      ruleCandidateSide: result.suggestion && result.suggestion.side ? result.suggestion.side : null,
-    };`);
+  // Narrow semantic anchor with whitespace tolerance only. We still fail closed
+  // unless the exact structural-bias tail occurs once in current server.ts.
+  out = replaceExactlyOnce(
+    out,
+    /^([ \t]*)structuralBias: classifyIndexOverallBias\(m\),\r?\n([ \t]*)};/gm,
+    (_match, fieldIndent, closeIndent) => `${fieldIndent}structuralBias: classifyIndexOverallBias(m),\n${fieldIndent}// Phase 50: exact already-computed deterministic decision-time state.\n${fieldIndent}// No recomputation, no new market-data call, no trading side effect.\n${fieldIndent}ruleScore: result.score,\n${fieldIndent}ruleMaxScore: result.maxScore,\n${fieldIndent}ruleVerdict: result.verdict,\n${fieldIndent}ruleContributions: result.contributions || {},\n${fieldIndent}ruleOverrides: result.overrides || [],\n${fieldIndent}ruleCandidateSide: result.suggestion && result.suggestion.side ? result.suggestion.side : null,\n${closeIndent}};`,
+    "premium diagnostic client snapshot anchor",
+  );
 
-  const interfaceAnchor = '  structuralBias: string | null;\n}';
-  if (!out.includes(interfaceAnchor)) throw new Error("PremiumDiagnosticSnapshot interface anchor missing");
-  out = out.replace(interfaceAnchor,
-`  structuralBias: string | null;
-  ruleScore?: number | null;
-  ruleMaxScore?: number | null;
-  ruleVerdict?: string | null;
-  ruleContributions?: Record<string, number>;
-  ruleOverrides?: string[];
-  ruleCandidateSide?: string | null;
-}`);
+  out = replaceExactlyOnce(
+    out,
+    /^([ \t]*)structuralBias: string \| null;\r?\n([ \t]*)}$/gm,
+    (_match, fieldIndent, closeIndent) => `${fieldIndent}structuralBias: string | null;\n${fieldIndent}ruleScore?: number | null;\n${fieldIndent}ruleMaxScore?: number | null;\n${fieldIndent}ruleVerdict?: string | null;\n${fieldIndent}ruleContributions?: Record<string, number>;\n${fieldIndent}ruleOverrides?: string[];\n${fieldIndent}ruleCandidateSide?: string | null;\n${closeIndent}}`,
+    "PremiumDiagnosticSnapshot interface anchor",
+  );
 
-  const routeAnchor = '  premiumDiagnosticBuffer.get(key)!.push(body.snapshot);\n  return c.json({ ok: true, windowId, bufferedCount: premiumDiagnosticBuffer.get(key)!.length });';
-  if (!out.includes(routeAnchor)) throw new Error("premium diagnostic persistence route anchor missing");
-  out = out.replace(routeAnchor,
-`  premiumDiagnosticBuffer.get(key)!.push(body.snapshot);
-  // Phase 50 shadow persistence: store only the exact score decomposition
-  // supplied at decision time. Fire-and-forget and flag-gated inside the
-  // persistence module; failure can never block the existing diagnostic path.
-  if (typeof body.snapshot.ruleScore === "number" && Number.isFinite(body.snapshot.ruleScore)) {
-    void persistKnownThenScoreObservation({
-      symbol: body.symbol,
-      observedAt: body.snapshot.timestamp,
-      legacyScore: body.snapshot.ruleScore,
-      maxScore: body.snapshot.ruleMaxScore ?? null,
-      legacyVerdict: body.snapshot.ruleVerdict ?? null,
-      contributions: body.snapshot.ruleContributions ?? {},
-      overrides: body.snapshot.ruleOverrides ?? [],
-      legacyCandidate: body.snapshot.ruleCandidateSide ?? null,
-      sourcePath: "/api/premium-diagnostic/snapshot",
-    }).catch((err) => console.error("[Phase50] score observation persistence failed:", err instanceof Error ? err.message : err));
-  }
-  return c.json({ ok: true, windowId, bufferedCount: premiumDiagnosticBuffer.get(key)!.length });`);
+  out = replaceExactlyOnce(
+    out,
+    /^([ \t]*)premiumDiagnosticBuffer\.get\(key\)!\.push\(body\.snapshot\);\r?\n([ \t]*)return c\.json\(\{ ok: true, windowId, bufferedCount: premiumDiagnosticBuffer\.get\(key\)!\.length \}\);/gm,
+    (_match, pushIndent, returnIndent) => `${pushIndent}premiumDiagnosticBuffer.get(key)!.push(body.snapshot);\n${pushIndent}// Phase 50 shadow persistence: store only the exact score decomposition\n${pushIndent}// supplied at decision time. Fire-and-forget and flag-gated inside the\n${pushIndent}// persistence module; failure can never block the existing diagnostic path.\n${pushIndent}if (typeof body.snapshot.ruleScore === "number" && Number.isFinite(body.snapshot.ruleScore)) {\n${pushIndent}  void persistKnownThenScoreObservation({\n${pushIndent}    symbol: body.symbol,\n${pushIndent}    observedAt: body.snapshot.timestamp,\n${pushIndent}    legacyScore: body.snapshot.ruleScore,\n${pushIndent}    maxScore: body.snapshot.ruleMaxScore ?? null,\n${pushIndent}    legacyVerdict: body.snapshot.ruleVerdict ?? null,\n${pushIndent}    contributions: body.snapshot.ruleContributions ?? {},\n${pushIndent}    overrides: body.snapshot.ruleOverrides ?? [],\n${pushIndent}    legacyCandidate: body.snapshot.ruleCandidateSide ?? null,\n${pushIndent}    sourcePath: "/api/premium-diagnostic/snapshot",\n${pushIndent}  }).catch((err) => console.error("[Phase50] score observation persistence failed:", err instanceof Error ? err.message : err));\n${pushIndent}}\n${returnIndent}return c.json({ ok: true, windowId, bufferedCount: premiumDiagnosticBuffer.get(key)!.length });`,
+    "premium diagnostic persistence route anchor",
+  );
 
   const latestRouteAnchor = 'app.get("/api/premium-diagnostic/latest", (c) => {';
-  if (!out.includes(latestRouteAnchor)) throw new Error("premium diagnostic latest route anchor missing");
+  if (out.split(latestRouteAnchor).length - 1 !== 1) throw new Error("premium diagnostic latest route anchor expected exactly once");
   out = out.replace(latestRouteAnchor,
 `// Phase 50 read-only research replay. Threshold list is deliberately empty:
 // this route reports score impact only and does not invent/freeze production thresholds.

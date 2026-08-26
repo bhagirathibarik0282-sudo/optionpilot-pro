@@ -79,11 +79,11 @@ export function unknownSnapshotModelTruth(row: OptionSnapshot1mRow): OptionModel
   };
 }
 
-export async function persistUnknownModelTruthForOptions(rows: OptionSnapshot1mRow[]): Promise<number> {
+/** Generic append-only model-truth persistence used by Phase 38 audited rows. */
+export async function persistOptionModelTruthRecords(rows: OptionModelTruthRecord[]): Promise<number> {
   if (!rows.length || !(await ensureSchema())) return 0;
   let writes = 0;
-  for (const option of rows) {
-    const row = unknownSnapshotModelTruth(option);
+  for (const row of rows) {
     const q = await dbQuerySafe(`
       INSERT INTO option_model_truth_1m (
         observation_id,symbol,minute_bucket,expiry,strike,option_type,
@@ -101,6 +101,10 @@ export async function persistUnknownModelTruthForOptions(rows: OptionSnapshot1mR
     if (q?.rows?.length) writes += 1;
   }
   return writes;
+}
+
+export async function persistUnknownModelTruthForOptions(rows: OptionSnapshot1mRow[]): Promise<number> {
+  return persistOptionModelTruthRecords(rows.map(unknownSnapshotModelTruth));
 }
 
 export interface AtmModelPermission {
@@ -133,6 +137,10 @@ export async function getAtmModelTruthPermission(symbol: string, minuteBucket: s
   return {
     ivAllowed: Boolean(ce.iv_permission && pe.iv_permission),
     greekAllowed: Boolean(ce.greek_permission && pe.greek_permission),
-    reason: ce.greek_permission && pe.greek_permission ? "MODEL_TRUTH_VALID" : "MODEL_PROVENANCE_NOT_VERIFIED",
+    reason: ce.greek_permission && pe.greek_permission
+      ? "MODEL_TRUTH_VALID"
+      : ce.iv_permission && pe.iv_permission
+        ? "IV_TRUTH_VALID_GREEKS_STILL_BLOCKED"
+        : "MODEL_PROVENANCE_NOT_VERIFIED",
   };
 }

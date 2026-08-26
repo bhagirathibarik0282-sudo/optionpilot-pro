@@ -25,6 +25,8 @@ test("audited live Black-Scholes formulas match canonical reference and IV recov
     near(liveGreeks.vega,canonical.vegaPerVolPoint,1e-9,"vega parity");
     near(liveGreeks.theta,canonical.thetaPerDay,1e-9,"theta parity");
 
+    // IV inversion is not uniformly well-conditioned. The 0.01 premium/IV-point
+    // vega floor is a parity-test research guard only, not a production threshold.
     const conditioning=classifyIvSolverConditioning({spot,strike,volatilityPct:vol*100,daysToExpiry:dte,isCall});
     if (conditioning.state === "WELL_CONDITIONED") {
       const recovered=liveCalcIv(canonical.price,spot,strike,dte,isCall)/100;

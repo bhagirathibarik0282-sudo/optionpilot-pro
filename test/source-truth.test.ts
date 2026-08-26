@@ -37,6 +37,19 @@ test("expiry classification is date based, not input order", () => {
   assert.equal(by["2026-09-24"], "MONTHLY");
 });
 
+test("current expiry can independently be monthly", () => {
+  const r = classifyExpiryBuckets("2026-09-24", ["2026-09-24", "2026-10-01"], ["2026-09-24"]);
+  const current = r.find((x) => x.expiry === "2026-09-24");
+  assert.equal(current?.bucket, "CURRENT");
+  assert.equal(current?.isMonthly, true);
+});
+
+test("incomplete critical option identity is blocked", () => {
+  const r = validateOptionIdentity({ ...base, expiry: null }, { ...base, expiry: null });
+  assert.equal(r.usable, false);
+  assert.ok(r.reasons.includes("CONTRACT_IDENTITY_INCOMPLETE"));
+});
+
 test("front future resolution ignores array order", () => {
   const r = resolveFrontFuture("2026-08-26", [
     { expiry: "2026-09-24", instrumentToken: 2 },

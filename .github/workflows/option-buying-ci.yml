@@ -11,8 +11,7 @@ on:
       - research-*.ts
       - scripts/verify-research-server-mount.ts
       - scripts/apply-research-server-mount.ts
-      - test/research-index.test.ts
-      - test/research-router-auth.test.ts
+      - 'test/**/*.ts'
       - .github/workflows/option-buying-ci.yml
   workflow_dispatch:
 

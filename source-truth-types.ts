@@ -26,7 +26,9 @@ export type SourceTruthReasonCode =
   | "OI_CADENCE_GAP"
   | "PARTIAL_EXPIRY_COVERAGE"
   | "CRITICAL_FIELD_UNKNOWN"
-  | "CONTRACT_IDENTITY_INCOMPLETE";
+  | "CONTRACT_IDENTITY_INCOMPLETE"
+  | "IDENTITY_NOT_CROSSCHECKED"
+  | "RECEIVED_AT_APPROXIMATED";
 
 export interface ContractIdentity {
   underlying: string;

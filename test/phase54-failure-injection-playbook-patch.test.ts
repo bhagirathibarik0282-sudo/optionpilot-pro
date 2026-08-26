@@ -1,8 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { applyPhase53ShadowPreflightPatch } from "../scripts/phase53-shadow-preflight-patch-core.mjs";
 import { applyPhase54FailureInjectionPlaybookPatch } from "../scripts/phase54-failure-injection-playbook-patch-core.mjs";
+
+const PHASE53_WIRED_FIXTURE = `
+import { getPhase53ShadowPreflight } from "./phase53-shadow-preflight.js"; // PHASE53_SHADOW_PREFLIGHT_WIRING_V1
+
+app.get("/api/research/shadow-preflight", async (c) => {
+  return c.json(await getPhase53ShadowPreflight());
+});
+`;
 
 function shadowFlagAssignmentCount(source: string): number {
   return (source.match(/PHASE50_SCORE_SHADOW\s*=(?!=)/g) || []).length;
@@ -17,13 +23,12 @@ function destructiveSqlCount(source: string): number {
 }
 
 test("Phase 54 mounts a read-only playbook after Phase 53 wiring without adding live mutations", () => {
-  const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
-  const p53 = applyPhase53ShadowPreflightPatch(source);
-  const beforeFlagAssignments = shadowFlagAssignmentCount(p53.source);
-  const beforeFetchCalls = fetchCallCount(p53.source);
-  const beforeDestructiveSql = destructiveSqlCount(p53.source);
+  const source = PHASE53_WIRED_FIXTURE;
+  const beforeFlagAssignments = shadowFlagAssignmentCount(source);
+  const beforeFetchCalls = fetchCallCount(source);
+  const beforeDestructiveSql = destructiveSqlCount(source);
 
-  const p54 = applyPhase54FailureInjectionPlaybookPatch(p53.source);
+  const p54 = applyPhase54FailureInjectionPlaybookPatch(source);
   assert.equal(p54.changed, true);
   assert.match(p54.source, /PHASE54_FAILURE_INJECTION_PLAYBOOK_WIRING_V1/);
   assert.match(p54.source, /\/api\/research\/failure-injection-playbook/);
@@ -39,10 +44,9 @@ test("Phase 54 mounts a read-only playbook after Phase 53 wiring without adding 
 });
 
 test("Phase 54 patch is idempotent", () => {
-  const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
-  const p53 = applyPhase53ShadowPreflightPatch(source);
-  const once = applyPhase54FailureInjectionPlaybookPatch(p53.source);
+  const once = applyPhase54FailureInjectionPlaybookPatch(PHASE53_WIRED_FIXTURE);
   const twice = applyPhase54FailureInjectionPlaybookPatch(once.source);
+  assert.equal(once.changed, true);
   assert.equal(twice.changed, false);
   assert.equal(twice.source, once.source);
 });

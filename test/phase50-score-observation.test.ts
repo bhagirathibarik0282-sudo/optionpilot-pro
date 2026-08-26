@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildKnownThenScoreObservation,
   knownThenScoreSchemaSql,
+  resolvePersistedObservationId,
   scoreObservationShadowEnabled,
   PHASE50_SCORE_OBSERVATION_SAFETY,
 } from "../score-observation-known-then.js";
@@ -48,6 +49,13 @@ test("schema is additive append-only and duplicate-safe", () => {
   assert.match(sql, /observation_id TEXT PRIMARY KEY/);
   assert.doesNotMatch(sql, /UPDATE\s+score_observation_known_then/i);
   assert.doesNotMatch(sql, /DELETE\s+FROM\s+score_observation_known_then/i);
+});
+
+test("DB write failure cannot masquerade as persistence success", () => {
+  const stableId = "stable-known-then-id";
+  assert.equal(resolvePersistedObservationId(null, stableId), null);
+  assert.equal(resolvePersistedObservationId({ rows: [] }, stableId), stableId, "successful duplicate-safe insert may return no row");
+  assert.equal(resolvePersistedObservationId({ rows: [{ observation_id: "returned-id" }] }, stableId), "returned-id");
 });
 
 test("shadow collection defaults off", () => {

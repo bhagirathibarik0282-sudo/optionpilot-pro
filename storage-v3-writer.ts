@@ -80,9 +80,11 @@ export async function persistStorageV3Minute(payload: StorageV3MinutePayload): P
     let modelTruthWrites = 0;
     if (sourceTruthShadowEnabled()) {
       if (truth.length) truthWrites = await persistSourceTruthRecords(truth);
-      // Phase 38 persists exact model inputs already available in Storage V3.
-      // IV permission can become true only when provenance + conditioning pass.
-      // Greek permission deliberately remains false until Gamma provenance is audited.
+      // Phase 39: exact model inputs are persisted in the companion truth store.
+      // Positive-DTE Greek provenance can be marked usable only after the
+      // audited Gamma + IV conditioning checks pass. Downstream ATM permission
+      // separately requires exact FRESH + VALID + USABLE option source truth.
+      // Zero-DTE remains blocked because basic and advanced time semantics differ.
       if (options.length) {
         const modelRows = options.map((option) => buildPhase38ModelTruth(option, payload.market));
         modelTruthWrites = await persistOptionModelTruthRecords(modelRows);

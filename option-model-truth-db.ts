@@ -79,7 +79,7 @@ export function unknownSnapshotModelTruth(row: OptionSnapshot1mRow): OptionModel
   };
 }
 
-/** Generic append-only model-truth persistence used by Phase 38 audited rows. */
+/** Generic append-only model-truth persistence used by audited shadow rows. */
 export async function persistOptionModelTruthRecords(rows: OptionModelTruthRecord[]): Promise<number> {
   if (!rows.length || !(await ensureSchema())) return 0;
   let writes = 0;
@@ -113,11 +113,37 @@ export interface AtmModelPermission {
   reason: string;
 }
 
+type PermissionRow = {
+  option_type: string;
+  iv_permission: boolean;
+  greek_permission: boolean;
+  source_truth_usable: boolean;
+};
+
+/**
+ * Research permission is conjunctive: model provenance alone is insufficient.
+ * The exact ATM option contract must also have a FRESH + VALID + USABLE source
+ * truth observation for the same minute/expiry/strike/side.
+ */
 export async function getAtmModelTruthPermission(symbol: string, minuteBucket: string | null): Promise<AtmModelPermission> {
   if (!minuteBucket) return { ivAllowed: false, greekAllowed: false, reason: "NO_MINUTE_BUCKET" };
   if (!(await ensureSchema())) return { ivAllowed: false, greekAllowed: false, reason: "MODEL_TRUTH_SCHEMA_UNAVAILABLE" };
-  const q = await dbQuerySafe<{ option_type: string; iv_permission: boolean; greek_permission: boolean }>(`
-    SELECT omt.option_type, omt.iv_permission, omt.greek_permission
+  const q = await dbQuerySafe<PermissionRow>(`
+    SELECT omt.option_type, omt.iv_permission, omt.greek_permission,
+      EXISTS (
+        SELECT 1
+        FROM source_truth_observation_1m sto
+        WHERE sto.record_kind = 'OPTION'
+          AND sto.symbol = omt.symbol
+          AND sto.minute_bucket = omt.minute_bucket
+          AND sto.expiry = omt.expiry
+          AND sto.strike = omt.strike
+          AND sto.option_type = omt.option_type
+          AND sto.freshness_state = 'FRESH'
+          AND sto.identity_state = 'VALID'
+          AND sto.quality_state = 'VALID'
+          AND sto.usability = 'USABLE'
+      ) AS source_truth_usable
     FROM option_model_truth_1m omt
     JOIN option_snapshot_1m os
       ON os.symbol = omt.symbol
@@ -134,12 +160,17 @@ export async function getAtmModelTruthPermission(symbol: string, minuteBucket: s
   const ce = rows.find((r) => r.option_type === "CE");
   const pe = rows.find((r) => r.option_type === "PE");
   if (!ce || !pe) return { ivAllowed: false, greekAllowed: false, reason: "ATM_MODEL_TRUTH_INCOMPLETE" };
+  if (!ce.source_truth_usable || !pe.source_truth_usable) {
+    return { ivAllowed: false, greekAllowed: false, reason: "ATM_SOURCE_TRUTH_NOT_USABLE" };
+  }
+  const ivAllowed = Boolean(ce.iv_permission && pe.iv_permission);
+  const greekAllowed = Boolean(ce.greek_permission && pe.greek_permission);
   return {
-    ivAllowed: Boolean(ce.iv_permission && pe.iv_permission),
-    greekAllowed: Boolean(ce.greek_permission && pe.greek_permission),
-    reason: ce.greek_permission && pe.greek_permission
-      ? "MODEL_TRUTH_VALID"
-      : ce.iv_permission && pe.iv_permission
+    ivAllowed,
+    greekAllowed,
+    reason: greekAllowed
+      ? "MODEL_AND_SOURCE_TRUTH_VALID"
+      : ivAllowed
         ? "IV_TRUTH_VALID_GREEKS_STILL_BLOCKED"
         : "MODEL_PROVENANCE_NOT_VERIFIED",
   };

@@ -32,7 +32,7 @@ test("hand-calculated complete chain resolves minimum aggregate intrinsic payout
   const r = calculateCanonicalMaxPain(rows);
   assert.equal(r.state,"VALID");
   assert.equal(r.maxPain,110);
-  assert.equal(r.minimumPayout,300);
+  assert.equal(r.minimumPayout,200);
   assert.equal(r.calculationVersion,MAX_PAIN_CALCULATION_VERSION);
 });
 

@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import { dbQuerySafe } from "./db.js";
+import {
+  MAX_PAIN_CALCULATION_VERSION,
+  MAX_PAIN_INTERPRETATION_GUARD,
+  phase47MaxPainPromotionReasons,
+} from "./max-pain-provenance.js";
 
 export type ChainMetricName =
   | "ATM_STRADDLE"
@@ -119,9 +124,9 @@ function record(args: {
   let truthState: ChainMetricTruthState = args.condition && numericValue !== null ? "VALID" : "BLOCKED";
   let usability: ChainMetricUsability = truthState === "VALID" ? "CONTEXT_ONLY" : "BLOCKED";
 
-  // Phase 46 has an exact backend quote-response receipt boundary but not an
-  // independently persisted exchange timestamp for every option quote. Keep
-  // metric provenance valid while refusing live evidence promotion for now.
+  // Phase 46/47 has an exact backend quote-response receipt boundary but not
+  // an independently persisted exchange timestamp for every option quote.
+  // Preserve formula/universe truth while refusing production evidence use.
   if (truthState === "VALID") reasonCodes.push("QUOTE_TIME_BASIS_RESPONSE_RECEIPT");
   if (numericValue === null) reasonCodes.push("METRIC_VALUE_UNAVAILABLE");
 
@@ -169,6 +174,10 @@ export function buildPhase46ChainMetricTruth(base: Phase46MetricInputs): ChainMe
     ...(!m.allQuotesPresent || m.quotedContractCount !== m.expectedContractCount ? ["FULL_UNIVERSE_QUOTE_COVERAGE_INCOMPLETE"] : []),
     ...(m.missingQuoteKeys.length ? ["FULL_UNIVERSE_MISSING_QUOTES"] : []),
   ];
+  const maxPainReasons = [
+    ...universeReasons,
+    ...phase47MaxPainPromotionReasons({ universeComplete, allOiPresent:m.allOiPresent, numericValue:base.maxPain }),
+  ];
 
   return [
     record({ base, metric:"ATM_STRADDLE", value:base.atmStraddle, condition:m.atmPairCoverageComplete, reasons:m.atmPairCoverageComplete ? [] : ["ATM_PAIR_COVERAGE_INCOMPLETE"], fingerprint }),
@@ -178,8 +187,23 @@ export function buildPhase46ChainMetricTruth(base: Phase46MetricInputs): ChainMe
     record({ base, metric:"FULL_CHAIN_VOLUME_PCR", value:m.fullChainVolumePcr, condition:universeComplete && m.allVolumePresent, reasons:[...universeReasons, ...(!m.allVolumePresent ? ["FULL_CHAIN_VOLUME_FIELD_COVERAGE_INCOMPLETE"] : [])], fingerprint }),
     record({ base, metric:"CALL_WALL", value:m.fullChainCallWallStrike, detail:{ oi:m.fullChainCallWallOi }, condition:universeComplete && m.allOiPresent && finite(m.fullChainCallWallOi) !== null, reasons:[...universeReasons, ...(!m.allOiPresent ? ["FULL_CHAIN_OI_FIELD_COVERAGE_INCOMPLETE"] : [])], fingerprint }),
     record({ base, metric:"PUT_WALL", value:m.fullChainPutWallStrike, detail:{ oi:m.fullChainPutWallOi }, condition:universeComplete && m.allOiPresent && finite(m.fullChainPutWallOi) !== null, reasons:[...universeReasons, ...(!m.allOiPresent ? ["FULL_CHAIN_OI_FIELD_COVERAGE_INCOMPLETE"] : [])], fingerprint }),
-    // Max Pain formula provenance is intentionally deferred to Phase 47.
-    record({ base, metric:"MAX_PAIN", value:base.maxPain, condition:false, reasons:["MAX_PAIN_CALCULATION_PROVENANCE_NOT_AUDITED"], fingerprint }),
+    record({
+      base,
+      metric:"MAX_PAIN",
+      value:base.maxPain,
+      detail:{
+        calculationVersion:MAX_PAIN_CALCULATION_VERSION,
+        interpretationGuard:MAX_PAIN_INTERPRETATION_GUARD,
+        candidateSettlementSet:"ALL_UNIQUE_LISTED_STRIKES_IN_EXACT_EXPIRY_UNIVERSE",
+        payoutBasis:"INTRINSIC_SETTLEMENT_PAYOUT_TIMES_OPEN_INTEREST",
+        tieBreak:"LOWEST_STRIKE_ON_EQUAL_MINIMUM_PAYOUT",
+        legacyMissingOiBehavior:"LEGACY_CALC_SKIPS_MISSING_OR_ZERO_OI; PHASE47_PROMOTION_REQUIRES_ALL_OI_PRESENT",
+        legacyDirectionalUse:"PRESENT_IN_EXISTING_SCORING; NOT AUTHORIZED BY PHASE47 SHADOW TRUTH",
+      },
+      condition:maxPainReasons.length === 0,
+      reasons:maxPainReasons,
+      fingerprint,
+    }),
   ];
 }
 

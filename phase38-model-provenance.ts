@@ -2,6 +2,11 @@ import type { MarketSnapshot1mRow, OptionSnapshot1mRow } from "./db.js";
 import { auditOptionModelTruth, type OptionModelTruthAudit, type ModelTruthReason } from "./iv-greeks-provenance.js";
 import { classifyIvSolverConditioning, type IvSolverConditioningState } from "./iv-solver-conditioning.js";
 import { LIVE_OPTION_MODEL_SPEC, LIVE_OPTION_MODEL_SPEC_VERSION } from "./live-option-model-spec.js";
+import {
+  LIVE_ADVANCED_GREEKS_SPEC,
+  LIVE_ADVANCED_GREEKS_SPEC_VERSION,
+  classifyExpiryDayGreekSemantics,
+} from "./live-advanced-greeks-spec.js";
 
 export interface Phase38ModelTruthRecord {
   symbol: string;
@@ -15,17 +20,15 @@ export interface Phase38ModelTruthRecord {
 }
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-
 function unique<T>(values: T[]): T[] { return [...new Set(values)]; }
 
 /**
  * Shadow-only known-then model provenance builder.
- *
- * It records the exact model inputs that are already present in Storage V3.
- * It does not recalculate or alter the live snapshot.  The current server's
- * basic IV/Delta/Vega/Theta path was source-audited in Phases 36-37. Gamma is
- * intentionally NOT granted model permission here because its exact live
- * calculation path has not yet been parity-audited with the same rigor.
+ * Phase 39 extends the Phase-38 record with source-audited Gamma provenance.
+ * Positive-DTE Gamma was extracted from the current server and parity-tested
+ * against an independent canonical Black-Scholes reference. Expiry day stays
+ * blocked because calcAdvancedGreeks uses a T floor while the basic IV/Greeks
+ * path rejects zero DTE.
  */
 export function buildPhase38ModelTruth(
   option: OptionSnapshot1mRow,
@@ -35,9 +38,11 @@ export function buildPhase38ModelTruth(
   const optionPrice = finite(option.ltp) ? option.ltp : null;
   const dte = finite(option.dte) ? option.dte : null;
   const valuationTimestamp = option.quoteTimestamp ?? market.backendTimestamp ?? option.minuteBucket;
+  const expirySemantics = dte === null ? "INVALID_DTE" : classifyExpiryDayGreekSemantics(dte);
 
   const completeCore = spot !== null && optionPrice !== null && dte !== null && dte > 0 &&
     finite(option.iv) && finite(option.delta) && finite(option.vega) && finite(option.theta);
+  const gammaPresent = finite(option.gamma);
 
   const baseAudit = auditOptionModelTruth({
     iv: option.iv,
@@ -72,20 +77,21 @@ export function buildPhase38ModelTruth(
     : { state: "INVALID_INPUT" as const, vegaPerVolPoint: 0, threshold: null };
 
   const additionalReasons: ModelTruthReason[] = [];
-  // Phase 38 does not over-claim Gamma provenance. COMB-02 remains blocked
-  // until the actual Gamma path is extracted and parity-audited.
-  if (finite(option.gamma)) additionalReasons.push("GAMMA_PROVENANCE_UNVERIFIED");
+  if (completeCore && !gammaPresent) additionalReasons.push("GAMMA_PROVENANCE_UNVERIFIED");
+  if (expirySemantics === "ZERO_DTE_SEMANTIC_CONFLICT") additionalReasons.push("ZERO_DTE_GREEK_SEMANTIC_CONFLICT");
   if (conditioning.state === "ILL_CONDITIONED_LOW_VEGA") additionalReasons.push("IV_SOLVER_ILL_CONDITIONED");
   if (conditioning.state === "INVALID_INPUT") additionalReasons.push("IV_SOLVER_CONDITIONING_UNKNOWN");
 
   const ivConditioned = baseAudit.ivPermission && conditioning.state === "WELL_CONDITIONED";
+  const gammaSourceAudited = completeCore && gammaPresent && expirySemantics === "CONSISTENT_POSITIVE_DTE";
+  const greekConditioned = ivConditioned && baseAudit.greekPermission && gammaSourceAudited;
+
   const audit: OptionModelTruthAudit = {
     ...baseAudit,
-    ivState: baseAudit.ivState,
-    greeksState: baseAudit.greeksState === "VALID" ? "PARTIAL" : baseAudit.greeksState,
-    usability: ivConditioned ? "CONTEXT_ONLY" : "BLOCKED",
+    greeksState: greekConditioned ? "VALID" : baseAudit.greeksState === "VALID" ? "PARTIAL" : baseAudit.greeksState,
+    usability: greekConditioned ? "USABLE" : ivConditioned ? "CONTEXT_ONLY" : "BLOCKED",
     ivPermission: ivConditioned,
-    greekPermission: false,
+    greekPermission: greekConditioned,
     reasons: unique([...baseAudit.reasons, ...additionalReasons]),
   };
 
@@ -98,7 +104,7 @@ export function buildPhase38ModelTruth(
     audit,
     conditioningState: completeCore ? conditioning.state : "UNKNOWN",
     payload: {
-      source: "PHASE38_AUDITED_LIVE_MODEL_INPUTS",
+      source: "PHASE39_AUDITED_LIVE_MODEL_INPUTS",
       modelName: LIVE_OPTION_MODEL_SPEC.modelName,
       modelVersion: LIVE_OPTION_MODEL_SPEC_VERSION,
       solverName: LIVE_OPTION_MODEL_SPEC.ivSolver,
@@ -124,7 +130,12 @@ export function buildPhase38ModelTruth(
       conditioningVegaPerVolPoint: completeCore ? conditioning.vegaPerVolPoint : null,
       conditioningThreshold: completeCore ? conditioning.threshold : null,
       conditioningThresholdStatus: "RESEARCH_TEST_ONLY_NOT_PRODUCTION_FROZEN",
-      gammaProvenance: "UNVERIFIED_IN_PHASE38",
+      gammaProvenance: gammaSourceAudited ? "SERVER_CALC_ADVANCED_GREEKS_PHASE39_PARITY_VERIFIED" : "NOT_ELIGIBLE",
+      gammaModelVersion: LIVE_ADVANCED_GREEKS_SPEC_VERSION,
+      gammaFormula: LIVE_ADVANCED_GREEKS_SPEC.gammaFormula,
+      gammaTimeConvention: LIVE_ADVANCED_GREEKS_SPEC.timeConvention,
+      expiryDayGreekSemantics: expirySemantics,
+      permissionScope: "SHADOW_RESEARCH_ONLY",
     },
   };
 }

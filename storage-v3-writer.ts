@@ -12,6 +12,7 @@ import {
   sourceTruthShadowEnabled,
   type SourceTruthPersistenceRecord,
 } from "./source-truth-db.js";
+import { promoteSourceTruthRecords } from "./source-truth-promotion.js";
 
 export type StorageV3Symbol = "NIFTY" | "BANKNIFTY" | "SENSEX";
 
@@ -96,15 +97,18 @@ export async function persistStorageV3Minute(payload: StorageV3MinutePayload): P
 
   const options = (payload.options ?? []).filter((row) => row.symbol === payload.market.symbol);
   const chains = (payload.chains ?? []).filter((row) => row.symbol === payload.market.symbol);
-  const truth = (payload.sourceTruth ?? []).filter((row) => row.symbol === payload.market.symbol);
+  const truth = promoteSourceTruthRecords(
+    (payload.sourceTruth ?? []).filter((row) => row.symbol === payload.market.symbol),
+  );
 
   try {
     await dbUpsertMarketSnapshot1m(payload.market);
     for (const row of options) await dbUpsertOptionSnapshot1m(row);
     for (const row of chains) await dbUpsertChainState1m(row);
 
-    // Source-truth persistence is deliberately opt-in and additive. Failure or
-    // disablement cannot alter the legacy normalized storage or live logic.
+    // Source-truth persistence is deliberately opt-in and additive. Promotion
+    // only affects the companion shadow truth records; it cannot change legacy
+    // normalized rows, verdicts, Telegram decisions, or execution behavior.
     let truthWrites = 0;
     if (sourceTruthShadowEnabled() && truth.length) {
       truthWrites = await persistSourceTruthRecords(truth);

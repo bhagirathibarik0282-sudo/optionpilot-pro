@@ -26,9 +26,13 @@ test("actual current server option-model source is audited without granting perm
   const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
   const audit = auditLiveOptionModelSource(server);
   console.log(`[Phase36ModelAudit] ${JSON.stringify(audit)}`);
+  const evidence = server.split(/\r?\n/)
+    .map((line, i) => ({ line: i + 1, text: line.trim() }))
+    .filter((x) => /(implied\s*vol|impliedVol|black.?scholes|risk.?free|dividend|yield|time.?to.?expiry|years.?to.?expiry|\bd1\b|\bd2\b|gamma|vega|theta)/i.test(x.text))
+    .filter((x) => x.text.length > 0 && x.text.length < 260)
+    .slice(0, 40);
+  console.log(`[Phase36SourceEvidence] ${JSON.stringify(evidence)}`);
   assert.ok(["VERIFIED", "PARTIAL", "BLOCKED"].includes(audit.state));
-  // Source-marker discovery is not numerical parity proof and therefore cannot
-  // by itself enable the Phase-35 model-truth permissions.
   assert.equal(Object.prototype.hasOwnProperty.call(audit, "greekPermission"), false);
 });
 

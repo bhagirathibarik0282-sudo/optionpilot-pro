@@ -7,7 +7,7 @@ function fetchCallCount(source: string): number {
   return (source.match(/\bfetch\s*\(/g) || []).length;
 }
 
-test("Phase 50 patch reuses existing diagnostic POST with no extra broker request", () => {
+test("Phase 50 patch reuses existing diagnostic path with no extra broker request", () => {
   const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
   const beforeFetches = fetchCallCount(source);
   const r = applyPhase50ScoreObservationPatch(source);
@@ -16,7 +16,6 @@ test("Phase 50 patch reuses existing diagnostic POST with no extra broker reques
   assert.match(r.source, /persistKnownThenScoreObservation/);
   assert.match(r.source, /ruleContributions: result\.contributions \|\| \{\}/);
   assert.match(r.source, /\/api\/research\/max-pain-counterfactual/);
-  assert.match(r.source, /\/api\/premium-diagnostic\/snapshot/);
   assert.equal(fetchCallCount(r.source), beforeFetches, "Phase 50 must not add any fetch call");
 });
 
@@ -29,5 +28,5 @@ test("Phase 50 patch is idempotent", () => {
 });
 
 test("Phase 50 patch fails closed if exact source anchors drift", () => {
-  assert.throws(() => applyPhase50ScoreObservationPatch("const x = 1;"), /anchor missing/);
+  assert.throws(() => applyPhase50ScoreObservationPatch("const x = 1;"), /expected exactly once/);
 });

@@ -18,6 +18,9 @@ function eqText(a: unknown, b: unknown): boolean {
 
 export function validateOptionIdentity(expected: ContractIdentity, actual: ContractIdentity): IdentityAudit {
   const reasons: SourceTruthReasonCode[] = [];
+  const requiredMissing = [expected.expiry, actual.expiry, expected.strike, actual.strike, expected.optionType, actual.optionType]
+    .some((value) => value === null || value === undefined || value === "");
+  if (requiredMissing) reasons.push("CONTRACT_IDENTITY_INCOMPLETE");
   if (expected.instrumentToken == null || actual.instrumentToken == null) reasons.push("TOKEN_MISSING");
   else if (String(expected.instrumentToken) !== String(actual.instrumentToken)) reasons.push("TOKEN_MISMATCH");
   if (expected.tradingSymbol && actual.tradingSymbol && !eqText(expected.tradingSymbol, actual.tradingSymbol)) reasons.push("TRADING_SYMBOL_MISMATCH");
@@ -35,6 +38,7 @@ export function validateOptionIdentity(expected: ContractIdentity, actual: Contr
 export interface ExpiryClassification {
   expiry: string;
   bucket: ExpiryBucket;
+  isMonthly: boolean;
 }
 
 /**
@@ -52,6 +56,7 @@ export function classifyExpiryBuckets(tradeDate: string, expiries: string[], mon
   return unique.map((expiry) => ({
     expiry,
     bucket: expiry === current ? "CURRENT" : expiry === next ? "NEXT" : monthly.has(expiry) ? "MONTHLY" : "OTHER",
+    isMonthly: monthly.has(expiry),
   }));
 }
 

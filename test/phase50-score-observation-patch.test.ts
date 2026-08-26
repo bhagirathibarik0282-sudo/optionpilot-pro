@@ -27,6 +27,15 @@ test("Phase 50 patch is idempotent", () => {
   assert.equal(twice.source, once.source);
 });
 
+test("Phase 50 named interface anchor tolerates unrelated identical structuralBias tails", () => {
+  const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+  const extra = `\ninterface UnrelatedPhase50Fixture {\n  structuralBias: string | null;\n}\n`;
+  const r = applyPhase50ScoreObservationPatch(source + extra);
+  assert.equal(r.changed, true);
+  assert.match(r.source, /interface UnrelatedPhase50Fixture \{\n  structuralBias: string \| null;\n\}/);
+  assert.match(r.source, /interface PremiumDiagnosticSnapshot \{[\s\S]*?ruleScore\?: number \| null;/);
+});
+
 test("Phase 50 patch fails closed if exact source anchors drift", () => {
   assert.throws(() => applyPhase50ScoreObservationPatch("const x = 1;"), /expected exactly once/);
 });

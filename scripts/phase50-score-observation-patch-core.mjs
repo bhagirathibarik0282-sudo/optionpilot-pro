@@ -4,6 +4,19 @@ function replaceExactlyOnce(source, regex, replacement, label) {
   return source.replace(regex, replacement);
 }
 
+function replaceNamedInterfaceTail(source, interfaceName, regex, replacement) {
+  const anchor = `interface ${interfaceName} {`;
+  const starts = source.split(anchor).length - 1;
+  if (starts !== 1) throw new Error(`${interfaceName} interface anchor expected exactly once, saw ${starts}`);
+  const start = source.indexOf(anchor);
+  const end = source.indexOf("\n}", start);
+  if (end < 0) throw new Error(`${interfaceName} interface closing brace missing`);
+  const blockEnd = end + 2;
+  const block = source.slice(start, blockEnd);
+  const patchedBlock = replaceExactlyOnce(block, regex, replacement, `${interfaceName} interface tail`);
+  return source.slice(0, start) + patchedBlock + source.slice(blockEnd);
+}
+
 export function applyPhase50ScoreObservationPatch(source) {
   const marker = "PHASE50_KNOWN_THEN_SCORE_WIRING_V1";
   if (source.includes(marker)) return { source, changed: false };
@@ -13,8 +26,6 @@ export function applyPhase50ScoreObservationPatch(source) {
   if (out.split(importAnchor).length - 1 !== 1) throw new Error("db import anchor expected exactly once");
   out = out.replace(importAnchor, importAnchor + '\nimport { persistKnownThenScoreObservation, replayPersistedScoresWithoutMaxPain } from "./score-observation-known-then.js"; // PHASE50_KNOWN_THEN_SCORE_WIRING_V1');
 
-  // Narrow semantic anchor with whitespace tolerance only. We still fail closed
-  // unless the exact structural-bias tail occurs once in current server.ts.
   out = replaceExactlyOnce(
     out,
     /^([ \t]*)structuralBias: classifyIndexOverallBias\(m\),\r?\n([ \t]*)};/gm,
@@ -22,11 +33,14 @@ export function applyPhase50ScoreObservationPatch(source) {
     "premium diagnostic client snapshot anchor",
   );
 
-  out = replaceExactlyOnce(
+  // Scope the type patch to the named PremiumDiagnosticSnapshot contract.
+  // Other interfaces legitimately end in the same structuralBias field, so
+  // a global tail regex is intentionally forbidden here.
+  out = replaceNamedInterfaceTail(
     out,
+    "PremiumDiagnosticSnapshot",
     /^([ \t]*)structuralBias: string \| null;\r?\n([ \t]*)}$/gm,
     (_match, fieldIndent, closeIndent) => `${fieldIndent}structuralBias: string | null;\n${fieldIndent}ruleScore?: number | null;\n${fieldIndent}ruleMaxScore?: number | null;\n${fieldIndent}ruleVerdict?: string | null;\n${fieldIndent}ruleContributions?: Record<string, number>;\n${fieldIndent}ruleOverrides?: string[];\n${fieldIndent}ruleCandidateSide?: string | null;\n${closeIndent}}`,
-    "PremiumDiagnosticSnapshot interface anchor",
   );
 
   out = replaceExactlyOnce(

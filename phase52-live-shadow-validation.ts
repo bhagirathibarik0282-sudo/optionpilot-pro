@@ -12,11 +12,7 @@ export type Phase52ScenarioId =
   | "DUPLICATE_OBSERVATION"
   | "SHADOW_FLAG_OFF";
 
-export interface Phase52ScenarioDefinition {
-  id: Phase52ScenarioId;
-  mandatory: true;
-  expected: readonly string[];
-}
+export interface Phase52ScenarioDefinition { id: Phase52ScenarioId; mandatory: true; expected: readonly string[]; }
 
 export const PHASE52_FAILURE_MATRIX: readonly Phase52ScenarioDefinition[] = Object.freeze([
   { id: "NORMAL_LIVE_SESSION", mandatory: true, expected: ["append-only KNOWN_THEN evidence is observable", "production behavior unchanged"] },
@@ -31,25 +27,9 @@ export const PHASE52_FAILURE_MATRIX: readonly Phase52ScenarioDefinition[] = Obje
   { id: "SHADOW_FLAG_OFF", mandatory: true, expected: ["no Phase50 score row is persisted", "readiness remains observational and production unchanged"] },
 ]);
 
-export interface Phase52ScenarioResult {
-  id: Phase52ScenarioId;
-  passed: boolean;
-  evidenceRefs: string[];
-  notes?: string[];
-}
-
-export interface Phase52SessionEvidence {
-  sessionId: string;
-  tradeDate: string;
-  evidenceRefs: string[];
-}
-
-export interface Phase52ValidationInput {
-  sessions: Phase52SessionEvidence[];
-  scenarios: Phase52ScenarioResult[];
-  productionBehaviorChanged: boolean;
-  automaticPromotionOccurred: boolean;
-}
+export interface Phase52ScenarioResult { id: Phase52ScenarioId; passed: boolean; evidenceRefs: string[]; notes?: string[]; }
+export interface Phase52SessionEvidence { sessionId: string; tradeDate: string; evidenceRefs: string[]; }
+export interface Phase52ValidationInput { sessions: Phase52SessionEvidence[]; scenarios: Phase52ScenarioResult[]; productionBehaviorChanged: boolean; automaticPromotionOccurred: boolean; }
 
 export interface Phase52ValidationReport {
   version: typeof PHASE52_VALIDATION_VERSION;
@@ -57,6 +37,7 @@ export interface Phase52ValidationReport {
   productionImpact: "NONE";
   status: "NOT_READY" | "ELIGIBLE_FOR_FINAL_DEVIL_AUDIT";
   distinctSessionCount: number;
+  distinctTradeDateCount: number;
   multiSessionCoverage: boolean;
   mandatoryScenarioCount: number;
   passedMandatoryScenarioCount: number;
@@ -69,9 +50,11 @@ export interface Phase52ValidationReport {
 }
 
 export function evaluatePhase52Validation(input: Phase52ValidationInput): Phase52ValidationReport {
-  const sessions = input.sessions.filter((s) => s.sessionId && s.tradeDate && s.evidenceRefs.length > 0);
+  const sessions = input.sessions.filter((s) => s.sessionId && /^\d{4}-\d{2}-\d{2}$/.test(s.tradeDate) && s.evidenceRefs.length > 0);
   const distinctSessionCount = new Set(sessions.map((s) => s.sessionId)).size;
-  const multiSessionCoverage = distinctSessionCount >= 2;
+  const distinctTradeDateCount = new Set(sessions.map((s) => s.tradeDate)).size;
+  // Literal multi-session coverage, not a statistical sufficiency threshold.
+  const multiSessionCoverage = distinctSessionCount >= 2 && distinctTradeDateCount >= 2;
   const byId = new Map(input.scenarios.map((s) => [s.id, s] as const));
   const missingScenarios: Phase52ScenarioId[] = [];
   const failedScenarios: Phase52ScenarioId[] = [];
@@ -100,6 +83,7 @@ export function evaluatePhase52Validation(input: Phase52ValidationInput): Phase5
     productionImpact: "NONE",
     status: blockers.length ? "NOT_READY" : "ELIGIBLE_FOR_FINAL_DEVIL_AUDIT",
     distinctSessionCount,
+    distinctTradeDateCount,
     multiSessionCoverage,
     mandatoryScenarioCount: PHASE52_FAILURE_MATRIX.length,
     passedMandatoryScenarioCount,

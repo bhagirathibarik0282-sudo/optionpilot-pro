@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const wire = readFileSync(new URL("../scripts/wire-storage-v3-runtime.mjs", import.meta.url), "utf8");
+const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+const snapshotAnchor = "    session.marketSnapshot = snapshot;\n    session.snapshotTime = Date.now();";
 
 test("runtime storage wiring declares Kite source and snapshot receipt proxy", () => {
   assert.ok(wire.includes('sourceProvider: \\\"KITE\\\"'));
@@ -22,4 +24,9 @@ test("runtime chain context does not invent a provider source timestamp", () => 
 test("runtime wiring still states no extra Kite request or trading side effect", () => {
   assert.ok(wire.includes('No extra Kite request'));
   assert.ok(wire.includes('no scoring/verdict/Telegram/execution side effect'));
+});
+
+test("current server has exactly one runtime snapshot anchor for safe patching", () => {
+  const count = server.split(snapshotAnchor).length - 1;
+  assert.equal(count, 1);
 });

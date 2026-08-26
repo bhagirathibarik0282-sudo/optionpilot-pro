@@ -29,26 +29,33 @@ function option(overrides: Partial<OptionSnapshot1mRow> = {}): OptionSnapshot1mR
   };
 }
 
-test("well-conditioned exact live model inputs can grant IV permission but not Gamma-dependent Greek permission", () => {
+test("positive-DTE well-conditioned row can receive shadow IV and Greek provenance permission", () => {
   const r = buildPhase38ModelTruth(option(), market);
   assert.equal(r.audit.ivState, "VALID");
   assert.equal(r.audit.ivPermission, true);
-  assert.equal(r.audit.greekPermission, false);
-  assert.equal(r.audit.greeksState, "PARTIAL");
+  assert.equal(r.audit.greekPermission, true);
+  assert.equal(r.audit.greeksState, "VALID");
+  assert.equal(r.audit.usability, "USABLE");
   assert.equal(r.conditioningState, "WELL_CONDITIONED");
-  assert.ok(r.audit.reasons.includes("GAMMA_PROVENANCE_UNVERIFIED"));
   assert.equal(r.payload.modelVersion, "LIVE_BS_R10_Q0_ACT365_BISECTION60_V1");
-  assert.equal(r.payload.riskFreeRate, 0.10);
-  assert.equal(r.payload.dividendYield, 0);
-  assert.equal(r.payload.dayCountConvention, "ACT_365");
+  assert.equal(r.payload.gammaModelVersion, "LIVE_ADV_GREEKS_BS_Q0_ACT365_TFLOOR0001_V1");
+  assert.equal(r.payload.gammaProvenance, "SERVER_CALC_ADVANCED_GREEKS_PHASE39_PARITY_VERIFIED");
+  assert.equal(r.payload.permissionScope, "SHADOW_RESEARCH_ONLY");
 });
 
-test("low-vega IV conditioning blocks IV permission instead of forcing solver trust", () => {
+test("low-vega IV conditioning blocks IV and Greek permission", () => {
   const r = buildPhase38ModelTruth(option({ strike: 27000, dte: 1, iv: 10, ltp: 0.5, delta: 0.0001, gamma: 0.00001, vega: 0.001, theta: -0.01 }), market);
   assert.equal(r.conditioningState, "ILL_CONDITIONED_LOW_VEGA");
   assert.equal(r.audit.ivPermission, false);
   assert.equal(r.audit.greekPermission, false);
   assert.ok(r.audit.reasons.includes("IV_SOLVER_ILL_CONDITIONED"));
+});
+
+test("missing Gamma fails closed even when other model inputs exist", () => {
+  const r = buildPhase38ModelTruth(option({ gamma: null }), market);
+  assert.equal(r.audit.ivPermission, true);
+  assert.equal(r.audit.greekPermission, false);
+  assert.ok(r.audit.reasons.includes("GAMMA_PROVENANCE_UNVERIFIED"));
 });
 
 test("missing spot fails closed and persists unknown conditioning", () => {
@@ -58,8 +65,11 @@ test("missing spot fails closed and persists unknown conditioning", () => {
   assert.equal(r.conditioningState, "UNKNOWN");
 });
 
-test("expiry-day zero DTE does not receive internal IV permission from this model contract", () => {
+test("expiry-day zero DTE remains fail-closed because basic and advanced Greek time semantics conflict", () => {
   const r = buildPhase38ModelTruth(option({ dte: 0 }), market);
   assert.equal(r.audit.ivPermission, false);
+  assert.equal(r.audit.greekPermission, false);
   assert.equal(r.conditioningState, "UNKNOWN");
+  assert.ok(r.audit.reasons.includes("ZERO_DTE_GREEK_SEMANTIC_CONFLICT"));
+  assert.equal(r.payload.expiryDayGreekSemantics, "ZERO_DTE_SEMANTIC_CONFLICT");
 });

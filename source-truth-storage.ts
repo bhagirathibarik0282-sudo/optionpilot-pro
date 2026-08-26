@@ -25,10 +25,7 @@ export interface TruthEnvelopeInput {
   additionalReasons?: SourceTruthReasonCode[];
 }
 
-/**
- * Pure provenance envelope builder. It never fetches data and never produces a
- * market direction. Identity and freshness are both required for USABLE.
- */
+/** Pure provenance envelope builder; never fetches or emits market direction. */
 export function buildTruthEnvelope(input: TruthEnvelopeInput): SourceTruthEnvelope {
   const identity = validateOptionIdentity(input.expectedIdentity, input.actualIdentity);
   const freshness = classifyFreshness(input.sourceTimestamp, input.receivedAt, input.policy);
@@ -74,7 +71,7 @@ export interface CompatibleObservation {
 export interface DeltaResult {
   value: number | null;
   usable: boolean;
-  reason: "OK" | "NO_PREVIOUS_VALID" | "IDENTITY_MISMATCH" | "SESSION_GAP" | "CADENCE_GAP" | "NON_NUMERIC";
+  reason: "OK" | "CURRENT_NOT_USABLE" | "NO_PREVIOUS_VALID" | "IDENTITY_MISMATCH" | "SESSION_GAP" | "CADENCE_GAP" | "NON_NUMERIC";
   elapsedMs: number | null;
 }
 
@@ -86,33 +83,22 @@ function sameContract(a: CompatibleObservation, b: CompatibleObservation): boole
 }
 
 /**
- * Derives change only from a previous compatible, usable observation. This is
- * suitable for OI/straddle/wall state deltas after the caller loads the latest
- * valid prior record from DB. It refuses overnight/session bridging.
+ * Derives change only from current+previous compatible USABLE observations.
+ * The caller may load the prior row from DB after restart. Overnight/session
+ * gaps and invalid cadence are deliberately not bridged.
  */
-export function deriveCompatibleDelta(
-  current: CompatibleObservation,
-  previous: CompatibleObservation | null | undefined,
-  maxCadenceMs: number,
-): DeltaResult {
-  if (!previous || previous.usability !== "USABLE") {
-    return { value: null, usable: false, reason: "NO_PREVIOUS_VALID", elapsedMs: null };
-  }
-  if (!sameContract(current, previous)) {
-    return { value: null, usable: false, reason: "IDENTITY_MISMATCH", elapsedMs: null };
-  }
-  if (current.sessionDate !== previous.sessionDate) {
-    return { value: null, usable: false, reason: "SESSION_GAP", elapsedMs: null };
-  }
+export function deriveCompatibleDelta(current: CompatibleObservation, previous: CompatibleObservation | null | undefined, maxCadenceMs: number): DeltaResult {
+  if (current.usability !== "USABLE") return { value: null, usable: false, reason: "CURRENT_NOT_USABLE", elapsedMs: null };
+  if (!previous || previous.usability !== "USABLE") return { value: null, usable: false, reason: "NO_PREVIOUS_VALID", elapsedMs: null };
+  if (!sameContract(current, previous)) return { value: null, usable: false, reason: "IDENTITY_MISMATCH", elapsedMs: null };
+  if (current.sessionDate !== previous.sessionDate) return { value: null, usable: false, reason: "SESSION_GAP", elapsedMs: null };
   const now = new Date(current.observedAt).getTime();
   const before = new Date(previous.observedAt).getTime();
   if (!Number.isFinite(now) || !Number.isFinite(before) || !Number.isFinite(current.value) || !Number.isFinite(previous.value)) {
     return { value: null, usable: false, reason: "NON_NUMERIC", elapsedMs: null };
   }
   const elapsedMs = now - before;
-  if (elapsedMs <= 0 || elapsedMs > maxCadenceMs) {
-    return { value: null, usable: false, reason: "CADENCE_GAP", elapsedMs };
-  }
+  if (elapsedMs <= 0 || elapsedMs > maxCadenceMs) return { value: null, usable: false, reason: "CADENCE_GAP", elapsedMs };
   return { value: (current.value as number) - (previous.value as number), usable: true, reason: "OK", elapsedMs };
 }
 
@@ -153,7 +139,7 @@ export interface FamilyHealthSummary {
 
 export function summarizeFamilyHealth(input: FamilyHealthInput): FamilyHealthSummary {
   const reasons = [...new Set(input.reasons ?? [])];
-  if (input.usability === "BLOCKED") {
+  if (input.usability === "BLOCKED" || input.identityState === "MISMATCH" || input.identityState === "AMBIGUOUS" || input.qualityState === "INVALID" || input.freshnessState === "STALE") {
     return { family: input.family, state: "BLOCKED", ageMs: input.ageMs ?? null, reasons, blocksNewEvidence: true };
   }
   if (input.freshnessState === "UNKNOWN" || input.identityState === "UNKNOWN" || input.qualityState === "UNKNOWN") {

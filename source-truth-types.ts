@@ -25,7 +25,8 @@ export type SourceTruthReasonCode =
   | "GREEKS_PROVENANCE_UNKNOWN"
   | "OI_CADENCE_GAP"
   | "PARTIAL_EXPIRY_COVERAGE"
-  | "CRITICAL_FIELD_UNKNOWN";
+  | "CRITICAL_FIELD_UNKNOWN"
+  | "CONTRACT_IDENTITY_INCOMPLETE";
 
 export interface ContractIdentity {
   underlying: string;

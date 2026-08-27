@@ -51,6 +51,10 @@ const helperCalls = [...new Set([
   ...[...rule.matchAll(/\b(server[A-Z][A-Za-z0-9_]*)\(/g)].map((m) => m[1]),
 ])].sort();
 
+const hasDefaultInjectedClock = /nowMs\s*:\s*number\s*=\s*Date\.now\(\)/.test(validate);
+const usesInjectedClockForTimestamp = /new Date\(nowMs\)\.toISOString\(\)/.test(validate);
+const usesInjectedClockForAge = /nowMs\s*-\s*new Date\(effTs\)\.getTime\(\)/.test(validate);
+
 const report = {
   version: "PHASE64_REPLAY_CONTRACT_AUDIT_V1",
   architectureRole: "STATIC_REPLAY_MAPPING_AUDIT_ONLY",
@@ -65,7 +69,7 @@ const report = {
   indexMetricFieldReferences: fieldRefs,
   kiteSessionFieldReferences: sessionRefs,
   serverHelperCalls: helperCalls,
-  validatorUsesInjectedClock: /nowMs\s*=\s*Date\.now\(\)/.test(validate) && /nowMs\s*-\s*new Date\(effTs\)\.getTime\(\)/.test(validate),
+  validatorUsesInjectedClock: hasDefaultInjectedClock && usesInjectedClockForTimestamp && usesInjectedClockForAge,
   replaySafety: {
     duplicateScoringFormulaAllowed: false,
     fabricateMissingFieldsAllowed: false,

@@ -37767,7 +37767,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
   const { dbIsConfigured, dbQuerySafe } = await import("./db.js");
   if (!dbIsConfigured()) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "DATABASE_UNAVAILABLE" }, 503);
 
-  const marketRows = await dbQuerySafe(\`
+  const marketRows = await dbQuerySafe(`
     SELECT minute_bucket, snapshot_id, backend_received_at, spot_ltp, spot_open, spot_high, spot_low,
            spot_prev_close, spot_vwap, spot_pdh, spot_pdl, future_ltp, future_oi, future_volume,
            future_basis, vix, vix_change
@@ -37780,15 +37780,15 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
       )
     ORDER BY minute_bucket ASC
     LIMIT 1000
-  \`, [symbol]);
+  `, [symbol]);
   if (!marketRows) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "READ_QUERY_FAILED" }, 500);
 
-  const chainRows = await dbQuerySafe(\`
+  const chainRows = await dbQuerySafe(`
     SELECT minute_bucket, expiry, expiry_bucket, full_chain_pcr, max_pain
     FROM chain_state_1m
     WHERE symbol = $1
     ORDER BY minute_bucket ASC, expiry ASC
-  \`, [symbol]);
+  `, [symbol]);
   if (!chainRows) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "READ_QUERY_FAILED" }, 500);
 
   const chainByMinute = new Map<string, any[]>();

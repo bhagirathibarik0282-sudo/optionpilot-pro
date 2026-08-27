@@ -1,0 +1,98 @@
+name: Phase74 Telegram Live V2
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'telegram-live-status-v2.ts'
+      - 'test/phase74-telegram-live-status-v2.test.ts'
+      - 'scripts/phase74-telegram-live-v2-patch.mjs'
+      - '.github/workflows/phase74-telegram-live-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Apply Phase74 Telegram-only patch
+        run: node scripts/phase74-telegram-live-v2-patch.mjs
+
+      - name: Syntax compile
+        run: |
+          npx esbuild telegram-live-status-v2.ts --platform=node --format=esm --outfile=/tmp/phase74-status.mjs --log-level=error
+          npx esbuild server.ts --platform=node --format=esm --outfile=/tmp/phase74-server.mjs --log-level=error
+
+      - name: Phase74 focused tests
+        run: npx tsx --test test/phase74-telegram-live-status-v2.test.ts
+
+      - name: Devil-check Phase74 invariants
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('server.ts','utf8');
+          const m = fs.readFileSync('telegram-live-status-v2.ts','utf8');
+          const required = [
+            'PHASE74_TELEGRAM_LIVE_V2',
+            'process.env.PHASE74_TELEGRAM_LIVE_V2',
+            'sendTelegramPremiumOnlyMessage(session, phase74Text)',
+            'editTelegramPremiumOnlyMessage(session, phase74Existing.messageId, phase74Text)',
+            'const rule = runRuleEngineServer(symbol, metrics, validation, null);',
+            '180_000'
+          ];
+          for (const q of required) if (!s.includes(q)) throw new Error('Missing Phase74 invariant: '+q);
+          for (const q of ['OPTIONPILOT_HAIKU_EXPLAIN_V2','Explanation-only auditor','Never invent missing values','OP LIVE V2']) {
+            if (!m.includes(q)) throw new Error('Missing explanation/render invariant: '+q);
+          }
+          const start = s.indexOf('// PHASE74_TELEGRAM_LIVE_V2');
+          const end = s.indexOf('const verdict = rule.verdict;', start);
+          if (start < 0 || end < 0) throw new Error('Cannot isolate Phase74 block');
+          const block = s.slice(start, end);
+          for (const forbidden of ['placeOrder(', 'executeTrade(', 'refreshMarketSnapshot(', 'runRuleEngineServer(symbol, metrics, validation, null)']) {
+            if (block.includes(forbidden)) throw new Error('P0 forbidden in Phase74 block: '+forbidden);
+          }
+          if (!block.includes('Dashboard unchanged') && !m.includes('Dashboard unchanged')) throw new Error('Dashboard isolation marker missing');
+          console.log(JSON.stringify({version:'PHASE74_TELEGRAM_LIVE_V2', result:'PASS', decisionAuthority:'CANONICAL_RULE_ENGINE_ONLY', haikuRole:'EXPLANATION_ONLY', dashboardChanged:false, featureDefault:'OFF'}, null, 2));
+          NODE
+
+      - name: Existing Telegram contract tests
+        run: npx tsx --test test/telegram-trade-card.test.ts
+
+      - name: Full existing test suite
+        run: npm test
+
+      - name: Verify no dashboard/client file mutation
+        run: |
+          git diff --name-only HEAD | tee /tmp/phase74-diff.txt
+          if grep -Ei '(^|/)(client|dashboard|frontend|public)/|\.html$|\.css$' /tmp/phase74-diff.txt; then
+            echo 'P0: dashboard/client mutation detected' >&2
+            exit 1
+          fi
+
+      - name: Commit verified server wiring
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo 'No server.ts change to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 74: wire Telegram Live V2 background status'
+          git push origin HEAD:phase59-autonomous-shadow-fix

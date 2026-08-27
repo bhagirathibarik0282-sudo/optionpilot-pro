@@ -1,0 +1,58 @@
+name: Phase70 Blocker Isolation Gate
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase70-blocker-isolation-gate-patch.mjs'
+      - '.github/workflows/phase70-blocker-isolation-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Apply Phase70 blocker isolation gate
+        run: node scripts/phase70-blocker-isolation-gate-patch.mjs
+      - name: Syntax compile server.ts
+        run: npx esbuild server.ts --platform=node --format=esm --outfile=/tmp/phase70-server.mjs
+      - name: Verify Phase70 safety invariants
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          const s=fs.readFileSync('server.ts','utf8');
+          const a=s.indexOf('app.get("/api/offline-research/nifty-deterministic-replay"');
+          const b=s.indexOf('app.get("/api/research/shadow-diagnostic-trace"',a);
+          if(a<0||b<0) throw new Error('replay route missing');
+          const x=s.slice(a,b);
+          for(const q of ['PHASE70_BLOCKER_ISOLATION_GATE_V1','P1_ISOLATE','FAIL_CLOSED_AND_KEEP_OUT_OF_PARITY_SET','PROCEED_WITH_ISOLATION','PARITY_CLEAN']) if(!x.includes(q)) throw new Error('missing '+q);
+          for(const q of ['placeOrder(','sendTelegram','persistKnownThenScoreObservation(','dbInsert(']) if(x.includes(q)) throw new Error('forbidden side effect '+q);
+          if(!x.includes('p0Detected: false')) throw new Error('explicit no-inference P0 marker missing');
+          NODE
+      - name: Run full existing test suite
+        run: npm test
+      - name: Commit verified Phase70 gate
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo 'No server change needed'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 70: classify and isolate replay blockers'
+          git push origin HEAD:phase59-autonomous-shadow-fix

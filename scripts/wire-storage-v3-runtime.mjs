@@ -7,12 +7,14 @@ const IMPORT_MARKER = 'import { persistStorageV3FromExistingSnapshot } from "./s
 const HEALTH_IMPORT = 'import { mountStorageHealthRoutes } from "./storage-health.js";';
 const TEF_INSPECT_IMPORT = 'import { mountTefInspectRoutes } from "./tef-inspect.js";';
 const TELEGRAM_PREVIEW_IMPORT = 'import { mountTelegramPreviewRoutes } from "./telegram-preview-route.js";';
+const DHAN_AUDIT_IMPORT = 'import { mountDhanAuditStatusRoute } from "./dhan-audit-status-route.js";';
 const DB_IMPORT = 'import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";';
 const SNAPSHOT_ANCHOR = `    session.marketSnapshot = snapshot;\n    session.snapshotTime = Date.now();`;
 const WIRE_MARKER = "// STORAGE_V3_RUNTIME_WIRE_BEGIN";
 const HEALTH_MOUNT_MARKER = "// STORAGE_V3_HEALTH_ROUTE_MOUNT";
 const TEF_MOUNT_MARKER = "// TEF_INSPECT_ROUTE_MOUNT";
 const TELEGRAM_PREVIEW_MOUNT_MARKER = "// TELEGRAM_PREVIEW_ROUTE_MOUNT";
+const DHAN_AUDIT_MOUNT_MARKER = "// DHAN_AUDIT_STATUS_ROUTE_MOUNT";
 
 if (!source.includes(IMPORT_MARKER)) {
   if (!source.includes(DB_IMPORT)) {
@@ -22,17 +24,10 @@ if (!source.includes(IMPORT_MARKER)) {
   source = source.replace(DB_IMPORT, `${DB_IMPORT}\n${IMPORT_MARKER}`);
 }
 
-if (!source.includes(HEALTH_IMPORT)) {
-  source = source.replace(IMPORT_MARKER, `${IMPORT_MARKER}\n${HEALTH_IMPORT}`);
-}
-
-if (!source.includes(TEF_INSPECT_IMPORT)) {
-  source = source.replace(HEALTH_IMPORT, `${HEALTH_IMPORT}\n${TEF_INSPECT_IMPORT}`);
-}
-
-if (!source.includes(TELEGRAM_PREVIEW_IMPORT)) {
-  source = source.replace(TEF_INSPECT_IMPORT, `${TEF_INSPECT_IMPORT}\n${TELEGRAM_PREVIEW_IMPORT}`);
-}
+if (!source.includes(HEALTH_IMPORT)) source = source.replace(IMPORT_MARKER, `${IMPORT_MARKER}\n${HEALTH_IMPORT}`);
+if (!source.includes(TEF_INSPECT_IMPORT)) source = source.replace(HEALTH_IMPORT, `${HEALTH_IMPORT}\n${TEF_INSPECT_IMPORT}`);
+if (!source.includes(TELEGRAM_PREVIEW_IMPORT)) source = source.replace(TEF_INSPECT_IMPORT, `${TEF_INSPECT_IMPORT}\n${TELEGRAM_PREVIEW_IMPORT}`);
+if (!source.includes(DHAN_AUDIT_IMPORT)) source = source.replace(TELEGRAM_PREVIEW_IMPORT, `${TELEGRAM_PREVIEW_IMPORT}\n${DHAN_AUDIT_IMPORT}`);
 
 if (!source.includes(WIRE_MARKER)) {
   const matches = source.split(SNAPSHOT_ANCHOR).length - 1;
@@ -46,10 +41,7 @@ if (!source.includes(WIRE_MARKER)) {
   source = source.replace(SNAPSHOT_ANCHOR, wiring);
 }
 
-const appPatterns = [
-  /const app = new Hono\(\);/,
-  /const app = new Hono<[^;]+>\(\);/,
-];
+const appPatterns = [/const app = new Hono\(\);/, /const app = new Hono<[^;]+>\(\);/];
 
 function mountAfterApp(marker, line, warning) {
   if (source.includes(marker)) return;
@@ -63,23 +55,10 @@ function mountAfterApp(marker, line, warning) {
   console.warn(warning);
 }
 
-mountAfterApp(
-  HEALTH_MOUNT_MARKER,
-  "mountStorageHealthRoutes(app);",
-  "[Storage V3 wire] Hono app anchor not found; health route not mounted",
-);
-
-mountAfterApp(
-  TEF_MOUNT_MARKER,
-  "mountTefInspectRoutes(app);",
-  "[Storage V3 wire] Hono app anchor not found; TEF inspection routes not mounted",
-);
-
-mountAfterApp(
-  TELEGRAM_PREVIEW_MOUNT_MARKER,
-  "mountTelegramPreviewRoutes(app);",
-  "[Storage V3 wire] Hono app anchor not found; Telegram preview route not mounted",
-);
+mountAfterApp(HEALTH_MOUNT_MARKER, "mountStorageHealthRoutes(app);", "[Storage V3 wire] Hono app anchor not found; health route not mounted");
+mountAfterApp(TEF_MOUNT_MARKER, "mountTefInspectRoutes(app);", "[Storage V3 wire] Hono app anchor not found; TEF inspection routes not mounted");
+mountAfterApp(TELEGRAM_PREVIEW_MOUNT_MARKER, "mountTelegramPreviewRoutes(app);", "[Storage V3 wire] Hono app anchor not found; Telegram preview route not mounted");
+mountAfterApp(DHAN_AUDIT_MOUNT_MARKER, "mountDhanAuditStatusRoute(app);", "[Storage V3 wire] Hono app anchor not found; Dhan audit status route not mounted");
 
 writeFileSync(path, source, "utf8");
 console.log("[Storage V3 wire] runtime storage wiring ready");

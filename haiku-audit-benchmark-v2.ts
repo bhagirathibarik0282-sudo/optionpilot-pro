@@ -142,6 +142,10 @@ function consistency(runs: RunResult[]): number {
 export async function runHaikuAuditBenchmarkV2(input: HaikuBenchmarkCaseInput, invoke: (prompt: string) => Promise<string | null>, nowMs = Date.now(), env: Record<string, string | undefined> = process.env): Promise<{ ran: boolean; reason: string; result?: CaseResult }> {
   const gate = shouldRunHaikuBenchmark(input, nowMs, env);
   if (!gate.run) return { ran: false, reason: gate.reason };
+  const day = istParts(nowMs).date;
+  const key = `${day}:${input.symbol}`;
+  const reserved = state.get(key) ?? { count: 0, lastCaseAt: 0, lastSignature: null, results: [] };
+  reserved.count += 1; reserved.lastCaseAt = nowMs; reserved.lastSignature = signature(input); state.set(key, reserved);
   const prompt = buildHaikuAuditBenchmarkPrompt(input);
   const runs: RunResult[] = [];
   for (let i = 0; i < 3; i++) {
@@ -165,8 +169,7 @@ export async function runHaikuAuditBenchmarkV2(input: HaikuBenchmarkCaseInput, i
   else if (schemaComplianceRate < 1 || apiSuccessRate < 1) result = "PASS_WITH_LIMIT";
   const caseId = `${input.symbol}:${input.observedAt}:${Math.abs([...signature(input)].reduce((a,c)=>((a*31)+c.charCodeAt(0))|0,7))}`;
   const out: CaseResult = { caseId, symbol: input.symbol, observedAt: input.observedAt, sourceMode: input.sourceMode ?? "UNKNOWN", runs, repeatConsistency, schemaComplianceRate, canonicalFidelityRate, overrideViolationRate, apiSuccessRate, averageLatencyMs, result };
-  const day = istParts(nowMs).date; const key = `${day}:${input.symbol}`; const s = state.get(key) ?? { count: 0, lastCaseAt: 0, lastSignature: null, results: [] };
-  s.count += 1; s.lastCaseAt = nowMs; s.lastSignature = signature(input); s.results.push(out); state.set(key, s);
+  const s = state.get(key)!; s.results.push(out); state.set(key, s);
   console.log(`[HaikuBenchmarkV2] ${input.symbol} ${result} case=${caseId} consistency=${repeatConsistency.toFixed(2)} fidelity=${canonicalFidelityRate.toFixed(2)} schema=${schemaComplianceRate.toFixed(2)} api=${apiSuccessRate.toFixed(2)}`);
   return { ran: true, reason: gate.reason, result: out };
 }

@@ -1,3 +1,4 @@
+import { runHaikuAuditBenchmarkV2 } from "./haiku-audit-benchmark-v2.js"; // PHASE76_HAIKU_AUDIT_BENCHMARK_V2_WIRED
 export type Phase74Symbol = "NIFTY" | "BANKNIFTY" | "SENSEX";
 
 export type Phase74CanonicalStatus = {
@@ -341,6 +342,22 @@ export async function publishPhase74TelegramLiveV2(input: {
     validation: input.validation,
     rule: input.rule,
   });
+
+  // Phase76 research-only benchmark. Non-blocking, known-then, no verdict/Telegram/execution authority.
+  if (input.anthropicApiKey) {
+    const benchmarkNow = input.nowMs ?? Date.now();
+    void runHaikuAuditBenchmarkV2({
+      symbol: status.symbol, observedAt: status.observedAt, validatorState: status.validatorState, freshness: status.freshness,
+      verdict: status.verdict, score: status.score, maxScore: status.maxScore, blockers: status.blockers, evidence: status.evidence, sourceMode: "LIVE",
+    }, async (prompt) => {
+      for (const model of ["claude-haiku-4-5", "claude-3-haiku-20240307"]) {
+        const raw = await callAnthropicModel(input.anthropicApiKey!, model, prompt).catch(() => null);
+        if (raw) return raw;
+      }
+      return null;
+    }, benchmarkNow).catch((error) => console.error("[HaikuBenchmarkV2] non-blocking failure:", error instanceof Error ? error.message : error));
+  }
+
   const transport = input.transport ?? resolvePhase74Transport();
   const transportCheck = validatePhase74Transport(transport);
   if (!transportCheck.ok) return { sent: false, edited: false, reason: transportCheck.reason };

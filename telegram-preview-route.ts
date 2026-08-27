@@ -1,3 +1,4 @@
+import { getHaikuAuditBenchmarkV2Snapshot, HAIKU_BENCHMARK_CRITERIA } from "./haiku-audit-benchmark-v2.js";
 import type { Hono } from "hono";
 import type {
   CanonicalTelegramCard,
@@ -57,6 +58,11 @@ function evidenceFromFamilies(
 }
 
 export function mountTelegramPreviewRoutes(app: Hono): void {
+  app.get("/api/research/haiku-audit-benchmark-v2", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json({ ok: true, mode: "RESEARCH_ONLY", automaticPromotionAllowed: false, affectsVerdict: false, affectsTelegram: false, affectsExecution: false, criteria: HAIKU_BENCHMARK_CRITERIA, benchmark: getHaikuAuditBenchmarkV2Snapshot() });
+  });
+
   app.get("/api/telegram/preview", async (c) => {
     c.header("Cache-Control", "no-store");
     const requested = (c.req.query("symbol") ?? "NIFTY").toUpperCase();

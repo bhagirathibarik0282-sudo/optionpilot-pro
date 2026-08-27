@@ -37932,6 +37932,20 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
     }
 
     stage = "RESPONSE";
+    const validationRate = processed > 0 ? validated / processed : 0;
+    const finiteScoreRate = processed > 0 ? finiteScores / processed : 0;
+    const topBlockers = Object.entries(blockerCounts)
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, 8)
+      .map(([signal, count]) => ({ signal, count }));
+    const phase69AuditState = processed === 0
+      ? "NO_INPUT"
+      : validated === 0
+        ? "ALL_BLOCKED"
+        : finiteScores === 0
+          ? "NO_FINITE_SCORES"
+          : "REPLAY_RESULTS_AVAILABLE";
+    // PHASE69_REPLAY_RESULT_AUDIT_V1
     return c.json({
       version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1",
       architectureRole: "READ_ONLY_OFFLINE_DETERMINISTIC_REPLAY",
@@ -37947,6 +37961,12 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
       validatedBuckets: validated,
       blockedBuckets: blocked,
       finiteScoreBuckets: finiteScores,
+      phase69Audit: {
+        state: phase69AuditState,
+        validationRate,
+        finiteScoreRate,
+        topBlockers,
+      },
       blockerCounts,
       verdictCounts,
       samples,

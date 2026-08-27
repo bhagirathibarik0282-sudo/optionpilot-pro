@@ -37946,6 +37946,22 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
           ? "NO_FINITE_SCORES"
           : "REPLAY_RESULTS_AVAILABLE";
     // PHASE69_REPLAY_RESULT_AUDIT_V1
+    // Phase70 does not invent P0 severity from a missing metric name. It gates by observed replay outcome.
+    const phase70Gate = processed === 0
+      ? "NO_INPUT"
+      : validated === 0 || finiteScores === 0
+        ? "ISOLATE_BLOCKERS"
+        : blocked > 0 || finiteScores < processed
+          ? "PROCEED_WITH_ISOLATION"
+          : "PARITY_CLEAN";
+    const isolatedSignals = topBlockers.map(({ signal, count }) => ({
+      signal,
+      count,
+      classification: "P1_ISOLATE",
+      action: "FAIL_CLOSED_AND_KEEP_OUT_OF_PARITY_SET",
+    }));
+    const phase70StopReason = processed === 0 ? "NO_REPLAY_INPUT" : null;
+    // PHASE70_BLOCKER_ISOLATION_GATE_V1
     return c.json({
       version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1",
       architectureRole: "READ_ONLY_OFFLINE_DETERMINISTIC_REPLAY",
@@ -37966,6 +37982,13 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
         validationRate,
         finiteScoreRate,
         topBlockers,
+      },
+      phase70Gate: {
+        state: phase70Gate,
+        stopReason: phase70StopReason,
+        isolatedSignals,
+        p0Detected: false,
+        p0DetectionNote: "P0 is not inferred from metric absence alone; semantic/data-integrity P0s require explicit evidence.",
       },
       blockerCounts,
       verdictCounts,

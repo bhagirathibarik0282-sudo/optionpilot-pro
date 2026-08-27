@@ -29,24 +29,23 @@ function generateTotp(secret, stepSeconds = 30, digits = 6) {
   return (bin % 10 ** digits).toString().padStart(digits, "0");
 }
 
-async function getAccessToken() {
+async function getFreshAccessToken(chunkIndex) {
   if (clientId && pin && totpSecret) {
     const totp = generateTotp(totpSecret);
     const params = new URLSearchParams({ dhanClientId: clientId, pin, totp });
     const res = await fetch(`https://auth.dhan.co/app/generateAccessToken?${params.toString()}`, { method: "POST" });
     const json = await res.json().catch(() => null);
     if (res.ok && json?.accessToken) {
-      console.log(JSON.stringify({ dhanAuth: "TOTP_REFRESH_OK", expiryTime: json.expiryTime || null, tokenExposed: false }));
+      console.log(JSON.stringify({ dhanAuth: "TOTP_REFRESH_OK", chunkIndex, expiryTime: json.expiryTime || null, tokenExposed: false }));
       return json.accessToken;
     }
-    console.error(JSON.stringify({ dhanAuth: "TOTP_REFRESH_FAIL", httpStatus: res.status, error: json?.errorMessage || null, tokenExposed: false }));
+    console.error(JSON.stringify({ dhanAuth: "TOTP_REFRESH_FAIL", chunkIndex, httpStatus: res.status, error: json?.errorMessage || null, tokenExposed: false }));
   }
   return legacyToken || null;
 }
 
-const accessToken = await getAccessToken();
-if (!accessToken || !clientId) {
-  console.error(JSON.stringify({ ok: false, error: "No valid Dhan access token/client id", tokenExposed: false }, null, 2));
+if (!clientId) {
+  console.error(JSON.stringify({ ok: false, error: "DHAN_CLIENT_ID missing", tokenExposed: false }));
   process.exit(1);
 }
 
@@ -67,7 +66,6 @@ if (!mapping) process.exit(1);
 const sides = ["CALL", "PUT"];
 const strikes = ["ATM"];
 for (let i = 1; i <= strikeRange; i++) strikes.push(`ATM+${i}`, `ATM-${i}`);
-
 const results = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fmt = (d) => d.toISOString().slice(0, 10);
@@ -81,7 +79,16 @@ while (cursor < end) {
   cursor = next;
 }
 
-for (const chunk of chunks) {
+for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+  const chunk = chunks[chunkIndex];
+  const accessToken = await getFreshAccessToken(chunkIndex + 1);
+  if (!accessToken) {
+    results.push({ ...chunk, chunkIndex: chunkIndex + 1, ok: false, error: "NO_VALID_ACCESS_TOKEN" });
+    continue;
+  }
+
+  console.log(JSON.stringify({ auditChunk: "START", chunkIndex: chunkIndex + 1, ...chunk, tokenExposed: false }));
+
   for (const strike of strikes) {
     for (const side of sides) {
       const body = {
@@ -97,7 +104,6 @@ for (const chunk of chunks) {
         fromDate: chunk.fromDate,
         toDate: chunk.toDate,
       };
-
       try {
         const res = await fetch("https://api.dhan.co/v2/charts/rollingoption", {
           method: "POST",
@@ -109,25 +115,20 @@ for (const chunk of chunks) {
           },
           body: JSON.stringify(body),
         });
-
         const raw = await res.text();
         let payload = null;
         try { payload = raw ? JSON.parse(raw) : null; } catch {}
-
         const node = side === "CALL" ? payload?.data?.ce : payload?.data?.pe;
         const timestamp = Array.isArray(node?.timestamp) ? node.timestamp : [];
         const fields = ["open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot", "timestamp"];
         const fieldAudit = {};
         for (const field of fields) {
           const v = node?.[field];
-          fieldAudit[field] = {
-            present: Array.isArray(v),
-            count: Array.isArray(v) ? v.length : 0,
-          };
+          fieldAudit[field] = { present: Array.isArray(v), count: Array.isArray(v) ? v.length : 0 };
         }
-
         results.push({
           ...chunk,
+          chunkIndex: chunkIndex + 1,
           strike,
           side,
           httpStatus: res.status,
@@ -137,30 +138,28 @@ for (const chunk of chunks) {
           providerError: !res.ok || !node ? {
             errorCode: payload?.errorCode ?? null,
             errorMessage: payload?.errorMessage ?? null,
-            rawSnippet: raw.slice(0, 220),
+            rawSnippet: raw.slice(0, 180),
           } : null,
         });
       } catch (err) {
-        results.push({
-          ...chunk,
-          strike,
-          side,
-          ok: false,
-          candleCount: 0,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        results.push({ ...chunk, chunkIndex: chunkIndex + 1, strike, side, ok: false, candleCount: 0, error: err instanceof Error ? err.message : String(err) });
       }
-
-      await sleep(700);
+      await sleep(850);
     }
   }
+
+  const chunkRows = results.filter((r) => r.chunkIndex === chunkIndex + 1 && r.strike);
+  const chunkPassed = chunkRows.filter((r) => r.ok).length;
+  console.log(JSON.stringify({ auditChunk: "DONE", chunkIndex: chunkIndex + 1, passed: chunkPassed, failed: chunkRows.length - chunkPassed, totalRequests: chunkRows.length }));
+  await sleep(2200);
 }
 
-const passed = results.filter((r) => r.ok).length;
-const totalCandles = results.reduce((sum, r) => sum + (r.candleCount || 0), 0);
+const requestRows = results.filter((r) => r.strike);
+const passed = requestRows.filter((r) => r.ok).length;
+const totalCandles = requestRows.reduce((sum, r) => sum + (r.candleCount || 0), 0);
 
 console.log(JSON.stringify({
-  architectureRole: "DHAN_EXPIRED_OPTIONS_30D_AUTO_CHUNK_ATM3_AUDIT_V4",
+  architectureRole: "DHAN_EXPIRED_OPTIONS_30D_SEQUENTIAL_CHUNK_AUDIT_V5",
   generatedAt: new Date().toISOString(),
   readOnlyMode: true,
   orderAccessUsed: false,
@@ -171,13 +170,12 @@ console.log(JSON.stringify({
   chunks: chunks.length,
   strikeRange: "ATM ±3",
   sides,
-  totalRequests: results.length,
+  totalRequests: requestRows.length,
   passed,
-  failed: results.length - passed,
+  failed: requestRows.length - passed,
   totalCandles,
-  status: passed === results.length ? "PASS" : passed > 0 ? "PARTIAL" : "FAIL",
-  safeForOneYearExpansion: passed === results.length,
-  results,
+  status: passed === requestRows.length && requestRows.length > 0 ? "PASS" : passed > 0 ? "PARTIAL" : "FAIL",
+  safeForOneYearExpansion: passed === requestRows.length && requestRows.length > 0,
 }, null, 2));
 
 if (passed === 0) process.exitCode = 2;

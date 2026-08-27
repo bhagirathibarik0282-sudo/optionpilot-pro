@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
+import { writeFileSync } from "node:fs";
 
+const REPORT_PATH = "/tmp/dhan-audit-result.json";
 const clientId = (process.env.DHAN_CLIENT_ID || "").trim();
 const legacyToken = (process.env.DHAN_ACCESS_TOKEN || "").trim();
 const pin = (process.env.DHAN_PIN || "").trim();
@@ -45,7 +47,9 @@ async function getFreshAccessToken(chunkIndex) {
 }
 
 if (!clientId) {
-  console.error(JSON.stringify({ ok: false, error: "DHAN_CLIENT_ID missing", tokenExposed: false }));
+  const fail = { ok: false, status: "FAIL", error: "DHAN_CLIENT_ID missing", tokenExposed: false, generatedAt: new Date().toISOString() };
+  try { writeFileSync(REPORT_PATH, JSON.stringify(fail)); } catch {}
+  console.error(JSON.stringify(fail));
   process.exit(1);
 }
 
@@ -86,8 +90,6 @@ for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
     results.push({ ...chunk, chunkIndex: chunkIndex + 1, ok: false, error: "NO_VALID_ACCESS_TOKEN" });
     continue;
   }
-
-  console.log(JSON.stringify({ auditChunk: "START", chunkIndex: chunkIndex + 1, ...chunk, tokenExposed: false }));
 
   for (const strike of strikes) {
     for (const side of sides) {
@@ -147,19 +149,17 @@ for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
       await sleep(850);
     }
   }
-
-  const chunkRows = results.filter((r) => r.chunkIndex === chunkIndex + 1 && r.strike);
-  const chunkPassed = chunkRows.filter((r) => r.ok).length;
-  console.log(JSON.stringify({ auditChunk: "DONE", chunkIndex: chunkIndex + 1, passed: chunkPassed, failed: chunkRows.length - chunkPassed, totalRequests: chunkRows.length }));
   await sleep(2200);
 }
 
 const requestRows = results.filter((r) => r.strike);
 const passed = requestRows.filter((r) => r.ok).length;
 const totalCandles = requestRows.reduce((sum, r) => sum + (r.candleCount || 0), 0);
+const failed = requestRows.length - passed;
+const status = passed === requestRows.length && requestRows.length > 0 ? "PASS" : passed > 0 ? "PARTIAL" : "FAIL";
 
-console.log(JSON.stringify({
-  architectureRole: "DHAN_EXPIRED_OPTIONS_30D_SEQUENTIAL_CHUNK_AUDIT_V5",
+const report = {
+  architectureRole: "DHAN_EXPIRED_OPTIONS_30D_SEQUENTIAL_CHUNK_AUDIT_V6",
   generatedAt: new Date().toISOString(),
   readOnlyMode: true,
   orderAccessUsed: false,
@@ -172,10 +172,14 @@ console.log(JSON.stringify({
   sides,
   totalRequests: requestRows.length,
   passed,
-  failed: requestRows.length - passed,
+  failed,
   totalCandles,
-  status: passed === requestRows.length && requestRows.length > 0 ? "PASS" : passed > 0 ? "PARTIAL" : "FAIL",
-  safeForOneYearExpansion: passed === requestRows.length && requestRows.length > 0,
-}, null, 2));
+  status,
+  safeForOneYearExpansion: status === "PASS",
+};
 
+try { writeFileSync(REPORT_PATH, JSON.stringify(report)); } catch (err) {
+  console.error(JSON.stringify({ auditReportWrite: "FAIL", error: err instanceof Error ? err.message : String(err) }));
+}
+console.log(`DHAN_AUDIT_RESULT status=${status} passed=${passed} failed=${failed} totalCandles=${totalCandles} safeForOneYearExpansion=${status === "PASS"}`);
 if (passed === 0) process.exitCode = 2;

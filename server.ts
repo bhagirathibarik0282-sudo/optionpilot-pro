@@ -37762,175 +37762,195 @@ app.route("/api/offline-research", offlineResearchRouter);
 // RESEARCH_ONLY / OFFLINE_REPLAY. Read-only DB queries. No broker, Telegram, execution,
 // score persistence, production verdict mutation, or hindsight. Each bucket is processed
 // chronologically and validated at its own minute timestamp.
+// PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1
+// PHASE66_ONE_SHOT_RUNTIME_HARDENING_V1
+// RESEARCH_ONLY / OFFLINE_REPLAY. Read-only DB queries. No broker, Telegram, execution,
+// score persistence, production verdict mutation, or hindsight. Missing metrics fail closed.
 app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
-  const symbol = "NIFTY";
-  const { dbIsConfigured, dbQuerySafe } = await import("./db.js");
-  if (!dbIsConfigured()) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "DATABASE_UNAVAILABLE" }, 503);
+  let stage = "BOOT";
+  try {
+    const symbol = "NIFTY";
+    const { dbIsConfigured, dbQuerySafe } = await import("./db.js");
+    if (!dbIsConfigured()) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "DATABASE_UNAVAILABLE" }, 503);
 
-  const marketQuery = await dbQuerySafe(`
-    SELECT minute_bucket, snapshot_id, backend_timestamp, spot_ltp, spot_open, spot_high, spot_low,
-           spot_prev_close, vwap, pdh, pdl, future_ltp, future_oi, future_volume,
-           future_basis, india_vix, india_vix_change
-    FROM market_snapshot_1m
-    WHERE symbol = $1
-      AND minute_bucket IN (
-        SELECT minute_bucket FROM chain_state_1m WHERE symbol = $1
-        INTERSECT
-        SELECT minute_bucket FROM option_snapshot_1m WHERE symbol = $1
-      )
-    ORDER BY minute_bucket ASC
-    LIMIT 1000
-  `, [symbol]);
-  // PHASE66_QUERY_DIAGNOSTIC_V1
-  if (!marketQuery) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "MARKET_QUERY_FAILED" }, 500);
-  const marketRows = marketQuery.rows;
-  // PHASE66_DBQUERY_RESULT_SHAPE_FIX_V1
+    stage = "MARKET_QUERY";
+    const marketQuery = await dbQuerySafe(`
+      SELECT minute_bucket, snapshot_id, exchange_timestamp, backend_timestamp, spot_ltp, spot_open, spot_high, spot_low,
+             spot_prev_close, vwap, pdh, pdl, future_ltp, future_vwap, future_oi, future_volume,
+             future_basis, india_vix, india_vix_change
+      FROM market_snapshot_1m
+      WHERE symbol = $1
+        AND minute_bucket IN (
+          SELECT minute_bucket FROM chain_state_1m WHERE symbol = $1
+          INTERSECT
+          SELECT minute_bucket FROM option_snapshot_1m WHERE symbol = $1
+        )
+      ORDER BY minute_bucket ASC
+      LIMIT 1000
+    `, [symbol]);
+    if (!marketQuery || !Array.isArray(marketQuery.rows)) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "MARKET_QUERY_FAILED" }, 500);
+    const marketRows = marketQuery.rows as any[];
 
-  const chainQuery = await dbQuerySafe(`
-    SELECT minute_bucket, expiry, expiry_bucket, full_chain_oi_pcr, max_pain
-    FROM chain_state_1m
-    WHERE symbol = $1
-    ORDER BY minute_bucket ASC, expiry ASC
-  `, [symbol]);
-  if (!chainQuery) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "CHAIN_QUERY_FAILED" }, 500);
-  const chainRows = chainQuery.rows;
+    stage = "CHAIN_QUERY";
+    const chainQuery = await dbQuerySafe(`
+      SELECT minute_bucket, expiry, expiry_bucket, atm_strike, full_chain_oi_pcr, volume_pcr, max_pain
+      FROM chain_state_1m
+      WHERE symbol = $1
+      ORDER BY minute_bucket ASC, expiry ASC
+    `, [symbol]);
+    if (!chainQuery || !Array.isArray(chainQuery.rows)) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "CHAIN_QUERY_FAILED" }, 500);
+    const chainRows = chainQuery.rows as any[];
 
-  const chainByMinute = new Map<string, any[]>();
-  for (const row of chainRows) {
-    const chainBucketMs = new Date(row.minute_bucket).getTime();
-    if (!Number.isFinite(chainBucketMs)) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "RECONSTRUCTION_RUNTIME_FAILED", stage: "CHAIN_BUCKET_TIMESTAMP" }, 500);
-    const key = new Date(chainBucketMs).toISOString();
-    const arr = chainByMinute.get(key) || [];
-    arr.push(row);
-    chainByMinute.set(key, arr);
-  }
+    stage = "CHAIN_RECONSTRUCTION";
+    const chainByMinute = new Map<string, any[]>();
+    for (const row of chainRows) {
+      const ms = new Date(row.minute_bucket).getTime();
+      if (!Number.isFinite(ms)) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "RECONSTRUCTION_RUNTIME_FAILED", stage: "CHAIN_BUCKET_TIMESTAMP" }, 500);
+      const key = new Date(ms).toISOString();
+      const arr = chainByMinute.get(key) || [];
+      arr.push(row);
+      chainByMinute.set(key, arr);
+    }
 
-  const replaySession: KiteSession = {
-    accessToken: "OFFLINE_REPLAY_NO_BROKER_TOKEN",
-    userId: "OFFLINE_REPLAY",
-    email: "",
-    loginTime: 0,
-    expiresAt: 0,
-    snapshotHistory: [],
-  };
+    const replaySession: KiteSession = {
+      accessToken: "OFFLINE_REPLAY_NO_BROKER_TOKEN",
+      userId: "OFFLINE_REPLAY",
+      email: "",
+      loginTime: 0,
+      expiresAt: 0,
+      snapshotHistory: [],
+    };
 
-  const blockerCounts: Record<string, number> = {};
-  const verdictCounts: Record<string, number> = {};
-  let validated = 0;
-  let blocked = 0;
-  let finiteScores = 0;
-  let processed = 0;
-  const samples: any[] = [];
+    const blockerCounts: Record<string, number> = {};
+    const verdictCounts: Record<string, number> = {};
+    let validated = 0;
+    let blocked = 0;
+    let finiteScores = 0;
+    let processed = 0;
+    const samples: any[] = [];
+    const dayState = new Map<string, { seen: number; first15High: number | null; first15Low: number | null }>();
 
-  for (const row of marketRows) {
-    const marketBucketMs = new Date(row.minute_bucket).getTime();
-    if (!Number.isFinite(marketBucketMs)) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "RECONSTRUCTION_RUNTIME_FAILED", stage: "MARKET_BUCKET_TIMESTAMP" }, 500);
-    const bucketIso = new Date(marketBucketMs).toISOString();
-    // PHASE66_REPLAY_RECONSTRUCTION_GUARD_V1
-    const chains = chainByMinute.get(bucketIso) || [];
-    const currentChain = chains.find((x: any) => String(x.expiry_bucket || "").toUpperCase().includes("CURRENT")) || chains[0] || null;
+    stage = "MARKET_REPLAY";
+    for (const row of marketRows) {
+      const marketBucketMs = new Date(row.minute_bucket).getTime();
+      if (!Number.isFinite(marketBucketMs)) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "RECONSTRUCTION_RUNTIME_FAILED", stage: "MARKET_BUCKET_TIMESTAMP" }, 500);
+      const bucketIso = new Date(marketBucketMs).toISOString();
+      const chains = chainByMinute.get(bucketIso) || [];
+      const currentChain = chains.find((x: any) => String(x.expiry_bucket || "").toUpperCase().includes("CURRENT")) || chains[0] || null;
 
-    const pcr = currentChain?.full_chain_oi_pcr == null ? null : Number(currentChain.full_chain_oi_pcr);
-    const maxPain = currentChain?.max_pain == null ? null : Number(currentChain.max_pain);
-    const current = Number(row.spot_ltp);
-    const dayOpen = Number(row.spot_open);
-    const pdh = Number(row.pdh);
-    const pdl = Number(row.pdl);
-    const pdcClose = Number(row.spot_prev_close);
-    const vwap = Number(row.vwap);
-    const vix = Number(row.india_vix);
-    const vixChange = Number(row.india_vix_change);
-    const futureLtp = Number(row.future_ltp);
+      const pcr = currentChain?.full_chain_oi_pcr == null ? null : Number(currentChain.full_chain_oi_pcr);
+      const volumePcr = currentChain?.volume_pcr == null ? null : Number(currentChain.volume_pcr);
+      const maxPain = currentChain?.max_pain == null ? null : Number(currentChain.max_pain);
+      const atmStrike = currentChain?.atm_strike == null ? Number.NaN : Number(currentChain.atm_strike);
+      const current = row.spot_ltp == null ? Number.NaN : Number(row.spot_ltp);
+      const dayOpen = row.spot_open == null ? Number.NaN : Number(row.spot_open);
+      const dayHigh = row.spot_high == null ? Number.NaN : Number(row.spot_high);
+      const dayLow = row.spot_low == null ? Number.NaN : Number(row.spot_low);
+      const pdh = row.pdh == null ? Number.NaN : Number(row.pdh);
+      const pdl = row.pdl == null ? Number.NaN : Number(row.pdl);
+      const pdcClose = row.spot_prev_close == null ? Number.NaN : Number(row.spot_prev_close);
+      const vwap = row.vwap == null ? Number.NaN : Number(row.vwap);
+      const vix = row.india_vix == null ? Number.NaN : Number(row.india_vix);
+      const vixChange = row.india_vix_change == null ? Number.NaN : Number(row.india_vix_change);
+      const futureLtp = row.future_ltp == null ? Number.NaN : Number(row.future_ltp);
+      const futureVwap = row.future_vwap == null ? Number.NaN : Number(row.future_vwap);
 
-    const m = {
+      const dayKey = bucketIso.slice(0, 10);
+      const ds = dayState.get(dayKey) || { seen: 0, first15High: null, first15Low: null };
+      if (ds.seen < 15) {
+        if (Number.isFinite(dayHigh)) ds.first15High = ds.first15High == null ? dayHigh : Math.max(ds.first15High, dayHigh);
+        if (Number.isFinite(dayLow)) ds.first15Low = ds.first15Low == null ? dayLow : Math.min(ds.first15Low, dayLow);
+        ds.seen++;
+      }
+      dayState.set(dayKey, ds);
+      const first15High = ds.first15High == null ? Number.NaN : ds.first15High;
+      const first15Low = ds.first15Low == null ? Number.NaN : ds.first15Low;
+
+      const m = {
+        symbol,
+        current,
+        change: Number.isFinite(current) && Number.isFinite(pdcClose) ? current - pdcClose : Number.NaN,
+        changePercent: Number.isFinite(current) && Number.isFinite(pdcClose) && pdcClose !== 0 ? ((current - pdcClose) / pdcClose) * 100 : Number.NaN,
+        vix,
+        vixChange,
+        vixChangePercent: Number.NaN,
+        spot: current,
+        atmStrike,
+        vwap,
+        pdh,
+        pdl,
+        pdcClose,
+        maxPain,
+        pcr,
+        volumePcr,
+        vwapSource: "RECORDED_MARKET_SNAPSHOT_1M",
+        signal: "WAIT",
+        futuresVwapBias: Number.isFinite(futureLtp) && Number.isFinite(futureVwap) ? (futureLtp > futureVwap ? "ABOVE" : futureLtp < futureVwap ? "BELOW" : "AT") : "UNKNOWN",
+        futuresContracts: Number.isFinite(futureLtp) ? [{
+          label: "Near", tradingsymbol: "OFFLINE_REPLAY", expiry: "", ltp: futureLtp, vwap: Number.isFinite(futureVwap) ? futureVwap : null,
+          prevClose: null, changePercent: null, oi: row.future_oi == null ? null : Number(row.future_oi),
+          volume: row.future_volume == null ? null : Number(row.future_volume), dayOpen: null, dayHigh: null,
+          dayLow: null, basis: row.future_basis == null ? null : Number(row.future_basis), quoteTimestamp: bucketIso
+        }] : [],
+        dayOpen,
+        dayHigh,
+        dayLow,
+        first15High,
+        first15Low,
+        snapshotId: String(row.snapshot_id || bucketIso),
+        exchangeTimestamp: row.exchange_timestamp ? new Date(row.exchange_timestamp).toISOString() : (row.backend_timestamp ? new Date(row.backend_timestamp).toISOString() : bucketIso),
+        expiries: [],
+        timestamp: bucketIso,
+      } as unknown as IndexMetrics;
+
+      replaySession.snapshotHistory!.push({ timestamp: bucketIso, NIFTY: { spot: current, pcr, vix } });
+      if (replaySession.snapshotHistory!.length > 5000) replaySession.snapshotHistory!.shift();
+
+      stage = "VALIDATION";
+      const validation = validateDataServer(symbol, m, replaySession, null, marketBucketMs);
+      stage = "RULE_ENGINE";
+      const result = runRuleEngineServerCore(symbol, m, validation, null);
+      stage = "AGGREGATION";
+      processed++;
+      if (validation.overallValid) validated++; else blocked++;
+      const signals = Array.isArray(validation.signals) ? validation.signals : [];
+      for (const s of signals) {
+        if (s.status === "NULL" || s.status === "STALE") blockerCounts[s.signal] = (blockerCounts[s.signal] || 0) + 1;
+      }
+      const verdictKey = String(result?.verdict ?? "UNKNOWN");
+      verdictCounts[verdictKey] = (verdictCounts[verdictKey] || 0) + 1;
+      if (typeof result?.score === "number" && Number.isFinite(result.score)) finiteScores++;
+      if (samples.length < 8 || processed > Math.max(0, marketRows.length - 3)) {
+        samples.push({ bucket: bucketIso, validation: { overallValid: validation.overallValid, blockingFailureCount: validation.blockingFailureCount, blockers: signals.filter((s: any) => s.status === "NULL" || s.status === "STALE").map((s: any) => ({ signal: s.signal, status: s.status, reason: s.reason })) }, result: { verdict: result?.verdict ?? null, score: result?.score ?? null, maxScore: result?.maxScore ?? null, confidence: result?.confidence ?? null } });
+      }
+    }
+
+    stage = "RESPONSE";
+    return c.json({
+      version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1",
+      architectureRole: "READ_ONLY_OFFLINE_DETERMINISTIC_REPLAY",
+      productionImpact: "NONE",
+      researchOnly: true,
+      mutationAllowed: false,
+      brokerCalls: false,
+      telegramCalls: false,
+      executionCalls: false,
+      scorePersistence: false,
       symbol,
-      current,
-      change: Number.isFinite(current) && Number.isFinite(pdcClose) ? current - pdcClose : 0,
-      changePercent: Number.isFinite(current) && Number.isFinite(pdcClose) && pdcClose !== 0 ? ((current - pdcClose) / pdcClose) * 100 : 0,
-      vix,
-      vixChange,
-      vixChangePercent: 0,
-      spot: current,
-      atmStrike: 0,
-      vwap,
-      pdh,
-      pdl,
-      pdcClose,
-      maxPain,
-      pcr,
-      volumePcr: null,
-      vwapSource: "RECORDED_MARKET_SNAPSHOT_1M",
-      signal: "WAIT",
-      futuresVwapBias: "UNKNOWN",
-      futuresContracts: Number.isFinite(futureLtp) ? [{
-        label: "Near", tradingsymbol: "OFFLINE_REPLAY", expiry: "", ltp: futureLtp,
-        prevClose: 0, changePercent: 0, oi: row.future_oi == null ? null : Number(row.future_oi),
-        volume: row.future_volume == null ? null : Number(row.future_volume), dayOpen: 0, dayHigh: 0,
-        dayLow: 0, basis: row.future_basis == null ? null : Number(row.future_basis), quoteTimestamp: bucketIso
-      }] : [],
-      dayOpen,
-      dayHigh: Number(row.spot_high),
-      dayLow: Number(row.spot_low),
-      first15High: 0,
-      first15Low: 0,
-      snapshotId: String(row.snapshot_id || bucketIso),
-      exchangeTimestamp: null,
-      expiries: [],
-      timestamp: bucketIso,
-    } as IndexMetrics;
-
-    replaySession.snapshotHistory!.push({ timestamp: bucketIso, NIFTY: { spot: current, pcr, vix } });
-    if (replaySession.snapshotHistory!.length > 5000) replaySession.snapshotHistory!.shift();
-
-    const nowMs = new Date(bucketIso).getTime();
-    let validation: ServerValidationResult;
-    try {
-      validation = validateDataServer(symbol, m, replaySession, null, nowMs);
-    } catch {
-      return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "VALIDATION_RUNTIME_FAILED", stage: "VALIDATION", bucket: bucketIso }, 500);
-    }
-    let result: ReturnType<typeof runRuleEngineServerCore>;
-    try {
-      result = runRuleEngineServerCore(symbol, m, validation, null);
-    } catch {
-      return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "RULE_ENGINE_RUNTIME_FAILED", stage: "RULE_ENGINE", bucket: bucketIso }, 500);
-    }
-    // PHASE66_REPLAY_RUNTIME_STAGE_DIAGNOSTIC_V1
-    processed++;
-    if (validation.overallValid) validated++; else blocked++;
-    for (const s of validation.signals) {
-      if (s.status === "NULL" || s.status === "STALE") blockerCounts[s.signal] = (blockerCounts[s.signal] || 0) + 1;
-    }
-    verdictCounts[result.verdict] = (verdictCounts[result.verdict] || 0) + 1;
-    if (typeof result.score === "number" && Number.isFinite(result.score)) finiteScores++;
-    if (samples.length < 8 || processed > Math.max(0, marketRows.length - 3)) {
-      samples.push({ bucket: bucketIso, validation: { overallValid: validation.overallValid, blockingFailureCount: validation.blockingFailureCount, blockers: validation.signals.filter((s: any) => s.status === "NULL" || s.status === "STALE").map((s: any) => ({ signal: s.signal, status: s.status, reason: s.reason })) }, result: { verdict: result.verdict, score: result.score, maxScore: result.maxScore, confidence: result.confidence } });
-    }
+      processedBuckets: processed,
+      validatedBuckets: validated,
+      blockedBuckets: blocked,
+      finiteScoreBuckets: finiteScores,
+      blockerCounts,
+      verdictCounts,
+      samples,
+      readiness: processed > 0 ? "REPLAY_EXECUTED" : "NO_ALIGNED_INPUT"
+    });
+  } catch (err) {
+    console.error(`[PHASE66_REPLAY] stage=${stage}:`, err instanceof Error ? err.message : err);
+    return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "RUNTIME_FAILED", stage }, 500);
   }
-
-  return c.json({
-    version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1",
-    architectureRole: "READ_ONLY_OFFLINE_DETERMINISTIC_REPLAY",
-    productionImpact: "NONE",
-    researchOnly: true,
-    mutationAllowed: false,
-    brokerCalls: false,
-    telegramCalls: false,
-    executionCalls: false,
-    scorePersistence: false,
-    symbol,
-    processedBuckets: processed,
-    validatedBuckets: validated,
-    blockedBuckets: blocked,
-    finiteScoreBuckets: finiteScores,
-    blockerCounts,
-    verdictCounts,
-    samples,
-    readiness: processed > 0 ? "REPLAY_EXECUTED" : "NO_ALIGNED_INPUT"
-  });
 });
-
-
 app.get("/api/research/shadow-diagnostic-trace", (c) => c.json(getPhase59ShadowDiagnosticTrace()));
 
 

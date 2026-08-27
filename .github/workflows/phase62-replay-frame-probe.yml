@@ -1,0 +1,59 @@
+name: Phase62 Replay Frame Probe
+
+on:
+  push:
+    branches:
+      - phase59-autonomous-shadow-fix
+    paths:
+      - scripts/phase62-replay-frame-probe-patch.mjs
+      - .github/workflows/phase62-replay-frame-probe.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Apply Phase62 read-only replay probe
+        run: node scripts/phase62-replay-frame-probe-patch.mjs
+
+      - name: Verify safety invariants
+        run: |
+          grep -q 'PHASE62_REPLAY_FRAME_PROBE_V1' server.ts
+          grep -q '/api/offline-research/replay-frame-probe' server.ts
+          grep -q 'READ_ONLY_REPLAY_RECONSTRUCTION' server.ts
+          git diff --check
+          if git diff -- server.ts | grep -E '^\+.*(INSERT INTO|UPDATE .* SET|DELETE FROM|CREATE TABLE|ALTER TABLE|DROP TABLE|refreshMarketSnapshot|sendTelegram|placeOrder|executeTrade)'; then
+            echo 'Forbidden mutation/live path detected'
+            exit 1
+          fi
+
+      - name: Run full existing test suite
+        run: npm test
+
+      - name: Commit verified server wiring
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo 'No server.ts changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 62: wire read-only replay frame probe'
+          git push origin HEAD:phase59-autonomous-shadow-fix

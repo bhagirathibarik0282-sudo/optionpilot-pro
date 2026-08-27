@@ -37794,7 +37794,9 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
 
   const chainByMinute = new Map<string, any[]>();
   for (const row of chainRows) {
-    const key = new Date(row.minute_bucket).toISOString();
+    const chainBucketMs = new Date(row.minute_bucket).getTime();
+    if (!Number.isFinite(chainBucketMs)) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "RECONSTRUCTION_RUNTIME_FAILED", stage: "CHAIN_BUCKET_TIMESTAMP" }, 500);
+    const key = new Date(chainBucketMs).toISOString();
     const arr = chainByMinute.get(key) || [];
     arr.push(row);
     chainByMinute.set(key, arr);
@@ -37818,7 +37820,10 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
   const samples: any[] = [];
 
   for (const row of marketRows) {
-    const bucketIso = new Date(row.minute_bucket).toISOString();
+    const marketBucketMs = new Date(row.minute_bucket).getTime();
+    if (!Number.isFinite(marketBucketMs)) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "RECONSTRUCTION_RUNTIME_FAILED", stage: "MARKET_BUCKET_TIMESTAMP" }, 500);
+    const bucketIso = new Date(marketBucketMs).toISOString();
+    // PHASE66_REPLAY_RECONSTRUCTION_GUARD_V1
     const chains = chainByMinute.get(bucketIso) || [];
     const currentChain = chains.find((x: any) => String(x.expiry_bucket || "").toUpperCase().includes("CURRENT")) || chains[0] || null;
 

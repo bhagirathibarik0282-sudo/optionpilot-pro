@@ -1,12 +1,52 @@
-const accessToken = (process.env.DHAN_ACCESS_TOKEN || "").trim();
-const clientId = (process.env.DHAN_CLIENT_ID || "").trim();
+import { createHmac } from "node:crypto";
 
+const clientId = (process.env.DHAN_CLIENT_ID || "").trim();
+const legacyToken = (process.env.DHAN_ACCESS_TOKEN || "").trim();
+const pin = (process.env.DHAN_PIN || "").trim();
+const totpSecret = (process.env.DHAN_TOTP_SECRET || "").trim();
+
+function base32Decode(input) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = input.toUpperCase().replace(/[^A-Z2-7]/g, "");
+  let bits = "";
+  for (const ch of clean) {
+    const v = alphabet.indexOf(ch);
+    if (v >= 0) bits += v.toString(2).padStart(5, "0");
+  }
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  return Buffer.from(bytes);
+}
+
+function generateTotp(secret, stepSeconds = 30, digits = 6) {
+  const key = base32Decode(secret);
+  const counter = Math.floor(Date.now() / 1000 / stepSeconds);
+  const counterBuf = Buffer.alloc(8);
+  counterBuf.writeBigUInt64BE(BigInt(counter));
+  const hmac = createHmac("sha1", key).update(counterBuf).digest();
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const bin = ((hmac[offset] & 0x7f) << 24) | ((hmac[offset + 1] & 0xff) << 16) | ((hmac[offset + 2] & 0xff) << 8) | (hmac[offset + 3] & 0xff);
+  return (bin % 10 ** digits).toString().padStart(digits, "0");
+}
+
+async function getAccessToken() {
+  if (clientId && pin && totpSecret) {
+    const totp = generateTotp(totpSecret);
+    const params = new URLSearchParams({ dhanClientId: clientId, pin, totp });
+    const res = await fetch(`https://auth.dhan.co/app/generateAccessToken?${params.toString()}`, { method: "POST" });
+    const json = await res.json().catch(() => null);
+    if (res.ok && json?.accessToken) {
+      console.log(JSON.stringify({ dhanAuth: "TOTP_REFRESH_OK", expiryTime: json.expiryTime || null, tokenExposed: false }));
+      return json.accessToken;
+    }
+    console.error(JSON.stringify({ dhanAuth: "TOTP_REFRESH_FAIL", httpStatus: res.status, error: json?.errorMessage || null, tokenExposed: false }));
+  }
+  return legacyToken || null;
+}
+
+const accessToken = await getAccessToken();
 if (!accessToken || !clientId) {
-  console.error(JSON.stringify({
-    ok: false,
-    error: "DHAN_ACCESS_TOKEN or DHAN_CLIENT_ID missing",
-    tokenExposed: false,
-  }, null, 2));
+  console.error(JSON.stringify({ ok: false, error: "No valid Dhan access token/client id", tokenExposed: false }, null, 2));
   process.exit(1);
 }
 
@@ -14,27 +54,19 @@ const symbol = (process.env.DHAN_SYMBOL || "NIFTY").toUpperCase();
 const fromDate = process.env.DHAN_FROM_DATE || "2026-07-02";
 const toDate = process.env.DHAN_TO_DATE || "2026-08-01";
 const range = Math.max(0, Math.min(10, Number(process.env.DHAN_STRIKE_RANGE || 3)));
-
 const underlyingMap = {
   NIFTY: { securityId: 13, exchangeSegment: "NSE_FNO" },
   BANKNIFTY: { securityId: 25, exchangeSegment: "NSE_FNO" },
   SENSEX: { securityId: 51, exchangeSegment: "BSE_FNO" },
 };
-
 const mapping = underlyingMap[symbol];
-if (!mapping) {
-  console.error(JSON.stringify({ ok: false, error: `Unsupported symbol: ${symbol}` }, null, 2));
-  process.exit(1);
-}
+if (!mapping) process.exit(1);
 
 const strikes = ["ATM"];
 for (let i = 1; i <= range; i++) strikes.push(`ATM+${i}`, `ATM-${i}`);
 const sides = ["CALL", "PUT"];
 const results = [];
-
-async function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 for (const strike of strikes) {
   for (const side of sides) {
@@ -51,76 +83,38 @@ for (const strike of strikes) {
       fromDate,
       toDate,
     };
-
     try {
       const res = await fetch("https://api.dhan.co/v2/charts/rollingoption", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          "access-token": accessToken,
-          "client-id": clientId,
-        },
+        headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
         body: JSON.stringify(body),
       });
-
       const raw = await res.text();
       let payload = null;
       try { payload = raw ? JSON.parse(raw) : null; } catch {}
-
       const node = side === "CALL" ? payload?.data?.ce : payload?.data?.pe;
       const timestamp = Array.isArray(node?.timestamp) ? node.timestamp : [];
       const fields = ["open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot", "timestamp"];
       const fieldAudit = {};
       for (const field of fields) {
         const v = node?.[field];
-        fieldAudit[field] = {
-          present: Array.isArray(v),
-          count: Array.isArray(v) ? v.length : 0,
-          first: Array.isArray(v) && v.length ? v[0] : null,
-          last: Array.isArray(v) && v.length ? v[v.length - 1] : null,
-        };
+        fieldAudit[field] = { present: Array.isArray(v), count: Array.isArray(v) ? v.length : 0 };
       }
-
-      results.push({
-        strike,
-        side,
-        httpStatus: res.status,
-        ok: res.ok && Boolean(node) && timestamp.length > 0,
-        candleCount: timestamp.length,
-        fieldAudit,
-        providerError: !res.ok || !node ? {
-          errorType: payload?.errorType ?? null,
-          errorCode: payload?.errorCode ?? null,
-          errorMessage: payload?.errorMessage ?? null,
-          rawSnippet: raw.slice(0, 300),
-        } : null,
-      });
+      results.push({ strike, side, httpStatus: res.status, ok: res.ok && Boolean(node) && timestamp.length > 0, candleCount: timestamp.length, fieldAudit, providerError: !res.ok || !node ? { errorCode: payload?.errorCode ?? null, errorMessage: payload?.errorMessage ?? null, rawSnippet: raw.slice(0, 220) } : null });
     } catch (err) {
       results.push({ strike, side, ok: false, candleCount: 0, error: err instanceof Error ? err.message : String(err) });
     }
-
     await sleep(450);
   }
 }
 
 const passed = results.filter((r) => r.ok).length;
-const report = {
-  architectureRole: "DHAN_EXPIRED_OPTIONS_30D_STANDALONE_AUDIT_V1",
-  generatedAt: new Date().toISOString(),
-  readOnlyMode: true,
-  orderAccessUsed: false,
-  tokenExposed: false,
-  symbol,
-  window: { fromDate, toDate, toDateNonInclusive: true },
-  strikeRange: `ATM ±${range}`,
-  totalRequests: results.length,
-  passed,
-  failed: results.length - passed,
+console.log(JSON.stringify({
+  architectureRole: "DHAN_EXPIRED_OPTIONS_30D_STANDALONE_AUDIT_V2",
+  generatedAt: new Date().toISOString(), readOnlyMode: true, orderAccessUsed: false, tokenExposed: false,
+  symbol, window: { fromDate, toDate, toDateNonInclusive: true }, strikeRange: `ATM ±${range}`,
+  totalRequests: results.length, passed, failed: results.length - passed,
   status: passed === results.length ? "PASS" : passed > 0 ? "PARTIAL" : "FAIL",
-  safeForOneYearExpansion: passed === results.length,
-  results,
-};
-
-console.log(JSON.stringify(report, null, 2));
+  safeForOneYearExpansion: passed === results.length, results,
+}, null, 2));
 if (passed === 0) process.exitCode = 2;

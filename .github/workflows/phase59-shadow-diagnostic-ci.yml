@@ -1,0 +1,36 @@
+name: Phase59 Shadow Diagnostic Trace CI
+
+on:
+  push:
+    branches:
+      - phase59-shadow-diagnostic-trace
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run Phase59 tests
+        run: node --import tsx --test test/phase59-shadow-diagnostic.test.ts
+      - name: Apply diagnostic patch to real server.ts
+        run: node scripts/phase59-shadow-diagnostic-patch.mjs server.ts
+      - name: Verify exact diagnostic wiring
+        run: |
+          grep -q 'PHASE59_SHADOW_DIAGNOSTIC_TRACE_WIRING_V1' server.ts
+          grep -q '/api/research/shadow-diagnostic-trace' server.ts
+          grep -q 'phase59TracePersistAttempt(symbol)' server.ts
+          grep -q 'phase59TracePersistResult(symbol, observationId)' server.ts
+          grep -q 'phase59ObservedAt === snapshotObservedAt' server.ts
+      - name: Validate patched server syntax
+        run: node --check server.ts
+      - name: Run full package tests
+        run: npm test

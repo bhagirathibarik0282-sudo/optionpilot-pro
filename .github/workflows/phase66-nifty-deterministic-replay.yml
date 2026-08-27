@@ -1,0 +1,61 @@
+name: Phase66 NIFTY Deterministic Replay
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase66-nifty-replay-execution-patch.mjs'
+      - '.github/workflows/phase66-nifty-deterministic-replay.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Apply Phase 66 patch
+        run: node scripts/phase66-nifty-replay-execution-patch.mjs
+
+      - name: Verify replay safety invariants
+        run: |
+          grep -q 'PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1' server.ts
+          grep -q 'validateDataServer(symbol, m, replaySession, null, nowMs)' server.ts
+          grep -q 'runRuleEngineServerCore(symbol, m, validation, null)' server.ts
+          grep -q 'scorePersistence: false' server.ts
+          git diff --check
+          ADDED="$(git diff -U0 -- server.ts | grep '^+' | grep -v '^+++' || true)"
+          if printf '%s\n' "$ADDED" | grep -E 'placeOrder\(|sendTelegram|persistKnownThenScoreObservation\(|dbInsert\(|INSERT INTO|UPDATE |DELETE FROM|CREATE TABLE'; then
+            echo 'Forbidden mutation/live side effect in Phase 66 diff'
+            exit 1
+          fi
+
+      - name: Run full existing test suite
+        run: npm test
+
+      - name: Commit verified Phase 66 wiring
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo 'No server.ts change to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 66: wire read-only NIFTY deterministic replay'
+          git push origin HEAD:phase59-autonomous-shadow-fix

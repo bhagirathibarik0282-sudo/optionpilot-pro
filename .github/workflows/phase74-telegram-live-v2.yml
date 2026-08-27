@@ -53,7 +53,6 @@ jobs:
             'process.env.PHASE74_TELEGRAM_LIVE_V2',
             'sendTelegramPremiumOnlyMessage(session, phase74Text)',
             'editTelegramPremiumOnlyMessage(session, phase74Existing.messageId, phase74Text)',
-            'const rule = runRuleEngineServer(symbol, metrics, validation, null);',
             '180_000'
           ];
           for (const q of required) if (!s.includes(q)) throw new Error('Missing Phase74 invariant: '+q);
@@ -64,9 +63,15 @@ jobs:
           const end = s.indexOf('const verdict = rule.verdict;', start);
           if (start < 0 || end < 0) throw new Error('Cannot isolate Phase74 block');
           const block = s.slice(start, end);
-          for (const forbidden of ['placeOrder(', 'executeTrade(', 'refreshMarketSnapshot(', 'runRuleEngineServer(symbol, metrics, validation, null)']) {
+          for (const forbidden of ['placeOrder(', 'executeTrade(', 'refreshMarketSnapshot(', 'runRuleEngineServer(', 'validateDataServer(']) {
             if (block.includes(forbidden)) throw new Error('P0 forbidden in Phase74 block: '+forbidden);
           }
+          const managerStart = s.indexOf('scheduleAutoTradeManager');
+          const managerEnd = s.indexOf('\nfunction ', managerStart + 32) > 0 ? s.indexOf('\nfunction ', managerStart + 32) : managerStart + 60000;
+          const manager = s.slice(managerStart, managerEnd);
+          const canonicalRules = (manager.match(/runRuleEngineServer\(/g) || []).length;
+          const canonicalValidations = (manager.match(/validateDataServer\(/g) || []).length;
+          if (canonicalRules < 1 || canonicalValidations < 1) throw new Error('Canonical validator/rule path missing');
           if (!block.includes('Dashboard unchanged') && !m.includes('Dashboard unchanged')) throw new Error('Dashboard isolation marker missing');
           console.log(JSON.stringify({version:'PHASE74_TELEGRAM_LIVE_V2', result:'PASS', decisionAuthority:'CANONICAL_RULE_ENGINE_ONLY', haikuRole:'EXPLANATION_ONLY', dashboardChanged:false, featureDefault:'OFF'}, null, 2));
           NODE

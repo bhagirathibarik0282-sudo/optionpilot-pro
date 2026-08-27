@@ -37632,6 +37632,62 @@ offlineResearchRouter.get("/console", (c) => {
 </body>
 </html>`);
 });
+// PHASE61_OFFLINE_REPLAY_COVERAGE_ROUTE_V1
+// Research-only, read-only aggregate coverage check. No broker/auth calls, no Telegram,
+// no execution, no DB mutation, and no raw snapshot payload is returned.
+app.get("/api/offline-research/replay-input-coverage", async (c) => {
+  const symbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!["NIFTY", "BANKNIFTY", "SENSEX"].includes(symbol)) {
+    return c.json({ ok: false, productionImpact: "NONE", reason: "INVALID_SYMBOL", allowed: ["NIFTY", "BANKNIFTY", "SENSEX"] }, 400);
+  }
+
+  const { dbIsConfigured, dbQuerySafe } = await import("./db.js");
+  if (!dbIsConfigured()) {
+    return c.json({ ok: false, productionImpact: "NONE", reason: "DATABASE_URL_NOT_CONFIGURED" }, 503);
+  }
+
+  const result = await dbQuerySafe<Record<string, string | number | null>>(
+    `WITH
+       m AS (SELECT minute_bucket FROM market_snapshot_1m WHERE symbol = $1),
+       c AS (SELECT minute_bucket FROM chain_state_1m WHERE symbol = $1),
+       o AS (SELECT minute_bucket FROM option_snapshot_1m WHERE symbol = $1),
+       mb AS (SELECT DISTINCT minute_bucket FROM m),
+       cb AS (SELECT DISTINCT minute_bucket FROM c),
+       ob AS (SELECT DISTINCT minute_bucket FROM o),
+       aligned AS (SELECT minute_bucket FROM mb INTERSECT SELECT minute_bucket FROM cb INTERSECT SELECT minute_bucket FROM ob)
+     SELECT
+       (SELECT COUNT(*) FROM m)::int AS market_rows,
+       (SELECT COUNT(*) FROM c)::int AS chain_rows,
+       (SELECT COUNT(*) FROM o)::int AS option_rows,
+       (SELECT COUNT(*) FROM mb)::int AS market_buckets,
+       (SELECT COUNT(*) FROM cb)::int AS chain_buckets,
+       (SELECT COUNT(*) FROM ob)::int AS option_buckets,
+       (SELECT COUNT(*) FROM aligned)::int AS fully_aligned_buckets,
+       (SELECT MIN(minute_bucket)::text FROM mb) AS first_market_bucket,
+       (SELECT MAX(minute_bucket)::text FROM mb) AS last_market_bucket`,
+    [symbol],
+  );
+
+  if (!result || !result.rows.length) {
+    return c.json({ ok: false, productionImpact: "NONE", reason: "READ_QUERY_FAILED" }, 503);
+  }
+
+  const coverage = result.rows[0];
+  const aligned = Number(coverage.fully_aligned_buckets || 0);
+  return c.json({
+    version: "OFFLINE_SHADOW_REPLAY_COVERAGE_V1",
+    architectureRole: "READ_ONLY_OFFLINE_REPLAY_INPUT",
+    productionImpact: "NONE",
+    mutationAllowed: false,
+    brokerCalls: false,
+    telegramCalls: false,
+    executionCalls: false,
+    symbol,
+    coverage,
+    readiness: aligned > 0 ? "REPLAY_INPUT_AVAILABLE" : "NO_ALIGNED_REPLAY_INPUT",
+  });
+});
+
 app.route("/api/offline-research", offlineResearchRouter);
 
 app.get("/api/research/shadow-diagnostic-trace", (c) => c.json(getPhase59ShadowDiagnosticTrace()));

@@ -1,0 +1,35 @@
+name: Phase58 Server Shadow Persistence CI
+
+on:
+  push:
+    branches:
+      - phase58-server-shadow-persistence
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Unit test patch core
+        run: node --import tsx --test test/phase58-server-shadow-persistence.test.ts
+      - name: Apply patch to real server.ts
+        run: node scripts/phase58-server-shadow-persistence-patch.mjs server.ts
+      - name: Verify safety markers
+        run: |
+          grep -q 'PHASE58_SERVER_SHADOW_SCORE_PERSISTENCE_V1' server.ts
+          grep -q 'function runRuleEngineServerCore' server.ts
+          grep -q 'sourcePath: "server:runRuleEngineServer"' server.ts
+          grep -q 'm?.timestamp' server.ts
+      - name: Validate patched server syntax
+        run: node --check server.ts
+      - name: Run full package tests
+        run: npm test

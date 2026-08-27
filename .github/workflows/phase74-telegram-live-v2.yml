@@ -48,32 +48,51 @@ jobs:
           const fs = require('fs');
           const s = fs.readFileSync('server.ts','utf8');
           const m = fs.readFileSync('telegram-live-status-v2.ts','utf8');
-          const required = [
+          const requiredServer = [
             'PHASE74_TELEGRAM_LIVE_V2',
+            'const rule = runRuleEngineServer(symbol, m, validation, null);',
+            'publishPhase74TelegramLiveV2',
             'process.env.PHASE74_TELEGRAM_LIVE_V2',
-            'sendTelegramPremiumOnlyMessage(session, phase74Text)',
-            'editTelegramPremiumOnlyMessage(session, phase74Existing.messageId, phase74Text)',
-            '180_000'
+            'process.env.ANTHROPIC_API_KEY'
           ];
-          for (const q of required) if (!s.includes(q)) throw new Error('Missing Phase74 invariant: '+q);
-          for (const q of ['OPTIONPILOT_HAIKU_EXPLAIN_V2','Explanation-only auditor','Never invent missing values','OP LIVE V2']) {
-            if (!m.includes(q)) throw new Error('Missing explanation/render invariant: '+q);
-          }
+          for (const q of requiredServer) if (!s.includes(q)) throw new Error('Missing Phase74 server invariant: '+q);
+          const requiredModule = [
+            'OPTIONPILOT_HAIKU_EXPLAIN_V2',
+            'Explanation-only auditor',
+            'Never invent missing values',
+            'OP LIVE V2',
+            'THREE_GROUP_CHAT_IDS_REQUIRED',
+            'GROUP_CHAT_IDS_MUST_BE_DISTINCT',
+            'TELEGRAM_NIFTY_CHAT_ID',
+            'TELEGRAM_BANKNIFTY_CHAT_ID',
+            'TELEGRAM_SENSEX_CHAT_ID',
+            'editMessageText',
+            'sendMessage'
+          ];
+          for (const q of requiredModule) if (!m.includes(q)) throw new Error('Missing Phase74 module invariant: '+q);
+
           const start = s.indexOf('// PHASE74_TELEGRAM_LIVE_V2');
-          const end = s.indexOf('const verdict = rule.verdict;', start);
-          if (start < 0 || end < 0) throw new Error('Cannot isolate Phase74 block');
-          const block = s.slice(start, end);
-          for (const forbidden of ['placeOrder(', 'executeTrade(', 'refreshMarketSnapshot(', 'runRuleEngineServer(', 'validateDataServer(']) {
-            if (block.includes(forbidden)) throw new Error('P0 forbidden in Phase74 block: '+forbidden);
+          if (start < 0) throw new Error('Cannot isolate Phase74 block');
+          const block = s.slice(start, start + 5000);
+          for (const forbidden of ['placeOrder(', 'executeTrade(', 'refreshMarketSnapshot(', 'validateDataServer(', 'runRuleEngineServer(']) {
+            if (block.includes(forbidden)) throw new Error('P0 forbidden inside Phase74 publisher block: '+forbidden);
           }
-          const managerStart = s.indexOf('scheduleAutoTradeManager');
-          const managerEnd = s.indexOf('\nfunction ', managerStart + 32) > 0 ? s.indexOf('\nfunction ', managerStart + 32) : managerStart + 60000;
-          const manager = s.slice(managerStart, managerEnd);
-          const canonicalRules = (manager.match(/runRuleEngineServer\(/g) || []).length;
-          const canonicalValidations = (manager.match(/validateDataServer\(/g) || []).length;
-          if (canonicalRules < 1 || canonicalValidations < 1) throw new Error('Canonical validator/rule path missing');
-          if (!block.includes('Dashboard unchanged') && !m.includes('Dashboard unchanged')) throw new Error('Dashboard isolation marker missing');
-          console.log(JSON.stringify({version:'PHASE74_TELEGRAM_LIVE_V2', result:'PASS', decisionAuthority:'CANONICAL_RULE_ENGINE_ONLY', haikuRole:'EXPLANATION_ONLY', dashboardChanged:false, featureDefault:'OFF'}, null, 2));
+          if (!block.includes('No extra market fetch') || !block.includes('no dashboard mutation')) throw new Error('Safety isolation markers missing');
+          if ((s.match(/const rule = runRuleEngineServer\(symbol, m, validation, null\);/g) || []).length !== 1) {
+            throw new Error('P0 duplicate canonical observer rule call');
+          }
+          console.log(JSON.stringify({
+            version:'PHASE74_TELEGRAM_LIVE_V2',
+            result:'PASS',
+            indices:['NIFTY','BANKNIFTY','SENSEX'],
+            routing:'STRICT_DISTINCT_GROUPS',
+            decisionAuthority:'CANONICAL_RULE_ENGINE_ONLY',
+            haikuRole:'EXPLANATION_ONLY',
+            dashboardChanged:false,
+            extraMarketFetch:false,
+            executionChanged:false,
+            featureDefault:'OFF'
+          }, null, 2));
           NODE
 
       - name: Existing Telegram contract tests
@@ -99,5 +118,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add server.ts
-          git commit -m 'Phase 74: wire Telegram Live V2 background status'
+          git commit -m 'Phase 74: wire three-group Telegram Live V2 status'
           git push origin HEAD:phase59-autonomous-shadow-fix

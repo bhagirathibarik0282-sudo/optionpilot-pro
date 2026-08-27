@@ -1,0 +1,71 @@
+name: Phase66 One-Shot Runtime Hardening
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - scripts/phase66-one-shot-runtime-hardening.mjs
+      - .github/workflows/phase66-one-shot-runtime-hardening.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Apply one-shot Phase66 hardening
+        run: node scripts/phase66-one-shot-runtime-hardening.mjs
+
+      - name: Syntax compile server.ts
+        run: ./node_modules/.bin/esbuild server.ts --platform=node --format=esm --outfile=/tmp/server-check.mjs --log-level=error
+
+      - name: Verify replay safety invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'PHASE66_ONE_SHOT_RUNTIME_HARDENING_V1' server.ts
+          grep -q 'const marketRows = marketQuery.rows as any\[\];' server.ts
+          grep -q 'const chainRows = chainQuery.rows as any\[\];' server.ts
+          grep -q 'full_chain_oi_pcr' server.ts
+          grep -q 'volume_pcr' server.ts
+          grep -q 'atm_strike' server.ts
+          grep -q 'validateDataServer(symbol, m, replaySession, null, marketBucketMs)' server.ts
+          grep -q 'runRuleEngineServerCore(symbol, m, validation, null)' server.ts
+          BLOCK="$(sed -n '/PHASE66_ONE_SHOT_RUNTIME_HARDENING_V1/,/app.get("\/api\/research\/shadow-diagnostic-trace"/p' server.ts)"
+          if printf '%s' "$BLOCK" | grep -Eq 'placeOrder\(|sendTelegram|persistKnownThenScoreObservation\(|dbInsert\('; then
+            echo 'Forbidden side effect detected in hardened replay route'
+            exit 1
+          fi
+          git diff --check
+
+      - name: Run full existing test suite
+        run: npm test
+
+      - name: Commit verified hardened replay route
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- server.ts; then
+            echo 'No server.ts change to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 66: harden replay runtime and fail closed'
+          git push origin HEAD:phase59-autonomous-shadow-fix

@@ -1,0 +1,57 @@
+name: Phase69 Replay Result Audit
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase69-replay-result-audit-patch.mjs'
+      - '.github/workflows/phase69-replay-result-audit.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Apply exact Phase69 audit patch
+        run: node scripts/phase69-replay-result-audit-patch.mjs
+      - name: Syntax compile server.ts
+        run: ./node_modules/.bin/esbuild server.ts --platform=node --format=esm --outfile=/tmp/server-check.mjs --log-level=error
+      - name: Verify Phase69 safety invariants
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('server.ts','utf8');
+          const a = s.indexOf('app.get("/api/offline-research/nifty-deterministic-replay"');
+          const b = s.indexOf('app.get("/api/research/shadow-diagnostic-trace"', a);
+          if (a < 0 || b < 0) throw new Error('replay route missing');
+          const block = s.slice(a,b);
+          for (const x of ['PHASE69_REPLAY_RESULT_AUDIT_V1','validationRate','finiteScoreRate','topBlockers']) if (!block.includes(x)) throw new Error('missing '+x);
+          for (const x of ['placeOrder(','sendTelegram','persistKnownThenScoreObservation(','dbInsert(']) if (block.includes(x)) throw new Error('forbidden '+x);
+          NODE
+          git diff --check
+      - name: Run full existing test suite
+        run: npm test
+      - name: Commit verified Phase69 audit
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo 'No server.ts change required'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 69: expose replay result audit summary'
+          git push origin HEAD:phase59-autonomous-shadow-fix

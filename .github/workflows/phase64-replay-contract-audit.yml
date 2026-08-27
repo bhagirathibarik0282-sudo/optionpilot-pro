@@ -1,0 +1,56 @@
+name: Phase64 Replay Contract Audit
+
+on:
+  push:
+    branches:
+      - phase59-autonomous-shadow-fix
+    paths:
+      - scripts/phase64-contract-audit.mjs
+      - .github/workflows/phase64-replay-contract-audit.yml
+
+permissions:
+  contents: write
+
+jobs:
+  audit-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Generate replay contract audit
+        run: node scripts/phase64-contract-audit.mjs
+
+      - name: Verify strict replay invariants
+        run: |
+          grep -q 'PHASE64_REPLAY_CONTRACT_AUDIT_V1' docs/phase64-replay-contract-audit.json
+          grep -q '"validatorUsesInjectedClock": true' docs/phase64-replay-contract-audit.json
+          grep -q '"duplicateScoringFormulaAllowed": false' docs/phase64-replay-contract-audit.json
+          grep -q '"fabricateMissingFieldsAllowed": false' docs/phase64-replay-contract-audit.json
+          git diff --check
+
+      - name: Run full existing test suite
+        run: npm test
+
+      - name: Commit verified audit report
+        run: |
+          if git diff --quiet -- docs/phase64-replay-contract-audit.json; then
+            echo 'No audit report changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/phase64-replay-contract-audit.json
+          git commit -m 'Phase 64: record verified replay contract audit'
+          git push origin HEAD:phase59-autonomous-shadow-fix

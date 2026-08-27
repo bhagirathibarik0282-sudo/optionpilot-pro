@@ -35538,7 +35538,31 @@ if (process.env.NODE_ENV !== "test") {
                 // fails closed if that input is mandatory. Phase59 trace then makes
                 // the exact blocker observable instead of fabricating a value.
                 const validation = validateDataServer(symbol, m, session, null);
-                runRuleEngineServer(symbol, m, validation, null);
+                const rule = runRuleEngineServer(symbol, m, validation, null);
+
+                // PHASE74_TELEGRAM_LIVE_V2
+                // Telegram-only observability. Reuses the canonical validation + rule result above.
+                // No extra market fetch, no second scoring formula, no dashboard mutation, no execution change.
+                if (/^(1|true|yes|on)$/i.test(String(process.env.PHASE74_TELEGRAM_LIVE_V2 ?? ""))) {
+                  void import("./telegram-live-status-v2.js")
+                    .then(({ publishPhase74TelegramLiveV2 }) => publishPhase74TelegramLiveV2({
+                      symbol,
+                      metrics: m,
+                      validation,
+                      rule,
+                      anthropicApiKey: process.env.ANTHROPIC_API_KEY || null,
+                    }))
+                    .then((delivery) => {
+                      if (delivery.sent || delivery.edited) {
+                        console.log("[PHASE74_TELEGRAM_LIVE_V2]", symbol, delivery.reason);
+                      } else if (delivery.reason !== "NO_MEANINGFUL_CHANGE") {
+                        console.warn("[PHASE74_TELEGRAM_LIVE_V2]", symbol, delivery.reason);
+                      }
+                    })
+                    .catch((phase74Error) => {
+                      console.error("[PHASE74_TELEGRAM_LIVE_V2]", symbol, phase74Error instanceof Error ? phase74Error.message : phase74Error);
+                    });
+                }
               }
             } catch (err) {
               console.error(

@@ -1,0 +1,52 @@
+name: Phase65 Replay Helper Contract
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase65-replay-helper-extract.mjs'
+      - '.github/workflows/phase65-replay-helper-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  extract-test-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Extract exact helper contract
+        run: node scripts/phase65-replay-helper-extract.mjs
+      - name: Verify strict invariants
+        run: |
+          grep -q 'PHASE65_REPLAY_HELPER_CONTRACT_V1' docs/phase65-replay-helper-contract.json
+          grep -q 'serverGetEffectiveTimestamp' docs/phase65-replay-helper-contract.json
+          grep -q 'serverComputePcrTrendValue' docs/phase65-replay-helper-contract.json
+          grep -q 'serverComputeFibPivotValue' docs/phase65-replay-helper-contract.json
+          grep -q '"duplicateScoringFormulaAllowed": false' docs/phase65-replay-helper-contract.json
+          grep -q '"fabricateMissingFieldsAllowed": false' docs/phase65-replay-helper-contract.json
+          git diff --check
+      - name: Run full existing test suite
+        run: npm test
+      - name: Commit verified helper contract
+        run: |
+          if git diff --quiet -- docs/phase65-replay-helper-contract.json; then
+            echo 'No report change.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/phase65-replay-helper-contract.json
+          git commit -m 'Phase 65: record verified replay helper contract'
+          git push origin HEAD:phase59-autonomous-shadow-fix

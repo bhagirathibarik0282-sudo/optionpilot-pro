@@ -6,6 +6,9 @@ on:
       - phase61-session-authority-audit
     paths:
       - 'server.ts'
+      - 'db.ts'
+      - 'kite-session-authority.ts'
+      - 'test/phase61-kite-session-authority.test.ts'
       - 'scripts/phase61-session-authority-audit.mjs'
       - '.github/workflows/phase61-session-authority-audit.yml'
   workflow_dispatch:
@@ -14,7 +17,7 @@ permissions:
   contents: read
 
 jobs:
-  audit:
+  audit-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout audit branch
@@ -25,8 +28,30 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Run source-only session authority audit
         run: node scripts/phase61-session-authority-audit.mjs
+
+      - name: Run Phase61 authority tests
+        run: NODE_ENV=test node --import tsx --test test/phase61-kite-session-authority.test.ts
+
+      - name: Verify authority safety contract
+        run: |
+          grep -q 'KITE_SESSION_ENCRYPTION_KEY' kite-session-authority.ts
+          grep -q 'aes-256-gcm' kite-session-authority.ts
+          grep -q 'SHARED_DB_AUTHORITY' kite-session-authority.ts
+          grep -q 'tokenExposed: false' kite-session-authority.ts
+          grep -q 'autoLoginAttempted: false' kite-session-authority.ts
+          grep -q 'productionDecisionImpact: "NONE"' kite-session-authority.ts
+          if grep -q 'fallback-key' kite-session-authority.ts; then
+            echo 'Forbidden fallback encryption key detected'
+            exit 1
+          fi
+
+      - name: Run full existing test suite
+        run: npm test
 
       - name: Upload audit report
         uses: actions/upload-artifact@v4

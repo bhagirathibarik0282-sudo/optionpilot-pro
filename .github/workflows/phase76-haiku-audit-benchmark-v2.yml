@@ -1,0 +1,71 @@
+name: Phase76 Haiku Audit Benchmark V2
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'haiku-audit-benchmark-v2.ts'
+      - 'telegram-live-status-v2.ts'
+      - 'telegram-preview-route.ts'
+      - 'scripts/phase76-haiku-audit-benchmark-v2-patch.mjs'
+      - 'test/phase76-haiku-audit-benchmark-v2.test.ts'
+      - '.github/workflows/phase76-haiku-audit-benchmark-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Apply Phase76 research-only patch
+        run: node scripts/phase76-haiku-audit-benchmark-v2-patch.mjs
+      - name: Syntax compile
+        run: |
+          npx esbuild haiku-audit-benchmark-v2.ts --platform=node --format=esm --outfile=/tmp/phase76-bench.mjs --log-level=error
+          npx esbuild telegram-live-status-v2.ts --platform=node --format=esm --outfile=/tmp/phase76-live.mjs --log-level=error
+          npx esbuild telegram-preview-route.ts --platform=node --format=esm --outfile=/tmp/phase76-preview.mjs --log-level=error
+      - name: Phase76 focused tests
+        run: npx tsx --test test/phase76-haiku-audit-benchmark-v2.test.ts
+      - name: Phase74 and Phase75 regression tests
+        run: |
+          npx tsx --test test/phase74-telegram-live-status-v2.test.ts
+          npx tsx --test test/phase75-telegram-emoji-insight.test.ts
+      - name: Devil-check benchmark invariants
+        run: |
+          grep -q 'START_DATE_IST = "2026-08-28"' haiku-audit-benchmark-v2.ts
+          grep -q 'MAX_CASES_PER_SYMBOL_PER_DAY = 6' haiku-audit-benchmark-v2.ts
+          grep -q 'OFFLINE_REPLAY_NOT_LIVE_BENCHMARK' haiku-audit-benchmark-v2.ts
+          grep -q 'NO_DECISION_OVERRIDE' haiku-audit-benchmark-v2.ts
+          grep -q 'NO_HINDSIGHT' haiku-audit-benchmark-v2.ts
+          grep -q 'sourceMode: "LIVE"' telegram-live-status-v2.ts
+          grep -q 'RESEARCH_ONLY' telegram-preview-route.ts
+          ! grep -q 'automaticPromotionAllowed: true' haiku-audit-benchmark-v2.ts
+      - name: Existing Telegram contract tests
+        run: npx tsx --test test/telegram-trade-card.test.ts
+      - name: Full test suite
+        run: npm test
+      - name: Verify no dashboard/client mutation
+        run: |
+          git diff --name-only | tee /tmp/changed.txt
+          if grep -E '^(client/|dashboard/|public/)' /tmp/changed.txt; then echo 'Dashboard/client mutation forbidden'; exit 1; fi
+      - name: Commit verified Phase76 wiring
+        run: |
+          if git diff --quiet; then echo 'No generated wiring changes'; exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add haiku-audit-benchmark-v2.ts telegram-live-status-v2.ts telegram-preview-route.ts
+          git commit -m 'Phase 76: wire Haiku audit benchmark V2 for live shadow'
+          git push origin HEAD:phase59-autonomous-shadow-fix

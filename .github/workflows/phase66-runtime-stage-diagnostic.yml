@@ -1,0 +1,51 @@
+name: Phase66 Replay Runtime Stage Diagnostic
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase66-runtime-stage-diagnostic-patch.mjs'
+      - '.github/workflows/phase66-runtime-stage-diagnostic.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Apply runtime-stage diagnostic
+        run: node scripts/phase66-runtime-stage-diagnostic-patch.mjs
+      - name: Syntax compile server.ts
+        run: npx esbuild server.ts --platform=node --format=esm --outfile=/tmp/phase66-stage-check.mjs
+      - name: Verify safety invariants
+        run: |
+          grep -q 'PHASE66_REPLAY_RUNTIME_STAGE_DIAGNOSTIC_V1' server.ts
+          grep -q 'VALIDATION_RUNTIME_FAILED' server.ts
+          grep -q 'RULE_ENGINE_RUNTIME_FAILED' server.ts
+          ! grep -A25 'PHASE66_REPLAY_RUNTIME_STAGE_DIAGNOSTIC_V1' server.ts | grep -E 'placeOrder|sendTelegram|persistKnownThenScoreObservation|dbInsert'
+          git diff --check
+      - name: Run full existing test suite
+        run: npm test
+      - name: Commit verified diagnostic
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo 'No server.ts change to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 66: add safe replay runtime-stage diagnostic'
+          git push origin HEAD:phase59-autonomous-shadow-fix

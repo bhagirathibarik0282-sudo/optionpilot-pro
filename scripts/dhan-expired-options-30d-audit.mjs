@@ -54,6 +54,8 @@ const symbol = (process.env.DHAN_SYMBOL || "NIFTY").toUpperCase();
 const overallFrom = process.env.DHAN_FROM_DATE || "2026-07-02";
 const overallTo = process.env.DHAN_TO_DATE || "2026-08-01";
 const chunkDays = 7;
+const strikeRange = 3;
+
 const underlyingMap = {
   NIFTY: { securityId: 13, exchangeSegment: "NSE_FNO" },
   BANKNIFTY: { securityId: 25, exchangeSegment: "NSE_FNO" },
@@ -63,6 +65,9 @@ const mapping = underlyingMap[symbol];
 if (!mapping) process.exit(1);
 
 const sides = ["CALL", "PUT"];
+const strikes = ["ATM"];
+for (let i = 1; i <= strikeRange; i++) strikes.push(`ATM+${i}`, `ATM-${i}`);
+
 const results = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fmt = (d) => d.toISOString().slice(0, 10);
@@ -77,48 +82,85 @@ while (cursor < end) {
 }
 
 for (const chunk of chunks) {
-  for (const side of sides) {
-    const body = {
-      exchangeSegment: mapping.exchangeSegment,
-      interval: "1",
-      securityId: mapping.securityId,
-      instrument: "OPTIDX",
-      expiryFlag: "WEEK",
-      expiryCode: 1,
-      strike: "ATM",
-      drvOptionType: side,
-      requiredData: ["open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot"],
-      fromDate: chunk.fromDate,
-      toDate: chunk.toDate,
-    };
-    try {
-      const res = await fetch("https://api.dhan.co/v2/charts/rollingoption", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json", "access-token": accessToken, "client-id": clientId },
-        body: JSON.stringify(body),
-      });
-      const raw = await res.text();
-      let payload = null;
-      try { payload = raw ? JSON.parse(raw) : null; } catch {}
-      const node = side === "CALL" ? payload?.data?.ce : payload?.data?.pe;
-      const timestamp = Array.isArray(node?.timestamp) ? node.timestamp : [];
-      const fields = ["open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot", "timestamp"];
-      const fieldAudit = {};
-      for (const field of fields) {
-        const v = node?.[field];
-        fieldAudit[field] = { present: Array.isArray(v), count: Array.isArray(v) ? v.length : 0 };
+  for (const strike of strikes) {
+    for (const side of sides) {
+      const body = {
+        exchangeSegment: mapping.exchangeSegment,
+        interval: "1",
+        securityId: mapping.securityId,
+        instrument: "OPTIDX",
+        expiryFlag: "WEEK",
+        expiryCode: 1,
+        strike,
+        drvOptionType: side,
+        requiredData: ["open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot"],
+        fromDate: chunk.fromDate,
+        toDate: chunk.toDate,
+      };
+
+      try {
+        const res = await fetch("https://api.dhan.co/v2/charts/rollingoption", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "access-token": accessToken,
+            "client-id": clientId,
+          },
+          body: JSON.stringify(body),
+        });
+
+        const raw = await res.text();
+        let payload = null;
+        try { payload = raw ? JSON.parse(raw) : null; } catch {}
+
+        const node = side === "CALL" ? payload?.data?.ce : payload?.data?.pe;
+        const timestamp = Array.isArray(node?.timestamp) ? node.timestamp : [];
+        const fields = ["open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot", "timestamp"];
+        const fieldAudit = {};
+        for (const field of fields) {
+          const v = node?.[field];
+          fieldAudit[field] = {
+            present: Array.isArray(v),
+            count: Array.isArray(v) ? v.length : 0,
+          };
+        }
+
+        results.push({
+          ...chunk,
+          strike,
+          side,
+          httpStatus: res.status,
+          ok: res.ok && Boolean(node) && timestamp.length > 0,
+          candleCount: timestamp.length,
+          fieldAudit,
+          providerError: !res.ok || !node ? {
+            errorCode: payload?.errorCode ?? null,
+            errorMessage: payload?.errorMessage ?? null,
+            rawSnippet: raw.slice(0, 220),
+          } : null,
+        });
+      } catch (err) {
+        results.push({
+          ...chunk,
+          strike,
+          side,
+          ok: false,
+          candleCount: 0,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-      results.push({ ...chunk, strike: "ATM", side, httpStatus: res.status, ok: res.ok && Boolean(node) && timestamp.length > 0, candleCount: timestamp.length, fieldAudit, providerError: !res.ok || !node ? { errorCode: payload?.errorCode ?? null, errorMessage: payload?.errorMessage ?? null, rawSnippet: raw.slice(0, 220) } : null });
-    } catch (err) {
-      results.push({ ...chunk, strike: "ATM", side, ok: false, candleCount: 0, error: err instanceof Error ? err.message : String(err) });
+
+      await sleep(700);
     }
-    await sleep(700);
   }
 }
 
 const passed = results.filter((r) => r.ok).length;
+const totalCandles = results.reduce((sum, r) => sum + (r.candleCount || 0), 0);
+
 console.log(JSON.stringify({
-  architectureRole: "DHAN_EXPIRED_OPTIONS_7D_CHUNK_AUDIT_V3",
+  architectureRole: "DHAN_EXPIRED_OPTIONS_30D_AUTO_CHUNK_ATM3_AUDIT_V4",
   generatedAt: new Date().toISOString(),
   readOnlyMode: true,
   orderAccessUsed: false,
@@ -127,12 +169,15 @@ console.log(JSON.stringify({
   overallWindow: { fromDate: overallFrom, toDate: overallTo, toDateNonInclusive: true },
   chunkDays,
   chunks: chunks.length,
-  testScope: "ATM only, CALL+PUT",
+  strikeRange: "ATM ±3",
+  sides,
   totalRequests: results.length,
   passed,
   failed: results.length - passed,
+  totalCandles,
   status: passed === results.length ? "PASS" : passed > 0 ? "PARTIAL" : "FAIL",
-  safeFor30DayATM: passed === results.length,
+  safeForOneYearExpansion: passed === results.length,
   results,
 }, null, 2));
+
 if (passed === 0) process.exitCode = 2;

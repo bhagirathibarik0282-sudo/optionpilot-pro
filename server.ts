@@ -37688,6 +37688,71 @@ app.get("/api/offline-research/replay-input-coverage", async (c) => {
   });
 });
 
+// PHASE62_REPLAY_FRAME_PROBE_V1
+// Research-only reconstruction probe. SELECT-only DB access; no broker/auth, Telegram, execution, or mutation.
+app.get("/api/offline-research/replay-frame-probe", async (c) => {
+  const symbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+  if (!["NIFTY", "BANKNIFTY", "SENSEX"].includes(symbol)) {
+    return c.json({ ok: false, productionImpact: "NONE", reason: "INVALID_SYMBOL", allowed: ["NIFTY", "BANKNIFTY", "SENSEX"] }, 400);
+  }
+
+  const { dbIsConfigured, dbQuerySafe } = await import("./db.js");
+  if (!dbIsConfigured()) return c.json({ ok: false, productionImpact: "NONE", reason: "DATABASE_URL_NOT_CONFIGURED" }, 503);
+
+  const bucketResult = await dbQuerySafe<{ minute_bucket: string }>(
+    `WITH mb AS (SELECT DISTINCT minute_bucket FROM market_snapshot_1m WHERE symbol=$1),
+           cb AS (SELECT DISTINCT minute_bucket FROM chain_state_1m WHERE symbol=$1),
+           ob AS (SELECT DISTINCT minute_bucket FROM option_snapshot_1m WHERE symbol=$1),
+           aligned AS (SELECT minute_bucket FROM mb INTERSECT SELECT minute_bucket FROM cb INTERSECT SELECT minute_bucket FROM ob)
+       SELECT minute_bucket::text FROM aligned ORDER BY minute_bucket DESC LIMIT 1`,
+    [symbol],
+  );
+  const minuteBucket = bucketResult?.rows?.[0]?.minute_bucket ?? null;
+  if (!minuteBucket) return c.json({ ok: false, productionImpact: "NONE", reason: "NO_ALIGNED_REPLAY_INPUT", symbol }, 404);
+
+  const market = await dbQuerySafe<Record<string, unknown>>(
+    `SELECT symbol, minute_bucket, snapshot_id, exchange_timestamp, backend_timestamp, freshness_status,
+            spot_ltp, spot_open, spot_high, spot_low, spot_prev_close, vwap, pdh, pdl, gap_percent,
+            future_ltp, future_vwap, future_oi, future_oi_change, future_volume, future_basis,
+            india_vix, india_vix_change, calculation_version
+       FROM market_snapshot_1m WHERE symbol=$1 AND minute_bucket=$2::timestamptz LIMIT 1`,
+    [symbol, minuteBucket],
+  );
+
+  const chain = await dbQuerySafe<Record<string, unknown>>(
+    `SELECT symbol, minute_bucket, expiry, expiry_bucket, atm_strike, full_chain_oi_pcr, band7_oi_pcr, volume_pcr,
+            max_pain, call_wall_strike, call_wall_oi, call_wall_strength, call_wall_distance, call_wall_migration,
+            put_wall_strike, put_wall_oi, put_wall_strength, put_wall_distance, put_wall_migration, atm_iv,
+            straddle_ltp, straddle_change, validation_status, calculation_version
+       FROM chain_state_1m WHERE symbol=$1 AND minute_bucket=$2::timestamptz ORDER BY expiry ASC LIMIT 12`,
+    [symbol, minuteBucket],
+  );
+
+  const options = await dbQuerySafe<Record<string, unknown>>(
+    `WITH base AS (
+         SELECT *, MIN(ABS(COALESCE(atm_offset, 99))) OVER (PARTITION BY expiry, option_type) AS min_abs_offset
+         FROM option_snapshot_1m WHERE symbol=$1 AND minute_bucket=$2::timestamptz
+       )
+       SELECT symbol, minute_bucket, expiry, expiry_bucket, dte, strike, option_type, atm_offset, is_candidate, is_wall,
+              ltp, bid, ask, spread, volume, oi, oi_change, iv, delta, gamma, vega, theta, intrinsic, extrinsic,
+              day_high, day_low, pdh, pdl, quote_timestamp, quote_age_seconds, liquidity_status, validation_status, calculation_version
+       FROM base
+       WHERE is_candidate=TRUE OR is_wall=TRUE OR ABS(COALESCE(atm_offset, 99)) <= 2
+       ORDER BY expiry ASC, strike ASC, option_type ASC LIMIT 80`,
+    [symbol, minuteBucket],
+  );
+
+  if (!market || !chain || !options) return c.json({ ok: false, productionImpact: "NONE", reason: "READ_QUERY_FAILED" }, 503);
+
+  return c.json({
+    version: "OFFLINE_REPLAY_FRAME_PROBE_V1", architectureRole: "READ_ONLY_REPLAY_RECONSTRUCTION", productionImpact: "NONE",
+    mutationAllowed: false, brokerCalls: false, telegramCalls: false, executionCalls: false,
+    symbol, minuteBucket, market: market.rows[0] ?? null, chain: chain.rows, options: options.rows,
+    counts: { marketRows: market.rows.length, chainRows: chain.rows.length, optionRows: options.rows.length },
+    nextStep: "Map this normalized replay frame to the existing deterministic server validator/rule-engine input without inventing a second scoring formula."
+  });
+});
+
 app.route("/api/offline-research", offlineResearchRouter);
 
 app.get("/api/research/shadow-diagnostic-trace", (c) => c.json(getPhase59ShadowDiagnosticTrace()));

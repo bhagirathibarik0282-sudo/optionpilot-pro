@@ -40,7 +40,6 @@ jobs:
         run: cp /tmp/phase59/phase59-shadow-diagnostic-trace.ts ./phase59-shadow-diagnostic-trace.ts
       - name: Apply diagnostic patch to real shadow server.ts
         run: |
-          cp /tmp/phase59/phase59-shadow-diagnostic-patch-core.mjs /tmp/phase59/phase59-shadow-diagnostic-patch-core.mjs
           cp /tmp/phase59/phase59-shadow-diagnostic-patch.mjs ./phase59-shadow-diagnostic-patch.mjs
           cp /tmp/phase59/phase59-shadow-diagnostic-patch-core.mjs ./phase59-shadow-diagnostic-patch-core.mjs
           node ./phase59-shadow-diagnostic-patch.mjs server.ts

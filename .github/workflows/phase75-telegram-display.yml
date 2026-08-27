@@ -1,0 +1,86 @@
+name: Phase75 Telegram Display Polish
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase75-telegram-emoji-insight-patch.mjs'
+      - 'test/phase75-telegram-emoji-insight.test.ts'
+      - '.github/workflows/phase75-telegram-display.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Apply Phase75 display-only patch
+        run: node scripts/phase75-telegram-emoji-insight-patch.mjs
+
+      - name: Syntax compile
+        run: npx esbuild telegram-live-status-v2.ts --platform=node --format=esm --outfile=/tmp/phase75.mjs --log-level=error
+
+      - name: Phase75 focused tests
+        run: npx tsx --test test/phase75-telegram-emoji-insight.test.ts
+
+      - name: Existing Phase74 tests
+        run: npx tsx --test test/phase74-telegram-live-status-v2.test.ts
+
+      - name: Existing Telegram contract tests
+        run: npx tsx --test test/telegram-trade-card.test.ts
+
+      - name: Devil-check display-only invariants
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('telegram-live-status-v2.ts','utf8');
+          for (const q of ['PHASE75_TELEGRAM_EMOJI_INSIGHT_V1','return "🐢"','return "👁️"','return "🔄"','return "⚔️"','📚 Trading Insight:']) {
+            if (!s.includes(q)) throw new Error('Missing Phase75 invariant: '+q);
+          }
+          const start = s.indexOf('PHASE75_TELEGRAM_EMOJI_INSIGHT_V1');
+          const end = s.indexOf('export function buildPhase74CanonicalStatus', start);
+          const block = s.slice(start, end);
+          for (const q of ['runRuleEngine','validateDataServer','telegramApi(','placeOrder','executeTrade','fetch(']) {
+            if (block.includes(q)) throw new Error('P0 display block contains '+q);
+          }
+          console.log(JSON.stringify({phase:75,result:'PASS',scope:'DISPLAY_ONLY',dashboardChanged:false,decisionAuthorityChanged:false},null,2));
+          NODE
+
+      - name: Full test suite
+        run: npm test
+
+      - name: Verify no dashboard/client mutation
+        run: |
+          git diff --name-only HEAD | tee /tmp/phase75-diff.txt
+          if grep -Ei '(^|/)(client|dashboard|frontend|public)/|\.html$|\.css$' /tmp/phase75-diff.txt; then
+            echo 'P0: dashboard/client mutation detected' >&2
+            exit 1
+          fi
+
+      - name: Commit verified display wiring
+        run: |
+          if git diff --quiet -- telegram-live-status-v2.ts; then
+            echo 'No display change to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add telegram-live-status-v2.ts
+          git commit -m 'Phase 75: add Telegram state emojis and insight footer'
+          git push origin HEAD:phase59-autonomous-shadow-fix

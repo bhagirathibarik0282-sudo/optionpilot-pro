@@ -37770,7 +37770,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
   const marketRows = await dbQuerySafe(`
     SELECT minute_bucket, snapshot_id, backend_timestamp, spot_ltp, spot_open, spot_high, spot_low,
            spot_prev_close, vwap, pdh, pdl, future_ltp, future_oi, future_volume,
-           future_basis, india_vix, india_india_vix_change
+           future_basis, india_vix, india_vix_change
     FROM market_snapshot_1m
     WHERE symbol = $1
       AND minute_bucket IN (
@@ -37829,8 +37829,8 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
     const pdl = Number(row.pdl);
     const pdcClose = Number(row.spot_prev_close);
     const vwap = Number(row.vwap);
-    const india_vix = Number(row.india_vix);
-    const india_vixChange = Number(row.india_india_vix_change);
+    const vix = Number(row.india_vix);
+    const vixChange = Number(row.india_vix_change);
     const futureLtp = Number(row.future_ltp);
 
     const m = {
@@ -37838,9 +37838,9 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
       current,
       change: Number.isFinite(current) && Number.isFinite(pdcClose) ? current - pdcClose : 0,
       changePercent: Number.isFinite(current) && Number.isFinite(pdcClose) && pdcClose !== 0 ? ((current - pdcClose) / pdcClose) * 100 : 0,
-      india_vix,
-      india_vixChange,
-      india_vixChangePercent: 0,
+      vix,
+      vixChange,
+      vixChangePercent: 0,
       spot: current,
       atmStrike: 0,
       vwap,
@@ -37870,7 +37870,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
       timestamp: bucketIso,
     } as IndexMetrics;
 
-    replaySession.snapshotHistory!.push({ timestamp: bucketIso, NIFTY: { spot: current, pcr, india_vix } });
+    replaySession.snapshotHistory!.push({ timestamp: bucketIso, NIFTY: { spot: current, pcr, vix } });
     if (replaySession.snapshotHistory!.length > 5000) replaySession.snapshotHistory!.shift();
 
     const nowMs = new Date(bucketIso).getTime();

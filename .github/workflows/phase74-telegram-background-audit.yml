@@ -1,0 +1,39 @@
+name: Phase74 Telegram Background Audit
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase74-telegram-background-audit.mjs'
+      - '.github/workflows/phase74-telegram-background-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Audit Telegram sender and Haiku background paths
+        run: node scripts/phase74-telegram-background-audit.mjs
+      - name: Syntax compile canonical Telegram modules
+        run: |
+          npx esbuild telegram-card-contract.ts --platform=node --format=esm --outfile=/tmp/phase74-contract.mjs --log-level=error
+          npx esbuild telegram-card-renderer.ts --platform=node --format=esm --outfile=/tmp/phase74-renderer.mjs --log-level=error
+          npx esbuild telegram-trade-card.ts --platform=node --format=esm --outfile=/tmp/phase74-trade-card.mjs --log-level=error
+      - name: Existing Telegram tests
+        run: npx tsx --test test/telegram-trade-card.test.ts
+      - name: Full existing test suite
+        run: npm test

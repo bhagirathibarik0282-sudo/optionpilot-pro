@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node scripts/wire-storage-v3-runtime.mjs && tsx server.ts",
+    "start": "node scripts/dhan-expired-options-30d-audit.mjs || true; node scripts/wire-storage-v3-runtime.mjs && tsx server.ts",
     "research:preflight": "tsx scripts/research-preflight.ts",
     "research:populate": "tsx scripts/populate-research-indices.ts",
     "research:backfill:auto": "tsx scripts/auto-backfill-research-indices.ts",

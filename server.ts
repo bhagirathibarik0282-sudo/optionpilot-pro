@@ -37768,9 +37768,9 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
   if (!dbIsConfigured()) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "DATABASE_UNAVAILABLE" }, 503);
 
   const marketRows = await dbQuerySafe(`
-    SELECT minute_bucket, snapshot_id, backend_received_at, spot_ltp, spot_open, spot_high, spot_low,
-           spot_prev_close, spot_vwap, spot_pdh, spot_pdl, future_ltp, future_oi, future_volume,
-           future_basis, vix, vix_change
+    SELECT minute_bucket, snapshot_id, backend_timestamp, spot_ltp, spot_open, spot_high, spot_low,
+           spot_prev_close, vwap, pdh, pdl, future_ltp, future_oi, future_volume,
+           future_basis, india_vix, india_india_vix_change
     FROM market_snapshot_1m
     WHERE symbol = $1
       AND minute_bucket IN (
@@ -37784,7 +37784,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
   if (!marketRows) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "READ_QUERY_FAILED" }, 500);
 
   const chainRows = await dbQuerySafe(`
-    SELECT minute_bucket, expiry, expiry_bucket, full_chain_pcr, max_pain
+    SELECT minute_bucket, expiry, expiry_bucket, full_chain_oi_pcr, max_pain
     FROM chain_state_1m
     WHERE symbol = $1
     ORDER BY minute_bucket ASC, expiry ASC
@@ -37821,16 +37821,16 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
     const chains = chainByMinute.get(bucketIso) || [];
     const currentChain = chains.find((x: any) => String(x.expiry_bucket || "").toUpperCase().includes("CURRENT")) || chains[0] || null;
 
-    const pcr = currentChain?.full_chain_pcr == null ? null : Number(currentChain.full_chain_pcr);
+    const pcr = currentChain?.full_chain_oi_pcr == null ? null : Number(currentChain.full_chain_oi_pcr);
     const maxPain = currentChain?.max_pain == null ? null : Number(currentChain.max_pain);
     const current = Number(row.spot_ltp);
     const dayOpen = Number(row.spot_open);
-    const pdh = Number(row.spot_pdh);
-    const pdl = Number(row.spot_pdl);
+    const pdh = Number(row.pdh);
+    const pdl = Number(row.pdl);
     const pdcClose = Number(row.spot_prev_close);
-    const vwap = Number(row.spot_vwap);
-    const vix = Number(row.vix);
-    const vixChange = Number(row.vix_change);
+    const vwap = Number(row.vwap);
+    const india_vix = Number(row.india_vix);
+    const india_vixChange = Number(row.india_india_vix_change);
     const futureLtp = Number(row.future_ltp);
 
     const m = {
@@ -37838,9 +37838,9 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
       current,
       change: Number.isFinite(current) && Number.isFinite(pdcClose) ? current - pdcClose : 0,
       changePercent: Number.isFinite(current) && Number.isFinite(pdcClose) && pdcClose !== 0 ? ((current - pdcClose) / pdcClose) * 100 : 0,
-      vix,
-      vixChange,
-      vixChangePercent: 0,
+      india_vix,
+      india_vixChange,
+      india_vixChangePercent: 0,
       spot: current,
       atmStrike: 0,
       vwap,
@@ -37870,7 +37870,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
       timestamp: bucketIso,
     } as IndexMetrics;
 
-    replaySession.snapshotHistory!.push({ timestamp: bucketIso, NIFTY: { spot: current, pcr, vix } });
+    replaySession.snapshotHistory!.push({ timestamp: bucketIso, NIFTY: { spot: current, pcr, india_vix } });
     if (replaySession.snapshotHistory!.length > 5000) replaySession.snapshotHistory!.shift();
 
     const nowMs = new Date(bucketIso).getTime();

@@ -15,6 +15,7 @@ import { buildObe3VolatilityPurchaseCondition } from "./obe-volatility.js";
 import { buildTelegramTradeCard, TradeCardInput, TradeCardTmPlan, TradeCardAdvancedGreeks } from "./telegram-trade-card.js";
 import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";
 import { persistKnownThenScoreObservation, replayPersistedScoresWithoutMaxPain } from "./score-observation-known-then.js"; // PHASE50_KNOWN_THEN_SCORE_WIRING_V1
+import { phase59TraceRuleBoundary, phase59TraceRuleResult, phase59TracePersistAttempt, phase59TracePersistResult, phase59TracePersistError, getPhase59ShadowDiagnosticTrace } from "./phase59-shadow-diagnostic-trace.js"; // PHASE59_SHADOW_DIAGNOSTIC_TRACE_WIRING_V1
 
 interface Instrument {
   instrument_token: number;
@@ -37606,6 +37607,8 @@ offlineResearchRouter.get("/console", (c) => {
 });
 app.route("/api/offline-research", offlineResearchRouter);
 
+app.get("/api/research/shadow-diagnostic-trace", (c) => c.json(getPhase59ShadowDiagnosticTrace()));
+
 
 // PHASE58_SERVER_SHADOW_SCORE_PERSISTENCE_V1
 // Shadow-only observer wrapper around the existing deterministic server Rule Engine.
@@ -37614,13 +37617,15 @@ app.route("/api/offline-research", offlineResearchRouter);
 // market snapshot timestamp is reused so repeated consumers of the same snapshot
 // collapse to the same observation_id via the existing append/idempotent DB write.
 function runRuleEngineServer(symbol: string, m: IndexMetrics | undefined, validation: ServerValidationResult, sectorBreadth: number | null): ServerRuleEngineResult {
+  const phase59ObservedAt = phase59TraceRuleBoundary(symbol, m, validation);
   const result = runRuleEngineServerCore(symbol, m, validation, sectorBreadth);
+  phase59TraceRuleResult(symbol, result);
   const shadow = result as any;
   const snapshotObservedAt = m?.timestamp && Number.isFinite(Date.parse(m.timestamp))
     ? m.timestamp
     : null;
 
-  if (snapshotObservedAt && typeof shadow.score === "number" && Number.isFinite(shadow.score) && shadow.verdict !== "DATA UNAVAILABLE") {
+  if (phase59ObservedAt === snapshotObservedAt && snapshotObservedAt && typeof shadow.score === "number" && Number.isFinite(shadow.score) && shadow.verdict !== "DATA UNAVAILABLE") {
     const contributions = shadow.contributions && typeof shadow.contributions === "object" && !Array.isArray(shadow.contributions)
       ? shadow.contributions
       : {};
@@ -37629,6 +37634,7 @@ function runRuleEngineServer(symbol: string, m: IndexMetrics | undefined, valida
       ? shadow.suggestion.side
       : null;
 
+    phase59TracePersistAttempt(symbol);
     void persistKnownThenScoreObservation({
       symbol,
       observedAt: snapshotObservedAt,
@@ -37639,7 +37645,11 @@ function runRuleEngineServer(symbol: string, m: IndexMetrics | undefined, valida
       overrides,
       legacyCandidate: candidate,
       sourcePath: "server:runRuleEngineServer",
-    }).catch((err) => console.error("[Phase58] server shadow score persistence failed:", err instanceof Error ? err.message : err));
+    }).then((observationId) => phase59TracePersistResult(symbol, observationId))
+      .catch((err) => {
+        phase59TracePersistError(symbol, err);
+        console.error("[Phase58] server shadow score persistence failed:", err instanceof Error ? err.message : err);
+      });
   }
 
   return result;

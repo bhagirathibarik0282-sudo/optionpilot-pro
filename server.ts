@@ -14,6 +14,8 @@ import { buildObe3VolatilityPurchaseCondition } from "./obe-volatility.js";
 // hard rules (never decides, only formats already-computed fields).
 import { buildTelegramTradeCard, TradeCardInput, TradeCardTmPlan, TradeCardAdvancedGreeks } from "./telegram-trade-card.js";
 import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";
+import { persistKnownThenScoreObservation, replayPersistedScoresWithoutMaxPain } from "./score-observation-known-then.js"; // PHASE50_KNOWN_THEN_SCORE_WIRING_V1
+import { phase59TraceRuleBoundary, phase59TraceRuleResult, phase59TracePersistAttempt, phase59TracePersistResult, phase59TracePersistError, getPhase59ShadowDiagnosticTrace } from "./phase59-shadow-diagnostic-trace.js"; // PHASE59_SHADOW_DIAGNOSTIC_TRACE_WIRING_V1
 
 interface Instrument {
   instrument_token: number;
@@ -8303,6 +8305,14 @@ app.get("/", (c) => {
         straddleBehaviour: contribLabel('straddle_behaviour'),
         sectorHeatmap: contribLabel('sector_heatmap'),
         structuralBias: classifyIndexOverallBias(m),
+        // Phase 50: exact already-computed deterministic decision-time state.
+        // No recomputation, no new market-data call, no trading side effect.
+        ruleScore: result.score,
+        ruleMaxScore: result.maxScore,
+        ruleVerdict: result.verdict,
+        ruleContributions: result.contributions || {},
+        ruleOverrides: result.overrides || [],
+        ruleCandidateSide: result.suggestion && result.suggestion.side ? result.suggestion.side : null,
       };
 
       fetch('/api/premium-diagnostic/snapshot', {
@@ -17226,7 +17236,7 @@ interface ServerRuleEngineResult {
 // (same as the client's own disclosed "excluded from score AND
 // denominator" behavior for any non-OK signal) rather than being silently
 // treated as neutral zero.
-function runRuleEngineServer(symbol: string, m: IndexMetrics | undefined, validation: ServerValidationResult, sectorBreadth: number | null): ServerRuleEngineResult {
+function runRuleEngineServerCore(symbol: string, m: IndexMetrics | undefined, validation: ServerValidationResult, sectorBreadth: number | null): ServerRuleEngineResult {
   const timestamp = new Date().toISOString();
   if (!validation.overallValid || !m) {
     return {
@@ -23513,6 +23523,12 @@ interface PremiumDiagnosticSnapshot {
   straddleBehaviour: string | null;
   sectorHeatmap: string | null;
   structuralBias: string | null;
+  ruleScore?: number | null;
+  ruleMaxScore?: number | null;
+  ruleVerdict?: string | null;
+  ruleContributions?: Record<string, number>;
+  ruleOverrides?: string[];
+  ruleCandidateSide?: string | null;
 }
 
 interface PremiumDiagnosticResult {
@@ -23546,7 +23562,31 @@ app.post("/api/premium-diagnostic/snapshot", async (c) => {
   const key = body.symbol + "_" + windowId;
   if (!premiumDiagnosticBuffer.has(key)) premiumDiagnosticBuffer.set(key, []);
   premiumDiagnosticBuffer.get(key)!.push(body.snapshot);
+  // Phase 50 shadow persistence: store only the exact score decomposition
+  // supplied at decision time. Fire-and-forget and flag-gated inside the
+  // persistence module; failure can never block the existing diagnostic path.
+  if (typeof body.snapshot.ruleScore === "number" && Number.isFinite(body.snapshot.ruleScore)) {
+    void persistKnownThenScoreObservation({
+      symbol: body.symbol,
+      observedAt: body.snapshot.timestamp,
+      legacyScore: body.snapshot.ruleScore,
+      maxScore: body.snapshot.ruleMaxScore ?? null,
+      legacyVerdict: body.snapshot.ruleVerdict ?? null,
+      contributions: body.snapshot.ruleContributions ?? {},
+      overrides: body.snapshot.ruleOverrides ?? [],
+      legacyCandidate: body.snapshot.ruleCandidateSide ?? null,
+      sourcePath: "/api/premium-diagnostic/snapshot",
+    }).catch((err) => console.error("[Phase50] score observation persistence failed:", err instanceof Error ? err.message : err));
+  }
   return c.json({ ok: true, windowId, bufferedCount: premiumDiagnosticBuffer.get(key)!.length });
+});
+
+// Phase 50 read-only research replay. Threshold list is deliberately empty:
+// this route reports score impact only and does not invent/freeze production thresholds.
+app.get("/api/research/max-pain-counterfactual", async (c) => {
+  const symbol = c.req.query("symbol") || undefined;
+  const result = await replayPersistedScoresWithoutMaxPain(symbol, []);
+  return c.json({ architectureRole: "RESEARCH_ONLY_KNOWN_THEN_COUNTERFACTUAL", productionImpact: "NONE", ...result });
 });
 
 app.get("/api/premium-diagnostic/latest", (c) => {
@@ -35477,12 +35517,39 @@ if (process.env.NODE_ENV !== "test") {
         continue;
       }
       if (!session.snapshotTime || Date.now() - session.snapshotTime >= effectiveTtl) {
-        void refreshMarketSnapshot(session).catch((err) => {
-          console.error(
-            "[BACKGROUND] Market refresh failed:",
-            err instanceof Error ? err.message : err
-          );
-        });
+        void refreshMarketSnapshot(session)
+          .then((snapshot) => {
+            // PHASE60_AUTONOMOUS_SHADOW_OBSERVER_V1
+            // Research-shadow only. Reuses the exact already-fetched canonical
+            // market snapshot. No extra Kite fetch, no score/verdict mutation,
+            // no Telegram/execution path, and persistence remains gated by the
+            // existing PHASE50_SCORE_SHADOW flag inside the observer path.
+            if (!/^(1|true|yes|on)$/i.test(String(process.env.PHASE50_SCORE_SHADOW ?? ""))) return;
+            try {
+              for (const symbol of ["NIFTY", "BANKNIFTY", "SENSEX"] as const) {
+                const m = snapshot[symbol];
+                if (!m || m.error) continue;
+                serverComputePcrTrendValueCached.set(symbol, serverComputePcrTrendValue(session, symbol));
+                // Deliberately do NOT issue a sector/API fetch here. The existing
+                // server validator receives null for unavailable sector breadth and
+                // fails closed if that input is mandatory. Phase59 trace then makes
+                // the exact blocker observable instead of fabricating a value.
+                const validation = validateDataServer(symbol, m, session, null);
+                runRuleEngineServer(symbol, m, validation, null);
+              }
+            } catch (err) {
+              console.error(
+                "[Phase60] autonomous shadow observer failed:",
+                err instanceof Error ? err.message : err
+              );
+            }
+          })
+          .catch((err) => {
+            console.error(
+              "[BACKGROUND] Market refresh failed:",
+              err instanceof Error ? err.message : err
+            );
+          });
       }
     }
   }, 30 * 1000);
@@ -37566,3 +37633,51 @@ offlineResearchRouter.get("/console", (c) => {
 </html>`);
 });
 app.route("/api/offline-research", offlineResearchRouter);
+
+app.get("/api/research/shadow-diagnostic-trace", (c) => c.json(getPhase59ShadowDiagnosticTrace()));
+
+
+// PHASE58_SERVER_SHADOW_SCORE_PERSISTENCE_V1
+// Shadow-only observer wrapper around the existing deterministic server Rule Engine.
+// Reuses the exact already-computed result; performs no broker/API fetch and cannot
+// alter score, verdict, Telegram, candidate selection, or execution. The stable
+// market snapshot timestamp is reused so repeated consumers of the same snapshot
+// collapse to the same observation_id via the existing append/idempotent DB write.
+function runRuleEngineServer(symbol: string, m: IndexMetrics | undefined, validation: ServerValidationResult, sectorBreadth: number | null): ServerRuleEngineResult {
+  const phase59ObservedAt = phase59TraceRuleBoundary(symbol, m, validation);
+  const result = runRuleEngineServerCore(symbol, m, validation, sectorBreadth);
+  phase59TraceRuleResult(symbol, result);
+  const shadow = result as any;
+  const snapshotObservedAt = m?.timestamp && Number.isFinite(Date.parse(m.timestamp))
+    ? m.timestamp
+    : null;
+
+  if (phase59ObservedAt === snapshotObservedAt && snapshotObservedAt && typeof shadow.score === "number" && Number.isFinite(shadow.score) && shadow.verdict !== "DATA UNAVAILABLE") {
+    const contributions = shadow.contributions && typeof shadow.contributions === "object" && !Array.isArray(shadow.contributions)
+      ? shadow.contributions
+      : {};
+    const overrides = Array.isArray(shadow.overrides) ? shadow.overrides : [];
+    const candidate = shadow.suggestion && typeof shadow.suggestion.side === "string"
+      ? shadow.suggestion.side
+      : null;
+
+    phase59TracePersistAttempt(symbol);
+    void persistKnownThenScoreObservation({
+      symbol,
+      observedAt: snapshotObservedAt,
+      legacyScore: shadow.score,
+      maxScore: typeof shadow.maxScore === "number" && Number.isFinite(shadow.maxScore) ? shadow.maxScore : null,
+      legacyVerdict: typeof shadow.verdict === "string" ? shadow.verdict : null,
+      contributions,
+      overrides,
+      legacyCandidate: candidate,
+      sourcePath: "server:runRuleEngineServer",
+    }).then((observationId) => phase59TracePersistResult(symbol, observationId))
+      .catch((err) => {
+        phase59TracePersistError(symbol, err);
+        console.error("[Phase58] server shadow score persistence failed:", err instanceof Error ? err.message : err);
+      });
+  }
+
+  return result;
+}

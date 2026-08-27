@@ -1,0 +1,46 @@
+export const PHASE46_MARKER = "// PHASE46_CHAIN_UNIVERSE_TRUTH";
+
+function replaceOnce(source, anchor, replacement, label) {
+  const count = source.split(anchor).length - 1;
+  if (count !== 1) throw new Error(`[Phase46 patch] expected one ${label} anchor, found ${count}`);
+  return source.replace(anchor, replacement);
+}
+
+function replaceRegexOnce(source, pattern, replacement, label) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  const matcher = new RegExp(pattern.source, flags);
+  const matches = [...source.matchAll(matcher)];
+  if (matches.length !== 1) throw new Error(`[Phase46 patch] expected one ${label} anchor, found ${matches.length}`);
+  return source.replace(pattern, replacement);
+}
+
+export function applyPhase46ChainUniversePatch(input) {
+  let source = input;
+  if (source.includes(PHASE46_MARKER)) return { source, changed: false };
+
+  const interfaceAnchor = "  bandStrikes: Array<{ strike: number; ceOi: number | null; ceLtp: number | null; peOi: number | null; peLtp: number | null }>;\n}";
+  source = replaceOnce(source, interfaceAnchor, `  bandStrikes: Array<{ strike: number; ceOi: number | null; ceLtp: number | null; peOi: number | null; peLtp: number | null }>;\n  phase46Universe?: {\n    provenance: \"KITE_LIVE_INSTRUMENT_MASTER_OPTION_MAP\";\n    expiry: string | null;\n    quoteReceivedAt: string;\n    expectedContractCount: number;\n    expectedCeCount: number;\n    expectedPeCount: number;\n    expectedStrikes: number[];\n    expectedContractKeys: string[];\n    uniqueTokenCount: number;\n    quotedContractCount: number;\n    missingQuoteKeys: string[];\n    allQuotesPresent: boolean;\n    allOiPresent: boolean;\n    allVolumePresent: boolean;\n    bandOiCoverageComplete: boolean;\n    bandVolumeCoverageComplete: boolean;\n    atmPairCoverageComplete: boolean;\n    atmCeLtp: number | null;\n    atmPeLtp: number | null;\n    fullChainVolumePcr: number | null;\n    fullChainCallWallStrike: number | null;\n    fullChainCallWallOi: number | null;\n    fullChainPutWallStrike: number | null;\n    fullChainPutWallOi: number | null;\n  };\n}`, "OptionChainStats interface");
+
+  const symbolsAnchor = "  const allInstruments = Array.from(optionMap.values());\n  const allSymbols = allInstruments.map((inst) => `${optExchange}:${inst.tradingsymbol}`);";
+  source = replaceOnce(source, symbolsAnchor, `${symbolsAnchor}\n  ${PHASE46_MARKER}\n  // The optionMap is built from the cached live Kite instrument master for one exact expiry.\n  // Capture its expected universe BEFORE looking at quotes; this does not add a broker request.\n  const phase46ExpectedCe = allInstruments.filter((inst) => inst.instrument_type === \"CE\");\n  const phase46ExpectedPe = allInstruments.filter((inst) => inst.instrument_type === \"PE\");\n  const phase46ExpectedStrikes = [...new Set(allInstruments.map((inst) => Number(inst.strike)).filter(Number.isFinite))].sort((a,b) => a-b);\n  const phase46ExpectedContractKeys = allInstruments.map((inst) => String(Number(inst.strike)) + \"_\" + String(inst.instrument_type)).sort();\n  const phase46UniqueTokens = new Set(allInstruments.map((inst) => Number(inst.instrument_token)).filter(Number.isFinite));\n  const phase46Expiry = allInstruments[0]?.expiry ? String(allInstruments[0].expiry).slice(0,10) : null;`, "all-instrument universe");
+
+  const quoteAnchor = "  const quotes = await fetchKiteQuoteBatched(accessToken, allSymbols);\n  if (!quotes) return { oiPcr: null, volumePcr: null, maxPain: 0, fullChainPcr: null, atmCeLtp: null, atmCeOi: null, atmPeLtp: null, atmPeOi: null, bandStrikes: [] };";
+  source = replaceOnce(source, quoteAnchor, `${quoteAnchor}\n  const phase46QuoteReceivedAt = new Date().toISOString();`, "all-chain quote response");
+
+  const finalAnchor = "  const atmCeQuote = atmCeInst ? quotes[`${optExchange}:${atmCeInst.tradingsymbol}`] : null;\n  const atmPeQuote = atmPeInst ? quotes[`${optExchange}:${atmPeInst.tradingsymbol}`] : null;\n\n  return {";
+  const finalInsert = `  const atmCeQuote = atmCeInst ? quotes[\`${'${optExchange}:${atmCeInst.tradingsymbol}'}\`] : null;\n  const atmPeQuote = atmPeInst ? quotes[\`${'${optExchange}:${atmPeInst.tradingsymbol}'}\`] : null;\n\n  const phase46Rows = allInstruments.map((inst) => {\n    const symbol = \`${'${optExchange}:${inst.tradingsymbol}'}\`;\n    const quote = quotes[symbol];\n    return { inst, symbol, quote, strike: Number(inst.strike), side: inst.instrument_type };\n  });\n  const phase46MissingQuoteKeys = phase46Rows.filter((row) => !row.quote).map((row) => String(row.strike) + \"_\" + String(row.side));\n  const phase46AllQuotesPresent = phase46MissingQuoteKeys.length === 0 && phase46Rows.length === allInstruments.length;\n  const phase46AllOiPresent = phase46AllQuotesPresent && phase46Rows.every((row) => Number.isFinite(row.quote?.oi));\n  const phase46AllVolumePresent = phase46AllQuotesPresent && phase46Rows.every((row) => Number.isFinite(row.quote?.volume));\n  const phase46BandRows = bandStrikeInfo.flatMap(({ strike, ceSymbol, peSymbol }) => [\n    { strike, side: \"CE\", symbol: ceSymbol }, { strike, side: \"PE\", symbol: peSymbol },\n  ]);\n  const phase46BandOiCoverageComplete = phase46BandRows.length === (bandSize * 2 + 1) * 2 && phase46BandRows.every((row) => row.symbol && Number.isFinite(quotes[row.symbol]?.oi));\n  const phase46BandVolumeCoverageComplete = phase46BandRows.length === (bandSize * 2 + 1) * 2 && phase46BandRows.every((row) => row.symbol && Number.isFinite(quotes[row.symbol]?.volume));\n  const phase46AtmPairCoverageComplete = !!atmCeInst && !!atmPeInst && !!atmCeQuote && !!atmPeQuote && Number.isFinite(atmCeQuote.last_price) && Number.isFinite(atmPeQuote.last_price);\n\n  let phase46FullCallVolume = 0, phase46FullPutVolume = 0;\n  if (phase46AllVolumePresent) {\n    for (const row of phase46Rows) {\n      if (row.side === \"CE\") phase46FullCallVolume += Number(row.quote.volume);\n      if (row.side === \"PE\") phase46FullPutVolume += Number(row.quote.volume);\n    }\n  }\n  const phase46FullChainVolumePcr = phase46AllVolumePresent && phase46FullCallVolume > 0 ? phase46FullPutVolume / phase46FullCallVolume : null;\n\n  const phase46Wall = (side) => {\n    if (!phase46AllOiPresent) return { strike: null, oi: null };\n    const rows = phase46Rows.filter((row) => row.side === side && Number.isFinite(row.strike) && Number.isFinite(row.quote?.oi));\n    if (!rows.length) return { strike: null, oi: null };\n    rows.sort((a,b) => Number(b.quote.oi) - Number(a.quote.oi) || a.strike - b.strike);\n    return { strike: rows[0].strike, oi: Number(rows[0].quote.oi) };\n  };\n  const phase46CallWall = phase46Wall(\"CE\");\n  const phase46PutWall = phase46Wall(\"PE\");\n\n  return {`;
+  source = replaceOnce(source, finalAnchor, finalInsert, "final OptionChainStats return");
+
+  const returnAnchor = "    bandStrikes,\n  };";
+  source = replaceOnce(source, returnAnchor, `    bandStrikes,\n    phase46Universe: {\n      provenance: \"KITE_LIVE_INSTRUMENT_MASTER_OPTION_MAP\",\n      expiry: phase46Expiry,\n      quoteReceivedAt: phase46QuoteReceivedAt,\n      expectedContractCount: allInstruments.length,\n      expectedCeCount: phase46ExpectedCe.length,\n      expectedPeCount: phase46ExpectedPe.length,\n      expectedStrikes: phase46ExpectedStrikes,\n      expectedContractKeys: phase46ExpectedContractKeys,\n      uniqueTokenCount: phase46UniqueTokens.size,\n      quotedContractCount: phase46Rows.filter((row) => !!row.quote).length,\n      missingQuoteKeys: phase46MissingQuoteKeys,\n      allQuotesPresent: phase46AllQuotesPresent,\n      allOiPresent: phase46AllOiPresent,\n      allVolumePresent: phase46AllVolumePresent,\n      bandOiCoverageComplete: phase46BandOiCoverageComplete,\n      bandVolumeCoverageComplete: phase46BandVolumeCoverageComplete,\n      atmPairCoverageComplete: phase46AtmPairCoverageComplete,\n      atmCeLtp: Number.isFinite(atmCeQuote?.last_price) ? Number(atmCeQuote.last_price) : null,\n      atmPeLtp: Number.isFinite(atmPeQuote?.last_price) ? Number(atmPeQuote.last_price) : null,\n      fullChainVolumePcr: phase46FullChainVolumePcr,\n      fullChainCallWallStrike: phase46CallWall.strike,\n      fullChainCallWallOi: phase46CallWall.oi,\n      fullChainPutWallStrike: phase46PutWall.strike,\n      fullChainPutWallOi: phase46PutWall.oi,\n    },\n  };`, "OptionChainStats returned bandStrikes");
+
+  const assignmentPattern = /(\s*baseMetrics\.maxPain\s*=\s*chainStats\.maxPain;\r?\n\s*fullChainPcr\s*=\s*chainStats\.fullChainPcr;)/;
+  source = replaceRegexOnce(
+    source,
+    assignmentPattern,
+    `$1\n      // Phase 46 companion truth only; does not alter legacy trading calculations.\n      (baseMetrics as any).phase46ChainTruth = chainStats.phase46Universe ?? null;`,
+    "main snapshot chain assignment",
+  );
+
+  return { source, changed: true };
+}

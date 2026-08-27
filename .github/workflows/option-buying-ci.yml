@@ -5,14 +5,11 @@ on:
     branches:
       - main
     paths:
-      - server.ts
       - package.json
-      - db.ts
-      - research-*.ts
-      - scripts/verify-research-server-mount.ts
-      - scripts/apply-research-server-mount.ts
-      - test/research-index.test.ts
-      - test/research-router-auth.test.ts
+      - '*.ts'
+      - 'scripts/**/*.ts'
+      - 'scripts/**/*.mjs'
+      - 'test/**/*.ts'
       - .github/workflows/option-buying-ci.yml
   workflow_dispatch:
 

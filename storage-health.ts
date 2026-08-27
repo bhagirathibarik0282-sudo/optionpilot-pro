@@ -1,5 +1,8 @@
 import type { Hono } from "hono";
 import { dbIsConfigured, dbQuerySafe } from "./db.js";
+import { mountSourceHealthRoutes } from "./source-health-api.js";
+import { mountSourceTruthRevisionRoutes } from "./source-truth-revision.js";
+import { mountSourceTruthRevisionReviewRoutes } from "./source-truth-revision-review.js";
 
 type CountRow = { count: string | number };
 type LatestRow = { symbol: string; minute_bucket: string | Date | null; spot_ltp: number | null };
@@ -89,4 +92,15 @@ export function mountStorageHealthRoutes(app: Hono): void {
       affectsExecution: false,
     });
   });
+
+  // Phase 41 owner-facing source/evidence health. Read-only and shadow-only.
+  mountSourceHealthRoutes(app);
+
+  // Phase 42 append-only correction ledger. Mutation is disabled unless an explicit
+  // SOURCE_TRUTH_REVISION_TOKEN is configured; revisions are never auto-applied to evidence.
+  mountSourceTruthRevisionRoutes(app);
+
+  // Phase 44 protected review transitions. A separate SOURCE_TRUTH_REVIEW_TOKEN is
+  // required; approval remains restricted to KNOWN_LATER analytics/research only.
+  mountSourceTruthRevisionReviewRoutes(app);
 }

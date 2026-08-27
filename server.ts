@@ -37875,8 +37875,19 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
     if (replaySession.snapshotHistory!.length > 5000) replaySession.snapshotHistory!.shift();
 
     const nowMs = new Date(bucketIso).getTime();
-    const validation = validateDataServer(symbol, m, replaySession, null, nowMs);
-    const result = runRuleEngineServerCore(symbol, m, validation, null);
+    let validation: ServerValidationResult;
+    try {
+      validation = validateDataServer(symbol, m, replaySession, null, nowMs);
+    } catch {
+      return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "VALIDATION_RUNTIME_FAILED", stage: "VALIDATION", bucket: bucketIso }, 500);
+    }
+    let result: ReturnType<typeof runRuleEngineServerCore>;
+    try {
+      result = runRuleEngineServerCore(symbol, m, validation, null);
+    } catch {
+      return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "RULE_ENGINE_RUNTIME_FAILED", stage: "RULE_ENGINE", bucket: bucketIso }, 500);
+    }
+    // PHASE66_REPLAY_RUNTIME_STAGE_DIAGNOSTIC_V1
     processed++;
     if (validation.overallValid) validated++; else blocked++;
     for (const s of validation.signals) {

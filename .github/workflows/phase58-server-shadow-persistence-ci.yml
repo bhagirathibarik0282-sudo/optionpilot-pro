@@ -7,22 +7,36 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
+  verify-and-deploy-shadow:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install dependencies
+      - name: Install helper dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Unit test patch core
         run: node --import tsx --test test/phase58-server-shadow-persistence.test.ts
-      - name: Apply patch to real server.ts
-        run: node scripts/phase58-server-shadow-persistence-patch.mjs server.ts
+      - name: Preserve verified patch scripts
+        run: |
+          mkdir -p /tmp/phase58
+          cp scripts/phase58-server-shadow-persistence-core.mjs /tmp/phase58/phase58-server-shadow-persistence-core.mjs
+          cp scripts/phase58-server-shadow-persistence-patch.mjs /tmp/phase58/phase58-server-shadow-persistence-patch.mjs
+      - name: Fetch and checkout isolated Railway shadow branch
+        run: |
+          git fetch origin phase28-source-truth-p0
+          git checkout -B phase28-source-truth-p0 origin/phase28-source-truth-p0
+      - name: Install target dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Apply patch to real shadow server.ts
+        run: node /tmp/phase58/phase58-server-shadow-persistence-patch.mjs server.ts
       - name: Verify safety markers
         run: |
           grep -q 'PHASE58_SERVER_SHADOW_SCORE_PERSISTENCE_V1' server.ts
@@ -33,3 +47,14 @@ jobs:
         run: node --check server.ts
       - name: Run full package tests
         run: npm test
+      - name: Commit only server.ts to shadow branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts
+          if git diff --cached --quiet; then
+            echo "Phase58 patch already present; nothing to commit."
+          else
+            git commit -m "Phase 58: deploy server shadow persistence"
+            git push origin HEAD:phase28-source-truth-p0
+          fi

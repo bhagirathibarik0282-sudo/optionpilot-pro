@@ -1,0 +1,61 @@
+name: Phase68 First15 IST Window Fix
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase68-first15-ist-window-fix.mjs'
+      - '.github/workflows/phase68-first15-ist-window-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Apply exact Phase68 first15 fix
+        run: node scripts/phase68-first15-ist-window-fix.mjs
+      - name: Syntax compile server.ts
+        run: ./node_modules/.bin/esbuild server.ts --platform=node --format=esm --outfile=/tmp/server-check.mjs --log-level=error
+      - name: Verify no-hindsight first15 invariants
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          const s=fs.readFileSync('server.ts','utf8');
+          const a=s.indexOf('app.get("/api/offline-research/nifty-deterministic-replay"');
+          const b=s.indexOf('app.get("/api/research/shadow-diagnostic-trace"',a);
+          const r=s.slice(a,b);
+          if(!r.includes('PHASE68_FIRST15_IST_WINDOW_V1')) throw new Error('marker missing');
+          if(r.includes('ds.seen < 15')) throw new Error('old row-count logic remains');
+          if(!r.includes('istMinuteOfDay >= 555 && istMinuteOfDay <= 569')) throw new Error('09:15-09:29 IST guard missing');
+          if(!r.includes('ds.minutes.size === 15')) throw new Error('distinct-minute completeness missing');
+          if(!r.includes('Number.NaN')) throw new Error('fail-closed semantics missing');
+          for(const x of ['placeOrder(','sendTelegram','persistKnownThenScoreObservation(','dbInsert(']) if(r.includes(x)) throw new Error('forbidden side effect '+x);
+          console.log('Phase68 no-hindsight first15 invariants PASS');
+          NODE
+          git diff --check
+      - name: Run full existing test suite
+        run: npm test
+      - name: Commit verified Phase68 fix
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo 'No server change.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 68: enforce exact first-15 IST replay window'
+          git push origin HEAD:phase59-autonomous-shadow-fix

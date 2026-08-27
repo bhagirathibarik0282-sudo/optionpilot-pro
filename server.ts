@@ -17235,7 +17235,7 @@ interface ServerRuleEngineResult {
 // (same as the client's own disclosed "excluded from score AND
 // denominator" behavior for any non-OK signal) rather than being silently
 // treated as neutral zero.
-function runRuleEngineServer(symbol: string, m: IndexMetrics | undefined, validation: ServerValidationResult, sectorBreadth: number | null): ServerRuleEngineResult {
+function runRuleEngineServerCore(symbol: string, m: IndexMetrics | undefined, validation: ServerValidationResult, sectorBreadth: number | null): ServerRuleEngineResult {
   const timestamp = new Date().toISOString();
   if (!validation.overallValid || !m) {
     return {
@@ -37605,3 +37605,42 @@ offlineResearchRouter.get("/console", (c) => {
 </html>`);
 });
 app.route("/api/offline-research", offlineResearchRouter);
+
+
+// PHASE58_SERVER_SHADOW_SCORE_PERSISTENCE_V1
+// Shadow-only observer wrapper around the existing deterministic server Rule Engine.
+// Reuses the exact already-computed result; performs no broker/API fetch and cannot
+// alter score, verdict, Telegram, candidate selection, or execution. The stable
+// market snapshot timestamp is reused so repeated consumers of the same snapshot
+// collapse to the same observation_id via the existing append/idempotent DB write.
+function runRuleEngineServer(symbol: string, m: IndexMetrics | undefined, validation: ServerValidationResult, sectorBreadth: number | null): ServerRuleEngineResult {
+  const result = runRuleEngineServerCore(symbol, m, validation, sectorBreadth);
+  const shadow = result as any;
+  const snapshotObservedAt = m?.timestamp && Number.isFinite(Date.parse(m.timestamp))
+    ? m.timestamp
+    : null;
+
+  if (snapshotObservedAt && typeof shadow.score === "number" && Number.isFinite(shadow.score) && shadow.verdict !== "DATA UNAVAILABLE") {
+    const contributions = shadow.contributions && typeof shadow.contributions === "object" && !Array.isArray(shadow.contributions)
+      ? shadow.contributions
+      : {};
+    const overrides = Array.isArray(shadow.overrides) ? shadow.overrides : [];
+    const candidate = shadow.suggestion && typeof shadow.suggestion.side === "string"
+      ? shadow.suggestion.side
+      : null;
+
+    void persistKnownThenScoreObservation({
+      symbol,
+      observedAt: snapshotObservedAt,
+      legacyScore: shadow.score,
+      maxScore: typeof shadow.maxScore === "number" && Number.isFinite(shadow.maxScore) ? shadow.maxScore : null,
+      legacyVerdict: typeof shadow.verdict === "string" ? shadow.verdict : null,
+      contributions,
+      overrides,
+      legacyCandidate: candidate,
+      sourcePath: "server:runRuleEngineServer",
+    }).catch((err) => console.error("[Phase58] server shadow score persistence failed:", err instanceof Error ? err.message : err));
+  }
+
+  return result;
+}

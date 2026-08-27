@@ -37769,7 +37769,13 @@ app.route("/api/offline-research", offlineResearchRouter);
 app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
   let stage = "BOOT";
   try {
-    const symbol = "NIFTY";
+    const requestedSymbol = String(c.req.query("symbol") || "NIFTY").toUpperCase();
+    const supportedSymbols = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
+    if (!supportedSymbols.includes(requestedSymbol as any)) {
+      return c.json({ version: "PHASE71_MULTI_INDEX_REPLAY_V1", readiness: "UNSUPPORTED_SYMBOL", supportedSymbols }, 400);
+    }
+    const symbol = requestedSymbol as "NIFTY" | "BANKNIFTY" | "SENSEX";
+    // PHASE71_MULTI_INDEX_REPLAY_V1
     const { dbIsConfigured, dbQuerySafe } = await import("./db.js");
     if (!dbIsConfigured()) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "DATABASE_UNAVAILABLE" }, 503);
 
@@ -37909,7 +37915,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
         timestamp: bucketIso,
       } as unknown as IndexMetrics;
 
-      replaySession.snapshotHistory!.push({ timestamp: bucketIso, NIFTY: { spot: current, pcr, vix } });
+      replaySession.snapshotHistory!.push({ timestamp: bucketIso, [symbol]: { spot: current, pcr, vix } } as any);
       if (replaySession.snapshotHistory!.length > 5000) replaySession.snapshotHistory!.shift();
 
       stage = "VALIDATION";
@@ -37973,6 +37979,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
       executionCalls: false,
       scorePersistence: false,
       symbol,
+      supportedSymbols,
       processedBuckets: processed,
       validatedBuckets: validated,
       blockedBuckets: blocked,

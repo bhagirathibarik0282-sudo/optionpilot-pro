@@ -7,22 +7,44 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  verify:
+  verify-and-deploy-shadow:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install dependencies
+      - name: Install helper dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Run Phase59 tests
         run: node --import tsx --test test/phase59-shadow-diagnostic.test.ts
-      - name: Apply diagnostic patch to real server.ts
-        run: node scripts/phase59-shadow-diagnostic-patch.mjs server.ts
+      - name: Preserve verified Phase59 assets
+        run: |
+          mkdir -p /tmp/phase59
+          cp phase59-shadow-diagnostic-trace.ts /tmp/phase59/phase59-shadow-diagnostic-trace.ts
+          cp scripts/phase59-shadow-diagnostic-patch-core.mjs /tmp/phase59/phase59-shadow-diagnostic-patch-core.mjs
+          cp scripts/phase59-shadow-diagnostic-patch.mjs /tmp/phase59/phase59-shadow-diagnostic-patch.mjs
+      - name: Fetch and checkout isolated Railway shadow branch
+        run: |
+          git fetch origin phase28-source-truth-p0
+          git checkout -B phase28-source-truth-p0 origin/phase28-source-truth-p0
+      - name: Install target dependencies
+        run: npm ci
+      - name: Add read-only diagnostic module
+        run: cp /tmp/phase59/phase59-shadow-diagnostic-trace.ts ./phase59-shadow-diagnostic-trace.ts
+      - name: Apply diagnostic patch to real shadow server.ts
+        run: |
+          cp /tmp/phase59/phase59-shadow-diagnostic-patch-core.mjs /tmp/phase59/phase59-shadow-diagnostic-patch-core.mjs
+          cp /tmp/phase59/phase59-shadow-diagnostic-patch.mjs ./phase59-shadow-diagnostic-patch.mjs
+          cp /tmp/phase59/phase59-shadow-diagnostic-patch-core.mjs ./phase59-shadow-diagnostic-patch-core.mjs
+          node ./phase59-shadow-diagnostic-patch.mjs server.ts
+          rm ./phase59-shadow-diagnostic-patch.mjs ./phase59-shadow-diagnostic-patch-core.mjs
       - name: Verify exact diagnostic wiring
         run: |
           grep -q 'PHASE59_SHADOW_DIAGNOSTIC_TRACE_WIRING_V1' server.ts
@@ -30,7 +52,19 @@ jobs:
           grep -q 'phase59TracePersistAttempt(symbol)' server.ts
           grep -q 'phase59TracePersistResult(symbol, observationId)' server.ts
           grep -q 'phase59ObservedAt === snapshotObservedAt' server.ts
+          grep -q 'RESEARCH_SHADOW_DIAGNOSTIC_ONLY' phase59-shadow-diagnostic-trace.ts
       - name: Validate patched server syntax
         run: node --check server.ts
       - name: Run full package tests
         run: npm test
+      - name: Commit only shadow diagnostic runtime files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts phase59-shadow-diagnostic-trace.ts
+          if git diff --cached --quiet; then
+            echo "Phase59 diagnostic already present; nothing to commit."
+          else
+            git commit -m "Phase 59: deploy shadow diagnostic trace"
+            git push origin HEAD:phase28-source-truth-p0
+          fi

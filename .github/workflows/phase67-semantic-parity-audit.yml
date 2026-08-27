@@ -1,0 +1,45 @@
+name: Phase67 Semantic Parity Audit
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase67-semantic-parity-audit.mjs'
+      - '.github/workflows/phase67-semantic-parity-audit.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Generate Phase67 semantic parity audit
+        run: node scripts/phase67-semantic-parity-audit.mjs
+      - name: Verify server syntax unchanged
+        run: ./node_modules/.bin/esbuild server.ts --platform=node --format=esm --outfile=/tmp/server-check.mjs --log-level=error
+      - name: Run full existing test suite
+        run: npm test
+      - name: Commit audit report only
+        run: |
+          git diff --check
+          if git diff --quiet -- docs/phase67-semantic-parity-audit.json; then
+            echo 'No report change.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/phase67-semantic-parity-audit.json
+          git commit -m 'Phase 67: record replay semantic parity audit'
+          git push origin HEAD:phase59-autonomous-shadow-fix

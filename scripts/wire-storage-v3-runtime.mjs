@@ -58,6 +58,13 @@ function mountAfterApp(marker, line, warning) {
 mountAfterApp(HEALTH_MOUNT_MARKER, "mountStorageHealthRoutes(app);", "[Storage V3 wire] Hono app anchor not found; health route not mounted");
 mountAfterApp(TEF_MOUNT_MARKER, "mountTefInspectRoutes(app);", "[Storage V3 wire] Hono app anchor not found; TEF inspection routes not mounted");
 mountAfterApp(TELEGRAM_PREVIEW_MOUNT_MARKER, "mountTelegramPreviewRoutes(app);", "[Storage V3 wire] Hono app anchor not found; Telegram preview route not mounted");
+
+// Upgrade any previously wired 2-argument audit mount to the 3-argument version.
+source = source.replace(
+  /mountDhanAuditStatusRoute\(app,\s*getValidDhanAccessToken\);/g,
+  "mountDhanAuditStatusRoute(app, getValidDhanAccessToken, refreshDhanAccessToken);",
+);
+
 mountAfterApp(DHAN_AUDIT_MOUNT_MARKER, "mountDhanAuditStatusRoute(app, getValidDhanAccessToken, refreshDhanAccessToken);", "[Storage V3 wire] Hono app anchor not found; Dhan audit status route not mounted");
 
 writeFileSync(path, source, "utf8");

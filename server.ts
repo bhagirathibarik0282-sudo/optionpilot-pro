@@ -37781,7 +37781,8 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
     ORDER BY minute_bucket ASC
     LIMIT 1000
   `, [symbol]);
-  if (!marketRows) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "READ_QUERY_FAILED" }, 500);
+  // PHASE66_QUERY_DIAGNOSTIC_V1
+  if (!marketRows) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "MARKET_QUERY_FAILED" }, 500);
 
   const chainRows = await dbQuerySafe(`
     SELECT minute_bucket, expiry, expiry_bucket, full_chain_oi_pcr, max_pain
@@ -37789,7 +37790,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
     WHERE symbol = $1
     ORDER BY minute_bucket ASC, expiry ASC
   `, [symbol]);
-  if (!chainRows) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "READ_QUERY_FAILED" }, 500);
+  if (!chainRows) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "CHAIN_QUERY_FAILED" }, 500);
 
   const chainByMinute = new Map<string, any[]>();
   for (const row of chainRows) {

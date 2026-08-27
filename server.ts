@@ -17169,9 +17169,12 @@ interface ServerValidationResult {
 // data missing -> staleness -> null/NaN -> OK, and a NOT_AVAILABLE signal
 // never counts as a blocking failure (matches the client's own documented
 // intent: "enough real, fresh data to eventually feed a rule engine").
-function validateDataServer(symbol: string, m: IndexMetrics | undefined, session: KiteSession, sectorBreadth: number | null): ServerValidationResult {
+function validateDataServer(symbol: string, m: IndexMetrics | undefined, session: KiteSession, sectorBreadth: number | null, nowMs: number = Date.now()): ServerValidationResult {
+  // PHASE63_REPLAY_CLOCK_INJECTION_V1
+  // Live callers omit nowMs and retain Date.now() behavior exactly. Historical replay
+  // callers may inject the bucket-time clock so old snapshots are not falsely marked STALE.
   const results: ServerSignalResult[] = [];
-  const timestamp = new Date().toISOString();
+  const timestamp = new Date(nowMs).toISOString();
 
   if (!m || m.error) {
     SERVER_SIGNAL_CATALOG.forEach((s) => results.push({ signal: s.id, status: "NULL", reason: "no index data" }));
@@ -17179,7 +17182,7 @@ function validateDataServer(symbol: string, m: IndexMetrics | undefined, session
   }
 
   const effTs = serverGetEffectiveTimestamp(m);
-  const ageMs = effTs ? Date.now() - new Date(effTs).getTime() : null;
+  const ageMs = effTs ? nowMs - new Date(effTs).getTime() : null;
   const isStale = ageMs == null || ageMs > SERVER_STALE_THRESHOLD_MS;
 
   const contract = m.futuresContracts && m.futuresContracts[0];

@@ -37767,7 +37767,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
   const { dbIsConfigured, dbQuerySafe } = await import("./db.js");
   if (!dbIsConfigured()) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "DATABASE_UNAVAILABLE" }, 503);
 
-  const marketRows = await dbQuerySafe(`
+  const marketQuery = await dbQuerySafe(`
     SELECT minute_bucket, snapshot_id, backend_timestamp, spot_ltp, spot_open, spot_high, spot_low,
            spot_prev_close, vwap, pdh, pdl, future_ltp, future_oi, future_volume,
            future_basis, india_vix, india_vix_change
@@ -37782,15 +37782,18 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
     LIMIT 1000
   `, [symbol]);
   // PHASE66_QUERY_DIAGNOSTIC_V1
-  if (!marketRows) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "MARKET_QUERY_FAILED" }, 500);
+  if (!marketQuery) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "MARKET_QUERY_FAILED" }, 500);
+  const marketRows = marketQuery.rows;
+  // PHASE66_DBQUERY_RESULT_SHAPE_FIX_V1
 
-  const chainRows = await dbQuerySafe(`
+  const chainQuery = await dbQuerySafe(`
     SELECT minute_bucket, expiry, expiry_bucket, full_chain_oi_pcr, max_pain
     FROM chain_state_1m
     WHERE symbol = $1
     ORDER BY minute_bucket ASC, expiry ASC
   `, [symbol]);
-  if (!chainRows) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "CHAIN_QUERY_FAILED" }, 500);
+  if (!chainQuery) return c.json({ version: "PHASE66_NIFTY_DETERMINISTIC_REPLAY_V1", readiness: "CHAIN_QUERY_FAILED" }, 500);
+  const chainRows = chainQuery.rows;
 
   const chainByMinute = new Map<string, any[]>();
   for (const row of chainRows) {

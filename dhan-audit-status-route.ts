@@ -8,10 +8,10 @@ const CACHE_MS = 15 * 60 * 1000;
 
 function isInvalidToken(status: number, payload: any, raw: string) {
   const text = `${payload?.errorMessage || ""} ${payload?.message || ""} ${raw || ""}`.toLowerCase();
-  return status === 400 && text.includes("invalid token") || status === 401 || text.includes("token invalid") || text.includes("token is invalid") || text.includes("expired");
+  return (status === 400 && text.includes("invalid token")) || status === 401 || text.includes("token invalid") || text.includes("token is invalid") || text.includes("expired");
 }
 
-async function callSide(token: string, clientId: string, side: "CALL" | "PUT") {
+async function callOne(token: string, clientId: string, side: "CALL" | "PUT", strike: string, fromDate: string, toDate: string) {
   const body = {
     exchangeSegment: "NSE_FNO",
     interval: "1",
@@ -19,11 +19,11 @@ async function callSide(token: string, clientId: string, side: "CALL" | "PUT") {
     instrument: "OPTIDX",
     expiryFlag: "WEEK",
     expiryCode: 1,
-    strike: "ATM",
+    strike,
     drvOptionType: side,
     requiredData: ["open", "high", "low", "close", "iv", "volume", "strike", "oi", "spot"],
-    fromDate: "2026-07-02",
-    toDate: "2026-07-09",
+    fromDate,
+    toDate,
   };
 
   const res = await fetch("https://api.dhan.co/v2/charts/rollingoption", {
@@ -44,19 +44,12 @@ async function callSide(token: string, clientId: string, side: "CALL" | "PUT") {
   const timestamps = Array.isArray(node?.timestamp) ? node.timestamp : [];
 
   return {
-    side,
     httpStatus: res.status,
     invalidToken: isInvalidToken(res.status, payload, raw),
     ok: res.ok && Boolean(node) && timestamps.length > 0,
     candleCount: timestamps.length,
-    fields: {
-      oi: Array.isArray(node?.oi) ? node.oi.length : 0,
-      iv: Array.isArray(node?.iv) ? node.iv.length : 0,
-      volume: Array.isArray(node?.volume) ? node.volume.length : 0,
-      spot: Array.isArray(node?.spot) ? node.spot.length : 0,
-      close: Array.isArray(node?.close) ? node.close.length : 0,
-    },
-    error: !res.ok || !node ? (payload?.errorMessage || raw.slice(0, 180) || "UNKNOWN") : null,
+    fieldsOk: ["oi", "iv", "volume", "spot", "close"].every((f) => Array.isArray(node?.[f]) && node[f].length === timestamps.length),
+    error: !res.ok || !node ? (payload?.errorMessage || raw.slice(0, 120) || "UNKNOWN") : null,
   };
 }
 
@@ -67,48 +60,85 @@ async function runAudit(getToken: TokenProvider, refreshToken: TokenRefresher) {
   let token = await getToken();
   if (!token) return { ok: false, status: "FAIL", error: "No valid Dhan token" };
 
+  const chunks = [
+    ["2026-07-02", "2026-07-09"],
+    ["2026-07-09", "2026-07-16"],
+    ["2026-07-16", "2026-07-23"],
+    ["2026-07-23", "2026-07-30"],
+    ["2026-07-30", "2026-08-01"],
+  ] as const;
+  const strikes = ["ATM", "ATM+1", "ATM-1", "ATM+2", "ATM-2", "ATM+3", "ATM-3"];
   const sides = ["CALL", "PUT"] as const;
-  const results: any[] = [];
-  let forcedRefreshUsed = false;
+  const chunkSummary: any[] = [];
+  let forcedRefreshCount = 0;
+  let totalRequests = 0;
+  let passed = 0;
+  let totalCandles = 0;
+  let firstError: any = null;
 
-  for (const side of sides) {
-    try {
-      let result = await callSide(token, clientId, side);
-      if (result.invalidToken) {
-        const fresh = await refreshToken();
-        forcedRefreshUsed = true;
-        if (fresh) {
-          token = fresh;
-          result = await callSide(token, clientId, side);
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const [fromDate, toDate] = chunks[ci];
+    let chunkPassed = 0;
+    let chunkFailed = 0;
+    let chunkCandles = 0;
+
+    for (const strike of strikes) {
+      for (const side of sides) {
+        totalRequests++;
+        try {
+          let result = await callOne(token, clientId, side, strike, fromDate, toDate);
+          if (result.invalidToken) {
+            const fresh = await refreshToken();
+            forcedRefreshCount++;
+            if (fresh) {
+              token = fresh;
+              result = await callOne(token, clientId, side, strike, fromDate, toDate);
+            }
+          }
+
+          if (result.ok && result.fieldsOk) {
+            passed++;
+            chunkPassed++;
+            totalCandles += result.candleCount;
+            chunkCandles += result.candleCount;
+          } else {
+            chunkFailed++;
+            if (!firstError) firstError = { chunk: ci + 1, fromDate, toDate, strike, side, httpStatus: result.httpStatus ?? null, error: result.error ?? (result.fieldsOk ? "UNKNOWN" : "FIELD_LENGTH_MISMATCH") };
+          }
+        } catch (err) {
+          chunkFailed++;
+          if (!firstError) firstError = { chunk: ci + 1, fromDate, toDate, strike, side, error: err instanceof Error ? err.message : String(err) };
         }
+        await new Promise((r) => setTimeout(r, 300));
       }
-      results.push(result);
-    } catch (err) {
-      results.push({ side, ok: false, candleCount: 0, error: err instanceof Error ? err.message : String(err) });
     }
-    await new Promise((r) => setTimeout(r, 650));
+
+    chunkSummary.push({ chunk: ci + 1, fromDate, toDate, passed: chunkPassed, failed: chunkFailed, totalCandles: chunkCandles });
+    await new Promise((r) => setTimeout(r, 700));
   }
 
-  const passed = results.filter((r) => r.ok).length;
-  const totalCandles = results.reduce((sum, r) => sum + (r.candleCount || 0), 0);
-  const status = passed === results.length ? "PASS" : passed > 0 ? "PARTIAL" : "FAIL";
+  const failed = totalRequests - passed;
+  const status = passed === totalRequests && totalRequests > 0 ? "PASS" : passed > 0 ? "PARTIAL" : "FAIL";
 
   return {
     ok: status === "PASS",
-    architectureRole: "DHAN_EXPIRED_OPTIONS_7D_DIRECT_AUDIT_V2",
+    architectureRole: "DHAN_EXPIRED_OPTIONS_30D_DIRECT_ATM3_AUDIT_V3",
     generatedAt: new Date().toISOString(),
     readOnlyMode: true,
     tokenExposed: false,
-    forcedRefreshUsed,
+    forcedRefreshCount,
     symbol: "NIFTY",
-    window: { fromDate: "2026-07-02", toDate: "2026-07-09", toDateNonInclusive: true },
-    scope: "ATM, CALL+PUT, 1-minute",
+    window: { fromDate: "2026-07-02", toDate: "2026-08-01", toDateNonInclusive: true },
+    scope: "ATM±3, CALL+PUT, 1-minute, 7-day chunks",
+    chunks: chunks.length,
+    totalRequests,
     passed,
-    failed: results.length - passed,
+    failed,
     totalCandles,
     status,
-    safeFor30DayExpansion: status === "PASS",
-    results,
+    safeForOneYearExpansion: status === "PASS",
+    firstError,
+    chunkSummary,
   };
 }
 

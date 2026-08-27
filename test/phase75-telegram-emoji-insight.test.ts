@@ -44,4 +44,4 @@ test("Phase75 insight is display-only and does not alter canonical verdict", () 
   renderPhase74TelegramStatus(status, "Display test", "DETERMINISTIC_FALLBACK");
   assert.equal(status.verdict, "SIDEWAYS");
   assert.equal(status.score, 3);
-}
+});

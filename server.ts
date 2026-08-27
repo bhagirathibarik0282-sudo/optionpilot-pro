@@ -37828,7 +37828,7 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
     let finiteScores = 0;
     let processed = 0;
     const samples: any[] = [];
-    const dayState = new Map<string, { seen: number; first15High: number | null; first15Low: number | null }>();
+    const dayState = new Map<string, { minutes: Set<number>; first15High: number | null; first15Low: number | null }>();
 
     stage = "MARKET_REPLAY";
     for (const row of marketRows) {
@@ -37855,16 +37855,22 @@ app.get("/api/offline-research/nifty-deterministic-replay", async (c) => {
       const futureLtp = row.future_ltp == null ? Number.NaN : Number(row.future_ltp);
       const futureVwap = row.future_vwap == null ? Number.NaN : Number(row.future_vwap);
 
-      const dayKey = bucketIso.slice(0, 10);
-      const ds = dayState.get(dayKey) || { seen: 0, first15High: null, first15Low: null };
-      if (ds.seen < 15) {
+      const istMs = marketBucketMs + 330 * 60 * 1000;
+      const istDate = new Date(istMs);
+      const dayKey = istDate.toISOString().slice(0, 10);
+      const istMinuteOfDay = istDate.getUTCHours() * 60 + istDate.getUTCMinutes();
+      const ds = dayState.get(dayKey) || { minutes: new Set<number>(), first15High: null, first15Low: null };
+      // Exact NSE opening window 09:15-09:29 IST; never extend because an aligned minute is missing.
+      if (istMinuteOfDay >= 555 && istMinuteOfDay <= 569 && !ds.minutes.has(istMinuteOfDay)) {
+        ds.minutes.add(istMinuteOfDay);
         if (Number.isFinite(dayHigh)) ds.first15High = ds.first15High == null ? dayHigh : Math.max(ds.first15High, dayHigh);
         if (Number.isFinite(dayLow)) ds.first15Low = ds.first15Low == null ? dayLow : Math.min(ds.first15Low, dayLow);
-        ds.seen++;
       }
       dayState.set(dayKey, ds);
-      const first15High = ds.first15High == null ? Number.NaN : ds.first15High;
-      const first15Low = ds.first15Low == null ? Number.NaN : ds.first15Low;
+      const first15Complete = ds.minutes.size === 15 && istMinuteOfDay >= 569;
+      const first15High = first15Complete && ds.first15High != null ? ds.first15High : Number.NaN;
+      const first15Low = first15Complete && ds.first15Low != null ? ds.first15Low : Number.NaN;
+      // PHASE68_FIRST15_IST_WINDOW_V1
 
       const m = {
         symbol,

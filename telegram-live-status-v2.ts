@@ -1,6 +1,8 @@
+export type Phase74Symbol = "NIFTY" | "BANKNIFTY" | "SENSEX";
+
 export type Phase74CanonicalStatus = {
   version: "OP_LIVE_V2";
-  symbol: "NIFTY" | "BANKNIFTY" | "SENSEX";
+  symbol: Phase74Symbol;
   observedAt: string;
   validatorState: string;
   blockers: string[];
@@ -8,10 +10,28 @@ export type Phase74CanonicalStatus = {
   score: number | null;
   maxScore: number | null;
   freshness: string;
+  evidence: string[];
   deterministicExplanation: string;
   aiSignature: string;
   displaySignature: string;
 };
+
+export type Phase74TelegramTransport = {
+  botToken: string | null;
+  chatIds: Record<Phase74Symbol, string | null>;
+};
+
+type DeliveryState = {
+  dayKey: string;
+  messageId: number;
+  aiSignature: string;
+  displaySignature: string;
+  explanation: string;
+  explanationSource: "HAIKU" | "DETERMINISTIC_FALLBACK";
+  lastEditAt: number;
+};
+
+const deliveryState = new Map<Phase74Symbol, DeliveryState>();
 
 function finiteOrNull(value: unknown): number | null {
   const n = typeof value === "number" ? value : Number(value);
@@ -31,11 +51,21 @@ function collectStrings(value: unknown): string[] {
   return [...new Set(value.flatMap((item: any) => {
     if (typeof item === "string" && item.trim()) return [item.trim()];
     if (item && typeof item === "object") {
-      const text = firstString(item, ["reason", "code", "message", "name", "signal"]);
+      const text = firstString(item, ["reason", "code", "message", "name", "signal", "label"]);
       return text ? [text] : [];
     }
     return [];
-  }))].slice(0, 4);
+  }))].slice(0, 6);
+}
+
+function collectRuleEvidence(rule: any): string[] {
+  const evidence = [
+    ...collectStrings(rule?.reasons),
+    ...collectStrings(rule?.scoreReasons),
+    ...collectStrings(rule?.warnings),
+  ];
+  if (Array.isArray(rule?.contributions)) evidence.push(...collectStrings(rule.contributions));
+  return [...new Set(evidence)].slice(0, 5);
 }
 
 function normalizeValidation(validation: any): { state: string; blockers: string[] } {
@@ -55,11 +85,11 @@ function normalizeValidation(validation: any): { state: string; blockers: string
 }
 
 function normalizeFreshness(metrics: any): string {
-  const value = firstString(metrics, ["freshnessStatus", "freshness_state", "freshness", "dataStatus", "quoteFreshness"]);
+  const value = firstString(metrics, ["freshnessStatus", "freshness_status", "freshnessState", "freshness_state", "freshness", "dataStatus", "quoteFreshness"]);
   return value ? value.toUpperCase() : "UNKNOWN";
 }
 
-function deterministicExplanationFor(state: string, verdict: string, blockers: string[]): string {
+function deterministicExplanationFor(state: string, verdict: string, blockers: string[], evidence: string[]): string {
   if (state.includes("BLOCK") || state.includes("FAIL") || state.includes("INVALID")) {
     return blockers.length
       ? `Validator blocked: ${blockers.join(", ")}. Trading decision is not promoted.`
@@ -68,6 +98,7 @@ function deterministicExplanationFor(state: string, verdict: string, blockers: s
   if (verdict.toUpperCase().includes("DATA UNAVAILABLE")) {
     return "Canonical rule engine has insufficient usable data; no trade conclusion is inferred.";
   }
+  if (evidence.length) return `Canonical engine returned ${verdict}. Key evidence: ${evidence.slice(0, 2).join("; ")}.`;
   return `Canonical engine processed the snapshot and returned ${verdict}. This status card does not alter that decision.`;
 }
 
@@ -81,6 +112,29 @@ function esc(value: unknown): string {
 
 function stablePart(value: unknown): string {
   return String(value ?? "UNKNOWN").replace(/\s+/g, " ").trim();
+}
+
+function validatorEmoji(state: string): string {
+  const v = state.toUpperCase();
+  if (v.includes("PASS") || v.includes("VALID") || v === "OK") return "✅";
+  if (v.includes("BLOCK") || v.includes("FAIL") || v.includes("INVALID")) return "🔴";
+  return "⚪";
+}
+
+function freshnessEmoji(state: string): string {
+  const v = state.toUpperCase();
+  if (v.includes("FRESH") || v.includes("LIVE")) return "🟢";
+  if (v.includes("STALE") || v.includes("EXPIRED")) return "🔴";
+  return "⚪";
+}
+
+function verdictEmoji(verdict: string): string {
+  const v = verdict.toUpperCase();
+  if (v.includes("BULL") || v.includes("BEST_CE") || v.includes("BUY CE")) return "📈🟢";
+  if (v.includes("BEAR") || v.includes("BEST_PE") || v.includes("BUY PE")) return "📉🔴";
+  if (v.includes("BLOCK") || v.includes("UNAVAILABLE")) return "⛔";
+  if (v.includes("NO TRADE") || v.includes("NEUTRAL") || v.includes("WAIT")) return "⏸️";
+  return "🧭";
 }
 
 export function buildPhase74CanonicalStatus(input: {
@@ -98,16 +152,14 @@ export function buildPhase74CanonicalStatus(input: {
   const score = finiteOrNull(input.rule?.score);
   const maxScore = finiteOrNull(input.rule?.maxScore);
   const freshness = normalizeFreshness(input.metrics);
-  const deterministicExplanation = deterministicExplanationFor(state, verdict, blockers);
-
-  // AI signature deliberately excludes continuously changing numeric score so Haiku is called only
-  // when the decision/health state meaningfully changes. Display signature still carries score.
-  const aiSignature = [symbol, state, freshness, verdict, blockers.join("|")].map(stablePart).join("::");
+  const evidence = collectRuleEvidence(input.rule);
+  const deterministicExplanation = deterministicExplanationFor(state, verdict, blockers, evidence);
+  const aiSignature = [symbol, state, freshness, verdict, blockers.join("|"), evidence.join("|")].map(stablePart).join("::");
   const displaySignature = [aiSignature, score ?? "NA", maxScore ?? "NA"].map(stablePart).join("::");
 
   return {
     version: "OP_LIVE_V2",
-    symbol: symbol as Phase74CanonicalStatus["symbol"],
+    symbol: symbol as Phase74Symbol,
     observedAt: input.observedAt || new Date().toISOString(),
     validatorState: state,
     blockers,
@@ -115,6 +167,7 @@ export function buildPhase74CanonicalStatus(input: {
     score,
     maxScore,
     freshness,
+    evidence,
     deterministicExplanation,
     aiSignature,
     displaySignature,
@@ -132,6 +185,7 @@ export function buildPhase74HaikuPrompt(status: Phase74CanonicalStatus): string 
     verdict: status.verdict,
     score: status.score,
     maxScore: status.maxScore,
+    canonicalEvidence: status.evidence,
   };
 
   return [
@@ -143,7 +197,8 @@ export function buildPhase74HaikuPrompt(status: Phase74CanonicalStatus): string 
     "3. Never invent missing values, market direction, future movement, probability, buyer/seller identity, or institutional activity.",
     "4. If validator is blocked/failed/invalid, explain the blocker and do not suggest a trade.",
     "5. If data is unavailable, explicitly say evidence is insufficient.",
-    "6. Return ONLY valid JSON: {\"explanation\":\"one short, simple Odia+English mixed explanation, maximum 2 sentences\"}.",
+    "6. Explain WHY the canonical engine is in this state using only blocker/evidence fields; maximum 2 short sentences.",
+    "7. Return ONLY valid JSON: {\"explanation\":\"simple Odia+English mixed explanation\"}.",
     `CANONICAL_JSON=${JSON.stringify(evidence)}`,
   ].join("\n");
 }
@@ -186,7 +241,7 @@ export async function explainPhase74WithHaiku(status: Phase74CanonicalStatus, ap
         return { explanation: parsed.explanation.trim().slice(0, 420), source: "HAIKU" };
       }
     } catch {
-      // Fail closed to deterministic explanation; AI availability must never block canonical processing.
+      // AI is explanation-only; failure must never block canonical processing.
     }
   }
   return { explanation: status.deterministicExplanation, source: "DETERMINISTIC_FALLBACK" };
@@ -195,15 +250,134 @@ export async function explainPhase74WithHaiku(status: Phase74CanonicalStatus, ap
 export function renderPhase74TelegramStatus(status: Phase74CanonicalStatus, explanation: string, explanationSource: "HAIKU" | "DETERMINISTIC_FALLBACK"): string {
   const scoreText = status.score == null ? "N/A" : status.maxScore == null ? String(status.score) : `${status.score}/${status.maxScore}`;
   const blockerText = status.blockers.length ? status.blockers.join(", ") : "NONE REPORTED";
-  const explainLabel = explanationSource === "HAIKU" ? "Haiku explain" : "Rule explain";
+  const evidenceText = status.evidence.length ? status.evidence.slice(0, 3).join(" • ") : "No extra canonical reason reported";
+  const explainLabel = explanationSource === "HAIKU" ? "🤖 Haiku explain" : "🧠 Rule explain";
 
   return [
-    `🧪 <b>OPTIONPILOT • OP LIVE V2 • ${esc(status.symbol)}</b>`,
-    `<b>SYSTEM:</b> BACKGROUND OBSERVING | Dashboard unchanged`,
-    `<b>DATA:</b> ${esc(status.freshness)} | <b>VALIDATOR:</b> ${esc(status.validatorState)}`,
-    `<b>ENGINE:</b> ${esc(status.verdict)} | <b>SCORE:</b> ${esc(scoreText)}`,
-    `<b>BLOCKER:</b> ${esc(blockerText)}`,
+    `🧪⚡ <b>OPTIONPILOT • OP LIVE V2 • ${esc(status.symbol)}</b>`,
+    `<b>SYSTEM:</b> 🔵 BACKGROUND PROCESSING | Dashboard unchanged`,
+    `<b>DATA:</b> ${freshnessEmoji(status.freshness)} ${esc(status.freshness)} | <b>VALIDATOR:</b> ${validatorEmoji(status.validatorState)} ${esc(status.validatorState)}`,
+    `<b>ENGINE:</b> ${verdictEmoji(status.verdict)} ${esc(status.verdict)} | <b>SCORE:</b> ${esc(scoreText)}`,
+    `<b>BLOCKER:</b> ${status.blockers.length ? "🟠" : "✅"} ${esc(blockerText)}`,
+    `<b>EVIDENCE:</b> ${esc(evidenceText)}`,
     `<b>${explainLabel}:</b> ${esc(explanation)}`,
-    `<b>QUALIFICATION:</b> LIVE EVIDENCE OBSERVING • no auto-promotion`,
+    `<b>QUALIFICATION:</b> 🧪 LIVE EVIDENCE OBSERVING • no auto-promotion`,
   ].join("\n");
+}
+
+export function resolvePhase74Transport(env: Record<string, string | undefined> = process.env): Phase74TelegramTransport {
+  const first = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = env[key]?.trim();
+      if (value) return value;
+    }
+    return null;
+  };
+  return {
+    botToken: first("PHASE74_TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"),
+    chatIds: {
+      NIFTY: first("PHASE74_NIFTY_CHAT_ID", "TELEGRAM_NIFTY_CHAT_ID", "NIFTY_TELEGRAM_CHAT_ID"),
+      BANKNIFTY: first("PHASE74_BANKNIFTY_CHAT_ID", "TELEGRAM_BANKNIFTY_CHAT_ID", "BANKNIFTY_TELEGRAM_CHAT_ID"),
+      SENSEX: first("PHASE74_SENSEX_CHAT_ID", "TELEGRAM_SENSEX_CHAT_ID", "SENSEX_TELEGRAM_CHAT_ID"),
+    },
+  };
+}
+
+export function validatePhase74Transport(transport: Phase74TelegramTransport): { ok: true } | { ok: false; reason: string } {
+  if (!transport.botToken) return { ok: false, reason: "BOT_TOKEN_MISSING" };
+  const ids = (["NIFTY", "BANKNIFTY", "SENSEX"] as const).map((symbol) => transport.chatIds[symbol]);
+  if (ids.some((id) => !id)) return { ok: false, reason: "THREE_GROUP_CHAT_IDS_REQUIRED" };
+  if (new Set(ids).size !== 3) return { ok: false, reason: "GROUP_CHAT_IDS_MUST_BE_DISTINCT" };
+  return { ok: true };
+}
+
+async function telegramApi(botToken: string, method: string, payload: Record<string, unknown>): Promise<any> {
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(8000),
+  });
+  const data: any = await response.json().catch(() => null);
+  if (!response.ok || data?.ok !== true) throw new Error(`TELEGRAM_${method.toUpperCase()}_FAILED`);
+  return data.result;
+}
+
+export async function publishPhase74TelegramLiveV2(input: {
+  symbol: string;
+  metrics: any;
+  validation: any;
+  rule: any;
+  anthropicApiKey?: string | null;
+  transport?: Phase74TelegramTransport;
+  nowMs?: number;
+}): Promise<{ sent: boolean; edited: boolean; reason: string }> {
+  const status = buildPhase74CanonicalStatus({
+    symbol: input.symbol,
+    observedAt: new Date(input.nowMs ?? Date.now()).toISOString(),
+    metrics: input.metrics,
+    validation: input.validation,
+    rule: input.rule,
+  });
+  const transport = input.transport ?? resolvePhase74Transport();
+  const transportCheck = validatePhase74Transport(transport);
+  if (!transportCheck.ok) return { sent: false, edited: false, reason: transportCheck.reason };
+
+  const chatId = transport.chatIds[status.symbol]!;
+  const now = input.nowMs ?? Date.now();
+  const ist = new Date(now + 330 * 60 * 1000);
+  const dayKey = ist.toISOString().slice(0, 10);
+  const existing = deliveryState.get(status.symbol);
+  const newDay = !existing || existing.dayKey !== dayKey;
+  const aiChanged = newDay || !existing || existing.aiSignature !== status.aiSignature;
+
+  let explanation = existing?.explanation ?? status.deterministicExplanation;
+  let explanationSource: "HAIKU" | "DETERMINISTIC_FALLBACK" = existing?.explanationSource ?? "DETERMINISTIC_FALLBACK";
+  if (aiChanged) {
+    const explained = await explainPhase74WithHaiku(status, input.anthropicApiKey ?? null);
+    explanation = explained.explanation;
+    explanationSource = explained.source;
+  }
+
+  const text = renderPhase74TelegramStatus(status, explanation, explanationSource);
+  const displayChanged = !existing || existing.displaySignature !== status.displaySignature;
+  const throttleElapsed = !existing || now - existing.lastEditAt >= 180_000;
+
+  if (newDay || !existing?.messageId) {
+    const result = await telegramApi(transport.botToken!, "sendMessage", {
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    });
+    const messageId = Number(result?.message_id);
+    if (!Number.isFinite(messageId)) throw new Error("TELEGRAM_MESSAGE_ID_MISSING");
+    deliveryState.set(status.symbol, {
+      dayKey, messageId, aiSignature: status.aiSignature, displaySignature: status.displaySignature,
+      explanation, explanationSource, lastEditAt: now,
+    });
+    return { sent: true, edited: false, reason: "NEW_INDEX_DAY_CARD" };
+  }
+
+  if (aiChanged || (displayChanged && throttleElapsed)) {
+    await telegramApi(transport.botToken!, "editMessageText", {
+      chat_id: chatId,
+      message_id: existing.messageId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    });
+    deliveryState.set(status.symbol, {
+      ...existing,
+      dayKey,
+      aiSignature: status.aiSignature,
+      displaySignature: status.displaySignature,
+      explanation,
+      explanationSource,
+      lastEditAt: now,
+    });
+    return { sent: false, edited: true, reason: aiChanged ? "MEANINGFUL_STATE_CHANGE" : "THROTTLED_DISPLAY_UPDATE" };
+  }
+
+  return { sent: false, edited: false, reason: "NO_MEANINGFUL_CHANGE" };
 }

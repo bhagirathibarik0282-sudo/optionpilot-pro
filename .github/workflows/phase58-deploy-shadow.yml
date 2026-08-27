@@ -1,0 +1,59 @@
+name: Phase58 Deploy Shadow
+
+on:
+  push:
+    branches:
+      - phase58-server-shadow-persistence
+    paths:
+      - .github/workflows/phase58-deploy-shadow.yml
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch target shadow branch
+        run: git fetch origin phase28-source-truth-p0
+
+      - name: Export verified Phase58 patch
+        run: |
+          mkdir -p /tmp/phase58
+          cp scripts/phase58-server-shadow-persistence-core.mjs /tmp/phase58/phase58-server-shadow-persistence-core.mjs
+          cp scripts/phase58-server-shadow-persistence-patch.mjs /tmp/phase58/phase58-server-shadow-persistence-patch.mjs
+
+      - name: Checkout isolated Railway shadow branch
+        run: git checkout -B phase28-source-truth-p0 origin/phase28-source-truth-p0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply verified server persistence patch
+        run: node /tmp/phase58/phase58-server-shadow-persistence-patch.mjs server.ts
+
+      - name: Verify exact shadow marker
+        run: |
+          grep -q 'PHASE58_SERVER_SHADOW_PERSISTENCE_V1' server.ts
+          grep -q 'sourcePath: "server:runRuleEngineServer"' server.ts
+          grep -q 'scoreObservationShadowEnabled(process.env)' server.ts
+
+      - name: Run full package tests
+        run: npm test
+
+      - name: Commit only server.ts to shadow branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts
+          if git diff --cached --quiet; then
+            echo "Phase58 patch already present; nothing to commit."
+          else
+            git commit -m "Phase 58: deploy server shadow persistence"
+            git push origin HEAD:phase28-source-truth-p0
+          fi

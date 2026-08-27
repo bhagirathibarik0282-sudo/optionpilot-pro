@@ -58,7 +58,7 @@ function mountAfterApp(marker, line, warning) {
 mountAfterApp(HEALTH_MOUNT_MARKER, "mountStorageHealthRoutes(app);", "[Storage V3 wire] Hono app anchor not found; health route not mounted");
 mountAfterApp(TEF_MOUNT_MARKER, "mountTefInspectRoutes(app);", "[Storage V3 wire] Hono app anchor not found; TEF inspection routes not mounted");
 mountAfterApp(TELEGRAM_PREVIEW_MOUNT_MARKER, "mountTelegramPreviewRoutes(app);", "[Storage V3 wire] Hono app anchor not found; Telegram preview route not mounted");
-mountAfterApp(DHAN_AUDIT_MOUNT_MARKER, "mountDhanAuditStatusRoute(app);", "[Storage V3 wire] Hono app anchor not found; Dhan audit status route not mounted");
+mountAfterApp(DHAN_AUDIT_MOUNT_MARKER, "mountDhanAuditStatusRoute(app, getValidDhanAccessToken);", "[Storage V3 wire] Hono app anchor not found; Dhan audit status route not mounted");
 
 writeFileSync(path, source, "utf8");
 console.log("[Storage V3 wire] runtime storage wiring ready");

@@ -1,0 +1,42 @@
+name: Phase72 Final Devilcheck
+
+on:
+  push:
+    branches: [phase59-autonomous-shadow-fix]
+    paths:
+      - 'scripts/phase72-final-devilcheck.mjs'
+      - '.github/workflows/phase72-final-devilcheck.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout isolated shadow branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase59-autonomous-shadow-fix
+          fetch-depth: 0
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Syntax compile server.ts
+        run: npx esbuild server.ts --platform=node --format=esm --outfile=/tmp/phase72-server.mjs --log-level=error
+      - name: Run Phase72 P0 devil-check
+        run: node scripts/phase72-final-devilcheck.mjs
+      - name: Full existing test suite
+        run: npm test
+      - name: Verify branch is audit-only
+        run: |
+          git diff --check
+          if ! git diff --quiet; then
+            echo 'Phase72 audit unexpectedly mutated files'
+            git diff --stat
+            exit 1
+          fi

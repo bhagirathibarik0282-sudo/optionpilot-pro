@@ -14,6 +14,8 @@ import { buildObe3VolatilityPurchaseCondition } from "./obe-volatility.js";
 // hard rules (never decides, only formats already-computed fields).
 import { buildTelegramTradeCard, TradeCardInput, TradeCardTmPlan, TradeCardAdvancedGreeks } from "./telegram-trade-card.js";
 import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";
+import { persistKiteAuthoritySession, resolveKiteAuthoritySession, getKiteAuthorityPublicStatus, kiteSessionIdMatchesFingerprint, type KiteAuthorityResolvedSession } from "./kite-session-authority.js";
+import { revokeKiteAuthoritySession } from "./kite-session-authority-revoke.js";
 
 interface Instrument {
   instrument_token: number;
@@ -167,6 +169,23 @@ interface KiteSession {
 
 // In-memory session store (use Redis in production)
 const sessions = new Map<string, KiteSession>();
+
+// PHASE62_KITE_RUNTIME_WIRING_V1 — restart-safe authority cache only.
+// It never changes score/verdict/Telegram/execution and never exposes credentials.
+let phase62RestoredKiteAuthority: KiteAuthorityResolvedSession | null = null;
+
+async function refreshPhase62KiteAuthorityCache(): Promise<void> {
+  try {
+    const resolved = await resolveKiteAuthoritySession();
+    phase62RestoredKiteAuthority = resolved.session;
+    console.log(`[PHASE62][KITE_AUTHORITY] status=${resolved.status.code}`);
+  } catch (err) {
+    phase62RestoredKiteAuthority = null;
+    console.warn("[PHASE62][KITE_AUTHORITY] restore failed closed:", err instanceof Error ? err.message : String(err));
+  }
+}
+
+void refreshPhase62KiteAuthorityCache();
 
 // BUGFIX (found live, 2026-08-07): Kite Connect returns quote timestamps
 // (last_trade_time) as naive IST wall-clock strings with NO timezone
@@ -5005,7 +5024,18 @@ function getSession(c: any): KiteSession | null {
 
     if (!sessionId) return null;
 
-    const session = sessions.get(sessionId);
+    let session = sessions.get(sessionId);
+    if (!session && phase62RestoredKiteAuthority && kiteSessionIdMatchesFingerprint(sessionId, phase62RestoredKiteAuthority.sessionIdFingerprint)) {
+      session = {
+        accessToken: phase62RestoredKiteAuthority.accessToken,
+        userId: phase62RestoredKiteAuthority.userId,
+        email: phase62RestoredKiteAuthority.email ?? "",
+        loginTime: phase62RestoredKiteAuthority.loginTime,
+        expiresAt: phase62RestoredKiteAuthority.expiresAt,
+      };
+      sessions.set(sessionId, session);
+      console.log("[PHASE62][KITE_AUTHORITY] restored in-memory session from shared authority");
+    }
     if (!session) return null;
 
     // Kite access tokens expire at 06:00 IST on the next day.
@@ -23895,13 +23925,31 @@ app.get("/api/kite/callback", async (c) => {
     // Store session in memory/database (NEVER expose to frontend)
     const sessionId = randomBytes(32).toString("hex");
     const expiresAt = nextKiteExpiryTime();
+    const loginTime = Date.now();
     sessions.set(sessionId, {
       accessToken: tokenData.accessToken,
       userId: tokenData.userId,
       email: tokenData.email,
-      loginTime: Date.now(),
+      loginTime,
       expiresAt,
     });
+
+    // Phase 62: persist encrypted shared authority. Failure does not break the current live login;
+    // it only disables restart restoration and is reported fail-closed.
+    const authorityPersist = await persistKiteAuthoritySession({
+      accessToken: tokenData.accessToken,
+      sessionId,
+      userId: tokenData.userId,
+      email: tokenData.email,
+      loginTime,
+      expiresAt,
+    });
+    if (authorityPersist.ok) {
+      await refreshPhase62KiteAuthorityCache();
+    } else {
+      phase62RestoredKiteAuthority = null;
+      console.warn(`[PHASE62][KITE_AUTHORITY] persistence unavailable status=${authorityPersist.status.code}`);
+    }
 
     // Store session ID in secure HTTP-only cookie
     const maxAgeSeconds = Math.max(60, Math.floor((expiresAt - Date.now()) / 1000));
@@ -23919,18 +23967,49 @@ app.get("/api/kite/callback", async (c) => {
   }
 });
 
-app.post("/api/kite/logout", (c) => {
+app.post("/api/kite/logout", async (c) => {
   const cookies = c.req.header("cookie") || "";
   const sessionId = cookies
     .split("; ")
     .find((row: string) => row.startsWith("session_id="))
     ?.substring(11);
+  // PHASE62_LOGOUT_REVOKE_GUARD_V1 — only the browser session that owns the authority may revoke it.
+  let phase62AuthorityRevokeAllowed = !!sessionId && sessions.has(sessionId);
+  if (sessionId && !phase62AuthorityRevokeAllowed) {
+    try {
+      const authorityForLogout = phase62RestoredKiteAuthority ?? (await resolveKiteAuthoritySession()).session;
+      phase62AuthorityRevokeAllowed = !!authorityForLogout && kiteSessionIdMatchesFingerprint(
+        sessionId,
+        authorityForLogout.sessionIdFingerprint,
+      );
+    } catch {
+      phase62AuthorityRevokeAllowed = false;
+    }
+  }
   if (sessionId) sessions.delete(sessionId);
+  if (phase62AuthorityRevokeAllowed) {
+    try {
+      const revokeResult = await revokeKiteAuthoritySession();
+      phase62RestoredKiteAuthority = null;
+      if (!revokeResult.ok) {
+        console.warn(`[PHASE62][KITE_AUTHORITY] logout authority revoke status=${revokeResult.code}`);
+      }
+    } catch (err) {
+      console.warn("[PHASE62][KITE_AUTHORITY] logout authority revoke failed closed:", err instanceof Error ? err.message : String(err));
+    }
+  }
   c.header(
     "Set-Cookie",
     "session_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
   );
   return c.json({ connected: false });
+});
+
+// Phase 66: authenticated read-only authority health. Never returns token or browser session id.
+app.get("/api/system/kite-session-authority", async (c) => {
+  const session = getSession(c);
+  if (!session) return c.json({ error: "UNAUTHORIZED" }, 401);
+  return c.json(await getKiteAuthorityPublicStatus());
 });
 
 // Kite Status - Returns connection status and user info (NEVER exposes tokens)

@@ -1,0 +1,65 @@
+name: Phase 64 E2E restart restore revoke proof
+
+on:
+  push:
+    branches:
+      - phase64-e2e-restart-restore-proof
+    paths:
+      - kite-session-authority.ts
+      - kite-session-authority-revoke.ts
+      - db.ts
+      - test/phase64-kite-authority-e2e.ts
+      - .github/workflows/phase64-e2e-restart-restore.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-proof:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: optionpilot
+          POSTGRES_PASSWORD: optionpilot
+          POSTGRES_DB: optionpilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U optionpilot -d optionpilot_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      DATABASE_URL: postgresql://optionpilot:optionpilot@127.0.0.1:5432/optionpilot_test
+      KITE_SESSION_ENCRYPTION_KEY: phase64-ci-encryption-key-that-is-longer-than-thirty-two-characters
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout Phase 64 branch
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Process A - persist encrypted authority session
+        run: npx tsx test/phase64-kite-authority-e2e.ts persist
+
+      - name: Process B - restore from shared DB after fresh process start
+        run: npx tsx test/phase64-kite-authority-e2e.ts restore
+
+      - name: Process C - revoke authority session
+        run: npx tsx test/phase64-kite-authority-e2e.ts revoke
+
+      - name: Process D - prove restore is blocked after revoke
+        run: npx tsx test/phase64-kite-authority-e2e.ts assert-revoked
+
+      - name: Regression suite
+        run: npm test

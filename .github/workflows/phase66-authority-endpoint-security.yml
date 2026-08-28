@@ -1,0 +1,61 @@
+name: Phase 66 authority endpoint security
+
+on:
+  push:
+    branches:
+      - phase64-e2e-restart-restore-proof
+    paths:
+      - scripts/phase66-authority-endpoint-security-patch.mjs
+      - .github/workflows/phase66-authority-endpoint-security.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  secure-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase64-e2e-restart-restore-proof
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Apply Phase 66 auth patch
+        run: node scripts/phase66-authority-endpoint-security-patch.mjs
+
+      - name: Verify fail-closed auth guard
+        shell: bash
+        run: |
+          grep -q 'const session = getSession(c);' server.ts
+          grep -q 'UNAUTHORIZED' server.ts
+          grep -q '401' server.ts
+          grep -q '/api/system/kite-session-authority' server.ts
+
+      - name: Run authority unit tests
+        run: NODE_ENV=test node --import tsx --test test/phase61-kite-session-authority.test.ts
+
+      - name: Run regression suite
+        run: npm test
+
+      - name: Commit secured server wiring only after tests pass
+        shell: bash
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo 'No server.ts changes to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 66: require authenticated session for authority health endpoint'
+          git push origin HEAD:phase64-e2e-restart-restore-proof

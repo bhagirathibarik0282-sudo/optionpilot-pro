@@ -22,14 +22,19 @@ function lexicalStateAt(pos){
   return state;
 }
 
-const report = hits.map((pos,i)=>({
-  ordinal:i+1,
-  pos,
-  lexicalState:lexicalStateAt(pos),
-  nearbyHasScriptTag:/<script[\s>]/i.test(src.slice(Math.max(0,pos-12000),pos)),
-  nearestBefore:src.slice(Math.max(0,pos-1200),pos).replace(/\s+/g,' ').slice(-900),
-  context:src.slice(Math.max(0,pos-280),Math.min(src.length,pos+480)).replace(/\s+/g,' ')
-}));
-
-console.log(JSON.stringify({phase:'PHASE76_SECOND_MAX_PAIN_PATH_AUDIT_V3',hitCount:hits.length,report},null,2));
+const report = hits.map((pos,i)=>{
+  const before = src.slice(Math.max(0,pos-12000),pos);
+  const sigs = [...before.matchAll(/(?:async\s+)?function\s+([A-Za-z0-9_$]+)[^\n{]*\{|(?:const|let|var)\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?\([^\n]*=>\s*\{|([A-Za-z0-9_$]+)\s*\([^\n]*\)\s*:\s*[^\n{]+\{/g)]
+    .slice(-8)
+    .map(m=>({name:m[1]||m[2]||m[3]||'unknown',snippet:m[0].replace(/\s+/g,' ').slice(0,260)}));
+  return {
+    ordinal:i+1,
+    pos,
+    lexicalState:lexicalStateAt(pos),
+    candidateSignatures:sigs,
+    nearestBefore:before.replace(/\s+/g,' ').slice(-1400),
+    context:src.slice(Math.max(0,pos-280),Math.min(src.length,pos+480)).replace(/\s+/g,' ')
+  };
+});
+console.log(JSON.stringify({phase:'PHASE76_SECOND_MAX_PAIN_PATH_AUDIT_V4',hitCount:hits.length,report},null,2));
 if(hits.length!==1) process.exit(2);

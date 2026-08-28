@@ -5,10 +5,10 @@ import { deriveMeaningfulCombinations, type MeaningfulCombinationSnapshot } from
 // market message. It only appends the already-built COMB-01..08 evidence lens.
 // Fail-closed: any DB/derivation/formatting problem sends the original message.
 
-const INSTALL_KEY = Symbol.for("optionpilot.telegramCombinationBridge.installed");
 const LAST_ENRICHED_MINUTE = new Map<string, string>();
 const MAX_TELEGRAM_TEXT = 4096;
 const SAFE_TEXT_LIMIT = 3980;
+const INSTALL_FLAG = "__OPTIONPILOT_TELEGRAM_COMBINATION_BRIDGE__";
 
 type SupportedSymbol = "NIFTY" | "BANKNIFTY" | "SENSEX";
 
@@ -68,18 +68,10 @@ function formatCombinationEvidence(snapshot: MeaningfulCombinationSnapshot): str
   ].join("\n");
 }
 
-function withExtraText(payload: TelegramPayload, text: string): RequestInit {
-  return {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...payload, text }),
-  };
-}
-
 export function installTelegramCombinationBridge(): void {
-  const holder = globalThis as typeof globalThis & { [INSTALL_KEY]?: boolean };
-  if (holder[INSTALL_KEY]) return;
-  holder[INSTALL_KEY] = true;
+  const holder = globalThis as typeof globalThis & Record<string, unknown>;
+  if (holder[INSTALL_FLAG] === true) return;
+  holder[INSTALL_FLAG] = true;
 
   const originalFetch = globalThis.fetch.bind(globalThis);
 
@@ -108,12 +100,11 @@ export function installTelegramCombinationBridge(): void {
         return originalFetch(input, { ...init, body: JSON.stringify({ ...payload, text: combined }) });
       }
 
-      // If the existing chunk is already near Telegram's 4096-char ceiling,
-      // preserve it byte-for-byte and send the evidence as one compact follow-up.
-      // This avoids truncating any existing production field.
+      // Existing production chunk is near Telegram's 4096-char ceiling:
+      // preserve it byte-for-byte, then send evidence as one compact follow-up.
       const first = await originalFetch(input, init);
       if (evidence.length <= MAX_TELEGRAM_TEXT) {
-        await originalFetch(input, withExtraText(payload, evidence));
+        await originalFetch(input, { ...init, body: JSON.stringify({ ...payload, text: evidence }) });
       }
       return first;
     } catch (err) {

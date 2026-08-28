@@ -23973,11 +23973,30 @@ app.post("/api/kite/logout", async (c) => {
     .split("; ")
     .find((row: string) => row.startsWith("session_id="))
     ?.substring(11);
+  // PHASE62_LOGOUT_REVOKE_GUARD_V1 — only the browser session that owns the authority may revoke it.
+  let phase62AuthorityRevokeAllowed = !!sessionId && sessions.has(sessionId);
+  if (sessionId && !phase62AuthorityRevokeAllowed) {
+    try {
+      const authorityForLogout = phase62RestoredKiteAuthority ?? (await resolveKiteAuthoritySession()).session;
+      phase62AuthorityRevokeAllowed = !!authorityForLogout && kiteSessionIdMatchesFingerprint(
+        sessionId,
+        authorityForLogout.sessionIdFingerprint,
+      );
+    } catch {
+      phase62AuthorityRevokeAllowed = false;
+    }
+  }
   if (sessionId) sessions.delete(sessionId);
-  const revokeResult = await revokeKiteAuthoritySession();
-  phase62RestoredKiteAuthority = null;
-  if (!revokeResult.ok) {
-    console.warn(`[PHASE62][KITE_AUTHORITY] logout authority revoke status=${revokeResult.code}`);
+  if (phase62AuthorityRevokeAllowed) {
+    try {
+      const revokeResult = await revokeKiteAuthoritySession();
+      phase62RestoredKiteAuthority = null;
+      if (!revokeResult.ok) {
+        console.warn(`[PHASE62][KITE_AUTHORITY] logout authority revoke status=${revokeResult.code}`);
+      }
+    } catch (err) {
+      console.warn("[PHASE62][KITE_AUTHORITY] logout authority revoke failed closed:", err instanceof Error ? err.message : String(err));
+    }
   }
   c.header(
     "Set-Cookie",

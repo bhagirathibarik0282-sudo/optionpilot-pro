@@ -10,13 +10,32 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Audit current runRuleEngine
+      - name: Install dependencies
+        run: npm ci
+      - name: Apply minimal context-only patch
+        run: node scripts/phase75-remove-max-pain-directional-vote.mjs
+      - name: Verify Max Pain has no directional rule-engine vote
         run: node scripts/phase75-rule-engine-devil-check.mjs
+      - name: Run regression suite
+        run: npm test
+      - name: Commit verified fix if changed
+        run: |
+          if git diff --quiet -- server.ts docs/scoring-rules.md; then
+            echo "No production/doc patch needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts docs/scoring-rules.md
+          git commit -m "Phase 75: make Max Pain context-only in rule engine"
+          git push origin HEAD:phase75-rule-engine-devil-check

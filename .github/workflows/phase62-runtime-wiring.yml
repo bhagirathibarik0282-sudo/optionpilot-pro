@@ -1,0 +1,74 @@
+name: Phase 62 isolated Kite runtime wiring
+
+on:
+  push:
+    branches:
+      - phase62-runtime-activation-proof
+    paths:
+      - server.ts
+      - kite-session-authority.ts
+      - kite-session-authority-revoke.ts
+      - scripts/phase62-runtime-wiring-patch.mjs
+      - test/phase61-kite-session-authority.test.ts
+      - .github/workflows/phase62-runtime-wiring.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  wire-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated Phase 62 branch
+        uses: actions/checkout@v4
+        with:
+          ref: phase62-runtime-activation-proof
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Apply deterministic Phase 62 patch
+        run: node scripts/phase62-runtime-wiring-patch.mjs
+
+      - name: Verify runtime marker and safety invariants
+        shell: bash
+        run: |
+          grep -q 'PHASE62_KITE_RUNTIME_WIRING_V1' server.ts
+          grep -q 'persistKiteAuthoritySession' server.ts
+          grep -q 'resolveKiteAuthoritySession' server.ts
+          grep -q 'kiteSessionIdMatchesFingerprint' server.ts
+          grep -q 'revokeKiteAuthoritySession' server.ts
+          grep -q '/api/system/kite-session-authority' server.ts
+          grep -q 'tokenExposed: false' kite-session-authority.ts
+          grep -q 'sessionIdExposed: false' kite-session-authority.ts
+          grep -q 'productionDecisionImpact: "NONE"' kite-session-authority.ts
+          if grep -R -n 'fallback-key' kite-session-authority.ts kite-session-authority-revoke.ts server.ts; then
+            echo 'Forbidden fallback encryption key found'
+            exit 1
+          fi
+
+      - name: Run Phase 61/62 authority unit tests
+        run: NODE_ENV=test node --import tsx --test test/phase61-kite-session-authority.test.ts
+
+      - name: Run existing regression suite
+        run: npm test
+
+      - name: Commit server wiring only after tests pass
+        shell: bash
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo 'No server.ts changes to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          git commit -m 'Phase 62: wire restart-safe Kite session authority runtime'
+          git push origin HEAD:phase62-runtime-activation-proof

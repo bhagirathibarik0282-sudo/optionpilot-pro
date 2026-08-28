@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-package-lock --no-audit --no-fund
       - name: Apply minimal context-only patch
         run: node scripts/phase75-remove-max-pain-directional-vote.mjs
       - name: Verify Max Pain has no directional rule-engine vote

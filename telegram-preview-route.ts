@@ -7,7 +7,7 @@ import type {
   TelegramSymbol,
 } from "./telegram-card-contract.js";
 import { TELEGRAM_INDEX_GROUP_ROUTING } from "./telegram-card-contract.js";
-import { renderTelegramCardPreview } from "./telegram-card-renderer.js";
+import { renderTelegramCardV2 } from "./telegram-card-renderer-v2.js";
 import { deriveClosedBlockPromotion } from "./tef-change-promotion.js";
 import { deriveFamilyStateFusion } from "./family-state-fusion.js";
 import { deriveEvidenceFamilies } from "./evidence-family-engine.js";
@@ -132,11 +132,13 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
 
       return c.json({
         ok: true,
-        mode: "READ_ONLY_TELEGRAM_PREVIEW",
+        mode: "READ_ONLY_TELEGRAM_V2_PREVIEW",
         source: "TEF_EVIDENCE_PREVIEW_NOT_FINAL_VERDICT",
         symbol: requested,
         destinationGroup: TELEGRAM_INDEX_GROUP_ROUTING[requested],
-        message: renderTelegramCardPreview(card),
+        strictIndexIsolation: true,
+        crossPostAllowed: false,
+        message: renderTelegramCardV2(card),
         card,
         safety: {
           sendsTelegram: false,
@@ -148,12 +150,12 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
         },
       });
     } catch (error) {
-      console.error("[Telegram Preview] failed:", error instanceof Error ? error.message : error);
+      console.error("[Telegram V2 Preview] failed:", error instanceof Error ? error.message : error);
       return c.json({
         ok: false,
-        mode: "READ_ONLY_TELEGRAM_PREVIEW",
+        mode: "READ_ONLY_TELEGRAM_V2_PREVIEW",
         symbol: requested,
-        error: "TELEGRAM_PREVIEW_FAILED",
+        error: "TELEGRAM_V2_PREVIEW_FAILED",
         sendsTelegram: false,
         affectsVerdict: false,
         affectsTelegram: false,

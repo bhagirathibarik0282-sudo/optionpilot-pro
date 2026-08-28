@@ -2,28 +2,21 @@ import fs from 'node:fs';
 
 const serverPath = 'server.ts';
 let server = fs.readFileSync(serverPath, 'utf8');
-const oldVote = "        if (availableSignals.has('max_pain') && m.maxPain > 0) {\n          add('max_pain', m.current < m.maxPain ? 0.5 : m.current > m.maxPain ? -0.5 : 0, 0.5);\n        }\n";
-const compactVote = "if (availableSignals.has('max_pain') && m.maxPain > 0) { add('max_pain', m.current < m.maxPain ? 0.5 : m.current > m.maxPain ? -0.5 : 0, 0.5); }";
-
-let removed = false;
-if (server.includes(oldVote)) {
-  server = server.replace(oldVote, '');
-  removed = true;
-} else if (server.includes(compactVote)) {
-  server = server.replace(compactVote, '');
-  removed = true;
+const voteRe = /if\s*\(\s*availableSignals\.has\(['"]max_pain['"]\)\s*&&\s*m\.maxPain\s*>\s*0\s*\)\s*\{\s*add\(['"]max_pain['"]\s*,\s*m\.current\s*<\s*m\.maxPain\s*\?\s*0\.5\s*:\s*m\.current\s*>\s*m\.maxPain\s*\?\s*-0\.5\s*:\s*0\s*,\s*0\.5\s*\);\s*\}/;
+const matches = server.match(new RegExp(voteRe.source, 'g')) ?? [];
+if (matches.length > 1) {
+  console.error(`PHASE75_PATCH_FAIL: expected at most one exact Max Pain scoring block, found ${matches.length}`);
+  process.exit(1);
 }
-
-if (!removed) {
-  const alreadyContextOnly = !/add\(['\"]max_pain['\"]\s*,/i.test(server);
-  if (!alreadyContextOnly) {
-    console.error('PHASE75_PATCH_FAIL: exact Max Pain scoring block not matched; refusing broad edit');
-    process.exit(1);
-  }
-  console.log('PHASE75_PATCH: Max Pain scoring vote already absent');
-} else {
+if (matches.length === 1) {
+  server = server.replace(voteRe, '');
   fs.writeFileSync(serverPath, server);
-  console.log('PHASE75_PATCH: removed Max Pain directional score/maxScore vote only');
+  console.log('PHASE75_PATCH: removed exactly one Max Pain directional score/maxScore vote');
+} else if (/add\(['"]max_pain['"]\s*,/i.test(server)) {
+  console.error('PHASE75_PATCH_FAIL: Max Pain add() exists but exact safe pattern did not match; refusing broad edit');
+  process.exit(1);
+} else {
+  console.log('PHASE75_PATCH: Max Pain scoring vote already absent');
 }
 
 const docPath = 'docs/scoring-rules.md';

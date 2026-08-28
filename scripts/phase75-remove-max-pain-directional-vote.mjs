@@ -2,21 +2,55 @@ import fs from 'node:fs';
 
 const serverPath = 'server.ts';
 let server = fs.readFileSync(serverPath, 'utf8');
-const voteRe = /if\s*\(\s*availableSignals\.has\(['"]max_pain['"]\)\s*&&\s*m\.maxPain\s*>\s*0\s*\)\s*\{\s*add\(['"]max_pain['"]\s*,\s*m\.current\s*<\s*m\.maxPain\s*\?\s*0\.5\s*:\s*m\.current\s*>\s*m\.maxPain\s*\?\s*-0\.5\s*:\s*0\s*,\s*0\.5\s*\);\s*\}/;
-const matches = server.match(new RegExp(voteRe.source, 'g')) ?? [];
-if (matches.length > 1) {
-  console.error(`PHASE75_PATCH_FAIL: expected at most one exact Max Pain scoring block, found ${matches.length}`);
+const needle = 'function runRuleEngine(';
+const declarations = server.split(needle).length - 1;
+if (declarations !== 1) {
+  console.error(`PHASE75_PATCH_FAIL: expected exactly one runRuleEngine declaration, found ${declarations}`);
   process.exit(1);
 }
-if (matches.length === 1) {
-  server = server.replace(voteRe, '');
+const start = server.indexOf(needle);
+const braceStart = server.indexOf('{', start);
+let depth = 0, mode = 'code', escaped = false, end = -1;
+for (let i = braceStart; i < server.length; i++) {
+  const ch = server[i], next = server[i + 1];
+  if (mode === 'lineComment') { if (ch === '\n') mode = 'code'; continue; }
+  if (mode === 'blockComment') { if (ch === '*' && next === '/') { mode = 'code'; i++; } continue; }
+  if (mode === 'single' || mode === 'double' || mode === 'template') {
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { escaped = true; continue; }
+    if ((mode === 'single' && ch === "'") || (mode === 'double' && ch === '"') || (mode === 'template' && ch === '`')) mode = 'code';
+    continue;
+  }
+  if (ch === '/' && next === '/') { mode = 'lineComment'; i++; continue; }
+  if (ch === '/' && next === '*') { mode = 'blockComment'; i++; continue; }
+  if (ch === "'") { mode = 'single'; continue; }
+  if (ch === '"') { mode = 'double'; continue; }
+  if (ch === '`') { mode = 'template'; continue; }
+  if (ch === '{') depth++;
+  if (ch === '}') { depth--; if (depth === 0) { end = i + 1; break; } }
+}
+if (end < 0) {
+  console.error('PHASE75_PATCH_FAIL: could not isolate runRuleEngine');
+  process.exit(1);
+}
+
+const voteRe = /if\s*\(\s*availableSignals\.has\(['"]max_pain['"]\)\s*&&\s*m\.maxPain\s*>\s*0\s*\)\s*\{\s*add\(['"]max_pain['"]\s*,\s*m\.current\s*<\s*m\.maxPain\s*\?\s*0\.5\s*:\s*m\.current\s*>\s*m\.maxPain\s*\?\s*-0\.5\s*:\s*0\s*,\s*0\.5\s*\);\s*\}/;
+let fn = server.slice(start, end);
+const fnMatches = fn.match(new RegExp(voteRe.source, 'g')) ?? [];
+if (fnMatches.length > 1) {
+  console.error(`PHASE75_PATCH_FAIL: runRuleEngine contains ${fnMatches.length} exact Max Pain votes`);
+  process.exit(1);
+}
+if (fnMatches.length === 1) {
+  fn = fn.replace(voteRe, '');
+  server = server.slice(0, start) + fn + server.slice(end);
   fs.writeFileSync(serverPath, server);
-  console.log('PHASE75_PATCH: removed exactly one Max Pain directional score/maxScore vote');
-} else if (/add\(['"]max_pain['"]\s*,/i.test(server)) {
-  console.error('PHASE75_PATCH_FAIL: Max Pain add() exists but exact safe pattern did not match; refusing broad edit');
+  console.log('PHASE75_PATCH: removed exactly one directional Max Pain vote from runRuleEngine only');
+} else if (/add\(['"]max_pain['"]\s*,/i.test(fn)) {
+  console.error('PHASE75_PATCH_FAIL: runRuleEngine still has Max Pain add() but safe pattern did not match');
   process.exit(1);
 } else {
-  console.log('PHASE75_PATCH: Max Pain scoring vote already absent');
+  console.log('PHASE75_PATCH: runRuleEngine already has no Max Pain scoring vote');
 }
 
 const docPath = 'docs/scoring-rules.md';

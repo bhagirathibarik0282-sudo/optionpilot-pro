@@ -1,0 +1,1 @@
+Endpoints: GET /health, GET /status, POST /ingest. Service starts with npm run start:option-recorder. Haiku and Telegram are disabled by default.

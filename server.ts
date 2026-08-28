@@ -24005,8 +24005,10 @@ app.post("/api/kite/logout", async (c) => {
   return c.json({ connected: false });
 });
 
-// Phase 62 read-only authority health. Never returns token or browser session id.
+// Phase 66: authenticated read-only authority health. Never returns token or browser session id.
 app.get("/api/system/kite-session-authority", async (c) => {
+  const session = getSession(c);
+  if (!session) return c.json({ error: "UNAUTHORIZED" }, 401);
   return c.json(await getKiteAuthorityPublicStatus());
 });
 

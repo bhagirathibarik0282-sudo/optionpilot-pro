@@ -1,0 +1,1 @@
+Pre-Railway gate: code and tests prepared; no merge or Railway deployment performed. CI must pass before manual Railway setup.

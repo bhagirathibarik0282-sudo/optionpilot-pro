@@ -8,6 +8,7 @@ import type {
 } from "./telegram-card-contract.js";
 import { TELEGRAM_INDEX_GROUP_ROUTING } from "./telegram-card-contract.js";
 import { renderTelegramCardV2 } from "./telegram-card-renderer-v2.js";
+import { sendTelegramCardV2 } from "./telegram-sender-v2.js";
 import { deriveClosedBlockPromotion } from "./tef-change-promotion.js";
 import { deriveFamilyStateFusion } from "./family-state-fusion.js";
 import { deriveEvidenceFamilies } from "./evidence-family-engine.js";
@@ -130,6 +131,8 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
         },
       };
 
+      const senderSimulation = await sendTelegramCardV2(card, { dryRun: true });
+
       return c.json({
         ok: true,
         mode: "READ_ONLY_TELEGRAM_V2_PREVIEW",
@@ -139,9 +142,11 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
         strictIndexIsolation: true,
         crossPostAllowed: false,
         message: renderTelegramCardV2(card),
+        senderSimulation,
         card,
         safety: {
           sendsTelegram: false,
+          senderDryRun: true,
           affectsVerdict: false,
           affectsTelegram: false,
           affectsExecution: false,

@@ -29,7 +29,7 @@ maxScore += signal_weight     (always positive — the signal's max possible pul
 | 1 | `futures_vwap` | 1 | `0` if `|LTP − VWAP| / VWAP ≤ 0.1%`; else `+1` if LTP > VWAP, `−1` if below |
 | 2 | `pdh_pdl` | 1 | `+1` if spot > PDH; `−1` if spot < PDL; else `0` |
 | 3 | `oi_pcr` | 1 | `+1` if PCR > 1.2; `−1` if PCR < 0.8; else `0` |
-| 4 | `max_pain` | 0.5 | `+0.5` if spot < Max Pain; `−0.5` if spot > Max Pain; else `0` |
+| 4 | `max_pain` | 0 (context only) | Display/context evidence only. It does **not** contribute to `score`, `maxScore`, confidence, or verdict. |
 | 5 | `india_vix` | 1 | `+1` if VIX change < 0; `−1` if VIX change > 0; else `0` |
 | 6 | `futures_oi_buildup` | 1 | `+1` Fresh Long Build-up; `−1` Fresh Short Build-up; else `0` |
 | 7 | `gap_type` | 2 (3 if gap > 0.8%) | `0` unless the gap is confirmed as a **Continuation**; if so, `direction × 2`, further `× 1.5` when the gap itself is > 0.8% (so the value can reach `±3`, matching the weight) |
@@ -43,7 +43,7 @@ maxScore += signal_weight     (always positive — the signal's max possible pul
 | 15 | `fii_dii_5day` | — | **Not yet wired.** FII/DII data is captured (manual entry) but not yet turned into a 5-day-trend signal for the engine. |
 | 16 | `option_premium_vwap` | — | **Deliberately not wired** (user decision, 2026-08-08). Kite's per-leg "VWAP" is actually its `average_price` field, explicitly unverified as true VWAP — wiring it would attach a real score weight to data whose meaning isn't confirmed. |
 
-**Maximum theoretical score** (all 14 wired signals available, every one at its most extreme value, including the big-gap 3-point case): **17.0**. This is the sum of the 14 currently-wired weights (1+1+1+0.5+1+1+3+1.5+1+1+1.5+1+1.5+1 = 17), not a designed constant — it grew from 16.0 to 17.0 when `fib_pivot` (weight 1) was wired on 2026-08-09. `maxScore` in any real cycle will typically be lower, since not every signal is available every cycle.
+**Maximum theoretical scoring weight** with the documented scoring signals is **16.5** after removing Max Pain's former 0.5 directional vote. Max Pain may still be available as contextual evidence, but it contributes **0** to `score` and `maxScore`. `maxScore` in any real cycle will typically be lower when scoring signals are unavailable.
 
 ## 4. Verdict Thresholds
 

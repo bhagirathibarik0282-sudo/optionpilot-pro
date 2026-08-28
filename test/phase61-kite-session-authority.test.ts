@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   decryptKiteAccessTokenForAuthority,
   encryptKiteAccessTokenForAuthority,
+  kiteSessionIdFingerprint,
+  kiteSessionIdMatchesFingerprint,
   kiteTokenFingerprint,
 } from "../kite-session-authority.js";
 
@@ -37,4 +39,14 @@ test("Phase61 token fingerprint is deterministic and does not reveal token", () 
   assert.equal(fp1, fp2);
   assert.equal(fp1.length, 16);
   assert.equal(fp1.includes(token), false);
+});
+
+test("Phase62 session id fingerprint validates only the original browser session", () => {
+  const sessionId = "browser-session-random-id-A";
+  const fingerprint = kiteSessionIdFingerprint(sessionId);
+  assert.equal(fingerprint.length, 64);
+  assert.equal(fingerprint.includes(sessionId), false);
+  assert.equal(kiteSessionIdMatchesFingerprint(sessionId, fingerprint), true);
+  assert.equal(kiteSessionIdMatchesFingerprint("forged-session-id", fingerprint), false);
+  assert.equal(kiteSessionIdMatchesFingerprint("", fingerprint), false);
 });

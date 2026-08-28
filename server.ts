@@ -10170,9 +10170,7 @@ app.get("/", (c) => {
       if (availableSignals.has('oi_pcr') && m.pcr != null) {
         add('oi_pcr', m.pcr > 1.2 ? 1 : m.pcr < 0.8 ? -1 : 0, 1);
       }
-      if (availableSignals.has('max_pain') && m.maxPain > 0) {
-        add('max_pain', m.current < m.maxPain ? 0.5 : m.current > m.maxPain ? -0.5 : 0, 0.5);
-      }
+      
       if (availableSignals.has('india_vix')) {
         add('india_vix', m.vixChange < 0 ? 1 : m.vixChange > 0 ? -1 : 0, 1);
       }

@@ -14,6 +14,7 @@ import { deriveFamilyStateFusion } from "./family-state-fusion.js";
 import { deriveEvidenceFamilies } from "./evidence-family-engine.js";
 
 const SYMBOLS: readonly TelegramSymbol[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
+const ROUTING_TEST_CONFIRM = "ROUTING_TEST_ONLY";
 
 function isSymbol(value: string): value is TelegramSymbol {
   return (SYMBOLS as readonly string[]).includes(value);
@@ -61,9 +62,25 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
   app.get("/api/telegram/preview", async (c) => {
     c.header("Cache-Control", "no-store");
     const requested = (c.req.query("symbol") ?? "NIFTY").toUpperCase();
+    const requestedSend = c.req.query("send") === "TEST";
+    const confirmed = c.req.query("confirm") === ROUTING_TEST_CONFIRM;
+    const testEnabled = process.env.TELEGRAM_TEST_SEND_ENABLED === "true";
+    const liveRoutingTest = requestedSend && confirmed && testEnabled;
 
     if (!isSymbol(requested)) {
       return c.json({ ok: false, error: "INVALID_SYMBOL", allowed: SYMBOLS }, 400);
+    }
+
+    if (requestedSend && !liveRoutingTest) {
+      return c.json({
+        ok: false,
+        error: "TELEGRAM_ROUTING_TEST_BLOCKED",
+        required: {
+          query: `send=TEST&confirm=${ROUTING_TEST_CONFIRM}`,
+          env: "TELEGRAM_TEST_SEND_ENABLED=true",
+        },
+        sendsTelegram: false,
+      }, 403);
     }
 
     try {
@@ -122,7 +139,9 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
           rrToT3: null,
           status: "UNAVAILABLE",
         },
-        reasons: promotion.reasons ?? [],
+        reasons: liveRoutingTest
+          ? ["ROUTING TEST ONLY — NOT A TRADE SIGNAL"]
+          : (promotion.reasons ?? []),
         nextUpdateAt: null,
         safety: {
           forwardTestingOnly: true,
@@ -131,12 +150,12 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
         },
       };
 
-      const senderSimulation = await sendTelegramCardV2(card, { dryRun: true });
+      const senderSimulation = await sendTelegramCardV2(card, { dryRun: !liveRoutingTest });
 
       return c.json({
         ok: true,
-        mode: "READ_ONLY_TELEGRAM_V2_PREVIEW",
-        source: "TEF_EVIDENCE_PREVIEW_NOT_FINAL_VERDICT",
+        mode: liveRoutingTest ? "CONTROLLED_TELEGRAM_ROUTING_TEST" : "READ_ONLY_TELEGRAM_V2_PREVIEW",
+        source: liveRoutingTest ? "MANUAL_ROUTING_TEST_NOT_TRADE_SIGNAL" : "TEF_EVIDENCE_PREVIEW_NOT_FINAL_VERDICT",
         symbol: requested,
         destinationGroup: TELEGRAM_INDEX_GROUP_ROUTING[requested],
         strictIndexIsolation: true,
@@ -145,10 +164,11 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
         senderSimulation,
         card,
         safety: {
-          sendsTelegram: false,
-          senderDryRun: true,
+          sendsTelegram: liveRoutingTest,
+          senderDryRun: !liveRoutingTest,
+          manualRoutingTestOnly: liveRoutingTest,
           affectsVerdict: false,
-          affectsTelegram: false,
+          affectsTelegram: liveRoutingTest,
           affectsExecution: false,
           createsOrders: false,
           extraMarketFetches: false,
@@ -158,9 +178,9 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
       console.error("[Telegram V2 Preview] failed:", error instanceof Error ? error.message : error);
       return c.json({
         ok: false,
-        mode: "READ_ONLY_TELEGRAM_V2_PREVIEW",
+        mode: liveRoutingTest ? "CONTROLLED_TELEGRAM_ROUTING_TEST" : "READ_ONLY_TELEGRAM_V2_PREVIEW",
         symbol: requested,
-        error: "TELEGRAM_V2_PREVIEW_FAILED",
+        error: liveRoutingTest ? "TELEGRAM_ROUTING_TEST_FAILED" : "TELEGRAM_V2_PREVIEW_FAILED",
         sendsTelegram: false,
         affectsVerdict: false,
         affectsTelegram: false,

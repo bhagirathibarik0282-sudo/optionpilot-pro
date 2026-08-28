@@ -1,37 +1,53 @@
 # Option Recorder Railway Handoff
 
-The GitHub side is prepared as a separate service and does not modify the existing `server.ts` production flow.
+GitHub preparation is complete on `option-recorder-final-build`. The existing backend keeps `/api/data` private and gains a separate read-only Option Recorder export route through the existing boot-time wiring mechanism.
 
-## Railway service command
+## Existing OptionPilot backend — manual Railway variable
+
+Set one strong random secret:
+
+- `OPTION_RECORDER_EXPORT_TOKEN=<strong-random-secret>`
+
+After the backend is deployed with this branch/PR, its recorder source endpoint is:
+
+- `/api/option-recorder/export`
+
+The endpoint is fail-closed: no configured token = HTTP 503; wrong/missing Bearer token = HTTP 401. It exports market/option/futures evidence only and never exposes broker credentials.
+
+## New Option Recorder Railway service
+
+Start command:
 
 `npm run start:option-recorder`
 
-## Keep these OFF first
+Required source variables:
+
+- `OPTION_RECORDER_SOURCE_URL=https://optionpilot-pro-v2-production.up.railway.app/api/option-recorder/export`
+- `OPTION_RECORDER_SOURCE_TOKEN=<same value as OPTION_RECORDER_EXPORT_TOKEN>`
+- `OPTION_RECORDER_POLL_MS=60000`
+
+Keep AI and Telegram OFF for the first shadow deployment:
 
 - `OPTION_RECORDER_HAIKU_ENABLED=false`
 - `OPTION_RECORDER_TELEGRAM_ENABLED=false`
 
-## Required before ingest
+Optional manual ingest protection:
 
-- `OPTION_RECORDER_INGEST_TOKEN=<random secret>`
-
-The service accepts normalized recorder envelopes at `POST /ingest` and exposes `GET /health` and `GET /status`.
+- `OPTION_RECORDER_INGEST_TOKEN=<another strong random secret>`
 
 ## Haiku variables
 
-Enable only after shadow ingest is verified:
+Enable only after real shadow source verification:
 
 - `OPTION_RECORDER_HAIKU_ENABLED=true`
 - `ANTHROPIC_API_KEY=<secret>`
-- `ANTHROPIC_MODEL=<exact model id selected by the user>`
+- `ANTHROPIC_MODEL=<exact current model id selected by the user>`
 - optional `ANTHROPIC_VERSION`
 - optional `OPTION_RECORDER_HAIKU_MAX_TOKENS`
 
-The model id is intentionally not hard-coded so a stale or incorrect model name is never silently used.
-
 ## Telegram variables
 
-Enable only after routing tests are verified:
+Enable only after Haiku consistency and routing checks:
 
 - `OPTION_RECORDER_TELEGRAM_ENABLED=true`
 - `TELEGRAM_BOT_TOKEN=<secret>`
@@ -39,8 +55,10 @@ Enable only after routing tests are verified:
 - `TELEGRAM_BANKNIFTY_CHAT_ID=<BANKNIFTY premium group>`
 - `TELEGRAM_SENSEX_CHAT_ID=<SENSEX premium group>`
 
-Routing is strict by index and unchanged fingerprints are deduplicated.
+## Exported evidence
+
+The protected source exports real contract expiry dates, bid/ask, volume, OI, IV/Greeks when available, per-leg quote timestamps, near/next/far futures context, PCR/volume PCR context, and multiple expiries from the already-held backend snapshot. No extra broker request is made for the recorder export.
 
 ## Promotion rule
 
-Do not treat the service as production-eligible until replay, adversarial failure tests, Haiku consistency checks, premium-selection checks and Telegram group-isolation checks all pass on real shadow data.
+First deploy in `SHADOW_ONLY`. Keep Haiku and Telegram disabled until `/health` and `/status` confirm successful source polling and real-data validation. Production eligibility still requires replay, adversarial failure tests, Haiku consistency, premium-selection checks and Telegram group-isolation checks on real shadow data.

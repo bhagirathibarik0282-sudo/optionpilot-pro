@@ -16,8 +16,21 @@ function insertBeforeOnce(label, anchor, insertion) {
   replaceOnce(label, anchor, insertion + anchor);
 }
 
+function hardenExistingLogoutRevoke() {
+  if (source.includes("PHASE62_LOGOUT_REVOKE_GUARD_V1")) return false;
+  const oldBlock = `  if (sessionId) sessions.delete(sessionId);\n  const revokeResult = await revokeKiteAuthoritySession();\n  phase62RestoredKiteAuthority = null;\n  if (!revokeResult.ok) {\n    console.warn(\`[PHASE62][KITE_AUTHORITY] logout authority revoke status=\${revokeResult.code}\`);\n  }\n`;
+  const guardedBlock = `  // PHASE62_LOGOUT_REVOKE_GUARD_V1 — only the browser session that owns the authority may revoke it.\n  let phase62AuthorityRevokeAllowed = !!sessionId && sessions.has(sessionId);\n  if (sessionId && !phase62AuthorityRevokeAllowed) {\n    try {\n      const authorityForLogout = phase62RestoredKiteAuthority ?? (await resolveKiteAuthoritySession()).session;\n      phase62AuthorityRevokeAllowed = !!authorityForLogout && kiteSessionIdMatchesFingerprint(\n        sessionId,\n        authorityForLogout.sessionIdFingerprint,\n      );\n    } catch {\n      phase62AuthorityRevokeAllowed = false;\n    }\n  }\n  if (sessionId) sessions.delete(sessionId);\n  if (phase62AuthorityRevokeAllowed) {\n    try {\n      const revokeResult = await revokeKiteAuthoritySession();\n      phase62RestoredKiteAuthority = null;\n      if (!revokeResult.ok) {\n        console.warn(\`[PHASE62][KITE_AUTHORITY] logout authority revoke status=\${revokeResult.code}\`);\n      }\n    } catch (err) {\n      console.warn(\"[PHASE62][KITE_AUTHORITY] logout authority revoke failed closed:\", err instanceof Error ? err.message : String(err));\n    }\n  }\n`;
+  replaceOnce("LOGOUT_REVOKE_HARDENING", oldBlock, guardedBlock);
+  return true;
+}
+
 if (source.includes("PHASE62_KITE_RUNTIME_WIRING_V1")) {
-  console.log("PHASE62_ALREADY_WIRED");
+  if (hardenExistingLogoutRevoke()) {
+    writeFileSync(path, source);
+    console.log("PHASE62_LOGOUT_REVOKE_HARDENED");
+  } else {
+    console.log("PHASE62_ALREADY_WIRED_AND_HARDENED");
+  }
   process.exit(0);
 }
 
@@ -68,7 +81,7 @@ replaceOnce(
 insertBeforeOnce(
   "LOGOUT_REVOKE",
   '  c.header(\n    "Set-Cookie",\n    "session_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"',
-  `  const revokeResult = await revokeKiteAuthoritySession();\n  phase62RestoredKiteAuthority = null;\n  if (!revokeResult.ok) {\n    console.warn(\`[PHASE62][KITE_AUTHORITY] logout authority revoke status=\${revokeResult.code}\`);\n  }\n`,
+  `  // PHASE62_LOGOUT_REVOKE_GUARD_V1 — only the browser session that owns the authority may revoke it.\n  let phase62AuthorityRevokeAllowed = !!sessionId && sessions.has(sessionId);\n  if (sessionId && !phase62AuthorityRevokeAllowed) {\n    try {\n      const authorityForLogout = phase62RestoredKiteAuthority ?? (await resolveKiteAuthoritySession()).session;\n      phase62AuthorityRevokeAllowed = !!authorityForLogout && kiteSessionIdMatchesFingerprint(\n        sessionId,\n        authorityForLogout.sessionIdFingerprint,\n      );\n    } catch {\n      phase62AuthorityRevokeAllowed = false;\n    }\n  }\n  if (sessionId) sessions.delete(sessionId);\n  if (phase62AuthorityRevokeAllowed) {\n    try {\n      const revokeResult = await revokeKiteAuthoritySession();\n      phase62RestoredKiteAuthority = null;\n      if (!revokeResult.ok) {\n        console.warn(\`[PHASE62][KITE_AUTHORITY] logout authority revoke status=\${revokeResult.code}\`);\n      }\n    } catch (err) {\n      console.warn(\"[PHASE62][KITE_AUTHORITY] logout authority revoke failed closed:\", err instanceof Error ? err.message : String(err));\n    }\n  }\n`,
 );
 
 insertBeforeOnce(

@@ -126,6 +126,11 @@ async function buildCard(requested: TelegramSymbol, routingTest: boolean): Promi
 }
 
 export function mountTelegramPreviewRoutes(app: Hono): void {
+  app.get("/api/telegram/routing-test-page", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.html(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Telegram Routing Test</title><style>body{font-family:system-ui;margin:18px;max-width:520px}input,select,button{width:100%;box-sizing:border-box;padding:14px;margin:8px 0;font-size:16px}button{font-weight:700}pre{white-space:pre-wrap;background:#111;color:#eee;padding:12px;border-radius:8px;min-height:120px}.warn{font-weight:700}</style></head><body><h2>Telegram Routing Test</h2><p class="warn">ROUTING TEST ONLY — NOT A TRADE SIGNAL</p><select id="symbol"><option>NIFTY</option><option>BANKNIFTY</option><option>SENSEX</option></select><input id="key" type="password" autocomplete="off" placeholder="Routing test secret key"><button id="send">SEND TEST</button><pre id="out">Ready</pre><script>const out=document.getElementById('out');document.getElementById('send').onclick=async()=>{const symbol=document.getElementById('symbol').value;const key=document.getElementById('key').value.trim();if(!key){out.textContent='Enter routing test key';return;}out.textContent='Sending...';try{const r=await fetch('/api/telegram/routing-test?symbol='+encodeURIComponent(symbol),{method:'POST',headers:{'x-telegram-routing-test-key':key}});const j=await r.json();out.textContent=JSON.stringify(j,null,2);}catch(e){out.textContent=String(e);}};</script></body></html>`);
+  });
+
   app.get("/api/telegram/preview", async (c) => {
     c.header("Cache-Control", "no-store");
     const requested = (c.req.query("symbol") ?? "NIFTY").toUpperCase();

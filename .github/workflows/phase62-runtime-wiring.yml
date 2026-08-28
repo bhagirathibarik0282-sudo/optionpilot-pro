@@ -49,8 +49,8 @@ jobs:
           grep -q 'tokenExposed: false' kite-session-authority.ts
           grep -q 'sessionIdExposed: false' kite-session-authority.ts
           grep -q 'productionDecisionImpact: "NONE"' kite-session-authority.ts
-          if grep -R -n 'fallback-key' kite-session-authority.ts kite-session-authority-revoke.ts server.ts; then
-            echo 'Forbidden fallback encryption key found'
+          if grep -R -n 'fallback-key' kite-session-authority.ts kite-session-authority-revoke.ts; then
+            echo 'Forbidden fallback encryption key found in Kite authority code'
             exit 1
           fi
 

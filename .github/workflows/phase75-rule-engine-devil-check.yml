@@ -1,0 +1,22 @@
+name: Phase 75 Rule Engine Devil Check
+
+on:
+  push:
+    branches:
+      - phase75-rule-engine-devil-check
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit current runRuleEngine
+        run: node scripts/phase75-rule-engine-devil-check.mjs

@@ -10,13 +10,40 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Audit remaining Max Pain path
-        run: node scripts/phase76-second-max-pain-path-audit.mjs
+      - name: Install dependencies
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Remove server-side Max Pain directional vote
+        run: node scripts/phase76-remove-server-max-pain-vote.mjs
+      - name: Verify no Max Pain directional votes remain
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          const s=fs.readFileSync('server.ts','utf8');
+          const re=/add\(["']max_pain["']\s*,\s*m\.current\s*<\s*m\.maxPain\s*\?\s*0\.5\s*:\s*m\.current\s*>\s*m\.maxPain\s*\?\s*-0\.5\s*:\s*0\s*,\s*0\.5\s*\)/g;
+          const n=[...s.matchAll(re)].length;
+          console.log('remainingDirectionalMaxPainVotes='+n);
+          if(n!==0) process.exit(2);
+          NODE
+      - name: Run regression suite
+        run: npm test
+      - name: Commit verified Phase 76 fix
+        run: |
+          if git diff --quiet -- server.ts; then
+            echo "No server patch needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server.ts
+          git commit -m "Phase 76: remove server-side Max Pain directional vote"
+          git push origin HEAD:phase76-second-max-pain-path-audit

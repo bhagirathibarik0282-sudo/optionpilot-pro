@@ -8,10 +8,15 @@ import {
   buildHaikuEvidence,
   buildTelegramText,
 } from "./option-recorder-runtime.js";
+import { fetchSourcePayloads } from "./option-recorder-source-adapter.js";
 
 const app = new Hono();
 const PORT = Number(process.env.PORT || 8080);
 const INGEST_TOKEN = process.env.OPTION_RECORDER_INGEST_TOKEN || "";
+
+const SOURCE_URL = process.env.OPTION_RECORDER_SOURCE_URL || "";
+const SOURCE_TOKEN = process.env.OPTION_RECORDER_SOURCE_TOKEN || "";
+const SOURCE_POLL_MS = Math.max(30_000, Number(process.env.OPTION_RECORDER_POLL_MS || 60_000));
 
 const HAIKU_ENABLED = process.env.OPTION_RECORDER_HAIKU_ENABLED === "true";
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
@@ -27,7 +32,10 @@ let lastState: (RecorderProcessedState & {
   telegram: { enabled: boolean; sent: boolean; reason: string };
 }) | null = null;
 
+let lastSourceError: string | null = null;
+let lastSourcePollAt: string | null = null;
 const lastFingerprintByDestination = new Map<string, string>();
+const lastSnapshotBySymbol = new Map<RecorderSymbol, string>();
 
 function authorized(authHeader: string | undefined): boolean {
   if (!INGEST_TOKEN) return true;
@@ -86,11 +94,76 @@ async function sendTelegram(symbol: RecorderSymbol, text: string): Promise<boole
   return response.ok;
 }
 
+async function processOne(payload: RecorderIngestPayload) {
+  const state = processRecorderPayload(payload);
+
+  let haikuResult: string | null = null;
+  let haikuError: string | null = null;
+
+  if (HAIKU_ENABLED) {
+    try {
+      haikuResult = await runHaikuMultiPass(buildHaikuEvidence(payload, state));
+    } catch (err) {
+      haikuError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  let sent = false;
+  let telegramReason = "DISABLED";
+
+  if (TELEGRAM_ENABLED) {
+    const hasSelectedPremium = Object.keys(state.selectedPremiums).length > 0;
+
+    if (!hasSelectedPremium) telegramReason = "NO_VALID_PREMIUM";
+    else if (lastFingerprintByDestination.get(state.telegramDestination) === state.fingerprint) telegramReason = "UNCHANGED_DEDUP";
+    else {
+      sent = await sendTelegram(payload.market.symbol, buildTelegramText(payload, state, haikuResult));
+      telegramReason = sent ? "SENT" : "SEND_FAILED_OR_NOT_CONFIGURED";
+      if (sent) lastFingerprintByDestination.set(state.telegramDestination, state.fingerprint);
+    }
+  }
+
+  lastState = {
+    ...state,
+    haiku: {
+      enabled: HAIKU_ENABLED,
+      configured: Boolean(ANTHROPIC_API_KEY && ANTHROPIC_MODEL),
+      result: haikuResult,
+      error: haikuError,
+    },
+    telegram: { enabled: TELEGRAM_ENABLED, sent, reason: telegramReason },
+  };
+
+  return lastState;
+}
+
+async function pollSource(): Promise<void> {
+  if (!SOURCE_URL) return;
+  lastSourcePollAt = new Date().toISOString();
+  try {
+    const payloads = await fetchSourcePayloads(SOURCE_URL, SOURCE_TOKEN);
+    for (const payload of payloads) {
+      const currentSnapshot = payload.market.snapshotId;
+      if (!currentSnapshot || lastSnapshotBySymbol.get(payload.market.symbol) === currentSnapshot) continue;
+      await processOne(payload);
+      lastSnapshotBySymbol.set(payload.market.symbol, currentSnapshot);
+    }
+    lastSourceError = null;
+  } catch (err) {
+    lastSourceError = err instanceof Error ? err.message : String(err);
+    console.warn(`[OPTION_RECORDER][SOURCE] ${lastSourceError}`);
+  }
+}
+
 app.get("/health", (c) => c.json({
   ok: true,
   service: "OPTION_RECORDER_V1",
   mode: OPTION_RECORDER_SHADOW_MODE.mode,
   productionImpact: OPTION_RECORDER_SHADOW_MODE.productionImpact,
+  sourceConfigured: Boolean(SOURCE_URL),
+  sourcePollMs: SOURCE_POLL_MS,
+  lastSourcePollAt,
+  lastSourceError,
   haikuEnabled: HAIKU_ENABLED,
   haikuConfigured: Boolean(ANTHROPIC_API_KEY && ANTHROPIC_MODEL),
   telegramEnabled: TELEGRAM_ENABLED,
@@ -98,7 +171,7 @@ app.get("/health", (c) => c.json({
   manualRailwayVariablesRequired: true,
 }));
 
-app.get("/status", (c) => c.json({ ok: true, lastState }));
+app.get("/status", (c) => c.json({ ok: true, lastState, lastSourcePollAt, lastSourceError }));
 
 app.post("/ingest", async (c) => {
   if (!authorized(c.req.header("authorization"))) {
@@ -107,50 +180,17 @@ app.post("/ingest", async (c) => {
 
   try {
     const payload = await c.req.json<RecorderIngestPayload>();
-    const state = processRecorderPayload(payload);
-
-    let haikuResult: string | null = null;
-    let haikuError: string | null = null;
-
-    if (HAIKU_ENABLED) {
-      try {
-        haikuResult = await runHaikuMultiPass(buildHaikuEvidence(payload, state));
-      } catch (err) {
-        haikuError = err instanceof Error ? err.message : String(err);
-      }
-    }
-
-    let sent = false;
-    let telegramReason = "DISABLED";
-
-    if (TELEGRAM_ENABLED) {
-      const hasSelectedPremium = Object.keys(state.selectedPremiums).length > 0;
-
-      if (!hasSelectedPremium) telegramReason = "NO_VALID_PREMIUM";
-      else if (lastFingerprintByDestination.get(state.telegramDestination) === state.fingerprint) telegramReason = "UNCHANGED_DEDUP";
-      else {
-        sent = await sendTelegram(payload.market.symbol, buildTelegramText(payload, state, haikuResult));
-        telegramReason = sent ? "SENT" : "SEND_FAILED_OR_NOT_CONFIGURED";
-        if (sent) lastFingerprintByDestination.set(state.telegramDestination, state.fingerprint);
-      }
-    }
-
-    lastState = {
-      ...state,
-      haiku: {
-        enabled: HAIKU_ENABLED,
-        configured: Boolean(ANTHROPIC_API_KEY && ANTHROPIC_MODEL),
-        result: haikuResult,
-        error: haikuError,
-      },
-      telegram: { enabled: TELEGRAM_ENABLED, sent, reason: telegramReason },
-    };
-
-    return c.json({ ok: true, state: lastState });
+    const state = await processOne(payload);
+    return c.json({ ok: true, state });
   } catch (err) {
     return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
   }
 });
 
 serve({ fetch: app.fetch, port: PORT });
-console.log(`[OPTION_RECORDER] listening port=${PORT} mode=${OPTION_RECORDER_SHADOW_MODE.mode} telegram=${TELEGRAM_ENABLED}`);
+console.log(`[OPTION_RECORDER] listening port=${PORT} mode=${OPTION_RECORDER_SHADOW_MODE.mode} telegram=${TELEGRAM_ENABLED} source=${Boolean(SOURCE_URL)}`);
+
+if (SOURCE_URL) {
+  void pollSource();
+  setInterval(() => void pollSource(), SOURCE_POLL_MS);
+}

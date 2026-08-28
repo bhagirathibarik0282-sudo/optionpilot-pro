@@ -11,6 +11,23 @@ function isSymbol(value: string): value is SymbolName {
   return (SYMBOLS as readonly string[]).includes(value);
 }
 
+async function inspectSymbol(symbol: SymbolName) {
+  const [promotion, fusion, families, combinations] = await Promise.all([
+    deriveClosedBlockPromotion(symbol),
+    deriveFamilyStateFusion(symbol),
+    deriveEvidenceFamilies(symbol),
+    deriveMeaningfulCombinations(symbol),
+  ]);
+
+  return {
+    symbol,
+    promotion,
+    fusion,
+    families,
+    combinations,
+  };
+}
+
 export function mountTefInspectRoutes(app: Hono): void {
   app.get("/api/tef/state", async (c) => {
     c.header("Cache-Control", "no-store");
@@ -20,22 +37,13 @@ export function mountTefInspectRoutes(app: Hono): void {
     }
 
     try {
-      const [promotion, fusion, families, combinations] = await Promise.all([
-        deriveClosedBlockPromotion(requested),
-        deriveFamilyStateFusion(requested),
-        deriveEvidenceFamilies(requested),
-        deriveMeaningfulCombinations(requested),
-      ]);
+      const state = await inspectSymbol(requested);
 
       return c.json({
         ok: true,
         mode: "READ_ONLY_INSPECTION",
-        symbol: requested,
         generatedAt: new Date().toISOString(),
-        promotion,
-        fusion,
-        families,
-        combinations,
+        ...state,
         safety: {
           affectsVerdict: false,
           affectsTelegram: false,
@@ -60,9 +68,10 @@ export function mountTefInspectRoutes(app: Hono): void {
 
   app.get("/api/tef/state/all", async (c) => {
     c.header("Cache-Control", "no-store");
+
     const results = await Promise.all(SYMBOLS.map(async (symbol) => {
       try {
-        return { symbol, ok: true, state: await deriveClosedBlockPromotion(symbol) };
+        return { symbol, ok: true, state: await inspectSymbol(symbol) };
       } catch (error) {
         return { symbol, ok: false, error: error instanceof Error ? error.message : String(error) };
       }
@@ -72,6 +81,9 @@ export function mountTefInspectRoutes(app: Hono): void {
       ok: results.some((r) => r.ok),
       mode: "READ_ONLY_INSPECTION",
       generatedAt: new Date().toISOString(),
+      evaluationMode: "PARALLEL",
+      symbolsEvaluatedInParallel: true,
+      perSymbolEvidenceEvaluatedInParallel: true,
       results,
       safety: {
         affectsVerdict: false,

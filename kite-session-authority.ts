@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { dbIsConfigured, dbQuerySafe } from "./db.js";
 
-export const KITE_SESSION_AUTHORITY_VERSION = "PHASE61_KITE_SESSION_AUTHORITY_V1" as const;
+export const KITE_SESSION_AUTHORITY_VERSION = "PHASE62_KITE_SESSION_AUTHORITY_RUNTIME_V2" as const;
 export const KITE_SESSION_AUTHORITY_ID = "primary" as const;
 
 type AuthorityCode =
@@ -15,6 +15,7 @@ type AuthorityCode =
 
 export interface KiteAuthoritySessionInput {
   accessToken: string;
+  sessionId: string;
   userId: string;
   email?: string | null;
   loginTime: number;
@@ -23,6 +24,7 @@ export interface KiteAuthoritySessionInput {
 
 export interface KiteAuthorityResolvedSession {
   accessToken: string;
+  sessionIdFingerprint: string;
   userId: string;
   email: string | null;
   loginTime: number;
@@ -42,12 +44,14 @@ export interface KiteAuthorityPublicStatus {
   expiresAt: string | null;
   tokenFingerprint: string | null;
   tokenExposed: false;
+  sessionIdExposed: false;
   autoLoginAttempted: false;
   productionDecisionImpact: "NONE";
 }
 
 type AuthorityDbRow = {
   access_token_ciphertext: string;
+  session_id_fingerprint: string;
   user_id: string;
   email: string | null;
   login_time: string | Date;
@@ -90,9 +94,18 @@ export function kiteTokenFingerprint(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex").slice(0, 16);
 }
 
+export function kiteSessionIdFingerprint(sessionId: string): string {
+  return createHash("sha256").update(`kite-session:${sessionId}`, "utf8").digest("hex");
+}
+
+export function kiteSessionIdMatchesFingerprint(sessionId: string, expectedFingerprint: string): boolean {
+  if (!sessionId || !expectedFingerprint) return false;
+  return kiteSessionIdFingerprint(sessionId) === expectedFingerprint;
+}
+
 function publicStatus(
   code: AuthorityCode,
-  fields: Partial<Omit<KiteAuthorityPublicStatus, "version" | "architectureRole" | "code" | "active" | "reconnectRequired" | "tokenExposed" | "autoLoginAttempted" | "productionDecisionImpact">> = {},
+  fields: Partial<Omit<KiteAuthorityPublicStatus, "version" | "architectureRole" | "code" | "active" | "reconnectRequired" | "tokenExposed" | "sessionIdExposed" | "autoLoginAttempted" | "productionDecisionImpact">> = {},
 ): KiteAuthorityPublicStatus {
   return {
     version: KITE_SESSION_AUTHORITY_VERSION,
@@ -106,6 +119,7 @@ function publicStatus(
     expiresAt: fields.expiresAt ?? null,
     tokenFingerprint: fields.tokenFingerprint ?? null,
     tokenExposed: false,
+    sessionIdExposed: false,
     autoLoginAttempted: false,
     productionDecisionImpact: "NONE",
   };
@@ -117,6 +131,7 @@ async function ensureAuthoritySchema(): Promise<boolean> {
     CREATE TABLE IF NOT EXISTS kite_session_authority (
       authority_id TEXT PRIMARY KEY,
       access_token_ciphertext TEXT NOT NULL,
+      session_id_fingerprint TEXT,
       user_id TEXT NOT NULL,
       email TEXT,
       login_time TIMESTAMPTZ NOT NULL,
@@ -125,11 +140,16 @@ async function ensureAuthoritySchema(): Promise<boolean> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
-  return result !== null;
+  if (result === null) return false;
+  const migration = await dbQuerySafe(`
+    ALTER TABLE kite_session_authority
+    ADD COLUMN IF NOT EXISTS session_id_fingerprint TEXT
+  `);
+  return migration !== null;
 }
 
 function validInput(input: KiteAuthoritySessionInput): boolean {
-  return !!input.accessToken && !!input.userId && Number.isFinite(input.loginTime) && Number.isFinite(input.expiresAt) && input.expiresAt > input.loginTime;
+  return !!input.accessToken && !!input.sessionId && !!input.userId && Number.isFinite(input.loginTime) && Number.isFinite(input.expiresAt) && input.expiresAt > input.loginTime;
 }
 
 export async function persistKiteAuthoritySession(
@@ -152,19 +172,21 @@ export async function persistKiteAuthoritySession(
 
   const ciphertext = encryptKiteAccessTokenForAuthority(input.accessToken, secret);
   const fingerprint = kiteTokenFingerprint(input.accessToken);
+  const sessionIdFingerprint = kiteSessionIdFingerprint(input.sessionId);
   const write = await dbQuerySafe(
     `INSERT INTO kite_session_authority (
-       authority_id, access_token_ciphertext, user_id, email, login_time, expires_at, token_fingerprint, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,now())
+       authority_id, access_token_ciphertext, session_id_fingerprint, user_id, email, login_time, expires_at, token_fingerprint, updated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
      ON CONFLICT (authority_id) DO UPDATE SET
        access_token_ciphertext=EXCLUDED.access_token_ciphertext,
+       session_id_fingerprint=EXCLUDED.session_id_fingerprint,
        user_id=EXCLUDED.user_id,
        email=EXCLUDED.email,
        login_time=EXCLUDED.login_time,
        expires_at=EXCLUDED.expires_at,
        token_fingerprint=EXCLUDED.token_fingerprint,
        updated_at=now()`,
-    [KITE_SESSION_AUTHORITY_ID, ciphertext, input.userId, input.email ?? null, new Date(input.loginTime).toISOString(), new Date(input.expiresAt).toISOString(), fingerprint],
+    [KITE_SESSION_AUTHORITY_ID, ciphertext, sessionIdFingerprint, input.userId, input.email ?? null, new Date(input.loginTime).toISOString(), new Date(input.expiresAt).toISOString(), fingerprint],
   );
   if (write === null) return { ok: false, status: publicStatus("STORAGE_UNAVAILABLE") };
 
@@ -189,7 +211,7 @@ export async function resolveKiteAuthoritySession(now = Date.now()): Promise<{
   if (!(await ensureAuthoritySchema())) return { session: null, status: publicStatus("STORAGE_UNAVAILABLE") };
 
   const read = await dbQuerySafe<AuthorityDbRow>(
-    `SELECT access_token_ciphertext, user_id, email, login_time, expires_at, token_fingerprint
+    `SELECT access_token_ciphertext, session_id_fingerprint, user_id, email, login_time, expires_at, token_fingerprint
        FROM kite_session_authority WHERE authority_id = $1`,
     [KITE_SESSION_AUTHORITY_ID],
   );
@@ -206,7 +228,7 @@ export async function resolveKiteAuthoritySession(now = Date.now()): Promise<{
     expiresAt: Number.isFinite(expiresAt) ? new Date(expiresAt).toISOString() : null,
     tokenFingerprint: row.token_fingerprint,
   };
-  if (!Number.isFinite(expiresAt) || expiresAt <= now) {
+  if (!Number.isFinite(expiresAt) || expiresAt <= now || !row.session_id_fingerprint) {
     return { session: null, status: publicStatus("RECONNECT_REQUIRED", meta) };
   }
 
@@ -216,6 +238,7 @@ export async function resolveKiteAuthoritySession(now = Date.now()): Promise<{
   return {
     session: {
       accessToken,
+      sessionIdFingerprint: row.session_id_fingerprint,
       userId: row.user_id,
       email: row.email,
       loginTime,

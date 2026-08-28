@@ -1,11 +1,19 @@
 import type { Hono } from "hono";
 import { researchRouter } from "./research-router.js";
+import { installTelegramCombinationBridge } from "./telegram-combination-bridge.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 
+// server.ts already imports this bootstrap module at process start. Install the
+// display-only Telegram evidence bridge here so the existing 1-minute sender
+// can surface COMB-01..08 without changing its verdict, score, cadence, or
+// execution logic. The bridge is idempotent and fail-closed.
+installTelegramCombinationBridge();
+
 /**
  * Mounts research-only endpoints without changing any production verdict,
- * scoring, Telegram, or trading execution path.
+ * scoring, or trading execution path. The separately installed Telegram
+ * bridge above is display-only: it appends evidence but never changes action.
  *
  * Intended server.ts integration:
  *   mountResearchRoutes(app);
@@ -13,7 +21,6 @@ const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 export function mountResearchRoutes(app: Hono): void {
   // UI-only middleware: after the existing main dashboard renders, inject a
   // small floating shortcut to the already-existing Intelligence Layer page.
-  // It does not alter dashboard data, scoring, verdicts, Telegram, or execution.
   app.use("/", async (c, next) => {
     await next();
 

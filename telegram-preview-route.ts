@@ -14,7 +14,6 @@ import { deriveFamilyStateFusion } from "./family-state-fusion.js";
 import { deriveEvidenceFamilies } from "./evidence-family-engine.js";
 
 const SYMBOLS: readonly TelegramSymbol[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
-const ROUTING_TEST_CONFIRM = "ROUTING_TEST_ONLY";
 
 function isSymbol(value: string): value is TelegramSymbol {
   return (SYMBOLS as readonly string[]).includes(value);
@@ -58,104 +57,91 @@ function evidenceFromFamilies(
     }));
 }
 
+async function buildCard(requested: TelegramSymbol, routingTest: boolean): Promise<CanonicalTelegramCard> {
+  const [promotion, fusion, familyResult] = await Promise.all([
+    deriveClosedBlockPromotion(requested),
+    deriveFamilyStateFusion(requested),
+    deriveEvidenceFamilies(requested),
+  ]);
+
+  const coreIds = ["PRICE_STRUCTURE", "OPTION_PREMIUM_REALITY"] as const;
+  const contextIds = ["VOLATILITY_GREEKS", "POSITIONING", "MULTI_EXPIRY", "BREADTH_REGIME"] as const;
+  const allFamilies = familyResult.families ?? [];
+
+  return {
+    schemaVersion: "TELEGRAM_CARD_V1",
+    symbol: requested,
+    generatedAt: new Date().toISOString(),
+    routing: {
+      groupName: TELEGRAM_INDEX_GROUP_ROUTING[requested],
+      strictIndexIsolation: true,
+      crossPostAllowed: false,
+    },
+    headline: {
+      verdict: displayDirection(fusion.bias, fusion.state),
+      confidenceLabel: "UNAVAILABLE",
+      truth: "PARTIAL",
+      freshnessSeconds: null,
+    },
+    timeframe: {
+      m1: promotion.oneMinute?.state === "INSUFFICIENT_DATA" ? "INSUFFICIENT_DATA" : "WARNING_ONLY",
+      m3: tfState(promotion.tf3m),
+      m15: tfState(promotion.tf15m),
+      m30: tfState(promotion.tf30m),
+      m60: tfState(promotion.tf60m),
+    },
+    coreEvidence: evidenceFromFamilies(allFamilies, coreIds),
+    contextEvidence: evidenceFromFamilies(allFamilies, contextIds),
+    conflicts: fusion.conflictingFamilies ?? [],
+    warnings: fusion.warningFamilies ?? [],
+    candidate: {
+      side: "NONE",
+      strike: null,
+      expiry: null,
+      dte: null,
+      premium: null,
+      health: "UNAVAILABLE",
+    },
+    tradePlan: {
+      entry: null,
+      sl: null,
+      t1: null,
+      t2: null,
+      t3: null,
+      rrToT1: null,
+      rrToT2: null,
+      rrToT3: null,
+      status: "UNAVAILABLE",
+    },
+    reasons: routingTest
+      ? ["ROUTING TEST ONLY — NOT A TRADE SIGNAL"]
+      : (promotion.reasons ?? []),
+    nextUpdateAt: null,
+    safety: {
+      forwardTestingOnly: true,
+      affectsVerdict: false,
+      affectsExecution: false,
+    },
+  };
+}
+
 export function mountTelegramPreviewRoutes(app: Hono): void {
   app.get("/api/telegram/preview", async (c) => {
     c.header("Cache-Control", "no-store");
     const requested = (c.req.query("symbol") ?? "NIFTY").toUpperCase();
-    const requestedSend = c.req.query("send") === "TEST";
-    const confirmed = c.req.query("confirm") === ROUTING_TEST_CONFIRM;
-    const testEnabled = process.env.TELEGRAM_TEST_SEND_ENABLED === "true";
-    const liveRoutingTest = requestedSend && confirmed && testEnabled;
 
     if (!isSymbol(requested)) {
       return c.json({ ok: false, error: "INVALID_SYMBOL", allowed: SYMBOLS }, 400);
     }
 
-    if (requestedSend && !liveRoutingTest) {
-      return c.json({
-        ok: false,
-        error: "TELEGRAM_ROUTING_TEST_BLOCKED",
-        required: {
-          query: `send=TEST&confirm=${ROUTING_TEST_CONFIRM}`,
-          env: "TELEGRAM_TEST_SEND_ENABLED=true",
-        },
-        sendsTelegram: false,
-      }, 403);
-    }
-
     try {
-      const [promotion, fusion, familyResult] = await Promise.all([
-        deriveClosedBlockPromotion(requested),
-        deriveFamilyStateFusion(requested),
-        deriveEvidenceFamilies(requested),
-      ]);
-
-      const coreIds = ["PRICE_STRUCTURE", "OPTION_PREMIUM_REALITY"] as const;
-      const contextIds = ["VOLATILITY_GREEKS", "POSITIONING", "MULTI_EXPIRY", "BREADTH_REGIME"] as const;
-      const allFamilies = familyResult.families ?? [];
-
-      const card: CanonicalTelegramCard = {
-        schemaVersion: "TELEGRAM_CARD_V1",
-        symbol: requested,
-        generatedAt: new Date().toISOString(),
-        routing: {
-          groupName: TELEGRAM_INDEX_GROUP_ROUTING[requested],
-          strictIndexIsolation: true,
-          crossPostAllowed: false,
-        },
-        headline: {
-          verdict: displayDirection(fusion.bias, fusion.state),
-          confidenceLabel: "UNAVAILABLE",
-          truth: "PARTIAL",
-          freshnessSeconds: null,
-        },
-        timeframe: {
-          m1: promotion.oneMinute?.state === "INSUFFICIENT_DATA" ? "INSUFFICIENT_DATA" : "WARNING_ONLY",
-          m3: tfState(promotion.tf3m),
-          m15: tfState(promotion.tf15m),
-          m30: tfState(promotion.tf30m),
-          m60: tfState(promotion.tf60m),
-        },
-        coreEvidence: evidenceFromFamilies(allFamilies, coreIds),
-        contextEvidence: evidenceFromFamilies(allFamilies, contextIds),
-        conflicts: fusion.conflictingFamilies ?? [],
-        warnings: fusion.warningFamilies ?? [],
-        candidate: {
-          side: "NONE",
-          strike: null,
-          expiry: null,
-          dte: null,
-          premium: null,
-          health: "UNAVAILABLE",
-        },
-        tradePlan: {
-          entry: null,
-          sl: null,
-          t1: null,
-          t2: null,
-          t3: null,
-          rrToT1: null,
-          rrToT2: null,
-          rrToT3: null,
-          status: "UNAVAILABLE",
-        },
-        reasons: liveRoutingTest
-          ? ["ROUTING TEST ONLY — NOT A TRADE SIGNAL"]
-          : (promotion.reasons ?? []),
-        nextUpdateAt: null,
-        safety: {
-          forwardTestingOnly: true,
-          affectsVerdict: false,
-          affectsExecution: false,
-        },
-      };
-
-      const senderSimulation = await sendTelegramCardV2(card, { dryRun: !liveRoutingTest });
+      const card = await buildCard(requested, false);
+      const senderSimulation = await sendTelegramCardV2(card, { dryRun: true });
 
       return c.json({
         ok: true,
-        mode: liveRoutingTest ? "CONTROLLED_TELEGRAM_ROUTING_TEST" : "READ_ONLY_TELEGRAM_V2_PREVIEW",
-        source: liveRoutingTest ? "MANUAL_ROUTING_TEST_NOT_TRADE_SIGNAL" : "TEF_EVIDENCE_PREVIEW_NOT_FINAL_VERDICT",
+        mode: "READ_ONLY_TELEGRAM_V2_PREVIEW",
+        source: "TEF_EVIDENCE_PREVIEW_NOT_FINAL_VERDICT",
         symbol: requested,
         destinationGroup: TELEGRAM_INDEX_GROUP_ROUTING[requested],
         strictIndexIsolation: true,
@@ -164,11 +150,10 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
         senderSimulation,
         card,
         safety: {
-          sendsTelegram: liveRoutingTest,
-          senderDryRun: !liveRoutingTest,
-          manualRoutingTestOnly: liveRoutingTest,
+          sendsTelegram: false,
+          senderDryRun: true,
           affectsVerdict: false,
-          affectsTelegram: liveRoutingTest,
+          affectsTelegram: false,
           affectsExecution: false,
           createsOrders: false,
           extraMarketFetches: false,
@@ -178,9 +163,72 @@ export function mountTelegramPreviewRoutes(app: Hono): void {
       console.error("[Telegram V2 Preview] failed:", error instanceof Error ? error.message : error);
       return c.json({
         ok: false,
-        mode: liveRoutingTest ? "CONTROLLED_TELEGRAM_ROUTING_TEST" : "READ_ONLY_TELEGRAM_V2_PREVIEW",
+        mode: "READ_ONLY_TELEGRAM_V2_PREVIEW",
         symbol: requested,
-        error: liveRoutingTest ? "TELEGRAM_ROUTING_TEST_FAILED" : "TELEGRAM_V2_PREVIEW_FAILED",
+        error: "TELEGRAM_V2_PREVIEW_FAILED",
+        sendsTelegram: false,
+        affectsVerdict: false,
+        affectsTelegram: false,
+        affectsExecution: false,
+      }, 503);
+    }
+  });
+
+  app.post("/api/telegram/routing-test", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const requested = (c.req.query("symbol") ?? "").toUpperCase();
+    const testEnabled = process.env.TELEGRAM_TEST_SEND_ENABLED === "true";
+    const expectedKey = process.env.TELEGRAM_ROUTING_TEST_KEY?.trim() ?? "";
+    const suppliedKey = c.req.header("x-telegram-routing-test-key")?.trim() ?? "";
+
+    if (!isSymbol(requested)) {
+      return c.json({ ok: false, error: "INVALID_SYMBOL", allowed: SYMBOLS, sendsTelegram: false }, 400);
+    }
+
+    if (!testEnabled || !expectedKey || suppliedKey !== expectedKey) {
+      return c.json({
+        ok: false,
+        error: "TELEGRAM_ROUTING_TEST_BLOCKED",
+        required: {
+          method: "POST",
+          env: ["TELEGRAM_TEST_SEND_ENABLED=true", "TELEGRAM_ROUTING_TEST_KEY=<secret>"],
+          header: "x-telegram-routing-test-key",
+        },
+        sendsTelegram: false,
+      }, 403);
+    }
+
+    try {
+      const card = await buildCard(requested, true);
+      const result = await sendTelegramCardV2(card, { dryRun: false });
+
+      return c.json({
+        ok: result.ok,
+        mode: "CONTROLLED_TELEGRAM_ROUTING_TEST",
+        source: "MANUAL_ROUTING_TEST_NOT_TRADE_SIGNAL",
+        symbol: requested,
+        destinationGroup: TELEGRAM_INDEX_GROUP_ROUTING[requested],
+        strictIndexIsolation: true,
+        crossPostAllowed: false,
+        message: renderTelegramCardV2(card),
+        senderResult: result,
+        safety: {
+          sendsTelegram: result.ok && result.sent,
+          manualRoutingTestOnly: true,
+          affectsVerdict: false,
+          affectsTelegram: result.ok && result.sent,
+          affectsExecution: false,
+          createsOrders: false,
+          extraMarketFetches: false,
+        },
+      }, result.ok ? 200 : 502);
+    } catch (error) {
+      console.error("[Telegram Routing Test] failed:", error instanceof Error ? error.message : error);
+      return c.json({
+        ok: false,
+        mode: "CONTROLLED_TELEGRAM_ROUTING_TEST",
+        symbol: requested,
+        error: "TELEGRAM_ROUTING_TEST_FAILED",
         sendsTelegram: false,
         affectsVerdict: false,
         affectsTelegram: false,

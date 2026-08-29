@@ -13,14 +13,7 @@ test("normalizes supported NSE date formats", () => {
   assert.equal(normalizeNseDate("28/08/2026"), "2026-08-28");
 });
 
-test("parses FII and DII cash rows and recomputes net", () => {
-  const result = parseNseFiiDiiResponse([
-    { category: "FII/FPI", date: "28-Aug-2026" },
-  ]);
-  void result;
-});
-
-test("parses standard FII/DII cash payload", () => {
+test("parses standard FII/DII cash payload and recomputes net", () => {
   const result = parseNseFiiDiiResponse([
     { category: "FII/FPI", date: "28-08-2026", buyValue: "12,000.50", sellValue: "13,500.25" },
     { category: "DII", date: "28-08-2026", buyValue: "14,000", sellValue: "11,000" },

@@ -16,6 +16,7 @@ on:
       - strategy-readiness-engine.ts
       - risk-readiness-engine.ts
       - decision-readiness-engine.ts
+      - research-engine-chain.ts
       - scripts/verify-research-server-mount.ts
       - scripts/apply-research-server-mount.ts
       - test/research-index.test.ts
@@ -27,6 +28,7 @@ on:
       - test/strategy-readiness-engine.test.ts
       - test/risk-readiness-engine.test.ts
       - test/decision-readiness-engine.test.ts
+      - test/research-engine-chain.test.ts
       - .github/workflows/option-buying-ci.yml
   workflow_dispatch:
 

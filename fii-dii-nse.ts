@@ -17,6 +17,12 @@ export interface NormalizedFiiDiiCash {
 }
 
 export const NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact";
+export const NSE_FII_DII_REPORT_URL = "https://www.nseindia.com/reports/fii-dii";
+
+const MONTHS: Record<string, string> = {
+  JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06",
+  JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12",
+};
 
 function finiteNumber(value: unknown, label: string): number {
   const n = typeof value === "number" ? value : Number(String(value ?? "").replace(/,/g, "").trim());
@@ -32,6 +38,12 @@ export function normalizeNseDate(value: unknown): string {
   if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
   const slash = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (slash) return `${slash[3]}-${slash[2]}-${slash[1]}`;
+  const named = raw.match(/^(\d{2})-([A-Za-z]{3})-(\d{4})$/);
+  if (named) {
+    const month = MONTHS[named[2].toUpperCase()];
+    if (!month) throw new Error("INVALID_NSE_FII_DII_DATE");
+    return `${named[3]}-${month}-${named[1]}`;
+  }
   throw new Error("INVALID_NSE_FII_DII_DATE");
 }
 
@@ -84,18 +96,40 @@ export function parseNseFiiDiiResponse(rows: unknown, fetchedAt = new Date().toI
   };
 }
 
+function baseHeaders(): Record<string, string> {
+  return {
+    accept: "application/json,text/plain,*/*",
+    "accept-language": "en-US,en;q=0.9",
+    referer: NSE_FII_DII_REPORT_URL,
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+  };
+}
+
+function cookiesFrom(response: Response): string {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+  const setCookies = headers.getSetCookie?.() ?? [];
+  const raw = setCookies.length > 0 ? setCookies : (response.headers.get("set-cookie") ? [response.headers.get("set-cookie") as string] : []);
+  return raw
+    .map((entry) => entry.split(";", 1)[0]?.trim())
+    .filter(Boolean)
+    .join("; ");
+}
+
 export async function fetchNseFiiDii(
   fetchImpl: typeof fetch = fetch,
   expectedTradingDate?: string,
 ): Promise<NormalizedFiiDiiCash> {
-  const response = await fetchImpl(NSE_FII_DII_URL, {
-    headers: {
-      accept: "application/json,text/plain,*/*",
-      "accept-language": "en-US,en;q=0.9",
-      referer: "https://www.nseindia.com/reports/fii-dii",
-      "user-agent": "Mozilla/5.0",
-    },
-  });
+  let cookie = "";
+  try {
+    const warmup = await fetchImpl(NSE_FII_DII_REPORT_URL, { headers: baseHeaders() });
+    if (warmup.ok) cookie = cookiesFrom(warmup);
+  } catch {
+    // Warm-up is best-effort; the API request below remains the authoritative attempt.
+  }
+
+  const headers = baseHeaders();
+  if (cookie) headers.cookie = cookie;
+  const response = await fetchImpl(NSE_FII_DII_URL, { headers });
   if (!response.ok) throw new Error(`NSE_FII_DII_HTTP_${response.status}`);
   const normalized = parseNseFiiDiiResponse(await response.json());
   if (expectedTradingDate) assertNseFiiDiiFreshness(normalized.date, expectedTradingDate);

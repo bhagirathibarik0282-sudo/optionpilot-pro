@@ -12,6 +12,7 @@ on:
       - h1-pilot-audit-*.ts
       - h1-runtime-bridge.ts
       - candidate-history-*.ts
+      - candidate-style-selector.ts
       - probability-engine.ts
       - market-regime-engine.ts
       - strategy-readiness-engine.ts
@@ -25,6 +26,7 @@ on:
       - test/h1-pilot-audit-*.test.ts
       - test/h1-runtime-bridge.test.ts
       - test/candidate-history-*.test.ts
+      - test/candidate-style-selector.test.ts
       - test/probability-engine.test.ts
       - test/market-regime-engine.test.ts
       - test/strategy-readiness-engine.test.ts

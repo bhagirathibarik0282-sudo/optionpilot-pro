@@ -23,6 +23,7 @@ on:
       - message-trigger-engine.ts
       - buyer-seller-behaviour-engine.ts
       - psychology-shadow-chain.ts
+      - psychology-shadow-validation.ts
       - probability-engine.ts
       - market-regime-engine.ts
       - strategy-readiness-engine.ts
@@ -47,6 +48,7 @@ on:
       - test/message-trigger-engine.test.ts
       - test/buyer-seller-behaviour-engine.test.ts
       - test/psychology-shadow-chain.test.ts
+      - test/psychology-shadow-validation.test.ts
       - test/probability-engine.test.ts
       - test/market-regime-engine.test.ts
       - test/strategy-readiness-engine.test.ts

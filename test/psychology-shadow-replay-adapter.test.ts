@@ -5,7 +5,7 @@ import type { ShadowValidationObservation } from "../psychology-shadow-validatio
 
 const validation: ShadowValidationObservation = {
   tradeId: "T1",
-  regime: "TREND",
+  regimes: ["TREND"],
   completedTrade: true,
   chaseWarnings: 1,
   falseChaseWarnings: 0,
@@ -43,6 +43,7 @@ test("eligible real replay can enter validation", () => {
   const r = adaptPsychologyValidationEvidence({ source: "REAL_REPLAY", replay, validation });
   assert.equal(r.accepted, true);
   assert.equal(r.observation?.tradeId, "T1");
+  assert.deepEqual(r.observation?.regimes, ["TREND"]);
 });
 
 test("eligible live observation can enter validation", () => {
@@ -64,31 +65,19 @@ test("unsupported runtime source fails closed", () => {
 });
 
 test("lookahead replay is blocked by H1 replay guard", () => {
-  const r = adaptPsychologyValidationEvidence({
-    source: "REAL_REPLAY",
-    replay: { ...replay, observedAt: "2026-08-20T09:22:00+05:30" },
-    validation,
-  });
+  const r = adaptPsychologyValidationEvidence({ source: "REAL_REPLAY", replay: { ...replay, observedAt: "2026-08-20T09:22:00+05:30" }, validation });
   assert.equal(r.accepted, false);
   assert.ok(r.blockers.includes("REPLAY_GUARD_LOOKAHEAD_FUTURE_OBSERVATION"));
 });
 
 test("live observation cannot use future evidence", () => {
-  const r = adaptPsychologyValidationEvidence({
-    source: "LIVE_OBSERVATION",
-    replay: { ...replay, observedAt: "2026-08-20T09:22:00+05:30" },
-    validation,
-  });
+  const r = adaptPsychologyValidationEvidence({ source: "LIVE_OBSERVATION", replay: { ...replay, observedAt: "2026-08-20T09:22:00+05:30" }, validation });
   assert.equal(r.accepted, false);
   assert.ok(r.blockers.includes("LIVE_GUARD_LOOKAHEAD_FUTURE_OBSERVATION"));
 });
 
 test("live observation cannot use an unclosed block", () => {
-  const r = adaptPsychologyValidationEvidence({
-    source: "LIVE_OBSERVATION",
-    replay: { ...replay, blockClosed: false },
-    validation,
-  });
+  const r = adaptPsychologyValidationEvidence({ source: "LIVE_OBSERVATION", replay: { ...replay, blockClosed: false }, validation });
   assert.equal(r.accepted, false);
   assert.ok(r.blockers.includes("LIVE_GUARD_UNCONFIRMED_RUNNING_BLOCK"));
 });
@@ -100,21 +89,13 @@ test("trade identity mismatch fails closed", () => {
 });
 
 test("low-quality live observation is blocked", () => {
-  const r = adaptPsychologyValidationEvidence({
-    source: "LIVE_OBSERVATION",
-    replay: { ...replay, quality: "STALE" },
-    validation,
-  });
+  const r = adaptPsychologyValidationEvidence({ source: "LIVE_OBSERVATION", replay: { ...replay, quality: "STALE" }, validation });
   assert.equal(r.accepted, false);
   assert.ok(r.blockers.includes("LIVE_GUARD_NON_RESEARCH_QUALITY_STALE"));
 });
 
 test("out-of-session live observation is blocked", () => {
-  const r = adaptPsychologyValidationEvidence({
-    source: "LIVE_OBSERVATION",
-    replay: { ...replay, sessionEligible: false },
-    validation,
-  });
+  const r = adaptPsychologyValidationEvidence({ source: "LIVE_OBSERVATION", replay: { ...replay, sessionEligible: false }, validation });
   assert.equal(r.accepted, false);
   assert.ok(r.blockers.includes("LIVE_GUARD_OUTSIDE_ELIGIBLE_SESSION"));
 });

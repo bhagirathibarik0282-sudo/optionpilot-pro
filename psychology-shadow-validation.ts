@@ -43,7 +43,8 @@ export const SHADOW_VALIDATION_METRICS: Readonly<Record<ShadowValidationMetricKe
 
 export interface ShadowValidationObservation {
   tradeId: string;
-  regime: ShadowValidationRegime;
+  /** One real trade may legitimately belong to multiple validation regimes (for example EXPIRY + HIGH_IV). */
+  regimes: ShadowValidationRegime[];
   completedTrade: boolean;
   chaseWarnings: number;
   falseChaseWarnings: number;
@@ -97,11 +98,17 @@ export function validatePsychologyShadowObservations(observations: ShadowValidat
     if (seenTradeIds.has(tradeId)) throw new Error(`duplicate tradeId is not allowed: ${tradeId}`);
     seenTradeIds.add(tradeId);
 
-    if (!REQUIRED_SHADOW_REGIMES.includes(o.regime)) throw new Error(`unsupported regime: ${String(o.regime)}`);
+    if (!Array.isArray(o.regimes) || o.regimes.length === 0) throw new Error("at least one validation regime is required");
+    const seenRegimes = new Set<ShadowValidationRegime>();
+    for (const regime of o.regimes) {
+      if (!REQUIRED_SHADOW_REGIMES.includes(regime)) throw new Error(`unsupported regime: ${String(regime)}`);
+      if (seenRegimes.has(regime)) throw new Error(`duplicate regime tag is not allowed: ${regime}`);
+      seenRegimes.add(regime);
+    }
     if (typeof o.completedTrade !== "boolean") throw new Error("completedTrade must be boolean");
 
     for (const [key, value] of Object.entries(o)) {
-      if (key === "tradeId" || key === "regime" || key === "completedTrade") continue;
+      if (key === "tradeId" || key === "regimes" || key === "completedTrade") continue;
       assertCount(key, value as number);
     }
     if (o.falseChaseWarnings > o.chaseWarnings) throw new Error("falseChaseWarnings cannot exceed chaseWarnings");
@@ -116,7 +123,7 @@ export function validatePsychologyShadowObservations(observations: ShadowValidat
 
   const sum = (key: keyof ShadowValidationObservation) => observations.reduce((acc, o) => acc + (typeof o[key] === "number" ? (o[key] as number) : 0), 0);
   const completedTrades = observations.filter((o) => o.completedTrade).length;
-  const coveredRegimes = REQUIRED_SHADOW_REGIMES.filter((r) => observations.some((o) => o.regime === r));
+  const coveredRegimes = REQUIRED_SHADOW_REGIMES.filter((r) => observations.some((o) => o.regimes.includes(r)));
   const missingRegimes = REQUIRED_SHADOW_REGIMES.filter((r) => !coveredRegimes.includes(r));
 
   const metrics: Record<ShadowValidationMetricKey, number | null> = {

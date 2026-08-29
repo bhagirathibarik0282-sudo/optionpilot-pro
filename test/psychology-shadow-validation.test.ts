@@ -5,12 +5,13 @@ import {
   SHADOW_VALIDATION_METRICS,
   validatePsychologyShadowObservations,
   type ShadowValidationObservation,
+  type ShadowValidationRegime,
 } from "../psychology-shadow-validation.ts";
 
-function obs(regime: ShadowValidationObservation["regime"], id: string): ShadowValidationObservation {
+function obs(regimes: ShadowValidationRegime | ShadowValidationRegime[], id: string): ShadowValidationObservation {
   return {
     tradeId: id,
-    regime,
+    regimes: Array.isArray(regimes) ? regimes : [regimes],
     completedTrade: true,
     chaseWarnings: 2,
     falseChaseWarnings: 0,
@@ -64,6 +65,16 @@ test("complete synthetic coverage calculates metrics but still cannot promote", 
   assert.ok(r.blockers.includes("ACCEPTANCE_THRESHOLDS_NOT_CALIBRATED_OR_FROZEN"));
 });
 
+test("one real trade may cover multiple overlapping regimes without double-counting the trade", () => {
+  const r = validatePsychologyShadowObservations([obs(["EXPIRY", "HIGH_IV", "TREND"], "T1")]);
+  assert.equal(r.observations, 1);
+  assert.equal(r.completedTrades, 1);
+  assert.ok(r.coveredRegimes.includes("EXPIRY"));
+  assert.ok(r.coveredRegimes.includes("HIGH_IV"));
+  assert.ok(r.coveredRegimes.includes("TREND"));
+  assert.equal(r.metrics.AVERAGE_UPDATES_PER_TRADE, 4);
+});
+
 test("missing regimes are explicit blockers", () => {
   const r = validatePsychologyShadowObservations([obs("TREND", "T1")]);
   assert.ok(r.missingRegimes.includes("FALSE_BREAKOUT"));
@@ -75,6 +86,12 @@ test("empty validation fails closed", () => {
   assert.equal(r.promotionEligible, false);
   assert.ok(r.blockers.includes("NO_SHADOW_OBSERVATIONS"));
   assert.ok(r.blockers.includes("NO_COMPLETED_CANDIDATE_TRADES"));
+});
+
+test("regime tags must be non-empty, supported and unique", () => {
+  assert.throws(() => validatePsychologyShadowObservations([{ ...obs("TREND", "T1"), regimes: [] }]), /at least one validation regime/);
+  assert.throws(() => validatePsychologyShadowObservations([{ ...obs("TREND", "T2"), regimes: ["UNKNOWN" as ShadowValidationRegime] }]), /unsupported regime/);
+  assert.throws(() => validatePsychologyShadowObservations([{ ...obs("TREND", "T3"), regimes: ["TREND", "TREND"] }]), /duplicate regime tag/);
 });
 
 test("impossible counters are rejected instead of silently corrupting metrics", () => {
@@ -90,11 +107,6 @@ test("duplicate trade ids are rejected so per-trade denominators cannot be infla
     () => validatePsychologyShadowObservations([obs("TREND", "T1"), obs("RANGE", "T1")]),
     /duplicate tradeId is not allowed/,
   );
-});
-
-test("unsupported runtime regime values fail closed", () => {
-  const bad = { ...obs("TREND", "T1"), regime: "UNKNOWN" as ShadowValidationObservation["regime"] };
-  assert.throws(() => validatePsychologyShadowObservations([bad]), /unsupported regime/);
 });
 
 test("validation harness has no live authority", () => {

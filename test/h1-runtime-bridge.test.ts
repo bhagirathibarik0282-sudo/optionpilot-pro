@@ -80,6 +80,19 @@ test("runtime bridge refuses invalid source time", async () => {
   assert.deepEqual(result, { attempted: 0, skipped: 1 });
 });
 
+test("runtime bridge refuses non-positive spot identity", async () => {
+  const zero = await recordH1FromRuntimeSnapshot(
+    { symbol: "NIFTY", spot: 0, snapshotId: "zero-spot", timestamp: TS, expiries: [], futuresContracts: [] },
+    { overallVerdict: "TRUE" },
+  );
+  const negative = await recordH1FromRuntimeSnapshot(
+    { symbol: "NIFTY", spot: -1, snapshotId: "negative-spot", timestamp: TS, expiries: [], futuresContracts: [] },
+    { overallVerdict: "TRUE" },
+  );
+  assert.deepEqual(zero, { attempted: 0, skipped: 0 });
+  assert.deepEqual(negative, { attempted: 0, skipped: 0 });
+});
+
 test("runtime bridge can derive deterministic snapshot identity only from validated source time", async () => {
   const result = await recordH1FromRuntimeSnapshot(
     { symbol: "NIFTY", spot: 25000, timestamp: TS, expiries: [], futuresContracts: [] },
@@ -93,5 +106,27 @@ test("missing optional numeric metrics do not get promoted to required observati
     { symbol: "NIFTY", spot: 25000, snapshotId: "missing-optionals", timestamp: TS, expiries: [], futuresContracts: [] },
     { overallVerdict: "PARTIAL" },
   );
+  assert.deepEqual(result, { attempted: 1, skipped: 0 });
+});
+
+test("missing ATM anchor cannot force an arbitrary option-band selection", async () => {
+  const result = await recordH1FromRuntimeSnapshot(
+    {
+      symbol: "NIFTY",
+      spot: 25000,
+      snapshotId: "missing-atm",
+      timestamp: TS,
+      expiries: [{
+        expiry: "Current",
+        expiryDate: "2026-09-03",
+        ceStrikes: [{ optionType: "CE", strike: 25000, lastPrice: 100 }],
+        peStrikes: [{ optionType: "PE", strike: 25000, lastPrice: 90 }],
+      }],
+      futuresContracts: [],
+    },
+    { overallVerdict: "PARTIAL" },
+  );
+  // The index-level observation remains eligible to be attempted, while the bridge
+  // strips option expiries internally because there is no finite positive ATM anchor.
   assert.deepEqual(result, { attempted: 1, skipped: 0 });
 });

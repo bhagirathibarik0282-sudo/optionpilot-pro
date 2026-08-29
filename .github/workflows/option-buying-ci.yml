@@ -19,6 +19,8 @@ on:
       - live-psychology-coach-contract.ts
       - premium-behaviour-engine.ts
       - trade-lifecycle-engine.ts
+      - behaviour-risk-engine.ts
+      - message-trigger-engine.ts
       - probability-engine.ts
       - market-regime-engine.ts
       - strategy-readiness-engine.ts
@@ -39,6 +41,8 @@ on:
       - test/live-psychology-coach-contract.test.ts
       - test/premium-behaviour-engine.test.ts
       - test/trade-lifecycle-engine.test.ts
+      - test/behaviour-risk-engine.test.ts
+      - test/message-trigger-engine.test.ts
       - test/probability-engine.test.ts
       - test/market-regime-engine.test.ts
       - test/strategy-readiness-engine.test.ts

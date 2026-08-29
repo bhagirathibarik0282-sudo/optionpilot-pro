@@ -12,6 +12,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function validProbability(value: Record<string, unknown>): boolean {
+  if (value.status !== "READY" && value.status !== "DATA_UNAVAILABLE") return false;
+  if (value.semantics !== "TARGET_BEFORE_STOP_OBSERVED_ONLY" || value.ruleVersion !== "PROBABILITY_ENGINE_V1") return false;
+  const integers = [value.sampleCount, value.resolvedSamples, value.wins, value.losses, value.censored];
+  if (!integers.every((n) => Number.isInteger(n) && (n as number) >= 0)) return false;
+  if ((value.wins as number) + (value.losses as number) !== value.resolvedSamples) return false;
+  if ((value.resolvedSamples as number) + (value.censored as number) !== value.sampleCount) return false;
+  if (value.status === "READY") {
+    if (!isFiniteNumber(value.winRatePct) || value.winRatePct < 0 || value.winRatePct > 100) return false;
+  } else if (value.winRatePct !== null) return false;
+  return typeof value.reason === "string" && value.reason.length > 0;
+}
+
+function validMarketRegime(value: Record<string, unknown>): boolean {
+  const regimes = new Set(["TRENDING_UP", "TRENDING_DOWN", "RANGE", "HIGH_VOLATILITY", "TRANSITION", "UNKNOWN"]);
+  if (!regimes.has(String(value.regime))) return false;
+  if (typeof value.ready !== "boolean") return false;
+  if (value.semantics !== "VALIDATED_EVIDENCE_ONLY" || value.ruleVersion !== "MARKET_REGIME_ENGINE_V1") return false;
+  if (value.affectsVerdict !== false || value.affectsTelegram !== false || value.affectsExecution !== false) return false;
+  return typeof value.reason === "string" && value.reason.length > 0;
+}
+
+function validRisk(value: Record<string, unknown>): boolean {
+  const nullableFinite = (v: unknown) => v === null || isFiniteNumber(v);
+  if (!nullableFinite(value.entry) || !nullableFinite(value.stop) || !nullableFinite(value.capital) || !nullableFinite(value.maxAllowedPlannedStopLossPct)) return false;
+  if (!(value.quantity === null || (Number.isInteger(value.quantity) && (value.quantity as number) > 0))) return false;
+  return true;
+}
+
 /**
  * Runtime adapter only. It accepts an explicit caller-supplied research payload,
  * performs no DB writes and invents no missing inputs. Invalid/missing payloads
@@ -29,6 +62,10 @@ export function evaluateResearchEngineChainHttp(body: unknown): ResearchEngineCh
     body.signalIdentityReady,
   ];
   if (!requiredBooleans.every((value) => typeof value === "boolean")) {
+    return { ok: false, mode: "RESEARCH_MODE", productionImpact: "NONE", reason: "INVALID_RESEARCH_ENGINE_CHAIN_INPUT" };
+  }
+
+  if (!validProbability(body.probability) || !validMarketRegime(body.marketRegime) || !validRisk(body.risk)) {
     return { ok: false, mode: "RESEARCH_MODE", productionImpact: "NONE", reason: "INVALID_RESEARCH_ENGINE_CHAIN_INPUT" };
   }
 

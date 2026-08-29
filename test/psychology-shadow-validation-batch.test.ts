@@ -2,12 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { runPsychologyValidationBatch } from "../psychology-shadow-validation-batch.ts";
 import type { PsychologyReplayValidationInput } from "../psychology-shadow-replay-adapter.ts";
-import type { ShadowValidationObservation } from "../psychology-shadow-validation.ts";
+import type { ShadowValidationObservation, ShadowValidationRegime } from "../psychology-shadow-validation.ts";
 
-function validation(tradeId: string, regime: ShadowValidationObservation["regime"] = "TREND"): ShadowValidationObservation {
+function validation(tradeId: string, regimes: ShadowValidationRegime[] = ["TREND"]): ShadowValidationObservation {
   return {
     tradeId,
-    regime,
+    regimes,
     completedTrade: true,
     chaseWarnings: 1,
     falseChaseWarnings: 0,
@@ -29,7 +29,7 @@ function validation(tradeId: string, regime: ShadowValidationObservation["regime
   };
 }
 
-function input(tradeId: string, source: PsychologyReplayValidationInput["source"] = "REAL_REPLAY"): PsychologyReplayValidationInput {
+function input(tradeId: string, source: PsychologyReplayValidationInput["source"] = "REAL_REPLAY", regimes: ShadowValidationRegime[] = ["TREND"]): PsychologyReplayValidationInput {
   return {
     source,
     replay: {
@@ -44,7 +44,7 @@ function input(tradeId: string, source: PsychologyReplayValidationInput["source"
       tradingDate: "2026-08-20",
       sessionEligible: true,
     },
-    validation: validation(tradeId),
+    validation: validation(tradeId, regimes),
   };
 }
 
@@ -55,6 +55,14 @@ test("accepted real evidence flows into frozen validation metrics", () => {
   assert.equal(r.acceptedRealReplay, 1);
   assert.equal(r.validation?.observations, 1);
   assert.equal(r.validation?.promotionEligible, false);
+});
+
+test("overlapping regimes survive admission without duplicating the trade", () => {
+  const r = runPsychologyValidationBatch([input("T1", "REAL_REPLAY", ["EXPIRY", "HIGH_IV"])]);
+  assert.equal(r.validation?.observations, 1);
+  assert.equal(r.validation?.completedTrades, 1);
+  assert.ok(r.validation?.coveredRegimes.includes("EXPIRY"));
+  assert.ok(r.validation?.coveredRegimes.includes("HIGH_IV"));
 });
 
 test("rejected evidence is surfaced and never enters validation", () => {

@@ -9,7 +9,7 @@ test("runtime bridge refuses to invent missing Truth", async () => {
   assert.deepEqual(result, { attempted: 0, skipped: 1 });
 });
 
-test("runtime bridge accepts explicit existing TRUE truth without affecting live path", async () => {
+test("runtime bridge accepts actual TruthReport overallVerdict shape", async () => {
   const result = await recordH1FromRuntimeSnapshot({
     NIFTY: {
       symbol: "NIFTY",
@@ -31,9 +31,23 @@ test("runtime bridge accepts explicit existing TRUE truth without affecting live
       expiries: [],
       futuresContracts: [],
     },
-  }, { NIFTY: { status: "TRUE" } });
+  }, { NIFTY: { overallVerdict: "TRUE" } });
   // DATABASE_URL is absent in unit tests, so persistence is a no-op; the bridge still proves
-  // that an explicit existing Truth state was resolved and attempted exactly once.
+  // that the exact existing TruthReport shape is resolved and attempted exactly once.
+  assert.equal(result.attempted, 1);
+  assert.equal(result.skipped, 0);
+});
+
+test("runtime bridge preserves non-TRUE TruthReport states instead of promoting them", async () => {
+  const result = await recordH1FromRuntimeSnapshot({
+    NIFTY: {
+      symbol: "NIFTY",
+      spot: 25000,
+      snapshotId: "s-partial",
+      expiries: [],
+      futuresContracts: [],
+    },
+  }, { NIFTY: { overallVerdict: "PARTIAL" } });
   assert.equal(result.attempted, 1);
   assert.equal(result.skipped, 0);
 });

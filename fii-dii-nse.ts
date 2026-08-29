@@ -35,6 +35,14 @@ export function normalizeNseDate(value: unknown): string {
   throw new Error("INVALID_NSE_FII_DII_DATE");
 }
 
+export function assertNseFiiDiiFreshness(dataDate: string, expectedTradingDate: string): void {
+  const actual = normalizeNseDate(dataDate);
+  const expected = normalizeNseDate(expectedTradingDate);
+  if (actual !== expected) {
+    throw new Error(`STALE_NSE_FII_DII_DATE:${actual}:EXPECTED:${expected}`);
+  }
+}
+
 function categoryOf(row: NseFiiDiiRow): string {
   return String(row.category ?? row.Category ?? row.clientType ?? row.clienttype ?? "").toUpperCase();
 }
@@ -76,7 +84,10 @@ export function parseNseFiiDiiResponse(rows: unknown, fetchedAt = new Date().toI
   };
 }
 
-export async function fetchNseFiiDii(fetchImpl: typeof fetch = fetch): Promise<NormalizedFiiDiiCash> {
+export async function fetchNseFiiDii(
+  fetchImpl: typeof fetch = fetch,
+  expectedTradingDate?: string,
+): Promise<NormalizedFiiDiiCash> {
   const response = await fetchImpl(NSE_FII_DII_URL, {
     headers: {
       accept: "application/json,text/plain,*/*",
@@ -86,5 +97,7 @@ export async function fetchNseFiiDii(fetchImpl: typeof fetch = fetch): Promise<N
     },
   });
   if (!response.ok) throw new Error(`NSE_FII_DII_HTTP_${response.status}`);
-  return parseNseFiiDiiResponse(await response.json());
+  const normalized = parseNseFiiDiiResponse(await response.json());
+  if (expectedTradingDate) assertNseFiiDiiFreshness(normalized.date, expectedTradingDate);
+  return normalized;
 }

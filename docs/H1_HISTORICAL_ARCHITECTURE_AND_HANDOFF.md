@@ -46,17 +46,47 @@ Store separately from raw truth:
 
 ## One-shot manual handoff checklist
 Complete all safe branch work first. Then perform one manual batch only:
-1. Insert the minimal server.ts import for recordH1Snapshot.
-2. Add the post-snapshot, post-Truth fire-and-forget hook.
-3. Verify DATABASE_URL and required Railway variables exist without exposing values.
-4. Build/type-check.
-5. Run 1-day pilot/replay.
-6. Audit timestamps, expiry, DTE, CE/PE identity, ATM offsets, duplicate minute buckets, NULL semantics.
-7. If PASS, expand to 5 days.
-8. Devil-check again.
-9. If PASS, bulk import 60 trading days.
-10. Keep research data isolated from production candidate logic until separate approval.
-11. Merge/deploy only after explicit final approval.
+1. Insert the minimal server.ts import for `recordH1Snapshot`.
+2. Insert the minimal import/init for `ensureH1DerivedSchema`.
+3. Add the post-snapshot, post-Truth fire-and-forget recorder hook. It must not await inside the live verdict path.
+4. Initialize derived schema after the existing DB init without changing candidate/verdict behavior.
+5. Verify `DATABASE_URL` and required Railway variables exist without exposing values.
+6. Run the repository test suite, including `test/h1-derived-history.test.ts`.
+7. Start with production-impact disabled / research-only recorder semantics.
+8. Run 1-day pilot/replay.
+9. Audit timestamps, expiry, DTE, CE/PE identity, ATM offsets, duplicate minute buckets, NULL semantics.
+10. Audit Truth eligibility: only TRUE can enter research/training queries by default.
+11. If PASS, expand to 5 days.
+12. Devil-check expiry roll, candidate lifecycle, regime transitions and data gaps.
+13. If PASS, bulk import 60 trading days in one controlled batch.
+14. Run post-import integrity counters before enabling any historical analog use.
+15. Keep research data isolated from production candidate weighting until separate approval.
+16. Merge/deploy only after explicit final approval.
+
+## Bulk import preflight counters
+Before the 60-day import, collect expected counts and abort on structural mismatch:
+- trading days requested vs trading days found
+- symbols expected vs symbols found
+- minute buckets per symbol/day
+- option contracts per expiry/minute
+- CE count vs PE count
+- current/next/monthly expiry coverage
+- TRUE/PARTIAL/STALE/INVALID counts
+- rejected expiry rows
+- NULL IV/Greeks counts
+- duplicate logical key count
+
+## Bulk import postflight counters
+After import, verify:
+- first and last market timestamp per trading day
+- no weekend/non-session contamination
+- no expiry-date shifts
+- no CE/PE swaps
+- no duplicate logical keys
+- no research-eligible PARTIAL/STALE/INVALID rows
+- ATM ±7 coverage within expected contract availability
+- candidate rows traceable to snapshotId + ruleVersion
+- MFE/MAE remains NULL until a verified outcome process calculates it
 
 ## Acceptance criteria before 60-day import
 - 0 duplicate logical minute keys.

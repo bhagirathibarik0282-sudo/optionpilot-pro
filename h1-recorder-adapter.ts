@@ -84,6 +84,7 @@ export interface H1RecordRequest {
 }
 
 const RESEARCH_ELIGIBLE = new Set<H1TruthVerdict>(["TRUE"]);
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 function finiteOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -97,17 +98,28 @@ function minuteBucketIso(date: Date): string {
 
 function safeDateOnly(value: string | Date | null | undefined): string | null {
   if (!value) return null;
+  if (typeof value === "string") {
+    const exact = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (exact) return value;
+  }
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
+  // Expiry is an exchange calendar date. Shift to IST before extracting the date
+  // so a UTC representation around midnight cannot silently move the contract day.
+  return new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function istDateOnly(date: Date): string {
+  return new Date(date.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
 function dteFrom(expiry: string, now: Date): number | null {
-  const e = new Date(`${expiry}T00:00:00Z`);
-  if (Number.isNaN(e.getTime())) return null;
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const diff = e.getTime() - today;
-  return Math.max(0, Math.ceil(diff / 86_400_000));
+  const expiryMatch = expiry.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const today = istDateOnly(now).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!expiryMatch || !today) return null;
+  const expiryUtc = Date.UTC(Number(expiryMatch[1]), Number(expiryMatch[2]) - 1, Number(expiryMatch[3]));
+  const todayUtc = Date.UTC(Number(today[1]), Number(today[2]) - 1, Number(today[3]));
+  return Math.max(0, Math.round((expiryUtc - todayUtc) / 86_400_000));
 }
 
 function optionKey(symbol: string, expiry: string, strike: number, side: "CE" | "PE"): string {
@@ -130,6 +142,7 @@ function liquidityStatus(bid: number, ask: number): string {
   const mid = (bid + ask) / 2;
   if (mid <= 0) return "INVALID_QUOTE";
   const spreadPct = ((ask - bid) / mid) * 100;
+  // Provisional research buckets only. They are labels, not execution approval.
   if (spreadPct <= 0.5) return "TIGHT";
   if (spreadPct <= 1.5) return "NORMAL";
   if (spreadPct <= 3) return "WIDE";
@@ -148,6 +161,15 @@ function band7<T extends H1PremiumInput>(legs: T[], atmStrike: number): T[] {
   const atmIndex = ordered.reduce((best, leg, i) =>
     Math.abs(leg.strike - atmStrike) < Math.abs(ordered[best].strike - atmStrike) ? i : best, 0);
   return ordered.slice(Math.max(0, atmIndex - 7), Math.min(ordered.length, atmIndex + 8));
+}
+
+function atmOffset(expiry: H1ExpiryInput, strike: number, atmStrike: number): number | null {
+  const strikes = [...new Set([...expiry.ceStrikes, ...expiry.peStrikes].map((x) => x.strike))].sort((a, b) => a - b);
+  if (strikes.length === 0) return null;
+  const atmIndex = strikes.reduce((best, value, i) =>
+    Math.abs(value - atmStrike) < Math.abs(strikes[best] - atmStrike) ? i : best, 0);
+  const strikeIndex = strikes.indexOf(strike);
+  return strikeIndex >= 0 ? strikeIndex - atmIndex : null;
 }
 
 function band7Pcr(expiry: H1ExpiryInput, atmStrike: number): number | null {
@@ -171,6 +193,10 @@ function straddleLtp(expiry: H1ExpiryInput, atmStrike: number): number | null {
   const pe = [...expiry.peStrikes].sort((a, b) => Math.abs(a.strike - atmStrike) - Math.abs(b.strike - atmStrike))[0];
   if (!ce || !pe || !Number.isFinite(ce.lastPrice) || !Number.isFinite(pe.lastPrice)) return null;
   return ce.lastPrice + pe.lastPrice;
+}
+
+function isCurrentExpiryLabel(label: string): boolean {
+  return /current/i.test(label);
 }
 
 /**
@@ -202,7 +228,6 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
     }
 
     const near = market.futuresContracts.find((x) => x.label === "Near") ?? market.futuresContracts[0];
-    const previousNearOi: number | null = null; // intentionally not fabricated; future adapter state may supply a verified delta
 
     const marketRow: MarketSnapshot1mRow = {
       symbol: market.symbol,
@@ -225,7 +250,7 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
       futureLtp: near ? finiteOrNull(near.ltp) : null,
       futureVwap: null,
       futureOi: near ? finiteOrNull(near.oi) : null,
-      futureOiChange: near && previousNearOi !== null && near.oi !== null ? near.oi - previousNearOi : null,
+      futureOiChange: null, // never synthesize a delta without a verified prior observation
       futureVolume: near ? finiteOrNull(near.volume) : null,
       futureBasis: near ? finiteOrNull(near.basis) : null,
       indiaVix: finiteOrNull(market.vix),
@@ -267,7 +292,7 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
           dte: dteFrom(expiryDate, now),
           strike: leg.strike,
           optionType: side,
-          atmOffset: Math.round((leg.strike - market.atmStrike) / Math.max(1, Math.abs(leg.strike - market.atmStrike) || 1)),
+          atmOffset: atmOffset(expiry, leg.strike, market.atmStrike),
           isCandidate: request.candidateKeys?.has(key) ?? false,
           isWall: request.wallKeys?.has(key) ?? false,
           ltp: finiteOrNull(leg.lastPrice),
@@ -276,7 +301,7 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
           spread: Number.isFinite(leg.bid) && Number.isFinite(leg.ask) ? Math.max(0, leg.ask - leg.bid) : null,
           volume: finiteOrNull(leg.volume),
           oi: finiteOrNull(leg.oi),
-          oiChange: null,
+          oiChange: null, // requires a verified prior contract observation
           iv: finiteOrNull(leg.iv),
           delta: finiteOrNull(leg.delta),
           gamma: finiteOrNull(leg.gamma),
@@ -297,16 +322,20 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
         await dbUpsertOptionSnapshot1m(row);
       }
 
+      // IndexMetrics currently exposes aggregate PCR/VolumePCR/MaxPain rather than
+      // a guaranteed per-expiry version. Persist those only for the explicitly
+      // labelled current expiry; otherwise NULL is safer than false precision.
+      const currentExpiry = isCurrentExpiryLabel(expiry.expiry);
       const chainRow: ChainState1mRow = {
         symbol: market.symbol,
         minuteBucket: bucket,
         expiry: expiryDate,
         expiryBucket: expiry.expiry,
         atmStrike: finiteOrNull(market.atmStrike),
-        fullChainOiPcr: finiteOrNull(market.pcr),
+        fullChainOiPcr: currentExpiry ? finiteOrNull(market.pcr) : null,
         band7OiPcr: band7Pcr(expiry, market.atmStrike),
-        volumePcr: finiteOrNull(market.volumePcr),
-        maxPain: finiteOrNull(market.maxPain),
+        volumePcr: currentExpiry ? finiteOrNull(market.volumePcr) : null,
+        maxPain: currentExpiry ? finiteOrNull(market.maxPain) : null,
         callWallStrike: null,
         callWallOi: null,
         callWallStrength: null,

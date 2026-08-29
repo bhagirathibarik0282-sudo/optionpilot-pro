@@ -9,10 +9,12 @@ on:
       - package.json
       - db.ts
       - research-*.ts
+      - h1-pilot-audit-*.ts
       - scripts/verify-research-server-mount.ts
       - scripts/apply-research-server-mount.ts
       - test/research-index.test.ts
       - test/research-router-auth.test.ts
+      - test/h1-pilot-audit-*.test.ts
       - .github/workflows/option-buying-ci.yml
   workflow_dispatch:
 

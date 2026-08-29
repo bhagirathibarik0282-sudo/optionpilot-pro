@@ -11,6 +11,7 @@
     "start:option-recorder": "tsx option-recorder-service.ts",
     "eod:archive": "tsx eod-archive-job.ts",
     "fii-dii:daily": "tsx fii-dii-daily-job.ts",
+    "h1:pilot:audit": "tsx h1-pilot-audit-job.ts",
     "research:preflight": "tsx scripts/research-preflight.ts",
     "research:populate": "tsx scripts/populate-research-indices.ts",
     "research:backfill:auto": "tsx scripts/auto-backfill-research-indices.ts",
@@ -18,7 +19,7 @@
     "research:dhan:30d": "node scripts/dhan-expired-options-30d-audit.mjs",
     "h1:wire:check": "node scripts/apply-h1-runtime-wiring.mjs --check",
     "h1:wire": "node scripts/apply-h1-runtime-wiring.mjs",
-    "test": "NODE_ENV=test node --import tsx --test test/outcome-engine.test.ts test/iv-science.test.ts test/fii-dii-import.test.ts test/fii-dii-nse.test.ts test/eod-archive-core.test.ts test/research-index.test.ts test/research-index-historical-csv.test.ts test/research-index-partial-ohl.test.ts test/research-router-auth.test.ts test/research-index-readiness.test.ts test/option-recorder-shadow.test.ts test/option-recorder-runtime.test.ts test/option-recorder-source-adapter.test.ts test/option-recorder-export.test.ts test/h1-derived-history.test.ts test/h1-intelligence-bridge.test.ts test/h1-candidate-quality.test.ts test/h1-execution-lifecycle.test.ts test/h1-history-router.test.ts test/h1-market-story-thesis.test.ts test/h1-replay-guard.test.ts test/h1-bulk-preflight.test.ts test/h1-outcome-attribution.test.ts test/h1-post-import-integrity.test.ts test/h1-oos-calibration.test.ts test/h1-governance-freeze.test.ts test/h1-runtime-bridge.test.ts"
+    "test": "NODE_ENV=test node --import tsx --test test/outcome-engine.test.ts test/iv-science.test.ts test/fii-dii-import.test.ts test/fii-dii-nse.test.ts test/eod-archive-core.test.ts test/research-index.test.ts test/research-index-historical-csv.test.ts test/research-index-partial-ohl.test.ts test/research-router-auth.test.ts test/research-index-readiness.test.ts test/option-recorder-shadow.test.ts test/option-recorder-runtime.test.ts test/option-recorder-source-adapter.test.ts test/option-recorder-export.test.ts test/h1-derived-history.test.ts test/h1-intelligence-bridge.test.ts test/h1-candidate-quality.test.ts test/h1-execution-lifecycle.test.ts test/h1-history-router.test.ts test/h1-market-story-thesis.test.ts test/h1-replay-guard.test.ts test/h1-bulk-preflight.test.ts test/h1-outcome-attribution.test.ts test/h1-post-import-integrity.test.ts test/h1-oos-calibration.test.ts test/h1-governance-freeze.test.ts test/h1-runtime-bridge.test.ts test/h1-pilot-audit-core.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.11",

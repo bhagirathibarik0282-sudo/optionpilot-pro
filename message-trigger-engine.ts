@@ -15,7 +15,8 @@ export type MessageTriggerLifecycle =
 export interface MessageTriggerInput {
   dataFresh: boolean;
   lifecycle: MessageTriggerLifecycle;
-  candidateSelected: boolean;
+  candidateKey: string;
+  candidateSelectionChanged: boolean;
   lifecycleChanged: boolean;
   premiumBehaviourChanged: boolean;
   buyerSellerStateChanged: boolean;
@@ -58,11 +59,19 @@ function out(shouldSpeak: boolean, urgent: boolean, reason: string): MessageTrig
  * No timing or confirmation threshold is invented here.
  * requiredConfirmations and cooldownSatisfied must come from an upstream frozen policy.
  * EXIT and DATA_UNAVAILABLE are urgent, but exact duplicate fingerprints remain suppressed.
+ * The fingerprint must be scoped to the stable exact candidate key to prevent cross-candidate collisions.
  */
 export function evaluateMessageTrigger(input: MessageTriggerInput): MessageTriggerResult {
-  if (!input.currentFingerprint.trim()) return out(false, false, "MISSING_MESSAGE_FINGERPRINT");
+  const candidateKey = input.candidateKey.trim();
+  if (!candidateKey) return out(false, false, "MISSING_CANDIDATE_KEY");
 
-  if (input.lastSpokenFingerprint === input.currentFingerprint) {
+  const fingerprint = input.currentFingerprint.trim();
+  if (!fingerprint) return out(false, false, "MISSING_MESSAGE_FINGERPRINT");
+  if (!fingerprint.startsWith(`${candidateKey}:`)) {
+    return out(false, false, "FINGERPRINT_CANDIDATE_SCOPE_MISMATCH");
+  }
+
+  if (input.lastSpokenFingerprint === fingerprint) {
     return out(false, false, "EXACT_DUPLICATE_SUPPRESSED");
   }
 
@@ -79,7 +88,7 @@ export function evaluateMessageTrigger(input: MessageTriggerInput): MessageTrigg
   }
 
   const meaningful =
-    input.candidateSelected ||
+    input.candidateSelectionChanged ||
     input.lifecycleChanged ||
     input.premiumBehaviourChanged ||
     input.buyerSellerStateChanged ||

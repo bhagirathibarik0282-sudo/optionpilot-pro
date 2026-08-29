@@ -64,3 +64,28 @@ test("missing risk object fails closed", () => {
   assert.equal(response.ok, false);
   assert.equal(response.reason, "INVALID_RESEARCH_ENGINE_CHAIN_INPUT");
 });
+
+test("forged READY probability with inconsistent counts is rejected", () => {
+  const response = evaluateResearchEngineChainHttp({
+    ...valid,
+    probability: { ...valid.probability, sampleCount: 1, resolvedSamples: 20 },
+  });
+  assert.equal(response.ok, false);
+  assert.equal(response.reason, "INVALID_RESEARCH_ENGINE_CHAIN_INPUT");
+});
+
+test("unknown regime vocabulary and authority drift are rejected", () => {
+  const badRegime = evaluateResearchEngineChainHttp({
+    ...valid,
+    marketRegime: { ...valid.marketRegime, regime: "TREND", affectsVerdict: true },
+  });
+  assert.equal(badRegime.ok, false);
+});
+
+test("malformed risk numeric fields are rejected before chain evaluation", () => {
+  const response = evaluateResearchEngineChainHttp({
+    ...valid,
+    risk: { ...valid.risk, capital: "50000" },
+  });
+  assert.equal(response.ok, false);
+});

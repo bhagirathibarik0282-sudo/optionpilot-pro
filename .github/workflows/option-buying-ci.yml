@@ -18,6 +18,7 @@ on:
       - telegram-human-live-talk.ts
       - live-psychology-coach-contract.ts
       - premium-behaviour-engine.ts
+      - trade-lifecycle-engine.ts
       - probability-engine.ts
       - market-regime-engine.ts
       - strategy-readiness-engine.ts
@@ -37,6 +38,7 @@ on:
       - test/telegram-human-live-talk.test.ts
       - test/live-psychology-coach-contract.test.ts
       - test/premium-behaviour-engine.test.ts
+      - test/trade-lifecycle-engine.test.ts
       - test/probability-engine.test.ts
       - test/market-regime-engine.test.ts
       - test/strategy-readiness-engine.test.ts

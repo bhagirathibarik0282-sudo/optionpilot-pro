@@ -20,6 +20,8 @@ export interface PsychologyReplayValidationResult {
   affectsExecution: false;
 }
 
+const SUPPORTED_SOURCES: readonly PsychologyValidationSource[] = ["REAL_REPLAY", "LIVE_OBSERVATION", "SYNTHETIC"] as const;
+
 /**
  * Admits only provenance-backed real replay or live-observation rows into psychology validation.
  * Both real replay and live observations must pass the H1 no-lookahead/data-quality guard.
@@ -28,6 +30,7 @@ export interface PsychologyReplayValidationResult {
 export function adaptPsychologyValidationEvidence(input: PsychologyReplayValidationInput): PsychologyReplayValidationResult {
   const blockers: string[] = [];
 
+  if (!SUPPORTED_SOURCES.includes(input.source)) blockers.push(`UNSUPPORTED_VALIDATION_SOURCE_${String(input.source)}`);
   if (input.source === "SYNTHETIC") blockers.push("SYNTHETIC_EVIDENCE_NOT_ACCEPTED");
   if (!input.validation.tradeId.trim()) blockers.push("MISSING_VALIDATION_TRADE_ID");
   if (!input.replay.logicalKey.trim()) blockers.push("MISSING_REPLAY_LOGICAL_KEY");

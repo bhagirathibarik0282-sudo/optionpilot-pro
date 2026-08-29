@@ -57,6 +57,12 @@ test("synthetic evidence can never enter real validation", () => {
   assert.ok(r.blockers.includes("SYNTHETIC_EVIDENCE_NOT_ACCEPTED"));
 });
 
+test("unsupported runtime source fails closed", () => {
+  const r = adaptPsychologyValidationEvidence({ source: "UNKNOWN" as never, replay, validation });
+  assert.equal(r.accepted, false);
+  assert.ok(r.blockers.includes("UNSUPPORTED_VALIDATION_SOURCE_UNKNOWN"));
+});
+
 test("lookahead replay is blocked by H1 replay guard", () => {
   const r = adaptPsychologyValidationEvidence({
     source: "REAL_REPLAY",

@@ -11,12 +11,14 @@ export interface PsychologyShadowChainInput {
   buyerSellerEvidence: BuyerSellerEvidence;
   lifecycleInput: TradeLifecycleInput;
   behaviourRiskEvidence: BehaviourRiskEvidence;
-  triggerInput: Omit<MessageTriggerInput, "candidateKey" | "lifecycle" | "dataFresh">;
+  triggerInput: Omit<MessageTriggerInput, "candidateKey" | "lifecycle" | "dataFresh" | "currentFingerprint">;
 }
 
 export interface PsychologyShadowChainResult {
   version: "PSYCHOLOGY_SHADOW_CHAIN_V1";
   semantics: "RESEARCH_SHADOW_ONLY";
+  candidateKey: string;
+  currentFingerprint: string;
   premium: ReturnType<typeof classifyPremiumBehaviour>;
   buyerSeller: ReturnType<typeof classifyBuyerSellerBehaviour>;
   lifecycle: ReturnType<typeof advanceTradeLifecycle>;
@@ -28,9 +30,40 @@ export interface PsychologyShadowChainResult {
   affectsExecution: false;
 }
 
+export function buildPsychologyCandidateKey(candidate: CandidateIdentity): string {
+  return [
+    candidate.style,
+    candidate.symbol.trim().toUpperCase(),
+    candidate.side,
+    String(candidate.strike),
+    candidate.expiryDate.trim(),
+    candidate.candidateId.trim(),
+  ].join(":");
+}
+
+function buildPsychologyFingerprint(
+  candidateKey: string,
+  lifecycle: ReturnType<typeof advanceTradeLifecycle>,
+  premium: ReturnType<typeof classifyPremiumBehaviour>,
+  buyerSeller: ReturnType<typeof classifyBuyerSellerBehaviour>,
+  behaviourRisk: ReturnType<typeof classifyBehaviourRisk>,
+  allFresh: boolean,
+): string {
+  const risks = [...behaviourRisk.risks].sort().join(",") || "NONE";
+  return [
+    candidateKey,
+    allFresh ? "DATA_FRESH" : "DATA_UNAVAILABLE",
+    lifecycle.nextState,
+    premium.state,
+    buyerSeller.state,
+    risks,
+  ].join(":");
+}
+
 /**
  * Research-only composition layer. Each deterministic engine remains authoritative for its own state;
  * Message Trigger Engine alone decides whether a message is eligible; coach/Haiku cannot override it.
+ * Candidate scope and message fingerprint are constructed internally so callers cannot spoof them.
  */
 export function runPsychologyShadowChain(input: PsychologyShadowChainInput): PsychologyShadowChainResult {
   const premium = classifyPremiumBehaviour(input.premiumEvidence);
@@ -38,18 +71,21 @@ export function runPsychologyShadowChain(input: PsychologyShadowChainInput): Psy
   const lifecycle = advanceTradeLifecycle(input.lifecycleInput);
   const behaviourRisk = classifyBehaviourRisk(input.behaviourRiskEvidence);
 
-  const candidateKey = input.candidate.candidateId.trim();
+  const candidateKey = buildPsychologyCandidateKey(input.candidate);
   const allFresh =
-    input.lifecycleInput.dataFresh &&
+    lifecycle.dataAvailable &&
     premium.state !== "DATA_UNAVAILABLE" &&
     buyerSeller.state !== "DATA_UNAVAILABLE" &&
     !behaviourRisk.risks.includes("DATA_UNAVAILABLE");
+  const currentFingerprint = buildPsychologyFingerprint(candidateKey, lifecycle, premium, buyerSeller, behaviourRisk, allFresh);
 
   const trigger = evaluateMessageTrigger({
     ...input.triggerInput,
     candidateKey,
     lifecycle: lifecycle.nextState,
     dataFresh: allFresh,
+    lifecycleChanged: lifecycle.changed,
+    currentFingerprint,
   });
 
   const coach = evaluateLivePsychologyCoach({
@@ -72,6 +108,8 @@ export function runPsychologyShadowChain(input: PsychologyShadowChainInput): Psy
   return {
     version: "PSYCHOLOGY_SHADOW_CHAIN_V1",
     semantics: "RESEARCH_SHADOW_ONLY",
+    candidateKey,
+    currentFingerprint,
     premium,
     buyerSeller,
     lifecycle,

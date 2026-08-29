@@ -6,11 +6,12 @@
 // auto-importer can parse a file without a browser.
 //
 // HARD RULES (mirrors outcome-engine.ts's isolation discipline):
-//   - Pure and self-contained. No import from server.ts, no wall-clock
-//     access (no Date.now()/new Date() defaults baked in) — if the pasted
-//     text doesn't carry a "Date:" line, `date` comes back null and the
-//     CALLER (server.ts) decides the fallback (e.g. indiaDate()). This
-//     keeps the module trivially unit-testable in isolation.
+//   - Pure and self-contained. No import from server.ts and no wall-clock
+//     access (no Date.now()/new Date() defaults baked in).
+//   - Drive auto-import MUST carry an explicit "Date:" line. Missing-date
+//     files are rejected instead of allowing the caller to silently stamp
+//     them with today's date. This prevents stale historical files from
+//     being misclassified as current data after a restart/re-import.
 //   - Never fabricates a "recognized" entry from unrelated text — requires
 //     at least one of the two cash figures to be present before returning
 //     anything other than null.
@@ -23,7 +24,7 @@ export interface ParsedFiiDiiDerivative {
 }
 
 export interface ParsedFiiDiiEntry {
-  date: string | null; // null if the pasted text had no "Date:" line
+  date: string;
   fiiCashCr: number;
   diiCashCr: number;
   derivatives: ParsedFiiDiiDerivative[];
@@ -76,9 +77,13 @@ export function parseFiiDiiPasteServerSide(text: string): ParsedFiiDiiEntry | nu
 
   // A recognizable entry needs at least one of the two cash figures --
   // anything less isn't confidently "FII/DII data", so don't fabricate a
-  // partial entry from stray matched lines (e.g. a file that only
-  // happened to contain an unrelated "Date: ..." line).
+  // partial entry from stray matched lines.
   if (fields.fiiCashCr === undefined && fields.diiCashCr === undefined) return null;
+
+  // Freshness safety guard: Drive imports without an explicit source date
+  // are unsafe because server.ts previously fell back to indiaDate(), which
+  // could make an old file look like today's data. Fail closed instead.
+  if (!fields.date) return null;
 
   const derivatives: ParsedFiiDiiDerivative[] = FII_DII_DERIVATIVE_CATEGORIES.map((cat, i) => ({
     category: cat,
@@ -87,7 +92,7 @@ export function parseFiiDiiPasteServerSide(text: string): ParsedFiiDiiEntry | nu
   }));
 
   return {
-    date: fields.date || null,
+    date: fields.date,
     fiiCashCr: Number(fields.fiiCashCr) || 0,
     diiCashCr: Number(fields.diiCashCr) || 0,
     derivatives,

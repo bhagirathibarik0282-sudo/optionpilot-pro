@@ -80,6 +80,21 @@ test("empty validation fails closed", () => {
 test("impossible counters are rejected instead of silently corrupting metrics", () => {
   const bad = { ...obs("TREND", "T1"), falseChaseWarnings: 3, chaseWarnings: 2 };
   assert.throws(() => validatePsychologyShadowObservations([bad]), /cannot exceed/);
+
+  const impossibleSpeech = { ...obs("TREND", "T2"), eligibleMessages: 2, spokenUpdates: 3 };
+  assert.throws(() => validatePsychologyShadowObservations([impossibleSpeech]), /spokenUpdates cannot exceed eligibleMessages/);
+});
+
+test("duplicate trade ids are rejected so per-trade denominators cannot be inflated", () => {
+  assert.throws(
+    () => validatePsychologyShadowObservations([obs("TREND", "T1"), obs("RANGE", "T1")]),
+    /duplicate tradeId is not allowed/,
+  );
+});
+
+test("unsupported runtime regime values fail closed", () => {
+  const bad = { ...obs("TREND", "T1"), regime: "UNKNOWN" as ShadowValidationObservation["regime"] };
+  assert.throws(() => validatePsychologyShadowObservations([bad]), /unsupported regime/);
 });
 
 test("validation harness has no live authority", () => {

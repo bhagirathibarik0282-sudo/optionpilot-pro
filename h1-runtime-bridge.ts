@@ -61,7 +61,7 @@ function looksLikeIndexMetrics(value: unknown): value is UnknownRecord {
   if (!isRecord(value)) return false;
   const symbol = text(value.symbol);
   const spot = nullableFinite(value.spot ?? value.current);
-  return !!symbol && spot !== null;
+  return !!symbol && spot !== null && spot > 0;
 }
 
 function collectMarkets(snapshot: unknown): UnknownRecord[] {
@@ -146,9 +146,14 @@ function normalizeIndex(raw: UnknownRecord): H1IndexInput | null {
 
   // Identity + source time are mandatory. Never synthesize a snapshot identity
   // from wall-clock time and never assign processing time to missing market data.
-  if (!symbol || spot === null || !timestamp) return null;
+  if (!symbol || spot === null || spot <= 0 || !timestamp) return null;
 
-  const expiries = Array.isArray(raw.expiries) ? raw.expiries.map(normalizeExpiry).filter(Boolean) : [];
+  const atmStrike = finiteOrMissing(raw.atmStrike);
+  const normalizedExpiries = Array.isArray(raw.expiries) ? raw.expiries.map(normalizeExpiry).filter(Boolean) : [];
+  // ±7 option selection requires a real ATM anchor. If ATM is unavailable, keep
+  // the valid index-level observation but persist no option/chain rows rather
+  // than selecting an arbitrary first strike band from a NaN distance sort.
+  const expiries = Number.isFinite(atmStrike) && atmStrike > 0 ? normalizedExpiries : [];
   const futuresContracts = Array.isArray(raw.futuresContracts) ? raw.futuresContracts.map(normalizeFuture).filter(Boolean) : [];
   return {
     symbol,
@@ -156,7 +161,7 @@ function normalizeIndex(raw: UnknownRecord): H1IndexInput | null {
     exchangeTimestamp: validTimestamp(raw.exchangeTimestamp),
     timestamp,
     spot,
-    atmStrike: finiteOrMissing(raw.atmStrike),
+    atmStrike,
     vwap: finiteOrMissing(raw.vwap),
     pdh: finiteOrMissing(raw.pdh),
     pdl: finiteOrMissing(raw.pdl),
@@ -180,6 +185,7 @@ function normalizeIndex(raw: UnknownRecord): H1IndexInput | null {
  * - no recognized existing Truth result => no normalized H1 write;
  * - missing source timestamp or malformed market identity => skipped;
  * - missing optional metrics remain missing and persist as DB NULL, never zero;
+ * - option/chain rows require a finite positive ATM anchor;
  * - all recorder errors stay outside the live path.
  */
 export async function recordH1FromRuntimeSnapshot(

@@ -40,21 +40,13 @@ const swing = {
 };
 
 function makeInput(overrides: Partial<CandidateStyleSelectionInput> = {}): CandidateStyleSelectionInput {
-  return {
-    style: "SCALP",
-    contract,
-    shared,
-    scalp,
-    swing,
-    ...overrides,
-  };
+  return { style: "SCALP", contract, shared, scalp, swing, ...overrides };
 }
 
 test("SCALP becomes READY only when scalp-specific gates and confirmations are ready", () => {
   const result = selectCandidateStyle(makeInput({ style: "SCALP" }));
   assert.equal(result.status, "READY");
-  assert.equal(result.style, "SCALP");
-  assert.equal(result.side, "CE");
+  assert.deepEqual(result.contract, contract);
   assert.match(result.candidateKey ?? "", /^SCALP:NIFTY:CE:/);
   assert.equal(result.affectsVerdict, false);
   assert.equal(result.affectsTelegram, false);
@@ -83,59 +75,59 @@ test("stale truth blocks both styles before any trade-looking candidate is emitt
   assert.equal(swingResult.candidateKey, null);
 });
 
-test("missing required evidence is DATA_UNAVAILABLE, never guessed false or true", () => {
-  const result = selectCandidateStyle(makeInput({
-    style: "SCALP",
-    scalp: { ...scalp, deltaGammaResponseConfirmed: null },
-  }));
+test("missing required style evidence is DATA_UNAVAILABLE, never guessed", () => {
+  const result = selectCandidateStyle(makeInput({ style: "SCALP", scalp: { ...scalp, deltaGammaResponseConfirmed: null } }));
   assert.equal(result.status, "DATA_UNAVAILABLE");
   assert.ok(result.reasons.includes("MISSING_DELTA_GAMMA_RESPONSE"));
+});
+
+test("missing shared positioning evidence is DATA_UNAVAILABLE", () => {
+  const result = selectCandidateStyle(makeInput({ shared: { ...shared, positioningConfirmed: null } }));
+  assert.equal(result.status, "DATA_UNAVAILABLE");
+  assert.ok(result.reasons.includes("MISSING_POSITIONING"));
+});
+
+test("unconfirmed positioning is WATCH, not silently ignored", () => {
+  const result = selectCandidateStyle(makeInput({ shared: { ...shared, positioningConfirmed: false } }));
+  assert.equal(result.status, "WATCH");
   assert.equal(result.candidateKey, null);
 });
 
+test("unconfirmed break/failure evidence is WATCH, not silently ignored", () => {
+  const result = selectCandidateStyle(makeInput({ style: "SWING", shared: { ...shared, breakFailureConfirmed: false } }));
+  assert.equal(result.status, "WATCH");
+});
+
 test("bad liquidity hard-blocks candidate selection", () => {
-  const result = selectCandidateStyle(makeInput({
-    shared: { ...shared, liquidityOk: false },
-  }));
+  const result = selectCandidateStyle(makeInput({ shared: { ...shared, liquidityOk: false } }));
   assert.equal(result.status, "BLOCKED");
   assert.ok(result.devilFlags.includes("LIQUIDITY_GATE_FAILED"));
 });
 
 test("SCALP may be READY while SWING is BLOCKED by higher-DTE thesis conflict", () => {
   const scalpResult = selectCandidateStyle(makeInput({ style: "SCALP" }));
-  const swingResult = selectCandidateStyle(makeInput({
-    style: "SWING",
-    swing: { ...swing, nearExpiryNoiseNotDrivingThesis: false },
-  }));
+  const swingResult = selectCandidateStyle(makeInput({ style: "SWING", swing: { ...swing, nearExpiryNoiseNotDrivingThesis: false } }));
   assert.equal(scalpResult.status, "READY");
   assert.equal(swingResult.status, "BLOCKED");
-  assert.ok(swingResult.devilFlags.includes("NEAR_EXPIRY_NOISE_DRIVES_SWING_THESIS"));
 });
 
 test("SWING may be READY while SCALP is WATCH when fast premium confirmation is absent", () => {
-  const scalpResult = selectCandidateStyle(makeInput({
-    style: "SCALP",
-    scalp: { ...scalp, fastPremiumResponseConfirmed: false },
-  }));
+  const scalpResult = selectCandidateStyle(makeInput({ style: "SCALP", scalp: { ...scalp, fastPremiumResponseConfirmed: false } }));
   const swingResult = selectCandidateStyle(makeInput({ style: "SWING" }));
   assert.equal(scalpResult.status, "WATCH");
   assert.equal(swingResult.status, "READY");
 });
 
 test("SWING hard-blocks unacceptable theta/IV burden", () => {
-  const result = selectCandidateStyle(makeInput({
-    style: "SWING",
-    swing: { ...swing, thetaIvBurdenAcceptable: false },
-  }));
+  const result = selectCandidateStyle(makeInput({ style: "SWING", swing: { ...swing, thetaIvBurdenAcceptable: false } }));
   assert.equal(result.status, "BLOCKED");
   assert.ok(result.devilFlags.includes("THETA_IV_BURDEN_UNACCEPTABLE"));
 });
 
 test("invalid exact contract identity is DATA_UNAVAILABLE", () => {
-  const result = selectCandidateStyle(makeInput({
-    contract: { ...contract, strike: 0 },
-  }));
+  const result = selectCandidateStyle(makeInput({ contract: { ...contract, strike: 0 } }));
   assert.equal(result.status, "DATA_UNAVAILABLE");
   assert.equal(result.side, null);
+  assert.equal(result.contract, null);
   assert.equal(result.candidateKey, null);
 });

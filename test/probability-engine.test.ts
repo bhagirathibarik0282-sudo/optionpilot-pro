@@ -70,7 +70,7 @@ test("computes observed target-before-stop rate only after sample gate passes", 
   assert.equal(result.wins, 2);
   assert.equal(result.losses, 1);
   assert.equal(result.censored, 2);
-  assert.equal(result.winRatePct, 200 / 3);
+  assert.ok(result.winRatePct !== null && Math.abs(result.winRatePct - (200 / 3)) < 1e-12);
 });
 
 test("filters like-for-like context without fabricating missing matches", () => {

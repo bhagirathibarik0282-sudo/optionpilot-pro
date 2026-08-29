@@ -5,7 +5,8 @@ import { evaluateMessageTrigger, type MessageTriggerInput } from "../message-tri
 const base: MessageTriggerInput = {
   dataFresh: true,
   lifecycle: "HOLD",
-  candidateSelected: false,
+  candidateKey: "S17",
+  candidateSelectionChanged: false,
   lifecycleChanged: false,
   premiumBehaviourChanged: false,
   buyerSellerStateChanged: false,
@@ -27,6 +28,11 @@ test("meaningful confirmed change is eligible", () => {
   const r = evaluateMessageTrigger({ ...base, premiumBehaviourChanged: true });
   assert.equal(r.shouldSpeak, true);
   assert.equal(r.urgent, false);
+});
+
+test("candidate selection must represent a change, not a persistent selected flag", () => {
+  assert.equal(evaluateMessageTrigger({ ...base, candidateSelectionChanged: false }).shouldSpeak, false);
+  assert.equal(evaluateMessageTrigger({ ...base, candidateSelectionChanged: true }).shouldSpeak, true);
 });
 
 test("hysteresis blocks under-confirmed change", () => {
@@ -90,8 +96,25 @@ test("invalid confirmation policy fails closed", () => {
   assert.equal(r.reason, "INVALID_REQUIRED_CONFIRMATIONS_POLICY");
 });
 
+test("missing candidate key fails closed", () => {
+  const r = evaluateMessageTrigger({ ...base, candidateKey: "", lifecycleChanged: true });
+  assert.equal(r.shouldSpeak, false);
+  assert.equal(r.reason, "MISSING_CANDIDATE_KEY");
+});
+
+test("fingerprint must be scoped to the same stable candidate key", () => {
+  const r = evaluateMessageTrigger({
+    ...base,
+    candidateKey: "S17",
+    currentFingerprint: "W04:HOLD:RESPONDING_WELL",
+    lifecycleChanged: true,
+  });
+  assert.equal(r.shouldSpeak, false);
+  assert.equal(r.reason, "FINGERPRINT_CANDIDATE_SCOPE_MISMATCH");
+});
+
 test("Haiku can never override trigger result", () => {
-  const r = evaluateMessageTrigger({ ...base, candidateSelected: true });
+  const r = evaluateMessageTrigger({ ...base, candidateSelectionChanged: true });
   assert.equal(r.haikuMayOverride, false);
   assert.equal(r.affectsTelegram, false);
   assert.equal(r.affectsVerdict, false);

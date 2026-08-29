@@ -37,10 +37,25 @@ test("flat non-expanding structure maps to range", () => {
   assert.equal(result.regime, "RANGE");
 });
 
-test("conflicting or unavailable evidence never guesses a regime", () => {
-  const result = classifyMarketRegime({ ...base, trendDirection: "UNAVAILABLE", rangeState: "UNAVAILABLE" });
+test("unavailable evidence field blocks classification even when count claims enough evidence", () => {
+  const result = classifyMarketRegime({ ...base, volatilityState: "UNAVAILABLE", evidenceCount: 10 });
   assert.equal(result.regime, "UNKNOWN");
   assert.equal(result.ready, false);
+  assert.equal(result.reason, "INCOMPLETE_EVIDENCE_FIELDS");
+});
+
+test("unknown transition state blocks classification instead of assuming false", () => {
+  const result = classifyMarketRegime({ ...base, transitionDetected: null, evidenceCount: 10 });
+  assert.equal(result.regime, "UNKNOWN");
+  assert.equal(result.ready, false);
+  assert.equal(result.reason, "INCOMPLETE_EVIDENCE_FIELDS");
+});
+
+test("conflicting complete evidence never guesses a regime", () => {
+  const result = classifyMarketRegime({ ...base, trendDirection: "UP", rangeState: "COMPRESSED", volatilityState: "NORMAL" });
+  assert.equal(result.regime, "UNKNOWN");
+  assert.equal(result.ready, false);
+  assert.equal(result.reason, "EVIDENCE_CONFLICT");
 });
 
 test("foundation has no live authority", () => {

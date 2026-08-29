@@ -29,7 +29,7 @@ export interface MarketRegimeResult {
 /**
  * Deterministic regime foundation over already-validated discrete evidence.
  * This module deliberately does not invent thresholds from raw prices/VIX.
- * Until enough validated evidence exists it fails closed to UNKNOWN.
+ * Until enough complete validated evidence exists it fails closed to UNKNOWN.
  */
 export function classifyMarketRegime(input: MarketRegimeInput): MarketRegimeResult {
   const validMinimum = Number.isInteger(input.minEvidenceCount) && input.minEvidenceCount > 0;
@@ -45,6 +45,16 @@ export function classifyMarketRegime(input: MarketRegimeInput): MarketRegimeResu
 
   if (!enoughEvidence) {
     return { ...base, regime: "UNKNOWN", ready: false, reason: "INSUFFICIENT_VALIDATED_EVIDENCE" };
+  }
+
+  const completeEvidence =
+    input.trendDirection !== "UNAVAILABLE" &&
+    input.rangeState !== "UNAVAILABLE" &&
+    input.volatilityState !== "UNAVAILABLE" &&
+    input.transitionDetected !== null;
+
+  if (!completeEvidence) {
+    return { ...base, regime: "UNKNOWN", ready: false, reason: "INCOMPLETE_EVIDENCE_FIELDS" };
   }
 
   if (input.transitionDetected === true) {
@@ -67,5 +77,5 @@ export function classifyMarketRegime(input: MarketRegimeInput): MarketRegimeResu
     return { ...base, regime: "RANGE", ready: true, reason: "FLAT_DIRECTION_WITH_NON_EXPANDING_RANGE" };
   }
 
-  return { ...base, regime: "UNKNOWN", ready: false, reason: "EVIDENCE_CONFLICT_OR_UNAVAILABLE" };
+  return { ...base, regime: "UNKNOWN", ready: false, reason: "EVIDENCE_CONFLICT" };
 }

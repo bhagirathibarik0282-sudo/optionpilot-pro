@@ -57,6 +57,15 @@ Store separately from raw truth:
 - Do not convert historical continuation frequency into a current-candidate probability or certainty.
 - Low-sample or mismatched-regime analogs remain `INSUFFICIENT` rather than being padded with weak cases.
 
+## Seven-index market story and thesis guard
+- Reuse the existing size-regime engine for BROAD_RISK_ON, NARROW_LARGECAP_RALLY, MIDCAP_EXPANSION, SMALLCAP_SPECULATION, EMERGING_LARGECAP_ROTATION, SIZE_ROTATION and BROAD_RISK_OFF.
+- Leadership and laggards are descriptive rankings from verified relative-strength metrics, not participant-intent claims.
+- Regime strength remains `UNKNOWN` until historical and out-of-sample calibration proves thresholds; the H1 story layer must not invent WEAK/MODERATE/STRONG labels.
+- Market story combines the 5D regime path, 20D leadership/rotation lens and 60D context into a historical context object.
+- Thesis stores historical bias, base case, alternative case, invalidation and explicit unknowns.
+- If historical bias conflicts with live direction, confidence is reduced; historical thesis still cannot flip live direction or execution.
+- Small-cap leadership alone is not promoted to broad healthy risk-on.
+
 ## Truth eligibility
 - TRUE: research eligible.
 - PARTIAL: persist only as diagnostic; exclude from learning by default.
@@ -73,6 +82,8 @@ Store separately from raw truth:
 - Never convert regime transition into reversal without explicit evidence.
 - Never reconstruct missing historical fixed-strike outcomes from ATM substitutions.
 - Never present descriptive analog frequency as calibrated current-trade probability.
+- Never infer market-participant intent from seven-index leadership rankings alone.
+- Never invent calibrated regime strength before OOS validation.
 
 ## One-shot manual handoff checklist
 Complete all safe branch work first. Then perform one manual batch only:
@@ -82,7 +93,7 @@ Complete all safe branch work first. Then perform one manual batch only:
 4. Initialize derived schema after the existing DB init without changing candidate/verdict behavior.
 5. Wire historical intelligence/lifecycle calls only after their source states are already deterministically known; no history module may become a live decision dependency.
 6. Verify `DATABASE_URL` and required Railway variables exist without exposing values.
-7. Run the repository test suite, including H1 derived/intelligence/candidate-quality/execution-lifecycle/history-router tests.
+7. Run the repository test suite, including H1 derived/intelligence/candidate-quality/execution-lifecycle/history-router/market-story tests.
 8. Start with production-impact disabled / research-only recorder semantics.
 9. Run 1-day pilot/replay.
 10. Audit timestamps, expiry, DTE, CE/PE identity, ATM offsets, duplicate minute buckets, NULL semantics.
@@ -93,12 +104,14 @@ Complete all safe branch work first. Then perform one manual batch only:
 15. Audit regime survival: transition != automatic reversal; invalidated thesis does not increment survival.
 16. Audit history router priority: LIVE always outranks 5D/20D/60D/1Y context.
 17. Audit analog output: sample/count disclosure only; no probability claim.
-18. If PASS, expand to 5 days.
-19. Devil-check expiry roll, candidate lifecycle, regime transitions, fixed-strike continuity and data gaps.
-20. If PASS, bulk import 60 trading days in one controlled batch.
-21. Run post-import integrity counters before enabling any historical analog use.
-22. Keep research data isolated from production candidate weighting until separate approval.
-23. Merge/deploy only after explicit final approval.
+18. Audit seven-index story: leadership/laggards must reflect verified RS metrics; regime strength must remain UNKNOWN while uncalibrated.
+19. Audit thesis conflict rule: history may reduce confidence but cannot flip live direction.
+20. If PASS, expand to 5 days.
+21. Devil-check expiry roll, candidate lifecycle, regime transitions, fixed-strike continuity, size rotation and data gaps.
+22. If PASS, bulk import 60 trading days in one controlled batch.
+23. Run post-import integrity counters before enabling any historical analog use.
+24. Keep research data isolated from production candidate weighting until separate approval.
+25. Merge/deploy only after explicit final approval.
 
 ## Bulk import preflight counters
 Before the 60-day import, collect expected counts and abort on structural mismatch:
@@ -114,6 +127,7 @@ Before the 60-day import, collect expected counts and abort on structural mismat
 - duplicate logical key count
 - candidate fixed-strike coverage window count
 - 5D/20D/60D metric availability counts
+- seven-index aligned-date coverage count
 
 ## Bulk import postflight counters
 After import, verify:
@@ -132,6 +146,9 @@ After import, verify:
 - historical lifecycle state matches the authoritative live state supplied at that timestamp
 - 5D/20D/60D windows use trading observations rather than calendar-day assumptions
 - analog summaries exclude bad-quality/regime-mismatched cases and disclose sample size
+- leadership/laggard rankings are traceable to seven-index RS values on the same aligned date
+- uncalibrated size-regime strength remains UNKNOWN
+- historical thesis conflict never mutates the live direction
 
 ## Acceptance criteria before 60-day import
 - 0 duplicate logical minute keys.
@@ -147,6 +164,8 @@ After import, verify:
 - Missing old fixed-strike outcome evidence remains explicitly incomplete.
 - History cannot override live direction.
 - Analog frequency cannot be labeled as current-trade probability.
+- Seven-index leadership cannot be presented as verified participant psychology.
+- Regime strength remains uncalibrated until OOS validation.
 
 ## Deferred until after 60-day validation
 - 90-day extension.

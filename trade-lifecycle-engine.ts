@@ -53,6 +53,7 @@ export interface TradeLifecycleResult {
 }
 
 const terminalStates = new Set<TradeLifecycleState>(["EXIT"]);
+const exitEligibleStates = new Set<TradeLifecycleState>(["ACTIVE", "HOLD", "PROTECT", "PARTIAL_BOOK", "TRAIL"]);
 
 function result(input: TradeLifecycleInput, nextState: TradeLifecycleState, reasons: string[], devilFlags: string[] = []): TradeLifecycleResult {
   return {
@@ -72,13 +73,17 @@ function result(input: TradeLifecycleInput, nextState: TradeLifecycleState, reas
 /**
  * Deterministic state machine only. It never invents a transition.
  * Safety priorities:
- * 1) missing/stale/invalid candidate => DATA_UNAVAILABLE
- * 2) EXIT is absorbing
+ * 1) EXIT is absorbing even if fresh data later disappears
+ * 2) missing/stale/invalid non-terminal candidate => DATA_UNAVAILABLE
  * 3) candidate/style mutation is blocked (no SCALP -> SWING rescue)
- * 4) EXIT may occur from any active lifecycle state when explicitly confirmed
+ * 4) EXIT requires explicit confirmation and only applies after activation
  * 5) partial/protect/trail require their own explicit upstream conditions
  */
 export function advanceTradeLifecycle(input: TradeLifecycleInput): TradeLifecycleResult {
+  if (terminalStates.has(input.currentState)) {
+    return result(input, "EXIT", ["EXIT_IS_TERMINAL"]);
+  }
+
   if (!input.dataFresh || !input.contractValid) {
     return result(input, "DATA_UNAVAILABLE", [!input.dataFresh ? "DATA_NOT_FRESH" : "CONTRACT_NOT_VALID"], ["NO_FRESH_LIFECYCLE_GUIDANCE"]);
   }
@@ -87,15 +92,14 @@ export function advanceTradeLifecycle(input: TradeLifecycleInput): TradeLifecycl
     return result(input, input.currentState, ["CANDIDATE_OR_STYLE_MUTATION_BLOCKED"], ["NO_SCALP_TO_SWING_MUTATION", "NO_CONTRACT_IDENTITY_MUTATION"]);
   }
 
-  if (terminalStates.has(input.currentState)) {
-    return result(input, "EXIT", ["EXIT_IS_TERMINAL"]);
-  }
-
   if (input.event === "DATA_LOST") {
     return result(input, "DATA_UNAVAILABLE", ["UPSTREAM_DATA_LOST"], ["NO_FRESH_LIFECYCLE_GUIDANCE"]);
   }
 
   if (input.event === "EXIT_TRIGGERED") {
+    if (!exitEligibleStates.has(input.currentState)) {
+      return result(input, input.currentState, ["EXIT_EVENT_BEFORE_ACTIVE_TRADE"], ["PRE_ENTRY_EXIT_BLOCKED"]);
+    }
     if (input.exitConditionConfirmed) return result(input, "EXIT", ["EXIT_CONDITION_CONFIRMED"]);
     return result(input, input.currentState, ["EXIT_EVENT_WITHOUT_CONFIRMATION"], ["UNCONFIRMED_EXIT_BLOCKED"]);
   }

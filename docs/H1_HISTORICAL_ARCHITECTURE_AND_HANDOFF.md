@@ -66,6 +66,19 @@ Store separately from raw truth:
 - If historical bias conflicts with live direction, confidence is reduced; historical thesis still cannot flip live direction or execution.
 - Small-cap leadership alone is not promoted to broad healthy risk-on.
 
+## Replay / look-ahead guard
+- A replay observation may only use information timestamped at or before its decision time.
+- Running/unclosed timeframe blocks are never allowed as confirmation evidence.
+- TRUE is the only replay/research-eligible truth quality; PARTIAL/STALE/INVALID stay diagnostic-only.
+- Duplicate logical keys, outside-session rows, expiry/DTE mismatch and future block-end timestamps are hard replay blockers.
+- Replay validation is historical-research-only and has zero live verdict/Telegram/execution authority.
+
+## 60D bulk-import preflight
+- Bulk import is abort-first, never best-effort when structural integrity fails.
+- Hard blockers include trading-day count mismatch, symbol-count mismatch, duplicate logical keys, CE/PE structural count mismatch, invalid expiry, DTE mismatch, outside-session data, look-ahead rows, running-block rows and zero TRUE research-eligible rows.
+- PARTIAL/STALE/INVALID diagnostic rows may be retained for audit, but they must stay excluded from research queries.
+- 60D import is attempted only after 1D and 5D pilots pass the same integrity rules.
+
 ## Truth eligibility
 - TRUE: research eligible.
 - PARTIAL: persist only as diagnostic; exclude from learning by default.
@@ -84,6 +97,8 @@ Store separately from raw truth:
 - Never present descriptive analog frequency as calibrated current-trade probability.
 - Never infer market-participant intent from seven-index leadership rankings alone.
 - Never invent calibrated regime strength before OOS validation.
+- Never allow future timestamps or unclosed blocks into replay evidence.
+- Never continue a 60D import after a hard structural preflight blocker.
 
 ## One-shot manual handoff checklist
 Complete all safe branch work first. Then perform one manual batch only:
@@ -93,7 +108,7 @@ Complete all safe branch work first. Then perform one manual batch only:
 4. Initialize derived schema after the existing DB init without changing candidate/verdict behavior.
 5. Wire historical intelligence/lifecycle calls only after their source states are already deterministically known; no history module may become a live decision dependency.
 6. Verify `DATABASE_URL` and required Railway variables exist without exposing values.
-7. Run the repository test suite, including H1 derived/intelligence/candidate-quality/execution-lifecycle/history-router/market-story tests.
+7. Run the repository test suite, including all H1 derived/intelligence/candidate-quality/execution-lifecycle/history-router/market-story/replay/preflight tests.
 8. Start with production-impact disabled / research-only recorder semantics.
 9. Run 1-day pilot/replay.
 10. Audit timestamps, expiry, DTE, CE/PE identity, ATM offsets, duplicate minute buckets, NULL semantics.
@@ -106,12 +121,14 @@ Complete all safe branch work first. Then perform one manual batch only:
 17. Audit analog output: sample/count disclosure only; no probability claim.
 18. Audit seven-index story: leadership/laggards must reflect verified RS metrics; regime strength must remain UNKNOWN while uncalibrated.
 19. Audit thesis conflict rule: history may reduce confidence but cannot flip live direction.
-20. If PASS, expand to 5 days.
-21. Devil-check expiry roll, candidate lifecycle, regime transitions, fixed-strike continuity, size rotation and data gaps.
-22. If PASS, bulk import 60 trading days in one controlled batch.
-23. Run post-import integrity counters before enabling any historical analog use.
-24. Keep research data isolated from production candidate weighting until separate approval.
-25. Merge/deploy only after explicit final approval.
+20. Audit replay leakage: no future observation, running block or non-TRUE row may enter research replay.
+21. If PASS, expand to 5 days and rerun the replay/leakage audit.
+22. Devil-check expiry roll, candidate lifecycle, regime transitions, fixed-strike continuity, size rotation and data gaps.
+23. Run the 60D abort-first preflight counters.
+24. If and only if preflight PASS, bulk import 60 trading days in one controlled batch.
+25. Run post-import integrity counters before enabling any historical analog use.
+26. Keep research data isolated from production candidate weighting until separate approval.
+27. Merge/deploy only after explicit final approval.
 
 ## Bulk import preflight counters
 Before the 60-day import, collect expected counts and abort on structural mismatch:
@@ -128,6 +145,10 @@ Before the 60-day import, collect expected counts and abort on structural mismat
 - candidate fixed-strike coverage window count
 - 5D/20D/60D metric availability counts
 - seven-index aligned-date coverage count
+- DTE/date mismatch row count
+- outside-session row count
+- look-ahead row count
+- running/unclosed timeframe-block row count
 
 ## Bulk import postflight counters
 After import, verify:
@@ -149,6 +170,8 @@ After import, verify:
 - leadership/laggard rankings are traceable to seven-index RS values on the same aligned date
 - uncalibrated size-regime strength remains UNKNOWN
 - historical thesis conflict never mutates the live direction
+- zero accepted replay rows have observedAt/blockEnd later than decisionAt
+- zero unclosed timeframe blocks are used as confirmed evidence
 
 ## Acceptance criteria before 60-day import
 - 0 duplicate logical minute keys.
@@ -166,6 +189,8 @@ After import, verify:
 - Analog frequency cannot be labeled as current-trade probability.
 - Seven-index leadership cannot be presented as verified participant psychology.
 - Regime strength remains uncalibrated until OOS validation.
+- Replay cannot consume future or running-block data.
+- 60D preflight has zero hard blockers.
 
 ## Deferred until after 60-day validation
 - 90-day extension.

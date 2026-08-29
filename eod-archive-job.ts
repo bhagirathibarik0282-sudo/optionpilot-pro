@@ -1,4 +1,4 @@
-import pg from "pg";
+import pg, { type PoolClient } from "pg";
 import { archiveKey, decideEodArchive, indiaTradingDateFromIso, isWeekdayTradingCandidate } from "./eod-archive-core.js";
 
 const { Pool } = pg;
@@ -10,8 +10,8 @@ function getPool() {
   return new Pool({ connectionString: url, max: 2, ssl: isLocal ? undefined : { rejectUnauthorized: false } });
 }
 
-async function ensureSchema(p: InstanceType<typeof Pool>) {
-  await p.query(`
+async function ensureSchema(client: PoolClient) {
+  await client.query(`
     CREATE TABLE IF NOT EXISTS eod_archive_runs (
       trading_date DATE PRIMARY KEY,
       archive_key TEXT NOT NULL UNIQUE,
@@ -34,8 +34,8 @@ async function ensureSchema(p: InstanceType<typeof Pool>) {
   `);
 }
 
-async function sourceCounts(p: InstanceType<typeof Pool>, tradingDate: string) {
-  const q = await p.query(`
+async function sourceCounts(client: PoolClient, tradingDate: string) {
+  const q = await client.query(`
     SELECT
       (SELECT count(*) FROM market_snapshot_1m WHERE (minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS market_count,
       (SELECT count(*) FROM option_snapshot_1m WHERE (minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS option_count,
@@ -51,13 +51,13 @@ async function sourceCounts(p: InstanceType<typeof Pool>, tradingDate: string) {
   return { counts, total };
 }
 
-async function alreadyCompleted(p: InstanceType<typeof Pool>, tradingDate: string) {
-  const q = await p.query("SELECT status FROM eod_archive_runs WHERE trading_date=$1::date", [tradingDate]);
+async function alreadyCompleted(client: PoolClient, tradingDate: string) {
+  const q = await client.query("SELECT status FROM eod_archive_runs WHERE trading_date=$1::date", [tradingDate]);
   return q.rows[0]?.status === "COMPLETED";
 }
 
-async function buildPayload(p: InstanceType<typeof Pool>, tradingDate: string) {
-  const result = await p.query(`
+async function buildPayload(client: PoolClient, tradingDate: string) {
+  const result = await client.query(`
     SELECT jsonb_build_object(
       'schemaVersion','EOD_ARCHIVE_V1',
       'tradingDate',$1::text,
@@ -80,11 +80,17 @@ export async function runEodArchive(nowIso = new Date().toISOString()) {
     return { ok: true, status: "SKIPPED_NO_DATA", tradingDate, reason: "NON_WEEKDAY" };
   }
 
-  const p = getPool();
+  const pool = getPool();
+  const client = await pool.connect();
   try {
-    await ensureSchema(p);
-    const completed = await alreadyCompleted(p, tradingDate);
-    const { counts, total } = await sourceCounts(p, tradingDate);
+    await ensureSchema(client);
+
+    // One archive writer per trading date across restarts/overlapping cron runs.
+    // The lock is session-scoped and is automatically released when this client is released.
+    await client.query("SELECT pg_advisory_lock(hashtext($1))", [archiveKey(tradingDate)]);
+
+    const completed = await alreadyCompleted(client, tradingDate);
+    const { counts, total } = await sourceCounts(client, tradingDate);
     const decision = decideEodArchive({ tradingDate, nowIso, alreadyCompleted: completed, sourceRecordCount: total });
 
     if (!decision.shouldRun) {
@@ -93,7 +99,7 @@ export async function runEodArchive(nowIso = new Date().toISOString()) {
     }
 
     const key = archiveKey(tradingDate);
-    await p.query(`
+    await client.query(`
       INSERT INTO eod_archive_runs (trading_date, archive_key, started_at, status, record_count, archive_destination, error, updated_at)
       VALUES ($1::date,$2,now(),'STARTED',$3,'POSTGRES:eod_archive_payloads',NULL,now())
       ON CONFLICT (trading_date) DO UPDATE SET
@@ -103,31 +109,36 @@ export async function runEodArchive(nowIso = new Date().toISOString()) {
     `, [tradingDate, key, total]);
 
     try {
-      const payload = await buildPayload(p, tradingDate);
+      const payload = await buildPayload(client, tradingDate);
       if (!payload) throw new Error("ARCHIVE_PAYLOAD_EMPTY");
-      await p.query("BEGIN");
-      await p.query(`
+
+      await client.query("BEGIN");
+      await client.query(`
         INSERT INTO eod_archive_payloads (trading_date, archive_key, payload, record_count)
         VALUES ($1::date,$2,$3::jsonb,$4)
-        ON CONFLICT (trading_date) DO UPDATE SET archive_key=EXCLUDED.archive_key, payload=EXCLUDED.payload, record_count=EXCLUDED.record_count
+        ON CONFLICT (trading_date) DO UPDATE SET
+          archive_key=EXCLUDED.archive_key, payload=EXCLUDED.payload, record_count=EXCLUDED.record_count
       `, [tradingDate, key, JSON.stringify(payload), total]);
-      await p.query(`
+      await client.query(`
         UPDATE eod_archive_runs SET status='COMPLETED', completed_at=now(), record_count=$2,
           archive_destination='POSTGRES:eod_archive_payloads', error=NULL, updated_at=now()
         WHERE trading_date=$1::date
       `, [tradingDate, total]);
-      await p.query("COMMIT");
+      await client.query("COMMIT");
+
       console.log(`[EOD_ARCHIVE] completed date=${tradingDate} records=${total} key=${key}`);
       return { ok: true, status: "COMPLETED", tradingDate, archiveKey: key, recordCount: total, counts };
     } catch (err) {
-      try { await p.query("ROLLBACK"); } catch {}
+      try { await client.query("ROLLBACK"); } catch {}
       const message = err instanceof Error ? err.message : String(err);
-      await p.query(`UPDATE eod_archive_runs SET status='FAILED', error=$2, updated_at=now() WHERE trading_date=$1::date`, [tradingDate, message]);
+      await client.query(`UPDATE eod_archive_runs SET status='FAILED', error=$2, updated_at=now() WHERE trading_date=$1::date`, [tradingDate, message]);
       console.error(`[EOD_ARCHIVE] failed date=${tradingDate} error=${message}`);
       return { ok: false, status: "FAILED", tradingDate, error: message };
     }
   } finally {
-    await p.end();
+    try { await client.query("SELECT pg_advisory_unlock(hashtext($1))", [archiveKey(tradingDate)]); } catch {}
+    client.release();
+    await pool.end();
   }
 }
 

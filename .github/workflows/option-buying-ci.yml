@@ -24,6 +24,7 @@ on:
       - buyer-seller-behaviour-engine.ts
       - psychology-shadow-chain.ts
       - psychology-shadow-validation.ts
+      - psychology-shadow-replay-adapter.ts
       - probability-engine.ts
       - market-regime-engine.ts
       - strategy-readiness-engine.ts
@@ -49,6 +50,7 @@ on:
       - test/buyer-seller-behaviour-engine.test.ts
       - test/psychology-shadow-chain.test.ts
       - test/psychology-shadow-validation.test.ts
+      - test/psychology-shadow-replay-adapter.test.ts
       - test/probability-engine.test.ts
       - test/market-regime-engine.test.ts
       - test/strategy-readiness-engine.test.ts

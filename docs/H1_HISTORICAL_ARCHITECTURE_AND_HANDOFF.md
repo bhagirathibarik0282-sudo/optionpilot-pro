@@ -38,6 +38,16 @@ Store separately from raw truth:
 - A+ historical quality requires full three-horizon alignment, supportive family fusion, high completeness and acceptable liquidity.
 - This classifier remains `HISTORICAL_RESEARCH_ONLY` and cannot affect live verdict, Telegram or execution until a separately approved future phase.
 
+## Premium-pair / execution lifecycle guard
+- Track the selected premium and opposite premium together when prior and current observations are available.
+- Missing prior premium means relation is `UNAVAILABLE`; never infer a move from one observation.
+- Historical lifecycle stores the already-decided live status; it cannot create/promote/downgrade HOLD, CAUTION, EXIT or any other live state.
+- Regime-survival count increments only while the thesis is explicitly intact.
+- A regime transition may be recorded as DEGRADED without being mislabeled as a reversal.
+- A broken thesis records INVALIDATED and cannot gain a survival increment.
+- Existing deterministic Outcome Engine remains the authority for observed target/stop/MFE/MAE results; H1 does not create a second outcome calculator.
+- Old incomplete ATM-only outcome windows remain incomplete. New ATM ±7 capture may improve future fixed-strike observability but cannot retroactively repair missing evidence.
+
 ## Truth eligibility
 - TRUE: research eligible.
 - PARTIAL: persist only as diagnostic; exclude from learning by default.
@@ -50,6 +60,9 @@ Store separately from raw truth:
 - Never recompute a second version of Greeks inside the recorder.
 - Missing values remain NULL with validation status.
 - Current live state always outranks historical analogs.
+- Never infer premium-pair change without two valid observations.
+- Never convert regime transition into reversal without explicit evidence.
+- Never reconstruct missing historical fixed-strike outcomes from ATM substitutions.
 
 ## One-shot manual handoff checklist
 Complete all safe branch work first. Then perform one manual batch only:
@@ -57,19 +70,23 @@ Complete all safe branch work first. Then perform one manual batch only:
 2. Insert the minimal import/init for `ensureH1DerivedSchema`.
 3. Add the post-snapshot, post-Truth fire-and-forget recorder hook. It must not await inside the live verdict path.
 4. Initialize derived schema after the existing DB init without changing candidate/verdict behavior.
-5. Verify `DATABASE_URL` and required Railway variables exist without exposing values.
-6. Run the repository test suite, including H1 derived/intelligence/candidate-quality tests.
-7. Start with production-impact disabled / research-only recorder semantics.
-8. Run 1-day pilot/replay.
-9. Audit timestamps, expiry, DTE, CE/PE identity, ATM offsets, duplicate minute buckets, NULL semantics.
-10. Audit Truth eligibility: only TRUE can enter research/training queries by default.
-11. Audit multi-horizon candidate-quality guards: FULL alignment must still reject overextended/no-chase/bad-liquidity cases.
-12. If PASS, expand to 5 days.
-13. Devil-check expiry roll, candidate lifecycle, regime transitions and data gaps.
-14. If PASS, bulk import 60 trading days in one controlled batch.
-15. Run post-import integrity counters before enabling any historical analog use.
-16. Keep research data isolated from production candidate weighting until separate approval.
-17. Merge/deploy only after explicit final approval.
+5. Wire historical intelligence/lifecycle calls only after their source states are already deterministically known; no history module may become a live decision dependency.
+6. Verify `DATABASE_URL` and required Railway variables exist without exposing values.
+7. Run the repository test suite, including H1 derived/intelligence/candidate-quality/execution-lifecycle tests.
+8. Start with production-impact disabled / research-only recorder semantics.
+9. Run 1-day pilot/replay.
+10. Audit timestamps, expiry, DTE, CE/PE identity, ATM offsets, duplicate minute buckets, NULL semantics.
+11. Audit Truth eligibility: only TRUE can enter research/training queries by default.
+12. Audit multi-horizon candidate-quality guards: FULL alignment must still reject overextended/no-chase/bad-liquidity cases.
+13. Audit premium-pair semantics: missing prior observation => UNAVAILABLE; no inferred move.
+14. Audit lifecycle semantics: historical layer preserves supplied live status and never promotes/downgrades it.
+15. Audit regime survival: transition != automatic reversal; invalidated thesis does not increment survival.
+16. If PASS, expand to 5 days.
+17. Devil-check expiry roll, candidate lifecycle, regime transitions, fixed-strike continuity and data gaps.
+18. If PASS, bulk import 60 trading days in one controlled batch.
+19. Run post-import integrity counters before enabling any historical analog use.
+20. Keep research data isolated from production candidate weighting until separate approval.
+21. Merge/deploy only after explicit final approval.
 
 ## Bulk import preflight counters
 Before the 60-day import, collect expected counts and abort on structural mismatch:
@@ -83,6 +100,7 @@ Before the 60-day import, collect expected counts and abort on structural mismat
 - rejected expiry rows
 - NULL IV/Greeks counts
 - duplicate logical key count
+- candidate fixed-strike coverage window count
 
 ## Bulk import postflight counters
 After import, verify:
@@ -94,19 +112,24 @@ After import, verify:
 - no research-eligible PARTIAL/STALE/INVALID rows
 - ATM ±7 coverage within expected contract availability
 - candidate rows traceable to snapshotId + ruleVersion
-- MFE/MAE remains NULL until a verified outcome process calculates it
+- MFE/MAE remains NULL until the verified outcome process calculates it
 - full-alignment historical candidates retain overextension/no-chase/liquidity guard outcomes
+- premium-pair relations are UNAVAILABLE where a prior observation is missing
+- regime-survival increments occur only on thesis-intact observations
+- historical lifecycle state matches the authoritative live state supplied at that timestamp
 
 ## Acceptance criteria before 60-day import
 - 0 duplicate logical minute keys.
 - No CE/PE swaps.
 - No expiry-date shifts from UTC/IST conversion.
 - No research-eligible rows from INVALID/PARTIAL/STALE data.
-- No fabricated OI deltas, PCR, MaxPain, Greeks, or sentiment.
+- No fabricated OI deltas, PCR, MaxPain, Greeks, sentiment or premium-pair changes.
 - Closed-timeframe state contains no look-ahead data.
 - Every candidate can trace back to snapshotId + ruleVersion.
 - DB failure cannot block live decision/Telegram path.
 - Multi-horizon alignment cannot bypass entry-quality/risk guards.
+- Historical lifecycle cannot alter live execution state.
+- Missing old fixed-strike outcome evidence remains explicitly incomplete.
 
 ## Deferred until after 60-day validation
 - 90-day extension.

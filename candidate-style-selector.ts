@@ -55,6 +55,7 @@ export interface CandidateStyleSelectionResult {
   semantics: "RESEARCH_SHADOW_ONLY";
   style: CandidateTradeStyle;
   side: CandidateSide | null;
+  contract: CandidateContractIdentity | null;
   status: CandidateSelectionStatus;
   candidateKey: string | null;
   reasons: string[];
@@ -102,6 +103,7 @@ function baseResult(
     semantics: "RESEARCH_SHADOW_ONLY",
     style: input.style,
     side: contract?.side ?? null,
+    contract,
     status,
     candidateKey: contract && status === "READY" ? candidateKey(input.style, contract) : null,
     reasons,
@@ -127,6 +129,8 @@ export function selectCandidateStyle(input: CandidateStyleSelectionInput): Candi
     missing("LIQUIDITY_OK", shared.liquidityOk, reasons),
     missing("DIRECTIONAL_PARTICIPATION", shared.directionalParticipationConfirmed, reasons),
     missing("PREMIUM_DIRECTION", shared.premiumDirectionConfirmed, reasons),
+    missing("POSITIONING", shared.positioningConfirmed, reasons),
+    missing("BREAK_FAILURE", shared.breakFailureConfirmed, reasons),
   ].some(Boolean);
   if (sharedMissing) return baseResult(input, "DATA_UNAVAILABLE", reasons, devilFlags);
 
@@ -156,6 +160,8 @@ export function selectCandidateStyle(input: CandidateStyleSelectionInput): Candi
     const confirmations = [
       shared.directionalParticipationConfirmed,
       shared.premiumDirectionConfirmed,
+      shared.positioningConfirmed,
+      shared.breakFailureConfirmed,
       scalp.fastPremiumResponseConfirmed,
       scalp.deltaGammaResponseConfirmed,
       scalp.shortHorizonProbabilityReady,
@@ -190,6 +196,8 @@ export function selectCandidateStyle(input: CandidateStyleSelectionInput): Candi
   const confirmations = [
     shared.directionalParticipationConfirmed,
     shared.premiumDirectionConfirmed,
+    shared.positioningConfirmed,
+    shared.breakFailureConfirmed,
     swing.multiExpiryAligned,
     swing.higherTimeframeRegimeStable,
     swing.longerHorizonProbabilityReady,

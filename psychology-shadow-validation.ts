@@ -90,8 +90,16 @@ function assertCount(name: string, value: number): void {
 }
 
 export function validatePsychologyShadowObservations(observations: ShadowValidationObservation[]): ShadowValidationResult {
+  const seenTradeIds = new Set<string>();
   for (const o of observations) {
-    if (!o.tradeId.trim()) throw new Error("tradeId is required");
+    const tradeId = o.tradeId.trim();
+    if (!tradeId) throw new Error("tradeId is required");
+    if (seenTradeIds.has(tradeId)) throw new Error(`duplicate tradeId is not allowed: ${tradeId}`);
+    seenTradeIds.add(tradeId);
+
+    if (!REQUIRED_SHADOW_REGIMES.includes(o.regime)) throw new Error(`unsupported regime: ${String(o.regime)}`);
+    if (typeof o.completedTrade !== "boolean") throw new Error("completedTrade must be boolean");
+
     for (const [key, value] of Object.entries(o)) {
       if (key === "tradeId" || key === "regime" || key === "completedTrade") continue;
       assertCount(key, value as number);
@@ -100,6 +108,7 @@ export function validatePsychologyShadowObservations(observations: ShadowValidat
     if (o.missedLateExitWarnings > o.lateExitEvents) throw new Error("missedLateExitWarnings cannot exceed lateExitEvents");
     if (o.missedThesisFailures > o.thesisFailures) throw new Error("missedThesisFailures cannot exceed thesisFailures");
     if (o.duplicateMessages > o.eligibleMessages) throw new Error("duplicateMessages cannot exceed eligibleMessages");
+    if (o.spokenUpdates > o.eligibleMessages) throw new Error("spokenUpdates cannot exceed eligibleMessages");
     if (o.entriesAfterExtension > o.entries) throw new Error("entriesAfterExtension cannot exceed entries");
     if (o.stopRespectViolations > o.stoppedTrades) throw new Error("stopRespectViolations cannot exceed stoppedTrades");
     if (o.usefulProfitProtectionEvents > o.profitProtectionOpportunities) throw new Error("usefulProfitProtectionEvents cannot exceed profitProtectionOpportunities");

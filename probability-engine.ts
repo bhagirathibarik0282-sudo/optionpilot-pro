@@ -32,10 +32,25 @@ const WIN_STATUSES = new Set<OutcomeRecord["status"]>([
   "TARGET_T3_HIT",
 ]);
 
+function unavailable(reason: string): HistoricalProbabilityResult {
+  return {
+    status: "DATA_UNAVAILABLE",
+    sampleCount: 0,
+    resolvedSamples: 0,
+    wins: 0,
+    losses: 0,
+    censored: 0,
+    winRatePct: null,
+    semantics: "TARGET_BEFORE_STOP_OBSERVED_ONLY",
+    ruleVersion: "PROBABILITY_ENGINE_V1",
+    reason,
+  };
+}
+
 function matches(record: OutcomeRecord, query: ProbabilityQuery): boolean {
   if (query.symbol && record.symbol !== query.symbol) return false;
   if (query.side !== undefined && record.side !== query.side) return false;
-  if (query.horizon !== undefined && record.horizon !== query.horizon) return false;
+  if (record.horizon !== query.horizon) return false;
   if (query.marketRegime !== undefined && record.marketRegime !== query.marketRegime) return false;
   if (query.expiryType !== undefined && record.expiryType !== query.expiryType) return false;
   if (query.signalType !== undefined && record.signalType !== query.signalType) return false;
@@ -47,11 +62,15 @@ function matches(record: OutcomeRecord, query: ProbabilityQuery): boolean {
  * Historical-support calculator only. It never changes a live verdict.
  * Incomplete/pending/ambiguous observations are censored rather than guessed.
  * NEITHER_HIT is also censored because no target-before-stop outcome was observed.
+ * A horizon is mandatory: mixing 30m/60m/90m/EOD records would count the same
+ * logical trade plan multiple times and manufacture a misleading probability.
  */
 export function computeHistoricalProbability(
   records: OutcomeRecord[],
   query: ProbabilityQuery,
 ): HistoricalProbabilityResult {
+  if (!query.horizon) return unavailable("HORIZON_REQUIRED");
+
   const minResolvedSamples = Number.isInteger(query.minResolvedSamples) && query.minResolvedSamples > 0
     ? query.minResolvedSamples
     : Number.POSITIVE_INFINITY;

@@ -9,8 +9,14 @@ function isRecord(value: unknown): value is UnknownRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function finite(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+/**
+ * H1 recorder input still uses numeric fields for compatibility, while the DB
+ * adapter already converts non-finite values to NULL. Use NaN strictly as an
+ * internal missing-value sentinel across that typed boundary; never replace a
+ * missing observed metric with a fabricated numeric zero.
+ */
+function finiteOrMissing(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : Number.NaN;
 }
 
 function nullableFinite(value: unknown): number | null {
@@ -18,7 +24,14 @@ function nullableFinite(value: unknown): number | null {
 }
 
 function text(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function validTimestamp(value: unknown): string | null {
+  const raw = text(value);
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
 function minuteBucketIso(date: Date): string {
@@ -73,28 +86,29 @@ function truthForSymbol(truthSource: unknown, symbol: string): H1TruthVerdict | 
 function normalizePremium(raw: unknown): any | null {
   if (!isRecord(raw)) return null;
   const optionType = text(raw.optionType)?.toUpperCase();
-  if (optionType !== "CE" && optionType !== "PE") return null;
+  const strike = nullableFinite(raw.strike);
+  if ((optionType !== "CE" && optionType !== "PE") || strike === null || strike <= 0) return null;
   return {
-    strike: finite(raw.strike),
+    strike,
     isAtm: raw.isAtm === true,
     expiryDate: text(raw.expiryDate),
     expiryBucket: text(raw.expiryBucket),
     optionType,
-    bid: finite(raw.bid),
-    ask: finite(raw.ask),
-    lastPrice: finite(raw.lastPrice),
-    iv: finite(raw.iv),
-    oi: finite(raw.oi),
+    bid: finiteOrMissing(raw.bid),
+    ask: finiteOrMissing(raw.ask),
+    lastPrice: finiteOrMissing(raw.lastPrice),
+    iv: finiteOrMissing(raw.iv),
+    oi: finiteOrMissing(raw.oi),
     volume: nullableFinite(raw.volume),
-    quoteTimestamp: text(raw.quoteTimestamp),
-    dayHigh: finite(raw.dayHigh),
-    dayLow: finite(raw.dayLow),
-    pdh: finite(raw.pdh),
-    pdl: finite(raw.pdl),
-    vega: finite(raw.vega),
-    theta: finite(raw.theta),
-    delta: finite(raw.delta),
-    gamma: finite(raw.gamma),
+    quoteTimestamp: validTimestamp(raw.quoteTimestamp),
+    dayHigh: finiteOrMissing(raw.dayHigh),
+    dayLow: finiteOrMissing(raw.dayLow),
+    pdh: finiteOrMissing(raw.pdh),
+    pdl: finiteOrMissing(raw.pdl),
+    vega: finiteOrMissing(raw.vega),
+    theta: finiteOrMissing(raw.theta),
+    delta: finiteOrMissing(raw.delta),
+    gamma: finiteOrMissing(raw.gamma),
   };
 }
 
@@ -117,36 +131,42 @@ function normalizeFuture(raw: unknown): any | null {
   return {
     label,
     expiry: text(raw.expiry) ?? "",
-    ltp: finite(raw.ltp),
+    ltp: finiteOrMissing(raw.ltp),
     oi: nullableFinite(raw.oi),
     volume: nullableFinite(raw.volume),
     basis: nullableFinite(raw.basis),
-    quoteTimestamp: text(raw.quoteTimestamp),
+    quoteTimestamp: validTimestamp(raw.quoteTimestamp),
   };
 }
 
 function normalizeIndex(raw: UnknownRecord): H1IndexInput | null {
   const symbol = text(raw.symbol);
-  if (!symbol) return null;
+  const spot = nullableFinite(raw.spot ?? raw.current);
+  const timestamp = validTimestamp(raw.timestamp) ?? validTimestamp(raw.exchangeTimestamp);
+
+  // Identity + source time are mandatory. Never synthesize a snapshot identity
+  // from wall-clock time and never assign processing time to missing market data.
+  if (!symbol || spot === null || !timestamp) return null;
+
   const expiries = Array.isArray(raw.expiries) ? raw.expiries.map(normalizeExpiry).filter(Boolean) : [];
   const futuresContracts = Array.isArray(raw.futuresContracts) ? raw.futuresContracts.map(normalizeFuture).filter(Boolean) : [];
   return {
     symbol,
-    snapshotId: text(raw.snapshotId) ?? `${symbol}-${text(raw.timestamp) ?? new Date().toISOString()}`,
-    exchangeTimestamp: text(raw.exchangeTimestamp),
-    timestamp: text(raw.timestamp) ?? undefined,
-    spot: finite(raw.spot ?? raw.current),
-    atmStrike: finite(raw.atmStrike),
-    vwap: finite(raw.vwap),
-    pdh: finite(raw.pdh),
-    pdl: finite(raw.pdl),
-    pdcClose: finite(raw.pdcClose),
-    dayOpen: finite(raw.dayOpen),
-    dayHigh: finite(raw.dayHigh),
-    dayLow: finite(raw.dayLow),
-    vix: finite(raw.vix),
-    vixChange: finite(raw.vixChange),
-    maxPain: finite(raw.maxPain),
+    snapshotId: text(raw.snapshotId) ?? `${symbol}-${timestamp}`,
+    exchangeTimestamp: validTimestamp(raw.exchangeTimestamp),
+    timestamp,
+    spot,
+    atmStrike: finiteOrMissing(raw.atmStrike),
+    vwap: finiteOrMissing(raw.vwap),
+    pdh: finiteOrMissing(raw.pdh),
+    pdl: finiteOrMissing(raw.pdl),
+    pdcClose: finiteOrMissing(raw.pdcClose),
+    dayOpen: finiteOrMissing(raw.dayOpen),
+    dayHigh: finiteOrMissing(raw.dayHigh),
+    dayLow: finiteOrMissing(raw.dayLow),
+    vix: finiteOrMissing(raw.vix),
+    vixChange: finiteOrMissing(raw.vixChange),
+    maxPain: finiteOrMissing(raw.maxPain),
     pcr: nullableFinite(raw.pcr),
     volumePcr: nullableFinite(raw.volumePcr),
     futuresContracts: futuresContracts as H1IndexInput["futuresContracts"],
@@ -158,7 +178,8 @@ function normalizeIndex(raw: UnknownRecord): H1IndexInput | null {
  * Runtime bridge used only by the final server.ts hook.
  * It is intentionally structural and fail-closed:
  * - no recognized existing Truth result => no normalized H1 write;
- * - malformed market snapshot => skipped;
+ * - missing source timestamp or malformed market identity => skipped;
+ * - missing optional metrics remain missing and persist as DB NULL, never zero;
  * - all recorder errors stay outside the live path.
  */
 export async function recordH1FromRuntimeSnapshot(
@@ -172,7 +193,7 @@ export async function recordH1FromRuntimeSnapshot(
 
   for (const raw of markets) {
     const market = normalizeIndex(raw);
-    if (!market) {
+    if (!market || !market.timestamp) {
       skipped += 1;
       continue;
     }
@@ -183,7 +204,7 @@ export async function recordH1FromRuntimeSnapshot(
       continue;
     }
     attempted += 1;
-    const recordNow = new Date();
+    const recordNow = new Date(market.timestamp);
     await recordH1Snapshot({ market, truthVerdict, calculationVersion, now: recordNow });
     await dbInsert("H1_TRUTH_MARKER", {
       symbol: market.symbol,

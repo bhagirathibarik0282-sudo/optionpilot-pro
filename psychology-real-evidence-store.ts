@@ -1,5 +1,6 @@
 import { dbQuerySafe } from "./db.js";
 import { adaptPsychologyValidationEvidence, type PsychologyReplayValidationInput } from "./psychology-shadow-replay-adapter.ts";
+import { validatePsychologyShadowObservations } from "./psychology-shadow-validation.ts";
 
 export const PSYCHOLOGY_REAL_EVIDENCE_KIND = "PSYCHOLOGY_REAL_EVIDENCE_V1" as const;
 export const PSYCHOLOGY_REAL_EVIDENCE_MAX_RECORDS = 2000;
@@ -28,9 +29,10 @@ export function psychologyEvidenceKey(input: Pick<StoredPsychologyRealEvidence, 
 }
 
 /**
- * Storage admission is deliberately downstream of the replay/live evidence gate.
- * Synthetic, stale, lookahead, unclosed-block, out-of-session and identity-mismatched
- * inputs never become persistable research evidence.
+ * Storage admission is deliberately downstream of both the replay/live evidence gate
+ * and the frozen validation invariants. Synthetic, stale, lookahead, malformed regime,
+ * impossible-counter, unclosed-block, out-of-session and identity-mismatched inputs never
+ * become persistable research evidence.
  */
 export function preparePsychologyRealEvidenceForStorage(
   input: PsychologyReplayValidationInput,
@@ -40,6 +42,12 @@ export function preparePsychologyRealEvidenceForStorage(
   const admitted = adaptPsychologyValidationEvidence(input);
   if (!admitted.accepted || !admitted.observation) return null;
   if (input.source !== "REAL_REPLAY" && input.source !== "LIVE_OBSERVATION") return null;
+
+  try {
+    validatePsychologyShadowObservations([admitted.observation]);
+  } catch {
+    return null;
+  }
 
   const source: PersistablePsychologyEvidenceSource = input.source;
   const record: StoredPsychologyRealEvidence = {
@@ -69,15 +77,22 @@ export function isStoredPsychologyRealEvidence(value: unknown): value is StoredP
   if (row.evidenceKey !== psychologyEvidenceKey(row as StoredPsychologyRealEvidence)) return false;
   if (row.affectsTelegram !== false || row.affectsVerdict !== false || row.affectsExecution !== false) return false;
 
-  // Re-run the canonical admission gate on restored DB payloads. This prevents a
-  // hand-written/corrupted row with a plausible key from bypassing replay quality,
-  // lookahead, session, trade-id, or regime/count validation.
+  // Re-run the canonical admission gate on restored DB payloads so a corrupted row
+  // cannot bypass replay quality, lookahead, session or trade-identity checks.
   const readmission = adaptPsychologyValidationEvidence({
     source: row.source,
     replay: row.replay as PsychologyReplayValidationInput["replay"],
     validation: row.validation as PsychologyReplayValidationInput["validation"],
   });
   if (!readmission.accepted || !readmission.observation) return false;
+
+  // The replay/live admission adapter intentionally does not own aggregate counter or
+  // regime-shape invariants. Re-run the frozen validation contract here as a second gate.
+  try {
+    validatePsychologyShadowObservations([readmission.observation]);
+  } catch {
+    return false;
+  }
   return true;
 }
 

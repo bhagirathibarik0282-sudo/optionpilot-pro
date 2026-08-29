@@ -31,6 +31,13 @@ Store separately from raw truth:
 - FII/DII context
 - outcome attribution including MFE/MAE
 
+## Historical candidate-quality guard
+- Reuse closed temporal evidence and existing family fusion; never create a second live scoring engine.
+- FULL multi-horizon alignment is not an automatic trade approval.
+- Overextension, no-chase, poor liquidity, family-fusion conflict or low evidence completeness may still classify the historical candidate as REJECT.
+- A+ historical quality requires full three-horizon alignment, supportive family fusion, high completeness and acceptable liquidity.
+- This classifier remains `HISTORICAL_RESEARCH_ONLY` and cannot affect live verdict, Telegram or execution until a separately approved future phase.
+
 ## Truth eligibility
 - TRUE: research eligible.
 - PARTIAL: persist only as diagnostic; exclude from learning by default.
@@ -51,17 +58,18 @@ Complete all safe branch work first. Then perform one manual batch only:
 3. Add the post-snapshot, post-Truth fire-and-forget recorder hook. It must not await inside the live verdict path.
 4. Initialize derived schema after the existing DB init without changing candidate/verdict behavior.
 5. Verify `DATABASE_URL` and required Railway variables exist without exposing values.
-6. Run the repository test suite, including `test/h1-derived-history.test.ts`.
+6. Run the repository test suite, including H1 derived/intelligence/candidate-quality tests.
 7. Start with production-impact disabled / research-only recorder semantics.
 8. Run 1-day pilot/replay.
 9. Audit timestamps, expiry, DTE, CE/PE identity, ATM offsets, duplicate minute buckets, NULL semantics.
 10. Audit Truth eligibility: only TRUE can enter research/training queries by default.
-11. If PASS, expand to 5 days.
-12. Devil-check expiry roll, candidate lifecycle, regime transitions and data gaps.
-13. If PASS, bulk import 60 trading days in one controlled batch.
-14. Run post-import integrity counters before enabling any historical analog use.
-15. Keep research data isolated from production candidate weighting until separate approval.
-16. Merge/deploy only after explicit final approval.
+11. Audit multi-horizon candidate-quality guards: FULL alignment must still reject overextended/no-chase/bad-liquidity cases.
+12. If PASS, expand to 5 days.
+13. Devil-check expiry roll, candidate lifecycle, regime transitions and data gaps.
+14. If PASS, bulk import 60 trading days in one controlled batch.
+15. Run post-import integrity counters before enabling any historical analog use.
+16. Keep research data isolated from production candidate weighting until separate approval.
+17. Merge/deploy only after explicit final approval.
 
 ## Bulk import preflight counters
 Before the 60-day import, collect expected counts and abort on structural mismatch:
@@ -87,6 +95,7 @@ After import, verify:
 - ATM ±7 coverage within expected contract availability
 - candidate rows traceable to snapshotId + ruleVersion
 - MFE/MAE remains NULL until a verified outcome process calculates it
+- full-alignment historical candidates retain overextension/no-chase/liquidity guard outcomes
 
 ## Acceptance criteria before 60-day import
 - 0 duplicate logical minute keys.
@@ -97,6 +106,7 @@ After import, verify:
 - Closed-timeframe state contains no look-ahead data.
 - Every candidate can trace back to snapshotId + ruleVersion.
 - DB failure cannot block live decision/Telegram path.
+- Multi-horizon alignment cannot bypass entry-quality/risk guards.
 
 ## Deferred until after 60-day validation
 - 90-day extension.

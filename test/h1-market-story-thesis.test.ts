@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildHistoricalMarketStory } from "../h1-market-story-thesis.js";
 
-const metric = (code: string, rs5: number, rs20: number, rs60: number, ret20 = 1) => ({
+const metric = (code: string, rs5: number, rs20: number, rs60: number, ret20 = 1, ret5 = 1) => ({
   tradeDate: "2026-08-21",
   indexCode: code,
   return1d: null,
-  return5d: 1,
+  return5d: ret5,
   return20d: ret20,
   return60d: 2,
   return120d: null,
@@ -40,11 +40,11 @@ test("historical/live conflict lowers confidence but never flips live", () => {
     dataQuality: "GOOD",
     liveDirection: "BULLISH",
     metrics: {
-      NIFTY500: metric("NIFTY500", -1, -1.5, -1, -2),
-      NEXT50: metric("NEXT50", -1, -1.2, -1, -2),
-      MIDCAP150: metric("MIDCAP150", -1.5, -2, -1.5, -3),
-      SMALLCAP250: metric("SMALLCAP250", -2, -2.5, -2, -4),
-      NIFTY100: metric("NIFTY100", -0.2, -0.3, -0.2, -1),
+      NIFTY500: metric("NIFTY500", -1, -1.5, -1, -2, -1),
+      NEXT50: metric("NEXT50", -1, -1.2, -1, -2, -1),
+      MIDCAP150: metric("MIDCAP150", -1.5, -2, -1.5, -3, -1.5),
+      SMALLCAP250: metric("SMALLCAP250", -2, -2.5, -2, -4, -2),
+      NIFTY100: metric("NIFTY100", -0.2, -0.3, -0.2, -1, -0.5),
     },
   });
   assert.equal(out.historicalBias, "BEARISH");

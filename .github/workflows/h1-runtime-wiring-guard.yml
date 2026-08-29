@@ -10,6 +10,7 @@ on:
       - scripts/apply-h1-runtime-wiring.mjs
       - h1-runtime-bridge.ts
       - test/h1-runtime-bridge.test.ts
+      - test/h1-market-story-thesis.test.ts
       - package.json
 
 permissions:

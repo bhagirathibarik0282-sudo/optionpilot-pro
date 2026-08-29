@@ -8,15 +8,15 @@ export interface RiskReadinessInput {
   stop: number | null;
   quantity: number | null;
   capital: number | null;
-  maxAllowedLossPct: number | null;
+  maxAllowedPlannedStopLossPct: number | null;
 }
 
 export interface RiskReadinessResult {
   status: RiskReadinessStatus;
   reason: string;
   riskPerUnit: number | null;
-  maxLossAmount: number | null;
-  maxLossPct: number | null;
+  plannedStopLossAmount: number | null;
+  plannedStopLossPct: number | null;
   semantics: "RESEARCH_RISK_VALIDATION_ONLY";
   ruleVersion: "RISK_READINESS_ENGINE_V1";
   affectsVerdict: false;
@@ -29,9 +29,11 @@ function finitePositive(value: number | null): value is number {
 }
 
 /**
- * Research-only risk validation. It never chooses a risk limit, position size,
- * trade, contract or order. The maximum acceptable loss percentage is supplied
- * by the caller and is never invented by this module.
+ * Research-only planned-stop risk validation. It never chooses a risk limit,
+ * position size, trade, contract or order. The acceptable planned stop-loss
+ * percentage is supplied by the caller and is never invented by this module.
+ * This is not a guarantee of maximum realised loss: gaps, slippage or execution
+ * failure can produce a larger realised loss than the planned stop distance.
  */
 export function assessRiskReadiness(input: RiskReadinessInput): RiskReadinessResult {
   const base = {
@@ -47,8 +49,8 @@ export function assessRiskReadiness(input: RiskReadinessInput): RiskReadinessRes
     status: "NOT_READY",
     reason,
     riskPerUnit: null,
-    maxLossAmount: null,
-    maxLossPct: null,
+    plannedStopLossAmount: null,
+    plannedStopLossPct: null,
   });
 
   if (input.strategyStatus !== "READY_FOR_RESEARCH") return unavailable("STRATEGY_NOT_READY");
@@ -57,22 +59,26 @@ export function assessRiskReadiness(input: RiskReadinessInput): RiskReadinessRes
   if (input.stop >= input.entry) return unavailable("STOP_NOT_BELOW_ENTRY_FOR_LONG_PREMIUM");
   if (!Number.isInteger(input.quantity) || !finitePositive(input.quantity)) return unavailable("QUANTITY_INVALID");
   if (!finitePositive(input.capital)) return unavailable("CAPITAL_INVALID");
-  if (!finitePositive(input.maxAllowedLossPct) || input.maxAllowedLossPct > 100) return unavailable("RISK_LIMIT_INVALID");
+  if (!finitePositive(input.maxAllowedPlannedStopLossPct) || input.maxAllowedPlannedStopLossPct > 100) {
+    return unavailable("RISK_LIMIT_INVALID");
+  }
 
   const riskPerUnit = input.entry - input.stop;
-  const maxLossAmount = riskPerUnit * input.quantity;
-  const maxLossPct = (maxLossAmount / input.capital) * 100;
+  const plannedStopLossAmount = riskPerUnit * input.quantity;
+  const plannedStopLossPct = (plannedStopLossAmount / input.capital) * 100;
 
-  if (![riskPerUnit, maxLossAmount, maxLossPct].every(Number.isFinite)) return unavailable("RISK_CALCULATION_INVALID");
+  if (![riskPerUnit, plannedStopLossAmount, plannedStopLossPct].every(Number.isFinite)) {
+    return unavailable("RISK_CALCULATION_INVALID");
+  }
 
-  if (maxLossPct > input.maxAllowedLossPct) {
+  if (plannedStopLossPct > input.maxAllowedPlannedStopLossPct) {
     return {
       ...base,
       status: "NOT_READY",
       reason: "CALLER_RISK_LIMIT_EXCEEDED",
       riskPerUnit,
-      maxLossAmount,
-      maxLossPct,
+      plannedStopLossAmount,
+      plannedStopLossPct,
     };
   }
 
@@ -81,7 +87,7 @@ export function assessRiskReadiness(input: RiskReadinessInput): RiskReadinessRes
     status: "READY_FOR_RESEARCH",
     reason: "CALLER_RISK_LIMIT_SATISFIED",
     riskPerUnit,
-    maxLossAmount,
-    maxLossPct,
+    plannedStopLossAmount,
+    plannedStopLossPct,
   };
 }

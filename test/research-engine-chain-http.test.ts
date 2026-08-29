@@ -74,12 +74,28 @@ test("forged READY probability with inconsistent counts is rejected", () => {
   assert.equal(response.reason, "INVALID_RESEARCH_ENGINE_CHAIN_INPUT");
 });
 
+test("forged READY probability with inconsistent win rate is rejected", () => {
+  const response = evaluateResearchEngineChainHttp({
+    ...valid,
+    probability: { ...valid.probability, winRatePct: 99 },
+  });
+  assert.equal(response.ok, false);
+});
+
 test("unknown regime vocabulary and authority drift are rejected", () => {
   const badRegime = evaluateResearchEngineChainHttp({
     ...valid,
     marketRegime: { ...valid.marketRegime, regime: "TREND", affectsVerdict: true },
   });
   assert.equal(badRegime.ok, false);
+});
+
+test("regime ready flag must be consistent with regime state", () => {
+  const response = evaluateResearchEngineChainHttp({
+    ...valid,
+    marketRegime: { ...valid.marketRegime, ready: false },
+  });
+  assert.equal(response.ok, false);
 });
 
 test("malformed risk numeric fields are rejected before chain evaluation", () => {

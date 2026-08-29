@@ -46,11 +46,23 @@ function outcome(status: OutcomeRecord["status"], overrides: Partial<OutcomeReco
   };
 }
 
+test("fails closed when horizon is unspecified so parallel plan horizons cannot be mixed", () => {
+  const result = computeHistoricalProbability([
+    outcome("TARGET_T1_HIT", { horizon: "30m" }),
+    outcome("STOP_HIT", { horizon: "60m" }),
+  ], { symbol: "NIFTY", side: "CE", minResolvedSamples: 1 });
+
+  assert.equal(result.status, "DATA_UNAVAILABLE");
+  assert.equal(result.reason, "HORIZON_REQUIRED");
+  assert.equal(result.sampleCount, 0);
+  assert.equal(result.winRatePct, null);
+});
+
 test("fails closed until caller-defined resolved sample minimum is met", () => {
   const result = computeHistoricalProbability([
     outcome("TARGET_T1_HIT"),
     outcome("STOP_HIT"),
-  ], { symbol: "NIFTY", side: "CE", minResolvedSamples: 3 });
+  ], { symbol: "NIFTY", side: "CE", horizon: "60m", minResolvedSamples: 3 });
 
   assert.equal(result.status, "DATA_UNAVAILABLE");
   assert.equal(result.winRatePct, null);
@@ -77,7 +89,7 @@ test("filters like-for-like context without fabricating missing matches", () => 
   const result = computeHistoricalProbability([
     outcome("TARGET_T1_HIT", { marketRegime: "TREND" }),
     outcome("STOP_HIT", { marketRegime: "RANGE" }),
-  ], { marketRegime: "TREND", minResolvedSamples: 1 });
+  ], { marketRegime: "TREND", horizon: "60m", minResolvedSamples: 1 });
 
   assert.equal(result.sampleCount, 1);
   assert.equal(result.wins, 1);
@@ -88,7 +100,7 @@ test("filters like-for-like context without fabricating missing matches", () => 
 test("invalid sample requirement never unlocks probability", () => {
   const result = computeHistoricalProbability([
     outcome("TARGET_T1_HIT"),
-  ], { minResolvedSamples: 0 });
+  ], { horizon: "60m", minResolvedSamples: 0 });
 
   assert.equal(result.status, "DATA_UNAVAILABLE");
   assert.equal(result.winRatePct, null);

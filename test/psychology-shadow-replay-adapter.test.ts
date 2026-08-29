@@ -45,6 +45,12 @@ test("eligible real replay can enter validation", () => {
   assert.equal(r.observation?.tradeId, "T1");
 });
 
+test("eligible live observation can enter validation", () => {
+  const r = adaptPsychologyValidationEvidence({ source: "LIVE_OBSERVATION", replay, validation });
+  assert.equal(r.accepted, true);
+  assert.equal(r.observation?.tradeId, "T1");
+});
+
 test("synthetic evidence can never enter real validation", () => {
   const r = adaptPsychologyValidationEvidence({ source: "SYNTHETIC", replay, validation });
   assert.equal(r.accepted, false);
@@ -61,6 +67,26 @@ test("lookahead replay is blocked by H1 replay guard", () => {
   assert.ok(r.blockers.includes("REPLAY_GUARD_LOOKAHEAD_FUTURE_OBSERVATION"));
 });
 
+test("live observation cannot use future evidence", () => {
+  const r = adaptPsychologyValidationEvidence({
+    source: "LIVE_OBSERVATION",
+    replay: { ...replay, observedAt: "2026-08-20T09:22:00+05:30" },
+    validation,
+  });
+  assert.equal(r.accepted, false);
+  assert.ok(r.blockers.includes("LIVE_GUARD_LOOKAHEAD_FUTURE_OBSERVATION"));
+});
+
+test("live observation cannot use an unclosed block", () => {
+  const r = adaptPsychologyValidationEvidence({
+    source: "LIVE_OBSERVATION",
+    replay: { ...replay, blockClosed: false },
+    validation,
+  });
+  assert.equal(r.accepted, false);
+  assert.ok(r.blockers.includes("LIVE_GUARD_UNCONFIRMED_RUNNING_BLOCK"));
+});
+
 test("trade identity mismatch fails closed", () => {
   const r = adaptPsychologyValidationEvidence({ source: "REAL_REPLAY", replay, validation: { ...validation, tradeId: "T2" } });
   assert.equal(r.accepted, false);
@@ -74,7 +100,17 @@ test("low-quality live observation is blocked", () => {
     validation,
   });
   assert.equal(r.accepted, false);
-  assert.ok(r.blockers.includes("LIVE_OBSERVATION_QUALITY_STALE"));
+  assert.ok(r.blockers.includes("LIVE_GUARD_NON_RESEARCH_QUALITY_STALE"));
+});
+
+test("out-of-session live observation is blocked", () => {
+  const r = adaptPsychologyValidationEvidence({
+    source: "LIVE_OBSERVATION",
+    replay: { ...replay, sessionEligible: false },
+    validation,
+  });
+  assert.equal(r.accepted, false);
+  assert.ok(r.blockers.includes("LIVE_GUARD_OUTSIDE_ELIGIBLE_SESSION"));
 });
 
 test("adapter has no live authority", () => {

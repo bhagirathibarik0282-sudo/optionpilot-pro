@@ -1,4 +1,5 @@
 import { recordH1Snapshot, type H1IndexInput, type H1TruthVerdict } from "./h1-recorder-adapter.js";
+import { dbInsert } from "./db.js";
 
 export const H1_RUNTIME_BRIDGE_VERSION = "H1_RUNTIME_BRIDGE_V1" as const;
 
@@ -18,6 +19,12 @@ function nullableFinite(value: unknown): number | null {
 
 function text(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function minuteBucketIso(date: Date): string {
+  const d = new Date(date);
+  d.setUTCSeconds(0, 0);
+  return d.toISOString();
 }
 
 function truthFromUnknown(value: unknown): H1TruthVerdict | null {
@@ -176,7 +183,15 @@ export async function recordH1FromRuntimeSnapshot(
       continue;
     }
     attempted += 1;
-    await recordH1Snapshot({ market, truthVerdict, calculationVersion });
+    const recordNow = new Date();
+    await recordH1Snapshot({ market, truthVerdict, calculationVersion, now: recordNow });
+    await dbInsert("H1_TRUTH_MARKER", {
+      symbol: market.symbol,
+      snapshotId: market.snapshotId,
+      minuteBucket: minuteBucketIso(recordNow),
+      truthVerdict,
+      calculationVersion,
+    });
   }
 
   return { attempted, skipped };

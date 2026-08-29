@@ -12,6 +12,7 @@ on:
       - h1-pilot-audit-*.ts
       - candidate-history-*.ts
       - probability-engine.ts
+      - market-regime-engine.ts
       - scripts/verify-research-server-mount.ts
       - scripts/apply-research-server-mount.ts
       - test/research-index.test.ts
@@ -19,6 +20,7 @@ on:
       - test/h1-pilot-audit-*.test.ts
       - test/candidate-history-*.test.ts
       - test/probability-engine.test.ts
+      - test/market-regime-engine.test.ts
       - .github/workflows/option-buying-ci.yml
   workflow_dispatch:
 

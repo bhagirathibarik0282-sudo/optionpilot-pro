@@ -15,6 +15,7 @@ on:
       - candidate-style-selector.ts
       - candidate-style-telegram-preview.ts
       - telegram-style-route.ts
+      - telegram-human-live-talk.ts
       - probability-engine.ts
       - market-regime-engine.ts
       - strategy-readiness-engine.ts
@@ -31,6 +32,7 @@ on:
       - test/candidate-style-selector.test.ts
       - test/candidate-style-telegram-preview.test.ts
       - test/telegram-style-route.test.ts
+      - test/telegram-human-live-talk.test.ts
       - test/probability-engine.test.ts
       - test/market-regime-engine.test.ts
       - test/strategy-readiness-engine.test.ts

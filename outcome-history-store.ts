@@ -1,4 +1,4 @@
-import { dbInsert, dbLoadRecent } from "./db.js";
+import { dbQuerySafe } from "./db.js";
 import type { OutcomeRecord } from "./outcome-engine.js";
 
 export const OUTCOME_HISTORY_KIND = "OUTCOME_RECORD_V1" as const;
@@ -55,8 +55,17 @@ export function outcomePersistenceFingerprint(record: OutcomeRecord): string {
   });
 }
 
+/**
+ * Checked append: unlike the legacy fire-and-forget dbInsert helper, this
+ * function must surface a failed DB write so the runtime wiring does not mark
+ * the fingerprint as persisted and silently suppress retries.
+ */
 export async function persistOutcomeRecord(record: OutcomeRecord): Promise<void> {
-  await dbInsert(OUTCOME_HISTORY_KIND, record);
+  const result = await dbQuerySafe(
+    "INSERT INTO app_state_log (kind, payload) VALUES ($1, $2::jsonb) RETURNING id",
+    [OUTCOME_HISTORY_KIND, JSON.stringify(record)],
+  );
+  if (!result) throw new Error("OUTCOME_HISTORY_PERSIST_FAILED");
 }
 
 export async function restoreOutcomeRecords(
@@ -65,6 +74,11 @@ export async function restoreOutcomeRecords(
   // Read extra append-only versions so terminal updates do not crowd out
   // unique older outcomes. Invalid legacy/partial payloads are ignored.
   const cap = Math.max(1, Math.floor(maxRecords));
-  const raw = await dbLoadRecent<OutcomeRecord>(OUTCOME_HISTORY_KIND, cap * 10);
+  const result = await dbQuerySafe<{ payload: OutcomeRecord }>(
+    "SELECT payload FROM app_state_log WHERE kind = $1 ORDER BY created_at DESC LIMIT $2",
+    [OUTCOME_HISTORY_KIND, cap * 10],
+  );
+  if (!result) throw new Error("OUTCOME_HISTORY_RESTORE_FAILED");
+  const raw = result.rows.map((row) => row.payload).reverse();
   return mergeOutcomeHistory(raw, cap);
 }

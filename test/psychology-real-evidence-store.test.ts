@@ -92,3 +92,24 @@ test("malformed stored rows are ignored during restore merge", () => {
   assert.equal(merged.length, 1);
   assert.equal(merged[0].evidenceKey, "REAL_REPLAY:T1");
 });
+
+test("restore re-runs admission so corrupted replay truth cannot re-enter", () => {
+  const good = preparePsychologyRealEvidenceForStorage(input("T1"), "2026-08-20T10:00:00+05:30")!;
+  const corrupted = { ...good, replay: { ...good.replay, quality: "STALE" as const } };
+  const merged = mergeStoredPsychologyRealEvidence([corrupted as typeof good]);
+  assert.equal(merged.length, 0);
+});
+
+test("restore rejects plausible-key rows with invalid validation counters or regimes", () => {
+  const good = preparePsychologyRealEvidenceForStorage(input("T1"), "2026-08-20T10:00:00+05:30")!;
+  const invalidCounter = {
+    ...good,
+    validation: { ...good.validation, spokenUpdates: 5, eligibleMessages: 4 },
+  } as typeof good;
+  const invalidRegime = {
+    ...good,
+    validation: { ...good.validation, regimes: ["UNKNOWN" as never] },
+  } as typeof good;
+  assert.equal(mergeStoredPsychologyRealEvidence([invalidCounter]).length, 0);
+  assert.equal(mergeStoredPsychologyRealEvidence([invalidRegime]).length, 0);
+});

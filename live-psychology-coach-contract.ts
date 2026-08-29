@@ -97,7 +97,7 @@ export function evaluateLivePsychologyCoach(input: LivePsychologyCoachInput): Li
   validateCandidate(input.candidate);
 
   const c = input.candidate;
-  const heading = `${c.style === "SCALP" ? "🔥" : "📌"} ${c.style} • ${c.symbol.trim().toUpperCase()} ${c.strike} ${c.side} • ${c.lifecycle} • ${c.candidateId}`;
+  const heading = `${c.style === "SCALP" ? "🔥" : "📌"} ${c.style} • ${c.symbol.trim().toUpperCase()} ${c.strike} ${c.side} • ${input.lifecycle} • ${c.candidateId}`;
 
   if (!input.dataFresh || input.premiumBehaviour === "DATA_UNAVAILABLE" || input.buyerSellerState === "DATA_UNAVAILABLE" || input.risks.includes("DATA_UNAVAILABLE")) {
     return {

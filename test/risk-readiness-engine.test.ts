@@ -8,7 +8,7 @@ const base = {
   stop: 80,
   quantity: 10,
   capital: 50000,
-  maxAllowedLossPct: 2,
+  maxAllowedPlannedStopLossPct: 2,
 };
 
 test("fails closed when strategy is not research-ready", () => {
@@ -25,26 +25,28 @@ test("invalid or inverted entry-stop identity is rejected", () => {
 test("invalid quantity capital and caller risk limit fail closed", () => {
   assert.equal(assessRiskReadiness({ ...base, quantity: 1.5 }).reason, "QUANTITY_INVALID");
   assert.equal(assessRiskReadiness({ ...base, capital: 0 }).reason, "CAPITAL_INVALID");
-  assert.equal(assessRiskReadiness({ ...base, maxAllowedLossPct: 0 }).reason, "RISK_LIMIT_INVALID");
+  assert.equal(assessRiskReadiness({ ...base, maxAllowedPlannedStopLossPct: 0 }).reason, "RISK_LIMIT_INVALID");
 });
 
-test("calculates deterministic maximum loss against caller-supplied limit", () => {
+test("calculates deterministic planned stop loss against caller-supplied limit", () => {
   const result = assessRiskReadiness(base);
   assert.equal(result.status, "READY_FOR_RESEARCH");
   assert.equal(result.riskPerUnit, 20);
-  assert.equal(result.maxLossAmount, 200);
-  assert.equal(result.maxLossPct, 0.4);
+  assert.equal(result.plannedStopLossAmount, 200);
+  assert.equal(result.plannedStopLossPct, 0.4);
 });
 
-test("blocks when computed loss exceeds caller-supplied limit", () => {
-  const result = assessRiskReadiness({ ...base, quantity: 100, maxAllowedLossPct: 2 });
+test("blocks when planned stop loss exceeds caller-supplied limit", () => {
+  const result = assessRiskReadiness({ ...base, quantity: 100, maxAllowedPlannedStopLossPct: 2 });
   assert.equal(result.status, "NOT_READY");
   assert.equal(result.reason, "CALLER_RISK_LIMIT_EXCEEDED");
-  assert.equal(result.maxLossPct, 4);
+  assert.equal(result.plannedStopLossPct, 4);
 });
 
-test("foundation never invents a risk threshold or gains live authority", () => {
+test("foundation never calls planned stop risk a guaranteed maximum loss or gains live authority", () => {
   const result = assessRiskReadiness(base);
+  assert.equal("maxLossAmount" in result, false);
+  assert.equal("maxLossPct" in result, false);
   assert.equal(result.affectsVerdict, false);
   assert.equal(result.affectsTelegram, false);
   assert.equal(result.affectsExecution, false);

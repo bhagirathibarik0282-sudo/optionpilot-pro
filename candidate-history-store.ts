@@ -7,13 +7,13 @@ export interface CandidateHistoryPersistResult {
   reason?: string;
 }
 
-/**
- * Historical-research-only persistence.
- * candidate_id is treated as the idempotency key even though the legacy table
- * does not yet have a UNIQUE constraint. INSERT ... WHERE NOT EXISTS prevents
- * normal duplicate writes without changing DB schema or live behavior.
- */
-export async function persistCandidateHistoryRecord(
+// One Railway process is the intended writer. Coalesce concurrent attempts for
+// the same candidateId so two async call-sites in that process cannot race the
+// legacy table's application-level NOT EXISTS guard. The entry is always
+// cleared after settlement, so a failed DB write remains retryable.
+const inFlightByCandidateId = new Map<string, Promise<CandidateHistoryPersistResult>>();
+
+async function persistCandidateHistoryRecordOnce(
   row: CandidateHistoryRecord,
 ): Promise<CandidateHistoryPersistResult> {
   const result = await dbQuerySafe<{ inserted: boolean }>(`
@@ -58,4 +58,30 @@ export async function persistCandidateHistoryRecord(
 
   if (!result) return { ok: false, inserted: false, reason: "DB_WRITE_FAILED" };
   return { ok: true, inserted: result.rows[0]?.inserted === true };
+}
+
+/**
+ * Historical-research-only persistence.
+ *
+ * candidate_id is the application-level identity. The current legacy schema
+ * has no UNIQUE(candidate_id), so this helper combines a DB NOT EXISTS guard
+ * with per-process in-flight coalescing. That is deterministic for the
+ * intended single Railway writer and avoids changing production schema here.
+ * A future multi-replica writer must add a DB-level uniqueness migration first.
+ */
+export async function persistCandidateHistoryRecord(
+  row: CandidateHistoryRecord,
+): Promise<CandidateHistoryPersistResult> {
+  const existing = inFlightByCandidateId.get(row.candidateId);
+  if (existing) return existing;
+
+  const pending = persistCandidateHistoryRecordOnce(row);
+  inFlightByCandidateId.set(row.candidateId, pending);
+  try {
+    return await pending;
+  } finally {
+    if (inFlightByCandidateId.get(row.candidateId) === pending) {
+      inFlightByCandidateId.delete(row.candidateId);
+    }
+  }
 }

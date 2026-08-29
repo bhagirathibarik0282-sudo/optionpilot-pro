@@ -20,8 +20,7 @@ const base: MessageTriggerInput = {
 };
 
 test("no meaningful change is suppressed", () => {
-  const r = evaluateMessageTrigger(base);
-  assert.equal(r.shouldSpeak, false);
+  assert.equal(evaluateMessageTrigger(base).shouldSpeak, false);
 });
 
 test("meaningful confirmed change is eligible", () => {
@@ -48,44 +47,28 @@ test("cooldown blocks non-urgent repeated commentary", () => {
 });
 
 test("exact duplicate is always suppressed, including urgent states", () => {
-  const r = evaluateMessageTrigger({
-    ...base,
-    lifecycle: "EXIT",
-    currentFingerprint: "S17:EXIT",
-    lastSpokenFingerprint: "S17:EXIT",
-  });
+  const r = evaluateMessageTrigger({ ...base, lifecycle: "EXIT", currentFingerprint: "S17:EXIT", lastSpokenFingerprint: "S17:EXIT" });
   assert.equal(r.shouldSpeak, false);
   assert.equal(r.reason, "EXACT_DUPLICATE_SUPPRESSED");
 });
 
 test("fresh unique EXIT is urgent and bypasses hysteresis/cooldown", () => {
-  const r = evaluateMessageTrigger({
-    ...base,
-    lifecycle: "EXIT",
-    consecutiveConfirmations: 0,
-    cooldownSatisfied: false,
-    currentFingerprint: "S17:EXIT",
-  });
+  const r = evaluateMessageTrigger({ ...base, lifecycle: "EXIT", consecutiveConfirmations: 0, cooldownSatisfied: false, currentFingerprint: "S17:EXIT" });
   assert.equal(r.shouldSpeak, true);
   assert.equal(r.urgent, true);
 });
 
-test("DATA_UNAVAILABLE is urgent but cannot repeat exact duplicate", () => {
-  const fresh = evaluateMessageTrigger({
-    ...base,
-    dataFresh: false,
-    lifecycle: "DATA_UNAVAILABLE",
-    currentFingerprint: "S17:DATA_UNAVAILABLE",
-  });
+test("DATA_UNAVAILABLE overlay is urgent but never mutates lifecycle", () => {
+  const fresh = evaluateMessageTrigger({ ...base, dataFresh: false, lifecycle: "HOLD", currentFingerprint: "S17:DATA_UNAVAILABLE:HOLD" });
   assert.equal(fresh.shouldSpeak, true);
   assert.equal(fresh.urgent, true);
 
   const duplicate = evaluateMessageTrigger({
     ...base,
     dataFresh: false,
-    lifecycle: "DATA_UNAVAILABLE",
-    currentFingerprint: "S17:DATA_UNAVAILABLE",
-    lastSpokenFingerprint: "S17:DATA_UNAVAILABLE",
+    lifecycle: "HOLD",
+    currentFingerprint: "S17:DATA_UNAVAILABLE:HOLD",
+    lastSpokenFingerprint: "S17:DATA_UNAVAILABLE:HOLD",
   });
   assert.equal(duplicate.shouldSpeak, false);
 });
@@ -103,12 +86,7 @@ test("missing candidate key fails closed", () => {
 });
 
 test("fingerprint must be scoped to the same stable candidate key", () => {
-  const r = evaluateMessageTrigger({
-    ...base,
-    candidateKey: "S17",
-    currentFingerprint: "W04:HOLD:RESPONDING_WELL",
-    lifecycleChanged: true,
-  });
+  const r = evaluateMessageTrigger({ ...base, candidateKey: "S17", currentFingerprint: "W04:HOLD:RESPONDING_WELL", lifecycleChanged: true });
   assert.equal(r.shouldSpeak, false);
   assert.equal(r.reason, "FINGERPRINT_CANDIDATE_SCOPE_MISMATCH");
 });

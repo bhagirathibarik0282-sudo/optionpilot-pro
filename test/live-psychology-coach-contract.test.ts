@@ -11,7 +11,7 @@ const scalp = {
   candidateId: "S17",
 };
 
-test("SCALP heading carries style, exact candidate, lifecycle and stable id", () => {
+test("SCALP heading carries style, exact candidate, stable id and lifecycle", () => {
   const out = evaluateLivePsychologyCoach({
     candidate: scalp,
     premiumBehaviour: "RESPONDING_WELL",
@@ -24,7 +24,7 @@ test("SCALP heading carries style, exact candidate, lifecycle and stable id", ()
   });
   assert.equal(out.shouldSpeak, true);
   assert.equal(out.scalpPriority, true);
-  assert.match(out.heading, /SCALP • NIFTY 24900 CE • HOLD • S17/);
+  assert.match(out.heading, /SCALP • NIFTY 24900 CE • S17 • HOLD/);
   assert.equal(out.haikuMayDecideTradeState, false);
   assert.equal(out.affectsTelegram, false);
 });
@@ -72,7 +72,7 @@ test("EXIT may speak immediately when deterministic exit state is supplied", () 
   assert.equal(out.lifecycle, "EXIT");
 });
 
-test("stale or unavailable evidence allows only no-fresh-guidance state", () => {
+test("stale or unavailable evidence becomes warning-only without changing lifecycle", () => {
   const out = evaluateLivePsychologyCoach({
     candidate: scalp,
     premiumBehaviour: "DATA_UNAVAILABLE",
@@ -84,6 +84,7 @@ test("stale or unavailable evidence allows only no-fresh-guidance state", () => 
     consecutiveConfirmations: 3,
   });
   assert.equal(out.shouldSpeak, true);
+  assert.equal(out.lifecycle, "HOLD");
   assert.deepEqual(out.risks, ["DATA_UNAVAILABLE"]);
   assert.match(out.reason, /incomplete/i);
 });

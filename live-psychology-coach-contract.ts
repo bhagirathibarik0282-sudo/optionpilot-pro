@@ -31,8 +31,7 @@ export type LifecycleState =
   | "PROTECT"
   | "PARTIAL_BOOK"
   | "TRAIL"
-  | "EXIT"
-  | "DATA_UNAVAILABLE";
+  | "EXIT";
 
 export type BehaviourRisk =
   | "DO_NOT_CHASE"
@@ -110,15 +109,15 @@ function baseDecision(input: LivePsychologyCoachInput, shouldSpeak: boolean, hea
 
 /**
  * Research-only contract for SCALP-first live coaching.
- * Deterministic engines decide state. When Message Trigger Engine output is supplied,
- * it alone decides whether speech is eligible. Haiku remains language-only.
+ * Deterministic engines decide state. Data availability is an overlay, not a lifecycle state.
+ * When Message Trigger Engine output is supplied, it alone decides speech eligibility.
  */
 export function evaluateLivePsychologyCoach(input: LivePsychologyCoachInput): LivePsychologyCoachDecision {
   validateCandidate(input.candidate);
 
   const c = input.candidate;
-  const heading = `${c.style === "SCALP" ? "🔥" : "📌"} ${c.style} • ${c.symbol.trim().toUpperCase()} ${c.strike} ${c.side} • ${input.lifecycle} • ${c.candidateId}`;
-  const unavailable = !input.dataFresh || input.lifecycle === "DATA_UNAVAILABLE" || input.premiumBehaviour === "DATA_UNAVAILABLE" || input.buyerSellerState === "DATA_UNAVAILABLE" || input.risks.includes("DATA_UNAVAILABLE");
+  const heading = `${c.style === "SCALP" ? "🔥" : "📌"} ${c.style} • ${c.symbol.trim().toUpperCase()} ${c.strike} ${c.side} • ${c.candidateId} • ${input.lifecycle}`;
+  const unavailable = !input.dataFresh || input.premiumBehaviour === "DATA_UNAVAILABLE" || input.buyerSellerState === "DATA_UNAVAILABLE" || input.risks.includes("DATA_UNAVAILABLE");
 
   if (input.triggerShouldSpeak !== undefined) {
     if (!input.triggerShouldSpeak) {

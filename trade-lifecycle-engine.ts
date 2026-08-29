@@ -9,8 +9,7 @@ export type TradeLifecycleState =
   | "PROTECT"
   | "PARTIAL_BOOK"
   | "TRAIL"
-  | "EXIT"
-  | "DATA_UNAVAILABLE";
+  | "EXIT";
 
 export type TradeLifecycleEvent =
   | "CANDIDATE_VALID"
@@ -45,6 +44,7 @@ export interface TradeLifecycleResult {
   previousState: TradeLifecycleState;
   nextState: TradeLifecycleState;
   changed: boolean;
+  dataAvailable: boolean;
   reasons: string[];
   devilFlags: string[];
   affectsTelegram: false;
@@ -55,13 +55,20 @@ export interface TradeLifecycleResult {
 const terminalStates = new Set<TradeLifecycleState>(["EXIT"]);
 const exitEligibleStates = new Set<TradeLifecycleState>(["ACTIVE", "HOLD", "PROTECT", "PARTIAL_BOOK", "TRAIL"]);
 
-function result(input: TradeLifecycleInput, nextState: TradeLifecycleState, reasons: string[], devilFlags: string[] = []): TradeLifecycleResult {
+function result(
+  input: TradeLifecycleInput,
+  nextState: TradeLifecycleState,
+  reasons: string[],
+  devilFlags: string[] = [],
+  dataAvailable = true,
+): TradeLifecycleResult {
   return {
     version: "TRADE_LIFECYCLE_ENGINE_V1",
     semantics: "RESEARCH_SHADOW_ONLY",
     previousState: input.currentState,
     nextState,
     changed: input.currentState !== nextState,
+    dataAvailable,
     reasons,
     devilFlags,
     affectsTelegram: false,
@@ -72,28 +79,41 @@ function result(input: TradeLifecycleInput, nextState: TradeLifecycleState, reas
 
 /**
  * Deterministic state machine only. It never invents a transition.
- * Safety priorities:
- * 1) EXIT is absorbing even if fresh data later disappears
- * 2) missing/stale/invalid non-terminal candidate => DATA_UNAVAILABLE
- * 3) candidate/style mutation is blocked (no SCALP -> SWING rescue)
- * 4) EXIT requires explicit confirmation and only applies after activation
- * 5) partial/protect/trail require their own explicit upstream conditions
+ * DATA_UNAVAILABLE is an availability overlay, never a lifecycle state.
+ * Canonical progression is WATCH -> ENTRY_READY -> ACTIVE -> HOLD -> PROTECT -> PARTIAL_BOOK -> TRAIL -> EXIT.
  */
 export function advanceTradeLifecycle(input: TradeLifecycleInput): TradeLifecycleResult {
   if (terminalStates.has(input.currentState)) {
-    return result(input, "EXIT", ["EXIT_IS_TERMINAL"]);
+    return result(
+      input,
+      "EXIT",
+      ["EXIT_IS_TERMINAL"],
+      !input.dataFresh || !input.contractValid ? ["NO_FRESH_LIFECYCLE_GUIDANCE"] : [],
+      input.dataFresh && input.contractValid,
+    );
   }
 
   if (!input.dataFresh || !input.contractValid) {
-    return result(input, "DATA_UNAVAILABLE", [!input.dataFresh ? "DATA_NOT_FRESH" : "CONTRACT_NOT_VALID"], ["NO_FRESH_LIFECYCLE_GUIDANCE"]);
+    return result(
+      input,
+      input.currentState,
+      [!input.dataFresh ? "DATA_NOT_FRESH" : "CONTRACT_NOT_VALID"],
+      ["NO_FRESH_LIFECYCLE_GUIDANCE"],
+      false,
+    );
   }
 
   if (!input.sameCandidate || !input.sameStyle) {
-    return result(input, input.currentState, ["CANDIDATE_OR_STYLE_MUTATION_BLOCKED"], ["NO_SCALP_TO_SWING_MUTATION", "NO_CONTRACT_IDENTITY_MUTATION"]);
+    return result(
+      input,
+      input.currentState,
+      ["CANDIDATE_OR_STYLE_MUTATION_BLOCKED"],
+      ["NO_SCALP_TO_SWING_MUTATION", "NO_CONTRACT_IDENTITY_MUTATION"],
+    );
   }
 
   if (input.event === "DATA_LOST") {
-    return result(input, "DATA_UNAVAILABLE", ["UPSTREAM_DATA_LOST"], ["NO_FRESH_LIFECYCLE_GUIDANCE"]);
+    return result(input, input.currentState, ["UPSTREAM_DATA_LOST"], ["NO_FRESH_LIFECYCLE_GUIDANCE"], false);
   }
 
   if (input.event === "EXIT_TRIGGERED") {
@@ -105,10 +125,6 @@ export function advanceTradeLifecycle(input: TradeLifecycleInput): TradeLifecycl
   }
 
   switch (input.currentState) {
-    case "DATA_UNAVAILABLE":
-      if (input.event === "CANDIDATE_VALID") return result(input, "WATCH", ["FRESH_VALID_CANDIDATE_RESTORED"]);
-      return result(input, "DATA_UNAVAILABLE", ["WAITING_FOR_VALID_FRESH_CANDIDATE"]);
-
     case "WATCH":
       if (input.event === "ENTRY_CONDITIONS_READY" && input.entryConditionConfirmed) {
         return result(input, "ENTRY_READY", ["ENTRY_CONDITIONS_CONFIRMED"]);
@@ -132,7 +148,7 @@ export function advanceTradeLifecycle(input: TradeLifecycleInput): TradeLifecycl
         return result(input, "PROTECT", ["PROFIT_PROTECTION_CONDITION_CONFIRMED"]);
       }
       if (input.event === "PARTIAL_BOOK_TRIGGERED" && input.partialBookConditionConfirmed) {
-        return result(input, "PARTIAL_BOOK", ["PARTIAL_BOOK_CONDITION_CONFIRMED"]);
+        return result(input, "HOLD", ["PARTIAL_BOOK_REQUIRES_PROTECT_STAGE_FIRST"], ["LIFECYCLE_STAGE_SKIP_BLOCKED"]);
       }
       return result(input, "HOLD", ["HOLD_STATE_MAINTAINED"]);
 
@@ -141,7 +157,7 @@ export function advanceTradeLifecycle(input: TradeLifecycleInput): TradeLifecycl
         return result(input, "PARTIAL_BOOK", ["PARTIAL_BOOK_CONDITION_CONFIRMED"]);
       }
       if (input.event === "TRAIL_TRIGGERED" && input.trailConditionConfirmed) {
-        return result(input, "TRAIL", ["TRAIL_CONDITION_CONFIRMED"]);
+        return result(input, "PROTECT", ["TRAIL_REQUIRES_PARTIAL_BOOK_STAGE_FIRST"], ["LIFECYCLE_STAGE_SKIP_BLOCKED"]);
       }
       return result(input, "PROTECT", ["PROTECTION_STATE_MAINTAINED"]);
 

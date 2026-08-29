@@ -18,34 +18,35 @@ const base: TradeLifecycleInput = {
   thesisHoldingConfirmed: false,
 };
 
-test("WATCH moves to ENTRY_READY only with explicit confirmation", () => {
-  const r = advanceTradeLifecycle({ ...base, event: "ENTRY_CONDITIONS_READY", entryConditionConfirmed: true });
-  assert.equal(r.nextState, "ENTRY_READY");
+test("canonical progression begins WATCH -> ENTRY_READY -> ACTIVE -> HOLD", () => {
+  assert.equal(advanceTradeLifecycle({ ...base, event: "ENTRY_CONDITIONS_READY", entryConditionConfirmed: true }).nextState, "ENTRY_READY");
+  assert.equal(advanceTradeLifecycle({ ...base, currentState: "ENTRY_READY", event: "ENTRY_ACTIVATED", entryActivatedConfirmed: true }).nextState, "ACTIVE");
+  assert.equal(advanceTradeLifecycle({ ...base, currentState: "ACTIVE", event: "THESIS_HOLDING", thesisHoldingConfirmed: true }).nextState, "HOLD");
 });
 
-test("ENTRY_READY moves to ACTIVE only on confirmed activation", () => {
-  const r = advanceTradeLifecycle({ ...base, currentState: "ENTRY_READY", event: "ENTRY_ACTIVATED", entryActivatedConfirmed: true });
-  assert.equal(r.nextState, "ACTIVE");
-});
-
-test("ACTIVE moves to HOLD only when thesis remains confirmed", () => {
-  const r = advanceTradeLifecycle({ ...base, currentState: "ACTIVE", event: "THESIS_HOLDING", thesisHoldingConfirmed: true });
-  assert.equal(r.nextState, "HOLD");
-});
-
-test("HOLD can move to PROTECT", () => {
+test("HOLD moves to PROTECT only with explicit confirmation", () => {
   const r = advanceTradeLifecycle({ ...base, currentState: "HOLD", event: "PROFIT_PROTECTION_REQUIRED", protectConditionConfirmed: true });
   assert.equal(r.nextState, "PROTECT");
 });
 
-test("partial booking requires explicit deterministic confirmation", () => {
-  const blocked = advanceTradeLifecycle({ ...base, currentState: "HOLD", event: "PARTIAL_BOOK_TRIGGERED" });
-  assert.equal(blocked.nextState, "HOLD");
-  const allowed = advanceTradeLifecycle({ ...base, currentState: "HOLD", event: "PARTIAL_BOOK_TRIGGERED", partialBookConditionConfirmed: true });
-  assert.equal(allowed.nextState, "PARTIAL_BOOK");
+test("HOLD cannot skip PROTECT and jump directly to PARTIAL_BOOK", () => {
+  const r = advanceTradeLifecycle({ ...base, currentState: "HOLD", event: "PARTIAL_BOOK_TRIGGERED", partialBookConditionConfirmed: true });
+  assert.equal(r.nextState, "HOLD");
+  assert.ok(r.devilFlags.includes("LIFECYCLE_STAGE_SKIP_BLOCKED"));
 });
 
-test("TRAIL requires explicit confirmation", () => {
+test("PROTECT moves to PARTIAL_BOOK only with explicit confirmation", () => {
+  const r = advanceTradeLifecycle({ ...base, currentState: "PROTECT", event: "PARTIAL_BOOK_TRIGGERED", partialBookConditionConfirmed: true });
+  assert.equal(r.nextState, "PARTIAL_BOOK");
+});
+
+test("PROTECT cannot skip PARTIAL_BOOK and jump directly to TRAIL", () => {
+  const r = advanceTradeLifecycle({ ...base, currentState: "PROTECT", event: "TRAIL_TRIGGERED", trailConditionConfirmed: true });
+  assert.equal(r.nextState, "PROTECT");
+  assert.ok(r.devilFlags.includes("LIFECYCLE_STAGE_SKIP_BLOCKED"));
+});
+
+test("PARTIAL_BOOK moves to TRAIL only with explicit confirmation", () => {
   const r = advanceTradeLifecycle({ ...base, currentState: "PARTIAL_BOOK", event: "TRAIL_TRIGGERED", trailConditionConfirmed: true });
   assert.equal(r.nextState, "TRAIL");
 });
@@ -61,6 +62,7 @@ test("EXIT remains terminal even when later data becomes stale", () => {
   const r = advanceTradeLifecycle({ ...base, currentState: "EXIT", dataFresh: false, contractValid: false });
   assert.equal(r.nextState, "EXIT");
   assert.equal(r.changed, false);
+  assert.equal(r.dataAvailable, false);
 });
 
 test("pre-entry EXIT is blocked even if an exit flag is supplied", () => {
@@ -83,15 +85,19 @@ test("style or candidate mutation is blocked", () => {
   assert.ok(r.devilFlags.includes("NO_SCALP_TO_SWING_MUTATION"));
 });
 
-test("stale data fails closed before terminal state", () => {
-  const r = advanceTradeLifecycle({ ...base, dataFresh: false });
-  assert.equal(r.nextState, "DATA_UNAVAILABLE");
+test("stale data is an overlay and never mutates lifecycle state", () => {
+  const r = advanceTradeLifecycle({ ...base, currentState: "HOLD", dataFresh: false });
+  assert.equal(r.nextState, "HOLD");
+  assert.equal(r.changed, false);
+  assert.equal(r.dataAvailable, false);
+  assert.ok(r.devilFlags.includes("NO_FRESH_LIFECYCLE_GUIDANCE"));
   assert.equal(r.affectsTelegram, false);
   assert.equal(r.affectsVerdict, false);
   assert.equal(r.affectsExecution, false);
 });
 
-test("DATA_UNAVAILABLE returns to WATCH only on a fresh valid candidate event", () => {
-  const r = advanceTradeLifecycle({ ...base, currentState: "DATA_UNAVAILABLE", event: "CANDIDATE_VALID" });
-  assert.equal(r.nextState, "WATCH");
+test("DATA_LOST is an availability overlay and preserves current lifecycle", () => {
+  const r = advanceTradeLifecycle({ ...base, currentState: "PROTECT", event: "DATA_LOST" });
+  assert.equal(r.nextState, "PROTECT");
+  assert.equal(r.dataAvailable, false);
 });

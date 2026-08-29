@@ -30,7 +30,7 @@ function truthFromUnknown(value: unknown): H1TruthVerdict | null {
     return null;
   }
   if (!isRecord(value)) return null;
-  for (const key of ["truthVerdict", "verdict", "status", "truthStatus", "dataQuality", "quality", "state"]) {
+  for (const key of ["overallVerdict", "truthVerdict", "verdict", "status", "truthStatus", "dataQuality", "quality", "state"]) {
     const verdict = truthFromUnknown(value[key]);
     if (verdict) return verdict;
   }

@@ -13,6 +13,7 @@ import { buildResearchDashboardModel } from "./research-dashboard-model.js";
 import { renderResearchDashboardHtml } from "./research-dashboard-view.js";
 import type { ResearchIndexCode } from "./research-index-types.js";
 import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
+import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 
 export const researchRouter = new Hono();
 
@@ -76,6 +77,11 @@ researchRouter.get("/broad-market-size/readiness", async (c) => {
 
 researchRouter.get("/broad-market-size/status", async (c) => {
   return c.json(researchIndexRuntimeStatus());
+});
+
+researchRouter.get("/h1-pilot-audit", async (c) => {
+  const result = await runH1PilotHttpAudit();
+  return c.json(result, result.audit || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
 });
 
 researchRouter.post("/broad-market-size/load-latest", async (c) => {

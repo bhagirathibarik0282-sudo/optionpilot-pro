@@ -22,7 +22,7 @@ export interface PsychologyReplayValidationResult {
 
 /**
  * Admits only provenance-backed real replay or live-observation rows into psychology validation.
- * Historical replay must first pass the H1 no-lookahead/data-quality guard.
+ * Both real replay and live observations must pass the H1 no-lookahead/data-quality guard.
  * Synthetic cases remain useful for unit tests but can never become validation evidence.
  */
 export function adaptPsychologyValidationEvidence(input: PsychologyReplayValidationInput): PsychologyReplayValidationResult {
@@ -38,12 +38,8 @@ export function adaptPsychologyValidationEvidence(input: PsychologyReplayValidat
     blockers.push(...replayGuard.errors.map((e) => `REPLAY_GUARD_${e}`));
   }
 
-  if (input.source === "LIVE_OBSERVATION") {
-    const observed = Date.parse(input.replay.observedAt);
-    const decision = Date.parse(input.replay.decisionAt);
-    if (!Number.isFinite(observed) || !Number.isFinite(decision)) blockers.push("INVALID_LIVE_OBSERVATION_TIMESTAMP");
-    if (input.replay.quality !== "TRUE") blockers.push(`LIVE_OBSERVATION_QUALITY_${input.replay.quality}`);
-    if (input.replay.sessionEligible === false) blockers.push("LIVE_OBSERVATION_OUTSIDE_ELIGIBLE_SESSION");
+  if (input.source === "LIVE_OBSERVATION" && !replayGuard.eligible) {
+    blockers.push(...replayGuard.errors.map((e) => `LIVE_GUARD_${e}`));
   }
 
   return {

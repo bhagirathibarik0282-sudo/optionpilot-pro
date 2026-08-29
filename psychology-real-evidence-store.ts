@@ -64,9 +64,20 @@ export function isStoredPsychologyRealEvidence(value: unknown): value is StoredP
   if (row.source !== "REAL_REPLAY" && row.source !== "LIVE_OBSERVATION") return false;
   if (typeof row.evidenceKey !== "string" || !row.evidenceKey.trim()) return false;
   if (typeof row.recordedAt !== "string" || !validIso(row.recordedAt)) return false;
-  if (!row.validation || typeof row.validation.tradeId !== "string" || !row.validation.tradeId.trim()) return false;
+  if (!row.replay || typeof row.replay !== "object") return false;
+  if (!row.validation || typeof row.validation !== "object" || typeof row.validation.tradeId !== "string" || !row.validation.tradeId.trim()) return false;
   if (row.evidenceKey !== psychologyEvidenceKey(row as StoredPsychologyRealEvidence)) return false;
   if (row.affectsTelegram !== false || row.affectsVerdict !== false || row.affectsExecution !== false) return false;
+
+  // Re-run the canonical admission gate on restored DB payloads. This prevents a
+  // hand-written/corrupted row with a plausible key from bypassing replay quality,
+  // lookahead, session, trade-id, or regime/count validation.
+  const readmission = adaptPsychologyValidationEvidence({
+    source: row.source,
+    replay: row.replay as PsychologyReplayValidationInput["replay"],
+    validation: row.validation as PsychologyReplayValidationInput["validation"],
+  });
+  if (!readmission.accepted || !readmission.observation) return false;
   return true;
 }
 

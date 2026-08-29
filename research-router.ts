@@ -14,6 +14,7 @@ import { renderResearchDashboardHtml } from "./research-dashboard-view.js";
 import type { ResearchIndexCode } from "./research-index-types.js";
 import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
+import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } from "./research-engine-chain-http.js";
 
 export const researchRouter = new Hono();
 
@@ -77,6 +78,18 @@ researchRouter.get("/broad-market-size/readiness", async (c) => {
 
 researchRouter.get("/broad-market-size/status", async (c) => {
   return c.json(researchIndexRuntimeStatus());
+});
+
+researchRouter.get("/engine-chain/status", (c) => {
+  return c.json(researchEngineChainRuntimeStatus());
+});
+
+researchRouter.post("/engine-chain/evaluate", async (c) => {
+  const denied = authorizeResearchMutation(c);
+  if (denied) return denied;
+  const body = await c.req.json().catch(() => null);
+  const result = evaluateResearchEngineChainHttp(body);
+  return c.json(result, result.ok ? 200 : 400);
 });
 
 researchRouter.get("/h1-pilot-audit", async (c) => {

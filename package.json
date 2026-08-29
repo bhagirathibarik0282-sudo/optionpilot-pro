@@ -10,6 +10,7 @@
     "start": "node scripts/wire-storage-v3-runtime.mjs && tsx server.ts",
     "start:option-recorder": "tsx option-recorder-service.ts",
     "eod:archive": "tsx eod-archive-job.ts",
+    "fii-dii:daily": "tsx fii-dii-daily-job.ts",
     "research:preflight": "tsx scripts/research-preflight.ts",
     "research:populate": "tsx scripts/populate-research-indices.ts",
     "research:backfill:auto": "tsx scripts/auto-backfill-research-indices.ts",

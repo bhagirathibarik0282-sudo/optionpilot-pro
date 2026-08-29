@@ -38,7 +38,7 @@ const base = {
     stop: 80,
     quantity: 10,
     capital: 50000,
-    maxAllowedLossPct: 2,
+    maxAllowedPlannedStopLossPct: 2,
   },
 };
 
@@ -46,6 +46,7 @@ test("propagates all-ready research prerequisites through the full chain", () =>
   const result = runResearchEngineChain(base);
   assert.equal(result.strategy.status, "READY_FOR_RESEARCH");
   assert.equal(result.risk.status, "READY_FOR_RESEARCH");
+  assert.equal(result.risk.plannedStopLossPct, 0.4);
   assert.equal(result.decision.status, "READY_FOR_RESEARCH_REVIEW");
 });
 
@@ -65,6 +66,16 @@ test("stale evidence blocks the final decision gate even when upstream readiness
   assert.equal(result.risk.status, "READY_FOR_RESEARCH");
   assert.equal(result.decision.status, "NOT_READY");
   assert.equal(result.decision.reason, "EVIDENCE_NOT_FRESH");
+});
+
+test("missing caller planned-stop risk limit fails closed", () => {
+  const result = runResearchEngineChain({
+    ...base,
+    risk: { ...base.risk, maxAllowedPlannedStopLossPct: null },
+  });
+  assert.equal(result.risk.status, "NOT_READY");
+  assert.equal(result.risk.reason, "RISK_LIMIT_INVALID");
+  assert.equal(result.decision.status, "NOT_READY");
 });
 
 test("shadow chain never gains live authority", () => {

@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { researchRouter } from "./research-router.js";
 import { installTelegramCombinationBridge } from "./telegram-combination-bridge.js";
+import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 
@@ -9,6 +10,23 @@ const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 // can surface COMB-01..08 without changing its verdict, score, cadence, or
 // execution logic. The bridge is idempotent and fail-closed.
 installTelegramCombinationBridge();
+
+// Railway MCP can read service logs but cannot safely execute one-off commands
+// or perform an outbound GET to the research endpoint. Emit the exact same
+// read-only H1 pilot audit once after startup so runtime evidence is observable
+// without changing Railway config, exposing credentials, or writing to DB.
+const h1StartupAuditTimer = setTimeout(() => {
+  void runH1PilotHttpAudit()
+    .then((result) => console.log(`[H1_PILOT_STARTUP_AUDIT] ${JSON.stringify(result)}`))
+    .catch((err) => console.error(`[H1_PILOT_STARTUP_AUDIT] ${JSON.stringify({
+      ok: false,
+      mode: "READ_ONLY_H1_PILOT_AUDIT",
+      productionImpact: "NONE",
+      audit: null,
+      reason: err instanceof Error ? err.message : "H1_PILOT_STARTUP_AUDIT_FAILED",
+    })}`));
+}, 5000);
+h1StartupAuditTimer.unref?.();
 
 /**
  * Mounts research-only endpoints without changing any production verdict,

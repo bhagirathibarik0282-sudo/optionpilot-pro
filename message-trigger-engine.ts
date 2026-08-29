@@ -9,8 +9,7 @@ export type MessageTriggerLifecycle =
   | "PROTECT"
   | "PARTIAL_BOOK"
   | "TRAIL"
-  | "EXIT"
-  | "DATA_UNAVAILABLE";
+  | "EXIT";
 
 export interface MessageTriggerInput {
   dataFresh: boolean;
@@ -58,7 +57,7 @@ function out(shouldSpeak: boolean, urgent: boolean, reason: string): MessageTrig
 /**
  * No timing or confirmation threshold is invented here.
  * requiredConfirmations and cooldownSatisfied must come from an upstream frozen policy.
- * EXIT and DATA_UNAVAILABLE are urgent, but exact duplicate fingerprints remain suppressed.
+ * EXIT and data-unavailable overlay are urgent, but exact duplicate fingerprints remain suppressed.
  * The fingerprint must be scoped to the stable exact candidate key to prevent cross-candidate collisions.
  */
 export function evaluateMessageTrigger(input: MessageTriggerInput): MessageTriggerResult {
@@ -75,8 +74,7 @@ export function evaluateMessageTrigger(input: MessageTriggerInput): MessageTrigg
     return out(false, false, "EXACT_DUPLICATE_SUPPRESSED");
   }
 
-  const dataUnavailable = !input.dataFresh || input.lifecycle === "DATA_UNAVAILABLE";
-  if (dataUnavailable) return out(true, true, "DATA_UNAVAILABLE_MESSAGE_ELIGIBLE");
+  if (!input.dataFresh) return out(true, true, "DATA_UNAVAILABLE_MESSAGE_ELIGIBLE");
 
   if (input.lifecycle === "EXIT") return out(true, true, "TERMINAL_EXIT_MESSAGE_ELIGIBLE");
 

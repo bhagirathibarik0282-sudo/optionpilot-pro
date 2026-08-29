@@ -14,6 +14,8 @@ import { buildObe3VolatilityPurchaseCondition } from "./obe-volatility.js";
 // hard rules (never decides, only formats already-computed fields).
 import { buildTelegramTradeCard, TradeCardInput, TradeCardTmPlan, TradeCardAdvancedGreeks } from "./telegram-trade-card.js";
 import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";
+import { ensureH1DerivedSchema } from "./h1-derived-db.js";
+import { recordH1FromRuntimeSnapshot } from "./h1-runtime-bridge.js";
 import { persistKiteAuthoritySession, resolveKiteAuthoritySession, getKiteAuthorityPublicStatus, kiteSessionIdMatchesFingerprint, type KiteAuthorityResolvedSession } from "./kite-session-authority.js";
 import { revokeKiteAuthoritySession } from "./kite-session-authority-revoke.js";
 
@@ -2132,6 +2134,13 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     const niftyTruth = computeTruthReport(niftyMetricsForTruth);
     const bankTruth = computeTruthReport(bankMetricsForTruth);
     const sensexTruth = computeTruthReport(snapshot.SENSEX);
+
+    // H1_TRUTH_BY_SYMBOL_V1 / H1_RUNTIME_PATCH_V2: research-only, fail-open side-channel.
+    // Reuse the exact TruthReport objects already computed by the existing recorder cycle.
+    const h1TruthBySymbol = { NIFTY: niftyTruth, BANKNIFTY: bankTruth, SENSEX: sensexTruth };
+    void recordH1FromRuntimeSnapshot(snapshot, h1TruthBySymbol).catch((err) =>
+      console.error("[H1] recorder bridge failed (live path unaffected):", err instanceof Error ? err.message : err),
+    );
 
     const niftySnap = toTruthValidatedRecorderIndexSnapshot(niftyMetricsForTruth, niftyTruth);
     const bankSnap = toTruthValidatedRecorderIndexSnapshot(bankMetricsForTruth, bankTruth);
@@ -35462,6 +35471,7 @@ app.get("/api/tradelab", async (c) => {
 // db.ts's own comment for the matching hard safety rule on that side.
 async function restorePersistedState(): Promise<void> {
   await dbInit();
+  void ensureH1DerivedSchema().catch((err) => console.error("[H1] derived schema init failed (live path unaffected):", err instanceof Error ? err.message : err));
   if (!dbIsConfigured()) return;
   try {
     const today = indiaTradingDate();

@@ -1,0 +1,68 @@
+name: H1 Runtime Wiring Guard
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - h1-recorder-wiring
+    paths:
+      - .github/workflows/h1-runtime-wiring-guard.yml
+      - scripts/apply-h1-runtime-wiring.mjs
+      - h1-runtime-bridge.ts
+      - test/h1-runtime-bridge.test.ts
+      - test/h1-market-story-thesis.test.ts
+      - package.json
+
+permissions:
+  contents: write
+
+jobs:
+  wire-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout guarded branch
+        uses: actions/checkout@v4
+        with:
+          ref: h1-recorder-wiring
+          fetch-depth: 0
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Verify exact H1 wiring anchors
+        run: node scripts/apply-h1-runtime-wiring.mjs --check
+
+      - name: Apply exact recorder Truth-scope wiring
+        run: node scripts/apply-h1-runtime-wiring.mjs
+
+      - name: Run complete repository test suite
+        run: npm test
+
+      - name: Verify only server runtime wiring is staged
+        shell: bash
+        run: |
+          git diff --exit-code -- . ':!server.ts' ':!server.ts.h1-prewire.bak'
+          git diff --check -- server.ts
+          grep -q 'H1_RUNTIME_PATCH_V2' server.ts
+          grep -q 'recordH1FromRuntimeSnapshot(snapshot, h1TruthBySymbol)' server.ts
+          grep -q 'const h1TruthBySymbol = { NIFTY: niftyTruth, BANKNIFTY: bankTruth, SENSEX: sensexTruth };' server.ts
+
+      - name: Commit branch-only runtime wiring
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          if git diff --cached --quiet; then
+            echo 'No server.ts change to commit.'
+            exit 0
+          fi
+          git commit -m 'wire H1 recorder into verified Truth scope'
+          git push origin HEAD:h1-recorder-wiring

@@ -25,6 +25,9 @@ function validProbability(value: Record<string, unknown>): boolean {
   if ((value.resolvedSamples as number) + (value.censored as number) !== value.sampleCount) return false;
   if (value.status === "READY") {
     if (!isFiniteNumber(value.winRatePct) || value.winRatePct < 0 || value.winRatePct > 100) return false;
+    if ((value.resolvedSamples as number) <= 0) return false;
+    const expected = ((value.wins as number) / (value.resolvedSamples as number)) * 100;
+    if (Math.abs(value.winRatePct - expected) > 1e-9) return false;
   } else if (value.winRatePct !== null) return false;
   return typeof value.reason === "string" && value.reason.length > 0;
 }
@@ -35,6 +38,7 @@ function validMarketRegime(value: Record<string, unknown>): boolean {
   if (typeof value.ready !== "boolean") return false;
   if (value.semantics !== "VALIDATED_EVIDENCE_ONLY" || value.ruleVersion !== "MARKET_REGIME_ENGINE_V1") return false;
   if (value.affectsVerdict !== false || value.affectsTelegram !== false || value.affectsExecution !== false) return false;
+  if ((value.regime === "UNKNOWN" && value.ready !== false) || (value.regime !== "UNKNOWN" && value.ready !== true)) return false;
   return typeof value.reason === "string" && value.reason.length > 0;
 }
 

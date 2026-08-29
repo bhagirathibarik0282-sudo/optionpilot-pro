@@ -50,11 +50,25 @@ test("TRAIL requires explicit confirmation", () => {
   assert.equal(r.nextState, "TRAIL");
 });
 
-test("confirmed EXIT can happen immediately and becomes terminal", () => {
+test("confirmed EXIT can happen after activation and becomes terminal", () => {
   const exited = advanceTradeLifecycle({ ...base, currentState: "ACTIVE", event: "EXIT_TRIGGERED", exitConditionConfirmed: true });
   assert.equal(exited.nextState, "EXIT");
   const again = advanceTradeLifecycle({ ...base, currentState: "EXIT", event: "CANDIDATE_VALID" });
   assert.equal(again.nextState, "EXIT");
+});
+
+test("EXIT remains terminal even when later data becomes stale", () => {
+  const r = advanceTradeLifecycle({ ...base, currentState: "EXIT", dataFresh: false, contractValid: false });
+  assert.equal(r.nextState, "EXIT");
+  assert.equal(r.changed, false);
+});
+
+test("pre-entry EXIT is blocked even if an exit flag is supplied", () => {
+  for (const state of ["WATCH", "ENTRY_READY"] as const) {
+    const r = advanceTradeLifecycle({ ...base, currentState: state, event: "EXIT_TRIGGERED", exitConditionConfirmed: true });
+    assert.equal(r.nextState, state);
+    assert.ok(r.devilFlags.includes("PRE_ENTRY_EXIT_BLOCKED"));
+  }
 });
 
 test("unconfirmed exit event cannot force EXIT", () => {
@@ -69,7 +83,7 @@ test("style or candidate mutation is blocked", () => {
   assert.ok(r.devilFlags.includes("NO_SCALP_TO_SWING_MUTATION"));
 });
 
-test("stale data fails closed", () => {
+test("stale data fails closed before terminal state", () => {
   const r = advanceTradeLifecycle({ ...base, dataFresh: false });
   assert.equal(r.nextState, "DATA_UNAVAILABLE");
   assert.equal(r.affectsTelegram, false);

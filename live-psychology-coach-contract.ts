@@ -31,7 +31,8 @@ export type LifecycleState =
   | "PROTECT"
   | "PARTIAL_BOOK"
   | "TRAIL"
-  | "EXIT";
+  | "EXIT"
+  | "DATA_UNAVAILABLE";
 
 export type BehaviourRisk =
   | "DO_NOT_CHASE"
@@ -63,6 +64,9 @@ export interface LivePsychologyCoachInput {
   dataFresh: boolean;
   meaningfulChange: boolean;
   consecutiveConfirmations: number;
+  /** When supplied, Message Trigger Engine is authoritative about whether speech is eligible. */
+  triggerShouldSpeak?: boolean;
+  triggerReason?: string;
 }
 
 export interface LivePsychologyCoachDecision {
@@ -87,81 +91,57 @@ function validateCandidate(candidate: CandidateIdentity): void {
   if (!candidate.candidateId.trim()) throw new Error("candidateId is required");
 }
 
+function baseDecision(input: LivePsychologyCoachInput, shouldSpeak: boolean, heading: string, risks: BehaviourRisk[], reason: string): LivePsychologyCoachDecision {
+  return {
+    version: "LIVE_PSYCHOLOGY_COACH_CONTRACT_V1",
+    semantics: "RESEARCH_SHADOW_ONLY",
+    scalpPriority: input.candidate.style === "SCALP",
+    shouldSpeak,
+    heading,
+    lifecycle: input.lifecycle,
+    risks,
+    haikuMayDecideTradeState: false,
+    affectsTelegram: false,
+    affectsVerdict: false,
+    affectsExecution: false,
+    reason,
+  };
+}
+
 /**
  * Research-only contract for SCALP-first live coaching.
- * Deterministic engines decide state; this function only decides whether a
- * meaningful, sufficiently confirmed state change is eligible to be spoken.
- * Haiku is downstream language-only and cannot change trade state.
+ * Deterministic engines decide state. When Message Trigger Engine output is supplied,
+ * it alone decides whether speech is eligible. Haiku remains language-only.
  */
 export function evaluateLivePsychologyCoach(input: LivePsychologyCoachInput): LivePsychologyCoachDecision {
   validateCandidate(input.candidate);
 
   const c = input.candidate;
   const heading = `${c.style === "SCALP" ? "🔥" : "📌"} ${c.style} • ${c.symbol.trim().toUpperCase()} ${c.strike} ${c.side} • ${input.lifecycle} • ${c.candidateId}`;
+  const unavailable = !input.dataFresh || input.lifecycle === "DATA_UNAVAILABLE" || input.premiumBehaviour === "DATA_UNAVAILABLE" || input.buyerSellerState === "DATA_UNAVAILABLE" || input.risks.includes("DATA_UNAVAILABLE");
 
-  if (!input.dataFresh || input.premiumBehaviour === "DATA_UNAVAILABLE" || input.buyerSellerState === "DATA_UNAVAILABLE" || input.risks.includes("DATA_UNAVAILABLE")) {
-    return {
-      version: "LIVE_PSYCHOLOGY_COACH_CONTRACT_V1",
-      semantics: "RESEARCH_SHADOW_ONLY",
-      scalpPriority: c.style === "SCALP",
-      shouldSpeak: true,
-      heading,
-      lifecycle: input.lifecycle,
-      risks: ["DATA_UNAVAILABLE"],
-      haikuMayDecideTradeState: false,
-      affectsTelegram: false,
-      affectsVerdict: false,
-      affectsExecution: false,
-      reason: "Live evidence incomplete; only a no-fresh-guidance message is eligible.",
-    };
+  if (input.triggerShouldSpeak !== undefined) {
+    if (!input.triggerShouldSpeak) {
+      return baseDecision(input, false, heading, input.risks, input.triggerReason || "Message Trigger Engine suppressed commentary.");
+    }
+    if (unavailable) {
+      return baseDecision(input, true, heading, ["DATA_UNAVAILABLE"], "Live evidence incomplete; only a no-fresh-guidance message is eligible.");
+    }
+    return baseDecision(input, true, heading, input.risks, input.triggerReason || "Message Trigger Engine confirmed speech eligibility.");
+  }
+
+  // Backward-compatible standalone contract behavior.
+  if (unavailable) {
+    return baseDecision(input, true, heading, ["DATA_UNAVAILABLE"], "Live evidence incomplete; only a no-fresh-guidance message is eligible.");
   }
 
   if (!input.meaningfulChange) {
-    return {
-      version: "LIVE_PSYCHOLOGY_COACH_CONTRACT_V1",
-      semantics: "RESEARCH_SHADOW_ONLY",
-      scalpPriority: c.style === "SCALP",
-      shouldSpeak: false,
-      heading,
-      lifecycle: input.lifecycle,
-      risks: input.risks,
-      haikuMayDecideTradeState: false,
-      affectsTelegram: false,
-      affectsVerdict: false,
-      affectsExecution: false,
-      reason: "No meaningful state change; suppress repeated commentary.",
-    };
+    return baseDecision(input, false, heading, input.risks, "No meaningful state change; suppress repeated commentary.");
   }
 
   if (input.consecutiveConfirmations < 2 && input.lifecycle !== "EXIT") {
-    return {
-      version: "LIVE_PSYCHOLOGY_COACH_CONTRACT_V1",
-      semantics: "RESEARCH_SHADOW_ONLY",
-      scalpPriority: c.style === "SCALP",
-      shouldSpeak: false,
-      heading,
-      lifecycle: input.lifecycle,
-      risks: input.risks,
-      haikuMayDecideTradeState: false,
-      affectsTelegram: false,
-      affectsVerdict: false,
-      affectsExecution: false,
-      reason: "State change not persistent enough; hysteresis suppresses noise.",
-    };
+    return baseDecision(input, false, heading, input.risks, "State change not persistent enough; hysteresis suppresses noise.");
   }
 
-  return {
-    version: "LIVE_PSYCHOLOGY_COACH_CONTRACT_V1",
-    semantics: "RESEARCH_SHADOW_ONLY",
-    scalpPriority: c.style === "SCALP",
-    shouldSpeak: true,
-    heading,
-    lifecycle: input.lifecycle,
-    risks: input.risks,
-    haikuMayDecideTradeState: false,
-    affectsTelegram: false,
-    affectsVerdict: false,
-    affectsExecution: false,
-    reason: "Meaningful deterministic state change confirmed; language layer may explain it.",
-  };
+  return baseDecision(input, true, heading, input.risks, "Meaningful deterministic state change confirmed; language layer may explain it.");
 }

@@ -48,6 +48,15 @@ Store separately from raw truth:
 - Existing deterministic Outcome Engine remains the authority for observed target/stop/MFE/MAE results; H1 does not create a second outcome calculator.
 - Old incomplete ATM-only outcome windows remain incomplete. New ATM ±7 capture may improve future fixed-strike observability but cannot retroactively repair missing evidence.
 
+## History router and analog guard
+- Reuse existing seven-index daily research metrics for 5D, 20D, 60D and 252D; do not recompute a second return/relative-strength engine.
+- Priority is `LIVE > 5D > 20D > 60D > 1Y`.
+- 20D is a computed lens from the same research store, not a separate physical data tier.
+- Historical conflict may reduce confidence/context quality but cannot flip an otherwise valid live direction.
+- Historical analogs are descriptive only: report regime-matched usable sample size, similarity count and outcome counts.
+- Do not convert historical continuation frequency into a current-candidate probability or certainty.
+- Low-sample or mismatched-regime analogs remain `INSUFFICIENT` rather than being padded with weak cases.
+
 ## Truth eligibility
 - TRUE: research eligible.
 - PARTIAL: persist only as diagnostic; exclude from learning by default.
@@ -63,6 +72,7 @@ Store separately from raw truth:
 - Never infer premium-pair change without two valid observations.
 - Never convert regime transition into reversal without explicit evidence.
 - Never reconstruct missing historical fixed-strike outcomes from ATM substitutions.
+- Never present descriptive analog frequency as calibrated current-trade probability.
 
 ## One-shot manual handoff checklist
 Complete all safe branch work first. Then perform one manual batch only:
@@ -72,7 +82,7 @@ Complete all safe branch work first. Then perform one manual batch only:
 4. Initialize derived schema after the existing DB init without changing candidate/verdict behavior.
 5. Wire historical intelligence/lifecycle calls only after their source states are already deterministically known; no history module may become a live decision dependency.
 6. Verify `DATABASE_URL` and required Railway variables exist without exposing values.
-7. Run the repository test suite, including H1 derived/intelligence/candidate-quality/execution-lifecycle tests.
+7. Run the repository test suite, including H1 derived/intelligence/candidate-quality/execution-lifecycle/history-router tests.
 8. Start with production-impact disabled / research-only recorder semantics.
 9. Run 1-day pilot/replay.
 10. Audit timestamps, expiry, DTE, CE/PE identity, ATM offsets, duplicate minute buckets, NULL semantics.
@@ -81,12 +91,14 @@ Complete all safe branch work first. Then perform one manual batch only:
 13. Audit premium-pair semantics: missing prior observation => UNAVAILABLE; no inferred move.
 14. Audit lifecycle semantics: historical layer preserves supplied live status and never promotes/downgrades it.
 15. Audit regime survival: transition != automatic reversal; invalidated thesis does not increment survival.
-16. If PASS, expand to 5 days.
-17. Devil-check expiry roll, candidate lifecycle, regime transitions, fixed-strike continuity and data gaps.
-18. If PASS, bulk import 60 trading days in one controlled batch.
-19. Run post-import integrity counters before enabling any historical analog use.
-20. Keep research data isolated from production candidate weighting until separate approval.
-21. Merge/deploy only after explicit final approval.
+16. Audit history router priority: LIVE always outranks 5D/20D/60D/1Y context.
+17. Audit analog output: sample/count disclosure only; no probability claim.
+18. If PASS, expand to 5 days.
+19. Devil-check expiry roll, candidate lifecycle, regime transitions, fixed-strike continuity and data gaps.
+20. If PASS, bulk import 60 trading days in one controlled batch.
+21. Run post-import integrity counters before enabling any historical analog use.
+22. Keep research data isolated from production candidate weighting until separate approval.
+23. Merge/deploy only after explicit final approval.
 
 ## Bulk import preflight counters
 Before the 60-day import, collect expected counts and abort on structural mismatch:
@@ -101,6 +113,7 @@ Before the 60-day import, collect expected counts and abort on structural mismat
 - NULL IV/Greeks counts
 - duplicate logical key count
 - candidate fixed-strike coverage window count
+- 5D/20D/60D metric availability counts
 
 ## Bulk import postflight counters
 After import, verify:
@@ -117,6 +130,8 @@ After import, verify:
 - premium-pair relations are UNAVAILABLE where a prior observation is missing
 - regime-survival increments occur only on thesis-intact observations
 - historical lifecycle state matches the authoritative live state supplied at that timestamp
+- 5D/20D/60D windows use trading observations rather than calendar-day assumptions
+- analog summaries exclude bad-quality/regime-mismatched cases and disclose sample size
 
 ## Acceptance criteria before 60-day import
 - 0 duplicate logical minute keys.
@@ -130,10 +145,12 @@ After import, verify:
 - Multi-horizon alignment cannot bypass entry-quality/risk guards.
 - Historical lifecycle cannot alter live execution state.
 - Missing old fixed-strike outcome evidence remains explicitly incomplete.
+- History cannot override live direction.
+- Analog frequency cannot be labeled as current-trade probability.
 
 ## Deferred until after 60-day validation
 - 90-day extension.
-- 1-year research library.
+- 1-year research library activation beyond context fields already supported by 252D metrics.
 - historical analog probability calibration.
 - psychology-performance statistics.
 - production weighting changes based on historical results.

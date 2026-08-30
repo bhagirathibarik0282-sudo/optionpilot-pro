@@ -20,13 +20,18 @@ const base: MessageTriggerInput = {
 };
 
 test("no meaningful change is suppressed", () => {
-  assert.equal(evaluateMessageTrigger(base).shouldSpeak, false);
+  const r = evaluateMessageTrigger(base);
+  assert.equal(r.shouldSpeak, false);
+  assert.equal(r.eligibleBeforeDuplicateSuppression, false);
+  assert.equal(r.duplicateSuppressed, false);
 });
 
 test("meaningful confirmed change is eligible", () => {
   const r = evaluateMessageTrigger({ ...base, premiumBehaviourChanged: true });
   assert.equal(r.shouldSpeak, true);
   assert.equal(r.urgent, false);
+  assert.equal(r.eligibleBeforeDuplicateSuppression, true);
+  assert.equal(r.duplicateSuppressed, false);
 });
 
 test("candidate selection must represent a change, not a persistent selected flag", () => {
@@ -38,30 +43,44 @@ test("hysteresis blocks under-confirmed change", () => {
   const r = evaluateMessageTrigger({ ...base, lifecycleChanged: true, consecutiveConfirmations: 1 });
   assert.equal(r.shouldSpeak, false);
   assert.equal(r.reason, "HYSTERESIS_CONFIRMATION_NOT_MET");
+  assert.equal(r.eligibleBeforeDuplicateSuppression, false);
 });
 
 test("cooldown blocks non-urgent repeated commentary", () => {
   const r = evaluateMessageTrigger({ ...base, behaviourRiskChanged: true, cooldownSatisfied: false });
   assert.equal(r.shouldSpeak, false);
   assert.equal(r.reason, "COOLDOWN_NOT_SATISFIED");
+  assert.equal(r.eligibleBeforeDuplicateSuppression, false);
 });
 
 test("exact duplicate is always suppressed, including urgent states", () => {
   const r = evaluateMessageTrigger({ ...base, lifecycle: "EXIT", currentFingerprint: "S17:EXIT", lastSpokenFingerprint: "S17:EXIT" });
   assert.equal(r.shouldSpeak, false);
   assert.equal(r.reason, "EXACT_DUPLICATE_SUPPRESSED");
+  assert.equal(r.eligibleBeforeDuplicateSuppression, true);
+  assert.equal(r.duplicateSuppressed, true);
+});
+
+test("non-meaningful repeated fingerprint is not misclassified as an eligible duplicate", () => {
+  const r = evaluateMessageTrigger({ ...base, lastSpokenFingerprint: base.currentFingerprint });
+  assert.equal(r.shouldSpeak, false);
+  assert.equal(r.reason, "NO_MEANINGFUL_CHANGE");
+  assert.equal(r.eligibleBeforeDuplicateSuppression, false);
+  assert.equal(r.duplicateSuppressed, false);
 });
 
 test("fresh unique EXIT is urgent and bypasses hysteresis/cooldown", () => {
   const r = evaluateMessageTrigger({ ...base, lifecycle: "EXIT", consecutiveConfirmations: 0, cooldownSatisfied: false, currentFingerprint: "S17:EXIT" });
   assert.equal(r.shouldSpeak, true);
   assert.equal(r.urgent, true);
+  assert.equal(r.eligibleBeforeDuplicateSuppression, true);
 });
 
 test("DATA_UNAVAILABLE overlay is urgent but never mutates lifecycle", () => {
   const fresh = evaluateMessageTrigger({ ...base, dataFresh: false, lifecycle: "HOLD", currentFingerprint: "S17:DATA_UNAVAILABLE:HOLD" });
   assert.equal(fresh.shouldSpeak, true);
   assert.equal(fresh.urgent, true);
+  assert.equal(fresh.eligibleBeforeDuplicateSuppression, true);
 
   const duplicate = evaluateMessageTrigger({
     ...base,
@@ -71,6 +90,8 @@ test("DATA_UNAVAILABLE overlay is urgent but never mutates lifecycle", () => {
     lastSpokenFingerprint: "S17:DATA_UNAVAILABLE:HOLD",
   });
   assert.equal(duplicate.shouldSpeak, false);
+  assert.equal(duplicate.eligibleBeforeDuplicateSuppression, true);
+  assert.equal(duplicate.duplicateSuppressed, true);
 });
 
 test("invalid confirmation policy fails closed", () => {

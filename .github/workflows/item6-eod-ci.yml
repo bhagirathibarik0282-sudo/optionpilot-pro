@@ -1,0 +1,30 @@
+name: Item 6 EOD Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'eod-archive-job.ts'
+      - 'eod-drive-upload.ts'
+      - 'eod-archive-core.ts'
+      - 'test/eod-archive-core.test.ts'
+      - 'package.json'
+      - '.github/workflows/item6-eod-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - name: EOD core tests
+        run: NODE_ENV=test node --import tsx --test test/eod-archive-core.test.ts
+      - name: Import Drive uploader
+        run: node --import tsx -e "import('./eod-drive-upload.ts').then(() => console.log('DRIVE_UPLOADER_IMPORT_OK'))"
+      - name: Import EOD archive job
+        run: node --import tsx -e "import('./eod-archive-job.ts').then(() => console.log('EOD_ARCHIVE_IMPORT_OK'))"

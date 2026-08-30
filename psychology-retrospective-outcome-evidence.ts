@@ -23,6 +23,7 @@ export type PsychologyRetrospectiveAdjudication =
   | (RetrospectiveEvidenceBase & { kind: "LATE_EXIT_ADJUDICATED"; priorExitOrProtectWarning: boolean })
   | (RetrospectiveEvidenceBase & { kind: "THESIS_FAILURE_ADJUDICATED"; priorThesisWarning: boolean })
   | (RetrospectiveEvidenceBase & { kind: "SIDE_FLIP_ADJUDICATED"; freshDeterministicSetup: boolean })
+  | (RetrospectiveEvidenceBase & { kind: "STOP_RESPECT_ADJUDICATED"; stopRespected: boolean })
   | (RetrospectiveEvidenceBase & { kind: "PROFIT_PROTECTION_ADJUDICATED"; useful: boolean });
 
 export interface PsychologyRetrospectiveOutcomeEvidenceInput {
@@ -66,9 +67,10 @@ function blocked(blockers: string[]): PsychologyRetrospectiveOutcomeEvidenceResu
 }
 
 /**
- * Converts only verified outcome truth and separately deterministic retrospective adjudications
- * into the deferred psychology validation events. No metric threshold is invented here.
- * STOP_HIT is the only deferred fact that the existing Outcome Engine can prove directly.
+ * Converts verified outcome binding plus separately deterministic retrospective adjudications
+ * into the deferred psychology validation events. It never invents adjudication thresholds.
+ * A STOP_HIT outcome proves a stopped trade occurred, but does not prove whether guidance respected
+ * the stop; STOP_RESPECT_ADJUDICATED remains mandatory for that metric.
  */
 export function buildPsychologyRetrospectiveOutcomeEvents(
   input: PsychologyRetrospectiveOutcomeEvidenceInput,
@@ -88,6 +90,10 @@ export function buildPsychologyRetrospectiveOutcomeEvents(
   if (!input.binding.ruleVersion.trim()) blockers.push("OUTCOME_BINDING_RULE_VERSION_MISSING");
   if (!input.outcome.terminal) blockers.push("OUTCOME_NOT_TERMINAL");
   if (input.outcome.semantics !== "VERIFIED_OUTCOME_ATTRIBUTION_ONLY") blockers.push("OUTCOME_SEMANTICS_UNTRUSTED");
+  if (!validIso(input.outcome.evaluatedAt ?? "")) blockers.push("OUTCOME_EVALUATED_AT_INVALID");
+  else if (validIso(input.evaluationCutoffAt) && Date.parse(input.outcome.evaluatedAt as string) > Date.parse(input.evaluationCutoffAt)) {
+    blockers.push("OUTCOME_AFTER_EVALUATION_CUTOFF");
+  }
 
   for (const evidence of input.adjudications) {
     const evidenceId = evidence.evidenceId.trim();
@@ -102,6 +108,9 @@ export function buildPsychologyRetrospectiveOutcomeEvents(
     else if (validIso(input.evaluationCutoffAt) && Date.parse(evidence.observedAt) > Date.parse(input.evaluationCutoffAt)) {
       blockers.push(`EVIDENCE_AFTER_EVALUATION_CUTOFF:${evidence.kind}`);
     }
+    if (evidence.kind === "STOP_RESPECT_ADJUDICATED" && input.outcome.status !== "STOP_HIT") {
+      blockers.push("STOP_RESPECT_REQUIRES_STOP_HIT_OUTCOME");
+    }
   }
 
   if (blockers.length > 0) return blocked(blockers);
@@ -114,17 +123,6 @@ export function buildPsychologyRetrospectiveOutcomeEvents(
     source: input.eventSource,
     ruleVersion: input.eventRuleVersion,
   } as const);
-
-  if (input.outcome.status === "STOP_HIT") {
-    const observedAt = validIso(input.outcome.incompleteReason ?? "")
-      ? input.outcome.incompleteReason as string
-      : input.evaluationCutoffAt;
-    events.push({
-      ...makeBase(`${tradeId}:${input.outcome.outcomeId}:STOPPED_TRADE`, observedAt),
-      kind: "STOPPED_TRADE",
-      stopRespected: true,
-    });
-  }
 
   const resolvedKinds = new Set<string>();
   for (const evidence of input.adjudications) {
@@ -145,6 +143,10 @@ export function buildPsychologyRetrospectiveOutcomeEvents(
         resolvedKinds.add("SIDE_FLIP");
         events.push({ ...makeBase(`${tradeId}:${evidence.evidenceId}:SIDE_FLIP`, evidence.observedAt), kind: "SIDE_FLIP", freshDeterministicSetup: evidence.freshDeterministicSetup });
         break;
+      case "STOP_RESPECT_ADJUDICATED":
+        resolvedKinds.add("STOPPED_TRADE");
+        events.push({ ...makeBase(`${tradeId}:${evidence.evidenceId}:STOPPED_TRADE`, evidence.observedAt), kind: "STOPPED_TRADE", stopRespected: evidence.stopRespected });
+        break;
       case "PROFIT_PROTECTION_ADJUDICATED":
         resolvedKinds.add("PROFIT_PROTECTION_OPPORTUNITY");
         events.push({ ...makeBase(`${tradeId}:${evidence.evidenceId}:PROFIT_PROTECTION`, evidence.observedAt), kind: "PROFIT_PROTECTION_OPPORTUNITY", useful: evidence.useful });
@@ -157,6 +159,7 @@ export function buildPsychologyRetrospectiveOutcomeEvents(
   if (!resolvedKinds.has("LATE_EXIT_EVENT")) unresolvedSources.push("LATE_EXIT_ADJUDICATION_NOT_SUPPLIED");
   if (!resolvedKinds.has("THESIS_FAILURE")) unresolvedSources.push("THESIS_FAILURE_ADJUDICATION_NOT_SUPPLIED");
   if (!resolvedKinds.has("SIDE_FLIP")) unresolvedSources.push("SIDE_FLIP_ADJUDICATION_NOT_SUPPLIED");
+  if (input.outcome.status === "STOP_HIT" && !resolvedKinds.has("STOPPED_TRADE")) unresolvedSources.push("STOP_RESPECT_ADJUDICATION_NOT_SUPPLIED");
   if (!resolvedKinds.has("PROFIT_PROTECTION_OPPORTUNITY")) unresolvedSources.push("PROFIT_PROTECTION_ADJUDICATION_NOT_SUPPLIED");
 
   return {

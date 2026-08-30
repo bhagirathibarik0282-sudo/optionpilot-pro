@@ -4,6 +4,7 @@ import {
   evaluateExecutionCapitalGate,
   evaluateExecutionLossGate,
   evaluateExecutionDailyLossGate,
+  evaluateExecutionTradeCountGate,
 } from "../execution-risk-gate.ts";
 
 test("allows a trade at the configured capital limit", () => {
@@ -180,4 +181,64 @@ test("daily loss gate fails closed on invalid daily cap", () => {
   });
   assert.equal(result.decision, "BLOCK");
   assert.ok(result.reasonCodes.includes("INVALID_MAX_DAILY_LOSS"));
+});
+
+test("trade count gate allows another trade below the configured count", () => {
+  const result = evaluateExecutionTradeCountGate({
+    symbol: "NIFTY",
+    tradesExecutedToday: 0,
+    policy: { maxTradesPerDay: 1 },
+  });
+  assert.equal(result.decision, "ALLOW");
+  assert.deepEqual(result.reasonCodes, ["TRADE_COUNT_GATE_PASSED"]);
+});
+
+test("trade count gate blocks when the configured count is reached", () => {
+  const result = evaluateExecutionTradeCountGate({
+    symbol: "NIFTY",
+    tradesExecutedToday: 1,
+    policy: { maxTradesPerDay: 1 },
+  });
+  assert.equal(result.decision, "BLOCK");
+  assert.ok(result.reasonCodes.includes("MAX_TRADES_PER_DAY_REACHED_OR_EXCEEDED"));
+});
+
+test("trade count gate blocks when count is already above the cap", () => {
+  const result = evaluateExecutionTradeCountGate({
+    symbol: "SENSEX",
+    tradesExecutedToday: 3,
+    policy: { maxTradesPerDay: 2 },
+  });
+  assert.equal(result.decision, "BLOCK");
+});
+
+test("trade count gate fails closed on non-integer count", () => {
+  const result = evaluateExecutionTradeCountGate({
+    symbol: "NIFTY",
+    tradesExecutedToday: 0.5,
+    policy: { maxTradesPerDay: 1 },
+  });
+  assert.equal(result.decision, "BLOCK");
+  assert.ok(result.reasonCodes.includes("INVALID_TRADES_EXECUTED_TODAY"));
+  assert.equal(result.failClosed, true);
+});
+
+test("trade count gate fails closed on negative count", () => {
+  const result = evaluateExecutionTradeCountGate({
+    symbol: "BANKNIFTY",
+    tradesExecutedToday: -1,
+    policy: { maxTradesPerDay: 1 },
+  });
+  assert.equal(result.decision, "BLOCK");
+  assert.ok(result.reasonCodes.includes("INVALID_TRADES_EXECUTED_TODAY"));
+});
+
+test("trade count gate fails closed on invalid max trades policy", () => {
+  const result = evaluateExecutionTradeCountGate({
+    symbol: "NIFTY",
+    tradesExecutedToday: 0,
+    policy: { maxTradesPerDay: 0 },
+  });
+  assert.equal(result.decision, "BLOCK");
+  assert.ok(result.reasonCodes.includes("INVALID_MAX_TRADES_PER_DAY"));
 });

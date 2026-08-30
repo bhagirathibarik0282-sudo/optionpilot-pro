@@ -1,3 +1,4 @@
+import { validateShadowValidationRegimeEvidence } from "./psychology-regime-evidence.ts";
 import { adaptPsychologyValidationEvidence, type PsychologyReplayValidationInput } from "./psychology-shadow-replay-adapter.ts";
 import { REQUIRED_SHADOW_REGIMES, SHADOW_VALIDATION_METRICS, validatePsychologyShadowObservations, type ShadowValidationMetricKey, type ShadowValidationRegime } from "./psychology-shadow-validation.ts";
 
@@ -9,6 +10,8 @@ export interface PsychologyRealEvidenceLedgerResult {
   rejectedInputs: number;
   acceptedRealReplay: number;
   acceptedLiveObservation: number;
+  provenRegimeInputs: number;
+  regimeProvenanceRejectedInputs: number;
   regimeTradeCounts: Record<ShadowValidationRegime, number>;
   coveredRegimes: ShadowValidationRegime[];
   missingRegimes: ShadowValidationRegime[];
@@ -23,14 +26,17 @@ export interface PsychologyRealEvidenceLedgerResult {
 }
 
 /**
- * Collection ledger only. It counts admitted real evidence by provenance and overlapping regime tags.
- * It intentionally does not invent minimum sample sizes or acceptance thresholds.
+ * Real-evidence ledger. Metrics may use admitted observations, but mandatory regime coverage
+ * counts only deterministic upstream regime evidence that is timestamp-safe against decisionAt.
  */
 export function buildPsychologyRealEvidenceLedger(inputs: PsychologyReplayValidationInput[]): PsychologyRealEvidenceLedgerResult {
   const accepted = [] as NonNullable<ReturnType<typeof adaptPsychologyValidationEvidence>["observation"]>[];
   const rejectionBlockers: string[] = [];
+  const regimeTradeCounts = Object.fromEntries(REQUIRED_SHADOW_REGIMES.map((r) => [r, 0])) as Record<ShadowValidationRegime, number>;
   let acceptedRealReplay = 0;
   let acceptedLiveObservation = 0;
+  let provenRegimeInputs = 0;
+  let regimeProvenanceRejectedInputs = 0;
 
   for (const input of inputs) {
     const admitted = adaptPsychologyValidationEvidence(input);
@@ -41,11 +47,15 @@ export function buildPsychologyRealEvidenceLedger(inputs: PsychologyReplayValida
     accepted.push(admitted.observation);
     if (input.source === "REAL_REPLAY") acceptedRealReplay += 1;
     if (input.source === "LIVE_OBSERVATION") acceptedLiveObservation += 1;
-  }
 
-  const regimeTradeCounts = Object.fromEntries(REQUIRED_SHADOW_REGIMES.map((r) => [r, 0])) as Record<ShadowValidationRegime, number>;
-  for (const observation of accepted) {
-    for (const regime of observation.regimes) regimeTradeCounts[regime] += 1;
+    const provenance = validateShadowValidationRegimeEvidence(admitted.observation.regimeEvidence, input.replay.decisionAt);
+    if (!provenance.valid) {
+      regimeProvenanceRejectedInputs += 1;
+      rejectionBlockers.push(...provenance.blockers.map((blocker) => `${input.validation.tradeId}:${blocker}`));
+      continue;
+    }
+    provenRegimeInputs += 1;
+    for (const regime of provenance.regimes) regimeTradeCounts[regime] += 1;
   }
 
   const coveredRegimes = REQUIRED_SHADOW_REGIMES.filter((r) => regimeTradeCounts[r] > 0);
@@ -72,6 +82,8 @@ export function buildPsychologyRealEvidenceLedger(inputs: PsychologyReplayValida
     rejectedInputs: inputs.length - accepted.length,
     acceptedRealReplay,
     acceptedLiveObservation,
+    provenRegimeInputs,
+    regimeProvenanceRejectedInputs,
     regimeTradeCounts,
     coveredRegimes: [...coveredRegimes],
     missingRegimes: [...missingRegimes],

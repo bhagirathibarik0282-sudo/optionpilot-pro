@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   evaluateExecutionCapitalGate,
   evaluateExecutionLossGate,
+  evaluateExecutionDailyLossGate,
 } from "../execution-risk-gate.ts";
 
 test("allows a trade at the configured capital limit", () => {
@@ -105,4 +106,78 @@ test("loss gate blocks blank symbol", () => {
   });
   assert.equal(result.decision, "BLOCK");
   assert.ok(result.reasonCodes.includes("INVALID_SYMBOL"));
+});
+
+test("daily loss gate allows a new trade while total risk stays below cap", () => {
+  const result = evaluateExecutionDailyLossGate({
+    symbol: "NIFTY",
+    realizedLossToday: 300,
+    openRisk: 200,
+    newTradeProjectedLoss: 400,
+    policy: { maxDailyLoss: 1000 },
+  });
+  assert.equal(result.decision, "ALLOW");
+  assert.equal(result.projectedDailyLossExposure, 900);
+  assert.deepEqual(result.reasonCodes, ["DAILY_LOSS_GATE_PASSED"]);
+});
+
+test("daily loss gate blocks exactly at the daily cap", () => {
+  const result = evaluateExecutionDailyLossGate({
+    symbol: "SENSEX",
+    realizedLossToday: 300,
+    openRisk: 200,
+    newTradeProjectedLoss: 500,
+    policy: { maxDailyLoss: 1000 },
+  });
+  assert.equal(result.decision, "BLOCK");
+  assert.ok(result.reasonCodes.includes("MAX_DAILY_LOSS_LIMIT_REACHED_OR_EXCEEDED"));
+});
+
+test("daily loss gate blocks above the daily cap", () => {
+  const result = evaluateExecutionDailyLossGate({
+    symbol: "BANKNIFTY",
+    realizedLossToday: 700,
+    openRisk: 200,
+    newTradeProjectedLoss: 200,
+    policy: { maxDailyLoss: 1000 },
+  });
+  assert.equal(result.decision, "BLOCK");
+  assert.equal(result.projectedDailyLossExposure, 1100);
+});
+
+test("daily loss gate fails closed on invalid realized loss", () => {
+  const result = evaluateExecutionDailyLossGate({
+    symbol: "NIFTY",
+    realizedLossToday: Number.NaN,
+    openRisk: 0,
+    newTradeProjectedLoss: 200,
+    policy: { maxDailyLoss: 1000 },
+  });
+  assert.equal(result.decision, "BLOCK");
+  assert.ok(result.reasonCodes.includes("INVALID_REALIZED_LOSS_TODAY"));
+  assert.equal(result.failClosed, true);
+});
+
+test("daily loss gate fails closed on negative open risk", () => {
+  const result = evaluateExecutionDailyLossGate({
+    symbol: "NIFTY",
+    realizedLossToday: 0,
+    openRisk: -1,
+    newTradeProjectedLoss: 200,
+    policy: { maxDailyLoss: 1000 },
+  });
+  assert.equal(result.decision, "BLOCK");
+  assert.ok(result.reasonCodes.includes("INVALID_OPEN_RISK"));
+});
+
+test("daily loss gate fails closed on invalid daily cap", () => {
+  const result = evaluateExecutionDailyLossGate({
+    symbol: "NIFTY",
+    realizedLossToday: 0,
+    openRisk: 0,
+    newTradeProjectedLoss: 200,
+    policy: { maxDailyLoss: 0 },
+  });
+  assert.equal(result.decision, "BLOCK");
+  assert.ok(result.reasonCodes.includes("INVALID_MAX_DAILY_LOSS"));
 });

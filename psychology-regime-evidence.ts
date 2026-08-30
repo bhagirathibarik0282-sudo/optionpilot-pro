@@ -23,6 +23,7 @@ function validIso(value: string): boolean {
 export function validateShadowValidationRegimeEvidence(
   evidence: readonly ShadowValidationRegimeEvidence[] | null | undefined,
   decisionAt: string,
+  diagnosticRegimes?: readonly ShadowValidationRegime[],
 ): ShadowValidationRegimeEvidenceResult {
   const blockers: string[] = [];
   const regimes: ShadowValidationRegime[] = [];
@@ -42,6 +43,7 @@ export function validateShadowValidationRegimeEvidence(
       blockers.push(`REGIME_EVIDENCE_UNSUPPORTED_REGIME:${String(item.regime)}`);
       continue;
     }
+    if (diagnosticRegimes && !diagnosticRegimes.includes(item.regime)) blockers.push(`REGIME_EVIDENCE_LABEL_MISMATCH:${item.regime}`);
     if (item.source !== "DETERMINISTIC_UPSTREAM") blockers.push(`REGIME_EVIDENCE_UNSUPPORTED_SOURCE:${String(item.source)}`);
     if (typeof item.ruleVersion !== "string" || !item.ruleVersion.trim()) blockers.push(`REGIME_EVIDENCE_RULE_VERSION_MISSING:${item.regime}`);
     if (typeof item.observedAt !== "string" || !validIso(item.observedAt)) {

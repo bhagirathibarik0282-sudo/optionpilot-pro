@@ -1,4 +1,5 @@
 import { dbQuerySafe } from "./db.js";
+import { validateShadowValidationRegimeEvidence } from "./psychology-regime-evidence.ts";
 import { adaptPsychologyValidationEvidence, type PsychologyReplayValidationInput } from "./psychology-shadow-replay-adapter.ts";
 import { validatePsychologyShadowObservations } from "./psychology-shadow-validation.ts";
 
@@ -28,12 +29,15 @@ export function psychologyEvidenceKey(input: Pick<StoredPsychologyRealEvidence, 
   return `${input.source}:${input.validation.tradeId.trim()}`;
 }
 
-/**
- * Storage admission is deliberately downstream of both the replay/live evidence gate
- * and the frozen validation invariants. Synthetic, stale, lookahead, malformed regime,
- * impossible-counter, unclosed-block, out-of-session and identity-mismatched inputs never
- * become persistable research evidence.
- */
+function cloneValidation(validation: PsychologyReplayValidationInput["validation"]): PsychologyReplayValidationInput["validation"] {
+  return {
+    ...validation,
+    regimes: [...validation.regimes],
+    ...(validation.regimeEvidence ? { regimeEvidence: validation.regimeEvidence.map((item) => ({ ...item })) } : {}),
+  };
+}
+
+/** Storage admission remains research-only and fail-closed. */
 export function preparePsychologyRealEvidenceForStorage(
   input: PsychologyReplayValidationInput,
   recordedAt: string,
@@ -49,20 +53,24 @@ export function preparePsychologyRealEvidenceForStorage(
     return null;
   }
 
+  if (admitted.observation.regimeEvidence !== undefined) {
+    const provenance = validateShadowValidationRegimeEvidence(admitted.observation.regimeEvidence, input.replay.decisionAt);
+    if (!provenance.valid) return null;
+  }
+
   const source: PersistablePsychologyEvidenceSource = input.source;
-  const record: StoredPsychologyRealEvidence = {
+  return {
     version: "PSYCHOLOGY_REAL_EVIDENCE_STORE_V1",
     semantics: "RESEARCH_SHADOW_ONLY",
     evidenceKey: `${source}:${admitted.observation.tradeId.trim()}`,
     source,
     recordedAt: new Date(recordedAt).toISOString(),
     replay: { ...input.replay },
-    validation: { ...admitted.observation, regimes: [...admitted.observation.regimes] },
+    validation: cloneValidation(admitted.observation),
     affectsTelegram: false,
     affectsVerdict: false,
     affectsExecution: false,
   };
-  return record;
 }
 
 export function isStoredPsychologyRealEvidence(value: unknown): value is StoredPsychologyRealEvidence {
@@ -77,8 +85,6 @@ export function isStoredPsychologyRealEvidence(value: unknown): value is StoredP
   if (row.evidenceKey !== psychologyEvidenceKey(row as StoredPsychologyRealEvidence)) return false;
   if (row.affectsTelegram !== false || row.affectsVerdict !== false || row.affectsExecution !== false) return false;
 
-  // Re-run the canonical admission gate on restored DB payloads so a corrupted row
-  // cannot bypass replay quality, lookahead, session or trade-identity checks.
   const readmission = adaptPsychologyValidationEvidence({
     source: row.source,
     replay: row.replay as PsychologyReplayValidationInput["replay"],
@@ -86,17 +92,22 @@ export function isStoredPsychologyRealEvidence(value: unknown): value is StoredP
   });
   if (!readmission.accepted || !readmission.observation) return false;
 
-  // The replay/live admission adapter intentionally does not own aggregate counter or
-  // regime-shape invariants. Re-run the frozen validation contract here as a second gate.
   try {
     validatePsychologyShadowObservations([readmission.observation]);
   } catch {
     return false;
   }
+
+  if (readmission.observation.regimeEvidence !== undefined) {
+    const provenance = validateShadowValidationRegimeEvidence(
+      readmission.observation.regimeEvidence,
+      (row.replay as PsychologyReplayValidationInput["replay"]).decisionAt,
+    );
+    if (!provenance.valid) return false;
+  }
   return true;
 }
 
-/** Append-only DB rows may contain updated snapshots for the same trade. Keep only the latest valid row per source+trade. */
 export function mergeStoredPsychologyRealEvidence(
   rows: readonly StoredPsychologyRealEvidence[],
   maxRecords = PSYCHOLOGY_REAL_EVIDENCE_MAX_RECORDS,

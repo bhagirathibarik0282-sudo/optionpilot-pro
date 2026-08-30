@@ -1,6 +1,6 @@
 import { buildPsychologyEvidenceReadiness, type PsychologyEvidenceReadinessResult } from "./psychology-evidence-readiness.ts";
 import { isStoredPsychologyRealEvidence, type StoredPsychologyRealEvidence } from "./psychology-real-evidence-store.ts";
-import { SHADOW_VALIDATION_METRICS, type ShadowValidationMetricKey, type ShadowValidationRegime } from "./psychology-shadow-validation.ts";
+import type { ShadowValidationMetricKey, ShadowValidationRegime } from "./psychology-shadow-validation.ts";
 
 export type PsychologyCalibrationPreparationStatus =
   | "NO_EVIDENCE"
@@ -32,7 +32,6 @@ export interface PsychologyCalibrationPreparationResult {
   };
   regimeTradeCounts: Record<ShadowValidationRegime, number>;
   metricDenominators: Record<ShadowValidationMetricKey, number>;
-  metricValues: Record<ShadowValidationMetricKey, number | null> | null;
   chronologicalPartitionStructurallyPossible: boolean;
   unresolvedProtocolItems: PsychologyCalibrationProtocolItem[];
   calibrationProtocolFrozen: false;
@@ -64,8 +63,8 @@ function validTradingDate(value: string | null | undefined): value is string {
 /**
  * Prepares accumulated evidence for a future, explicitly frozen calibration protocol.
  * This layer does not invent sample-size rules, split ratios, confidence methods, objectives,
- * or acceptance thresholds. It only inventories the evidence and reports what still must be
- * preregistered before statistical sufficiency or threshold calibration can be claimed.
+ * metric values, or acceptance thresholds. It only inventories the evidence and reports what
+ * still must be preregistered before statistical sufficiency or calibration can be claimed.
  */
 export function buildPsychologyCalibrationPreparation(
   rows: readonly StoredPsychologyRealEvidence[],
@@ -83,14 +82,6 @@ export function buildPsychologyCalibrationPreparation(
       .filter(validTradingDate),
   )].sort();
 
-  const metricValues = validRows.length > 0
-    ? readiness.zeroDenominatorMetrics.length === 0
-      ? Object.fromEntries((Object.keys(SHADOW_VALIDATION_METRICS) as ShadowValidationMetricKey[]).map((key) => [key, null])) as Record<ShadowValidationMetricKey, number | null>
-      : null
-    : null;
-
-  // Values intentionally remain null here. This layer is an inventory/protocol gate, not a second
-  // metric calculator; canonical metric values remain owned by the existing evidence ledger/runner.
   const blockers: string[] = [];
   if (rows.length === 0) blockers.push("NO_REAL_EVIDENCE_RECORDS");
   if (readiness.status !== "STRUCTURALLY_READY_FOR_THRESHOLD_RESEARCH") {
@@ -118,7 +109,6 @@ export function buildPsychologyCalibrationPreparation(
     sourceCounts,
     regimeTradeCounts: { ...readiness.regimeTradeCounts },
     metricDenominators: { ...readiness.metricDenominators },
-    metricValues,
     chronologicalPartitionStructurallyPossible: tradingDates.length >= 2,
     unresolvedProtocolItems: [...REQUIRED_PROTOCOL_ITEMS],
     calibrationProtocolFrozen: false,

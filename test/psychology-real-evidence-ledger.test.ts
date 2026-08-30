@@ -4,7 +4,12 @@ import { buildPsychologyRealEvidenceLedger } from "../psychology-real-evidence-l
 import type { PsychologyReplayValidationInput } from "../psychology-shadow-replay-adapter.ts";
 import type { ShadowValidationRegime } from "../psychology-shadow-validation.ts";
 
-function input(tradeId: string, regimes: ShadowValidationRegime[], source: PsychologyReplayValidationInput["source"] = "REAL_REPLAY"): PsychologyReplayValidationInput {
+function input(
+  tradeId: string,
+  regimes: ShadowValidationRegime[],
+  source: PsychologyReplayValidationInput["source"] = "REAL_REPLAY",
+  withProvenance = true,
+): PsychologyReplayValidationInput {
   return {
     source,
     replay: {
@@ -22,6 +27,14 @@ function input(tradeId: string, regimes: ShadowValidationRegime[], source: Psych
     validation: {
       tradeId,
       regimes,
+      ...(withProvenance ? {
+        regimeEvidence: regimes.map((regime) => ({
+          regime,
+          source: "DETERMINISTIC_UPSTREAM" as const,
+          observedAt: "2026-08-20T09:20:30+05:30",
+          ruleVersion: "REGIME_RULE_V1",
+        })),
+      } : {}),
       completedTrade: true,
       chaseWarnings: 1,
       falseChaseWarnings: 0,
@@ -44,14 +57,25 @@ function input(tradeId: string, regimes: ShadowValidationRegime[], source: Psych
   };
 }
 
-test("ledger counts overlapping real regimes without double-counting accepted inputs", () => {
+test("ledger counts overlapping regimes only when deterministic provenance is valid", () => {
   const r = buildPsychologyRealEvidenceLedger([input("T1", ["EXPIRY", "HIGH_IV", "TREND"])]);
   assert.equal(r.acceptedInputs, 1);
+  assert.equal(r.provenRegimeInputs, 1);
   assert.equal(r.regimeTradeCounts.EXPIRY, 1);
   assert.equal(r.regimeTradeCounts.HIGH_IV, 1);
   assert.equal(r.regimeTradeCounts.TREND, 1);
   assert.equal(r.acceptedRealReplay, 1);
   assert.equal(r.promotionEligible, false);
+});
+
+test("diagnostic regime labels without provenance never count mandatory coverage", () => {
+  const r = buildPsychologyRealEvidenceLedger([input("T1", ["TREND", "HIGH_IV"], "REAL_REPLAY", false)]);
+  assert.equal(r.acceptedInputs, 1);
+  assert.equal(r.provenRegimeInputs, 0);
+  assert.equal(r.regimeProvenanceRejectedInputs, 1);
+  assert.equal(r.regimeTradeCounts.TREND, 0);
+  assert.equal(r.regimeTradeCounts.HIGH_IV, 0);
+  assert.ok(r.rejectionBlockers.includes("T1:REGIME_EVIDENCE_MISSING"));
 });
 
 test("ledger separates real replay and live-observation provenance", () => {

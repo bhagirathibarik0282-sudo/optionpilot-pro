@@ -21,6 +21,7 @@ on:
       - trade-lifecycle-engine.ts
       - behaviour-risk-engine.ts
       - execution-risk-gate.ts
+      - scalp-execution-gate.ts
       - message-trigger-engine.ts
       - buyer-seller-behaviour-engine.ts
       - psychology-shadow-chain.ts
@@ -49,6 +50,7 @@ on:
       - test/trade-lifecycle-engine.test.ts
       - test/behaviour-risk-engine.test.ts
       - test/execution-risk-gate.test.ts
+      - test/scalp-execution-gate.test.ts
       - test/message-trigger-engine.test.ts
       - test/buyer-seller-behaviour-engine.test.ts
       - test/psychology-shadow-chain.test.ts
@@ -148,8 +150,11 @@ jobs:
           console.log("\nAll option-buying safety contracts passed.");
           NODE
 
-      - name: Run execution capital gate tests
+      - name: Run execution risk gate tests
         run: node --import tsx --test test/execution-risk-gate.test.ts
+
+      - name: Run scalp execution gate tests
+        run: node --import tsx --test test/scalp-execution-gate.test.ts
 
       - name: Run existing package tests when available
         run: |

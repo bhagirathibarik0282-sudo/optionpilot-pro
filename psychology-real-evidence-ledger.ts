@@ -48,7 +48,11 @@ export function buildPsychologyRealEvidenceLedger(inputs: PsychologyReplayValida
     if (input.source === "REAL_REPLAY") acceptedRealReplay += 1;
     if (input.source === "LIVE_OBSERVATION") acceptedLiveObservation += 1;
 
-    const provenance = validateShadowValidationRegimeEvidence(admitted.observation.regimeEvidence, input.replay.decisionAt);
+    const provenance = validateShadowValidationRegimeEvidence(
+      admitted.observation.regimeEvidence,
+      input.replay.decisionAt,
+      admitted.observation.regimes,
+    );
     if (!provenance.valid) {
       regimeProvenanceRejectedInputs += 1;
       rejectionBlockers.push(...provenance.blockers.map((blocker) => `${input.validation.tradeId}:${blocker}`));

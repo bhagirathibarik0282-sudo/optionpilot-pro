@@ -5,6 +5,8 @@ export interface DriveUploadResult {
   name: string;
   size: number | null;
   checksumSha256: string;
+  checksumMd5: string;
+  reusedExisting: boolean;
 }
 
 function b64url(value: string | Buffer): string {
@@ -55,11 +57,61 @@ export function eodArchiveChecksum(payloadJson: string): string {
   return createHash("sha256").update(payloadJson, "utf8").digest("hex");
 }
 
+function md5(payloadJson: string): string {
+  return createHash("md5").update(payloadJson, "utf8").digest("hex");
+}
+
+type DriveFile = {
+  id?: string;
+  name?: string;
+  size?: string;
+  md5Checksum?: string;
+  trashed?: boolean;
+  parents?: string[];
+  appProperties?: Record<string, string>;
+};
+
+async function verifyDriveFile(token: string, fileId: string, fileName: string, folderId: string, checksumSha256: string, checksumMd5: string): Promise<DriveFile> {
+  const verify = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,size,md5Checksum,trashed,parents,appProperties`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const checked = await verify.json() as DriveFile & { error?: { message?: string } };
+  if (!verify.ok) throw new Error(`DRIVE_VERIFY_FAILED:${checked.error?.message || verify.status}`);
+  if (checked.id !== fileId || checked.name !== fileName || checked.trashed === true) throw new Error("DRIVE_VERIFY_METADATA_MISMATCH");
+  if (!checked.parents?.includes(folderId)) throw new Error("DRIVE_VERIFY_WRONG_FOLDER");
+  if (checked.appProperties?.checksumSha256 !== checksumSha256) throw new Error("DRIVE_VERIFY_CHECKSUM_TAG_MISMATCH");
+  if (!checked.md5Checksum || checked.md5Checksum !== checksumMd5) throw new Error("DRIVE_VERIFY_CONTENT_CHECKSUM_MISMATCH");
+  return checked;
+}
+
 export async function uploadEodArchiveToDrive(tradingDate: string, payloadJson: string): Promise<DriveUploadResult> {
   const folderId = requiredEnv("GOOGLE_DRIVE_EOD_FOLDER_ID");
   const token = await getServiceAccountAccessToken();
   const fileName = `optionpilot-eod-${tradingDate}.json`;
   const checksumSha256 = eodArchiveChecksum(payloadJson);
+  const checksumMd5 = md5(payloadJson);
+
+  // Retry guard: reuse an already-uploaded exact archive rather than creating a duplicate
+  // if the previous run uploaded successfully but failed before DB state was committed.
+  const q = encodeURIComponent(`trashed = false and '${folderId}' in parents and appProperties has { key='tradingDate' and value='${tradingDate}' } and appProperties has { key='checksumSha256' and value='${checksumSha256}' }`);
+  const existingResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size,md5Checksum,trashed,parents,appProperties)&pageSize=10`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const existingJson = await existingResponse.json() as { files?: DriveFile[]; error?: { message?: string } };
+  if (!existingResponse.ok) throw new Error(`DRIVE_LOOKUP_FAILED:${existingJson.error?.message || existingResponse.status}`);
+  const existing = existingJson.files?.find((f) => f.id && f.name === fileName);
+  if (existing?.id) {
+    const checked = await verifyDriveFile(token, existing.id, fileName, folderId, checksumSha256, checksumMd5);
+    return {
+      fileId: existing.id,
+      name: checked.name || fileName,
+      size: checked.size ? Number(checked.size) : null,
+      checksumSha256,
+      checksumMd5,
+      reusedExisting: true,
+    };
+  }
+
   const boundary = `optionpilot_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   const metadata = JSON.stringify({
     name: fileName,
@@ -72,7 +124,7 @@ export async function uploadEodArchiveToDrive(tradingDate: string, payloadJson: 
     `--${boundary}--`,
   ].join("");
 
-  const upload = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,trashed,appProperties", {
+  const upload = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,md5Checksum,trashed,appProperties", {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
@@ -80,22 +132,16 @@ export async function uploadEodArchiveToDrive(tradingDate: string, payloadJson: 
     },
     body: multipart,
   });
-  const created = await upload.json() as { id?: string; name?: string; size?: string; trashed?: boolean; appProperties?: Record<string, string>; error?: { message?: string } };
+  const created = await upload.json() as DriveFile & { error?: { message?: string } };
   if (!upload.ok || !created.id) throw new Error(`DRIVE_UPLOAD_FAILED:${created.error?.message || upload.status}`);
 
-  const verify = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(created.id)}?fields=id,name,size,trashed,parents,appProperties`, {
-    headers: { authorization: `Bearer ${token}` },
-  });
-  const checked = await verify.json() as { id?: string; name?: string; size?: string; trashed?: boolean; parents?: string[]; appProperties?: Record<string, string>; error?: { message?: string } };
-  if (!verify.ok) throw new Error(`DRIVE_VERIFY_FAILED:${checked.error?.message || verify.status}`);
-  if (checked.id !== created.id || checked.name !== fileName || checked.trashed === true) throw new Error("DRIVE_VERIFY_METADATA_MISMATCH");
-  if (!checked.parents?.includes(folderId)) throw new Error("DRIVE_VERIFY_WRONG_FOLDER");
-  if (checked.appProperties?.checksumSha256 !== checksumSha256) throw new Error("DRIVE_VERIFY_CHECKSUM_TAG_MISMATCH");
-
+  const checked = await verifyDriveFile(token, created.id, fileName, folderId, checksumSha256, checksumMd5);
   return {
     fileId: created.id,
     name: checked.name || fileName,
     size: checked.size ? Number(checked.size) : null,
     checksumSha256,
+    checksumMd5,
+    reusedExisting: false,
   };
 }

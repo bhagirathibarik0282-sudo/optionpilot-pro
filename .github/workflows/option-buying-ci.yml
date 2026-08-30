@@ -24,6 +24,7 @@ on:
       - scalp-execution-gate.ts
       - execution-candidate-selector.ts
       - execution-level-plan.ts
+      - execution-liquidity-spread-gate.ts
       - message-trigger-engine.ts
       - buyer-seller-behaviour-engine.ts
       - psychology-shadow-chain.ts
@@ -55,6 +56,7 @@ on:
       - test/scalp-execution-gate.test.ts
       - test/execution-candidate-selector.test.ts
       - test/execution-level-plan.test.ts
+      - test/execution-liquidity-spread-gate.test.ts
       - test/message-trigger-engine.test.ts
       - test/buyer-seller-behaviour-engine.test.ts
       - test/psychology-shadow-chain.test.ts
@@ -165,6 +167,9 @@ jobs:
 
       - name: Run execution level plan tests
         run: node --import tsx --test test/execution-level-plan.test.ts
+
+      - name: Run execution liquidity spread gate tests
+        run: node --import tsx --test test/execution-liquidity-spread-gate.test.ts
 
       - name: Run existing package tests when available
         run: |

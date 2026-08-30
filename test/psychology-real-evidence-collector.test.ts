@@ -82,7 +82,7 @@ function input(tradeId = "T1", withProvenance = true): PsychologyReplayValidatio
   };
 }
 
-test("collector prepares a provenance-backed observed candidate for persistence", () => {
+test("collector prepares a provenance-backed observed exact candidate for persistence", () => {
   const result = preparePsychologyEvidenceCollectionCandidate({
     candidate: candidate(),
     input: input(),
@@ -127,6 +127,33 @@ test("collector blocks candidate evidence observed after the replay decision", (
   });
   assert.equal(result.status, "BLOCKED");
   assert.ok(result.blockers.includes("CANDIDATE_OBSERVED_AFTER_DECISION"));
+});
+
+test("collector requires an exact option contract before evidence can be prepared", () => {
+  const incomplete = candidate();
+  incomplete.expiry = null;
+  incomplete.strike = null;
+  const result = preparePsychologyEvidenceCollectionCandidate({
+    candidate: incomplete,
+    input: input(),
+    recordedAt: "2026-08-20T10:00:00+05:30",
+  });
+  assert.equal(result.status, "BLOCKED");
+  assert.ok(result.blockers.includes("CANDIDATE_EXPIRY_MISSING"));
+  assert.ok(result.blockers.includes("CANDIDATE_STRIKE_MISSING"));
+});
+
+test("collector blocks DTE mismatch and invalid recording timestamp", () => {
+  const mismatch = candidate();
+  mismatch.dte = 1;
+  const result = preparePsychologyEvidenceCollectionCandidate({
+    candidate: mismatch,
+    input: input(),
+    recordedAt: "not-a-time",
+  });
+  assert.equal(result.status, "BLOCKED");
+  assert.ok(result.blockers.includes("CANDIDATE_REPLAY_DTE_MISMATCH"));
+  assert.ok(result.blockers.includes("RECORDED_AT_INVALID"));
 });
 
 test("batch exposes ready and blocked counts without persisting or promoting", () => {

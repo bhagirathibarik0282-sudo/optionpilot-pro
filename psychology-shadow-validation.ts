@@ -2,6 +2,8 @@
 // This module freezes metric definitions and regime coverage requirements.
 // It does NOT invent acceptance thresholds and has no live authority.
 
+import type { ShadowValidationRegimeEvidence } from "./psychology-regime-evidence.ts";
+
 export type ShadowValidationRegime =
   | "TREND"
   | "RANGE"
@@ -43,8 +45,10 @@ export const SHADOW_VALIDATION_METRICS: Readonly<Record<ShadowValidationMetricKe
 
 export interface ShadowValidationObservation {
   tradeId: string;
-  /** One real trade may legitimately belong to multiple validation regimes (for example EXPIRY + HIGH_IV). */
+  /** Diagnostic regime labels. They do not prove promotion-grade regime coverage by themselves. */
   regimes: ShadowValidationRegime[];
+  /** Optional deterministic evidence used by the real-evidence ledger for proven regime coverage. */
+  regimeEvidence?: ShadowValidationRegimeEvidence[];
   completedTrade: boolean;
   chaseWarnings: number;
   falseChaseWarnings: number;
@@ -105,10 +109,11 @@ export function validatePsychologyShadowObservations(observations: ShadowValidat
       if (seenRegimes.has(regime)) throw new Error(`duplicate regime tag is not allowed: ${regime}`);
       seenRegimes.add(regime);
     }
+    if (o.regimeEvidence !== undefined && !Array.isArray(o.regimeEvidence)) throw new Error("regimeEvidence must be an array when provided");
     if (typeof o.completedTrade !== "boolean") throw new Error("completedTrade must be boolean");
 
     for (const [key, value] of Object.entries(o)) {
-      if (key === "tradeId" || key === "regimes" || key === "completedTrade") continue;
+      if (key === "tradeId" || key === "regimes" || key === "regimeEvidence" || key === "completedTrade") continue;
       assertCount(key, value as number);
     }
     if (o.falseChaseWarnings > o.chaseWarnings) throw new Error("falseChaseWarnings cannot exceed chaseWarnings");

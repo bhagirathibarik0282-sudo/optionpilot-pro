@@ -1,0 +1,52 @@
+name: OptionPilot Full Automation Gate V1
+
+on:
+  pull_request:
+    branches:
+      - automation-staging
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safety-gate:
+    name: Fail-closed automation safety gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Block production/live enablement in automated staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" > /tmp/optionpilot-pr.diff
+          ADDED=/tmp/optionpilot-added-lines.txt
+          grep '^+' /tmp/optionpilot-pr.diff | grep -v '^+++' > "$ADDED" || true
+          if grep -E -i '(placesOrder[[:space:]]*:[[:space:]]*true|LIVE_EXECUTION_ENABLED[[:space:]]*=[[:space:]]*(true|1)|AUTO_DEPLOY_PRODUCTION[[:space:]]*=[[:space:]]*(true|1)|railway[[:space:]]+up|\.placeOrder\(|broker\.placeOrder|kite\.placeOrder|zerodha\.placeOrder)' "$ADDED"; then
+            echo 'Unsafe LIVE/order/deploy enablement detected. Automation fails closed.'
+            exit 1
+          fi
+
+      - name: Run repository regression suite
+        run: npm test
+
+      - name: Confirm staging-only policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ github.base_ref }}" = "automation-staging"
+          echo 'Automation gate passed for staging only. No main merge or production deployment performed.'

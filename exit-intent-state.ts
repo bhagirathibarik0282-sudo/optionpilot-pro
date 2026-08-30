@@ -61,7 +61,6 @@ export function evaluateExitIntentState(input: ExitIntentInput): ExitIntentResul
 
   if (!key) reasons.push("INVALID_EXIT_IDENTITY");
   if (!validQty(input?.authoritativeOpenQty) || !validQty(input?.confirmedExitQty)) reasons.push("INVALID_EXIT_QUANTITY_STATE");
-  if (validQty(input?.authoritativeOpenQty) && validQty(input?.confirmedExitQty) && input.confirmedExitQty > input.authoritativeOpenQty) reasons.push("CONFIRMED_EXIT_EXCEEDS_OPEN_QTY");
   if (input?.stateFresh !== true) reasons.push("EXIT_STATE_STALE");
   if (input?.identityConsistent !== true) reasons.push("EXIT_CONTRACT_IDENTITY_MISMATCH");
   if (!["NONE","REQUESTED","PENDING","PARTIAL","COMPLETE","CANCELLED","REJECTED","HALT"].includes(input?.existingState)) reasons.push("INVALID_EXIT_STATE");
@@ -94,13 +93,13 @@ export function evaluateExitIntentState(input: ExitIntentInput): ExitIntentResul
 
   if (reasons.length) return base("BLOCK", "HALT", reasons, input?.existingReason ?? null, 0, null, true);
 
-  if (input.authoritativeOpenQty === 0) {
-    return base("COMPLETE", "COMPLETE", ["NO_OPEN_POSITION_EXIT_COMPLETE"], input.existingReason ?? input.requestedReason, 0, 0);
-  }
+  // authoritativeOpenQty is already the current remaining open position from the
+  // position-truth layer. confirmedExitQty is audit context and must not be
+  // subtracted again, otherwise partial exits are double-counted.
+  const residualQty = input.authoritativeOpenQty;
 
-  const residualQty = Math.max(0, input.authoritativeOpenQty - input.confirmedExitQty);
   if (residualQty === 0) {
-    return base("COMPLETE", "COMPLETE", ["CONFIRMED_EXIT_COVERS_OPEN_POSITION"], input.existingReason ?? input.requestedReason, 0, 0);
+    return base("COMPLETE", "COMPLETE", ["NO_OPEN_POSITION_EXIT_COMPLETE"], input.existingReason ?? input.requestedReason, 0, 0);
   }
 
   if (input.existingState === "COMPLETE") {

@@ -67,6 +67,23 @@ test('tracks cancellation', () => {
   assert.equal(r.state, 'CANCELLED');
 });
 
+test('fails closed on regression from partial fill to acknowledged', () => {
+  const r = evaluateShadowBrokerSubmission({ ...base, previousState: 'PARTIALLY_FILLED' });
+  assert.equal(r.state, 'BLOCKED');
+  assert.ok(r.reasonCodes.includes('STATE_REGRESSION'));
+});
+
+test('fails closed when a filled terminal state regresses', () => {
+  const r = evaluateShadowBrokerSubmission({ ...base, previousState: 'FILLED' });
+  assert.equal(r.state, 'BLOCKED');
+  assert.ok(r.reasonCodes.includes('TERMINAL_STATE_REGRESSION'));
+});
+
+test('allows a stable filled terminal state', () => {
+  const r = evaluateShadowBrokerSubmission({ ...base, previousState: 'FILLED', filledQuantity: 50 });
+  assert.equal(r.state, 'FILLED');
+});
+
 test('never places an order', () => {
   const r = evaluateShadowBrokerSubmission(base);
   assert.equal(r.placesOrder, false);

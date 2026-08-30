@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - automation-staging
     paths:
       - shadow-broker-submission-state.ts
       - test/shadow-broker-submission-state.test.ts

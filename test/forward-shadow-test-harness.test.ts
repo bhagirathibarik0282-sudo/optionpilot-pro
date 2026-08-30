@@ -22,6 +22,21 @@ test('ready only as shadow and never allows broker order', () => {
   assert.equal(d.recordDecision, true);
 });
 
+test('runner path blocks if index-specific runner is required but not ready', () => {
+  const d = evaluateForwardShadowTest({ ...good, runnerLogicRequired: true, indexSpecificRunnerReady: false });
+  assert.equal(d.status, 'BLOCKED');
+  assert.equal(d.reason, 'INDEX_SPECIFIC_RUNNER_NOT_READY');
+  assert.equal(d.brokerOrderAllowed, false);
+});
+
+test('runner path is verified only when index-specific runner is ready', () => {
+  const d = evaluateForwardShadowTest({ ...good, runnerLogicRequired: true, indexSpecificRunnerReady: true });
+  assert.equal(d.status, 'READY');
+  assert.equal(d.reason, 'FORWARD_SHADOW_SIGNAL_AND_RUNNER_READY');
+  assert.equal(d.runnerPathVerified, true);
+  assert.equal(d.brokerOrderAllowed, false);
+});
+
 test('market closed blocks run', () => assert.equal(evaluateForwardShadowTest({ ...good, marketOpen: false }).reason, 'MARKET_CLOSED'));
 test('stale live data blocks', () => assert.equal(evaluateForwardShadowTest({ ...good, liveDataFresh: false }).reason, 'LIVE_DATA_NOT_FRESH'));
 test('broker session unhealthy blocks', () => assert.equal(evaluateForwardShadowTest({ ...good, brokerSessionHealthy: false }).reason, 'BROKER_SESSION_UNHEALTHY'));

@@ -19,6 +19,7 @@ export interface ShadowBrokerSubmissionInput {
   filledQuantity: number;
   totalQuantity: number;
   cancelled: boolean;
+  previousState?: ShadowBrokerState;
 }
 
 export interface ShadowBrokerSubmissionResult {
@@ -29,6 +30,15 @@ export interface ShadowBrokerSubmissionResult {
   shadowOnly: true;
   placesOrder: false;
 }
+
+const terminalStates = new Set<ShadowBrokerState>(["BLOCKED", "REJECTED", "FILLED", "CANCELLED"]);
+const progressionRank: Partial<Record<ShadowBrokerState, number>> = {
+  AUTHORIZED: 1,
+  SUBMISSION_SIMULATED: 2,
+  ACKNOWLEDGED: 3,
+  PARTIALLY_FILLED: 4,
+  FILLED: 5,
+};
 
 export function evaluateShadowBrokerSubmission(
   input: ShadowBrokerSubmissionInput,
@@ -48,13 +58,44 @@ export function evaluateShadowBrokerSubmission(
   if (input?.cancelled === true && input?.filledQuantity === input?.totalQuantity && input?.totalQuantity > 0) reasons.push("FILLED_AND_CANCELLED_CONFLICT");
 
   if (reasons.length > 0) return result("BLOCKED", reasons);
-  if (input.cancelled) return result("CANCELLED", ["SHADOW_ORDER_CANCELLED"]);
-  if (input.brokerRejected) return result("REJECTED", ["SHADOW_ORDER_REJECTED"]);
-  if (!input.simulatedSubmissionAccepted) return result("AUTHORIZED", ["AWAITING_SHADOW_SUBMISSION"]);
-  if (!input.brokerAcknowledged) return result("SUBMISSION_SIMULATED", ["AWAITING_SHADOW_ACKNOWLEDGEMENT"]);
-  if (input.filledQuantity === input.totalQuantity) return result("FILLED", ["SHADOW_ORDER_FULLY_FILLED"]);
-  if (input.filledQuantity > 0) return result("PARTIALLY_FILLED", ["SHADOW_ORDER_PARTIALLY_FILLED"]);
-  return result("ACKNOWLEDGED", ["SHADOW_ORDER_ACKNOWLEDGED"]);
+
+  const nextState = classifyState(input);
+  const previousState = input.previousState;
+
+  if (previousState && terminalStates.has(previousState) && nextState !== previousState) {
+    return result("BLOCKED", ["TERMINAL_STATE_REGRESSION"]);
+  }
+
+  const previousRank = previousState ? progressionRank[previousState] : undefined;
+  const nextRank = progressionRank[nextState];
+  if (previousRank !== undefined && nextRank !== undefined && nextRank < previousRank) {
+    return result("BLOCKED", ["STATE_REGRESSION"]);
+  }
+
+  return stateResult(nextState);
+}
+
+function classifyState(input: ShadowBrokerSubmissionInput): ShadowBrokerState {
+  if (input.cancelled) return "CANCELLED";
+  if (input.brokerRejected) return "REJECTED";
+  if (!input.simulatedSubmissionAccepted) return "AUTHORIZED";
+  if (!input.brokerAcknowledged) return "SUBMISSION_SIMULATED";
+  if (input.filledQuantity === input.totalQuantity) return "FILLED";
+  if (input.filledQuantity > 0) return "PARTIALLY_FILLED";
+  return "ACKNOWLEDGED";
+}
+
+function stateResult(state: ShadowBrokerState): ShadowBrokerSubmissionResult {
+  switch (state) {
+    case "CANCELLED": return result(state, ["SHADOW_ORDER_CANCELLED"]);
+    case "REJECTED": return result(state, ["SHADOW_ORDER_REJECTED"]);
+    case "AUTHORIZED": return result(state, ["AWAITING_SHADOW_SUBMISSION"]);
+    case "SUBMISSION_SIMULATED": return result(state, ["AWAITING_SHADOW_ACKNOWLEDGEMENT"]);
+    case "FILLED": return result(state, ["SHADOW_ORDER_FULLY_FILLED"]);
+    case "PARTIALLY_FILLED": return result(state, ["SHADOW_ORDER_PARTIALLY_FILLED"]);
+    case "ACKNOWLEDGED": return result(state, ["SHADOW_ORDER_ACKNOWLEDGED"]);
+    default: return result("BLOCKED", ["UNKNOWN_SHADOW_BROKER_STATE"]);
+  }
 }
 
 function result(state: ShadowBrokerState, reasonCodes: string[]): ShadowBrokerSubmissionResult {

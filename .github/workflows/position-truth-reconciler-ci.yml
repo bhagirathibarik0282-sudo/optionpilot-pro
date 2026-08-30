@@ -1,0 +1,30 @@
+name: Position Truth Reconciler CI
+
+on:
+  pull_request:
+    branches:
+      - automation-staging
+    paths:
+      - position-truth-reconciler.ts
+      - test/position-truth-reconciler.test.ts
+      - .github/workflows/position-truth-reconciler-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-position-truth:
+    name: Validate position truth reconciler
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run position truth devil tests
+        run: node --import tsx --test test/position-truth-reconciler.test.ts

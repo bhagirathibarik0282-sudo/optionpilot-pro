@@ -22,6 +22,7 @@ on:
       - behaviour-risk-engine.ts
       - execution-risk-gate.ts
       - scalp-execution-gate.ts
+      - execution-candidate-selector.ts
       - message-trigger-engine.ts
       - buyer-seller-behaviour-engine.ts
       - psychology-shadow-chain.ts
@@ -51,6 +52,7 @@ on:
       - test/behaviour-risk-engine.test.ts
       - test/execution-risk-gate.test.ts
       - test/scalp-execution-gate.test.ts
+      - test/execution-candidate-selector.test.ts
       - test/message-trigger-engine.test.ts
       - test/buyer-seller-behaviour-engine.test.ts
       - test/psychology-shadow-chain.test.ts
@@ -155,6 +157,9 @@ jobs:
 
       - name: Run scalp execution gate tests
         run: node --import tsx --test test/scalp-execution-gate.test.ts
+
+      - name: Run execution candidate selector tests
+        run: node --import tsx --test test/execution-candidate-selector.test.ts
 
       - name: Run existing package tests when available
         run: |

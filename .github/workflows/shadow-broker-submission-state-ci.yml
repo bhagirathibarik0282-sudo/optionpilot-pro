@@ -1,0 +1,31 @@
+name: Shadow Broker Submission State CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - automation-staging
+    paths:
+      - shadow-broker-submission-state.ts
+      - test/shadow-broker-submission-state.test.ts
+      - .github/workflows/shadow-broker-submission-state-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-shadow-broker-state:
+    name: Validate shadow broker submission state
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run shadow broker state devil tests
+        run: node --import tsx --test test/shadow-broker-submission-state.test.ts

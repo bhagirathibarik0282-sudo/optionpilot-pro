@@ -68,12 +68,40 @@ export interface ExecutionDailyLossGateResult {
   failClosed: true;
 }
 
+export interface ExecutionTradeCountPolicy {
+  maxTradesPerDay: number;
+}
+
+export interface ExecutionTradeCountInput {
+  symbol: string;
+  tradesExecutedToday: number;
+  policy: ExecutionTradeCountPolicy;
+}
+
+export interface ExecutionTradeCountGateResult {
+  version: "EXECUTION_TRADE_COUNT_GATE_V1";
+  decision: ExecutionRiskDecision;
+  reasonCodes: string[];
+  symbol: string | null;
+  tradesExecutedToday: number | null;
+  maxTradesPerDay: number | null;
+  failClosed: true;
+}
+
 function finitePositive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
 
 function finiteNonNegative(value: number): boolean {
   return Number.isFinite(value) && value >= 0;
+}
+
+function nonNegativeInteger(value: number): boolean {
+  return Number.isInteger(value) && value >= 0;
+}
+
+function positiveInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0;
 }
 
 function normalizedSymbol(symbol: string): string | null {
@@ -177,6 +205,39 @@ export function evaluateExecutionDailyLossGate(
     newTradeProjectedLoss,
     projectedDailyLossExposure,
     maxDailyLoss,
+    failClosed: true,
+  };
+}
+
+export function evaluateExecutionTradeCountGate(
+  input: ExecutionTradeCountInput,
+): ExecutionTradeCountGateResult {
+  const reasonCodes: string[] = [];
+  const symbol = normalizedSymbol(input?.symbol);
+  const tradesExecutedToday = nonNegativeInteger(input?.tradesExecutedToday)
+    ? input.tradesExecutedToday
+    : null;
+  const maxTradesPerDay = positiveInteger(input?.policy?.maxTradesPerDay)
+    ? input.policy.maxTradesPerDay
+    : null;
+
+  if (!symbol) reasonCodes.push("INVALID_SYMBOL");
+  if (tradesExecutedToday == null) reasonCodes.push("INVALID_TRADES_EXECUTED_TODAY");
+  if (maxTradesPerDay == null) reasonCodes.push("INVALID_MAX_TRADES_PER_DAY");
+
+  // Trade-count cap is a hard stop: once the configured count has been reached,
+  // no additional order may be opened.
+  if (reasonCodes.length === 0 && tradesExecutedToday! >= maxTradesPerDay!) {
+    reasonCodes.push("MAX_TRADES_PER_DAY_REACHED_OR_EXCEEDED");
+  }
+
+  return {
+    version: "EXECUTION_TRADE_COUNT_GATE_V1",
+    decision: reasonCodes.length === 0 ? "ALLOW" : "BLOCK",
+    reasonCodes: reasonCodes.length === 0 ? ["TRADE_COUNT_GATE_PASSED"] : reasonCodes,
+    symbol,
+    tradesExecutedToday,
+    maxTradesPerDay,
     failClosed: true,
   };
 }

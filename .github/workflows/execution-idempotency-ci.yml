@@ -1,0 +1,26 @@
+name: Execution Idempotency CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - execution-idempotency-gate.ts
+      - test/execution-idempotency-gate.test.ts
+      - .github/workflows/execution-idempotency-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-idempotency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run execution idempotency devil tests
+        run: node --import tsx --test test/execution-idempotency-gate.test.ts

@@ -19,6 +19,37 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+function firstEnv(...names: string[]): string | null {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+async function getOAuthAccessToken(): Promise<string> {
+  const clientId = firstEnv("GOOGLE_CLIENT_ID", "GOOGLE_DRIVE_CLIENT_ID");
+  const clientSecret = firstEnv("GOOGLE_CLIENT_SECRET", "GOOGLE_DRIVE_CLIENT_SECRET");
+  const refreshToken = firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN");
+  if (!clientId || !clientSecret || !refreshToken) throw new Error("GOOGLE_DRIVE_OAUTH_NOT_CONFIGURED");
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  const json = await response.json() as { access_token?: string; error?: string; error_description?: string };
+  if (!response.ok || !json.access_token) {
+    throw new Error(`GOOGLE_OAUTH_TOKEN_FAILED:${json.error || response.status}:${json.error_description || "unknown"}`);
+  }
+  return json.access_token;
+}
+
 async function getServiceAccountAccessToken(): Promise<string> {
   const clientEmail = requiredEnv("GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL");
   const privateKey = requiredEnv("GOOGLE_DRIVE_SERVICE_ACCOUNT_PRIVATE_KEY").replace(/\\n/g, "\n");
@@ -51,6 +82,23 @@ async function getServiceAccountAccessToken(): Promise<string> {
     throw new Error(`GOOGLE_TOKEN_FAILED:${json.error || response.status}:${json.error_description || "unknown"}`);
   }
   return json.access_token;
+}
+
+async function getDriveAccessToken(): Promise<string> {
+  const hasOAuth = Boolean(
+    firstEnv("GOOGLE_CLIENT_ID", "GOOGLE_DRIVE_CLIENT_ID") &&
+    firstEnv("GOOGLE_CLIENT_SECRET", "GOOGLE_DRIVE_CLIENT_SECRET") &&
+    firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN")
+  );
+  if (hasOAuth) return getOAuthAccessToken();
+
+  const hasServiceAccount = Boolean(
+    process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL?.trim() &&
+    process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_PRIVATE_KEY?.trim()
+  );
+  if (hasServiceAccount) return getServiceAccountAccessToken();
+
+  throw new Error("GOOGLE_DRIVE_AUTH_NOT_CONFIGURED");
 }
 
 export function eodArchiveChecksum(payloadJson: string): string {
@@ -86,13 +134,11 @@ async function verifyDriveFile(token: string, fileId: string, fileName: string, 
 
 export async function uploadEodArchiveToDrive(tradingDate: string, payloadJson: string): Promise<DriveUploadResult> {
   const folderId = requiredEnv("GOOGLE_DRIVE_EOD_FOLDER_ID");
-  const token = await getServiceAccountAccessToken();
+  const token = await getDriveAccessToken();
   const fileName = `optionpilot-eod-${tradingDate}.json`;
   const checksumSha256 = eodArchiveChecksum(payloadJson);
   const checksumMd5 = md5(payloadJson);
 
-  // Retry guard: reuse an already-uploaded exact archive rather than creating a duplicate
-  // if the previous run uploaded successfully but failed before DB state was committed.
   const q = encodeURIComponent(`trashed = false and '${folderId}' in parents and appProperties has { key='tradingDate' and value='${tradingDate}' } and appProperties has { key='checksumSha256' and value='${checksumSha256}' }`);
   const existingResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size,md5Checksum,trashed,parents,appProperties)&pageSize=10`, {
     headers: { authorization: `Bearer ${token}` },

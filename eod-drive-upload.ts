@@ -19,10 +19,19 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+function firstEnv(...names: string[]): string | null {
+  for (const name of names) {
+    const value = process.env[name]?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
 async function getOAuthAccessToken(): Promise<string> {
-  const clientId = requiredEnv("GOOGLE_DRIVE_CLIENT_ID");
-  const clientSecret = requiredEnv("GOOGLE_DRIVE_CLIENT_SECRET");
-  const refreshToken = requiredEnv("GOOGLE_DRIVE_REFRESH_TOKEN");
+  const clientId = firstEnv("GOOGLE_CLIENT_ID", "GOOGLE_DRIVE_CLIENT_ID");
+  const clientSecret = firstEnv("GOOGLE_CLIENT_SECRET", "GOOGLE_DRIVE_CLIENT_SECRET");
+  const refreshToken = firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN");
+  if (!clientId || !clientSecret || !refreshToken) throw new Error("GOOGLE_DRIVE_OAUTH_NOT_CONFIGURED");
 
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -77,9 +86,9 @@ async function getServiceAccountAccessToken(): Promise<string> {
 
 async function getDriveAccessToken(): Promise<string> {
   const hasOAuth = Boolean(
-    process.env.GOOGLE_DRIVE_CLIENT_ID?.trim() &&
-    process.env.GOOGLE_DRIVE_CLIENT_SECRET?.trim() &&
-    process.env.GOOGLE_DRIVE_REFRESH_TOKEN?.trim()
+    firstEnv("GOOGLE_CLIENT_ID", "GOOGLE_DRIVE_CLIENT_ID") &&
+    firstEnv("GOOGLE_CLIENT_SECRET", "GOOGLE_DRIVE_CLIENT_SECRET") &&
+    firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN")
   );
   if (hasOAuth) return getOAuthAccessToken();
 

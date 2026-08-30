@@ -13,7 +13,7 @@ const goodGate = {
   idempotencyPassed: true,
   killSwitchClear: true,
   runnerLogicRequired: true,
-  indexRunnerBufferReady: true,
+  indexSpecificRunnerReady: true,
 };
 
 test("starts evidence only when forward shadow gate is ready", () => {
@@ -29,7 +29,7 @@ test("blocked shadow gate cannot create an entry record", () => {
 });
 
 test("runner buffer readiness is mandatory when runner logic is required", () => {
-  const s = beginForwardShadowEvidence({ gate: { ...goodGate, indexRunnerBufferReady: false }, tradeId: "T3", ts: "2026-09-01T09:30:00+05:30", index: "SENSEX", entryPremium: 200, entryQty: 40 });
+  const s = beginForwardShadowEvidence({ gate: { ...goodGate, indexSpecificRunnerReady: false }, tradeId: "T3", ts: "2026-09-01T09:30:00+05:30", index: "SENSEX", entryPremium: 200, entryQty: 40 });
   assert.equal(s, null);
 });
 

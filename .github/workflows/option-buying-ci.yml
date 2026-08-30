@@ -20,6 +20,12 @@ on:
       - premium-behaviour-engine.ts
       - trade-lifecycle-engine.ts
       - behaviour-risk-engine.ts
+      - execution-risk-gate.ts
+      - scalp-execution-gate.ts
+      - execution-candidate-selector.ts
+      - execution-level-plan.ts
+      - execution-liquidity-spread-gate.ts
+      - broker-order-builder.ts
       - message-trigger-engine.ts
       - buyer-seller-behaviour-engine.ts
       - psychology-shadow-chain.ts
@@ -47,6 +53,12 @@ on:
       - test/premium-behaviour-engine.test.ts
       - test/trade-lifecycle-engine.test.ts
       - test/behaviour-risk-engine.test.ts
+      - test/execution-risk-gate.test.ts
+      - test/scalp-execution-gate.test.ts
+      - test/execution-candidate-selector.test.ts
+      - test/execution-level-plan.test.ts
+      - test/execution-liquidity-spread-gate.test.ts
+      - test/broker-order-builder.test.ts
       - test/message-trigger-engine.test.ts
       - test/buyer-seller-behaviour-engine.test.ts
       - test/psychology-shadow-chain.test.ts
@@ -145,6 +157,24 @@ jobs:
 
           console.log("\nAll option-buying safety contracts passed.");
           NODE
+
+      - name: Run execution risk gate tests
+        run: node --import tsx --test test/execution-risk-gate.test.ts
+
+      - name: Run scalp execution gate tests
+        run: node --import tsx --test test/scalp-execution-gate.test.ts
+
+      - name: Run execution candidate selector tests
+        run: node --import tsx --test test/execution-candidate-selector.test.ts
+
+      - name: Run execution level plan tests
+        run: node --import tsx --test test/execution-level-plan.test.ts
+
+      - name: Run execution liquidity spread gate tests
+        run: node --import tsx --test test/execution-liquidity-spread-gate.test.ts
+
+      - name: Run broker order builder tests
+        run: node --import tsx --test test/broker-order-builder.test.ts
 
       - name: Run existing package tests when available
         run: |

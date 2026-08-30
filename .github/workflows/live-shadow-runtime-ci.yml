@@ -1,0 +1,26 @@
+name: Live Shadow Runtime CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - live-shadow-runtime.ts
+      - shadow-evidence-persistence.ts
+      - forward-shadow-evidence-persistent-flow.ts
+      - test/live-shadow-runtime.test.ts
+      - .github/workflows/live-shadow-runtime-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/live-shadow-runtime.test.ts

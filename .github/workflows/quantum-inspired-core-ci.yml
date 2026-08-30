@@ -1,0 +1,26 @@
+name: Quantum Inspired Core CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - quantum-inspired-core.ts
+      - test/quantum-inspired-core.test.ts
+      - .github/workflows/quantum-inspired-core-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-quantum-inspired-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run quantum-inspired core tests
+        run: node --import tsx --test test/quantum-inspired-core.test.ts

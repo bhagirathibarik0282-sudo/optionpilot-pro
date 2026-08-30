@@ -23,17 +23,41 @@ export interface ExecutionCapitalGateResult {
   failClosed: true;
 }
 
+export interface ExecutionLossPolicy {
+  maxLossPerTrade: number;
+}
+
+export interface ExecutionLossInput {
+  symbol: string;
+  projectedMaxLoss: number;
+  policy: ExecutionLossPolicy;
+}
+
+export interface ExecutionLossGateResult {
+  version: "EXECUTION_LOSS_GATE_V1";
+  decision: ExecutionRiskDecision;
+  reasonCodes: string[];
+  symbol: string | null;
+  projectedMaxLoss: number | null;
+  maxLossPerTrade: number | null;
+  failClosed: true;
+}
+
 function finitePositive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+function normalizedSymbol(symbol: string): string | null {
+  return typeof symbol === "string" && symbol.trim().length > 0
+    ? symbol.trim().toUpperCase()
+    : null;
 }
 
 export function evaluateExecutionCapitalGate(
   input: ExecutionCapitalInput,
 ): ExecutionCapitalGateResult {
   const reasonCodes: string[] = [];
-  const symbol = typeof input?.symbol === "string" && input.symbol.trim().length > 0
-    ? input.symbol.trim().toUpperCase()
-    : null;
+  const symbol = normalizedSymbol(input?.symbol);
   const plannedCapital = finitePositive(input?.plannedCapital) ? input.plannedCapital : null;
   const maxCapitalPerTrade = finitePositive(input?.policy?.maxCapitalPerTrade)
     ? input.policy.maxCapitalPerTrade
@@ -54,6 +78,35 @@ export function evaluateExecutionCapitalGate(
     symbol,
     plannedCapital,
     maxCapitalPerTrade,
+    failClosed: true,
+  };
+}
+
+export function evaluateExecutionLossGate(
+  input: ExecutionLossInput,
+): ExecutionLossGateResult {
+  const reasonCodes: string[] = [];
+  const symbol = normalizedSymbol(input?.symbol);
+  const projectedMaxLoss = finitePositive(input?.projectedMaxLoss) ? input.projectedMaxLoss : null;
+  const maxLossPerTrade = finitePositive(input?.policy?.maxLossPerTrade)
+    ? input.policy.maxLossPerTrade
+    : null;
+
+  if (!symbol) reasonCodes.push("INVALID_SYMBOL");
+  if (projectedMaxLoss == null) reasonCodes.push("INVALID_PROJECTED_MAX_LOSS");
+  if (maxLossPerTrade == null) reasonCodes.push("INVALID_MAX_LOSS_PER_TRADE");
+
+  if (reasonCodes.length === 0 && projectedMaxLoss! > maxLossPerTrade!) {
+    reasonCodes.push("MAX_LOSS_PER_TRADE_LIMIT_EXCEEDED");
+  }
+
+  return {
+    version: "EXECUTION_LOSS_GATE_V1",
+    decision: reasonCodes.length === 0 ? "ALLOW" : "BLOCK",
+    reasonCodes: reasonCodes.length === 0 ? ["LOSS_GATE_PASSED"] : reasonCodes,
+    symbol,
+    projectedMaxLoss,
+    maxLossPerTrade,
     failClosed: true,
   };
 }

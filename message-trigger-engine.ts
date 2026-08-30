@@ -34,19 +34,31 @@ export interface MessageTriggerResult {
   shouldSpeak: boolean;
   urgent: boolean;
   reason: string;
+  /** True when the message passes all non-duplicate eligibility gates. */
+  eligibleBeforeDuplicateSuppression: boolean;
+  /** True only when a message that was otherwise eligible was suppressed as an exact duplicate. */
+  duplicateSuppressed: boolean;
   affectsTelegram: false;
   affectsVerdict: false;
   affectsExecution: false;
   haikuMayOverride: false;
 }
 
-function out(shouldSpeak: boolean, urgent: boolean, reason: string): MessageTriggerResult {
+function out(
+  shouldSpeak: boolean,
+  urgent: boolean,
+  reason: string,
+  eligibleBeforeDuplicateSuppression = false,
+  duplicateSuppressed = false,
+): MessageTriggerResult {
   return {
     version: "MESSAGE_TRIGGER_ENGINE_V1",
     semantics: "RESEARCH_SHADOW_ONLY",
     shouldSpeak,
     urgent,
     reason,
+    eligibleBeforeDuplicateSuppression,
+    duplicateSuppressed,
     affectsTelegram: false,
     affectsVerdict: false,
     affectsExecution: false,
@@ -54,11 +66,24 @@ function out(shouldSpeak: boolean, urgent: boolean, reason: string): MessageTrig
   };
 }
 
+function meaningfulChange(input: MessageTriggerInput): boolean {
+  return (
+    input.candidateSelectionChanged ||
+    input.lifecycleChanged ||
+    input.premiumBehaviourChanged ||
+    input.buyerSellerStateChanged ||
+    input.behaviourRiskChanged ||
+    input.materialEvidenceChange
+  );
+}
+
 /**
  * No timing or confirmation threshold is invented here.
  * requiredConfirmations and cooldownSatisfied must come from an upstream frozen policy.
  * EXIT and data-unavailable overlay are urgent, but exact duplicate fingerprints remain suppressed.
  * The fingerprint must be scoped to the stable exact candidate key to prevent cross-candidate collisions.
+ * Instrumentation explicitly exposes eligibility-before-duplicate-suppression so validation metrics do not
+ * have to reverse-engineer trigger behavior downstream.
  */
 export function evaluateMessageTrigger(input: MessageTriggerInput): MessageTriggerResult {
   const candidateKey = input.candidateKey.trim();
@@ -70,38 +95,43 @@ export function evaluateMessageTrigger(input: MessageTriggerInput): MessageTrigg
     return out(false, false, "FINGERPRINT_CANDIDATE_SCOPE_MISMATCH");
   }
 
-  if (input.lastSpokenFingerprint === fingerprint) {
-    return out(false, false, "EXACT_DUPLICATE_SUPPRESSED");
+  let eligible = false;
+  let urgent = false;
+  let nonDuplicateReason = "NO_MEANINGFUL_CHANGE";
+
+  if (!input.dataFresh) {
+    eligible = true;
+    urgent = true;
+    nonDuplicateReason = "DATA_UNAVAILABLE_MESSAGE_ELIGIBLE";
+  } else if (input.lifecycle === "EXIT") {
+    eligible = true;
+    urgent = true;
+    nonDuplicateReason = "TERMINAL_EXIT_MESSAGE_ELIGIBLE";
+  } else {
+    if (!Number.isInteger(input.requiredConfirmations) || input.requiredConfirmations < 1) {
+      return out(false, false, "INVALID_REQUIRED_CONFIRMATIONS_POLICY");
+    }
+    if (!Number.isInteger(input.consecutiveConfirmations) || input.consecutiveConfirmations < 0) {
+      return out(false, false, "INVALID_CONFIRMATION_COUNT");
+    }
+
+    if (!meaningfulChange(input)) return out(false, false, "NO_MEANINGFUL_CHANGE");
+
+    if (input.consecutiveConfirmations < input.requiredConfirmations) {
+      return out(false, false, "HYSTERESIS_CONFIRMATION_NOT_MET");
+    }
+
+    if (!input.cooldownSatisfied) {
+      return out(false, false, "COOLDOWN_NOT_SATISFIED");
+    }
+
+    eligible = true;
+    nonDuplicateReason = "MEANINGFUL_CONFIRMED_CHANGE_ELIGIBLE";
   }
 
-  if (!input.dataFresh) return out(true, true, "DATA_UNAVAILABLE_MESSAGE_ELIGIBLE");
-
-  if (input.lifecycle === "EXIT") return out(true, true, "TERMINAL_EXIT_MESSAGE_ELIGIBLE");
-
-  if (!Number.isInteger(input.requiredConfirmations) || input.requiredConfirmations < 1) {
-    return out(false, false, "INVALID_REQUIRED_CONFIRMATIONS_POLICY");
-  }
-  if (!Number.isInteger(input.consecutiveConfirmations) || input.consecutiveConfirmations < 0) {
-    return out(false, false, "INVALID_CONFIRMATION_COUNT");
+  if (eligible && input.lastSpokenFingerprint === fingerprint) {
+    return out(false, false, "EXACT_DUPLICATE_SUPPRESSED", true, true);
   }
 
-  const meaningful =
-    input.candidateSelectionChanged ||
-    input.lifecycleChanged ||
-    input.premiumBehaviourChanged ||
-    input.buyerSellerStateChanged ||
-    input.behaviourRiskChanged ||
-    input.materialEvidenceChange;
-
-  if (!meaningful) return out(false, false, "NO_MEANINGFUL_CHANGE");
-
-  if (input.consecutiveConfirmations < input.requiredConfirmations) {
-    return out(false, false, "HYSTERESIS_CONFIRMATION_NOT_MET");
-  }
-
-  if (!input.cooldownSatisfied) {
-    return out(false, false, "COOLDOWN_NOT_SATISFIED");
-  }
-
-  return out(true, false, "MEANINGFUL_CONFIRMED_CHANGE_ELIGIBLE");
+  return out(eligible, urgent, nonDuplicateReason, eligible, false);
 }

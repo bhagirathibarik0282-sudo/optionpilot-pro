@@ -4,10 +4,7 @@ import type { PsychologyReplayValidationInput } from "./psychology-shadow-replay
 
 export type PsychologyRealEvidenceRunnerStatus =
   | "NO_EVIDENCE"
-  | "EVIDENCE_PRESENT_PROVENANCE_BLOCKED"
-  | "COVERAGE_INCOMPLETE"
-  | "METRICS_INCOMPLETE"
-  | "READY_FOR_THRESHOLD_RESEARCH";
+  | "EVIDENCE_PRESENT_PROVENANCE_BLOCKED";
 
 export interface PsychologyRealEvidenceRunnerResult {
   version: "PSYCHOLOGY_REAL_EVIDENCE_RUNNER_V1";
@@ -54,18 +51,11 @@ export function buildPsychologyRealEvidenceRunnerResult(
   if (ledger.nullMetrics.length > 0) blockers.push(`NULL_METRICS:${ledger.nullMetrics.join(",")}`);
   blockers.push("ACCEPTANCE_THRESHOLDS_NOT_CALIBRATED_OR_FROZEN");
 
-  let status: PsychologyRealEvidenceRunnerStatus;
-  if (rows.length === 0) status = "NO_EVIDENCE";
-  else if (true) status = "EVIDENCE_PRESENT_PROVENANCE_BLOCKED";
-  else if (ledger.missingRegimes.length > 0) status = "COVERAGE_INCOMPLETE";
-  else if (ledger.nullMetrics.length > 0) status = "METRICS_INCOMPLETE";
-  else status = "READY_FOR_THRESHOLD_RESEARCH";
-
   return {
     version: "PSYCHOLOGY_REAL_EVIDENCE_RUNNER_V1",
     semantics: "RESEARCH_SHADOW_ONLY",
     restoredRecords: rows.length,
-    status,
+    status: rows.length === 0 ? "NO_EVIDENCE" : "EVIDENCE_PRESENT_PROVENANCE_BLOCKED",
     ledger,
     regimeTagProvenanceVerified: false,
     blockers,

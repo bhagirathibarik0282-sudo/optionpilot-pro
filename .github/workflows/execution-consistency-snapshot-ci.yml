@@ -1,0 +1,31 @@
+name: Execution Consistency Snapshot CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - automation-staging
+    paths:
+      - execution-consistency-snapshot.ts
+      - test/execution-consistency-snapshot.test.ts
+      - .github/workflows/execution-consistency-snapshot-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-execution-consistency:
+    name: Validate execution consistency snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run execution consistency devil tests
+        run: node --import tsx --test test/execution-consistency-snapshot.test.ts

@@ -1,0 +1,30 @@
+name: Pre-Trade Decision Evidence CI
+
+on:
+  pull_request:
+    branches:
+      - automation-staging
+    paths:
+      - pre-trade-decision-evidence.ts
+      - test/pre-trade-decision-evidence.test.ts
+      - .github/workflows/pre-trade-decision-evidence-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-pre-trade-evidence:
+    name: Validate pre-trade decision evidence
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run pre-trade evidence devil tests
+        run: node --import tsx --test test/pre-trade-decision-evidence.test.ts

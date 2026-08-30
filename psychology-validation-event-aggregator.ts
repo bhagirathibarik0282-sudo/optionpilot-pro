@@ -5,6 +5,7 @@ import { validatePsychologyShadowObservations, type ShadowValidationObservation,
 export type PsychologyValidationEventSource = "DETERMINISTIC_REPLAY" | "DETERMINISTIC_LIVE";
 
 interface PsychologyValidationEventBase {
+  eventId: string;
   tradeId: string;
   observedAt: string;
   source: PsychologyValidationEventSource;
@@ -62,10 +63,11 @@ function blocked(blockers: string[]): PsychologyValidationEventAggregationResult
 
 /**
  * Aggregates already-deterministic replay/live instrumentation into the frozen psychology
- * validation counters. It never infers event truth from prices or text, and retrospective
- * events may occur after the original replay decision as long as they are no later than the
- * explicit evaluation cutoff. Regime evidence remains separately no-lookahead guarded to
- * replayDecisionAt because regime labels describe information available at decision time.
+ * validation counters. It never infers event truth from prices or text. Every event must have
+ * a stable unique eventId so replay/retry duplication cannot inflate validation counters.
+ * Retrospective events may occur after the original replay decision as long as they are no
+ * later than the explicit evaluation cutoff. Regime evidence remains separately no-lookahead
+ * guarded to replayDecisionAt because regime labels describe information available at decision time.
  */
 export function aggregatePsychologyValidationEvents(
   input: PsychologyValidationEventAggregationInput,
@@ -75,15 +77,24 @@ export function aggregatePsychologyValidationEvents(
   if (!tradeId) blockers.push("TRADE_ID_MISSING");
   if (!validIso(input.evaluationCutoffAt)) blockers.push("EVALUATION_CUTOFF_INVALID");
   if (!validIso(input.replayDecisionAt)) blockers.push("REPLAY_DECISION_AT_INVALID");
+  if (validIso(input.evaluationCutoffAt) && validIso(input.replayDecisionAt)
+      && Date.parse(input.evaluationCutoffAt) < Date.parse(input.replayDecisionAt)) {
+    blockers.push("EVALUATION_CUTOFF_BEFORE_REPLAY_DECISION");
+  }
 
   const provenance = validateShadowValidationRegimeEvidence(input.regimeEvidence, input.replayDecisionAt, input.regimes);
   if (!provenance.valid) blockers.push(...provenance.blockers);
 
+  const seenEventIds = new Set<string>();
   for (const event of input.events) {
     if (!event || typeof event !== "object") {
       blockers.push("EVENT_INVALID");
       continue;
     }
+    const eventId = typeof event.eventId === "string" ? event.eventId.trim() : "";
+    if (!eventId) blockers.push(`EVENT_ID_MISSING:${event.kind}`);
+    else if (seenEventIds.has(eventId)) blockers.push(`EVENT_ID_DUPLICATE:${eventId}`);
+    else seenEventIds.add(eventId);
     if (event.tradeId.trim() !== tradeId) blockers.push(`EVENT_TRADE_ID_MISMATCH:${event.kind}`);
     if (event.source !== "DETERMINISTIC_REPLAY" && event.source !== "DETERMINISTIC_LIVE") {
       blockers.push(`EVENT_SOURCE_UNSUPPORTED:${event.kind}`);

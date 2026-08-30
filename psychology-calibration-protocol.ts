@@ -11,7 +11,7 @@ export const PSYCHOLOGY_CALIBRATION_PROTOCOL_V1 = {
     promotionEligible: false,
   },
   sampleCriteria: {
-    minimumUniqueTradingDates: 60,
+    minimumUniqueTradingDates: 67,
     minimumCompletedTrades: 200,
     minimumTradesPerMandatoryRegime: 30,
     minimumDenominatorPerMetric: 100,
@@ -140,8 +140,8 @@ export function evaluatePsychologyCalibrationProtocolGate(
       ? "SAMPLE_INSUFFICIENT"
       : "READY_FOR_CALIBRATION_PARTITION";
 
-  // Meeting preregistered minima establishes protocol sufficiency for starting calibration,
-  // not proof that the psychology system is effective and not permission for live promotion.
+  // Meeting preregistered minima establishes sufficiency under this frozen internal protocol only;
+  // it is not proof that the psychology system is effective and is not permission for live promotion.
   const statisticalSufficiencyEstablished = status === "READY_FOR_CALIBRATION_PARTITION";
 
   return {

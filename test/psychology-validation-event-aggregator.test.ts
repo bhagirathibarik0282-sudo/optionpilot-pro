@@ -25,17 +25,17 @@ const common = {
 
 test("aggregates deterministic replay events into frozen validation counters", () => {
   const events: PsychologyValidationEvent[] = [
-    event({ ...base, kind: "CHASE_WARNING", observedAt: "2026-08-20T09:22:00+05:30", falseWarning: true }),
-    event({ ...base, kind: "LATE_EXIT_EVENT", observedAt: "2026-08-20T09:30:00+05:30", priorExitOrProtectWarning: false }),
-    event({ ...base, kind: "THESIS_FAILURE", observedAt: "2026-08-20T09:35:00+05:30", priorThesisWarning: true }),
-    event({ ...base, kind: "STATE_FLIP", observedAt: "2026-08-20T09:25:00+05:30", terminal: false }),
-    event({ ...base, kind: "MESSAGE_ELIGIBLE", observedAt: "2026-08-20T09:26:00+05:30", duplicate: true, spoken: false }),
-    event({ ...base, kind: "MESSAGE_ELIGIBLE", observedAt: "2026-08-20T09:27:00+05:30", duplicate: false, spoken: true }),
-    event({ ...base, kind: "SIDE_FLIP", observedAt: "2026-08-20T09:28:00+05:30", freshDeterministicSetup: false }),
-    event({ ...base, kind: "ENTRY", observedAt: "2026-08-20T09:23:00+05:30", accepted: true, extensionBlocked: true }),
-    event({ ...base, kind: "STOPPED_TRADE", observedAt: "2026-08-20T09:40:00+05:30", stopRespected: false }),
-    event({ ...base, kind: "PROFIT_PROTECTION_OPPORTUNITY", observedAt: "2026-08-20T09:32:00+05:30", useful: true }),
-    event({ ...base, kind: "TRADE_COMPLETED", observedAt: "2026-08-20T09:45:00+05:30" }),
+    event({ ...base, eventId: "E1", kind: "CHASE_WARNING", observedAt: "2026-08-20T09:22:00+05:30", falseWarning: true }),
+    event({ ...base, eventId: "E2", kind: "LATE_EXIT_EVENT", observedAt: "2026-08-20T09:30:00+05:30", priorExitOrProtectWarning: false }),
+    event({ ...base, eventId: "E3", kind: "THESIS_FAILURE", observedAt: "2026-08-20T09:35:00+05:30", priorThesisWarning: true }),
+    event({ ...base, eventId: "E4", kind: "STATE_FLIP", observedAt: "2026-08-20T09:25:00+05:30", terminal: false }),
+    event({ ...base, eventId: "E5", kind: "MESSAGE_ELIGIBLE", observedAt: "2026-08-20T09:26:00+05:30", duplicate: true, spoken: false }),
+    event({ ...base, eventId: "E6", kind: "MESSAGE_ELIGIBLE", observedAt: "2026-08-20T09:27:00+05:30", duplicate: false, spoken: true }),
+    event({ ...base, eventId: "E7", kind: "SIDE_FLIP", observedAt: "2026-08-20T09:28:00+05:30", freshDeterministicSetup: false }),
+    event({ ...base, eventId: "E8", kind: "ENTRY", observedAt: "2026-08-20T09:23:00+05:30", accepted: true, extensionBlocked: true }),
+    event({ ...base, eventId: "E9", kind: "STOPPED_TRADE", observedAt: "2026-08-20T09:40:00+05:30", stopRespected: false }),
+    event({ ...base, eventId: "E10", kind: "PROFIT_PROTECTION_OPPORTUNITY", observedAt: "2026-08-20T09:32:00+05:30", useful: true }),
+    event({ ...base, eventId: "E11", kind: "TRADE_COMPLETED", observedAt: "2026-08-20T09:45:00+05:30" }),
   ];
 
   const result = aggregatePsychologyValidationEvents({ ...common, regimes: [...common.regimes], events });
@@ -66,7 +66,7 @@ test("retrospective validation events may occur after decision but not after eva
   const result = aggregatePsychologyValidationEvents({
     ...common,
     regimes: [...common.regimes],
-    events: [event({ ...base, kind: "TRADE_COMPLETED", observedAt: "2026-08-20T10:01:00+05:30" })],
+    events: [event({ ...base, eventId: "E1", kind: "TRADE_COMPLETED", observedAt: "2026-08-20T10:01:00+05:30" })],
   });
   assert.equal(result.status, "BLOCKED");
   assert.ok(result.blockers.includes("EVENT_AFTER_EVALUATION_CUTOFF:TRADE_COMPLETED"));
@@ -76,7 +76,7 @@ test("event stream is trade-isolated", () => {
   const result = aggregatePsychologyValidationEvents({
     ...common,
     regimes: [...common.regimes],
-    events: [event({ ...base, tradeId: "T2", kind: "TRADE_COMPLETED", observedAt: "2026-08-20T09:45:00+05:30" })],
+    events: [event({ ...base, eventId: "E1", tradeId: "T2", kind: "TRADE_COMPLETED", observedAt: "2026-08-20T09:45:00+05:30" })],
   });
   assert.equal(result.status, "BLOCKED");
   assert.ok(result.blockers.includes("EVENT_TRADE_ID_MISMATCH:TRADE_COMPLETED"));
@@ -102,8 +102,32 @@ test("blank event rule version is rejected", () => {
   const result = aggregatePsychologyValidationEvents({
     ...common,
     regimes: [...common.regimes],
-    events: [event({ ...base, ruleVersion: " ", kind: "TRADE_COMPLETED", observedAt: "2026-08-20T09:45:00+05:30" })],
+    events: [event({ ...base, eventId: "E1", ruleVersion: " ", kind: "TRADE_COMPLETED", observedAt: "2026-08-20T09:45:00+05:30" })],
   });
   assert.equal(result.status, "BLOCKED");
   assert.ok(result.blockers.includes("EVENT_RULE_VERSION_MISSING:TRADE_COMPLETED"));
+});
+
+test("duplicate event ids are rejected so retries cannot inflate counters", () => {
+  const result = aggregatePsychologyValidationEvents({
+    ...common,
+    regimes: [...common.regimes],
+    events: [
+      event({ ...base, eventId: "E1", kind: "CHASE_WARNING", observedAt: "2026-08-20T09:22:00+05:30", falseWarning: false }),
+      event({ ...base, eventId: "E1", kind: "CHASE_WARNING", observedAt: "2026-08-20T09:22:00+05:30", falseWarning: false }),
+    ],
+  });
+  assert.equal(result.status, "BLOCKED");
+  assert.ok(result.blockers.includes("EVENT_ID_DUPLICATE:E1"));
+});
+
+test("evaluation cutoff cannot be earlier than replay decision", () => {
+  const result = aggregatePsychologyValidationEvents({
+    ...common,
+    evaluationCutoffAt: "2026-08-20T09:20:00+05:30",
+    regimes: [...common.regimes],
+    events: [],
+  });
+  assert.equal(result.status, "BLOCKED");
+  assert.ok(result.blockers.includes("EVALUATION_CUTOFF_BEFORE_REPLAY_DECISION"));
 });

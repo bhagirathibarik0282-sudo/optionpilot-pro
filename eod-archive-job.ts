@@ -1,5 +1,6 @@
 import pg, { type PoolClient } from "pg";
 import { archiveKey, decideEodArchive, indiaTradingDateFromIso, isWeekdayTradingCandidate } from "./eod-archive-core.js";
+import { uploadEodArchiveToDrive } from "./eod-drive-upload.js";
 
 const { Pool } = pg;
 
@@ -31,6 +32,11 @@ async function ensureSchema(client: PoolClient) {
       record_count BIGINT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE eod_archive_runs ADD COLUMN IF NOT EXISTS drive_file_id TEXT;
+    ALTER TABLE eod_archive_runs ADD COLUMN IF NOT EXISTS drive_verified_at TIMESTAMPTZ;
+    ALTER TABLE eod_archive_runs ADD COLUMN IF NOT EXISTS checksum_sha256 TEXT;
+    ALTER TABLE eod_archive_runs ADD COLUMN IF NOT EXISTS cleanup_allowed BOOLEAN NOT NULL DEFAULT false;
   `);
 }
 
@@ -51,9 +57,9 @@ async function sourceCounts(client: PoolClient, tradingDate: string) {
   return { counts, total };
 }
 
-async function alreadyCompleted(client: PoolClient, tradingDate: string) {
+async function alreadyDriveVerified(client: PoolClient, tradingDate: string) {
   const q = await client.query("SELECT status FROM eod_archive_runs WHERE trading_date=$1::date", [tradingDate]);
-  return q.rows[0]?.status === "COMPLETED";
+  return q.rows[0]?.status === "DRIVE_VERIFIED";
 }
 
 async function buildPayload(client: PoolClient, tradingDate: string) {
@@ -84,12 +90,9 @@ export async function runEodArchive(nowIso = new Date().toISOString()) {
   const client = await pool.connect();
   try {
     await ensureSchema(client);
-
-    // One archive writer per trading date across restarts/overlapping cron runs.
-    // The lock is session-scoped and is automatically released when this client is released.
     await client.query("SELECT pg_advisory_lock(hashtext($1))", [archiveKey(tradingDate)]);
 
-    const completed = await alreadyCompleted(client, tradingDate);
+    const completed = await alreadyDriveVerified(client, tradingDate);
     const { counts, total } = await sourceCounts(client, tradingDate);
     const decision = decideEodArchive({ tradingDate, nowIso, alreadyCompleted: completed, sourceRecordCount: total });
 
@@ -100,17 +103,19 @@ export async function runEodArchive(nowIso = new Date().toISOString()) {
 
     const key = archiveKey(tradingDate);
     await client.query(`
-      INSERT INTO eod_archive_runs (trading_date, archive_key, started_at, status, record_count, archive_destination, error, updated_at)
-      VALUES ($1::date,$2,now(),'STARTED',$3,'POSTGRES:eod_archive_payloads',NULL,now())
+      INSERT INTO eod_archive_runs (trading_date, archive_key, started_at, status, record_count, archive_destination, error, cleanup_allowed, updated_at)
+      VALUES ($1::date,$2,now(),'STARTED',$3,'POSTGRES:eod_archive_payloads',NULL,false,now())
       ON CONFLICT (trading_date) DO UPDATE SET
         archive_key=EXCLUDED.archive_key, started_at=now(), completed_at=NULL, status='STARTED',
-        record_count=EXCLUDED.record_count, archive_destination=EXCLUDED.archive_destination, error=NULL, updated_at=now()
-      WHERE eod_archive_runs.status <> 'COMPLETED'
+        record_count=EXCLUDED.record_count, archive_destination=EXCLUDED.archive_destination, error=NULL,
+        cleanup_allowed=false, updated_at=now()
+      WHERE eod_archive_runs.status <> 'DRIVE_VERIFIED'
     `, [tradingDate, key, total]);
 
     try {
       const payload = await buildPayload(client, tradingDate);
       if (!payload) throw new Error("ARCHIVE_PAYLOAD_EMPTY");
+      const payloadJson = JSON.stringify(payload);
 
       await client.query("BEGIN");
       await client.query(`
@@ -118,20 +123,49 @@ export async function runEodArchive(nowIso = new Date().toISOString()) {
         VALUES ($1::date,$2,$3::jsonb,$4)
         ON CONFLICT (trading_date) DO UPDATE SET
           archive_key=EXCLUDED.archive_key, payload=EXCLUDED.payload, record_count=EXCLUDED.record_count
-      `, [tradingDate, key, JSON.stringify(payload), total]);
+      `, [tradingDate, key, payloadJson, total]);
       await client.query(`
-        UPDATE eod_archive_runs SET status='COMPLETED', completed_at=now(), record_count=$2,
-          archive_destination='POSTGRES:eod_archive_payloads', error=NULL, updated_at=now()
+        UPDATE eod_archive_runs SET status='POSTGRES_COMPLETED', completed_at=now(), record_count=$2,
+          archive_destination='POSTGRES:eod_archive_payloads', error=NULL, cleanup_allowed=false, updated_at=now()
         WHERE trading_date=$1::date
       `, [tradingDate, total]);
       await client.query("COMMIT");
 
-      console.log(`[EOD_ARCHIVE] completed date=${tradingDate} records=${total} key=${key}`);
-      return { ok: true, status: "COMPLETED", tradingDate, archiveKey: key, recordCount: total, counts };
+      let drive;
+      try {
+        drive = await uploadEodArchiveToDrive(tradingDate, payloadJson);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await client.query(`
+          UPDATE eod_archive_runs SET status='DRIVE_FAILED', archive_destination='POSTGRES:eod_archive_payloads',
+            error=$2, cleanup_allowed=false, updated_at=now() WHERE trading_date=$1::date
+        `, [tradingDate, message]);
+        console.error(`[EOD_ARCHIVE] drive failed date=${tradingDate} error=${message}`);
+        return { ok: false, status: "DRIVE_FAILED", tradingDate, recordCount: total, counts, error: message };
+      }
+
+      await client.query(`
+        UPDATE eod_archive_runs SET status='DRIVE_VERIFIED', drive_file_id=$2, drive_verified_at=now(),
+          checksum_sha256=$3, archive_destination=$4, error=NULL, cleanup_allowed=true, updated_at=now()
+        WHERE trading_date=$1::date
+      `, [tradingDate, drive.fileId, drive.checksumSha256, `GOOGLE_DRIVE:${drive.fileId}`]);
+
+      console.log(`[EOD_ARCHIVE] drive verified date=${tradingDate} records=${total} file=${drive.fileId}`);
+      return {
+        ok: true,
+        status: "DRIVE_VERIFIED",
+        tradingDate,
+        archiveKey: key,
+        recordCount: total,
+        counts,
+        driveFileId: drive.fileId,
+        checksumSha256: drive.checksumSha256,
+        cleanupAllowed: true,
+      };
     } catch (err) {
       try { await client.query("ROLLBACK"); } catch {}
       const message = err instanceof Error ? err.message : String(err);
-      await client.query(`UPDATE eod_archive_runs SET status='FAILED', error=$2, updated_at=now() WHERE trading_date=$1::date`, [tradingDate, message]);
+      await client.query(`UPDATE eod_archive_runs SET status='FAILED', error=$2, cleanup_allowed=false, updated_at=now() WHERE trading_date=$1::date`, [tradingDate, message]);
       console.error(`[EOD_ARCHIVE] failed date=${tradingDate} error=${message}`);
       return { ok: false, status: "FAILED", tradingDate, error: message };
     }

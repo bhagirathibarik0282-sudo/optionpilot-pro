@@ -38,27 +38,42 @@ export function buildShadowEvidencePersistenceEnvelope(
   };
 }
 
+function isValidEnvelope(row: ShadowEvidencePersistenceEnvelope | null | undefined): row is ShadowEvidencePersistenceEnvelope {
+  return !!row &&
+    row.version === "SHADOW_EVIDENCE_PERSISTENCE_V1" &&
+    row.brokerOrderAllowed === false &&
+    !!row.tradeId?.trim() &&
+    validTs(row.persistedAt) &&
+    row.evidence?.version === "SHADOW_TRADE_EVIDENCE_V1" &&
+    row.evidence.tradeId === row.tradeId &&
+    row.evidence.index === row.index &&
+    row.evidence.brokerOrderAllowed === false;
+}
+
 export async function persistShadowTradeEvidence(
   evidence: ShadowTradeEvidence,
   persistedAt = new Date().toISOString(),
 ): Promise<boolean> {
   const envelope = buildShadowEvidencePersistenceEnvelope(evidence, persistedAt);
   if (!envelope) return false;
+
   await dbInsert(SHADOW_EVIDENCE_DB_KIND, envelope);
-  return true;
+
+  // dbInsert intentionally swallows DB failures to protect the running app. Therefore a write
+  // attempt is NOT treated as durable success until the exact envelope can be read back.
+  const rows = await dbLoadRecent<ShadowEvidencePersistenceEnvelope>(SHADOW_EVIDENCE_DB_KIND, 50);
+  return rows.some((row) =>
+    isValidEnvelope(row) &&
+    row.tradeId === envelope.tradeId &&
+    row.persistedAt === envelope.persistedAt &&
+    row.evidence.events.length === envelope.evidence.events.length &&
+    row.evidence.lastPremium === envelope.evidence.lastPremium &&
+    row.evidence.remainingQty === envelope.evidence.remainingQty
+  );
 }
 
 export async function loadRecentShadowTradeEvidence(limit = 100): Promise<ShadowEvidencePersistenceEnvelope[]> {
   if (!Number.isInteger(limit) || limit <= 0 || limit > 1000) return [];
   const rows = await dbLoadRecent<ShadowEvidencePersistenceEnvelope>(SHADOW_EVIDENCE_DB_KIND, limit);
-  return rows.filter((row) =>
-    row?.version === "SHADOW_EVIDENCE_PERSISTENCE_V1" &&
-    row?.brokerOrderAllowed === false &&
-    !!row?.tradeId?.trim() &&
-    validTs(row?.persistedAt) &&
-    row?.evidence?.version === "SHADOW_TRADE_EVIDENCE_V1" &&
-    row.evidence.tradeId === row.tradeId &&
-    row.evidence.index === row.index &&
-    row.evidence.brokerOrderAllowed === false
-  );
+  return rows.filter(isValidEnvelope);
 }

@@ -1,0 +1,30 @@
+name: Broker Execution Authorization CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - broker-execution-authorization.ts
+      - test/broker-execution-authorization.test.ts
+      - .github/workflows/broker-execution-authorization-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-authorization:
+    name: Validate broker execution authorization
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run broker execution authorization devil tests
+        run: node --import tsx --test test/broker-execution-authorization.test.ts

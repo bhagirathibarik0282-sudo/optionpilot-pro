@@ -29,7 +29,7 @@ export interface PsychologyRealEvidenceFlowInput {
   recordedAt: string;
   regimes: ShadowValidationRegime[];
   regimeEvidence: ShadowValidationRegimeEvidence[];
-  direct: PsychologyValidationEventSourceBridgeInput;
+  direct: readonly PsychologyValidationEventSourceBridgeInput[];
   retrospective: PsychologyRetrospectiveOutcomeEvidenceInput | null;
 }
 
@@ -85,11 +85,12 @@ function compareDirectContract(candidate: CandidateHistoryRecord, direct: Psycho
 }
 
 /**
- * End-to-end research-only composition for psychology evidence. It joins the direct deterministic
- * shadow-chain events with separately verified retrospective outcome adjudications, aggregates the
- * frozen counters, passes the canonical replay/live guard, and prepares (but never persists) the
- * trusted real-evidence record. Missing retrospective adjudications remain explicit unresolved
- * sources; they are never converted into zero-valued facts by this layer.
+ * End-to-end research-only composition for psychology evidence. It joins an ordered sequence of
+ * direct deterministic shadow-chain transitions with separately verified retrospective outcome
+ * adjudications, aggregates the frozen counters, passes the canonical replay/live guard, and
+ * prepares (but never persists) the trusted real-evidence record. Missing retrospective
+ * adjudications remain explicit unresolved sources; they are never converted into zero-valued
+ * facts by this layer.
  */
 export function preparePsychologyRealEvidenceFlow(input: PsychologyRealEvidenceFlowInput): PsychologyRealEvidenceFlowResult {
   const blockers: string[] = [];
@@ -111,12 +112,30 @@ export function preparePsychologyRealEvidenceFlow(input: PsychologyRealEvidenceF
   if (!input.replay.tradingDate) blockers.push("REPLAY_TRADING_DATE_MISSING");
   if (input.replay.logicalKey.trim() !== candidateId) blockers.push("REPLAY_CANDIDATE_ID_MISMATCH");
 
-  blockers.push(...compareDirectContract(input.candidate, input.direct));
-  if (input.direct.tradeId.trim() !== candidateId) blockers.push("DIRECT_TRADE_ID_MISMATCH");
-  if (input.direct.source !== expectedSource) blockers.push("DIRECT_EVENT_SOURCE_MISMATCH");
-  if (validIso(input.direct.observedAt) && validIso(input.evaluationCutoffAt)
-      && Date.parse(input.direct.observedAt) > Date.parse(input.evaluationCutoffAt)) {
-    blockers.push("DIRECT_OBSERVED_AFTER_EVALUATION_CUTOFF");
+  if (!Array.isArray(input.direct) || input.direct.length === 0) blockers.push("DIRECT_SEQUENCE_MISSING");
+  let previousObservedMs: number | null = null;
+  let previousCurrentFingerprint: string | null = null;
+  for (let index = 0; index < input.direct.length; index += 1) {
+    const direct = input.direct[index];
+    blockers.push(...compareDirectContract(input.candidate, direct).map((item) => `${item}:${index}`));
+    if (direct.tradeId.trim() !== candidateId) blockers.push(`DIRECT_TRADE_ID_MISMATCH:${index}`);
+    if (direct.source !== expectedSource) blockers.push(`DIRECT_EVENT_SOURCE_MISMATCH:${index}`);
+    if (!validIso(direct.observedAt)) blockers.push(`DIRECT_OBSERVED_AT_INVALID:${index}`);
+    else {
+      const observedMs = Date.parse(direct.observedAt);
+      if (validIso(input.replay.decisionAt) && observedMs < Date.parse(input.replay.decisionAt)) blockers.push(`DIRECT_OBSERVED_BEFORE_REPLAY_DECISION:${index}`);
+      if (validIso(input.evaluationCutoffAt) && observedMs > Date.parse(input.evaluationCutoffAt)) blockers.push(`DIRECT_OBSERVED_AFTER_EVALUATION_CUTOFF:${index}`);
+      if (previousObservedMs != null && observedMs <= previousObservedMs) blockers.push(`DIRECT_SEQUENCE_NOT_STRICTLY_CHRONOLOGICAL:${index}`);
+      previousObservedMs = observedMs;
+    }
+
+    if (index > 0) {
+      if (!direct.previous) blockers.push(`DIRECT_SEQUENCE_PREVIOUS_MISSING:${index}`);
+      else if (previousCurrentFingerprint !== null && direct.previous.currentFingerprint !== previousCurrentFingerprint) {
+        blockers.push(`DIRECT_SEQUENCE_CONTINUITY_MISMATCH:${index}`);
+      }
+    }
+    previousCurrentFingerprint = direct.current.currentFingerprint;
   }
 
   if (input.retrospective) {
@@ -132,8 +151,12 @@ export function preparePsychologyRealEvidenceFlow(input: PsychologyRealEvidenceF
 
   if (blockers.length > 0) return blocked(candidateId, blockers, unresolvedSources);
 
-  const direct = projectPsychologyValidationEvents(input.direct);
-  if (direct.status !== "READY") blockers.push(...direct.blockers.map((item) => `DIRECT_${item}`));
+  const directEvents: PsychologyValidationEvent[] = [];
+  for (let index = 0; index < input.direct.length; index += 1) {
+    const direct = projectPsychologyValidationEvents(input.direct[index]);
+    if (direct.status !== "READY") blockers.push(...direct.blockers.map((item) => `DIRECT_${index}_${item}`));
+    else directEvents.push(...direct.events);
+  }
 
   let retrospectiveEvents: PsychologyValidationEvent[] = [];
   if (input.retrospective) {
@@ -147,13 +170,11 @@ export function preparePsychologyRealEvidenceFlow(input: PsychologyRealEvidenceF
 
   if (blockers.length > 0) return blocked(candidateId, blockers, unresolvedSources);
 
-  const events = [...direct.events, ...retrospectiveEvents];
+  const events = [...directEvents, ...retrospectiveEvents];
   if (validIso(input.replay.decisionAt)) {
     const decisionMs = Date.parse(input.replay.decisionAt);
     for (const event of events) {
-      if (validIso(event.observedAt) && Date.parse(event.observedAt) < decisionMs) {
-        blockers.push(`EVENT_BEFORE_REPLAY_DECISION:${event.kind}`);
-      }
+      if (validIso(event.observedAt) && Date.parse(event.observedAt) < decisionMs) blockers.push(`EVENT_BEFORE_REPLAY_DECISION:${event.kind}`);
       if (event.source !== expectedSource) blockers.push(`EVENT_SOURCE_MISMATCH:${event.kind}`);
     }
   }
@@ -192,7 +213,7 @@ export function preparePsychologyRealEvidenceFlow(input: PsychologyRealEvidenceF
     candidateId,
     status: "READY_TO_PERSIST",
     collection,
-    directEventCount: direct.events.length,
+    directEventCount: directEvents.length,
     retrospectiveEventCount: retrospectiveEvents.length,
     totalEventCount: events.length,
     unresolvedSources: [...new Set(unresolvedSources)],

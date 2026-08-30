@@ -25,6 +25,7 @@ on:
       - execution-candidate-selector.ts
       - execution-level-plan.ts
       - execution-liquidity-spread-gate.ts
+      - broker-order-builder.ts
       - message-trigger-engine.ts
       - buyer-seller-behaviour-engine.ts
       - psychology-shadow-chain.ts
@@ -57,6 +58,7 @@ on:
       - test/execution-candidate-selector.test.ts
       - test/execution-level-plan.test.ts
       - test/execution-liquidity-spread-gate.test.ts
+      - test/broker-order-builder.test.ts
       - test/message-trigger-engine.test.ts
       - test/buyer-seller-behaviour-engine.test.ts
       - test/psychology-shadow-chain.test.ts
@@ -170,6 +172,9 @@ jobs:
 
       - name: Run execution liquidity spread gate tests
         run: node --import tsx --test test/execution-liquidity-spread-gate.test.ts
+
+      - name: Run broker order builder tests
+        run: node --import tsx --test test/broker-order-builder.test.ts
 
       - name: Run existing package tests when available
         run: |

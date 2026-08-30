@@ -1,0 +1,30 @@
+name: Exit Intent State CI
+
+on:
+  pull_request:
+    branches:
+      - automation-staging
+    paths:
+      - exit-intent-state.ts
+      - test/exit-intent-state.test.ts
+      - .github/workflows/exit-intent-state-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-exit-intent-state:
+    name: Validate exit intent state
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout review branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run exit intent devil tests
+        run: node --import tsx --test test/exit-intent-state.test.ts

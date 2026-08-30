@@ -17,13 +17,33 @@ const base = {
   scaleOutMinScore: 0.6,
   runnerExitMaxScore: 0.35,
   structuralSlCandidate: 118,
+  runnerBuffer: {
+    index: "NIFTY" as const,
+    currentPremium: 138,
+    premiumAtr: 6,
+    realisedVolatilityPct: 18,
+    relativeSpreadPct: 0.8,
+    dte: 2,
+    iv: 16,
+    recentWhipsawRate: 0.25,
+    structuralBuffer: 5,
+    maxAllowedBuffer: 14,
+    quantumFeatures: [0.8, 0.7, 0.75, 0.82],
+  },
 };
+
+const withPremium = (currentPremium: number) => ({
+  ...base,
+  currentPremium,
+  runnerBuffer: { ...base.runnerBuffer, currentPremium },
+});
 
 test("requests exactly one-lot partial exit when dynamic score qualifies", () => {
   const d = evaluateTwoLotQuantumRunner(base);
   assert.equal(d.action, "REQUEST_PARTIAL_EXIT");
   assert.equal(d.requestedExitQty, 65);
   assert.equal(d.placesOrder, false);
+  assert.ok((d.runnerBufferPoints ?? 0) > 0);
 });
 
 test("holds two lots when scale-out quality is below threshold", () => {
@@ -49,12 +69,12 @@ test("blocks partial-exit overfill", () => {
 });
 
 test("runner exits when quantum-adjusted runner quality deteriorates", () => {
+  const p = withPremium(140);
   const d = evaluateTwoLotQuantumRunner({
-    ...base,
+    ...p,
     stage: "ONE_LOT_RUNNER",
     confirmedExitQty: 65,
     runnerClassicalScore: 0.2,
-    currentPremium: 140,
     structuralSlCandidate: 120,
   });
   assert.equal(d.action, "REQUEST_RUNNER_EXIT");
@@ -62,15 +82,33 @@ test("runner exits when quantum-adjusted runner quality deteriorates", () => {
 });
 
 test("trailing stop never widens", () => {
+  const p = withPremium(140);
   const d = evaluateTwoLotQuantumRunner({
-    ...base,
+    ...p,
     stage: "ONE_LOT_RUNNER",
     confirmedExitQty: 65,
     currentTrailingSl: 125,
     structuralSlCandidate: 119,
-    currentPremium: 140,
   });
   assert.equal(d.nextTrailingSl, 125);
+});
+
+test("SENSEX and NIFTY use distinct runner buffers", () => {
+  const n = evaluateTwoLotQuantumRunner(base);
+  const s = evaluateTwoLotQuantumRunner({
+    ...base,
+    runnerBuffer: { ...base.runnerBuffer, index: "SENSEX" as const },
+  });
+  assert.notEqual(n.runnerBufferPoints, s.runnerBufferPoints);
+});
+
+test("blocks runner buffer price mismatch", () => {
+  const d = evaluateTwoLotQuantumRunner({
+    ...base,
+    runnerBuffer: { ...base.runnerBuffer, currentPremium: 137 },
+  });
+  assert.equal(d.action, "BLOCK");
+  assert.equal(d.reason, "RUNNER_BUFFER_STATE_MISMATCH");
 });
 
 test("blocks unconfirmed two-lot entry quantity", () => {

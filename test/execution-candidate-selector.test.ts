@@ -9,6 +9,8 @@ const base = {
   expiryDate: "2026-09-01",
   dte: 2,
   moneyness: "ATM" as const,
+  premiumLtp: 150,
+  capitalFit: true,
   liquidityOk: true,
   spreadOk: true,
   premiumResponseConfirmed: true,
@@ -19,18 +21,94 @@ const base = {
   higherDteUsable: false,
 };
 
-test("selects a valid NIFTY scalp candidate", () => {
+test("selects a valid NIFTY near-DTE candidate", () => {
   const r = selectExecutionCandidate(base);
   assert.equal(r.decision, "SELECT");
-  assert.ok(r.candidateKey);
+  assert.equal(r.dteBucket, "NEAR_2_4");
+});
+
+test("classifies 0-1 DTE as expiry priority bucket", () => {
+  const r = selectExecutionCandidate({ ...base, dte: 1 });
+  assert.equal(r.decision, "SELECT");
+  assert.equal(r.dteBucket, "EXPIRY_0_1");
+});
+
+test("5-7 DTE requires explicit fallback approval", () => {
+  const r = selectExecutionCandidate({ ...base, dte: 6 });
+  assert.equal(r.decision, "BLOCK");
+  assert.ok(r.reasonCodes.includes("FALLBACK_DTE_NOT_APPROVED"));
+});
+
+test("5-7 DTE may pass only with fallback approval", () => {
+  const r = selectExecutionCandidate({ ...base, dte: 6, fallbackDteApproved: true });
+  assert.equal(r.decision, "SELECT");
+  assert.equal(r.dteBucket, "FALLBACK_5_7");
+});
+
+test("NIFTY above 7 DTE is not a scalp candidate", () => {
+  const r = selectExecutionCandidate({ ...base, dte: 8, fallbackDteApproved: true });
+  assert.equal(r.decision, "BLOCK");
+  assert.ok(r.reasonCodes.includes("DTE_BUCKET_NOT_ALLOWED"));
+});
+
+test("BANKNIFTY accepts higher DTE 10-35 bucket", () => {
+  const r = selectExecutionCandidate({
+    ...base,
+    symbol: "BANKNIFTY",
+    dte: 18,
+    currentOrNearExpiryUsable: false,
+    higherDteUsable: true,
+  });
+  assert.equal(r.decision, "SELECT");
+  assert.equal(r.dteBucket, "BANKNIFTY_HIGHER_10_35");
+});
+
+test("BANKNIFTY below 10 DTE is blocked", () => {
+  const r = selectExecutionCandidate({
+    ...base,
+    symbol: "BANKNIFTY",
+    dte: 9,
+    currentOrNearExpiryUsable: false,
+    higherDteUsable: true,
+  });
+  assert.equal(r.decision, "BLOCK");
+  assert.ok(r.reasonCodes.includes("DTE_BUCKET_NOT_ALLOWED"));
+});
+
+test("BANKNIFTY above 35 DTE is blocked", () => {
+  const r = selectExecutionCandidate({
+    ...base,
+    symbol: "BANKNIFTY",
+    dte: 36,
+    currentOrNearExpiryUsable: false,
+    higherDteUsable: true,
+  });
+  assert.equal(r.decision, "BLOCK");
 });
 
 test("blocks unsupported moneyness", () => {
-  const r = selectExecutionCandidate({ ...base, moneyness: "ATM" as any as "ATM" });
-  (r as any);
-  const bad = selectExecutionCandidate({ ...base, moneyness: "OTM2" as any });
-  assert.equal(bad.decision, "BLOCK");
-  assert.ok(bad.reasonCodes.includes("UNSUPPORTED_MONEYNESS"));
+  const r = selectExecutionCandidate({ ...base, moneyness: "OTM2" as any });
+  assert.equal(r.decision, "BLOCK");
+  assert.ok(r.reasonCodes.includes("UNSUPPORTED_MONEYNESS"));
+});
+
+test("blocks invalid or zero premium", () => {
+  const zero = selectExecutionCandidate({ ...base, premiumLtp: 0 });
+  const nan = selectExecutionCandidate({ ...base, premiumLtp: Number.NaN });
+  assert.equal(zero.decision, "BLOCK");
+  assert.equal(nan.decision, "BLOCK");
+  assert.ok(zero.reasonCodes.includes("INVALID_PREMIUM_LTP"));
+});
+
+test("blocks premium that does not fit capital budget", () => {
+  const r = selectExecutionCandidate({ ...base, capitalFit: false });
+  assert.equal(r.decision, "BLOCK");
+  assert.ok(r.reasonCodes.includes("PREMIUM_NOT_CAPITAL_FIT"));
+});
+
+test("does not reject a higher premium merely for being expensive when capital-fit and quality gates pass", () => {
+  const r = selectExecutionCandidate({ ...base, premiumLtp: 999, capitalFit: true });
+  assert.equal(r.decision, "SELECT");
 });
 
 test("blocks poor liquidity", () => {
@@ -67,17 +145,6 @@ test("NIFTY requires usable near expiry", () => {
   const r = selectExecutionCandidate({ ...base, currentOrNearExpiryUsable: false });
   assert.equal(r.decision, "BLOCK");
   assert.ok(r.reasonCodes.includes("NEAR_EXPIRY_NOT_USABLE"));
-});
-
-test("BANKNIFTY requires higher DTE usability", () => {
-  const r = selectExecutionCandidate({
-    ...base,
-    symbol: "BANKNIFTY",
-    dte: 18,
-    currentOrNearExpiryUsable: false,
-    higherDteUsable: true,
-  });
-  assert.equal(r.decision, "SELECT");
 });
 
 test("invalid contract identity fails closed", () => {

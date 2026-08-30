@@ -41,10 +41,10 @@ function validIso(value: string): boolean {
 }
 
 /**
- * Fail-closed bridge from an observed candidate-history row into the trusted psychology
- * real-evidence store contract. This collector deliberately does not derive psychology
- * counters or regime labels from candidate history: those facts must already be supplied
- * by deterministic upstream/replay instrumentation and pass their canonical validators.
+ * Fail-closed bridge from an observed exact candidate-history row into the trusted
+ * psychology real-evidence store contract. This collector deliberately does not derive
+ * psychology counters or regime labels from candidate history: those facts must already
+ * be supplied by deterministic upstream/replay instrumentation and pass canonical validators.
  */
 export function preparePsychologyEvidenceCollectionCandidate(
   request: PsychologyEvidenceCollectionCandidate,
@@ -56,9 +56,14 @@ export function preparePsychologyEvidenceCollectionCandidate(
 
   if (!candidateId) blockers.push("CANDIDATE_ID_MISSING");
   if (request.candidate.status !== "OBSERVED") blockers.push(`CANDIDATE_NOT_OBSERVED:${request.candidate.status}`);
+  if (request.candidate.side === null) blockers.push("CANDIDATE_SIDE_MISSING");
+  if (request.candidate.expiry === null) blockers.push("CANDIDATE_EXPIRY_MISSING");
+  if (request.candidate.strike === null) blockers.push("CANDIDATE_STRIKE_MISSING");
+  if (request.candidate.dte === null) blockers.push("CANDIDATE_DTE_MISSING");
   if (candidateId !== tradeId) blockers.push("CANDIDATE_VALIDATION_TRADE_ID_MISMATCH");
   if (candidateId !== replayKey) blockers.push("CANDIDATE_REPLAY_KEY_MISMATCH");
 
+  if (!validIso(request.recordedAt)) blockers.push("RECORDED_AT_INVALID");
   if (!validIso(request.candidate.observedAt)) blockers.push("CANDIDATE_OBSERVED_AT_INVALID");
   if (!validIso(request.input.replay.decisionAt)) blockers.push("REPLAY_DECISION_AT_INVALID");
   if (validIso(request.candidate.observedAt) && validIso(request.input.replay.decisionAt)
@@ -69,6 +74,10 @@ export function preparePsychologyEvidenceCollectionCandidate(
   if (request.candidate.expiry !== null && request.input.replay.expiry !== null
       && request.candidate.expiry !== request.input.replay.expiry) {
     blockers.push("CANDIDATE_REPLAY_EXPIRY_MISMATCH");
+  }
+  if (request.candidate.dte !== null && request.input.replay.dte !== null
+      && request.candidate.dte !== request.input.replay.dte) {
+    blockers.push("CANDIDATE_REPLAY_DTE_MISMATCH");
   }
 
   const admitted = adaptPsychologyValidationEvidence(request.input);

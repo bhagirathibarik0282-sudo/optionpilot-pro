@@ -43,8 +43,37 @@ export interface ExecutionLossGateResult {
   failClosed: true;
 }
 
+export interface ExecutionDailyLossPolicy {
+  maxDailyLoss: number;
+}
+
+export interface ExecutionDailyLossInput {
+  symbol: string;
+  realizedLossToday: number;
+  openRisk: number;
+  newTradeProjectedLoss: number;
+  policy: ExecutionDailyLossPolicy;
+}
+
+export interface ExecutionDailyLossGateResult {
+  version: "EXECUTION_DAILY_LOSS_GATE_V1";
+  decision: ExecutionRiskDecision;
+  reasonCodes: string[];
+  symbol: string | null;
+  realizedLossToday: number | null;
+  openRisk: number | null;
+  newTradeProjectedLoss: number | null;
+  projectedDailyLossExposure: number | null;
+  maxDailyLoss: number | null;
+  failClosed: true;
+}
+
 function finitePositive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+function finiteNonNegative(value: number): boolean {
+  return Number.isFinite(value) && value >= 0;
 }
 
 function normalizedSymbol(symbol: string): string | null {
@@ -107,6 +136,47 @@ export function evaluateExecutionLossGate(
     symbol,
     projectedMaxLoss,
     maxLossPerTrade,
+    failClosed: true,
+  };
+}
+
+export function evaluateExecutionDailyLossGate(
+  input: ExecutionDailyLossInput,
+): ExecutionDailyLossGateResult {
+  const reasonCodes: string[] = [];
+  const symbol = normalizedSymbol(input?.symbol);
+  const realizedLossToday = finiteNonNegative(input?.realizedLossToday) ? input.realizedLossToday : null;
+  const openRisk = finiteNonNegative(input?.openRisk) ? input.openRisk : null;
+  const newTradeProjectedLoss = finitePositive(input?.newTradeProjectedLoss) ? input.newTradeProjectedLoss : null;
+  const maxDailyLoss = finitePositive(input?.policy?.maxDailyLoss)
+    ? input.policy.maxDailyLoss
+    : null;
+
+  if (!symbol) reasonCodes.push("INVALID_SYMBOL");
+  if (realizedLossToday == null) reasonCodes.push("INVALID_REALIZED_LOSS_TODAY");
+  if (openRisk == null) reasonCodes.push("INVALID_OPEN_RISK");
+  if (newTradeProjectedLoss == null) reasonCodes.push("INVALID_NEW_TRADE_PROJECTED_LOSS");
+  if (maxDailyLoss == null) reasonCodes.push("INVALID_MAX_DAILY_LOSS");
+
+  const projectedDailyLossExposure = reasonCodes.length === 0
+    ? realizedLossToday! + openRisk! + newTradeProjectedLoss!
+    : null;
+
+  // Daily cap is a hard stop: hitting or crossing it blocks the new order.
+  if (projectedDailyLossExposure != null && projectedDailyLossExposure >= maxDailyLoss!) {
+    reasonCodes.push("MAX_DAILY_LOSS_LIMIT_REACHED_OR_EXCEEDED");
+  }
+
+  return {
+    version: "EXECUTION_DAILY_LOSS_GATE_V1",
+    decision: reasonCodes.length === 0 ? "ALLOW" : "BLOCK",
+    reasonCodes: reasonCodes.length === 0 ? ["DAILY_LOSS_GATE_PASSED"] : reasonCodes,
+    symbol,
+    realizedLossToday,
+    openRisk,
+    newTradeProjectedLoss,
+    projectedDailyLossExposure,
+    maxDailyLoss,
     failClosed: true,
   };
 }

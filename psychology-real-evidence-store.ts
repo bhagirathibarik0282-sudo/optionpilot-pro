@@ -54,7 +54,11 @@ export function preparePsychologyRealEvidenceForStorage(
   }
 
   if (admitted.observation.regimeEvidence !== undefined) {
-    const provenance = validateShadowValidationRegimeEvidence(admitted.observation.regimeEvidence, input.replay.decisionAt);
+    const provenance = validateShadowValidationRegimeEvidence(
+      admitted.observation.regimeEvidence,
+      input.replay.decisionAt,
+      admitted.observation.regimes,
+    );
     if (!provenance.valid) return null;
   }
 
@@ -102,6 +106,7 @@ export function isStoredPsychologyRealEvidence(value: unknown): value is StoredP
     const provenance = validateShadowValidationRegimeEvidence(
       readmission.observation.regimeEvidence,
       (row.replay as PsychologyReplayValidationInput["replay"]).decisionAt,
+      readmission.observation.regimes,
     );
     if (!provenance.valid) return false;
   }

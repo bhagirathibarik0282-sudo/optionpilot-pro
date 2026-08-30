@@ -21,8 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
       - name: EOD core tests
         run: NODE_ENV=test node --import tsx --test test/eod-archive-core.test.ts
       - name: Import Drive uploader

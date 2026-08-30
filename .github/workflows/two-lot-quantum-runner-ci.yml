@@ -1,0 +1,27 @@
+name: Two Lot Quantum Runner CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - two-lot-quantum-runner.ts
+      - quantum-inspired-core.ts
+      - test/two-lot-quantum-runner.test.ts
+      - .github/workflows/two-lot-quantum-runner-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-two-lot-quantum-runner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run two-lot quantum runner tests
+        run: node --import tsx --test test/two-lot-quantum-runner.test.ts

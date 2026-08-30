@@ -8,6 +8,7 @@ export interface H1OutcomeAttribution {
   symbol: string;
   tradingDate: string;
   status: OutcomeStatus;
+  evaluatedAt: string | null;
   outcomeClass: H1OutcomeClass;
   terminal: boolean;
   calibrationEligible: boolean;
@@ -63,6 +64,7 @@ export function mapVerifiedOutcome(record: OutcomeRecord): H1OutcomeAttribution 
   if (record.observationResolution !== "3MIN_LTP_SAMPLED") reasons.push("OBSERVATION_RESOLUTION_UNEXPECTED");
   if (record.maeR == null || record.mfeR == null) reasons.push("R_EXCURSION_UNAVAILABLE");
   if (!record.planId) reasons.push("PLAN_ID_UNAVAILABLE");
+  if (terminal && !record.evaluatedAt) reasons.push("EVALUATED_AT_UNAVAILABLE");
 
   const calibrationEligible =
     terminal &&
@@ -80,6 +82,7 @@ export function mapVerifiedOutcome(record: OutcomeRecord): H1OutcomeAttribution 
     symbol: record.symbol,
     tradingDate: record.tradingDate,
     status: record.status,
+    evaluatedAt: record.evaluatedAt,
     outcomeClass,
     terminal,
     calibrationEligible,

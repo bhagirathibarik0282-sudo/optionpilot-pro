@@ -17,6 +17,7 @@ test("target outcome maps to calibration-eligible WIN without recomputation", ()
   assert.equal(out.outcomeClass, "WIN");
   assert.equal(out.calibrationEligible, true);
   assert.equal(out.status, "TARGET_T1_HIT");
+  assert.equal(out.evaluatedAt, "2026-08-28T05:00:00Z");
   assert.equal(out.affectsVerdict, false);
 });
 

@@ -59,7 +59,7 @@ export class KiteImmediateRuntimeCore {
           if (row.detector.event?.fresh && row.detector.event.abnormalImmediateChange) freshEvents.push(row.detector.event);
         }
         for (const row of p.migrationTruthRecords) {
-          if (row.record?.event?.fresh && row.record.event.abnormalImmediateChange) freshEvents.push(row.record.event);
+          if (row.ok && row.record.event.fresh && row.record.event.abnormalImmediateChange) freshEvents.push(row.record.event);
         }
       }
     }

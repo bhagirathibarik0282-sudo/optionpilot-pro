@@ -1,0 +1,23 @@
+name: Shadow Postgres Restart Runtime Adapter CI
+
+on:
+  pull_request:
+    branches: [automation-staging]
+    paths:
+      - 'shadow-postgres-restart-runtime-adapter.ts'
+      - 'test/shadow-postgres-restart-runtime-adapter.test.ts'
+      - '.github/workflows/shadow-postgres-restart-runtime-adapter-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/shadow-postgres-restart-runtime-adapter.test.ts

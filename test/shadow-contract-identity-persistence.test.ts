@@ -100,6 +100,37 @@ test("conflicting durable rows make recovery identity unavailable", async () => 
   assert.equal(await loadShadowContractIdentity("TRADE-6", io), null);
 });
 
+test("valid row plus corrupt same-trade row taints recovery", async () => {
+  const valid = buildShadowContractIdentityPersistenceEnvelope("TRADE-TAINT-1", identity, "2026-09-01T04:00:00.000Z");
+  assert.ok(valid);
+  const corrupt = { ...valid!, failClosed: false } as unknown as ShadowContractIdentityPersistenceEnvelope;
+  const { io } = memoryIo([valid!, corrupt]);
+  assert.equal(await loadShadowContractIdentity("TRADE-TAINT-1", io), null);
+});
+
+test("corrupt same-trade row blocks idempotent persistence reuse", async () => {
+  const valid = buildShadowContractIdentityPersistenceEnvelope("TRADE-TAINT-2", identity, "2026-09-01T04:00:00.000Z");
+  assert.ok(valid);
+  const corrupt = { ...valid!, persistedAt: "not-a-date" } as ShadowContractIdentityPersistenceEnvelope;
+  const { io, rows } = memoryIo([valid!, corrupt]);
+  const ok = await persistShadowContractIdentity(
+    "TRADE-TAINT-2",
+    identity,
+    "2026-09-01T04:02:00.000Z",
+    io,
+  );
+  assert.equal(ok, false);
+  assert.equal(rows.length, 2);
+});
+
+test("invalid row for another trade does not taint target identity", async () => {
+  const valid = buildShadowContractIdentityPersistenceEnvelope("TRADE-CLEAN", identity, "2026-09-01T04:00:00.000Z");
+  assert.ok(valid);
+  const unrelatedCorrupt = { ...valid!, tradeId: "OTHER-TRADE", shadowOnly: false } as unknown as ShadowContractIdentityPersistenceEnvelope;
+  const { io } = memoryIo([valid!, unrelatedCorrupt]);
+  assert.deepEqual(await loadShadowContractIdentity("TRADE-CLEAN", io), identity);
+});
+
 test("persistence IO failure returns false/null instead of guessing", async () => {
   const io: ShadowContractIdentityPersistenceIo = {
     async insert() { throw new Error("db down"); },

@@ -5,7 +5,8 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "start": "node scripts/wire-storage-v3-runtime.mjs && node scripts/wire-outcome-history-runtime.mjs && tsx server.ts",
+    "start": "node scripts/wire-storage-v3-runtime.mjs && node scripts/wire-outcome-history-runtime.mjs && (tsx kite-shadow-runtime-service.ts & tsx server.ts)",
+    "start:kite-shadow": "tsx kite-shadow-runtime-service.ts",
     "start:option-recorder": "tsx option-recorder-service.ts",
     "eod:archive": "tsx eod-archive-job.ts",
     "fii-dii:daily": "tsx fii-dii-daily-job.ts",

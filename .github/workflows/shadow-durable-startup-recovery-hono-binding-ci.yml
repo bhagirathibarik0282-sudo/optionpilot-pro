@@ -1,0 +1,20 @@
+name: Shadow Durable Startup Recovery Hono Binding CI
+
+on:
+  pull_request:
+    branches: [automation-staging]
+    paths:
+      - 'shadow-durable-startup-recovery-hono-binding.ts'
+      - 'test/shadow-durable-startup-recovery-hono-binding.test.ts'
+      - '.github/workflows/shadow-durable-startup-recovery-hono-binding-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/shadow-durable-startup-recovery-hono-binding.test.ts

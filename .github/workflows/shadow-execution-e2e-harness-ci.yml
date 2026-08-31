@@ -1,0 +1,26 @@
+name: Shadow Execution E2E Harness CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - automation-staging
+    paths:
+      - 'shadow-execution-e2e-harness.ts'
+      - 'test/shadow-execution-e2e-harness.test.ts'
+      - 'execution-action-planner.ts'
+      - 'shadow-execution-intent-coordinator.ts'
+      - 'shadow-execution-route-adapter.ts'
+      - 'shadow-downstream-state-bridge.ts'
+      - '.github/workflows/shadow-execution-e2e-harness-ci.yml'
+
+jobs:
+  shadow-execution-e2e-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/shadow-execution-e2e-harness.test.ts

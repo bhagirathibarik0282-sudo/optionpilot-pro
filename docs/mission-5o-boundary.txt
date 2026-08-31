@@ -1,1 +1,0 @@
-Mission 5O is a semantic-integrity hardening change only. It modifies the existing startup-recovery read-only observability contract and its tests/CI. It adds no runtime adapter, no server.ts wiring, no Railway/config changes, no main merge, no production deployment, no new-entry authority, and no broker order authority.

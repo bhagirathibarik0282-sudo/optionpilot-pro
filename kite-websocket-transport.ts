@@ -18,14 +18,18 @@ export type KiteWebSocketTransportConfig = {
   instrumentTokens: number[];
   mode?: "ltp" | "quote" | "full";
   socketFactory?: KiteSocketFactory;
+  reconnect?: { enabled: boolean; delayMs?: number; maxAttempts?: number };
   onTicks: (ticks: KiteDecodedPacket[], receivedAt: string) => void | Promise<void>;
   onTextMessage?: (text: string) => void | Promise<void>;
-  onState?: (state: "CONNECTING" | "OPEN" | "CLOSED" | "ERROR") => void;
+  onState?: (state: "CONNECTING" | "OPEN" | "CLOSED" | "ERROR" | "RECONNECTING") => void;
 };
 
 export class KiteWebSocketTransport {
   private socket: KiteSocketLike | null = null;
   private readonly mode: "ltp" | "quote" | "full";
+  private reconnectAttempts = 0;
+  private manualDisconnect = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly config: KiteWebSocketTransportConfig) {
     this.mode = config.mode ?? "full";
@@ -38,14 +42,20 @@ export class KiteWebSocketTransport {
 
   connect(): void {
     if (this.socket) throw new Error("KITE_WS_ALREADY_STARTED");
+    this.manualDisconnect = false;
+    this.openSocket(false);
+  }
+
+  private openSocket(isReconnect: boolean): void {
     const factory = this.config.socketFactory ?? ((url: string) => new WebSocket(url) as unknown as KiteSocketLike);
     const url = `${KITE_WS_ENDPOINT}?api_key=${encodeURIComponent(this.config.apiKey)}&access_token=${encodeURIComponent(this.config.accessToken)}`;
-    this.config.onState?.("CONNECTING");
+    this.config.onState?.(isReconnect ? "RECONNECTING" : "CONNECTING");
     const socket = factory(url);
     this.socket = socket;
     socket.binaryType = "arraybuffer";
 
     socket.addEventListener("open", () => {
+      this.reconnectAttempts = 0;
       socket.send(JSON.stringify({ a: "subscribe", v: this.config.instrumentTokens }));
       socket.send(JSON.stringify({ a: "mode", v: [this.mode, this.config.instrumentTokens] }));
       this.config.onState?.("OPEN");
@@ -73,11 +83,29 @@ export class KiteWebSocketTransport {
     socket.addEventListener("error", () => this.config.onState?.("ERROR"));
     socket.addEventListener("close", () => {
       this.config.onState?.("CLOSED");
-      this.socket = null;
+      if (this.socket === socket) this.socket = null;
+      this.scheduleReconnect();
     });
   }
 
+  private scheduleReconnect(): void {
+    if (this.manualDisconnect || !this.config.reconnect?.enabled || this.reconnectTimer) return;
+    const maxAttempts = this.config.reconnect.maxAttempts ?? 10;
+    if (this.reconnectAttempts >= maxAttempts) return;
+    this.reconnectAttempts += 1;
+    const delayMs = this.config.reconnect.delayMs ?? 1000;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.manualDisconnect && !this.socket) this.openSocket(true);
+    }, delayMs);
+  }
+
   disconnect(): void {
+    this.manualDisconnect = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (!this.socket) return;
     this.socket.close(1000, "normal");
   }

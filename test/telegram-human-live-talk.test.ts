@@ -65,3 +65,44 @@ test("empty symbol fails closed", () => {
     verifiedFacts: [],
   }), /symbol is required/);
 });
+
+test("immediate context renders why-now verdict watch and invalidation", () => {
+  const out = buildHumanLiveTalk({
+    style: "SCALP",
+    symbol: "NIFTY",
+    side: "CE",
+    state: "READY",
+    verdictLocked: true,
+    verifiedFacts: ["PCR jumped immediately.", "Call-wall OI shed immediately.", "CE premium expanded."],
+    immediate: {
+      whyNow: "PCR, wall pressure and CE premium synchronized in favour of the locked bullish trend.",
+      verdict: "CE_FAVOURED",
+      whatToWatch: "Watch CE continuation and PE weakness.",
+      invalidation: "Confidence weakens if PE re-expands or cross-index alignment breaks.",
+    },
+  });
+
+  assert.match(out.text, /IMMEDIATE CHANGE — NIFTY/);
+  assert.match(out.text, /WHY NOW:/);
+  assert.match(out.text, /VERDICT: CE FAVOURED/);
+  assert.match(out.text, /WATCH:/);
+  assert.match(out.text, /INVALIDATION:/);
+  assert.equal(out.affectsTelegram, false);
+});
+
+test("immediate context cannot override a locked WAIT state", () => {
+  assert.throws(() => buildHumanLiveTalk({
+    style: "SCALP",
+    symbol: "NIFTY",
+    side: "CE",
+    state: "WATCH",
+    verdictLocked: true,
+    verifiedFacts: ["PCR moved."],
+    immediate: {
+      whyNow: "PCR moved.",
+      verdict: "CE_FAVOURED",
+      whatToWatch: "Watch CE.",
+      invalidation: "Watch PE re-expansion.",
+    },
+  }), /immediate verdict must match locked trade state and side/);
+});

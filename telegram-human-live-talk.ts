@@ -2,6 +2,13 @@ export type HumanTalkTradeStyle = "SCALP" | "SWING" | "TRADE";
 export type HumanTalkSide = "CE" | "PE" | "NONE";
 export type HumanTalkState = "READY" | "WATCH" | "BLOCKED" | "DATA_UNAVAILABLE";
 
+export interface HumanTalkImmediateContext {
+  whyNow: string;
+  verdict: "CE_FAVOURED" | "PE_FAVOURED" | "WAIT";
+  whatToWatch: string;
+  invalidation: string;
+}
+
 export interface HumanLiveTalkInput {
   style: HumanTalkTradeStyle;
   symbol: string;
@@ -10,6 +17,7 @@ export interface HumanLiveTalkInput {
   verdictLocked: true;
   verifiedFacts: string[];
   caution?: string | null;
+  immediate?: HumanTalkImmediateContext | null;
 }
 
 export interface HumanLiveTalkResult {
@@ -28,13 +36,20 @@ function cleanFact(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
+function sideToImmediateVerdict(side: HumanTalkSide): HumanTalkImmediateContext["verdict"] {
+  if (side === "CE") return "CE_FAVOURED";
+  if (side === "PE") return "PE_FAVOURED";
+  return "WAIT";
+}
+
 /**
  * Human-like live-market wording boundary.
  *
  * IMPORTANT: this layer is downstream of the locked deterministic verdict.
  * It may talk naturally about caller-supplied VERIFIED facts, but it cannot
  * choose CE/PE, upgrade WATCH/BLOCKED to READY, create a contract, calculate
- * entry/SL/targets, or invent market numbers.
+ * entry/SL/targets, or invent market numbers. Optional immediate context is
+ * also deterministic upstream evidence; this function only renders it.
  */
 export function buildHumanLiveTalk(input: HumanLiveTalkInput): HumanLiveTalkResult {
   const symbol = input.symbol.trim().toUpperCase();
@@ -56,10 +71,29 @@ export function buildHumanLiveTalk(input: HumanLiveTalkInput): HumanLiveTalkResu
     lead = `${symbol}: I do not have enough reliable live evidence to call this trade.`;
   }
 
+  let text = `${lead} ${factText}${caution}`.trim();
+
+  if (input.immediate) {
+    const expected = input.state === "READY" ? sideToImmediateVerdict(input.side) : "WAIT";
+    if (input.immediate.verdict !== expected) {
+      throw new Error("immediate verdict must match locked trade state and side");
+    }
+
+    text = [
+      `⚡ IMMEDIATE CHANGE — ${symbol}`,
+      `WHY NOW: ${cleanFact(input.immediate.whyNow)}`,
+      `VERDICT: ${input.immediate.verdict.replace("_", " ")}`,
+      `WATCH: ${cleanFact(input.immediate.whatToWatch)}`,
+      `INVALIDATION: ${cleanFact(input.immediate.invalidation)}`,
+      facts.length > 0 ? `EVIDENCE: ${factText}` : "",
+      input.caution?.trim() ? `CAUTION: ${cleanFact(input.caution)}` : "",
+    ].filter(Boolean).join("\n");
+  }
+
   return {
     version: "TELEGRAM_HUMAN_LIVE_TALK_V1",
     semantics: "RESEARCH_SHADOW_ONLY",
-    text: `${lead} ${factText}${caution}`.trim(),
+    text,
     canChangeVerdict: false,
     canChangeContract: false,
     canInventNumbers: false,

@@ -66,6 +66,22 @@ test("fails closed when reconciliation evidence is missing", () => {
   assert.deepEqual(out.reasonCodes, ["RECONCILIATION_EVIDENCE_NOT_READY"]);
 });
 
+test("blocks reconciliation when exact contract is not bound", () => {
+  const out = coordinateShadowExecutionIntent({
+    ...base,
+    action: "RECONCILE_ONLY",
+    reconciliationRequired: true,
+    managementIntentAllowed: true,
+    hasConfirmedOpenPosition: true,
+    reconciliationEvidenceReady: true,
+    exactContractBound: false,
+  });
+  assert.equal(out.route, "BLOCKED");
+  assert.deepEqual(out.reasonCodes, ["RECONCILIATION_CONTRACT_NOT_BOUND"]);
+  assert.equal(out.downstreamManagementEligible, false);
+  assert.equal(out.downstreamReconciliationRequired, false);
+});
+
 test("routes emergency exit only with confirmed position, contract and ready exit intent", () => {
   const out = coordinateShadowExecutionIntent({
     ...base,
@@ -101,6 +117,18 @@ test("preserves management-only semantics under halt", () => {
   });
   assert.equal(out.route, "MANAGEMENT_ONLY");
   assert.equal(out.downstreamManagementEligible, true);
+});
+
+test("blocks management-only routing when exact contract is not bound", () => {
+  const out = coordinateShadowExecutionIntent({
+    ...base,
+    managementIntentAllowed: true,
+    hasConfirmedOpenPosition: true,
+    exactContractBound: false,
+  });
+  assert.equal(out.route, "BLOCKED");
+  assert.deepEqual(out.reasonCodes, ["MANAGEMENT_CONTRACT_NOT_BOUND"]);
+  assert.equal(out.downstreamManagementEligible, false);
 });
 
 test("halts to no-new-action when no position management is needed", () => {

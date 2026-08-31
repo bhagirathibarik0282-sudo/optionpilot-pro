@@ -1,0 +1,20 @@
+name: Shadow Durable Startup Recovery Route Provider CI
+
+on:
+  pull_request:
+    branches: [automation-staging]
+    paths:
+      - 'shadow-durable-startup-recovery-route-provider.ts'
+      - 'test/shadow-durable-startup-recovery-route-provider.test.ts'
+      - '.github/workflows/shadow-durable-startup-recovery-route-provider-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/shadow-durable-startup-recovery-route-provider.test.ts

@@ -1,0 +1,26 @@
+name: Shadow Restart Recovery E2E CI
+
+on:
+  pull_request:
+    branches: [automation-staging, main]
+    paths:
+      - 'shadow-restart-recovery-e2e-harness.ts'
+      - 'shadow-replay-persistence.ts'
+      - 'shadow-broker-state-recovery-guard.ts'
+      - 'shadow-restart-recovery-coordinator.ts'
+      - 'test/shadow-restart-recovery-e2e-harness.test.ts'
+      - '.github/workflows/shadow-restart-recovery-e2e-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  restart-recovery-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/shadow-restart-recovery-e2e-harness.test.ts

@@ -11,6 +11,8 @@ import {
 import { buildImmediateExpansionTelegramRuntime } from "./immediate-expansion-telegram-runtime.js";
 import { ImmediateEventTruthRecorder } from "./immediate-event-truth-recorder.js";
 import type { ImmediateVerifiedEvent } from "./immediate-expansion-chain.js";
+import { ImmediateMetricIngestBridge } from "./immediate-metric-ingest-bridge.js";
+import type { ImmediateMetricSample } from "./immediate-abnormal-change-detector.js";
 import { fetchSourcePayloads } from "./option-recorder-source-adapter.js";
 
 const app = new Hono();
@@ -32,6 +34,7 @@ const IMMEDIATE_TELEGRAM_ENABLED = process.env.OPTION_RECORDER_IMMEDIATE_TELEGRA
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 
 const immediateTruthRecorder = new ImmediateEventTruthRecorder();
+const immediateMetricBridge = new ImmediateMetricIngestBridge(immediateTruthRecorder);
 
 let lastState: (RecorderProcessedState & {
   haiku: { enabled: boolean; configured: boolean; result: string | null; error: string | null };
@@ -203,7 +206,8 @@ app.get("/health", (c) => c.json({
   productionImpact: OPTION_RECORDER_SHADOW_MODE.productionImpact,
   sourceConfigured: Boolean(SOURCE_URL),
   sourcePollMs: SOURCE_POLL_MS,
-  immediateSourceGranularity: "SNAPSHOT_OR_INGEST_PLUS_EXPLICIT_EVENT_TRUTH_INPUT",
+  immediateSourceGranularity: "SNAPSHOT_OR_INGEST_PLUS_EXPLICIT_METRIC_OR_EVENT_INPUT",
+  immediateMetricBridge: immediateMetricBridge.stats(),
   immediateTruthRecorder: immediateTruthRecorder.stats(),
   lastSourcePollAt,
   lastSourceError,
@@ -220,6 +224,7 @@ app.get("/status", (c) => c.json({
   lastState,
   lastSourcePollAt,
   lastSourceError,
+  immediateMetricBridge: immediateMetricBridge.stats(),
   immediateTruthRecorder: immediateTruthRecorder.stats(),
 }));
 
@@ -229,6 +234,32 @@ app.get("/immediate-events/:symbol", (c) => {
   if (!symbol) return c.json({ ok: false, error: "INVALID_SYMBOL" }, 400);
   const limit = Number(c.req.query("limit") || 100);
   return c.json({ ok: true, symbol, events: immediateTruthRecorder.list(symbol, limit) });
+});
+
+app.post("/immediate-metrics", async (c) => {
+  if (!authorized(c.req.header("authorization"))) return c.json({ ok: false, error: "UNAUTHORIZED" }, 401);
+  try {
+    const body = await c.req.json<{
+      symbol: string;
+      lockedTrendSide: "CE" | "PE" | "NONE";
+      fresh?: boolean;
+      sample: ImmediateMetricSample;
+    }>();
+    const symbol = recorderSymbol(body.symbol || "");
+    if (!symbol) return c.json({ ok: false, error: "INVALID_SYMBOL" }, 400);
+    if (body.lockedTrendSide !== "CE" && body.lockedTrendSide !== "PE" && body.lockedTrendSide !== "NONE") {
+      return c.json({ ok: false, error: "INVALID_LOCKED_TREND_SIDE" }, 400);
+    }
+    const result = immediateMetricBridge.ingest({
+      symbol,
+      lockedTrendSide: body.lockedTrendSide,
+      fresh: body.fresh,
+      sample: body.sample,
+    });
+    return c.json({ ok: true, result });
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+  }
 });
 
 app.post("/immediate-events", async (c) => {

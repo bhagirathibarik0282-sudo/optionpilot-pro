@@ -8,11 +8,20 @@ import {
   resolveRecorderConflict,
   recorderTelegramDestination,
 } from "./option-recorder-shadow.js";
+import type { ImmediateSide, ImmediateVerifiedEvent } from "./immediate-expansion-chain.js";
+
+export type RecorderImmediateExpansionContext = {
+  lockedTrendSide: ImmediateSide;
+  trendValid: boolean;
+  clusterReady: boolean;
+  events: ImmediateVerifiedEvent[];
+};
 
 export type RecorderIngestPayload = {
   market: RecorderMarketSnapshot;
   options: RecorderOptionSnapshot[];
   verdicts: RecorderStrategyVerdict[];
+  immediateExpansion?: RecorderImmediateExpansionContext | null;
 };
 
 export type SelectedPremium = {
@@ -127,12 +136,13 @@ export function processRecorderPayload(payload: RecorderIngestPayload): Recorder
 export function buildHaikuEvidence(payload: RecorderIngestPayload, state: RecorderProcessedState) {
   return {
     instruction:
-      "Analyze SCALP, TRADER and SWING independently. Use all supplied useful evidence. Run primary analysis, devil check, contradiction review and final synthesis. Never invent missing data, never override deterministic validation, and prefer NO_TRADE over weak conviction.",
+      "Analyze SCALP, TRADER and SWING independently. Use all supplied useful evidence. Run primary analysis, devil check, contradiction review and final synthesis. Never invent missing data, never override deterministic validation, and prefer NO_TRADE over weak conviction. If immediateExpansion is present, explain only its verified facts and never change its deterministic CE/PE/WAIT verdict.",
     market: payload.market,
     verdicts: payload.verdicts,
     selectedPremiums: state.selectedPremiums,
     conflict: state.conflict,
     options: payload.options,
+    immediateExpansion: payload.immediateExpansion ?? null,
   };
 }
 

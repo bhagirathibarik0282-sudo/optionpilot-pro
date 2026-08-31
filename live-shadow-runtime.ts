@@ -49,18 +49,25 @@ export class LiveShadowRuntime {
     const { contract: _contract, ...entry } = input;
     const result = await beginPersistentForwardShadowEvidence(entry);
     if (!result.evidence) return this.fromFlow(input.tradeId, result, false);
-    if (!result.persisted) {
-      return this.snapshot(input.tradeId, result.evidence, false, "RUNTIME_EVIDENCE_PERSISTENCE_UNCONFIRMED", false, null);
-    }
 
     const identityPersisted = await persistShadowContractIdentity(input.tradeId, input.contract, input.ts);
-    if (!identityPersisted) {
-      return this.snapshot(input.tradeId, result.evidence, false, "RUNTIME_CONTRACT_IDENTITY_PERSISTENCE_UNCONFIRMED", false, null);
-    }
 
+    // Preserve the existing in-memory shadow runtime when persistence is unavailable.
+    // Restart recovery remains fail-closed because recover()/cold apply() require the
+    // exact contract identity to be durable before restoring an active trade.
     this.active.set(input.tradeId, result.evidence);
     this.identities.set(input.tradeId, input.contract);
-    return this.fromFlow(input.tradeId, result, true, input.contract);
+
+    return this.snapshot(
+      input.tradeId,
+      result.evidence,
+      true,
+      result.persisted && identityPersisted
+        ? "SHADOW_ENTRY_AND_CONTRACT_PERSISTED"
+        : "SHADOW_ENTRY_ACTIVE_RESTART_RECOVERY_UNCONFIRMED",
+      result.persisted && identityPersisted,
+      input.contract,
+    );
   }
 
   async apply(tradeId: string, event: ShadowLifecycleEventInput): Promise<LiveShadowRuntimeSnapshot> {

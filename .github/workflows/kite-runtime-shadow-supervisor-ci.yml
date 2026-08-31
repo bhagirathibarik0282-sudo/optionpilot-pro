@@ -18,5 +18,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
       - run: NODE_ENV=test node --import tsx --test test/kite-websocket-transport.test.ts test/kite-immediate-runtime-core.test.ts test/kite-runtime-shadow-supervisor.test.ts

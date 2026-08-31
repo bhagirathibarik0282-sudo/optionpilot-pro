@@ -9,6 +9,8 @@ import {
   buildTelegramText,
 } from "./option-recorder-runtime.js";
 import { buildImmediateExpansionTelegramRuntime } from "./immediate-expansion-telegram-runtime.js";
+import { ImmediateEventTruthRecorder } from "./immediate-event-truth-recorder.js";
+import type { ImmediateVerifiedEvent } from "./immediate-expansion-chain.js";
 import { fetchSourcePayloads } from "./option-recorder-source-adapter.js";
 
 const app = new Hono();
@@ -28,6 +30,8 @@ const HAIKU_MAX_TOKENS = Math.max(512, Number(process.env.OPTION_RECORDER_HAIKU_
 const TELEGRAM_ENABLED = process.env.OPTION_RECORDER_TELEGRAM_ENABLED === "true";
 const IMMEDIATE_TELEGRAM_ENABLED = process.env.OPTION_RECORDER_IMMEDIATE_TELEGRAM_ENABLED === "true";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+
+const immediateTruthRecorder = new ImmediateEventTruthRecorder();
 
 let lastState: (RecorderProcessedState & {
   haiku: { enabled: boolean; configured: boolean; result: string | null; error: string | null };
@@ -50,6 +54,11 @@ const lastSnapshotBySymbol = new Map<RecorderSymbol, string>();
 function authorized(authHeader: string | undefined): boolean {
   if (!INGEST_TOKEN) return true;
   return authHeader === `Bearer ${INGEST_TOKEN}`;
+}
+
+function recorderSymbol(value: string): RecorderSymbol | null {
+  const symbol = value.trim().toUpperCase();
+  return symbol === "NIFTY" || symbol === "BANKNIFTY" || symbol === "SENSEX" ? symbol : null;
 }
 
 async function callHaiku(body: unknown): Promise<string> {
@@ -194,7 +203,8 @@ app.get("/health", (c) => c.json({
   productionImpact: OPTION_RECORDER_SHADOW_MODE.productionImpact,
   sourceConfigured: Boolean(SOURCE_URL),
   sourcePollMs: SOURCE_POLL_MS,
-  immediateSourceGranularity: "SNAPSHOT_OR_INGEST_ONLY_NOT_TICK",
+  immediateSourceGranularity: "SNAPSHOT_OR_INGEST_PLUS_EXPLICIT_EVENT_TRUTH_INPUT",
+  immediateTruthRecorder: immediateTruthRecorder.stats(),
   lastSourcePollAt,
   lastSourceError,
   haikuEnabled: HAIKU_ENABLED,
@@ -205,7 +215,46 @@ app.get("/health", (c) => c.json({
   manualRailwayVariablesRequired: true,
 }));
 
-app.get("/status", (c) => c.json({ ok: true, lastState, lastSourcePollAt, lastSourceError }));
+app.get("/status", (c) => c.json({
+  ok: true,
+  lastState,
+  lastSourcePollAt,
+  lastSourceError,
+  immediateTruthRecorder: immediateTruthRecorder.stats(),
+}));
+
+app.get("/immediate-events/:symbol", (c) => {
+  if (!authorized(c.req.header("authorization"))) return c.json({ ok: false, error: "UNAUTHORIZED" }, 401);
+  const symbol = recorderSymbol(c.req.param("symbol"));
+  if (!symbol) return c.json({ ok: false, error: "INVALID_SYMBOL" }, 400);
+  const limit = Number(c.req.query("limit") || 100);
+  return c.json({ ok: true, symbol, events: immediateTruthRecorder.list(symbol, limit) });
+});
+
+app.post("/immediate-events", async (c) => {
+  if (!authorized(c.req.header("authorization"))) return c.json({ ok: false, error: "UNAUTHORIZED" }, 401);
+  try {
+    const body = await c.req.json<{
+      symbol: string;
+      source: string;
+      snapshotId?: string | null;
+      receivedAt?: string;
+      event: ImmediateVerifiedEvent;
+    }>();
+    const symbol = recorderSymbol(body.symbol || "");
+    if (!symbol) return c.json({ ok: false, error: "INVALID_SYMBOL" }, 400);
+    const result = immediateTruthRecorder.append({
+      symbol,
+      source: body.source,
+      snapshotId: body.snapshotId,
+      receivedAt: body.receivedAt,
+      event: body.event,
+    });
+    return c.json(result, result.ok ? 200 : 400);
+  } catch (err) {
+    return c.json({ ok: false, accepted: false, duplicate: false, error: err instanceof Error ? err.message : String(err) }, 400);
+  }
+});
 
 app.post("/ingest", async (c) => {
   if (!authorized(c.req.header("authorization"))) {

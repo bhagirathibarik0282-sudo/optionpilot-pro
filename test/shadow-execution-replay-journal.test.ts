@@ -79,3 +79,21 @@ test("fails closed on invalid fingerprint", () => {
   assert.equal(out.authorizesOrder, false);
   assert.equal(out.brokerOrderAllowed, false);
 });
+
+test("rejects colon in execution id so stable key identity boundary cannot collide", () => {
+  const out = evaluateShadowExecutionReplayJournal({ ...base, executionId: "exec:1" });
+  assert.equal(out.decision, "BLOCK_INVALID");
+  assert.equal(out.stableReplayKey, null);
+  assert.ok(out.reasonCodes.includes("INVALID_EXECUTION_ID"));
+  assert.equal(out.placesOrder, false);
+});
+
+test("rejects colon-bearing previous execution id before replay reuse", () => {
+  const out = evaluateShadowExecutionReplayJournal({
+    ...base,
+    previous: { ...previousBase, executionId: "exec:1" },
+  });
+  assert.equal(out.decision, "BLOCK_INVALID");
+  assert.ok(out.reasonCodes.includes("INVALID_PREVIOUS_REPLAY_RECORD"));
+  assert.equal(out.reuseExistingRecord, false);
+});

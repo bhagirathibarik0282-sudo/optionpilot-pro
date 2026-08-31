@@ -1,4 +1,4 @@
-import { evaluateShadowReplayPersistence } from "./shadow-replay-persistence.js";
+import { verifyShadowReplayPersistence } from "./shadow-replay-persistence.js";
 
 export interface ShadowReplayDurableRecord {
   stableReplayKey: string;
@@ -79,7 +79,7 @@ export async function persistShadowReplayThroughAdapter(
   let writeAttempted = false;
   let writeSucceeded = false;
   let readBackFound = false;
-  let readBackStableReplayKey: string | null = null;
+  let readBackReplayKey: string | null = null;
   let readBackResultFingerprint: string | null = null;
 
   try {
@@ -95,14 +95,14 @@ export async function persistShadowReplayThroughAdapter(
     const readBack = await store.read(input.stableReplayKey);
     if (readBack) {
       readBackFound = true;
-      readBackStableReplayKey = readBack.stableReplayKey;
+      readBackReplayKey = readBack.stableReplayKey;
       readBackResultFingerprint = readBack.resultFingerprint;
     }
   } catch {
     return blocked(["DURABLE_STORE_OPERATION_FAILED"], input.stableReplayKey);
   }
 
-  const verified = evaluateShadowReplayPersistence({
+  const verified = verifyShadowReplayPersistence({
     journalVersion: input.journalVersion,
     journalDecision: input.journalDecision,
     stableReplayKey: input.stableReplayKey,
@@ -110,7 +110,7 @@ export async function persistShadowReplayThroughAdapter(
     writeAttempted,
     writeSucceeded,
     readBackFound,
-    readBackStableReplayKey,
+    readBackReplayKey,
     readBackResultFingerprint,
     authorizesOrder: false,
     brokerOrderAllowed: false,

@@ -8,6 +8,7 @@ import {
   buildHaikuEvidence,
   buildTelegramText,
 } from "./option-recorder-runtime.js";
+import { buildImmediateExpansionTelegramRuntime } from "./immediate-expansion-telegram-runtime.js";
 import { fetchSourcePayloads } from "./option-recorder-source-adapter.js";
 
 const app = new Hono();
@@ -25,16 +26,25 @@ const ANTHROPIC_VERSION = process.env.ANTHROPIC_VERSION || "2023-06-01";
 const HAIKU_MAX_TOKENS = Math.max(512, Number(process.env.OPTION_RECORDER_HAIKU_MAX_TOKENS || 4096));
 
 const TELEGRAM_ENABLED = process.env.OPTION_RECORDER_TELEGRAM_ENABLED === "true";
+const IMMEDIATE_TELEGRAM_ENABLED = process.env.OPTION_RECORDER_IMMEDIATE_TELEGRAM_ENABLED === "true";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 
 let lastState: (RecorderProcessedState & {
   haiku: { enabled: boolean; configured: boolean; result: string | null; error: string | null };
   telegram: { enabled: boolean; sent: boolean; reason: string };
+  immediateTelegram: {
+    enabled: boolean;
+    eligible: boolean;
+    sent: boolean;
+    reason: string;
+    verdict: "CE_FAVOURED" | "PE_FAVOURED" | "WAIT" | null;
+  };
 }) | null = null;
 
 let lastSourceError: string | null = null;
 let lastSourcePollAt: string | null = null;
 const lastFingerprintByDestination = new Map<string, string>();
+const lastImmediateFingerprintByDestination = new Map<string, string>();
 const lastSnapshotBySymbol = new Map<RecorderSymbol, string>();
 
 function authorized(authHeader: string | undefined): boolean {
@@ -96,6 +106,7 @@ async function sendTelegram(symbol: RecorderSymbol, text: string): Promise<boole
 
 async function processOne(payload: RecorderIngestPayload) {
   const state = processRecorderPayload(payload);
+  const immediate = buildImmediateExpansionTelegramRuntime(payload);
 
   let haikuResult: string | null = null;
   let haikuError: string | null = null;
@@ -108,13 +119,27 @@ async function processOne(payload: RecorderIngestPayload) {
     }
   }
 
+  let immediateSent = false;
+  let immediateReason = IMMEDIATE_TELEGRAM_ENABLED ? immediate.reason : "DISABLED";
+  if (TELEGRAM_ENABLED && IMMEDIATE_TELEGRAM_ENABLED && immediate.eligible && immediate.text && immediate.fingerprint) {
+    if (lastImmediateFingerprintByDestination.get(state.telegramDestination) === immediate.fingerprint) {
+      immediateReason = "UNCHANGED_DEDUP";
+    } else {
+      immediateSent = await sendTelegram(payload.market.symbol, immediate.text);
+      immediateReason = immediateSent ? "SENT" : "SEND_FAILED_OR_NOT_CONFIGURED";
+      if (immediateSent) lastImmediateFingerprintByDestination.set(state.telegramDestination, immediate.fingerprint);
+    }
+  }
+
   let sent = false;
   let telegramReason = "DISABLED";
 
   if (TELEGRAM_ENABLED) {
+    const immediateOwnsSnapshot = IMMEDIATE_TELEGRAM_ENABLED && immediate.eligible;
     const hasSelectedPremium = Object.keys(state.selectedPremiums).length > 0;
 
-    if (!hasSelectedPremium) telegramReason = "NO_VALID_PREMIUM";
+    if (immediateOwnsSnapshot) telegramReason = "SUPPRESSED_BY_IMMEDIATE_MESSAGE";
+    else if (!hasSelectedPremium) telegramReason = "NO_VALID_PREMIUM";
     else if (lastFingerprintByDestination.get(state.telegramDestination) === state.fingerprint) telegramReason = "UNCHANGED_DEDUP";
     else {
       sent = await sendTelegram(payload.market.symbol, buildTelegramText(payload, state, haikuResult));
@@ -132,6 +157,13 @@ async function processOne(payload: RecorderIngestPayload) {
       error: haikuError,
     },
     telegram: { enabled: TELEGRAM_ENABLED, sent, reason: telegramReason },
+    immediateTelegram: {
+      enabled: TELEGRAM_ENABLED && IMMEDIATE_TELEGRAM_ENABLED,
+      eligible: immediate.eligible,
+      sent: immediateSent,
+      reason: immediateReason,
+      verdict: immediate.chain?.verdict ?? null,
+    },
   };
 
   return lastState;
@@ -162,11 +194,13 @@ app.get("/health", (c) => c.json({
   productionImpact: OPTION_RECORDER_SHADOW_MODE.productionImpact,
   sourceConfigured: Boolean(SOURCE_URL),
   sourcePollMs: SOURCE_POLL_MS,
+  immediateSourceGranularity: "SNAPSHOT_OR_INGEST_ONLY_NOT_TICK",
   lastSourcePollAt,
   lastSourceError,
   haikuEnabled: HAIKU_ENABLED,
   haikuConfigured: Boolean(ANTHROPIC_API_KEY && ANTHROPIC_MODEL),
   telegramEnabled: TELEGRAM_ENABLED,
+  immediateTelegramEnabled: TELEGRAM_ENABLED && IMMEDIATE_TELEGRAM_ENABLED,
   telegramBotConfigured: Boolean(TELEGRAM_BOT_TOKEN),
   manualRailwayVariablesRequired: true,
 }));
@@ -188,7 +222,7 @@ app.post("/ingest", async (c) => {
 });
 
 serve({ fetch: app.fetch, port: PORT });
-console.log(`[OPTION_RECORDER] listening port=${PORT} mode=${OPTION_RECORDER_SHADOW_MODE.mode} telegram=${TELEGRAM_ENABLED} source=${Boolean(SOURCE_URL)}`);
+console.log(`[OPTION_RECORDER] listening port=${PORT} mode=${OPTION_RECORDER_SHADOW_MODE.mode} telegram=${TELEGRAM_ENABLED} immediateTelegram=${IMMEDIATE_TELEGRAM_ENABLED} source=${Boolean(SOURCE_URL)}`);
 
 if (SOURCE_URL) {
   void pollSource();

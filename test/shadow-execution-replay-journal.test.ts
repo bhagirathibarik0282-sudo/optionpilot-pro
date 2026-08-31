@@ -2,6 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluateShadowExecutionReplayJournal } from "../shadow-execution-replay-journal.js";
 
+const previousBase = {
+  executionId: "exec-1",
+  snapshotVersion: "EXECUTION_CONSISTENCY_SNAPSHOT_V1" as const,
+  harnessVersion: "SHADOW_EXECUTION_E2E_HARNESS_V1" as const,
+  contractKey: "NIFTY:CE:25000:2026-09-03",
+  actionState: "READY",
+  finalTarget: "SHADOW_SUBMISSION_STATE",
+  resultFingerprint: "fp-123",
+};
+
 const base = {
   executionId: "exec-1",
   snapshotVersion: "EXECUTION_CONSISTENCY_SNAPSHOT_V1" as const,
@@ -20,22 +30,46 @@ test("records a new replay safely", () => {
   assert.equal(out.placesOrder, false);
 });
 
-test("reuses an identical replay", () => {
-  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: { executionId: "exec-1", contractKey: base.contractKey, resultFingerprint: "fp-123" } });
+test("reuses an identical replay only when all semantics match", () => {
+  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: previousBase });
   assert.equal(out.decision, "REUSE_IDENTICAL");
   assert.equal(out.reuseExistingRecord, true);
 });
 
 test("blocks conflicting replay result", () => {
-  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: { executionId: "exec-1", contractKey: base.contractKey, resultFingerprint: "different" } });
+  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: { ...previousBase, resultFingerprint: "different" } });
   assert.equal(out.decision, "BLOCK_CONFLICT");
   assert.ok(out.reasonCodes.includes("REPLAY_RESULT_CONFLICT"));
 });
 
 test("blocks replay identity conflict", () => {
-  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: { executionId: "exec-other", contractKey: base.contractKey, resultFingerprint: "fp-123" } });
+  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: { ...previousBase, executionId: "exec-other" } });
   assert.equal(out.decision, "BLOCK_CONFLICT");
   assert.ok(out.reasonCodes.includes("REPLAY_IDENTITY_CONFLICT"));
+});
+
+test("blocks same fingerprint when final target changed", () => {
+  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: { ...previousBase, finalTarget: "MANAGEMENT_ENGINE" } });
+  assert.equal(out.decision, "BLOCK_CONFLICT");
+  assert.ok(out.reasonCodes.includes("REPLAY_SEMANTIC_CONFLICT"));
+});
+
+test("blocks same fingerprint when action state changed", () => {
+  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: { ...previousBase, actionState: "RECONCILE" } });
+  assert.equal(out.decision, "BLOCK_CONFLICT");
+  assert.ok(out.reasonCodes.includes("REPLAY_SEMANTIC_CONFLICT"));
+});
+
+test("fails closed on invalid previous snapshot version", () => {
+  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: { ...previousBase, snapshotVersion: "OTHER" } as any });
+  assert.equal(out.decision, "BLOCK_INVALID");
+  assert.ok(out.reasonCodes.includes("INVALID_PREVIOUS_REPLAY_RECORD"));
+});
+
+test("fails closed on invalid previous harness version", () => {
+  const out = evaluateShadowExecutionReplayJournal({ ...base, previous: { ...previousBase, harnessVersion: "OTHER" } as any });
+  assert.equal(out.decision, "BLOCK_INVALID");
+  assert.ok(out.reasonCodes.includes("INVALID_PREVIOUS_REPLAY_RECORD"));
 });
 
 test("fails closed on invalid fingerprint", () => {

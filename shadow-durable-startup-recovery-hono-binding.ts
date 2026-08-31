@@ -1,7 +1,4 @@
-import {
-  runShadowDurableStartupRecoveryRouteProvider,
-  type ShadowDurableStartupRecoveryRouteProviderInput,
-} from "./shadow-durable-startup-recovery-route-provider.js";
+import { runShadowDurableStartupRecoveryRouteProvider } from "./shadow-durable-startup-recovery-route-provider.js";
 import type { ShadowReplayPersistenceAdapterInput } from "./shadow-replay-persistence-adapter.js";
 import { buildShadowStartupRecoveryDiagnosticReport } from "./shadow-startup-recovery-diagnostic-report.js";
 import type { ShadowStartupRecoveryDiagnosticSnapshot } from "./shadow-startup-recovery-diagnostic-snapshot.js";
@@ -100,18 +97,16 @@ function failClosedRoute(reasonCode: string): ShadowStartupRecoveryReadonlyRoute
 export function bindShadowDurableStartupRecoveryRoute(
   app: DurableHonoLikeReadonlyApp,
   factsFactory: (context: unknown) => ShadowDurableStartupRecoveryContextFacts | Promise<ShadowDurableStartupRecoveryContextFacts>,
-  runProvider: (input: ShadowDurableStartupRecoveryRouteProviderInput) => Promise<ShadowStartupRecoveryReadonlyRouteResult> = runShadowDurableStartupRecoveryRouteProvider,
 ): ShadowDurableStartupRecoveryHonoBindingResult {
   if (!app || typeof app.get !== "function") return bindingBlocked("INVALID_DURABLE_HONO_APP");
   if (typeof factsFactory !== "function") return bindingBlocked("INVALID_DURABLE_CONTEXT_FACTS_FACTORY");
-  if (typeof runProvider !== "function") return bindingBlocked("INVALID_DURABLE_ROUTE_PROVIDER");
 
   try {
     app.get("/api/shadow/startup-recovery", async (context: unknown) => {
       try {
         const facts = await factsFactory(context);
         if (!facts || typeof facts !== "object") return failClosedRoute("DURABLE_CONTEXT_FACTS_UNAVAILABLE");
-        return await runProvider({
+        return await runShadowDurableStartupRecoveryRouteProvider({
           providerVersion: "SHADOW_DURABLE_STARTUP_RECOVERY_ROUTE_PROVIDER_V1",
           method: "GET",
           path: "/api/shadow/startup-recovery",

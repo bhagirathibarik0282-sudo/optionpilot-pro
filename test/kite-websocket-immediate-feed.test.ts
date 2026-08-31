@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { ImmediateEventTruthRecorder } from "../immediate-event-truth-recorder.js";
 import { ImmediateMetricIngestBridge } from "../immediate-metric-ingest-bridge.js";
 import { KiteWebSocketImmediateFeed } from "../kite-websocket-immediate-feed.js";
+import { decodeKitePacket } from "../kite-websocket-binary-decoder.js";
+import { KiteWebSocketTransport } from "../kite-websocket-transport.js";
 
 function feed() {
   const truth = new ImmediateEventTruthRecorder();
@@ -70,4 +72,40 @@ test("stale WebSocket update can be detected but is not marked fresh", () => {
   const staleTick = { ...tick(115, 20), freshnessVerified: false };
   last = wsFeed.ingestTick(staleTick);
   assert.equal(last.results[0].detector.event?.fresh, false);
+});
+
+test("official Kite full packet fields decode from binary", () => {
+  const bytes = new Uint8Array(184);
+  const view = new DataView(bytes.buffer);
+  view.setInt32(0, 123456, false);
+  view.setInt32(4, 13220, false);
+  view.setInt32(48, 987654, false);
+  view.setInt32(60, 1700000000, false);
+  const decoded = decodeKitePacket(bytes);
+  assert.equal(decoded.mode, "full");
+  assert.equal(decoded.lastPrice, 132.2);
+  assert.equal(decoded.oi, 987654);
+  assert.equal(decoded.exchangeTimestamp, new Date(1700000000000).toISOString());
+});
+
+test("transport subscribes Kite tokens in full mode", () => {
+  const sent: string[] = [];
+  const listeners = new Map<string, (event:any)=>void>();
+  const socket = {
+    binaryType: "",
+    readyState: 1,
+    send: (s:string) => sent.push(s),
+    close: () => {},
+    addEventListener: (type:any, fn:any) => listeners.set(type, fn),
+  };
+  let url = "";
+  const transport = new KiteWebSocketTransport({
+    apiKey: "key", accessToken: "token", instrumentTokens: [256265],
+    socketFactory: (u) => { url = u; return socket; }, onTicks: () => {},
+  });
+  transport.connect();
+  listeners.get("open")?.({});
+  assert.match(url, /^wss:\/\/ws\.kite\.trade\?/);
+  assert.deepEqual(JSON.parse(sent[0]), { a: "subscribe", v: [256265] });
+  assert.deepEqual(JSON.parse(sent[1]), { a: "mode", v: ["full", [256265]] });
 });

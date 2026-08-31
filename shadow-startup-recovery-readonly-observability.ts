@@ -57,6 +57,31 @@ function blocked(reasonCode: string): ShadowStartupRecoveryObservabilityResponse
   };
 }
 
+function expectedDiagnosticPayload(report: ShadowStartupRecoveryDiagnosticReport) {
+  return {
+    version: report.version,
+    observedAt: report.observedAt,
+    status: report.status,
+    decision: report.decision,
+    diagnosticAccepted: report.diagnosticAccepted,
+    startupAccepted: report.startupAccepted,
+    runtimeAccepted: report.runtimeAccepted,
+    managementResumeAllowed: report.managementResumeAllowed,
+    newEntryResumeAllowed: report.newEntryResumeAllowed,
+    reconciliationRequired: report.reconciliationRequired,
+    effectiveOpenQuantity: report.effectiveOpenQuantity,
+    reasonCodes: [...report.reasonCodes],
+    diagnosticOnly: report.diagnosticOnly,
+    loggingSideEffectAllowed: report.loggingSideEffectAllowed,
+    startupSideEffectsAllowed: report.startupSideEffectsAllowed,
+    authorizesOrder: report.authorizesOrder,
+    brokerOrderAllowed: report.brokerOrderAllowed,
+    placesOrder: report.placesOrder,
+    shadowOnly: report.shadowOnly,
+    failClosed: report.failClosed,
+  };
+}
+
 export function buildShadowStartupRecoveryObservabilityResponse(
   report: ShadowStartupRecoveryDiagnosticReport,
 ): ShadowStartupRecoveryObservabilityResponse {
@@ -84,6 +109,11 @@ export function buildShadowStartupRecoveryObservabilityResponse(
   }
   if (JSON.stringify(parsed) !== report.deterministicJson) {
     return blocked("NON_DETERMINISTIC_DIAGNOSTIC_REPORT_JSON");
+  }
+
+  const expected = expectedDiagnosticPayload(report);
+  if (JSON.stringify(parsed) !== JSON.stringify(expected)) {
+    return blocked("DIAGNOSTIC_REPORT_SEMANTIC_MISMATCH");
   }
 
   return {

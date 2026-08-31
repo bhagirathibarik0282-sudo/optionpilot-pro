@@ -1,5 +1,10 @@
 import { dbInsert, dbLoadRecent } from "./db.js";
 import {
+  claimShadowContractIdentityAtomic,
+  loadShadowContractIdentityAtomic,
+  type ShadowContractIdentityAtomicStoreResult,
+} from "./shadow-contract-identity-claim-store.js";
+import {
   validateShadowContractIdentity,
   type ShadowContractIdentity,
 } from "./live-shadow-market-binding.js";
@@ -23,11 +28,17 @@ export interface ShadowContractIdentityPersistenceEnvelope {
 export interface ShadowContractIdentityPersistenceIo {
   insert(kind: string, payload: unknown): Promise<void>;
   loadRecent<T>(kind: string, limit: number): Promise<T[]>;
+  atomicClaim?(
+    envelope: ShadowContractIdentityPersistenceEnvelope,
+  ): Promise<ShadowContractIdentityAtomicStoreResult>;
+  atomicLoad?(tradeId: string): Promise<ShadowContractIdentityAtomicStoreResult>;
 }
 
 const defaultIo: ShadowContractIdentityPersistenceIo = {
   insert: dbInsert,
   loadRecent: dbLoadRecent,
+  atomicClaim: claimShadowContractIdentityAtomic,
+  atomicLoad: loadShadowContractIdentityAtomic,
 };
 
 function validTs(value: string): boolean {
@@ -92,6 +103,29 @@ async function loadCompleteIdentityHistory(
   }
 }
 
+function exactIdentityFromRows(
+  rows: ShadowContractIdentityPersistenceEnvelope[],
+  tradeId: string,
+): ShadowContractIdentity | null {
+  if (hasTaintedClaim(rows, tradeId)) return null;
+  const matches = rows.filter((row) => validEnvelope(row) && row.tradeId === tradeId);
+  if (matches.length === 0) return null;
+
+  const reference = matches[0].identity;
+  if (matches.some((row) => !sameShadowContractIdentity(row.identity, reference))) return null;
+  return { ...reference };
+}
+
+function exactIdentityFromAtomicResult(
+  result: ShadowContractIdentityAtomicStoreResult,
+  tradeId: string,
+): ShadowContractIdentity | null {
+  if (result.status !== "FOUND") return null;
+  const row = result.payload as ShadowContractIdentityPersistenceEnvelope | null;
+  if (!validEnvelope(row) || row.tradeId !== tradeId) return null;
+  return { ...row.identity };
+}
+
 export function buildShadowContractIdentityPersistenceEnvelope(
   tradeId: string,
   identity: ShadowContractIdentity,
@@ -127,6 +161,13 @@ export async function persistShadowContractIdentity(
     if (hasTaintedClaim(before, envelope.tradeId)) return false;
     const existing = before.filter((row) => validEnvelope(row) && row.tradeId === envelope.tradeId);
     if (existing.some((row) => !sameShadowContractIdentity(row.identity, envelope.identity))) return false;
+
+    if (typeof io.atomicClaim === "function") {
+      const claimed = await io.atomicClaim(envelope);
+      const winner = exactIdentityFromAtomicResult(claimed, envelope.tradeId);
+      return !!winner && sameShadowContractIdentity(winner, envelope.identity);
+    }
+
     if (existing.some((row) => sameShadowContractIdentity(row.identity, envelope.identity))) return true;
 
     await io.insert(SHADOW_CONTRACT_IDENTITY_DB_KIND, envelope);
@@ -154,17 +195,26 @@ export async function loadShadowContractIdentity(
 
   try {
     const normalizedTradeId = tradeId.trim();
+
+    if (typeof io.atomicLoad === "function") {
+      const atomic = await io.atomicLoad(normalizedTradeId);
+      if (atomic.status === "UNAVAILABLE") return null;
+      if (atomic.status === "FOUND") {
+        const atomicIdentity = exactIdentityFromAtomicResult(atomic, normalizedTradeId);
+        if (!atomicIdentity) return null;
+
+        const legacyRows = await loadCompleteIdentityHistory(io);
+        if (!legacyRows) return null;
+        if (hasTaintedClaim(legacyRows, normalizedTradeId)) return null;
+        const legacyIdentity = exactIdentityFromRows(legacyRows, normalizedTradeId);
+        if (legacyIdentity && !sameShadowContractIdentity(legacyIdentity, atomicIdentity)) return null;
+        return atomicIdentity;
+      }
+    }
+
     const rows = await loadCompleteIdentityHistory(io);
     if (!rows) return null;
-    if (hasTaintedClaim(rows, normalizedTradeId)) return null;
-    const matches = rows.filter((row) => validEnvelope(row) && row.tradeId === normalizedTradeId);
-    if (matches.length === 0) return null;
-
-    const reference = matches[0].identity;
-    if (matches.some((row) => !sameShadowContractIdentity(row.identity, reference))) return null;
-
-    matches.sort((a, b) => Date.parse(b.persistedAt) - Date.parse(a.persistedAt));
-    return { ...matches[0].identity };
+    return exactIdentityFromRows(rows, normalizedTradeId);
   } catch {
     return null;
   }

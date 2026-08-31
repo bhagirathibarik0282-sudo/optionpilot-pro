@@ -1,0 +1,20 @@
+name: Shadow Broker Recovery Facts Persistence CI
+
+on:
+  pull_request:
+    branches: [automation-staging]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsx --test test/shadow-broker-recovery-facts-persistence.test.ts

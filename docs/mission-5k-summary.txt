@@ -1,0 +1,1 @@
+Standalone read-only startup recovery route handler contract. No runtime registration or deployment changes.

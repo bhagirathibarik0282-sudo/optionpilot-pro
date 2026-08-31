@@ -63,6 +63,16 @@ function validEnvelope(
     row.failClosed === true;
 }
 
+function claimsTradeId(row: unknown, tradeId: string): boolean {
+  if (!row || typeof row !== "object") return false;
+  const candidate = row as { tradeId?: unknown };
+  return typeof candidate.tradeId === "string" && candidate.tradeId.trim() === tradeId;
+}
+
+function hasTaintedClaim(rows: unknown[], tradeId: string): boolean {
+  return rows.some((row) => claimsTradeId(row, tradeId) && !validEnvelope(row as ShadowContractIdentityPersistenceEnvelope));
+}
+
 export function buildShadowContractIdentityPersistenceEnvelope(
   tradeId: string,
   identity: ShadowContractIdentity,
@@ -94,6 +104,7 @@ export async function persistShadowContractIdentity(
 
   try {
     const before = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(SHADOW_CONTRACT_IDENTITY_DB_KIND, 1000);
+    if (hasTaintedClaim(before, envelope.tradeId)) return false;
     const existing = before.filter((row) => validEnvelope(row) && row.tradeId === envelope.tradeId);
     if (existing.some((row) => !sameShadowContractIdentity(row.identity, envelope.identity))) return false;
     if (existing.some((row) => sameShadowContractIdentity(row.identity, envelope.identity))) return true;
@@ -101,6 +112,7 @@ export async function persistShadowContractIdentity(
     await io.insert(SHADOW_CONTRACT_IDENTITY_DB_KIND, envelope);
 
     const after = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(SHADOW_CONTRACT_IDENTITY_DB_KIND, 1000);
+    if (hasTaintedClaim(after, envelope.tradeId)) return false;
     return after.some((row) =>
       validEnvelope(row) &&
       row.tradeId === envelope.tradeId &&
@@ -120,8 +132,10 @@ export async function loadShadowContractIdentity(
   if (!io || typeof io.loadRecent !== "function") return null;
 
   try {
+    const normalizedTradeId = tradeId.trim();
     const rows = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(SHADOW_CONTRACT_IDENTITY_DB_KIND, 1000);
-    const matches = rows.filter((row) => validEnvelope(row) && row.tradeId === tradeId.trim());
+    if (hasTaintedClaim(rows, normalizedTradeId)) return null;
+    const matches = rows.filter((row) => validEnvelope(row) && row.tradeId === normalizedTradeId);
     if (matches.length === 0) return null;
 
     const reference = matches[0].identity;

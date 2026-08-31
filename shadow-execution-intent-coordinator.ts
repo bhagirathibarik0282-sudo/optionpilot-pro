@@ -117,6 +117,7 @@ export function coordinateShadowExecutionIntent(
     if (!input.reconciliationRequired || input.entryIntentEligible || input.emergencyExitIntentRequired) {
       return result("BLOCKED", ["INCONSISTENT_RECONCILIATION_ACTION_PLAN"]);
     }
+    if (!input.exactContractBound) return result("BLOCKED", ["RECONCILIATION_CONTRACT_NOT_BOUND"]);
     if (input.reconciliationEvidenceReady !== true) {
       return result("BLOCKED", ["RECONCILIATION_EVIDENCE_NOT_READY"]);
     }
@@ -144,6 +145,7 @@ export function coordinateShadowExecutionIntent(
   }
 
   if (input.managementIntentAllowed && input.hasConfirmedOpenPosition) {
+    if (!input.exactContractBound) return result("BLOCKED", ["MANAGEMENT_CONTRACT_NOT_BOUND"]);
     return result("MANAGEMENT_ONLY", ["MANAGEMENT_ONLY_ALLOWED"], {
       downstreamManagementEligible: true,
     });

@@ -1,0 +1,27 @@
+name: Shadow Replay Postgres Persistence CI
+
+on:
+  pull_request:
+    branches: [main, automation-staging]
+    paths:
+      - 'shadow-replay-postgres-persistence.ts'
+      - 'shadow-replay-postgres-store.ts'
+      - 'shadow-replay-persistence-adapter.ts'
+      - 'shadow-replay-persistence.ts'
+      - 'db.ts'
+      - 'test/shadow-replay-postgres-persistence.test.ts'
+      - '.github/workflows/shadow-replay-postgres-persistence-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/shadow-replay-postgres-persistence.test.ts

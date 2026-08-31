@@ -1,0 +1,23 @@
+name: Shadow Replay Persistence CI
+
+on:
+  pull_request:
+    branches: [main, automation-staging]
+    paths:
+      - 'shadow-replay-persistence.ts'
+      - 'test/shadow-replay-persistence.test.ts'
+      - '.github/workflows/shadow-replay-persistence-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  replay-persistence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/shadow-replay-persistence.test.ts

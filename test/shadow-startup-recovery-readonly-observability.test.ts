@@ -70,3 +70,22 @@ test("invalid deterministic JSON fails closed", () => {
   assert.equal(out.httpStatus, 503);
   assert.equal(JSON.parse(out.body).reasonCodes[0], "INVALID_DIAGNOSTIC_REPORT_JSON");
 });
+
+test("outer status tamper against deterministic JSON fails closed", () => {
+  const input: any = report("PASS");
+  input.status = "BLOCK";
+  const out = buildShadowStartupRecoveryObservabilityResponse(input);
+  assert.equal(out.accepted, false);
+  assert.equal(out.httpStatus, 503);
+  assert.equal(JSON.parse(out.body).reasonCodes[0], "DIAGNOSTIC_REPORT_SEMANTIC_MISMATCH");
+});
+
+test("outer decision/reasonCodes tamper against deterministic JSON fails closed", () => {
+  const input: any = report("WARN");
+  input.decision = "RESUME_IDLE_SHADOW";
+  input.reasonCodes = ["FABRICATED"];
+  const out = buildShadowStartupRecoveryObservabilityResponse(input);
+  assert.equal(out.accepted, false);
+  assert.equal(out.httpStatus, 503);
+  assert.equal(JSON.parse(out.body).reasonCodes[0], "DIAGNOSTIC_REPORT_SEMANTIC_MISMATCH");
+});

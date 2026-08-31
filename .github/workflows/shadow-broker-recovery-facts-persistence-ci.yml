@@ -15,6 +15,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx tsx --test test/shadow-broker-recovery-facts-persistence.test.ts
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/shadow-broker-recovery-facts-persistence.test.ts

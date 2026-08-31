@@ -5,6 +5,7 @@ import {
   loadShadowContractIdentity,
   persistShadowContractIdentity,
   sameShadowContractIdentity,
+  SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT,
   type ShadowContractIdentityPersistenceEnvelope,
   type ShadowContractIdentityPersistenceIo,
 } from "../shadow-contract-identity-persistence.js";
@@ -129,6 +130,60 @@ test("invalid row for another trade does not taint target identity", async () =>
   const unrelatedCorrupt = { ...valid!, tradeId: "OTHER-TRADE", shadowOnly: false } as unknown as ShadowContractIdentityPersistenceEnvelope;
   const { io } = memoryIo([valid!, unrelatedCorrupt]);
   assert.deepEqual(await loadShadowContractIdentity("TRADE-CLEAN", io), identity);
+});
+
+test("saturated recent-history window blocks recovery because older identity rows may be hidden", async () => {
+  const rows: ShadowContractIdentityPersistenceEnvelope[] = [];
+  for (let i = 0; i < SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT - 1; i += 1) {
+    const row = buildShadowContractIdentityPersistenceEnvelope(
+      `OTHER-${i}`,
+      identity,
+      new Date(Date.UTC(2026, 8, 1, 4, 0, i % 60)).toISOString(),
+    );
+    assert.ok(row);
+    rows.push(row!);
+  }
+  const target = buildShadowContractIdentityPersistenceEnvelope(
+    "TRADE-SATURATED",
+    identity,
+    "2026-09-01T05:00:00.000Z",
+  );
+  assert.ok(target);
+  rows.push(target!);
+  assert.equal(rows.length, SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT);
+  const { io } = memoryIo(rows);
+  assert.equal(await loadShadowContractIdentity("TRADE-SATURATED", io), null);
+});
+
+test("saturated recent-history window blocks idempotent persistence reuse", async () => {
+  const rows: ShadowContractIdentityPersistenceEnvelope[] = [];
+  for (let i = 0; i < SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT - 1; i += 1) {
+    const row = buildShadowContractIdentityPersistenceEnvelope(
+      `OTHER-PERSIST-${i}`,
+      identity,
+      new Date(Date.UTC(2026, 8, 1, 6, 0, i % 60)).toISOString(),
+    );
+    assert.ok(row);
+    rows.push(row!);
+  }
+  const target = buildShadowContractIdentityPersistenceEnvelope(
+    "TRADE-SATURATED-PERSIST",
+    identity,
+    "2026-09-01T07:00:00.000Z",
+  );
+  assert.ok(target);
+  rows.push(target!);
+  const { io, rows: stored } = memoryIo(rows);
+  assert.equal(
+    await persistShadowContractIdentity(
+      "TRADE-SATURATED-PERSIST",
+      identity,
+      "2026-09-01T07:01:00.000Z",
+      io,
+    ),
+    false,
+  );
+  assert.equal(stored.length, SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT);
 });
 
 test("persistence IO failure returns false/null instead of guessing", async () => {

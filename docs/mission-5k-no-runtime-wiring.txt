@@ -1,0 +1,1 @@
+No server.ts registration, no startup hook, no Railway/config change, no live broker execution, no main merge, no production deployment.

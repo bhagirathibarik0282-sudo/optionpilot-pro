@@ -12,6 +12,11 @@ import {
   type ShadowContractIdentity,
   type LiveShadowMarketTick,
 } from "./live-shadow-market-binding.js";
+import {
+  loadShadowContractIdentity,
+  persistShadowContractIdentity,
+  sameShadowContractIdentity,
+} from "./shadow-contract-identity-persistence.js";
 
 export interface LiveShadowRuntimeSnapshot {
   version: "LIVE_SHADOW_RUNTIME_V2";
@@ -44,6 +49,14 @@ export class LiveShadowRuntime {
     const { contract: _contract, ...entry } = input;
     const result = await beginPersistentForwardShadowEvidence(entry);
     if (!result.evidence) return this.fromFlow(input.tradeId, result, false);
+    if (!result.persisted) {
+      return this.snapshot(input.tradeId, result.evidence, false, "RUNTIME_EVIDENCE_PERSISTENCE_UNCONFIRMED", false, null);
+    }
+
+    const identityPersisted = await persistShadowContractIdentity(input.tradeId, input.contract, input.ts);
+    if (!identityPersisted) {
+      return this.snapshot(input.tradeId, result.evidence, false, "RUNTIME_CONTRACT_IDENTITY_PERSISTENCE_UNCONFIRMED", false, null);
+    }
 
     this.active.set(input.tradeId, result.evidence);
     this.identities.set(input.tradeId, input.contract);
@@ -57,7 +70,14 @@ export class LiveShadowRuntime {
     if (!state) {
       state = await recoverLatestShadowTradeEvidence(tradeId);
       if (!state) return this.snapshot(tradeId, null, false, "RUNTIME_TRADE_NOT_FOUND");
-      if (!state.closed) this.active.set(tradeId, state);
+      const identity = await loadShadowContractIdentity(tradeId);
+      if (!identity || identity.index !== state.index) {
+        return this.snapshot(tradeId, state, false, "RUNTIME_CONTRACT_IDENTITY_NOT_DURABLE", false, null);
+      }
+      if (!state.closed) {
+        this.active.set(tradeId, state);
+        this.identities.set(tradeId, identity);
+      }
     }
 
     if (state.closed) {
@@ -98,20 +118,28 @@ export class LiveShadowRuntime {
     if (!tradeId?.trim()) return this.snapshot(tradeId, null, false, "RUNTIME_INVALID_TRADE_ID");
     const evidence = await recoverLatestShadowTradeEvidence(tradeId);
     if (!evidence) return this.snapshot(tradeId, null, false, "RUNTIME_RECOVERY_NOT_FOUND");
-    if (contract) {
-      if (!validateShadowContractIdentity(contract) || contract.index !== evidence.index) {
-        return this.snapshot(tradeId, evidence, false, "RUNTIME_RECOVERY_CONTRACT_MISMATCH");
-      }
-      this.identities.set(tradeId, contract);
+
+    const durableIdentity = await loadShadowContractIdentity(tradeId);
+    if (!durableIdentity || durableIdentity.index !== evidence.index) {
+      return this.snapshot(tradeId, evidence, false, "RUNTIME_RECOVERY_CONTRACT_IDENTITY_NOT_DURABLE", false, null);
     }
-    if (!evidence.closed) this.active.set(tradeId, evidence);
+    if (contract) {
+      if (!validateShadowContractIdentity(contract) || !sameShadowContractIdentity(contract, durableIdentity)) {
+        return this.snapshot(tradeId, evidence, false, "RUNTIME_RECOVERY_CONTRACT_MISMATCH", false, durableIdentity);
+      }
+    }
+
+    if (!evidence.closed) {
+      this.active.set(tradeId, evidence);
+      this.identities.set(tradeId, durableIdentity);
+    }
     return this.snapshot(
       tradeId,
       evidence,
       !evidence.closed,
       evidence.closed ? "RUNTIME_RECOVERED_CLOSED" : "RUNTIME_RECOVERED_ACTIVE",
-      false,
-      contract ?? this.identities.get(tradeId) ?? null,
+      true,
+      durableIdentity,
     );
   }
 

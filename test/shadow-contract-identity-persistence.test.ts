@@ -6,6 +6,7 @@ import {
   persistShadowContractIdentity,
   sameShadowContractIdentity,
   SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT,
+  SHADOW_CONTRACT_IDENTITY_HISTORY_MAX_SCAN_LIMIT,
   type ShadowContractIdentityPersistenceEnvelope,
   type ShadowContractIdentityPersistenceIo,
 } from "../shadow-contract-identity-persistence.js";
@@ -20,42 +21,46 @@ const identity = {
 
 function memoryIo(seed: ShadowContractIdentityPersistenceEnvelope[] = []) {
   const rows = [...seed];
+  const requestedLimits: number[] = [];
   const io: ShadowContractIdentityPersistenceIo = {
     async insert(_kind, payload) {
       rows.push(payload as ShadowContractIdentityPersistenceEnvelope);
     },
     async loadRecent<T>(_kind, limit) {
+      requestedLimits.push(limit);
       return rows.slice(-limit) as T[];
     },
   };
-  return { io, rows };
+  return { io, rows, requestedLimits };
+}
+
+function row(tradeId: string, ts: string, override = {}) {
+  const out = buildShadowContractIdentityPersistenceEnvelope(tradeId, { ...identity, ...override }, ts);
+  assert.ok(out);
+  return out!;
 }
 
 test("builds a fail-closed non-order-authorizing identity envelope", () => {
-  const row = buildShadowContractIdentityPersistenceEnvelope(
-    "TRADE-1",
-    identity,
-    "2026-09-01T04:00:00.000Z",
-  );
-  assert.ok(row);
-  assert.equal(row?.tradeId, "TRADE-1");
-  assert.equal(row?.authorizesOrder, false);
-  assert.equal(row?.brokerOrderAllowed, false);
-  assert.equal(row?.placesOrder, false);
-  assert.equal(row?.shadowOnly, true);
-  assert.equal(row?.failClosed, true);
+  const out = row("TRADE-1", "2026-09-01T04:00:00.000Z");
+  assert.equal(out.authorizesOrder, false);
+  assert.equal(out.brokerOrderAllowed, false);
+  assert.equal(out.placesOrder, false);
+  assert.equal(out.shadowOnly, true);
+  assert.equal(out.failClosed, true);
 });
 
 test("rejects invalid identity envelope input", () => {
-  const bad = buildShadowContractIdentityPersistenceEnvelope(
-    "TRADE-2",
-    { ...identity, strike: 0 },
-    "2026-09-01T04:00:00.000Z",
+  assert.equal(
+    buildShadowContractIdentityPersistenceEnvelope(
+      "TRADE-2",
+      { ...identity, strike: 0 },
+      "2026-09-01T04:00:00.000Z",
+    ),
+    null,
   );
-  assert.equal(bad, null);
 });
 
-test("same identity comparison includes exact option contract and instrument token", () => {
+test("same identity comparison includes exact option contract and token", () => {
   assert.equal(sameShadowContractIdentity(identity, { ...identity }), true);
   assert.equal(sameShadowContractIdentity(identity, { ...identity, optionType: "PE" }), false);
   assert.equal(sameShadowContractIdentity(identity, { ...identity, strike: 25100 }), false);
@@ -65,125 +70,90 @@ test("same identity comparison includes exact option contract and instrument tok
 
 test("persists and exactly reads back one contract identity", async () => {
   const { io, rows } = memoryIo();
-  const ok = await persistShadowContractIdentity(
-    "TRADE-3",
-    identity,
-    "2026-09-01T04:00:00.000Z",
-    io,
-  );
-  assert.equal(ok, true);
+  assert.equal(await persistShadowContractIdentity("TRADE-3", identity, "2026-09-01T04:00:00.000Z", io), true);
   assert.equal(rows.length, 1);
-  const loaded = await loadShadowContractIdentity("TRADE-3", io);
-  assert.deepEqual(loaded, identity);
+  assert.deepEqual(await loadShadowContractIdentity("TRADE-3", io), identity);
 });
 
-test("identical repeat is idempotent and does not create another row", async () => {
+test("identical repeat is idempotent", async () => {
   const { io, rows } = memoryIo();
   assert.equal(await persistShadowContractIdentity("TRADE-4", identity, "2026-09-01T04:00:00.000Z", io), true);
   assert.equal(await persistShadowContractIdentity("TRADE-4", identity, "2026-09-01T04:01:00.000Z", io), true);
   assert.equal(rows.length, 1);
 });
 
-test("same trade id with conflicting contract identity fails closed", async () => {
+test("same trade id with conflicting valid identity fails closed", async () => {
   const { io, rows } = memoryIo();
   assert.equal(await persistShadowContractIdentity("TRADE-5", identity, "2026-09-01T04:00:00.000Z", io), true);
-  const conflict = { ...identity, strike: 25100 };
-  assert.equal(await persistShadowContractIdentity("TRADE-5", conflict, "2026-09-01T04:01:00.000Z", io), false);
+  assert.equal(await persistShadowContractIdentity("TRADE-5", { ...identity, strike: 25100 }, "2026-09-01T04:01:00.000Z", io), false);
   assert.equal(rows.length, 1);
-  assert.deepEqual(await loadShadowContractIdentity("TRADE-5", io), identity);
 });
 
-test("conflicting durable rows make recovery identity unavailable", async () => {
-  const first = buildShadowContractIdentityPersistenceEnvelope("TRADE-6", identity, "2026-09-01T04:00:00.000Z");
-  const second = buildShadowContractIdentityPersistenceEnvelope("TRADE-6", { ...identity, optionType: "PE" }, "2026-09-01T04:01:00.000Z");
-  assert.ok(first && second);
-  const { io } = memoryIo([first!, second!]);
+test("conflicting durable rows make recovery unavailable", async () => {
+  const { io } = memoryIo([
+    row("TRADE-6", "2026-09-01T04:00:00.000Z"),
+    row("TRADE-6", "2026-09-01T04:01:00.000Z", { optionType: "PE" as const }),
+  ]);
   assert.equal(await loadShadowContractIdentity("TRADE-6", io), null);
 });
 
-test("valid row plus corrupt same-trade row taints recovery", async () => {
-  const valid = buildShadowContractIdentityPersistenceEnvelope("TRADE-TAINT-1", identity, "2026-09-01T04:00:00.000Z");
-  assert.ok(valid);
-  const corrupt = { ...valid!, failClosed: false } as unknown as ShadowContractIdentityPersistenceEnvelope;
-  const { io } = memoryIo([valid!, corrupt]);
+test("valid plus corrupt same-trade row taints recovery", async () => {
+  const valid = row("TRADE-TAINT-1", "2026-09-01T04:00:00.000Z");
+  const corrupt = { ...valid, failClosed: false } as unknown as ShadowContractIdentityPersistenceEnvelope;
+  const { io } = memoryIo([valid, corrupt]);
   assert.equal(await loadShadowContractIdentity("TRADE-TAINT-1", io), null);
 });
 
 test("corrupt same-trade row blocks idempotent persistence reuse", async () => {
-  const valid = buildShadowContractIdentityPersistenceEnvelope("TRADE-TAINT-2", identity, "2026-09-01T04:00:00.000Z");
-  assert.ok(valid);
-  const corrupt = { ...valid!, persistedAt: "not-a-date" } as ShadowContractIdentityPersistenceEnvelope;
-  const { io, rows } = memoryIo([valid!, corrupt]);
-  const ok = await persistShadowContractIdentity(
-    "TRADE-TAINT-2",
-    identity,
-    "2026-09-01T04:02:00.000Z",
-    io,
-  );
-  assert.equal(ok, false);
+  const valid = row("TRADE-TAINT-2", "2026-09-01T04:00:00.000Z");
+  const corrupt = { ...valid, persistedAt: "not-a-date" } as ShadowContractIdentityPersistenceEnvelope;
+  const { io, rows } = memoryIo([valid, corrupt]);
+  assert.equal(await persistShadowContractIdentity("TRADE-TAINT-2", identity, "2026-09-01T04:02:00.000Z", io), false);
   assert.equal(rows.length, 2);
 });
 
-test("invalid row for another trade does not taint target identity", async () => {
-  const valid = buildShadowContractIdentityPersistenceEnvelope("TRADE-CLEAN", identity, "2026-09-01T04:00:00.000Z");
-  assert.ok(valid);
-  const unrelatedCorrupt = { ...valid!, tradeId: "OTHER-TRADE", shadowOnly: false } as unknown as ShadowContractIdentityPersistenceEnvelope;
-  const { io } = memoryIo([valid!, unrelatedCorrupt]);
+test("invalid row for another trade does not taint target", async () => {
+  const valid = row("TRADE-CLEAN", "2026-09-01T04:00:00.000Z");
+  const unrelated = { ...valid, tradeId: "OTHER-TRADE", shadowOnly: false } as unknown as ShadowContractIdentityPersistenceEnvelope;
+  const { io } = memoryIo([valid, unrelated]);
   assert.deepEqual(await loadShadowContractIdentity("TRADE-CLEAN", io), identity);
 });
 
-test("saturated recent-history window blocks recovery because older identity rows may be hidden", async () => {
+test("base scan saturation adaptively widens and still recovers exact identity", async () => {
   const rows: ShadowContractIdentityPersistenceEnvelope[] = [];
   for (let i = 0; i < SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT - 1; i += 1) {
-    const row = buildShadowContractIdentityPersistenceEnvelope(
-      `OTHER-${i}`,
-      identity,
-      new Date(Date.UTC(2026, 8, 1, 4, 0, i % 60)).toISOString(),
-    );
-    assert.ok(row);
-    rows.push(row!);
+    rows.push(row(`OTHER-${i}`, new Date(Date.UTC(2026, 8, 1, 4, 0, i % 60)).toISOString()));
   }
-  const target = buildShadowContractIdentityPersistenceEnvelope(
-    "TRADE-SATURATED",
-    identity,
-    "2026-09-01T05:00:00.000Z",
-  );
-  assert.ok(target);
-  rows.push(target!);
-  assert.equal(rows.length, SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT);
-  const { io } = memoryIo(rows);
-  assert.equal(await loadShadowContractIdentity("TRADE-SATURATED", io), null);
+  rows.push(row("TRADE-ADAPTIVE", "2026-09-01T05:00:00.000Z"));
+  const { io, requestedLimits } = memoryIo(rows);
+  assert.deepEqual(await loadShadowContractIdentity("TRADE-ADAPTIVE", io), identity);
+  assert.deepEqual(requestedLimits.slice(0, 2), [1000, 2000]);
 });
 
-test("saturated recent-history window blocks idempotent persistence reuse", async () => {
+test("base scan saturation adaptively widens and permits safe idempotent reuse", async () => {
   const rows: ShadowContractIdentityPersistenceEnvelope[] = [];
   for (let i = 0; i < SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT - 1; i += 1) {
-    const row = buildShadowContractIdentityPersistenceEnvelope(
-      `OTHER-PERSIST-${i}`,
-      identity,
-      new Date(Date.UTC(2026, 8, 1, 6, 0, i % 60)).toISOString(),
-    );
-    assert.ok(row);
-    rows.push(row!);
+    rows.push(row(`OTHER-PERSIST-${i}`, new Date(Date.UTC(2026, 8, 1, 6, 0, i % 60)).toISOString()));
   }
-  const target = buildShadowContractIdentityPersistenceEnvelope(
-    "TRADE-SATURATED-PERSIST",
-    identity,
-    "2026-09-01T07:00:00.000Z",
-  );
-  assert.ok(target);
-  rows.push(target!);
-  const { io, rows: stored } = memoryIo(rows);
+  rows.push(row("TRADE-ADAPTIVE-PERSIST", "2026-09-01T07:00:00.000Z"));
+  const { io, rows: stored, requestedLimits } = memoryIo(rows);
   assert.equal(
-    await persistShadowContractIdentity(
-      "TRADE-SATURATED-PERSIST",
-      identity,
-      "2026-09-01T07:01:00.000Z",
-      io,
-    ),
-    false,
+    await persistShadowContractIdentity("TRADE-ADAPTIVE-PERSIST", identity, "2026-09-01T07:01:00.000Z", io),
+    true,
   );
   assert.equal(stored.length, SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT);
+  assert.deepEqual(requestedLimits.slice(0, 2), [1000, 2000]);
+});
+
+test("adaptive scan still fails closed when maximum safety ceiling is saturated", async () => {
+  const rows: ShadowContractIdentityPersistenceEnvelope[] = [];
+  for (let i = 0; i < SHADOW_CONTRACT_IDENTITY_HISTORY_MAX_SCAN_LIMIT - 1; i += 1) {
+    rows.push(row(`MAX-${i}`, new Date(Date.UTC(2026, 8, 1, 8, 0, i % 60)).toISOString()));
+  }
+  rows.push(row("TRADE-MAX-SATURATED", "2026-09-01T09:00:00.000Z"));
+  const { io, requestedLimits } = memoryIo(rows);
+  assert.equal(await loadShadowContractIdentity("TRADE-MAX-SATURATED", io), null);
+  assert.deepEqual(requestedLimits, [1000, 2000, 4000]);
 });
 
 test("persistence IO failure returns false/null instead of guessing", async () => {

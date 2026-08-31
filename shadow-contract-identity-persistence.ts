@@ -6,6 +6,7 @@ import {
 
 export const SHADOW_CONTRACT_IDENTITY_DB_KIND = "SHADOW_CONTRACT_IDENTITY_V1" as const;
 export const SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT = 1000 as const;
+export const SHADOW_CONTRACT_IDENTITY_HISTORY_MAX_SCAN_LIMIT = 4000 as const;
 
 export interface ShadowContractIdentityPersistenceEnvelope {
   version: "SHADOW_CONTRACT_IDENTITY_PERSISTENCE_V1";
@@ -74,8 +75,21 @@ function hasTaintedClaim(rows: unknown[], tradeId: string): boolean {
   return rows.some((row) => claimsTradeId(row, tradeId) && !validEnvelope(row as ShadowContractIdentityPersistenceEnvelope));
 }
 
-function completeHistoryWindow(rows: unknown[]): boolean {
-  return Array.isArray(rows) && rows.length < SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT;
+async function loadCompleteIdentityHistory(
+  io: ShadowContractIdentityPersistenceIo,
+): Promise<ShadowContractIdentityPersistenceEnvelope[] | null> {
+  let limit = SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT;
+
+  while (true) {
+    const rows = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(
+      SHADOW_CONTRACT_IDENTITY_DB_KIND,
+      limit,
+    );
+    if (!Array.isArray(rows)) return null;
+    if (rows.length < limit) return rows;
+    if (limit >= SHADOW_CONTRACT_IDENTITY_HISTORY_MAX_SCAN_LIMIT) return null;
+    limit = Math.min(limit * 2, SHADOW_CONTRACT_IDENTITY_HISTORY_MAX_SCAN_LIMIT);
+  }
 }
 
 export function buildShadowContractIdentityPersistenceEnvelope(
@@ -108,11 +122,8 @@ export async function persistShadowContractIdentity(
   if (!envelope || !io || typeof io.insert !== "function" || typeof io.loadRecent !== "function") return false;
 
   try {
-    const before = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(
-      SHADOW_CONTRACT_IDENTITY_DB_KIND,
-      SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT,
-    );
-    if (!completeHistoryWindow(before)) return false;
+    const before = await loadCompleteIdentityHistory(io);
+    if (!before) return false;
     if (hasTaintedClaim(before, envelope.tradeId)) return false;
     const existing = before.filter((row) => validEnvelope(row) && row.tradeId === envelope.tradeId);
     if (existing.some((row) => !sameShadowContractIdentity(row.identity, envelope.identity))) return false;
@@ -120,11 +131,8 @@ export async function persistShadowContractIdentity(
 
     await io.insert(SHADOW_CONTRACT_IDENTITY_DB_KIND, envelope);
 
-    const after = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(
-      SHADOW_CONTRACT_IDENTITY_DB_KIND,
-      SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT,
-    );
-    if (!completeHistoryWindow(after)) return false;
+    const after = await loadCompleteIdentityHistory(io);
+    if (!after) return false;
     if (hasTaintedClaim(after, envelope.tradeId)) return false;
     return after.some((row) =>
       validEnvelope(row) &&
@@ -146,11 +154,8 @@ export async function loadShadowContractIdentity(
 
   try {
     const normalizedTradeId = tradeId.trim();
-    const rows = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(
-      SHADOW_CONTRACT_IDENTITY_DB_KIND,
-      SHADOW_CONTRACT_IDENTITY_HISTORY_SCAN_LIMIT,
-    );
-    if (!completeHistoryWindow(rows)) return null;
+    const rows = await loadCompleteIdentityHistory(io);
+    if (!rows) return null;
     if (hasTaintedClaim(rows, normalizedTradeId)) return null;
     const matches = rows.filter((row) => validEnvelope(row) && row.tradeId === normalizedTradeId);
     if (matches.length === 0) return null;

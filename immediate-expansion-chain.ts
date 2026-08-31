@@ -92,9 +92,9 @@ export function evaluateImmediateExpansionChain(input: ImmediateExpansionChainIn
     whyNow = volatilityOnly.length > 0
       ? "Immediate volatility expansion is present, but there is no locked directional trend."
       : "Directional trend is not locked, so the engine must wait.";
-  } else if (conflictsTrend.length > 0 && !input.clusterReady) {
+  } else if (conflictsTrend.length > 0) {
     whyNow = `Immediate evidence is conflicting: ${conflictsTrend[0].fact}`;
-  } else if (input.clusterReady && supportsTrend.length > 0 && conflictsTrend.length === 0) {
+  } else if (input.clusterReady && supportsTrend.length > 0) {
     verdict = sideVerdict(input.lockedTrendSide);
     whyNow = supportsTrend.map((event) => event.fact.trim()).slice(0, 3).join(" ");
   } else if (supportsTrend.length > 0) {

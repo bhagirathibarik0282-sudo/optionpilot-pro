@@ -1,0 +1,21 @@
+name: Shadow Broker State Recovery Guard CI
+
+on:
+  pull_request:
+    branches:
+      - automation-staging
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  recovery-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/shadow-broker-state-recovery-guard.test.ts

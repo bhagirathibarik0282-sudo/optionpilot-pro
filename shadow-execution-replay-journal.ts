@@ -10,7 +10,11 @@ export interface ShadowExecutionReplayJournalInput {
   resultFingerprint: string;
   previous?: {
     executionId: string;
+    snapshotVersion: "EXECUTION_CONSISTENCY_SNAPSHOT_V1";
+    harnessVersion: "SHADOW_EXECUTION_E2E_HARNESS_V1";
     contractKey: string;
+    actionState: string;
+    finalTarget: string;
     resultFingerprint: string;
   } | null;
 }
@@ -74,12 +78,29 @@ export function evaluateShadowExecutionReplayJournal(
     return result("RECORD_NEW", ["NEW_REPLAY_RECORD_REQUIRED"], stableReplayKey, true, false);
   }
 
-  if (!valid(previous.executionId) || !valid(previous.contractKey) || !valid(previous.resultFingerprint)) {
+  if (
+    !valid(previous.executionId) ||
+    previous.snapshotVersion !== "EXECUTION_CONSISTENCY_SNAPSHOT_V1" ||
+    previous.harnessVersion !== "SHADOW_EXECUTION_E2E_HARNESS_V1" ||
+    !valid(previous.contractKey) ||
+    !valid(previous.actionState) ||
+    !valid(previous.finalTarget) ||
+    !valid(previous.resultFingerprint)
+  ) {
     return result("BLOCK_INVALID", ["INVALID_PREVIOUS_REPLAY_RECORD"], stableReplayKey);
   }
 
   if (previous.executionId.trim() !== input.executionId.trim() || previous.contractKey.trim() !== input.contractKey.trim()) {
     return result("BLOCK_CONFLICT", ["REPLAY_IDENTITY_CONFLICT"], stableReplayKey);
+  }
+
+  if (
+    previous.snapshotVersion !== input.snapshotVersion ||
+    previous.harnessVersion !== input.harnessVersion ||
+    previous.actionState.trim() !== input.actionState.trim() ||
+    previous.finalTarget.trim() !== input.finalTarget.trim()
+  ) {
+    return result("BLOCK_CONFLICT", ["REPLAY_SEMANTIC_CONFLICT"], stableReplayKey);
   }
 
   if (previous.resultFingerprint.trim() !== input.resultFingerprint.trim()) {

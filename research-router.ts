@@ -14,6 +14,7 @@ import { renderResearchDashboardHtml } from "./research-dashboard-view.js";
 import type { ResearchIndexCode } from "./research-index-types.js";
 import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
+import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } from "./research-engine-chain-http.js";
 
 export const researchRouter = new Hono();
@@ -97,6 +98,27 @@ researchRouter.get("/h1-pilot-audit", async (c) => {
   return c.json(result, result.audit || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
 });
 
+researchRouter.get("/h1-replay", async (c) => {
+  const parsed = parseH1ReplayRequest({
+    symbol: c.req.query("symbol"),
+    tradeDate: c.req.query("date"),
+    fromTime: c.req.query("from"),
+    toTime: c.req.query("to"),
+    scope: c.req.query("scope"),
+  });
+  if (!parsed.ok) {
+    return c.json({
+      ok: false,
+      mode: "READ_ONLY_H1_3M_REPLAY",
+      productionImpact: "NONE",
+      request: null,
+      reason: parsed.reason,
+    }, 400);
+  }
+  const result = await runH1ReplayHttp(parsed.value);
+  return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
 researchRouter.post("/broad-market-size/load-latest", async (c) => {
   const denied = authorizeResearchMutation(c);
   if (denied) return denied;
@@ -151,7 +173,6 @@ researchRouter.post("/broad-market-size/load-history", async (c) => {
       reason: "RESEARCH_DB_UNAVAILABLE",
     }, 503);
   }
-
   return c.json({ ok: true, ...audit });
 });
 

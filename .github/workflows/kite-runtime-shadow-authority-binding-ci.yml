@@ -1,0 +1,20 @@
+name: Kite Runtime Shadow Authority Binding CI
+
+on:
+  pull_request:
+    paths:
+      - 'kite-runtime-shadow-authority-binding.ts'
+      - 'test/kite-runtime-shadow-authority-binding.test.ts'
+      - '.github/workflows/kite-runtime-shadow-authority-binding-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/kite-runtime-shadow-authority-binding.test.ts test/kite-runtime-shadow-supervisor.test.ts test/kite-websocket-transport.test.ts

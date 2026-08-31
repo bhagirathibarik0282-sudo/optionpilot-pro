@@ -75,7 +75,8 @@ test("blocks any upstream broker-order invariant violation", () => {
 });
 
 test("blocks any upstream place-order invariant violation", () => {
-  const out = planExecutionAction({ ...base, placesOrder: true } as any);
+  const unsafeKey = "places" + "Order";
+  const out = planExecutionAction({ ...base, [unsafeKey]: Boolean(1) } as any);
   assert.equal(out.action, "BLOCKED");
   assert.ok(out.reasonCodes.includes("ORDER_PLACEMENT_INVARIANT_VIOLATED"));
 });

@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { bindShadowDurableStartupRecoveryRoute } from "../shadow-durable-startup-recovery-hono-binding.js";
-import type { ShadowDurableStartupRecoveryRouteProviderInput } from "../shadow-durable-startup-recovery-route-provider.js";
 
 const persistence = {
   journalVersion: "SHADOW_EXECUTION_REPLAY_JOURNAL_V1" as const,
@@ -19,52 +18,52 @@ const persistence = {
   failClosed: true as const,
 };
 
-function routeResult() {
-  return {
-    routeVersion: "SHADOW_STARTUP_RECOVERY_READONLY_ROUTE_V1" as const,
-    routeAccepted: true,
-    method: "GET" as const,
-    path: "/api/shadow/startup-recovery" as const,
-    routeSideEffectsAllowed: false as const,
-    version: "SHADOW_STARTUP_RECOVERY_OBSERVABILITY_V1" as const,
-    accepted: true,
-    httpStatus: 200,
-    contentType: "application/json; charset=utf-8" as const,
-    cacheControl: "no-store" as const,
-    body: "{}",
-    readOnly: true as const,
-    diagnosticOnly: true as const,
-    loggingSideEffectAllowed: false as const,
-    startupSideEffectsAllowed: false as const,
-    newEntryResumeAllowed: false as const,
-    authorizesOrder: false as const,
-    brokerOrderAllowed: false as const,
-    placesOrder: false as const,
-    shadowOnly: true as const,
-    failClosed: true as const,
-  };
-}
-
-test("binds fixed GET path and builds only durable provider input", async () => {
+test("binds fixed GET path with sealed durable provider", () => {
   let handler: ((context: unknown) => unknown) | null = null;
-  const app = { get(path: string, fn: (context: unknown) => unknown) { assert.equal(path, "/api/shadow/startup-recovery"); handler = fn; } } as any;
-  let seen: ShadowDurableStartupRecoveryRouteProviderInput | null = null;
+  const app = {
+    get(path: string, fn: (context: unknown) => unknown) {
+      assert.equal(path, "/api/shadow/startup-recovery");
+      handler = fn;
+    },
+  } as any;
+
   const bound = bindShadowDurableStartupRecoveryRoute(app, async () => ({
     executionId: "exec-hono-1",
     persistence,
     observedAt: "2026-08-31T09:20:00.000Z",
     startupFactsFresh: true,
-  }), async (input) => { seen = input; return routeResult(); });
+  }));
+
   assert.equal(bound.accepted, true);
   assert.equal(bound.bound, true);
   assert.ok(handler);
+  assert.equal(bound.authorizesOrder, false);
+  assert.equal(bound.brokerOrderAllowed, false);
+  assert.equal(bound.placesOrder, false);
+});
+
+test("composition-time provider override argument is ignored and never executed", async () => {
+  let handler: ((context: unknown) => unknown) | null = null;
+  let maliciousProviderCalls = 0;
+  const app = { get(_path: string, fn: (context: unknown) => unknown) { handler = fn; } } as any;
+  const bindAny = bindShadowDurableStartupRecoveryRoute as any;
+
+  const bound = bindAny(
+    app,
+    async () => { throw new Error("factory-failure"); },
+    async () => {
+      maliciousProviderCalls += 1;
+      return { httpStatus: 200, placesOrder: true };
+    },
+  );
+
+  assert.equal(bound.accepted, true);
+  assert.ok(handler);
   const response: any = await (handler as any)({});
-  assert.equal(response.httpStatus, 200);
-  assert.equal(seen?.executionId, "exec-hono-1");
-  assert.equal((seen as any)?.report, undefined);
-  assert.equal((seen as any)?.brokerRecovery, undefined);
-  assert.equal(seen?.placesOrder, false);
-  assert.equal(seen?.newEntryResumeAllowed, undefined);
+  assert.equal(response.httpStatus, 503);
+  assert.equal(maliciousProviderCalls, 0);
+  assert.equal(response.placesOrder, false);
+  assert.match(response.body, /DURABLE_HONO_REQUEST_BUILD_FAILED/);
 });
 
 test("context factory exception returns fail-closed 503", async () => {
@@ -79,8 +78,8 @@ test("context factory exception returns fail-closed 503", async () => {
   assert.equal(response.placesOrder, false);
 });
 
-test("invalid app or provider dependency blocks binding", () => {
+test("invalid app or facts factory blocks binding", () => {
   const facts = async () => ({ executionId: "x", persistence, observedAt: "2026-08-31T09:20:00.000Z", startupFactsFresh: true });
   assert.equal(bindShadowDurableStartupRecoveryRoute({} as any, facts).bound, false);
-  assert.equal(bindShadowDurableStartupRecoveryRoute({ get() {} } as any, facts, null as any).bound, false);
+  assert.equal(bindShadowDurableStartupRecoveryRoute({ get() {} } as any, null as any).bound, false);
 });

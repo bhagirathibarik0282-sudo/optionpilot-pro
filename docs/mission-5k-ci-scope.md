@@ -1,0 +1,1 @@
+Mission 5K CI validates only the standalone read-only route handler boundary and its fail-closed invariants. It does not register any runtime route or alter deployment behavior.

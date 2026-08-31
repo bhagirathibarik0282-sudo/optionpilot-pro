@@ -1,0 +1,112 @@
+name: OptionPilot Staging Auto Merge V1
+
+on:
+  pull_request:
+    branches:
+      - automation-staging
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  staging-auto-merge:
+    name: Staging all-green merge controller
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for all relevant checks and merge staging only
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+            const headSha = pr.head.sha;
+            const pullNumber = pr.number;
+            const ownCheckName = 'Staging all-green merge controller';
+            const requiredGateName = 'Fail-closed automation safety gate';
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            if (pr.base.ref !== 'automation-staging') {
+              core.setFailed('Fail closed: auto-merge is allowed only into automation-staging.');
+              return;
+            }
+
+            for (let attempt = 1; attempt <= 40; attempt++) {
+              const current = (await github.rest.pulls.get({ owner, repo, pull_number: pullNumber })).data;
+              if (current.state !== 'open') {
+                core.info('PR is no longer open; nothing to merge.');
+                return;
+              }
+              if (current.base.ref !== 'automation-staging' || current.head.sha !== headSha || current.draft) {
+                core.setFailed('Fail closed: PR base/head/draft state changed during validation.');
+                return;
+              }
+
+              const response = await github.rest.checks.listForRef({
+                owner,
+                repo,
+                ref: headSha,
+                per_page: 100,
+              });
+
+              const checks = response.data.check_runs.filter((check) => check.name !== ownCheckName);
+              const gate = checks.find((check) => check.name === requiredGateName);
+              const pending = checks.filter((check) => check.status !== 'completed');
+              const failed = checks.filter((check) =>
+                check.status === 'completed' && !['success', 'neutral', 'skipped'].includes(check.conclusion)
+              );
+
+              if (failed.length > 0) {
+                core.setFailed(`Fail closed: CI failure detected: ${failed.map((c) => `${c.name}:${c.conclusion}`).join(', ')}`);
+                return;
+              }
+
+              if (!gate || gate.status !== 'completed' || gate.conclusion !== 'success' || pending.length > 0) {
+                core.info(`Waiting for checks (${attempt}/40). Gate=${gate ? `${gate.status}/${gate.conclusion}` : 'missing'}, pending=${pending.map((c) => c.name).join(', ') || 'none'}`);
+                await sleep(15000);
+                continue;
+              }
+
+              // Stability window: prevent merging before a late check-run registers.
+              const firstNames = checks.map((c) => c.name).sort().join('|');
+              await sleep(20000);
+              const stableResponse = await github.rest.checks.listForRef({ owner, repo, ref: headSha, per_page: 100 });
+              const stableChecks = stableResponse.data.check_runs.filter((check) => check.name !== ownCheckName);
+              const stableNames = stableChecks.map((c) => c.name).sort().join('|');
+              const stableGate = stableChecks.find((check) => check.name === requiredGateName);
+              const stablePending = stableChecks.filter((check) => check.status !== 'completed');
+              const stableFailed = stableChecks.filter((check) =>
+                check.status === 'completed' && !['success', 'neutral', 'skipped'].includes(check.conclusion)
+              );
+
+              if (stableFailed.length > 0) {
+                core.setFailed(`Fail closed after stability window: ${stableFailed.map((c) => `${c.name}:${c.conclusion}`).join(', ')}`);
+                return;
+              }
+              if (firstNames !== stableNames || !stableGate || stableGate.conclusion !== 'success' || stablePending.length > 0) {
+                core.info('Check set changed or is not stable yet; continuing validation.');
+                continue;
+              }
+
+              const merged = await github.rest.pulls.merge({
+                owner,
+                repo,
+                pull_number: pullNumber,
+                merge_method: 'merge',
+                sha: headSha,
+              });
+
+              if (!merged.data.merged) {
+                core.setFailed(`GitHub refused staging merge: ${merged.data.message || 'unknown reason'}`);
+                return;
+              }
+
+              core.info(`Merged PR #${pullNumber} into automation-staging at ${merged.data.sha}. No main merge or deployment performed.`);
+              return;
+            }
+
+            core.setFailed('Fail closed: timed out waiting for all relevant checks to complete successfully.');

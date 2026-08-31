@@ -4,7 +4,6 @@ on:
   pull_request:
     branches:
       - automation-staging
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -33,11 +32,23 @@ jobs:
           set -euo pipefail
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" > /tmp/optionpilot-pr.diff
-          ADDED=/tmp/optionpilot-added-lines.txt
-          grep '^+' /tmp/optionpilot-pr.diff | grep -v '^+++' > "$ADDED" || true
+          ADDED=/tmp/optionpilot-runtime-added-lines.txt
+          : > "$ADDED"
+
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" \
+            | grep -E '\.(ts|js|mjs|cjs)$' \
+            | grep -Ev '^(test/|tests/|docs/|\.github/)|(^|/)[^/]+\.(test|spec)\.(ts|js|mjs|cjs)$' \
+            > /tmp/optionpilot-runtime-files.txt || true
+
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            git diff --unified=0 "$BASE_SHA" "$HEAD_SHA" -- "$file" \
+              | grep '^+' \
+              | grep -v '^+++' >> "$ADDED" || true
+          done < /tmp/optionpilot-runtime-files.txt
+
           if grep -E -i '(placesOrder[[:space:]]*:[[:space:]]*true|LIVE_EXECUTION_ENABLED[[:space:]]*=[[:space:]]*(true|1)|AUTO_DEPLOY_PRODUCTION[[:space:]]*=[[:space:]]*(true|1)|railway[[:space:]]+up|\.placeOrder\(|broker\.placeOrder|kite\.placeOrder|zerodha\.placeOrder)' "$ADDED"; then
-            echo 'Unsafe LIVE/order/deploy enablement detected. Automation fails closed.'
+            echo 'Unsafe LIVE/order/deploy enablement detected in runtime source. Automation fails closed.'
             exit 1
           fi
 

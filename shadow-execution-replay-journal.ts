@@ -37,6 +37,14 @@ function valid(v: unknown): v is string {
   return typeof v === "string" && v.trim().length > 0;
 }
 
+// stableReplayKey is SHADOW_EXEC:<executionId>:<contractKey>. contractKey is
+// intentionally colon-delimited (for example NIFTY:CE:25000:2026-09-03), so
+// executionId must never contain ':' or the identity boundary becomes
+// ambiguous. Reject rather than escape to preserve existing durable keys.
+function validExecutionId(v: unknown): v is string {
+  return valid(v) && !v.trim().includes(":");
+}
+
 function result(
   decision: ReplayJournalDecision,
   reasonCodes: string[],
@@ -63,7 +71,7 @@ export function evaluateShadowExecutionReplayJournal(
   input: ShadowExecutionReplayJournalInput,
 ): ShadowExecutionReplayJournalResult {
   const reasons: string[] = [];
-  if (!valid(input?.executionId)) reasons.push("INVALID_EXECUTION_ID");
+  if (!validExecutionId(input?.executionId)) reasons.push("INVALID_EXECUTION_ID");
   if (input?.snapshotVersion !== "EXECUTION_CONSISTENCY_SNAPSHOT_V1") reasons.push("INVALID_SNAPSHOT_VERSION");
   if (input?.harnessVersion !== "SHADOW_EXECUTION_E2E_HARNESS_V1") reasons.push("INVALID_HARNESS_VERSION");
   if (!valid(input?.contractKey)) reasons.push("INVALID_CONTRACT_KEY");
@@ -79,7 +87,7 @@ export function evaluateShadowExecutionReplayJournal(
   }
 
   if (
-    !valid(previous.executionId) ||
+    !validExecutionId(previous.executionId) ||
     previous.snapshotVersion !== "EXECUTION_CONSISTENCY_SNAPSHOT_V1" ||
     previous.harnessVersion !== "SHADOW_EXECUTION_E2E_HARNESS_V1" ||
     !valid(previous.contractKey) ||

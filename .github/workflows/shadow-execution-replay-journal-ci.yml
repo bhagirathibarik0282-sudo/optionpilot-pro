@@ -1,0 +1,16 @@
+name: Shadow Execution Replay Journal CI
+
+on:
+  pull_request:
+    branches: [main, automation-staging]
+
+jobs:
+  replay-journal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/shadow-execution-replay-journal.test.ts

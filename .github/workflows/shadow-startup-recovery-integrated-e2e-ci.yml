@@ -1,0 +1,27 @@
+name: Shadow Startup Recovery Integrated E2E CI
+
+on:
+  pull_request:
+    branches: [automation-staging]
+    paths:
+      - 'test/shadow-startup-recovery-integrated-e2e.test.ts'
+      - '.github/workflows/shadow-startup-recovery-integrated-e2e-ci.yml'
+      - 'shadow-startup-recovery-*.ts'
+      - 'shadow-postgres-restart-runtime-adapter.ts'
+      - 'shadow-replay-postgres-store.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  integrated-shadow-startup-recovery-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run integrated E2E devil gate
+        run: node --import tsx --test test/shadow-startup-recovery-integrated-e2e.test.ts

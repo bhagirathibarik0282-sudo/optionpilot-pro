@@ -18,6 +18,16 @@ export interface ShadowContractIdentityPersistenceEnvelope {
   failClosed: true;
 }
 
+export interface ShadowContractIdentityPersistenceIo {
+  insert(kind: string, payload: unknown): Promise<void>;
+  loadRecent<T>(kind: string, limit: number): Promise<T[]>;
+}
+
+const defaultIo: ShadowContractIdentityPersistenceIo = {
+  insert: dbInsert,
+  loadRecent: dbLoadRecent,
+};
+
 function validTs(value: string): boolean {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
@@ -77,37 +87,49 @@ export async function persistShadowContractIdentity(
   tradeId: string,
   identity: ShadowContractIdentity,
   persistedAt = new Date().toISOString(),
+  io: ShadowContractIdentityPersistenceIo = defaultIo,
 ): Promise<boolean> {
   const envelope = buildShadowContractIdentityPersistenceEnvelope(tradeId, identity, persistedAt);
-  if (!envelope) return false;
+  if (!envelope || !io || typeof io.insert !== "function" || typeof io.loadRecent !== "function") return false;
 
-  const before = await dbLoadRecent<ShadowContractIdentityPersistenceEnvelope>(SHADOW_CONTRACT_IDENTITY_DB_KIND, 1000);
-  const existing = before.filter((row) => validEnvelope(row) && row.tradeId === envelope.tradeId);
-  if (existing.some((row) => !sameShadowContractIdentity(row.identity, envelope.identity))) return false;
-  if (existing.some((row) => sameShadowContractIdentity(row.identity, envelope.identity))) return true;
+  try {
+    const before = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(SHADOW_CONTRACT_IDENTITY_DB_KIND, 1000);
+    const existing = before.filter((row) => validEnvelope(row) && row.tradeId === envelope.tradeId);
+    if (existing.some((row) => !sameShadowContractIdentity(row.identity, envelope.identity))) return false;
+    if (existing.some((row) => sameShadowContractIdentity(row.identity, envelope.identity))) return true;
 
-  await dbInsert(SHADOW_CONTRACT_IDENTITY_DB_KIND, envelope);
+    await io.insert(SHADOW_CONTRACT_IDENTITY_DB_KIND, envelope);
 
-  const after = await dbLoadRecent<ShadowContractIdentityPersistenceEnvelope>(SHADOW_CONTRACT_IDENTITY_DB_KIND, 1000);
-  return after.some((row) =>
-    validEnvelope(row) &&
-    row.tradeId === envelope.tradeId &&
-    row.persistedAt === envelope.persistedAt &&
-    sameShadowContractIdentity(row.identity, envelope.identity)
-  );
+    const after = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(SHADOW_CONTRACT_IDENTITY_DB_KIND, 1000);
+    return after.some((row) =>
+      validEnvelope(row) &&
+      row.tradeId === envelope.tradeId &&
+      row.persistedAt === envelope.persistedAt &&
+      sameShadowContractIdentity(row.identity, envelope.identity)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function loadShadowContractIdentity(
   tradeId: string,
+  io: ShadowContractIdentityPersistenceIo = defaultIo,
 ): Promise<ShadowContractIdentity | null> {
   if (typeof tradeId !== "string" || !tradeId.trim()) return null;
-  const rows = await dbLoadRecent<ShadowContractIdentityPersistenceEnvelope>(SHADOW_CONTRACT_IDENTITY_DB_KIND, 1000);
-  const matches = rows.filter((row) => validEnvelope(row) && row.tradeId === tradeId.trim());
-  if (matches.length === 0) return null;
+  if (!io || typeof io.loadRecent !== "function") return null;
 
-  const reference = matches[0].identity;
-  if (matches.some((row) => !sameShadowContractIdentity(row.identity, reference))) return null;
+  try {
+    const rows = await io.loadRecent<ShadowContractIdentityPersistenceEnvelope>(SHADOW_CONTRACT_IDENTITY_DB_KIND, 1000);
+    const matches = rows.filter((row) => validEnvelope(row) && row.tradeId === tradeId.trim());
+    if (matches.length === 0) return null;
 
-  matches.sort((a, b) => Date.parse(b.persistedAt) - Date.parse(a.persistedAt));
-  return { ...matches[0].identity };
+    const reference = matches[0].identity;
+    if (matches.some((row) => !sameShadowContractIdentity(row.identity, reference))) return null;
+
+    matches.sort((a, b) => Date.parse(b.persistedAt) - Date.parse(a.persistedAt));
+    return { ...matches[0].identity };
+  } catch {
+    return null;
+  }
 }

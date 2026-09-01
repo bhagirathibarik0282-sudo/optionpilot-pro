@@ -47,6 +47,7 @@ jobs:
           const trigger = fs.readFileSync('message-trigger-engine.ts', 'utf8');
           const hook = fs.readFileSync('research-server-hook.ts', 'utf8');
           const live = fs.readFileSync('meaningful-live-telegram.ts', 'utf8');
+          const monitor = fs.readFileSync('meaningful-live-acceptance-monitor.ts', 'utf8');
           const eod = fs.readFileSync('eod-archive-job.ts', 'utf8');
           const required = [
             ['NIFTY routing', contract.includes('NIFTY: "NIFTY"')],
@@ -60,6 +61,10 @@ jobs:
             ['Hysteresis gate', trigger.includes('HYSTERESIS_CONFIRMATION_NOT_MET')],
             ['Exact duplicate suppression', trigger.includes('EXACT_DUPLICATE_SUPPRESSED')],
             ['Live meaningful bridge installed', hook.includes('installMeaningfulLiveTelegramBridge()')],
+            ['Acceptance monitor installed after live bridge', hook.indexOf('installMeaningfulLiveAcceptanceMonitor()') > hook.indexOf('installMeaningfulLiveTelegramBridge()')],
+            ['Acceptance endpoint mounted', hook.includes('/api/research/meaningful-live-acceptance')],
+            ['Acceptance monitor does not mutate Telegram', monitor.includes('changesTelegramPayload: false')],
+            ['Acceptance monitor journal check', monitor.includes('POSTGRES_APP_STATE_LOG')],
             ['Live bridge fail-open', live.includes('bridge failed open')],
             ['Same-timestamp leadership guard', live.includes('LEAD_TIMESTAMP_TIE_UNRESOLVED')],
             ['No execution authority', live.includes('NOT TRADE EXECUTION')],
@@ -85,6 +90,7 @@ jobs:
             test/message-trigger-engine.test.ts \
             test/meaningful-market-narrative.test.ts \
             test/meaningful-live-telegram.test.ts \
+            test/meaningful-live-acceptance-monitor.test.ts \
             test/telegram-human-live-talk.test.ts \
             test/telegram-style-route.test.ts \
             test/immediate-expansion-telegram-runtime.test.ts \

@@ -1,0 +1,108 @@
+name: Devil-Gated Auto Deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optionpilot-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  devil-gate:
+    name: Devil Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Validate package.json
+        run: node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('PASS package.json')"
+
+      - name: Devil check - Telegram strict index isolation
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const contract = fs.readFileSync('telegram-card-contract.ts', 'utf8');
+          const sender = fs.readFileSync('telegram-sender-v2.ts', 'utf8');
+          const trigger = fs.readFileSync('message-trigger-engine.ts', 'utf8');
+          const required = [
+            ['NIFTY routing', contract.includes('NIFTY: "NIFTY"')],
+            ['BANKNIFTY routing', contract.includes('BANKNIFTY: "BANKNIFTY"')],
+            ['SENSEX routing', contract.includes('SENSEX: "SENSEX"')],
+            ['Strict isolation', contract.includes('strictIndexIsolation: true')],
+            ['Cross-post off', contract.includes('crossPostAllowed: false')],
+            ['Sender routing assertion', sender.includes('TELEGRAM_ROUTING_MISMATCH')],
+            ['Duplicate guard', sender.includes('DUPLICATE_GUARD')],
+            ['Meaningful change gate', trigger.includes('meaningfulChange')],
+            ['Hysteresis gate', trigger.includes('HYSTERESIS_CONFIRMATION_NOT_MET')],
+            ['Exact duplicate suppression', trigger.includes('EXACT_DUPLICATE_SUPPRESSED')],
+          ];
+          let failed = false;
+          for (const [name, ok] of required) {
+            console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}`);
+            if (!ok) failed = true;
+          }
+          if (failed) process.exit(1);
+          NODE
+
+      - name: Devil check - runtime wiring guards
+        run: |
+          npm run h1:wire:check
+          npm run outcome:wire:check
+
+      - name: Devil check - focused messaging tests
+        run: |
+          NODE_ENV=test node --import tsx --test \
+            test/message-trigger-engine.test.ts \
+            test/telegram-human-live-talk.test.ts \
+            test/telegram-style-route.test.ts \
+            test/immediate-expansion-telegram-runtime.test.ts
+
+      - name: Devil check - full regression suite
+        run: npm test
+
+      - name: Devil Gate PASS
+        run: echo "DEVIL_GATE_PASS"
+
+  deploy-production:
+    name: Deploy Production
+    needs: devil-gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.devil-gate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      RAILWAY_DEPLOY_HOOK: ${{ secrets.RAILWAY_DEPLOY_HOOK }}
+
+    steps:
+      - name: Require Railway deploy hook
+        run: |
+          if [ -z "$RAILWAY_DEPLOY_HOOK" ]; then
+            echo "DEPLOYMENT_BLOCKED: RAILWAY_DEPLOY_HOOK secret missing"
+            exit 1
+          fi
+
+      - name: Trigger Railway deployment only after Devil Gate PASS
+        run: |
+          curl --fail-with-body --show-error --silent \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            -X POST "$RAILWAY_DEPLOY_HOOK"
+          echo "RAILWAY_DEPLOY_TRIGGERED_AFTER_DEVIL_GATE_PASS"

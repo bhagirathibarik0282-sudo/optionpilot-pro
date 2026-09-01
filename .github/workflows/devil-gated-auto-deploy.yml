@@ -45,6 +45,9 @@ jobs:
           const contract = fs.readFileSync('telegram-card-contract.ts', 'utf8');
           const sender = fs.readFileSync('telegram-sender-v2.ts', 'utf8');
           const trigger = fs.readFileSync('message-trigger-engine.ts', 'utf8');
+          const hook = fs.readFileSync('research-server-hook.ts', 'utf8');
+          const live = fs.readFileSync('meaningful-live-telegram.ts', 'utf8');
+          const eod = fs.readFileSync('eod-archive-job.ts', 'utf8');
           const required = [
             ['NIFTY routing', contract.includes('NIFTY: "NIFTY"')],
             ['BANKNIFTY routing', contract.includes('BANKNIFTY: "BANKNIFTY"')],
@@ -56,6 +59,12 @@ jobs:
             ['Meaningful change gate', trigger.includes('meaningfulChange')],
             ['Hysteresis gate', trigger.includes('HYSTERESIS_CONFIRMATION_NOT_MET')],
             ['Exact duplicate suppression', trigger.includes('EXACT_DUPLICATE_SUPPRESSED')],
+            ['Live meaningful bridge installed', hook.includes('installMeaningfulLiveTelegramBridge()')],
+            ['Live bridge fail-open', live.includes('bridge failed open')],
+            ['Same-timestamp leadership guard', live.includes('LEAD_TIMESTAMP_TIE_UNRESOLVED')],
+            ['No execution authority', live.includes('NOT TRADE EXECUTION')],
+            ['Persistent narrative journal', live.includes('meaningful_narrative_event')],
+            ['EOD narrative inclusion', eod.includes('meaningfulNarrativeEvents')],
           ];
           let failed = false;
           for (const [name, ok] of required) {
@@ -75,9 +84,11 @@ jobs:
           NODE_ENV=test node --import tsx --test \
             test/message-trigger-engine.test.ts \
             test/meaningful-market-narrative.test.ts \
+            test/meaningful-live-telegram.test.ts \
             test/telegram-human-live-talk.test.ts \
             test/telegram-style-route.test.ts \
-            test/immediate-expansion-telegram-runtime.test.ts
+            test/immediate-expansion-telegram-runtime.test.ts \
+            test/eod-archive-core.test.ts
 
       - name: Devil check - full regression suite
         run: npm test

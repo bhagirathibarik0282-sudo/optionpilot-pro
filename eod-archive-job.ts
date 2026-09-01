@@ -3,6 +3,7 @@ import { archiveKey, decideEodArchive, indiaTradingDateFromIso, isWeekdayTrading
 import { uploadEodArchiveToDrive } from "./eod-drive-upload.js";
 
 const { Pool } = pg;
+const MEANINGFUL_NARRATIVE_KIND = "meaningful_narrative_event";
 
 function getPool() {
   const url = process.env.DATABASE_URL?.trim();
@@ -49,8 +50,9 @@ async function sourceCounts(client: PoolClient, tradingDate: string) {
       (SELECT count(*) FROM timeframe_state WHERE (block_end AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS timeframe_count,
       (SELECT count(*) FROM candidate_history WHERE (observed_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS candidate_count,
       (SELECT count(*) FROM trade_plan_history WHERE (created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS trade_plan_count,
-      (SELECT count(*) FROM trade_event_history WHERE (event_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS trade_event_count
-  `, [tradingDate]);
+      (SELECT count(*) FROM trade_event_history WHERE (event_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS trade_event_count,
+      (SELECT count(*) FROM app_state_log WHERE kind=$2 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS narrative_event_count
+  `, [tradingDate, MEANINGFUL_NARRATIVE_KIND]);
   const row = q.rows[0] || {};
   const counts = Object.fromEntries(Object.entries(row).map(([k, v]) => [k, Number(v || 0)]));
   const total = Object.values(counts).reduce((a, b) => a + Number(b || 0), 0);
@@ -73,9 +75,10 @@ async function buildPayload(client: PoolClient, tradingDate: string) {
       'timeframeStates',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY block_end), '[]'::jsonb) FROM timeframe_state t WHERE (block_end AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
       'candidates',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY observed_at), '[]'::jsonb) FROM candidate_history t WHERE (observed_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
       'tradePlans',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY created_at), '[]'::jsonb) FROM trade_plan_history t WHERE (created_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
-      'tradeEvents',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY event_at), '[]'::jsonb) FROM trade_event_history t WHERE (event_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date)
+      'tradeEvents',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY event_at), '[]'::jsonb) FROM trade_event_history t WHERE (event_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
+      'meaningfulNarrativeEvents',(SELECT COALESCE(jsonb_agg(payload ORDER BY created_at), '[]'::jsonb) FROM app_state_log WHERE kind=$2 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date)
     ) AS payload
-  `, [tradingDate]);
+  `, [tradingDate, MEANINGFUL_NARRATIVE_KIND]);
   return result.rows[0]?.payload || null;
 }
 

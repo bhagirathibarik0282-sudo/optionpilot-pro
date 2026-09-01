@@ -1,4 +1,4 @@
-name: Devil-Gated Auto Deploy
+name: OptionPilot Devil Gate
 
 on:
   pull_request:
@@ -10,8 +10,11 @@ on:
 permissions:
   contents: read
 
+# Railway production service must have Settings -> Wait for CI enabled.
+# Railway then holds the GitHub autodeploy in WAITING state until this workflow finishes.
+# Any failed GitHub workflow causes Railway to SKIP that deployment.
 concurrency:
-  group: optionpilot-production-deploy
+  group: optionpilot-devil-gate-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -79,29 +82,4 @@ jobs:
         run: npm test
 
       - name: Devil Gate PASS
-        run: echo "DEVIL_GATE_PASS"
-
-  deploy-production:
-    name: Deploy Production
-    needs: devil-gate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.devil-gate.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production
-    env:
-      RAILWAY_DEPLOY_HOOK: ${{ secrets.RAILWAY_DEPLOY_HOOK }}
-
-    steps:
-      - name: Require Railway deploy hook
-        run: |
-          if [ -z "$RAILWAY_DEPLOY_HOOK" ]; then
-            echo "DEPLOYMENT_BLOCKED: RAILWAY_DEPLOY_HOOK secret missing"
-            exit 1
-          fi
-
-      - name: Trigger Railway deployment only after Devil Gate PASS
-        run: |
-          curl --fail-with-body --show-error --silent \
-            --retry 3 --retry-delay 2 --retry-all-errors \
-            -X POST "$RAILWAY_DEPLOY_HOOK"
-          echo "RAILWAY_DEPLOY_TRIGGERED_AFTER_DEVIL_GATE_PASS"
+        run: echo "DEVIL_GATE_PASS_RAILWAY_MAY_DEPLOY_IF_WAIT_FOR_CI_ENABLED"

@@ -34,6 +34,14 @@ test("meaningful confirmed change is eligible", () => {
   assert.equal(r.duplicateSuppressed, false);
 });
 
+test("narrative footprint and structure deltas are meaningful without breaking old callers", () => {
+  assert.equal(evaluateMessageTrigger({ ...base, footprintLeadershipChanged: true }).shouldSpeak, true);
+  assert.equal(evaluateMessageTrigger({ ...base, structuralBoundaryChanged: true }).shouldSpeak, true);
+  assert.equal(evaluateMessageTrigger({ ...base, oppositePremiumStateChanged: true }).shouldSpeak, true);
+  assert.equal(evaluateMessageTrigger({ ...base, crossDteCoherenceChanged: true }).shouldSpeak, true);
+  assert.equal(evaluateMessageTrigger({ ...base, breadthStateChanged: true }).shouldSpeak, true);
+});
+
 test("candidate selection must represent a change, not a persistent selected flag", () => {
   assert.equal(evaluateMessageTrigger({ ...base, candidateSelectionChanged: false }).shouldSpeak, false);
   assert.equal(evaluateMessageTrigger({ ...base, candidateSelectionChanged: true }).shouldSpeak, true);

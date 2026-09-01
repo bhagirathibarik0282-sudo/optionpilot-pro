@@ -2,17 +2,23 @@ import type { Hono } from "hono";
 import { researchRouter } from "./research-router.js";
 import { installTelegramCombinationBridge } from "./telegram-combination-bridge.js";
 import { installMeaningfulLiveTelegramBridge } from "./meaningful-live-telegram.js";
+import {
+  getMeaningfulLiveAcceptanceStatus,
+  installMeaningfulLiveAcceptanceMonitor,
+} from "./meaningful-live-acceptance-monitor.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
+const MEANINGFUL_ACCEPTANCE_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
 
 // server.ts already imports this bootstrap module at process start. Install the
 // display-only combination evidence bridge first, then the meaningful-message
-// bridge as the outer Telegram interceptor. The meaningful bridge may suppress
-// repetitive 1-minute snapshots or replace them with a linked verified narrative;
-// missing/invalid evidence always fails open to the original sender.
+// bridge, then the read-only observer as the outermost Telegram interceptor.
+// The observer never mutates Telegram payloads; it only classifies returned
+// responses and exposes acceptance counters through a read-only endpoint.
 installTelegramCombinationBridge();
 installMeaningfulLiveTelegramBridge();
+installMeaningfulLiveAcceptanceMonitor();
 
 // Railway MCP can read service logs but cannot safely execute one-off commands
 // or perform an outbound GET to the research endpoint. Emit the exact same
@@ -71,6 +77,21 @@ export function mountResearchRoutes(app: Hono): void {
       statusText: response.statusText,
       headers,
     });
+  });
+
+  app.get("/api/research/meaningful-live-acceptance", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const requested = (c.req.query("symbol") ?? "").trim().toUpperCase();
+    if (requested && !(MEANINGFUL_ACCEPTANCE_SYMBOLS as readonly string[]).includes(requested)) {
+      return c.json({
+        ok: false,
+        mode: "READ_ONLY_MEANINGFUL_LIVE_ACCEPTANCE_V1",
+        error: "INVALID_SYMBOL",
+        allowed: MEANINGFUL_ACCEPTANCE_SYMBOLS,
+      }, 400);
+    }
+    const result = await getMeaningfulLiveAcceptanceStatus(requested || null);
+    return c.json(result);
   });
 
   app.route("/api/research", researchRouter);

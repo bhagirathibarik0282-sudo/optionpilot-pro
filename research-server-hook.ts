@@ -1,15 +1,18 @@
 import type { Hono } from "hono";
 import { researchRouter } from "./research-router.js";
 import { installTelegramCombinationBridge } from "./telegram-combination-bridge.js";
+import { installMeaningfulLiveTelegramBridge } from "./meaningful-live-telegram.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 
 // server.ts already imports this bootstrap module at process start. Install the
-// display-only Telegram evidence bridge here so the existing 1-minute sender
-// can surface COMB-01..08 without changing its verdict, score, cadence, or
-// execution logic. The bridge is idempotent and fail-closed.
+// display-only combination evidence bridge first, then the meaningful-message
+// bridge as the outer Telegram interceptor. The meaningful bridge may suppress
+// repetitive 1-minute snapshots or replace them with a linked verified narrative;
+// missing/invalid evidence always fails open to the original sender.
 installTelegramCombinationBridge();
+installMeaningfulLiveTelegramBridge();
 
 // Railway MCP can read service logs but cannot safely execute one-off commands
 // or perform an outbound GET to the research endpoint. Emit the exact same
@@ -30,8 +33,8 @@ h1StartupAuditTimer.unref?.();
 
 /**
  * Mounts research-only endpoints without changing any production verdict,
- * scoring, or trading execution path. The separately installed Telegram
- * bridge above is display-only: it appends evidence but never changes action.
+ * scoring, or trading execution path. Telegram bridges are presentation/cadence
+ * layers only and cannot create or modify broker orders.
  *
  * Intended server.ts integration:
  *   mountResearchRoutes(app);
@@ -76,8 +79,8 @@ export function mountResearchRoutes(app: Hono): void {
 export const RESEARCH_ROUTE_BASE = "/api/research" as const;
 export const RESEARCH_ROUTE_SAFETY = {
   mode: "RESEARCH_MODE",
-  productionImpact: "NONE",
+  productionImpact: "TELEGRAM_PRESENTATION_ONLY",
   affectsVerdict: false,
-  affectsTelegram: false,
+  affectsTelegram: true,
   affectsExecution: false,
 } as const;

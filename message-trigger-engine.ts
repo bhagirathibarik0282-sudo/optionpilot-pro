@@ -21,6 +21,12 @@ export interface MessageTriggerInput {
   buyerSellerStateChanged: boolean;
   behaviourRiskChanged: boolean;
   materialEvidenceChange: boolean;
+  /** Optional narrative-only signals; existing callers remain backward compatible. */
+  footprintLeadershipChanged?: boolean;
+  structuralBoundaryChanged?: boolean;
+  oppositePremiumStateChanged?: boolean;
+  crossDteCoherenceChanged?: boolean;
+  breadthStateChanged?: boolean;
   consecutiveConfirmations: number;
   requiredConfirmations: number;
   cooldownSatisfied: boolean;
@@ -73,7 +79,12 @@ function meaningfulChange(input: MessageTriggerInput): boolean {
     input.premiumBehaviourChanged ||
     input.buyerSellerStateChanged ||
     input.behaviourRiskChanged ||
-    input.materialEvidenceChange
+    input.materialEvidenceChange ||
+    input.footprintLeadershipChanged === true ||
+    input.structuralBoundaryChanged === true ||
+    input.oppositePremiumStateChanged === true ||
+    input.crossDteCoherenceChanged === true ||
+    input.breadthStateChanged === true
   );
 }
 

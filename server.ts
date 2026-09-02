@@ -18,6 +18,7 @@ import { ensureH1DerivedSchema } from "./h1-derived-db.js";
 import { recordH1FromRuntimeSnapshot } from "./h1-runtime-bridge.js";
 import { persistKiteAuthoritySession, resolveKiteAuthoritySession, getKiteAuthorityPublicStatus, kiteSessionIdMatchesFingerprint, type KiteAuthorityResolvedSession } from "./kite-session-authority.js";
 import { revokeKiteAuthoritySession } from "./kite-session-authority-revoke.js";
+import { KeyedSingleFlight, marketAuthorityKey } from "./market-refresh-singleflight.js";
 
 interface Instrument {
   instrument_token: number;
@@ -6894,6 +6895,13 @@ async function fetchFinancialNews(): Promise<{ title: string; source: string; pu
 const app = new Hono();
 mountResearchRoutes(app);
 
+// One browser/session per tab can point at the same Kite authority. A
+// session-local refreshPromise cannot collapse those cross-session races, so
+// the old background loop could launch duplicate NIFTY/BANKNIFTY/SENSEX fetch
+// cycles in the same second and trigger Kite HTTP 429 responses.
+const marketRefreshSingleFlight = new KeyedSingleFlight<IndexMetrics[]>();
+const MARKET_REFRESH_REUSE_MS = 5_000;
+
 app.use("*", async (c, next) => {
   await next();
   c.header("X-Content-Type-Options", "nosniff");
@@ -6918,11 +6926,19 @@ async function refreshMarketSnapshot(
   if (session.refreshPromise) return session.refreshPromise;
 
   session.refreshPromise = (async () => {
-    const results = await Promise.all([
-      fetchIndexData(session.accessToken, "NIFTY"),
-      fetchIndexData(session.accessToken, "BANKNIFTY"),
-      fetchIndexData(session.accessToken, "SENSEX"),
-    ]);
+    const sharedResults = await marketRefreshSingleFlight.run(
+      marketAuthorityKey(session.accessToken),
+      () => Promise.all([
+        fetchIndexData(session.accessToken, "NIFTY"),
+        fetchIndexData(session.accessToken, "BANKNIFTY"),
+        fetchIndexData(session.accessToken, "SENSEX"),
+      ]),
+      MARKET_REFRESH_REUSE_MS,
+    );
+    // Gap-score trend and histories below are session-owned and mutate their
+    // snapshot. Keep the upstream fetch shared but give every session its own
+    // object graph so one dashboard cannot alter another dashboard's state.
+    const results = structuredClone(sharedResults) as IndexMetrics[];
     const snapshot: Record<string, IndexMetrics> = {
       NIFTY: results[0],
       BANKNIFTY: results[1],

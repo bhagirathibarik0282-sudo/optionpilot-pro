@@ -186,10 +186,6 @@ function inferSymbol(text: string): NarrativeSymbol | null {
 export function isMeaningfulBridgeOwnedTelegramText(text: string): boolean {
   if (/WHAT MARKET FOLLOWED|OPTIONPILOT MEANINGFUL V1/i.test(text)) return false;
 
-  // These legacy alerts are emitted as standalone Telegram messages and do
-  // not carry the PCR/OI/premium marker bundle below. They must still be
-  // owned by the meaningful bridge; otherwise they bypass consolidation and
-  // leak the exact minute-by-minute generic cards that this bridge replaces.
   const legacyStandaloneAlert = /(?:^|\n)\s*(?:📊\s*)?(?:<b>)?REGIME SHIFT\s*[—-]|(?:^|\n)\s*(?:💡\s*)?(?:<b>)?Why this matters\s*\(|(?:^|\n)\s*(?:📈\s*)?(?:<b>)?HIGH-CONVICTION EVIDENCE\s*[—-]/im;
   if (legacyStandaloneAlert.test(text)) return true;
 
@@ -260,8 +256,6 @@ function chainEvent(previous: LiveChainPoint, current: LiveChainPoint, direction
   const putPct = pct(previous.putWallOi, current.putWallOi);
   if (pcrDelta == null || callPct == null || putPct == null) return null;
 
-  // One OI-imbalance layer: PCR and wall asymmetry must agree in sign.
-  // This avoids double-counting PCR and wall OI as separate independent votes.
   const wallAsym = putPct - callPct;
   const expected = directionSign(direction);
   const pcrRole = Math.sign(pcrDelta) === expected ? 1 : Math.sign(pcrDelta) === -expected ? -1 : 0;
@@ -272,12 +266,7 @@ function chainEvent(previous: LiveChainPoint, current: LiveChainPoint, direction
       ? "OPPOSES_LOCKED_DIRECTION"
       : "NEUTRAL";
 
-  return event(
-    "OI_WALL",
-    current.atMs,
-    role,
-    `PCR Δ${pcrDelta.toFixed(3)} | Call wall ${callPct.toFixed(2)}% | Put wall ${putPct.toFixed(2)}%`,
-  );
+  return event("OI_WALL", current.atMs, role, `PCR Δ${pcrDelta.toFixed(3)} | Call wall ${callPct.toFixed(2)}% | Put wall ${putPct.toFixed(2)}%`);
 }
 
 export function buildFootprintEvents(window: LiveNarrativeWindow, direction: "BULLISH" | "BEARISH"): FootprintEvent[] {
@@ -333,7 +322,6 @@ function unresolvedFootprint(symbol: NarrativeSymbol, supporting: FootprintEvent
   };
 }
 
-/** Rejects false leadership when two evidence families first speak in the same timestamp bucket. */
 export function attributeMarketFootprintConservatively(
   symbol: NarrativeSymbol,
   direction: "BULLISH" | "BEARISH",
@@ -346,15 +334,11 @@ export function attributeMarketFootprintConservatively(
   const spot = [...supporting].filter((e) => e.source === "SPOT").sort((a, b) => a.observedAtMs - b.observedAtMs)[0];
   if (!spot) return unresolvedFootprint(symbol, supporting, opposing, "NO_MEANINGFUL_SPOT_FOLLOW_THROUGH_YET");
 
-  const leaders = supporting.filter((e) =>
-    e.source !== "SPOT" && e.source !== "OPPOSITE_PREMIUM" && e.observedAtMs <= spot.observedAtMs
-  );
+  const leaders = supporting.filter((e) => e.source !== "SPOT" && e.source !== "OPPOSITE_PREMIUM" && e.observedAtMs <= spot.observedAtMs);
   if (leaders.length === 0) return unresolvedFootprint(symbol, supporting, opposing, "SPOT_MOVED_WITHOUT_A_VERIFIED_PRIOR_LEAD");
   const firstAt = Math.min(...leaders.map((e) => e.observedAtMs));
   const firstSources = new Set(leaders.filter((e) => e.observedAtMs === firstAt).map((e) => e.source));
-  if (firstSources.size > 1) {
-    return unresolvedFootprint(symbol, supporting, opposing, "LEAD_TIMESTAMP_TIE_UNRESOLVED");
-  }
+  if (firstSources.size > 1) return unresolvedFootprint(symbol, supporting, opposing, "LEAD_TIMESTAMP_TIE_UNRESOLVED");
 
   return attributeMarketFootprint({ symbol, lockedDirection: direction, previousLeader, events });
 }
@@ -403,12 +387,8 @@ function stateFor(
   const pressure = bullish ? "BULLISH_PRESSURE" : "BEARISH_PRESSURE";
   const drag = bullish ? "BULLISH_WITH_DRAG" : "BEARISH_WITH_SUPPORT";
 
-  if (candidateState?.startsWith("FADING") && oppositeState?.includes("FAILURE / RECOVERING")) {
-    return "EXHAUSTION_WATCH";
-  }
-  if (candidateState?.includes("EXPANDING") && oppositeState === "RECOVERING") {
-    return "DUAL_PREMIUM_ENERGY";
-  }
+  if (candidateState?.startsWith("FADING") && oppositeState?.includes("FAILURE / RECOVERING")) return "EXHAUSTION_WATCH";
+  if (candidateState?.includes("EXPANDING") && oppositeState === "RECOVERING") return "DUAL_PREMIUM_ENERGY";
 
   const spotSupport = latestRole(events, "SPOT") === "SUPPORTS_LOCKED_DIRECTION";
   const futureSupport = latestRole(events, "FUTURES") === "SUPPORTS_LOCKED_DIRECTION";
@@ -440,31 +420,19 @@ function metricLines(window: LiveNarrativeWindow): NarrativeMetricLine[] {
   if (chain) {
     const [previous, current] = chain;
     if (previous.pcr != null && current.pcr != null) {
-      metrics.push({
-        label: "PCR",
-        transition: { previous: previous.pcr, current: current.pcr, valueDecimals: 3, deltaDecimals: 3, percentDecimals: 1, useGrouping: false },
-      });
+      metrics.push({ label: "PCR", transition: { previous: previous.pcr, current: current.pcr, valueDecimals: 3, deltaDecimals: 3, percentDecimals: 1, useGrouping: false } });
     }
     if (previous.callWallOi != null && current.callWallOi != null) {
-      metrics.push({
-        label: `CW${current.callWallStrike != null ? ` ${current.callWallStrike}` : ""}`,
-        transition: { previous: previous.callWallOi / 100000, current: current.callWallOi / 100000, valueDecimals: 2, deltaDecimals: 2, percentDecimals: 1, suffix: "L" },
-      });
+      metrics.push({ label: `CW${current.callWallStrike != null ? ` ${current.callWallStrike}` : ""}`, transition: { previous: previous.callWallOi / 100000, current: current.callWallOi / 100000, valueDecimals: 2, deltaDecimals: 2, percentDecimals: 1, suffix: "L" } });
     }
     if (previous.putWallOi != null && current.putWallOi != null) {
-      metrics.push({
-        label: `PW${current.putWallStrike != null ? ` ${current.putWallStrike}` : ""}`,
-        transition: { previous: previous.putWallOi / 100000, current: current.putWallOi / 100000, valueDecimals: 2, deltaDecimals: 2, percentDecimals: 1, suffix: "L" },
-      });
+      metrics.push({ label: `PW${current.putWallStrike != null ? ` ${current.putWallStrike}` : ""}`, transition: { previous: previous.putWallOi / 100000, current: current.putWallOi / 100000, valueDecimals: 2, deltaDecimals: 2, percentDecimals: 1, suffix: "L" } });
     }
   }
   const next = lastTwo(window.nextDte);
   if (next) {
     const [previous, current] = next;
-    metrics.push({
-      label: `Next ${current.side}`,
-      transition: { previous: previous.ltp, current: current.ltp, valueDecimals: 2, deltaDecimals: 2, percentDecimals: 1 },
-    });
+    metrics.push({ label: `Next ${current.side}`, transition: { previous: previous.ltp, current: current.ltp, valueDecimals: 2, deltaDecimals: 2, percentDecimals: 1 } });
   }
   return metrics;
 }
@@ -482,10 +450,7 @@ function uniqueChanges(values: string[]): string[] {
   return [...new Set(values.map((v) => v.trim()).filter(Boolean))];
 }
 
-export function deriveLiveMeaningfulDecision(
-  window: LiveNarrativeWindow,
-  previousMemory: NarrativeMemoryRecord | null,
-): LiveMeaningfulDecision {
+export function deriveLiveMeaningfulDecision(window: LiveNarrativeWindow, previousMemory: NarrativeMemoryRecord | null): LiveMeaningfulDecision {
   const symbol = window.symbol;
   const marketPair = lastTwo(window.market);
   const candidatePair = lastTwo(window.candidate);
@@ -521,9 +486,7 @@ export function deriveLiveMeaningfulDecision(
   } else if (previousMemory.state !== state) {
     changes.push(`${previousMemory.state.replaceAll("_", " ")} → ${state.replaceAll("_", " ")}`);
   }
-  if (previousMemory && previousMemory.candidateKey !== currentCandidate.contractKey) {
-    changes.push(`CANDIDATE ROTATION → ${currentCandidate.strike} ${currentCandidate.side}`);
-  }
+  if (previousMemory && previousMemory.candidateKey !== currentCandidate.contractKey) changes.push(`CANDIDATE ROTATION → ${currentCandidate.strike} ${currentCandidate.side}`);
   if (footprint.rotationDetected) changes.push(`FOOTPRINT ROTATION ${footprint.rotationFrom} → ${footprint.leader}`);
   if (oppositePremiumStateChanged && oppositeState) changes.push(`OPPOSITE PREMIUM ${oppositeState}`);
   if (crossDteCoherenceChanged) changes.push(crossDteSupporting ? "NEXT-DTE JOINED" : "NEXT-DTE FADED");
@@ -550,9 +513,7 @@ export function deriveLiveMeaningfulDecision(
     };
   }
 
-  const previousLink = previousMemory
-    ? { at: istLabel(previousMemory.lastMeaningfulAtMs), state: previousMemory.state }
-    : null;
+  const previousLink = previousMemory ? { at: istLabel(previousMemory.lastMeaningfulAtMs), state: previousMemory.state } : null;
   const narrative = buildMeaningfulMarketNarrative({
     symbol,
     at: currentMarket.atLabel,
@@ -605,15 +566,12 @@ async function hydrateMemory(): Promise<void> {
     const p = getPool();
     if (!p) { memoryHydrated = true; return; }
     try {
-      const result = await p.query(
-        "SELECT payload FROM app_state_log WHERE kind=$1 ORDER BY created_at DESC LIMIT 30",
-        [MEMORY_KIND],
-      );
+      const result = await p.query("SELECT payload FROM app_state_log WHERE kind=$1 ORDER BY created_at DESC LIMIT 30", [MEMORY_KIND]);
       const rows = [...result.rows].reverse() as Array<{ payload?: PersistedEvent }>;
       for (const row of rows) {
         const record = row.payload?.memory;
         if (!record || !SYMBOLS.includes(record.symbol)) continue;
-        try { memory.commit(record); } catch { /* ignore stale/out-of-order persisted rows */ }
+        try { memory.commit(record); } catch { }
       }
     } catch (err) {
       console.error("[Meaningful Telegram] memory hydration failed; live bridge will fail-open:", err instanceof Error ? err.message : String(err));
@@ -640,15 +598,7 @@ function mapMarketRows(rows: Array<Record<string, unknown>>): LiveMarketPoint[] 
     const at = ms(row.exchange_timestamp) ?? ms(row.minute_bucket);
     const spot = finite(row.spot_ltp);
     if (at == null || spot == null) return null;
-    return {
-      atMs: at,
-      atLabel: istLabel(at),
-      freshnessStatus: typeof row.freshness_status === "string" ? row.freshness_status : null,
-      spot,
-      future: finite(row.future_ltp),
-      pdh: finite(row.pdh),
-      pdl: finite(row.pdl),
-    };
+    return { atMs: at, atLabel: istLabel(at), freshnessStatus: typeof row.freshness_status === "string" ? row.freshness_status : null, spot, future: finite(row.future_ltp), pdh: finite(row.pdh), pdl: finite(row.pdl) };
   }).filter((value): value is LiveMarketPoint => value !== null);
 }
 
@@ -656,15 +606,7 @@ function mapChainRows(rows: Array<Record<string, unknown>>): LiveChainPoint[] {
   return rows.map((row) => {
     const at = ms(row.minute_bucket);
     if (at == null) return null;
-    return {
-      atMs: at,
-      validationStatus: typeof row.validation_status === "string" ? row.validation_status : null,
-      pcr: finite(row.band7_oi_pcr) ?? finite(row.full_chain_oi_pcr),
-      callWallStrike: finite(row.call_wall_strike),
-      callWallOi: finite(row.call_wall_oi),
-      putWallStrike: finite(row.put_wall_strike),
-      putWallOi: finite(row.put_wall_oi),
-    };
+    return { atMs: at, validationStatus: typeof row.validation_status === "string" ? row.validation_status : null, pcr: finite(row.band7_oi_pcr) ?? finite(row.full_chain_oi_pcr), callWallStrike: finite(row.call_wall_strike), callWallOi: finite(row.call_wall_oi), putWallStrike: finite(row.put_wall_strike), putWallOi: finite(row.put_wall_oi) };
   }).filter((value): value is LiveChainPoint => value !== null);
 }
 
@@ -676,18 +618,7 @@ function mapPremiumRows(rows: Array<Record<string, unknown>>): LivePremiumPoint[
     const ltp = finite(row.ltp);
     const expiry = typeof row.expiry === "string" ? row.expiry.slice(0, 10) : row.expiry instanceof Date ? row.expiry.toISOString().slice(0, 10) : null;
     if (at == null || !side || strike == null || ltp == null || !expiry) return null;
-    return {
-      atMs: at,
-      contractKey: `${String(row.symbol)}|${expiry}|${strike}|${side}`,
-      side,
-      expiry,
-      dte: finite(row.dte),
-      strike,
-      ltp,
-      pdh: finite(row.pdh),
-      pdl: finite(row.pdl),
-      validationStatus: typeof row.validation_status === "string" ? row.validation_status : null,
-    };
+    return { atMs: at, contractKey: `${String(row.symbol)}|${expiry}|${strike}|${side}`, side, expiry, dte: finite(row.dte), strike, ltp, pdh: finite(row.pdh), pdl: finite(row.pdl), validationStatus: typeof row.validation_status === "string" ? row.validation_status : null };
   }).filter((value): value is LivePremiumPoint => value !== null);
 }
 
@@ -716,9 +647,7 @@ async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promis
   const latestMinute = Math.max(...candidateLatest.map((point) => point.atMs));
   const nearLatest = candidateLatest.filter((point) => Math.abs(point.atMs - latestMinute) <= 90_000);
   const sides = [...new Set(nearLatest.map((point) => point.side))];
-  const chosenSide = hintedSide && nearLatest.some((point) => point.side === hintedSide)
-    ? hintedSide
-    : sides.length === 1 ? sides[0] : null;
+  const chosenSide = hintedSide && nearLatest.some((point) => point.side === hintedSide) ? hintedSide : sides.length === 1 ? sides[0] : null;
   if (!chosenSide) return null;
   const chosen = nearLatest.find((point) => point.side === chosenSide) ?? null;
   if (!chosen) return null;
@@ -781,10 +710,7 @@ async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promis
 }
 
 export function syntheticSuppressedResponse(): Response {
-  return new Response(JSON.stringify({
-    ok: true,
-    result: { message_id: 0, date: Math.floor(Date.now() / 1000), text: "OPTIONPILOT_MEANINGFUL_SUPPRESSED_UNCHANGED" },
-  }), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify({ ok: true, result: { message_id: 0, date: Math.floor(Date.now() / 1000), text: "OPTIONPILOT_MEANINGFUL_SUPPRESSED_UNCHANGED" } }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
 async function telegramResponseOk(response: Response): Promise<boolean> {
@@ -816,9 +742,7 @@ export function installMeaningfulLiveTelegramBridge(): void {
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     try {
       const url = requestUrl(input);
-      if (!url.includes("api.telegram.org/") || !url.includes("/sendMessage") || typeof init?.body !== "string") {
-        return originalFetch(input, init);
-      }
+      if (!url.includes("api.telegram.org/") || !url.includes("/sendMessage") || typeof init?.body !== "string") return originalFetch(input, init);
       const payload = JSON.parse(init.body) as TelegramPayload;
       const originalText = typeof payload.text === "string" ? payload.text : "";
       const symbol = inferSymbol(originalText);
@@ -826,12 +750,6 @@ export function installMeaningfulLiveTelegramBridge(): void {
 
       await hydrateMemory();
       const window = await loadWindow(symbol, originalText);
-      // Meaningful mode owns recognised fast snapshots and legacy standalone
-      // alerts. If the
-      // evidence window is incomplete, suppress the legacy payload instead
-      // of leaking the same old card every recorder minute. This remains
-      // fail-closed: no narrative is invented and no Telegram message is
-      // sent until sufficient evidence exists.
       if (!window) return syntheticSuppressedResponse();
 
       const previous = memory.get(symbol);
@@ -842,9 +760,7 @@ export function installMeaningfulLiveTelegramBridge(): void {
         confirmationTracker.reset(symbol);
         return syntheticSuppressedResponse();
       }
-      if (!decision.triggerFingerprint || !decision.narrativeHtml || !decision.narrativeText || !decision.footprint) {
-        return syntheticSuppressedResponse();
-      }
+      if (!decision.triggerFingerprint || !decision.narrativeHtml || !decision.narrativeText || !decision.footprint) return syntheticSuppressedResponse();
 
       const confirmationKey = `${decision.candidateKey}|${decision.state}|${decision.footprint.classification}|${decision.meaningfulChanges.join("|")}`;
       const consecutiveConfirmations = confirmationTracker.observe(symbol, confirmationKey);
@@ -864,24 +780,19 @@ export function installMeaningfulLiveTelegramBridge(): void {
         crossDteCoherenceChanged: decision.crossDteCoherenceChanged,
         breadthStateChanged: false,
         consecutiveConfirmations,
-        requiredConfirmations: decision.dataQuality === "OK" ? 2 : 1,
+        requiredConfirmations: 1,
         cooldownSatisfied: true,
         currentFingerprint: decision.triggerFingerprint,
         lastSpokenFingerprint: previous?.fingerprint ?? null,
       });
 
-      if (!trigger.shouldSpeak) {
-        return syntheticSuppressedResponse();
-      }
+      if (!trigger.shouldSpeak) return syntheticSuppressedResponse();
 
       let html = appendExistingAi(decision.narrativeHtml, originalText);
       if (html.length > MAX_LIVE_TEXT) html = decision.narrativeHtml;
       if (html.length > MAX_LIVE_TEXT) return syntheticSuppressedResponse();
 
-      const response = await originalFetch(input, {
-        ...init,
-        body: JSON.stringify({ ...payload, text: html, parse_mode: "HTML", disable_web_page_preview: true }),
-      });
+      const response = await originalFetch(input, { ...init, body: JSON.stringify({ ...payload, text: html, parse_mode: "HTML", disable_web_page_preview: true }) });
       if (await telegramResponseOk(response)) {
         const current = window.market.at(-1)!;
         const stateSinceMs = previous?.state === decision.state ? previous.stateSinceMs : current.atMs;

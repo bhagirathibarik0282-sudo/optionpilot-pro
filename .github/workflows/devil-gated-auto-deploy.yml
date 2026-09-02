@@ -67,7 +67,7 @@ jobs:
             ['Acceptance monitor journal check', monitor.includes('POSTGRES_APP_STATE_LOG')],
             ['Live bridge fail-open', live.includes('bridge failed open')],
             ['Same-timestamp leadership guard', live.includes('LEAD_TIMESTAMP_TIE_UNRESOLVED')],
-            ['No execution authority', live.includes('NOT TRADE EXECUTION')],
+            ['No execution authority', live.includes('affectsExecution: false') && live.includes('affectsVerdict: false')],
             ['Persistent narrative journal', live.includes('meaningful_narrative_event')],
             ['EOD narrative inclusion', eod.includes('meaningfulNarrativeEvents')],
           ];

@@ -1,0 +1,5 @@
+--- a/meaningful-live-telegram.ts
++++ b/meaningful-live-telegram.ts
+@@
+-        requiredConfirmations: decision.dataQuality === "OK" ? 2 : 1,
++        requiredConfirmations: 1,

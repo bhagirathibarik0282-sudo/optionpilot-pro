@@ -5,6 +5,7 @@ import {
   attributeMarketFootprintConservatively,
   buildFootprintEvents,
   deriveLiveMeaningfulDecision,
+  isMeaningfulBridgeOwnedTelegramText,
   syntheticSuppressedResponse,
   toTelegramHtml,
   type LiveNarrativeWindow,
@@ -147,4 +148,21 @@ test("meaningful bridge suppression response blocks legacy minute-card pass-thro
   const body = await response.json() as { ok?: boolean; result?: { text?: string } };
   assert.equal(body.ok, true);
   assert.equal(body.result?.text, "OPTIONPILOT_MEANINGFUL_SUPPRESSED_UNCHANGED");
+});
+
+test("meaningful bridge owns standalone legacy alerts that lack PCR/OI/premium markers", () => {
+  assert.equal(isMeaningfulBridgeOwnedTelegramText(
+    "📊 <b>REGIME SHIFT — NIFTY</b>\nRANGE_COMPRESSION_PROVISIONAL → OSCILLATING_OR_RANGE",
+  ), true);
+  assert.equal(isMeaningfulBridgeOwnedTelegramText(
+    "💡 <b>Why this matters (NIFTY)</b>\nBoth metrics signal that call buyers are struggling.",
+  ), true);
+  assert.equal(isMeaningfulBridgeOwnedTelegramText(
+    "📈 <b>HIGH-CONVICTION EVIDENCE — NIFTY</b>\nReadiness: EVIDENCE_MATRIX_COMPLETE | Conflicts: 0",
+  ), true);
+});
+
+test("meaningful bridge does not recapture consolidated output or unrelated Telegram text", () => {
+  assert.equal(isMeaningfulBridgeOwnedTelegramText("🧭 OPTIONPILOT MEANINGFUL V1\nNIFTY • BULLISH PRESSURE"), false);
+  assert.equal(isMeaningfulBridgeOwnedTelegramText("Manual operator note for NIFTY"), false);
 });

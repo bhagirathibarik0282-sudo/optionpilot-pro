@@ -8,8 +8,16 @@ const CHAT_ID_ENV: Record<TelegramSymbol, string> = {
   SENSEX: "TELEGRAM_SENSEX_CHAT_ID",
 };
 
-const lastSent = new Map<TelegramSymbol, { fingerprint: string; at: number }>();
-const DUPLICATE_GUARD_MS = 3 * 60 * 1000;
+/**
+ * Same-state Telegram suppression.
+ *
+ * A repeated NO TRADE / blocker card often differs only because the renderer adds
+ * a fresh clock timestamp. Using the raw message as a fingerprint therefore let
+ * unchanged alerts re-fire every few minutes. Keep one stable fingerprint per
+ * symbol for the current IST trading date and only speak again when the actual
+ * message state changes.
+ */
+const lastSent = new Map<TelegramSymbol, { fingerprint: string; istDate: string }>();
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -28,6 +36,29 @@ function assertStrictRouting(card: CanonicalTelegramCard): void {
   }
 }
 
+function istDateKey(now = Date.now()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(now));
+}
+
+/** Strip only volatile clock text. Market/risk numbers are intentionally kept. */
+function normalizeMessageForDedup(message: string): string {
+  return message
+    // e.g. "⏰ 2:27:34 pm | Manual review only."
+    .replace(/(?:⏰\s*)?\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\s*\|\s*Manual review only\.?/gi, "<MANUAL_REVIEW_TIME>")
+    // e.g. "Time: 2:24:35 pm"
+    .replace(/\bTime\s*:\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b/gi, "Time:<VOLATILE>")
+    // generic ISO timestamps occasionally embedded by preview paths
+    .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z\b/g, "<ISO_TIME>")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function fingerprint(card: CanonicalTelegramCard, message: string): string {
   return [
     card.symbol,
@@ -37,7 +68,7 @@ function fingerprint(card: CanonicalTelegramCard, message: string): string {
     card.candidate.expiry ?? "NONE",
     card.tradePlan.entry ?? "NONE",
     card.tradePlan.sl ?? "NONE",
-    message,
+    normalizeMessageForDedup(message),
   ].join("|");
 }
 
@@ -57,10 +88,13 @@ export async function sendTelegramCardV2(
     assertStrictRouting(card);
     const message = renderTelegramCardV2(card);
     const fp = fingerprint(card, message);
+    const today = istDateKey();
     const previous = lastSent.get(card.symbol);
-    const now = Date.now();
 
-    if (previous && previous.fingerprint === fp && now - previous.at < DUPLICATE_GUARD_MS) {
+    // Same semantic state is spoken only once per IST trading date.
+    // Any real market/risk/candidate number change remains in the normalized
+    // message, changes the fingerprint, and is eligible immediately.
+    if (previous && previous.istDate === today && previous.fingerprint === fp) {
       return { ok: true, sent: false, symbol: card.symbol, destinationGroup, reason: "DUPLICATE_GUARD" };
     }
 
@@ -86,7 +120,7 @@ export async function sendTelegramCardV2(
       throw new Error(`TELEGRAM_SEND_FAILED:${response.status}:${payload?.description ?? "UNKNOWN"}`);
     }
 
-    lastSent.set(card.symbol, { fingerprint: fp, at: now });
+    lastSent.set(card.symbol, { fingerprint: fp, istDate: today });
 
     return {
       ok: true,

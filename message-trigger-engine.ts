@@ -57,6 +57,7 @@ function out(
   eligibleBeforeDuplicateSuppression = false,
   duplicateSuppressed = false,
 ): MessageTriggerResult {
+  console.log(`[Telegram Trigger] ${shouldSpeak ? "ELIGIBLE" : "SUPPRESSED"} reason=${reason}`);
   return {
     version: "MESSAGE_TRIGGER_ENGINE_V1",
     semantics: "RESEARCH_SHADOW_ONLY",

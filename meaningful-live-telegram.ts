@@ -14,6 +14,7 @@ import {
   type PremiumNarrativeBlock,
 } from "./meaningful-market-narrative.js";
 import { evaluateMessageTrigger } from "./message-trigger-engine.js";
+import { buildMeaningfulTelegramCardV2 } from "./telegram-meaningful-card-v2.js";
 
 const { Pool } = pg;
 
@@ -531,9 +532,44 @@ export function deriveLiveMeaningfulDecision(window: LiveNarrativeWindow, previo
     footprint,
   });
 
+  const oppositePair = lastTwo(window.opposite);
+  const chainPair = lastTwo(window.chain);
+  const compactText = buildMeaningfulTelegramCardV2({
+    symbol,
+    at: currentMarket.atLabel,
+    direction,
+    state,
+    spotPrevious: previousMarket.spot,
+    spotCurrent: currentMarket.spot,
+    futurePrevious: previousMarket.future,
+    futureCurrent: currentMarket.future,
+    pdh: currentMarket.pdh,
+    pdl: currentMarket.pdl,
+    candidateStrike: currentCandidate.strike,
+    candidateSide: currentCandidate.side,
+    candidatePrevious: previousCandidate.ltp,
+    candidateCurrent: currentCandidate.ltp,
+    candidateDte: currentCandidate.dte,
+    oppositeStrike: oppositePair?.[1].strike ?? null,
+    oppositeSide: oppositePair?.[1].side ?? null,
+    oppositePrevious: oppositePair?.[0].ltp ?? null,
+    oppositeCurrent: oppositePair?.[1].ltp ?? null,
+    pcrPrevious: chainPair?.[0].pcr ?? null,
+    pcrCurrent: chainPair?.[1].pcr ?? null,
+    callWallStrike: chainPair?.[1].callWallStrike ?? null,
+    callWallOiPrevious: chainPair?.[0].callWallOi ?? null,
+    callWallOiCurrent: chainPair?.[1].callWallOi ?? null,
+    putWallStrike: chainPair?.[1].putWallStrike ?? null,
+    putWallOiPrevious: chainPair?.[0].putWallOi ?? null,
+    putWallOiCurrent: chainPair?.[1].putWallOi ?? null,
+    nextDtePrevious: nextPair?.[0].ltp ?? null,
+    nextDteCurrent: nextPair?.[1].ltp ?? null,
+    meaningfulChanges,
+    blocker: dq === "OK" ? null : `DATA QUALITY ${dq}`,
+  });
+
   const triggerFingerprint = `${currentCandidate.contractKey}:${narrative.fingerprint}`;
-  const cart = `\n\n🛒 **CARTED / WATCH: ${currentCandidate.strike} ${currentCandidate.side}${currentCandidate.dte != null ? ` • DTE${currentCandidate.dte}` : ""}**\nNOT TRADE EXECUTION`;
-  const text = `🧭 OPTIONPILOT MEANINGFUL V1\n${narrative.text}${cart}`;
+  const text = compactText;
   const html = toTelegramHtml(text);
 
   return {

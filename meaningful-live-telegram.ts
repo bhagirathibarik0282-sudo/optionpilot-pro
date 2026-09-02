@@ -183,8 +183,16 @@ function inferSymbol(text: string): NarrativeSymbol | null {
   return null;
 }
 
-function looksLikeFastMarketSnapshot(text: string): boolean {
+export function isMeaningfulBridgeOwnedTelegramText(text: string): boolean {
   if (/WHAT MARKET FOLLOWED|OPTIONPILOT MEANINGFUL V1/i.test(text)) return false;
+
+  // These legacy alerts are emitted as standalone Telegram messages and do
+  // not carry the PCR/OI/premium marker bundle below. They must still be
+  // owned by the meaningful bridge; otherwise they bypass consolidation and
+  // leak the exact minute-by-minute generic cards that this bridge replaces.
+  const legacyStandaloneAlert = /(?:^|\n)\s*(?:📊\s*)?(?:<b>)?REGIME SHIFT\s*[—-]|(?:^|\n)\s*(?:💡\s*)?(?:<b>)?Why this matters\s*\(|(?:^|\n)\s*(?:📈\s*)?(?:<b>)?HIGH-CONVICTION EVIDENCE\s*[—-]/im;
+  if (legacyStandaloneAlert.test(text)) return true;
+
   const markers = ["PCR", "Wall", "WALL", "Intrinsic", "Extrinsic", "OI", "Premium", "PREMIUM"];
   return markers.filter((marker) => text.includes(marker)).length >= 3;
 }
@@ -814,11 +822,12 @@ export function installMeaningfulLiveTelegramBridge(): void {
       const payload = JSON.parse(init.body) as TelegramPayload;
       const originalText = typeof payload.text === "string" ? payload.text : "";
       const symbol = inferSymbol(originalText);
-      if (!symbol || !looksLikeFastMarketSnapshot(originalText)) return originalFetch(input, init);
+      if (!symbol || !isMeaningfulBridgeOwnedTelegramText(originalText)) return originalFetch(input, init);
 
       await hydrateMemory();
       const window = await loadWindow(symbol, originalText);
-      // Meaningful mode owns recognised fast-snapshot messages. If the
+      // Meaningful mode owns recognised fast snapshots and legacy standalone
+      // alerts. If the
       // evidence window is incomplete, suppress the legacy payload instead
       // of leaking the same old card every recorder minute. This remains
       // fail-closed: no narrative is invented and no Telegram message is

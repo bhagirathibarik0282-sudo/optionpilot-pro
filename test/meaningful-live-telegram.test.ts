@@ -160,6 +160,9 @@ test("meaningful bridge owns standalone legacy alerts that lack PCR/OI/premium m
   assert.equal(isMeaningfulBridgeOwnedTelegramText(
     "📈 <b>HIGH-CONVICTION EVIDENCE — NIFTY</b>\nReadiness: EVIDENCE_MATRIX_COMPLETE | Conflicts: 0",
   ), true);
+  assert.equal(isMeaningfulBridgeOwnedTelegramText(
+    "⛔ <b>NIFTY | NO TRADE</b>\nReason: REVIEWABLE_CONTRACT: Selected ATM/1-ITM contract must have complete live quote/liquidity data.",
+  ), true);
 });
 
 test("meaningful bridge does not recapture consolidated output or unrelated Telegram text", () => {

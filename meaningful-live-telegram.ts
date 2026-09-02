@@ -772,7 +772,7 @@ async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promis
   return { symbol, market, chain, candidate, opposite, nextDte };
 }
 
-function syntheticSuppressedResponse(): Response {
+export function syntheticSuppressedResponse(): Response {
   return new Response(JSON.stringify({
     ok: true,
     result: { message_id: 0, date: Math.floor(Date.now() / 1000), text: "OPTIONPILOT_MEANINGFUL_SUPPRESSED_UNCHANGED" },
@@ -818,18 +818,23 @@ export function installMeaningfulLiveTelegramBridge(): void {
 
       await hydrateMemory();
       const window = await loadWindow(symbol, originalText);
-      if (!window) return originalFetch(input, init); // missing evidence => fail-open, never invent
+      // Meaningful mode owns recognised fast-snapshot messages. If the
+      // evidence window is incomplete, suppress the legacy payload instead
+      // of leaking the same old card every recorder minute. This remains
+      // fail-closed: no narrative is invented and no Telegram message is
+      // sent until sufficient evidence exists.
+      if (!window) return syntheticSuppressedResponse();
 
       const previous = memory.get(symbol);
       const decision = deriveLiveMeaningfulDecision(window, previous);
-      if (!decision.ok || !decision.candidateKey) return originalFetch(input, init);
+      if (!decision.ok || !decision.candidateKey) return syntheticSuppressedResponse();
 
       if (decision.reason === "NO_MEANINGFUL_CHANGE") {
         confirmationTracker.reset(symbol);
         return syntheticSuppressedResponse();
       }
       if (!decision.triggerFingerprint || !decision.narrativeHtml || !decision.narrativeText || !decision.footprint) {
-        return originalFetch(input, init);
+        return syntheticSuppressedResponse();
       }
 
       const confirmationKey = `${decision.candidateKey}|${decision.state}|${decision.footprint.classification}|${decision.meaningfulChanges.join("|")}`;
@@ -862,7 +867,7 @@ export function installMeaningfulLiveTelegramBridge(): void {
 
       let html = appendExistingAi(decision.narrativeHtml, originalText);
       if (html.length > MAX_LIVE_TEXT) html = decision.narrativeHtml;
-      if (html.length > MAX_LIVE_TEXT) return originalFetch(input, init); // length uncertainty => fail-open
+      if (html.length > MAX_LIVE_TEXT) return syntheticSuppressedResponse();
 
       const response = await originalFetch(input, {
         ...init,

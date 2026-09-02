@@ -5,6 +5,7 @@ import {
   attributeMarketFootprintConservatively,
   buildFootprintEvents,
   deriveLiveMeaningfulDecision,
+  syntheticSuppressedResponse,
   toTelegramHtml,
   type LiveNarrativeWindow,
   type LivePremiumPoint,
@@ -137,4 +138,13 @@ test("confirmation tracker requires the same meaningful state key to persist", (
   assert.equal(tracker.observe("NIFTY", "B"), 2);
   tracker.reset("NIFTY");
   assert.equal(tracker.observe("NIFTY", "B"), 1);
+});
+
+
+test("meaningful bridge suppression response blocks legacy minute-card pass-through", async () => {
+  const response = syntheticSuppressedResponse();
+  assert.equal(response.ok, true);
+  const body = await response.json() as { ok?: boolean; result?: { text?: string } };
+  assert.equal(body.ok, true);
+  assert.equal(body.result?.text, "OPTIONPILOT_MEANINGFUL_SUPPRESSED_UNCHANGED");
 });

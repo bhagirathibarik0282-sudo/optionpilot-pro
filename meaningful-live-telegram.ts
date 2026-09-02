@@ -190,7 +190,7 @@ export function isMeaningfulBridgeOwnedTelegramText(text: string): boolean {
   // not carry the PCR/OI/premium marker bundle below. They must still be
   // owned by the meaningful bridge; otherwise they bypass consolidation and
   // leak the exact minute-by-minute generic cards that this bridge replaces.
-  const legacyStandaloneAlert = /(?:^|\n)\s*(?:📊\s*)?(?:<b>)?REGIME SHIFT\s*[—-]|(?:^|\n)\s*(?:💡\s*)?(?:<b>)?Why this matters\s*\(|(?:^|\n)\s*(?:📈\s*)?(?:<b>)?HIGH-CONVICTION EVIDENCE\s*[—-]/im;
+  const legacyStandaloneAlert = /(?:^|\n)\s*(?:📊\s*)?(?:<b>)?REGIME SHIFT\s*[—-]|(?:^|\n)\s*(?:💡\s*)?(?:<b>)?Why this matters\s*\(|(?:^|\n)\s*(?:📈\s*)?(?:<b>)?HIGH-CONVICTION EVIDENCE\s*[—-]|(?:^|\n)\s*(?:⛔\s*)?(?:<b>)?(?:NIFTY|BANKNIFTY|SENSEX)\s*\|\s*NO TRADE\b/im;
   if (legacyStandaloneAlert.test(text)) return true;
 
   const markers = ["PCR", "Wall", "WALL", "Intrinsic", "Extrinsic", "OI", "Premium", "PREMIUM"];

@@ -1,0 +1,43 @@
+name: Diagnose Telegram Fast Freshness
+
+on:
+  push:
+    branches:
+      - diag/telegram-fast-freshness
+    paths:
+      - .github/workflows/diag-telegram-fast-freshness.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print relevant server.ts context
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('server.ts')
+          lines = p.read_text(encoding='utf-8').splitlines()
+          needles = [
+              'TELEGRAM_SLOW_CACHE.set',
+              'fetchTelegramFastPcrSnapshot',
+              'runTelegramFastCycle',
+              'marketSnapshot',
+              'freshness',
+          ]
+          seen = set()
+          for i, line in enumerate(lines):
+              if any(n in line for n in needles):
+                  lo, hi = max(0, i-8), min(len(lines), i+13)
+                  key = (lo, hi)
+                  if key in seen:
+                      continue
+                  seen.add(key)
+                  print(f'--- server.ts lines {lo+1}-{hi} ---')
+                  for j in range(lo, hi):
+                      print(f'{j+1}: {lines[j]}')
+          PY

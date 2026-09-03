@@ -1,0 +1,22 @@
+name: MDI Research Shadow CI
+
+on:
+  pull_request:
+    paths:
+      - "mdi-research-shadow.ts"
+      - "test/mdi-research-shadow.test.ts"
+      - ".github/workflows/mdi-research-shadow-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  mdi-research-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run MDI research shadow tests
+        run: NODE_ENV=test node --import tsx --test test/mdi-research-shadow.test.ts

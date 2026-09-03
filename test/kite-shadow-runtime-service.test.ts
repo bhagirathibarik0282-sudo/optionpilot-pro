@@ -22,3 +22,13 @@ test("enabled shadow service parses explicit locked registry", () => {
   assert.equal(cfg.apiKey, "k");
   assert.equal(cfg.registryEntries.length, 1);
 });
+
+test("exact H1 service becomes the single WebSocket owner when enabled", () => {
+  const cfg = readKiteShadowServiceConfig({
+    KITE_RUNTIME_SHADOW_ENABLED: "true",
+    KITE_H1_EXACT_SHADOW_ENABLED: "true",
+    KITE_API_KEY: "k",
+  });
+  assert.equal(cfg.enabled, false);
+  assert.deepEqual(cfg.registryEntries, []);
+});

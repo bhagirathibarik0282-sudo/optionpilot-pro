@@ -1,0 +1,80 @@
+name: Apply Telegram Fast Fresh Bootstrap
+
+on:
+  push:
+    branches:
+      - diag/telegram-fast-freshness
+    paths:
+      - .github/workflows/apply-telegram-fast-fresh-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: diag/telegram-fast-freshness
+      - name: Apply exact guarded patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('server.ts')
+          text = p.read_text(encoding='utf-8')
+          anchor = '''  const symbols: V2PremiumSymbol[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
+
+  // 2026-08-18: the PCR info box shows all 3 indices in every message, so
+'''
+          replacement = '''  const symbols: V2PremiumSymbol[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
+
+  // Restart-safe Telegram warm-up: bootstrap only from the same server-held
+  // market snapshot when it passes the existing 3-minute freshness rule.
+  // No new Kite/API call is added here; stale/error snapshots remain blocked.
+  const slowCacheBootstrapFresh = Boolean(
+    activeSession.marketSnapshot &&
+    activeSession.snapshotTime &&
+    Date.now() - activeSession.snapshotTime < SNAPSHOT_TTL_MS
+  );
+  if (slowCacheBootstrapFresh) {
+    for (const symbol of symbols) {
+      if (TELEGRAM_SLOW_CACHE.has(symbol)) continue;
+      const m = activeSession.marketSnapshot?.[symbol];
+      if (m && !m.error && m.atmStrike) {
+        TELEGRAM_SLOW_CACHE.set(symbol, { m, stocks: [], updatedAt: activeSession.snapshotTime! });
+      }
+    }
+  }
+
+  // 2026-08-18: the PCR info box shows all 3 indices in every message, so
+'''
+          count = text.count(anchor)
+          if count != 1:
+              raise SystemExit(f'ABORT: expected exact anchor once, found {count}')
+          text = text.replace(anchor, replacement, 1)
+          if text.count('const slowCacheBootstrapFresh = Boolean(') != 1:
+              raise SystemExit('ABORT: bootstrap block count is not exactly one')
+          p.write_text(text, encoding='utf-8')
+          PY
+          git diff --check
+          git diff -- server.ts
+      - name: Install dependencies
+        run: npm ci
+      - name: Run test suite
+        run: npm test
+      - name: Remove temporary workflows
+        shell: bash
+        run: |
+          rm -f .github/workflows/diag-telegram-fast-freshness.yml
+          rm -f .github/workflows/apply-telegram-fast-fresh-bootstrap.yml
+      - name: Commit tested patch to branch
+        shell: bash
+        run: |
+          git config user.name "optionpilot-safe-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add server.ts .github/workflows/diag-telegram-fast-freshness.yml .github/workflows/apply-telegram-fast-fresh-bootstrap.yml
+          git diff --cached --check
+          git commit -m "fix: freshness-guard Telegram fast cache bootstrap"
+          git push origin HEAD:diag/telegram-fast-freshness

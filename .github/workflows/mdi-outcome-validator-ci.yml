@@ -1,0 +1,21 @@
+name: MDI Outcome Validator CI
+
+on:
+  pull_request:
+    paths:
+      - 'mdi-outcome-replay-validator.ts'
+      - 'test/mdi-outcome-replay-validator.test.ts'
+      - '.github/workflows/mdi-outcome-validator-ci.yml'
+
+jobs:
+  mdi-outcome-validator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run MDI outcome validator tests
+        run: NODE_ENV=test node --import tsx --test test/mdi-outcome-replay-validator.test.ts

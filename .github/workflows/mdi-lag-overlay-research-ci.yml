@@ -1,0 +1,21 @@
+name: MDI Lag Overlay Research CI
+
+on:
+  pull_request:
+    paths:
+      - 'mdi-lag-transition-overlay.ts'
+      - 'test/mdi-lag-transition-overlay.test.ts'
+      - '.github/workflows/mdi-lag-overlay-research-ci.yml'
+
+jobs:
+  mdi-lag-overlay-research:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run MDI lag overlay research tests
+        run: NODE_ENV=test node --import tsx --test test/mdi-lag-transition-overlay.test.ts

@@ -8,14 +8,18 @@ on:
       - ".github/workflows/h1-live-selector-source-audit-ci.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx tsx --test test/h1-live-selector-source-audit.test.ts
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run H1 live selector source audit tests
+        run: NODE_ENV=test node --import tsx --test test/h1-live-selector-source-audit.test.ts

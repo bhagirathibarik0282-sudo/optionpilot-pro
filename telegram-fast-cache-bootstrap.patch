@@ -1,0 +1,28 @@
+*** Begin Patch
+*** Update File: server.ts
+@@
+ async function runTelegramFastCycle(): Promise<void> {
+   if (!isMarketOpenNowServer()) return;
+   let activeSession: KiteSession | undefined;
+   for (const s of sessions.values()) {
+     if (s.expiresAt > Date.now()) { activeSession = s; break; }
+   }
+   if (!activeSession) return;
+ 
+   const symbols: V2PremiumSymbol[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
++
++  // Bootstrap the Telegram slow cache from the already-live session snapshot
++  // when the 1-minute fast cycle runs before the normal 3-minute slow refresh.
++  // This adds no Kite/API calls and does not alter trading/verdict/execution logic.
++  // The normal slow cycle will later replace the empty stock watchlist with
++  // its fully refreshed watchlist data.
++  for (const symbol of symbols) {
++    if (TELEGRAM_SLOW_CACHE.has(symbol)) continue;
++    const m = activeSession.marketSnapshot?.[symbol];
++    if (m && !m.error) {
++      TELEGRAM_SLOW_CACHE.set(symbol, { m, stocks: [], updatedAt: Date.now() });
++    }
++  }
+ 
+   // 2026-08-18: the PCR info box shows all 3 indices in every message, so
+*** End Patch

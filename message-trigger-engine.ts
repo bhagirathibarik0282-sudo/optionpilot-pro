@@ -50,6 +50,25 @@ export interface MessageTriggerResult {
   haikuMayOverride: false;
 }
 
+export interface TelegramTriggerDiagnostic {
+  reason: string;
+  shouldSpeak: boolean;
+  observedAt: string;
+}
+
+const lastTriggerDiagnosticBySymbol = new Map<string, TelegramTriggerDiagnostic>();
+let activeDiagnosticCandidateKey = "";
+
+function candidateSymbol(candidateKey: string): string | null {
+  const symbol = candidateKey.split("|")[0]?.trim().toUpperCase() ?? "";
+  return symbol === "NIFTY" || symbol === "BANKNIFTY" || symbol === "SENSEX" ? symbol : null;
+}
+
+export function getLastTelegramTriggerDiagnostic(symbol: string): TelegramTriggerDiagnostic | null {
+  const value = lastTriggerDiagnosticBySymbol.get(symbol.trim().toUpperCase());
+  return value ? { ...value } : null;
+}
+
 function out(
   shouldSpeak: boolean,
   urgent: boolean,
@@ -58,6 +77,14 @@ function out(
   duplicateSuppressed = false,
 ): MessageTriggerResult {
   console.log(`[Telegram Trigger] ${shouldSpeak ? "ELIGIBLE" : "SUPPRESSED"} reason=${reason}`);
+  const symbol = candidateSymbol(activeDiagnosticCandidateKey);
+  if (symbol) {
+    lastTriggerDiagnosticBySymbol.set(symbol, {
+      reason,
+      shouldSpeak,
+      observedAt: new Date().toISOString(),
+    });
+  }
   return {
     version: "MESSAGE_TRIGGER_ENGINE_V1",
     semantics: "RESEARCH_SHADOW_ONLY",
@@ -99,6 +126,7 @@ function meaningfulChange(input: MessageTriggerInput): boolean {
  */
 export function evaluateMessageTrigger(input: MessageTriggerInput): MessageTriggerResult {
   const candidateKey = input.candidateKey.trim();
+  activeDiagnosticCandidateKey = candidateKey;
   if (!candidateKey) return out(false, false, "MISSING_CANDIDATE_KEY");
 
   const fingerprint = input.currentFingerprint.trim();

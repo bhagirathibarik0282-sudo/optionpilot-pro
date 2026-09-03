@@ -7,23 +7,16 @@ import {
   installMeaningfulLiveAcceptanceMonitor,
 } from "./meaningful-live-acceptance-monitor.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
+import { parseH1ReplayRequest } from "./h1-replay-http.js";
+import { runH1ObservedCandidate30mGross } from "./h1-observed-candidate-30m-gross.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const MEANINGFUL_ACCEPTANCE_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
 
-// server.ts already imports this bootstrap module at process start. Install the
-// display-only combination evidence bridge first, then the meaningful-message
-// bridge, then the read-only observer as the outermost Telegram interceptor.
-// The observer never mutates Telegram payloads; it only classifies returned
-// responses and exposes acceptance counters through a read-only endpoint.
 installTelegramCombinationBridge();
 installMeaningfulLiveTelegramBridge();
 installMeaningfulLiveAcceptanceMonitor();
 
-// Railway MCP can read service logs but cannot safely execute one-off commands
-// or perform an outbound GET to the research endpoint. Emit the exact same
-// read-only H1 pilot audit once after startup so runtime evidence is observable
-// without changing Railway config, exposing credentials, or writing to DB.
 const h1StartupAuditTimer = setTimeout(() => {
   void runH1PilotHttpAudit()
     .then((result) => console.log(`[H1_PILOT_STARTUP_AUDIT] ${JSON.stringify(result)}`))
@@ -37,17 +30,7 @@ const h1StartupAuditTimer = setTimeout(() => {
 }, 5000);
 h1StartupAuditTimer.unref?.();
 
-/**
- * Mounts research-only endpoints without changing any production verdict,
- * scoring, or trading execution path. Telegram bridges are presentation/cadence
- * layers only and cannot create or modify broker orders.
- *
- * Intended server.ts integration:
- *   mountResearchRoutes(app);
- */
 export function mountResearchRoutes(app: Hono): void {
-  // UI-only middleware: after the existing main dashboard renders, inject a
-  // small floating shortcut to the already-existing Intelligence Layer page.
   app.use("/", async (c, next) => {
     await next();
 
@@ -92,6 +75,27 @@ export function mountResearchRoutes(app: Hono): void {
     }
     const result = await getMeaningfulLiveAcceptanceStatus(requested || null);
     return c.json(result);
+  });
+
+  app.get("/api/research/h1-observed-candidate-30m-gross", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const parsed = parseH1ReplayRequest({
+      symbol: c.req.query("symbol"),
+      tradeDate: c.req.query("date"),
+      fromTime: c.req.query("from"),
+      toTime: c.req.query("to"),
+      scope: c.req.query("scope"),
+    });
+    if (!parsed.ok) {
+      return c.json({
+        ok: false,
+        mode: "READ_ONLY_H1_OBSERVED_CANDIDATE_30M_GROSS_V1",
+        productionImpact: "NONE",
+        reason: parsed.reason,
+      }, 400);
+    }
+    const result = await runH1ObservedCandidate30mGross(parsed.value);
+    return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
   });
 
   app.route("/api/research", researchRouter);

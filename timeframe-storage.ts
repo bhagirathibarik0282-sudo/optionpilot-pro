@@ -1,7 +1,7 @@
 import { dbQuerySafe } from "./db.js";
 import type { StorageV3Symbol } from "./storage-v3-writer.js";
 
-const TIMEFRAMES = [3, 15, 30, 60] as const;
+const TIMEFRAMES = [3, 6, 15, 30, 60] as const;
 type TfMinutes = typeof TIMEFRAMES[number];
 
 type MarketRow = {

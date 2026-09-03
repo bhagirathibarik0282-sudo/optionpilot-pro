@@ -1,0 +1,23 @@
+name: H1 Live Theta IV Multi Expiry Evaluator CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-live-theta-iv-multi-expiry-evaluator.ts"
+      - "test/h1-live-theta-iv-multi-expiry-evaluator.test.ts"
+      - ".github/workflows/h1-live-theta-iv-multi-expiry-evaluator-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluator:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/h1-live-theta-iv-multi-expiry-evaluator.test.ts

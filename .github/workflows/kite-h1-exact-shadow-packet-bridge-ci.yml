@@ -1,0 +1,20 @@
+name: Kite H1 Exact Shadow Packet Bridge CI
+
+on:
+  pull_request:
+    paths:
+      - 'kite-h1-exact-shadow-packet-bridge.ts'
+      - 'test/kite-h1-exact-shadow-packet-bridge.test.ts'
+      - '.github/workflows/kite-h1-exact-shadow-packet-bridge-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx tsx --test test/kite-h1-exact-shadow-packet-bridge.test.ts

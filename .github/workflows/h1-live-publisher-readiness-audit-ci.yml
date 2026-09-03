@@ -1,0 +1,25 @@
+name: H1 Live Publisher Readiness Audit CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-live-publisher-readiness-audit.ts"
+      - "test/h1-live-publisher-readiness-audit.test.ts"
+      - ".github/workflows/h1-live-publisher-readiness-audit-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run publisher readiness audit tests
+        run: NODE_ENV=test node --import tsx --test test/h1-live-publisher-readiness-audit.test.ts

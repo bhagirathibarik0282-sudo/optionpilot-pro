@@ -1,0 +1,17 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { validateFixed30mRegimeDteLift } from "../option-buyer-fixed30m-regime-dte-lift.js";
+import type { MdiInput,MdiSourceQualityMap } from "../mdi-research-shadow.js";
+const verified:MdiSourceQualityMap={PCR:"VERIFIED",WALL:"VERIFIED",IV:"VERIFIED",VIX:"VERIFIED",FUTURES:"VERIFIED"};
+const mdi=():MdiInput=>({previous:{ts:"2026-09-03T04:00:00.000Z",sourceQuality:verified,fullPcr:.8,band7Pcr:.8,callWallStrike:24000,putWallStrike:23800,callWallStrength:100,putWallStrength:100,ceIv:12,peIv:12,indiaVix:12,futureLtp:23900},current:{ts:"2026-09-03T04:03:00.000Z",sourceQuality:verified,fullPcr:1,band7Pcr:1,callWallStrike:24050,putWallStrike:23850,callWallStrength:85,putWallStrength:120,ceIv:15,peIv:11,indiaVix:11.5,futureLtp:24020},strikeStep:50});
+const candidate=(dte=1)=>({symbol:"NIFTY" as const,side:"CE" as const,strike:23900,expiryDate:"2026-09-03",dte,moneyness:"ATM" as const,premiumLtp:100,capitalFit:true,liquidityOk:true,spreadOk:true,premiumResponseConfirmed:true,deltaGammaResponseConfirmed:true,thetaIvBurdenAcceptable:true,multiExpiryConflictAbsent:true,currentOrNearExpiryUsable:true,higherDteUsable:dte>=10,fallbackDteApproved:true});
+const q=(ts:string,bid:number,ask:number)=>({ts,expiryDate:"2026-09-03",strike:23900,side:"CE" as const,bid,ask,quality:"VERIFIED" as const});
+const payoff=(dte=1)=>({signalTs:"2026-09-03T04:03:00.000Z",candidate:candidate(dte),entryQuote:q("2026-09-03T04:03:00.000Z",99,100),futureQuotes:[q("2026-09-03T04:33:00.000Z",115,115.5)],exchange:"NSE" as const,quantity:130,accountState:"NON_DEBIT" as const,evaluationDate:"2026-09-03"});
+const regime={trendDirection:"UP" as const,rangeState:"NORMAL" as const,volatilityState:"NORMAL" as const,transitionDetected:false,evidenceCount:4,minEvidenceCount:3};
+const sample=(id="a",dte=1)=>({sampleId:id,mdiInput:mdi(),payoffInput:payoff(dte),regimeInput:regime,regimeObservedAt:"2026-09-03T04:03:00.000Z"});
+test("produces exact30m regime+DTE lift cell",()=>{const out=validateFixed30mRegimeDteLift([sample()]);assert.equal(out.state,"USABLE");assert.equal(out.cells.length,1);assert.equal(out.cells[0].regime,"TRENDING_UP");assert.equal(out.cells[0].dteBucket,"EXPIRY_0_1");});
+test("regime timestamp must equal signal timestamp",()=>{const x=sample();x.regimeObservedAt="2026-09-03T04:04:00.000Z";const out=validateFixed30mRegimeDteLift([x]);assert.equal(out.state,"UNAVAILABLE");assert.ok(out.blockers.includes("REGIME_TIMESTAMP_NOT_BOUND_TO_SIGNAL_TIMESTAMP"));});
+test("unknown regime evidence is excluded",()=>{const x=sample();x.regimeInput={...regime,evidenceCount:1};const out=validateFixed30mRegimeDteLift([x]);assert.equal(out.excludedUnknownRegime,1);assert.equal(out.state,"UNAVAILABLE");});
+test("unsupported DTE is excluded",()=>{const out=validateFixed30mRegimeDteLift([sample("a",8)]);assert.equal(out.excludedUnsupportedDte,1);assert.equal(out.state,"UNAVAILABLE");});
+test("duplicate logical event fails closed",()=>{const out=validateFixed30mRegimeDteLift([sample("a"),sample("b")]);assert.equal(out.state,"UNAVAILABLE");assert.ok(out.blockers.includes("DUPLICATE_LOGICAL_SIGNAL_CONTRACT_HORIZON"));});
+test("research only with zero live authority",()=>{const out=validateFixed30mRegimeDteLift([]);assert.equal(out.affectsVerdict,false);assert.equal(out.affectsTelegram,false);assert.equal(out.affectsExecution,false);assert.equal(out.createsOrders,false);assert.equal(out.aiMayOverride,false);});

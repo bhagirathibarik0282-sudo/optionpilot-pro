@@ -1,0 +1,21 @@
+name: Option Buyer MDI Lift Validation CI
+
+on:
+  pull_request:
+    paths:
+      - 'option-buyer-lift-validation.ts'
+      - 'test/option-buyer-lift-validation.test.ts'
+      - '.github/workflows/option-buyer-lift-validation-ci.yml'
+
+jobs:
+  option-buyer-lift:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run option buyer MDI lift tests
+        run: NODE_ENV=test node --import tsx --test test/option-buyer-lift-validation.test.ts

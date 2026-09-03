@@ -1,0 +1,20 @@
+name: H1 Live Snapshot Publisher Binding CI
+
+on:
+  pull_request:
+    paths:
+      - 'h1-live-snapshot-publisher-binding.ts'
+      - 'test/h1-live-snapshot-publisher-binding.test.ts'
+      - '.github/workflows/h1-live-snapshot-publisher-binding-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx tsx --test test/h1-live-snapshot-publisher-binding.test.ts

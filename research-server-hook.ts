@@ -11,6 +11,7 @@ import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { runH1ObservedCandidate30mGross } from "./h1-observed-candidate-30m-gross.js";
 import { runH1ObservedCandidateMdiEvidenceHttp } from "./h1-observed-candidate-mdi-evidence-http.js";
 import { diagnoseObservedCandidateCoverage } from "./h1-observed-candidate-coverage-diagnostic.js";
+import { auditCandidateReconstruction } from "./h1-candidate-reconstruction-audit.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const MEANINGFUL_ACCEPTANCE_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
@@ -136,6 +137,23 @@ export function mountResearchRoutes(app: Hono): void {
     const replay = await runH1ReplayHttp(parsed.value);
     const result = diagnoseObservedCandidateCoverage(parsed.value, replay);
     return c.json({ ok: replay.ok && result.blockers.length === 0, ...result, reason: replay.reason }, replay.ok ? 200 : 503);
+  });
+
+  app.get("/api/research/h1-candidate-reconstruction-audit", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const parsed = parseH1ReplayRequest({
+      symbol: c.req.query("symbol"),
+      tradeDate: c.req.query("date"),
+      fromTime: c.req.query("from"),
+      toTime: c.req.query("to"),
+      scope: c.req.query("scope"),
+    });
+    if (!parsed.ok) {
+      return c.json({ ok: false, mode: "READ_ONLY_H1_CANDIDATE_RECONSTRUCTION_AUDIT_V1", productionImpact: "NONE", reason: parsed.reason }, 400);
+    }
+    const replay = await runH1ReplayHttp(parsed.value);
+    const result = auditCandidateReconstruction(parsed.value, replay);
+    return c.json({ ok: replay.ok, ...result, reason: replay.reason }, replay.ok ? 200 : 503);
   });
 
   app.route("/api/research", researchRouter);

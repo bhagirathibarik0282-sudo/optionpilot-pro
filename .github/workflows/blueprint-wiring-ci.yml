@@ -16,6 +16,7 @@ on:
       - "test/h1-replay-intelligence-authority.test.ts"
       - "test/h1-replay-intelligence-route.test.ts"
       - "test/haiku-audit-contract.test.ts"
+      - "test/meaningful-live-acceptance-route.test.ts"
       - ".github/workflows/blueprint-wiring-ci.yml"
   workflow_dispatch:
 
@@ -41,3 +42,4 @@ jobs:
           test/h1-replay-intelligence-authority.test.ts
           test/h1-replay-intelligence-route.test.ts
           test/haiku-audit-contract.test.ts
+          test/meaningful-live-acceptance-route.test.ts

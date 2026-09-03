@@ -17,6 +17,7 @@ import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
 import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } from "./research-engine-chain-http.js";
+import { getMeaningfulLiveAcceptanceStatus } from "./meaningful-live-acceptance-monitor.js";
 
 export const researchRouter = new Hono();
 
@@ -139,6 +140,14 @@ researchRouter.get("/h1-replay-intelligence", async (c) => {
   }
   const result = await runH1ReplayIntelligenceHttp(parsed.value);
   return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/meaningful-live-acceptance", async (c) => {
+  const result = await getMeaningfulLiveAcceptanceStatus(c.req.query("symbol"));
+  return c.json({
+    ...result,
+    productionImpact: "NONE",
+  });
 });
 
 researchRouter.post("/broad-market-size/load-latest", async (c) => {

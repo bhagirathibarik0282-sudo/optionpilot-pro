@@ -38,6 +38,19 @@ export function bindH1ForwardCandidateDecisions(input: unknown): H1ForwardCandid
   const accepted: H1ForwardCandidateDecisionInput[] = [];
   const rejected: { index: number; reason: string }[] = [];
 
+  // Backward-compatible absence means no explicit selector evidence was supplied.
+  // It must never be interpreted as either SELECT or BLOCK.
+  if (input == null) {
+    return {
+      version: "H1_FORWARD_CANDIDATE_DECISION_BINDING_V1",
+      candidateKeys,
+      accepted,
+      rejected,
+      failClosed: true,
+      semantics: "EXPLICIT_SELECTOR_DECISIONS_ONLY_NO_INFERENCE",
+    };
+  }
+
   if (!Array.isArray(input)) {
     return {
       version: "H1_FORWARD_CANDIDATE_DECISION_BINDING_V1",

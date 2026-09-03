@@ -1,0 +1,20 @@
+name: H1 Kite Exact Price Greek Adapter CI
+
+on:
+  pull_request:
+    paths:
+      - 'h1-kite-exact-price-greek-adapter.ts'
+      - 'test/h1-kite-exact-price-greek-adapter.test.ts'
+      - '.github/workflows/h1-kite-exact-price-greek-adapter-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx tsx --test test/h1-kite-exact-price-greek-adapter.test.ts

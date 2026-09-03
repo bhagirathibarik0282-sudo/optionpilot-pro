@@ -1,0 +1,21 @@
+name: H1 Live Selector Source Audit CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-live-selector-source-audit.ts"
+      - "test/h1-live-selector-source-audit.test.ts"
+      - ".github/workflows/h1-live-selector-source-audit-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsx --test test/h1-live-selector-source-audit.test.ts

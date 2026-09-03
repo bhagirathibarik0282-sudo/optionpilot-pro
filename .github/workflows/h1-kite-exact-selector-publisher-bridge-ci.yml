@@ -1,0 +1,20 @@
+name: H1 Kite Exact Selector Publisher Bridge CI
+
+on:
+  pull_request:
+    paths:
+      - 'h1-kite-exact-selector-publisher-bridge.ts'
+      - 'test/h1-kite-exact-selector-publisher-bridge.test.ts'
+      - '.github/workflows/h1-kite-exact-selector-publisher-bridge-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx tsx --test test/h1-kite-exact-selector-publisher-bridge.test.ts

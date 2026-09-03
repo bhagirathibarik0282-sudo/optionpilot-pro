@@ -1,3 +1,9 @@
+export type KiteMarketDepthEntry = {
+  quantity: number;
+  price: number;
+  orders: number;
+};
+
 export type KiteDecodedPacket = {
   mode: "ltp" | "quote" | "full";
   instrumentToken: number;
@@ -16,6 +22,10 @@ export type KiteDecodedPacket = {
   oiDayHigh?: number;
   oiDayLow?: number;
   exchangeTimestamp?: string | null;
+  marketDepth?: {
+    buy: KiteMarketDepthEntry[];
+    sell: KiteMarketDepthEntry[];
+  };
   isIndex: boolean;
 };
 
@@ -30,6 +40,19 @@ function isoFromUnixSeconds(value: number): string | null {
 function divisorForToken(token: number): number {
   const segment = token & 0xff;
   return segment === 3 ? 10_000_000 : 100;
+}
+
+function decodeMarketDepth(view: DataView, divisor: number): { buy: KiteMarketDepthEntry[]; sell: KiteMarketDepthEntry[] } {
+  const entries: KiteMarketDepthEntry[] = [];
+  for (let index = 0; index < 10; index++) {
+    const offset = 64 + index * 12;
+    entries.push({
+      quantity: i32(view, offset),
+      price: i32(view, offset + 4) / divisor,
+      orders: u16(view, offset + 8),
+    });
+  }
+  return { buy: entries.slice(0, 5), sell: entries.slice(5, 10) };
 }
 
 export function splitKiteBinaryFrame(data: ArrayBuffer | Uint8Array): Uint8Array[] {
@@ -95,6 +118,7 @@ export function decodeKitePacket(packet: Uint8Array): KiteDecodedPacket {
     oiDayHigh: length === 184 ? i32(view, 52) : undefined,
     oiDayLow: length === 184 ? i32(view, 56) : undefined,
     exchangeTimestamp: length === 184 ? isoFromUnixSeconds(i32(view, 60)) : null,
+    marketDepth: length === 184 ? decodeMarketDepth(view, divisor) : undefined,
     isIndex: false,
   };
 }

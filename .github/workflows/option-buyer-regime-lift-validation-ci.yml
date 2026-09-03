@@ -1,0 +1,19 @@
+name: Option Buyer Regime Lift Validation CI
+on:
+  pull_request:
+    paths:
+      - 'option-buyer-regime-lift-validation.ts'
+      - 'test/option-buyer-regime-lift-validation.test.ts'
+      - 'market-regime-engine.ts'
+      - 'option-buyer-lift-validation.ts'
+      - '.github/workflows/option-buyer-regime-lift-validation-ci.yml'
+jobs:
+  regime-lift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/option-buyer-regime-lift-validation.test.ts

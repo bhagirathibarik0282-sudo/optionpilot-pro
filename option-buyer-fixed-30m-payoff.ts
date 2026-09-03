@@ -1,5 +1,5 @@
 import { selectExecutionCandidate, type ExecutionCandidateInput } from "./execution-candidate-selector.js";
-import { estimateOptionBuyerNetPayoff, type OptionBuyerNetPayoffInput, type QuoteQuality } from "./option-buyer-net-payoff-research.js";
+import { deriveOptionBuyerNetPayoffResearch, type OptionBuyerNetPayoffInput, type QuoteQuality } from "./option-buyer-net-payoff-research.js";
 
 export interface ExecutableQuotePoint {
   ts: string;
@@ -71,7 +71,7 @@ export function validateFixed30mOptionBuyerPayoff(input: Fixed30mPayoffInput): F
   let estimatedNetPnl:number|null=null,estimatedNetReturnPctOnPremium:number|null=null,estimatedTotalCharges:number|null=null;
   if(blockers.length===0&&exit){
     const netInput:OptionBuyerNetPayoffInput={exchange:input.exchange,quantity:input.quantity,accountState:input.accountState,evaluationDate:input.evaluationDate,entry:{bid:input.entryQuote.bid,ask:input.entryQuote.ask,quality:input.entryQuote.quality},exit:{bid:exit.bid,ask:exit.ask,quality:exit.quality}};
-    const net=estimateOptionBuyerNetPayoff(netInput);
+    const net=deriveOptionBuyerNetPayoffResearch(netInput);
     if(net.state!=="USABLE") blockers.push(...net.blockers.map(x=>`NET_PAYOFF_${x}`));
     else {estimatedNetPnl=net.estimatedNetPnl;estimatedNetReturnPctOnPremium=net.estimatedNetReturnPctOnPremium;estimatedTotalCharges=net.estimatedTotalCharges;}
   }

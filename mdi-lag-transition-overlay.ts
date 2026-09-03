@@ -1,14 +1,12 @@
 import type { LagTransitionSnapshot } from "./lag-transition-research.js";
-import type { MdiBias } from "./mdi-research-shadow.js";
+import type { MdiBias, MdiResult } from "./mdi-research-shadow.js";
 
 export type MdiLagDirection = "UP" | "DOWN" | "NEUTRAL" | "UNKNOWN";
 export type MdiLagAlignment = "ALIGNED" | "CONTRADICTING" | "NEUTRAL" | "UNAVAILABLE";
 
 export interface MdiLagObservation {
   firstQualifiedAt: string | null;
-  bias: MdiBias;
-  mdi: number | null;
-  sourceQualityVerified: boolean;
+  result: MdiResult;
 }
 
 export interface MdiLagOverlayInput {
@@ -55,27 +53,56 @@ function mdiDirection(bias: MdiBias): MdiLagDirection {
   return "UNKNOWN";
 }
 
+function expectedBias(score: number): MdiBias {
+  if (score >= 60) return "STRONG_BULLISH";
+  if (score >= 25) return "MILD_BULLISH";
+  if (score <= -60) return "STRONG_BEARISH";
+  if (score <= -25) return "MILD_BEARISH";
+  return "NEUTRAL";
+}
+
+function trustedMdiResult(result: MdiResult): boolean {
+  return result.ruleVersion === "MDI_RESEARCH_SHADOW_V1"
+    && result.semantics === "RESEARCH_SHADOW_ONLY"
+    && result.sourcePolicy === "VERIFIED_COMPONENT_SOURCES_ONLY"
+    && result.affectsVerdict === false
+    && result.affectsTelegram === false
+    && result.affectsExecution === false
+    && result.createsOrders === false
+    && result.aiMayOverride === false;
+}
+
 export function deriveMdiLagOverlay(input: MdiLagOverlayInput): MdiLagOverlayResult {
   const reasons: string[] = [];
+  const mdiResult = input.mdi.result;
+  const provenanceTrusted = trustedMdiResult(mdiResult);
   const mdiAt = input.mdi.firstQualifiedAt;
-  const mdiDir = mdiDirection(input.mdi.bias);
+  const mdiConsistent = mdiResult.mdi == null || expectedBias(mdiResult.mdi) === mdiResult.bias;
+  const mdiUsable = provenanceTrusted && mdiConsistent && mdiResult.mdi != null && mdiAt != null && mdiResult.bias !== "UNAVAILABLE";
+  const mdiDir = mdiUsable ? mdiDirection(mdiResult.bias) : "UNKNOWN";
   const niftyAt = input.lag.measurements.find((m) => m.stage === "NIFTY")?.firstQualifiedAt ?? null;
   const premiumAt = input.lag.measurements.find((m) => m.stage === "PREMIUM")?.firstQualifiedAt ?? null;
 
+  if (!provenanceTrusted) reasons.push("MDI_PROVENANCE_CONTRACT_NOT_TRUSTED");
+  if (provenanceTrusted && !mdiConsistent) reasons.push("MDI_SCORE_BIAS_INCONSISTENT");
+  if (provenanceTrusted && mdiConsistent && !mdiUsable) reasons.push("MDI_CONFIRMATION_UNAVAILABLE");
+
+  const hwLag = mdiUsable ? lagMinutes(input.lag.t0At, mdiAt) : null;
+  const niftyLag = mdiUsable ? lagMinutes(niftyAt, mdiAt) : null;
+  const premiumLag = mdiUsable ? lagMinutes(premiumAt, mdiAt) : null;
+  if (hwLag != null && hwLag < 0) reasons.push("MDI_PRECEDES_HEAVYWEIGHT_T0");
+  if (niftyLag != null && niftyLag < 0) reasons.push("MDI_PRECEDES_NIFTY_CONFIRMATION");
+  if (premiumLag != null && premiumLag < 0) reasons.push("MDI_PRECEDES_PREMIUM_CONFIRMATION");
+
   let alignment: MdiLagAlignment = "UNAVAILABLE";
-  if (!input.mdi.sourceQualityVerified) {
-    reasons.push("MDI_SOURCE_QUALITY_NOT_VERIFIED");
-  } else if (input.mdi.mdi == null || mdiAt == null || mdiDir === "UNKNOWN") {
-    reasons.push("MDI_CONFIRMATION_UNAVAILABLE");
-  } else if (mdiDir === "NEUTRAL") {
+  if (mdiUsable && mdiDir === "NEUTRAL") {
     alignment = "NEUTRAL";
     reasons.push("MDI_IS_NEUTRAL_CONTEXT");
-  } else if (input.lag.directionalIntegrity === "UNKNOWN") {
+  } else if (mdiUsable && input.lag.directionalIntegrity === "UNKNOWN") {
     reasons.push("LAG_DIRECTION_UNKNOWN");
-  } else if (input.lag.directionalIntegrity === "MIXED") {
-    alignment = "CONTRADICTING";
-    reasons.push("LAG_DIRECTION_MIXED");
-  } else {
+  } else if (mdiUsable && input.lag.directionalIntegrity === "MIXED") {
+    reasons.push("LAG_DIRECTION_MIXED_ALIGNMENT_UNAVAILABLE");
+  } else if (mdiUsable) {
     const firstDirectional = input.lag.measurements.find((m) => m.present && (m.direction === "UP" || m.direction === "DOWN"));
     if (!firstDirectional) {
       reasons.push("NO_DIRECTIONAL_LAG_STAGE");
@@ -90,11 +117,11 @@ export function deriveMdiLagOverlay(input: MdiLagOverlayInput): MdiLagOverlayRes
 
   return {
     tradeDate: input.lag.tradeDate,
-    mdiFirstQualifiedAt: input.mdi.sourceQualityVerified ? mdiAt : null,
-    mdiLagFromHeavyweightT0Minutes: input.mdi.sourceQualityVerified ? lagMinutes(input.lag.t0At, mdiAt) : null,
-    mdiLagFromNiftyMinutes: input.mdi.sourceQualityVerified ? lagMinutes(niftyAt, mdiAt) : null,
-    mdiLagFromPremiumMinutes: input.mdi.sourceQualityVerified ? lagMinutes(premiumAt, mdiAt) : null,
-    mdiDirection: input.mdi.sourceQualityVerified ? mdiDir : "UNKNOWN",
+    mdiFirstQualifiedAt: mdiUsable ? mdiAt : null,
+    mdiLagFromHeavyweightT0Minutes: hwLag,
+    mdiLagFromNiftyMinutes: niftyLag,
+    mdiLagFromPremiumMinutes: premiumLag,
+    mdiDirection: mdiUsable ? mdiDir : "UNKNOWN",
     alignmentWithLagDirection: alignment,
     reasons,
     ruleVersion: "MDI_LAG_OVERLAY_RESEARCH_V1",

@@ -16,6 +16,7 @@ import { buildTelegramTradeCard, TradeCardInput, TradeCardTmPlan, TradeCardAdvan
 import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";
 import { ensureH1DerivedSchema } from "./h1-derived-db.js";
 import { recordH1FromRuntimeSnapshot } from "./h1-runtime-bridge.js";
+import { collectH1LiveSelectorDecisions } from "./h1-live-selector-registry.js";
 import { persistKiteAuthoritySession, resolveKiteAuthoritySession, getKiteAuthorityPublicStatus, kiteSessionIdMatchesFingerprint, type KiteAuthorityResolvedSession } from "./kite-session-authority.js";
 import { revokeKiteAuthoritySession } from "./kite-session-authority-revoke.js";
 import { KeyedSingleFlight, marketAuthorityKey } from "./market-refresh-singleflight.js";
@@ -2139,7 +2140,12 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     // H1_TRUTH_BY_SYMBOL_V1 / H1_RUNTIME_PATCH_V2: research-only, fail-open side-channel.
     // Reuse the exact TruthReport objects already computed by the existing recorder cycle.
     const h1TruthBySymbol = { NIFTY: niftyTruth, BANKNIFTY: bankTruth, SENSEX: sensexTruth };
-    void recordH1FromRuntimeSnapshot(snapshot, h1TruthBySymbol).catch((err) =>
+    void (() => {
+      // H1_SELECTOR_REGISTRY_WIRING_V1: consume only fresh LIVE_RUNTIME_EXACT selector evidence.
+      const h1Selector = collectH1LiveSelectorDecisions(new Date().toISOString());
+      const h1CandidateDecisions = h1Selector.eligibleForLiveH1Marking ? h1Selector.decisions : undefined;
+      return recordH1FromRuntimeSnapshot(snapshot, h1TruthBySymbol, undefined, h1CandidateDecisions);
+    })().catch((err) =>
       console.error("[H1] recorder bridge failed (live path unaffected):", err instanceof Error ? err.message : err),
     );
 

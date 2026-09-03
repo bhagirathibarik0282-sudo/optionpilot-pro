@@ -1,0 +1,61 @@
+name: H1 Final Server Selector Wiring CI
+
+on:
+  push:
+    branches:
+      - h1-final-server-selector-wiring-v1
+    paths:
+      - scripts/apply-h1-selector-registry-wiring.mjs
+      - .github/workflows/h1-final-server-selector-wiring-ci.yml
+      - h1-live-selector-registry.ts
+      - h1-live-selector-pipeline.ts
+      - h1-runtime-bridge.ts
+      - server.ts
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  wire-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: h1-final-server-selector-wiring-v1
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify exact server anchors
+        run: node scripts/apply-h1-selector-registry-wiring.mjs --check
+      - name: Apply selector registry wiring
+        run: node scripts/apply-h1-selector-registry-wiring.mjs
+      - name: Type and focused tests
+        run: |
+          NODE_ENV=test node --import tsx --test test/h1-live-selector-registry.test.ts test/h1-live-selector-pipeline.test.ts test/h1-forward-candidate-runtime-bridge.test.ts
+      - name: Full repository tests
+        run: npm test
+      - name: Verify server-only generated diff
+        shell: bash
+        run: |
+          git diff --check -- server.ts
+          grep -q 'H1_SELECTOR_REGISTRY_WIRING_V1' server.ts
+          grep -q 'collectH1LiveSelectorDecisions(new Date().toISOString())' server.ts
+          grep -q 'recordH1FromRuntimeSnapshot(snapshot, h1TruthBySymbol, undefined, h1CandidateDecisions)' server.ts
+      - name: Commit guarded server wiring
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server.ts
+          if git diff --cached --quiet; then
+            echo 'No server.ts change to commit.'
+            exit 0
+          fi
+          git commit -m 'wire live selector registry into H1 recorder'
+          git push origin HEAD:h1-final-server-selector-wiring-v1

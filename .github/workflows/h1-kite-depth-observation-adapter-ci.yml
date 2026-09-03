@@ -1,0 +1,30 @@
+name: H1 Kite Depth Observation Adapter CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-kite-depth-observation-adapter.ts"
+      - "kite-websocket-binary-decoder.ts"
+      - "h1-live-exact-snapshot-aggregator.ts"
+      - "test/h1-kite-depth-observation-adapter.test.ts"
+      - ".github/workflows/h1-kite-depth-observation-adapter-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "h1-kite-depth-observation-adapter.ts"
+      - "kite-websocket-binary-decoder.ts"
+      - "h1-live-exact-snapshot-aggregator.ts"
+      - "test/h1-kite-depth-observation-adapter.test.ts"
+      - ".github/workflows/h1-kite-depth-observation-adapter-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsx --test test/h1-kite-depth-observation-adapter.test.ts

@@ -1,0 +1,21 @@
+name: MDI Payoff Path Research CI
+
+on:
+  pull_request:
+    paths:
+      - 'mdi-payoff-path-research.ts'
+      - 'test/mdi-payoff-path-research.test.ts'
+      - '.github/workflows/mdi-payoff-path-research-ci.yml'
+
+jobs:
+  mdi-payoff-path:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run MDI payoff path research tests
+        run: NODE_ENV=test node --import tsx --test test/mdi-payoff-path-research.test.ts

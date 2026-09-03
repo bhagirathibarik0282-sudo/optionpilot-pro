@@ -1,0 +1,25 @@
+name: Lag Transition Research CI
+
+on:
+  pull_request:
+    paths:
+      - "lag-transition-research.ts"
+      - "test/lag-transition-research.test.ts"
+      - ".github/workflows/lag-transition-research-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lag-transition-research:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run lag transition research tests
+        run: NODE_ENV=test node --import tsx --test test/lag-transition-research.test.ts

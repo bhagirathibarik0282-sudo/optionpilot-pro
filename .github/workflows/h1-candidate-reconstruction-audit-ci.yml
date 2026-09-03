@@ -5,6 +5,7 @@ on:
       - 'h1-candidate-reconstruction-audit.ts'
       - 'research-server-hook.ts'
       - 'test/h1-candidate-reconstruction-audit.test.ts'
+      - 'test/h1-candidate-reconstruction-audit-route.test.ts'
       - '.github/workflows/h1-candidate-reconstruction-audit-ci.yml'
 jobs:
   test:
@@ -15,4 +16,4 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - run: npx tsx --test test/h1-candidate-reconstruction-audit.test.ts
+      - run: npx tsx --test test/h1-candidate-reconstruction-audit.test.ts test/h1-candidate-reconstruction-audit-route.test.ts

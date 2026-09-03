@@ -15,6 +15,7 @@ import type { ResearchIndexCode } from "./research-index-types.js";
 import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
+import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
 import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } from "./research-engine-chain-http.js";
 
 export const researchRouter = new Hono();
@@ -116,6 +117,27 @@ researchRouter.get("/h1-replay", async (c) => {
     }, 400);
   }
   const result = await runH1ReplayHttp(parsed.value);
+  return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/h1-replay-intelligence", async (c) => {
+  const parsed = parseH1ReplayRequest({
+    symbol: c.req.query("symbol"),
+    tradeDate: c.req.query("date"),
+    fromTime: c.req.query("from"),
+    toTime: c.req.query("to"),
+    scope: c.req.query("scope"),
+  });
+  if (!parsed.ok) {
+    return c.json({
+      ok: false,
+      mode: "READ_ONLY_H1_REPLAY_INTELLIGENCE_V1",
+      productionImpact: "NONE",
+      request: null,
+      reason: parsed.reason,
+    }, 400);
+  }
+  const result = await runH1ReplayIntelligenceHttp(parsed.value);
   return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
 });
 

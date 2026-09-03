@@ -12,7 +12,7 @@ export type TemporalDirection = "UP" | "DOWN" | "FLAT" | "UNKNOWN";
 
 export interface TemporalEvidenceSnapshot {
   symbol: string;
-  timeframe: "3M" | "15M" | "30M" | "60M";
+  timeframe: "3M" | "6M" | "15M" | "30M" | "60M";
   blockEnd: string;
   previousBlockEnd: string | null;
   state: TemporalState;
@@ -152,7 +152,7 @@ function parseRow(row: TfRow) {
 
 export async function deriveTemporalEvidenceState(
   symbol: "NIFTY" | "BANKNIFTY" | "SENSEX",
-  timeframe: "3M" | "15M" | "30M" | "60M",
+  timeframe: "3M" | "6M" | "15M" | "30M" | "60M",
 ): Promise<TemporalEvidenceSnapshot> {
   const result = await dbQuerySafe<TfRow>(`
     SELECT block_end, data_quality, evidence_compact

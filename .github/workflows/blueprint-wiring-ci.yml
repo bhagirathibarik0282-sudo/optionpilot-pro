@@ -1,0 +1,43 @@
+name: Blueprint Wiring CI
+
+on:
+  pull_request:
+    paths:
+      - "canonical-evidence-envelope.ts"
+      - "fii-dii-context.ts"
+      - "h1-replay-intelligence.ts"
+      - "haiku-audit-contract.ts"
+      - "research-router.ts"
+      - "temporal-evidence-fusion.ts"
+      - "timeframe-storage.ts"
+      - "test/blueprint-telegram-gate.test.ts"
+      - "test/canonical-evidence-envelope.test.ts"
+      - "test/fii-dii-context.test.ts"
+      - "test/h1-replay-intelligence-authority.test.ts"
+      - "test/h1-replay-intelligence-route.test.ts"
+      - "test/haiku-audit-contract.test.ts"
+      - ".github/workflows/blueprint-wiring-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  blueprint-wiring:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run blueprint wiring contract tests
+        run: >-
+          NODE_ENV=test node --import tsx --test
+          test/blueprint-telegram-gate.test.ts
+          test/canonical-evidence-envelope.test.ts
+          test/fii-dii-context.test.ts
+          test/h1-replay-intelligence-authority.test.ts
+          test/h1-replay-intelligence-route.test.ts
+          test/haiku-audit-contract.test.ts

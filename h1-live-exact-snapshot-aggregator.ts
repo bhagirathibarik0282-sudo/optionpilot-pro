@@ -47,9 +47,15 @@ function ts(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function validDateOnly(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const n = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(n) && new Date(n).toISOString().slice(0, 10) === value;
+}
+
 function validIdentity(x: H1ExactContractIdentity): boolean {
   return (x?.symbol === "NIFTY" || x?.symbol === "SENSEX" || x?.symbol === "BANKNIFTY") &&
-    /^\d{4}-\d{2}-\d{2}$/.test(x.expiryDate) &&
+    validDateOnly(x.expiryDate) &&
     Number.isFinite(x.strike) && x.strike > 0 &&
     (x.side === "CE" || x.side === "PE") &&
     Number.isInteger(x.dte) && x.dte >= 0;
@@ -93,7 +99,7 @@ export function aggregateH1LiveExactSnapshot(
     const received = ts(depth.receivedAt)!;
     const agePg = now - pg;
     const ageDp = now - dp;
-    if (agePg < 0 || ageDp < 0) blockers.push("FUTURE_EVIDENCE");
+    if (agePg < 0 || ageDp < 0 || received > now) blockers.push("FUTURE_EVIDENCE");
     if (agePg > maxAgeMs || ageDp > maxAgeMs) blockers.push("STALE_EVIDENCE");
     if (Math.abs(pg - dp) > maxSkewMs) blockers.push("CROSS_SOURCE_TIME_SKEW_TOO_LARGE");
     if (received < dp) blockers.push("INVALID_DEPTH_RECEIVE_CHRONOLOGY");

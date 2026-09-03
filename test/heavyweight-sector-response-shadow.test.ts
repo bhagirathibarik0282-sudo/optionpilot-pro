@@ -31,7 +31,7 @@ test("heavyweight can lead before sector confirmation", () => {
   ], [
     { sector: "BANK", windows: { clue3m: snap("3M", "UP") } },
   ]);
-  assert.equal(out.heavyweights[0].roleState, "CONFIRMING");
+  assert.equal(out.heavyweights[0].roleState, "LEADING");
   assert.equal(out.sectors[0].state, "EARLY_RESPONSE");
   assert.equal(out.transition, "HEAVYWEIGHT_LEADS");
 });

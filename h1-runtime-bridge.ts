@@ -1,5 +1,6 @@
 import { recordH1Snapshot, type H1IndexInput, type H1TruthVerdict } from "./h1-recorder-adapter.js";
 import { dbInsert } from "./db.js";
+import { bindH1ForwardCandidateDecisions } from "./h1-forward-candidate-decision-binding.js";
 
 export const H1_RUNTIME_BRIDGE_VERSION = "H1_RUNTIME_BRIDGE_V1" as const;
 
@@ -144,15 +145,10 @@ function normalizeIndex(raw: UnknownRecord): H1IndexInput | null {
   const spot = nullableFinite(raw.spot ?? raw.current);
   const timestamp = validTimestamp(raw.timestamp) ?? validTimestamp(raw.exchangeTimestamp);
 
-  // Identity + source time are mandatory. Never synthesize a snapshot identity
-  // from wall-clock time and never assign processing time to missing market data.
   if (!symbol || spot === null || spot <= 0 || !timestamp) return null;
 
   const atmStrike = finiteOrMissing(raw.atmStrike);
   const normalizedExpiries = Array.isArray(raw.expiries) ? raw.expiries.map(normalizeExpiry).filter(Boolean) : [];
-  // ±7 option selection requires a real ATM anchor. If ATM is unavailable, keep
-  // the valid index-level observation but persist no option/chain rows rather
-  // than selecting an arbitrary first strike band from a NaN distance sort.
   const expiries = Number.isFinite(atmStrike) && atmStrike > 0 ? normalizedExpiries : [];
   const futuresContracts = Array.isArray(raw.futuresContracts) ? raw.futuresContracts.map(normalizeFuture).filter(Boolean) : [];
   return {
@@ -181,19 +177,18 @@ function normalizeIndex(raw: UnknownRecord): H1IndexInput | null {
 
 /**
  * Runtime bridge used only by the final server.ts hook.
- * It is intentionally structural and fail-closed:
- * - no recognized existing Truth result => no normalized H1 write;
- * - missing source timestamp or malformed market identity => skipped;
- * - missing optional metrics remain missing and persist as DB NULL, never zero;
- * - option/chain rows require a finite positive ATM anchor;
- * - all recorder errors stay outside the live path.
+ * Existing 3-argument callers remain compatible. The fourth argument is
+ * optional explicit execution-selector evidence; the bridge never derives or
+ * guesses selector decisions from market fields.
  */
 export async function recordH1FromRuntimeSnapshot(
   runtimeSnapshot: unknown,
   runtimeTruth: unknown,
   calculationVersion = H1_RUNTIME_BRIDGE_VERSION,
+  runtimeCandidateDecisions?: unknown,
 ): Promise<{ attempted: number; skipped: number }> {
   const markets = collectMarkets(runtimeSnapshot);
+  const binding = bindH1ForwardCandidateDecisions(runtimeCandidateDecisions);
   let attempted = 0;
   let skipped = 0;
 
@@ -209,14 +204,55 @@ export async function recordH1FromRuntimeSnapshot(
       console.warn(`[H1] skip ${market.symbol}: existing Truth verdict could not be resolved; no fallback truth is invented.`);
       continue;
     }
+
     attempted += 1;
     const recordNow = new Date(market.timestamp);
-    await recordH1Snapshot({ market, truthVerdict, calculationVersion, now: recordNow });
+    const symbol = market.symbol.toUpperCase();
+    const symbolDecisions = binding.accepted.filter((x) => x.symbol === symbol);
+    const symbolCandidateKeys = new Set(
+      symbolDecisions
+        .filter((x) => x.decision === "SELECT")
+        .map((x) => `${x.symbol}|${x.expiry}|${x.strike}|${x.side}`),
+    );
+
+    await recordH1Snapshot({
+      market,
+      truthVerdict,
+      calculationVersion,
+      now: recordNow,
+      candidateKeys: symbolCandidateKeys,
+    });
+
     await dbInsert("H1_TRUTH_MARKER", {
       symbol: market.symbol,
       snapshotId: market.snapshotId,
       minuteBucket: minuteBucketIso(recordNow),
       truthVerdict,
+      calculationVersion,
+    });
+
+    for (const decision of symbolDecisions) {
+      await dbInsert("H1_EXECUTION_CANDIDATE_DECISION", {
+        symbol: decision.symbol,
+        snapshotId: market.snapshotId,
+        minuteBucket: minuteBucketIso(recordNow),
+        expiry: decision.expiry,
+        strike: decision.strike,
+        side: decision.side,
+        decision: decision.decision,
+        reasonCodes: decision.reasonCodes,
+        gates: decision.gates ?? null,
+        selectorVersion: decision.selectorVersion ?? null,
+        bindingVersion: binding.version,
+        calculationVersion,
+      });
+    }
+  }
+
+  if (binding.rejected.length > 0) {
+    await dbInsert("H1_EXECUTION_CANDIDATE_BINDING_REJECT", {
+      rejected: binding.rejected,
+      bindingVersion: binding.version,
       calculationVersion,
     });
   }

@@ -35,6 +35,7 @@ export interface Fixed30mPayoffResult {
   horizonPolicy: "EXACT_PLUS_30_MINUTES_NO_NEAREST_SUBSTITUTION";
   contractPolicy: "SELECTOR_QUALIFIED_SAME_CONTRACT_ENTRY_AND_EXIT_ONLY";
   executionPricePolicy: "BUY_AT_VERIFIED_ASK_SELL_AT_VERIFIED_BID";
+  dateBindingPolicy: "EVALUATION_DATE_MUST_MATCH_SIGNAL_IST_DATE";
   semantics: "RESEARCH_ONLY_COMPARABLE_30M_NET_PAYOFF_ESTIMATE";
   affectsVerdict: false;
   affectsTelegram: false;
@@ -49,12 +50,14 @@ const istDate=(ms:number|null)=>ms==null?null:new Date(ms+330*60_000).toISOStrin
 export function validateFixed30mOptionBuyerPayoff(input: Fixed30mPayoffInput): Fixed30mPayoffResult {
   const blockers:string[]=[];
   const signalMs=parseMs(input.signalTs);
+  const signalIstDate=istDate(signalMs);
   const targetMs=signalMs==null?null:signalMs+30*60_000;
   const targetTs=targetMs==null?null:new Date(targetMs).toISOString();
   const selection=selectExecutionCandidate(input.candidate);
   if(selection.decision!=="SELECT") blockers.push("OPTION_BUYER_CANDIDATE_NOT_SELECTOR_QUALIFIED");
   if(signalMs==null) blockers.push("INVALID_SIGNAL_TIMESTAMP");
-  if(targetMs!=null&&istDate(targetMs)!==istDate(signalMs)) blockers.push("EXACT_30M_HORIZON_CROSSES_IST_SESSION");
+  if(signalIstDate!=null&&input.evaluationDate!==signalIstDate) blockers.push("EVALUATION_DATE_NOT_BOUND_TO_SIGNAL_IST_DATE");
+  if(targetMs!=null&&istDate(targetMs)!==signalIstDate) blockers.push("EXACT_30M_HORIZON_CROSSES_IST_SESSION");
   if(parseMs(input.entryQuote.ts)!==signalMs) blockers.push("ENTRY_QUOTE_NOT_BOUND_TO_SIGNAL_TIMESTAMP");
   if(input.entryQuote.side!==input.candidate.side||input.entryQuote.strike!==input.candidate.strike||input.entryQuote.expiryDate!==input.candidate.expiryDate) blockers.push("ENTRY_QUOTE_NOT_BOUND_TO_SELECTED_CONTRACT");
   if(input.entryQuote.quality!=="VERIFIED") blockers.push("ENTRY_QUOTE_NOT_VERIFIED");
@@ -66,7 +69,7 @@ export function validateFixed30mOptionBuyerPayoff(input: Fixed30mPayoffInput): F
   const exit=exact.length===1?exact[0]:null;
   if(exit&&exit.quality!=="VERIFIED") blockers.push("EXIT_QUOTE_NOT_VERIFIED");
   if(exit&&(typeof exit.bid!=="number"||!Number.isFinite(exit.bid)||exit.bid<=0)) blockers.push("EXIT_BID_UNAVAILABLE");
-  if(exit&&istDate(parseMs(exit.ts))!==istDate(signalMs)) blockers.push("EXIT_QUOTE_OUTSIDE_SIGNAL_IST_SESSION");
+  if(exit&&istDate(parseMs(exit.ts))!==signalIstDate) blockers.push("EXIT_QUOTE_OUTSIDE_SIGNAL_IST_SESSION");
 
   let estimatedNetPnl:number|null=null,estimatedNetReturnPctOnPremium:number|null=null,estimatedTotalCharges:number|null=null;
   if(blockers.length===0&&exit){
@@ -76,5 +79,5 @@ export function validateFixed30mOptionBuyerPayoff(input: Fixed30mPayoffInput): F
     else {estimatedNetPnl=net.estimatedNetPnl;estimatedNetReturnPctOnPremium=net.estimatedNetReturnPctOnPremium;estimatedTotalCharges=net.estimatedTotalCharges;}
   }
 
-  return {state:blockers.length?"UNAVAILABLE":"USABLE",targetTs,observedTs:exit?.ts??null,candidateKey:selection.decision==="SELECT"?selection.candidateKey:null,estimatedNetPnl,estimatedNetReturnPctOnPremium,estimatedTotalCharges,blockers:[...new Set(blockers)],ruleVersion:"OPTION_BUYER_FIXED_30M_PAYOFF_V1",horizonPolicy:"EXACT_PLUS_30_MINUTES_NO_NEAREST_SUBSTITUTION",contractPolicy:"SELECTOR_QUALIFIED_SAME_CONTRACT_ENTRY_AND_EXIT_ONLY",executionPricePolicy:"BUY_AT_VERIFIED_ASK_SELL_AT_VERIFIED_BID",semantics:"RESEARCH_ONLY_COMPARABLE_30M_NET_PAYOFF_ESTIMATE",affectsVerdict:false,affectsTelegram:false,affectsExecution:false,createsOrders:false,aiMayOverride:false};
+  return {state:blockers.length?"UNAVAILABLE":"USABLE",targetTs,observedTs:exit?.ts??null,candidateKey:selection.decision==="SELECT"?selection.candidateKey:null,estimatedNetPnl,estimatedNetReturnPctOnPremium,estimatedTotalCharges,blockers:[...new Set(blockers)],ruleVersion:"OPTION_BUYER_FIXED_30M_PAYOFF_V1",horizonPolicy:"EXACT_PLUS_30_MINUTES_NO_NEAREST_SUBSTITUTION",contractPolicy:"SELECTOR_QUALIFIED_SAME_CONTRACT_ENTRY_AND_EXIT_ONLY",executionPricePolicy:"BUY_AT_VERIFIED_ASK_SELL_AT_VERIFIED_BID",dateBindingPolicy:"EVALUATION_DATE_MUST_MATCH_SIGNAL_IST_DATE",semantics:"RESEARCH_ONLY_COMPARABLE_30M_NET_PAYOFF_ESTIMATE",affectsVerdict:false,affectsTelegram:false,affectsExecution:false,createsOrders:false,aiMayOverride:false};
 }

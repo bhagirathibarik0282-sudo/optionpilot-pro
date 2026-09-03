@@ -3247,6 +3247,24 @@ async function runTelegramFastCycle(): Promise<void> {
 
   const symbols: V2PremiumSymbol[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
 
+  // Restart-safe Telegram warm-up: bootstrap only from the same server-held
+  // market snapshot when it passes the existing 3-minute freshness rule.
+  // No new Kite/API call is added here; stale/error snapshots remain blocked.
+  const slowCacheBootstrapFresh = Boolean(
+    activeSession.marketSnapshot &&
+    activeSession.snapshotTime &&
+    Date.now() - activeSession.snapshotTime < SNAPSHOT_TTL_MS
+  );
+  if (slowCacheBootstrapFresh) {
+    for (const symbol of symbols) {
+      if (TELEGRAM_SLOW_CACHE.has(symbol)) continue;
+      const m = activeSession.marketSnapshot?.[symbol];
+      if (m && !m.error && m.atmStrike) {
+        TELEGRAM_SLOW_CACHE.set(symbol, { m, stocks: [], updatedAt: activeSession.snapshotTime! });
+      }
+    }
+  }
+
   // 2026-08-18: the PCR info box shows all 3 indices in every message, so
   // all 3 symbols' fast snapshots are fetched FIRST (no new Kite cost --
   // this cycle already fetched all 3 individually before, just not into a

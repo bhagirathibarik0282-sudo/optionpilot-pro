@@ -1,0 +1,17 @@
+name: Option Buyer Fixed 30m Payoff CI
+on:
+  pull_request:
+    paths:
+      - 'option-buyer-fixed-30m-payoff.ts'
+      - 'test/option-buyer-fixed-30m-payoff.test.ts'
+      - '.github/workflows/option-buyer-fixed-30m-payoff-ci.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx tsx --test test/option-buyer-fixed-30m-payoff.test.ts

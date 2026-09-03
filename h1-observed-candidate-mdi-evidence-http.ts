@@ -29,7 +29,14 @@ const exactMs = (v: unknown): number | null => {
   const t = Date.parse(s(v));
   return Number.isFinite(t) ? t : null;
 };
-const verified = (row: Record<string, unknown> | undefined): boolean => !!row && s(row.truth_verdict) === "TRUE";
+const truthVerified = (row: Record<string, unknown> | undefined): boolean => !!row && s(row.truth_verdict) === "TRUE";
+const validationHealthy = (row: Record<string, unknown> | undefined): boolean => {
+  if (!truthVerified(row)) return false;
+  const status = s(row?.validation_status).toUpperCase();
+  return !/(STALE|DIAGNOSTIC|INVALID|ERROR)/.test(status);
+};
+const marketHealthy = (row: Record<string, unknown> | undefined): boolean =>
+  truthVerified(row) && s(row?.freshness_status).toUpperCase() === "TRUE";
 const strikeStep = (symbol: H1ReplayRequest["symbol"]): number => symbol === "BANKNIFTY" ? 100 : symbol === "SENSEX" ? 100 : 50;
 
 function bump(map: Record<string, number>, key: string): void { map[key] = (map[key] ?? 0) + 1; }
@@ -41,11 +48,11 @@ function quality(params: {
   pe: Record<string, unknown> | undefined;
 }): MdiSourceQualityMap {
   return {
-    PCR: verified(params.chain) ? "VERIFIED" : "UNKNOWN",
-    WALL: verified(params.chain) ? "VERIFIED" : "UNKNOWN",
-    IV: verified(params.ce) && verified(params.pe) ? "VERIFIED" : "UNKNOWN",
-    VIX: verified(params.market) ? "VERIFIED" : "UNKNOWN",
-    FUTURES: verified(params.market) ? "VERIFIED" : "UNKNOWN",
+    PCR: validationHealthy(params.chain) ? "VERIFIED" : "UNKNOWN",
+    WALL: validationHealthy(params.chain) ? "VERIFIED" : "UNKNOWN",
+    IV: validationHealthy(params.ce) && validationHealthy(params.pe) ? "VERIFIED" : "UNKNOWN",
+    VIX: marketHealthy(params.market) ? "VERIFIED" : "UNKNOWN",
+    FUTURES: marketHealthy(params.market) ? "VERIFIED" : "UNKNOWN",
   };
 }
 

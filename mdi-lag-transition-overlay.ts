@@ -1,17 +1,16 @@
 import type { LagTransitionSnapshot } from "./lag-transition-research.js";
-import type { MdiBias, MdiResult } from "./mdi-research-shadow.js";
+import { deriveMdiResearchShadow, type MdiBias, type MdiInput } from "./mdi-research-shadow.js";
 
 export type MdiLagDirection = "UP" | "DOWN" | "NEUTRAL" | "UNKNOWN";
 export type MdiLagAlignment = "ALIGNED" | "CONTRADICTING" | "NEUTRAL" | "UNAVAILABLE";
 
-export interface MdiLagObservation {
-  firstQualifiedAt: string | null;
-  result: MdiResult;
-}
-
 export interface MdiLagOverlayInput {
   lag: LagTransitionSnapshot;
-  mdi: MdiLagObservation;
+  /**
+   * Raw MDI observation pairs only. The overlay derives MDI internally so callers
+   * cannot inject a prebuilt score/bias or an independent qualification timestamp.
+   */
+  mdiObservations: MdiInput[];
 }
 
 export interface MdiLagOverlayResult {
@@ -25,6 +24,7 @@ export interface MdiLagOverlayResult {
   reasons: string[];
   ruleVersion: "MDI_LAG_OVERLAY_RESEARCH_V1";
   semantics: "RESEARCH_REPLAY_ONLY";
+  sourcePolicy: "DERIVE_MDI_INTERNALLY_FROM_RAW_VERIFIED_INPUTS";
   affectsLagSequence: false;
   affectsVerdict: false;
   affectsTelegram: false;
@@ -53,56 +53,62 @@ function mdiDirection(bias: MdiBias): MdiLagDirection {
   return "UNKNOWN";
 }
 
-function expectedBias(score: number): MdiBias {
-  if (score >= 60) return "STRONG_BULLISH";
-  if (score >= 25) return "MILD_BULLISH";
-  if (score <= -60) return "STRONG_BEARISH";
-  if (score <= -25) return "MILD_BEARISH";
-  return "NEUTRAL";
+interface QualifiedMdiObservation {
+  at: string;
+  bias: MdiBias;
+  mdi: number;
 }
 
-function trustedMdiResult(result: MdiResult): boolean {
-  return result.ruleVersion === "MDI_RESEARCH_SHADOW_V1"
-    && result.semantics === "RESEARCH_SHADOW_ONLY"
-    && result.sourcePolicy === "VERIFIED_COMPONENT_SOURCES_ONLY"
-    && result.affectsVerdict === false
-    && result.affectsTelegram === false
-    && result.affectsExecution === false
-    && result.createsOrders === false
-    && result.aiMayOverride === false;
+function firstQualifiedObservation(observations: MdiInput[], reasons: string[]): QualifiedMdiObservation | null {
+  const qualified: QualifiedMdiObservation[] = [];
+
+  for (const observation of observations) {
+    const previousMs = epochMs(observation.previous.ts);
+    const currentMs = epochMs(observation.current.ts);
+    if (previousMs == null || currentMs == null || currentMs <= previousMs) {
+      reasons.push("MDI_OBSERVATION_TIMESTAMP_INVALID_OR_NON_FORWARD");
+      continue;
+    }
+
+    const result = deriveMdiResearchShadow(observation);
+    if (result.mdi == null || result.bias === "UNAVAILABLE") {
+      reasons.push("MDI_OBSERVATION_NOT_QUALIFIED");
+      continue;
+    }
+
+    qualified.push({ at: observation.current.ts, bias: result.bias, mdi: result.mdi });
+  }
+
+  qualified.sort((a, b) => (epochMs(a.at) as number) - (epochMs(b.at) as number));
+  return qualified[0] ?? null;
 }
 
 export function deriveMdiLagOverlay(input: MdiLagOverlayInput): MdiLagOverlayResult {
   const reasons: string[] = [];
-  const mdiResult = input.mdi.result;
-  const provenanceTrusted = trustedMdiResult(mdiResult);
-  const mdiAt = input.mdi.firstQualifiedAt;
-  const mdiConsistent = mdiResult.mdi == null || expectedBias(mdiResult.mdi) === mdiResult.bias;
-  const mdiUsable = provenanceTrusted && mdiConsistent && mdiResult.mdi != null && mdiAt != null && mdiResult.bias !== "UNAVAILABLE";
-  const mdiDir = mdiUsable ? mdiDirection(mdiResult.bias) : "UNKNOWN";
+  const qualified = firstQualifiedObservation(input.mdiObservations, reasons);
+  const mdiAt = qualified?.at ?? null;
+  const mdiDir = qualified ? mdiDirection(qualified.bias) : "UNKNOWN";
   const niftyAt = input.lag.measurements.find((m) => m.stage === "NIFTY")?.firstQualifiedAt ?? null;
   const premiumAt = input.lag.measurements.find((m) => m.stage === "PREMIUM")?.firstQualifiedAt ?? null;
 
-  if (!provenanceTrusted) reasons.push("MDI_PROVENANCE_CONTRACT_NOT_TRUSTED");
-  if (provenanceTrusted && !mdiConsistent) reasons.push("MDI_SCORE_BIAS_INCONSISTENT");
-  if (provenanceTrusted && mdiConsistent && !mdiUsable) reasons.push("MDI_CONFIRMATION_UNAVAILABLE");
+  if (!qualified) reasons.push("MDI_CONFIRMATION_UNAVAILABLE");
 
-  const hwLag = mdiUsable ? lagMinutes(input.lag.t0At, mdiAt) : null;
-  const niftyLag = mdiUsable ? lagMinutes(niftyAt, mdiAt) : null;
-  const premiumLag = mdiUsable ? lagMinutes(premiumAt, mdiAt) : null;
+  const hwLag = qualified ? lagMinutes(input.lag.t0At, mdiAt) : null;
+  const niftyLag = qualified ? lagMinutes(niftyAt, mdiAt) : null;
+  const premiumLag = qualified ? lagMinutes(premiumAt, mdiAt) : null;
   if (hwLag != null && hwLag < 0) reasons.push("MDI_PRECEDES_HEAVYWEIGHT_T0");
   if (niftyLag != null && niftyLag < 0) reasons.push("MDI_PRECEDES_NIFTY_CONFIRMATION");
   if (premiumLag != null && premiumLag < 0) reasons.push("MDI_PRECEDES_PREMIUM_CONFIRMATION");
 
   let alignment: MdiLagAlignment = "UNAVAILABLE";
-  if (mdiUsable && mdiDir === "NEUTRAL") {
+  if (qualified && mdiDir === "NEUTRAL") {
     alignment = "NEUTRAL";
     reasons.push("MDI_IS_NEUTRAL_CONTEXT");
-  } else if (mdiUsable && input.lag.directionalIntegrity === "UNKNOWN") {
+  } else if (qualified && input.lag.directionalIntegrity === "UNKNOWN") {
     reasons.push("LAG_DIRECTION_UNKNOWN");
-  } else if (mdiUsable && input.lag.directionalIntegrity === "MIXED") {
+  } else if (qualified && input.lag.directionalIntegrity === "MIXED") {
     reasons.push("LAG_DIRECTION_MIXED_ALIGNMENT_UNAVAILABLE");
-  } else if (mdiUsable) {
+  } else if (qualified) {
     const firstDirectional = input.lag.measurements.find((m) => m.present && (m.direction === "UP" || m.direction === "DOWN"));
     if (!firstDirectional) {
       reasons.push("NO_DIRECTIONAL_LAG_STAGE");
@@ -117,15 +123,16 @@ export function deriveMdiLagOverlay(input: MdiLagOverlayInput): MdiLagOverlayRes
 
   return {
     tradeDate: input.lag.tradeDate,
-    mdiFirstQualifiedAt: mdiUsable ? mdiAt : null,
+    mdiFirstQualifiedAt: mdiAt,
     mdiLagFromHeavyweightT0Minutes: hwLag,
     mdiLagFromNiftyMinutes: niftyLag,
     mdiLagFromPremiumMinutes: premiumLag,
-    mdiDirection: mdiUsable ? mdiDir : "UNKNOWN",
+    mdiDirection: qualified ? mdiDir : "UNKNOWN",
     alignmentWithLagDirection: alignment,
     reasons,
     ruleVersion: "MDI_LAG_OVERLAY_RESEARCH_V1",
     semantics: "RESEARCH_REPLAY_ONLY",
+    sourcePolicy: "DERIVE_MDI_INTERNALLY_FROM_RAW_VERIFIED_INPUTS",
     affectsLagSequence: false,
     affectsVerdict: false,
     affectsTelegram: false,

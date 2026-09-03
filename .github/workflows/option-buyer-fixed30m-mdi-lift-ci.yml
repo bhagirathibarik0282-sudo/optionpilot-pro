@@ -1,0 +1,19 @@
+name: Option Buyer Fixed30m MDI Lift CI
+on:
+  pull_request:
+    paths:
+      - 'option-buyer-fixed30m-mdi-lift.ts'
+      - 'test/option-buyer-fixed30m-mdi-lift.test.ts'
+      - 'option-buyer-fixed-30m-payoff.ts'
+      - 'mdi-research-shadow.ts'
+      - '.github/workflows/option-buyer-fixed30m-mdi-lift-ci.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/option-buyer-fixed30m-mdi-lift.test.ts

@@ -8,8 +8,12 @@ export type KiteShadowServiceConfig = {
 };
 
 export function readKiteShadowServiceConfig(env: NodeJS.ProcessEnv = process.env): KiteShadowServiceConfig {
-  const enabled = env.KITE_RUNTIME_SHADOW_ENABLED === "true";
   const apiKey = env.KITE_API_KEY?.trim() || null;
+  // The exact H1 service owns the single Kite WebSocket when explicitly enabled.
+  if (env.KITE_H1_EXACT_SHADOW_ENABLED === "true") {
+    return { enabled: false, apiKey, registryEntries: [] };
+  }
+  const enabled = env.KITE_RUNTIME_SHADOW_ENABLED === "true";
   if (!enabled) return { enabled: false, apiKey, registryEntries: [] };
   const raw = env.KITE_SHADOW_REGISTRY_JSON?.trim() || "";
   if (!raw) throw new Error("KITE_SHADOW_REGISTRY_JSON_REQUIRED");

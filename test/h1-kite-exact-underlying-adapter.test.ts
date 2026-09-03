@@ -40,6 +40,7 @@ test("blocks FUTURE identity instead of substituting it for spot", () => {
 
 test("blocks missing, future and stale exchange timestamps", () => {
   assert.equal(mapKiteIndexFullPacketToH1ExactUnderlying({ ...packet, exchangeTimestamp: null }, registry, "2026-09-03T10:00:00.500Z"), null);
+  assert.equal(mapKiteIndexFullPacketToH1ExactUnderlying({ ...packet, exchangeTimestamp: "not-a-time" }, registry, "2026-09-03T10:00:00.500Z"), null);
   assert.equal(mapKiteIndexFullPacketToH1ExactUnderlying({ ...packet, exchangeTimestamp: "2026-09-03T10:00:01.000Z" }, registry, "2026-09-03T10:00:00.500Z"), null);
   assert.equal(mapKiteIndexFullPacketToH1ExactUnderlying({ ...packet, exchangeTimestamp: "2026-09-03T09:59:50.000Z" }, registry, "2026-09-03T10:00:00.500Z"), null);
 });

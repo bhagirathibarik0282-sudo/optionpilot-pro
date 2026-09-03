@@ -1,0 +1,19 @@
+name: H1 Live Selector Pipeline CI
+on:
+  pull_request:
+    paths:
+      - 'h1-live-selector-pipeline.ts'
+      - 'h1-live-gate-evidence-assembler.ts'
+      - 'h1-live-selector-decision-producer.ts'
+      - 'test/h1-live-selector-pipeline.test.ts'
+      - '.github/workflows/h1-live-selector-pipeline-ci.yml'
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/h1-live-selector-pipeline.test.ts

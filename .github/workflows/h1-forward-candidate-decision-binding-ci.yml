@@ -1,0 +1,19 @@
+name: H1 Forward Candidate Decision Binding CI
+on:
+  pull_request:
+    paths:
+      - 'h1-forward-candidate-decision-binding.ts'
+      - 'h1-runtime-bridge.ts'
+      - 'test/h1-forward-candidate-decision-binding.test.ts'
+      - 'test/h1-forward-candidate-runtime-bridge.test.ts'
+      - '.github/workflows/h1-forward-candidate-decision-binding-ci.yml'
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/h1-forward-candidate-decision-binding.test.ts test/h1-forward-candidate-runtime-bridge.test.ts

@@ -1,0 +1,22 @@
+name: H1 Live Contract Selection CI
+
+on:
+  pull_request:
+    paths:
+      - 'h1-live-selection-spot-rest.ts'
+      - 'h1-live-contract-selection.ts'
+      - 'h1-live-contract-selection-startup-audit.ts'
+      - 'h1-live-contract-discovery-startup-audit.ts'
+      - 'test/h1-live-contract-selection.test.ts'
+      - '.github/workflows/h1-live-contract-selection-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/h1-live-contract-selection.test.ts

@@ -8,10 +8,13 @@ on:
       - 'h1-live-exact-readonly-websocket-service.ts'
       - 'h1-live-contract-selection-startup-audit.ts'
       - 'h1-dynamic-readonly-live-chain.ts'
+      - 'h1-dynamic-readonly-server-bootstrap.ts'
+      - 'research-server-hook.ts'
       - 'test/h1-kite-exact-runtime-coordinator.test.ts'
       - 'test/h1-live-exact-market-wiring-readiness.test.ts'
       - 'test/h1-live-exact-readonly-websocket-service.test.ts'
       - 'test/h1-dynamic-readonly-live-chain.test.ts'
+      - 'test/h1-dynamic-readonly-server-bootstrap.test.ts'
       - '.github/workflows/h1-kite-exact-runtime-coordinator-ci.yml'
   workflow_dispatch:
 
@@ -25,4 +28,4 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: npx --no-install tsx --test test/h1-kite-exact-runtime-coordinator.test.ts test/h1-live-exact-market-wiring-readiness.test.ts test/h1-live-exact-readonly-websocket-service.test.ts test/h1-dynamic-readonly-live-chain.test.ts
+      - run: npx --no-install tsx --test test/h1-kite-exact-runtime-coordinator.test.ts test/h1-live-exact-market-wiring-readiness.test.ts test/h1-live-exact-readonly-websocket-service.test.ts test/h1-dynamic-readonly-live-chain.test.ts test/h1-dynamic-readonly-server-bootstrap.test.ts

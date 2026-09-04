@@ -1,6 +1,7 @@
 import { startH1DynamicReadOnlyLiveChain, type H1DynamicReadOnlyLiveStartResult } from "./h1-dynamic-readonly-live-chain.js";
 import { getH1RegularMarketWindowContext, type H1RegularMarketWindowContext } from "./h1-regular-market-window-context.js";
 import { evaluateH1MarketOpenReadinessAcceptance, type H1MarketOpenReadinessAcceptance } from "./h1-market-open-readiness-acceptance.js";
+import { buildH1MarketOpenAcceptanceCapture } from "./h1-market-open-acceptance-capture.js";
 import type { H1LiveExactReadOnlyConsumerObservation, H1LiveExactReadOnlyDirectionObservation, H1LiveExactReadOnlyShadowInputObservation, H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-websocket-service.js";
 import type { H1LiveExactRawEvidenceMissing, H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import type { H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
@@ -142,7 +143,9 @@ function scheduleDelayedLiveProofLog(): void {
   }, 5_000);
   threeMinuteProofTimer = setTimeout(() => {
     threeMinuteProofTimer = null;
-    console.log(`[H1_DYNAMIC_READONLY_3M_LIVE_PROOF] ${JSON.stringify(getH1DynamicReadOnlyServerStatus())}`);
+    const liveStatus = getH1DynamicReadOnlyServerStatus();
+    console.log(`[H1_DYNAMIC_READONLY_3M_LIVE_PROOF] ${JSON.stringify(liveStatus)}`);
+    console.log(`[H1_MARKET_OPEN_ACCEPTANCE_CAPTURE] ${JSON.stringify(buildH1MarketOpenAcceptanceCapture(liveStatus))}`);
   }, 180_000);
   initialProofTimer.unref?.();
   threeMinuteProofTimer.unref?.();

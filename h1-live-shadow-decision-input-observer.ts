@@ -8,6 +8,7 @@ export interface H1LiveShadowDecisionInputObserverResult {
   sourceConnected: boolean;
   sourcePacketCount: number;
   sourceRejectedPacketCount: number;
+  sourceHealthBlockers: string[];
   productionImpact: "NONE";
   readOnly: true;
   forwardsDownstream: false;
@@ -26,7 +27,21 @@ export interface H1LiveShadowDecisionInputObserverResult {
 export function observeH1LiveShadowDecisionInput(
   status: H1LiveExactReadOnlyWebSocketStatus,
 ): H1LiveShadowDecisionInputObserverResult {
-  const observed = buildH1ReadOnlyShadowDecisionInputBoundary(status.readOnlyShadowInputObservations);
+  const sourceHealthBlockers: string[] = [];
+  if (!status.started || !status.connected || status.state !== "OPEN") sourceHealthBlockers.push("SOURCE_SOCKET_NOT_OPEN");
+  if (status.productionImpact !== "NONE" || status.readOnly !== true || status.forwardsDownstream !== false || status.affectsVerdict !== false || status.affectsExecution !== false || status.affectsTelegram !== false || status.failClosed !== true) {
+    sourceHealthBlockers.push("SOURCE_SAFETY_CONTRACT_INVALID");
+  }
+
+  const safeRows = sourceHealthBlockers.length === 0
+    ? status.readOnlyShadowInputObservations
+    : status.readOnlyShadowInputObservations.map((row) => ({
+        ...row,
+        ready: false,
+        direction: null,
+        blockers: [...new Set([...row.blockers, ...sourceHealthBlockers])],
+      }));
+  const observed = buildH1ReadOnlyShadowDecisionInputBoundary(safeRows);
   return {
     version: "H1_LIVE_SHADOW_DECISION_INPUT_OBSERVER_V1",
     observed,
@@ -34,6 +49,7 @@ export function observeH1LiveShadowDecisionInput(
     sourceConnected: status.connected,
     sourcePacketCount: status.receivedPacketCount,
     sourceRejectedPacketCount: status.rejectedPacketCount,
+    sourceHealthBlockers,
     productionImpact: "NONE",
     readOnly: true,
     forwardsDownstream: false,

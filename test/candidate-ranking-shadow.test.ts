@@ -72,3 +72,54 @@ test("fails closed when ranking evidence coverage is too low", () => {
   assert.equal(result.bestCandidateKey, null);
   assert.ok(result.ranked[0].reasons.includes("RANKING_EVIDENCE_BELOW_50_PERCENT_WEIGHT"));
 });
+
+test("clamps finite out-of-range evidence instead of allowing score inflation", () => {
+  const result = rankCandidateSet([
+    {
+      candidate: candidate(),
+      evidence: {
+        temporalConfidencePct: 250,
+        premiumEfficiencyPct: -25,
+        liquidityQualityPct: 100,
+        crossDteAgreementPct: 100,
+      },
+    },
+  ]);
+
+  const row = result.ranked[0];
+  assert.equal(row.eligible, true);
+  assert.equal(row.score, 72.2);
+  assert.equal(row.rank, 1);
+  assert.equal(result.bestCandidateKey, row.candidateKey);
+  assert.equal(result.affectsVerdict, false);
+  assert.equal(result.affectsTelegram, false);
+  assert.equal(result.affectsExecution, false);
+  assert.equal(result.createsOrders, false);
+});
+
+test("treats non-finite evidence as unavailable and fails closed when coverage drops below 50 percent", () => {
+  const result = rankCandidateSet([
+    {
+      candidate: candidate(),
+      evidence: {
+        temporalConfidencePct: Number.NaN,
+        premiumEfficiencyPct: Number.POSITIVE_INFINITY,
+        liquidityQualityPct: 100,
+        crossDteAgreementPct: 100,
+      },
+    },
+  ]);
+
+  const row = result.ranked[0];
+  assert.equal(row.eligible, false);
+  assert.equal(row.score, 0);
+  assert.equal(row.rank, null);
+  assert.equal(result.bestCandidateKey, null);
+  assert.ok(row.reasons.includes("TEMPORAL_EVIDENCE_UNAVAILABLE"));
+  assert.ok(row.reasons.includes("PREMIUM_EVIDENCE_UNAVAILABLE"));
+  assert.ok(row.reasons.includes("RANKING_EVIDENCE_BELOW_50_PERCENT_WEIGHT"));
+  assert.equal(result.affectsVerdict, false);
+  assert.equal(result.affectsTelegram, false);
+  assert.equal(result.affectsExecution, false);
+  assert.equal(result.createsOrders, false);
+});

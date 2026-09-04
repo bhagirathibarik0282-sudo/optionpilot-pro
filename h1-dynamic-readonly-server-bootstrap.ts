@@ -1,4 +1,5 @@
 import { startH1DynamicReadOnlyLiveChain, type H1DynamicReadOnlyLiveStartResult } from "./h1-dynamic-readonly-live-chain.js";
+import type { H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-websocket-service.js";
 
 export const H1_DYNAMIC_READONLY_LIVE_ENV = "H1_DYNAMIC_READONLY_LIVE_ENABLED" as const;
 
@@ -10,8 +11,14 @@ export interface H1DynamicReadOnlyServerStatus {
   reason: "DISABLED" | H1DynamicReadOnlyLiveStartResult["reason"] | "START_FAILED";
   asOfDate: string | null;
   subscribedTokenCount: number;
+  connected: boolean;
+  socketState: "READY" | "CONNECTING" | "RECONNECTING" | "OPEN" | "CLOSED" | "ERROR" | "UNAVAILABLE";
+  receivedPacketCount: number;
+  rejectedPacketCount: number;
+  lastPacketTimestamp: string | null;
   productionImpact: "NONE";
   readOnly: true;
+  forwardsDownstream: false;
   affectsDirection: false;
   affectsVerdict: false;
   affectsExecution: false;
@@ -20,9 +27,11 @@ export interface H1DynamicReadOnlyServerStatus {
 }
 
 type StartFn = (asOfDate: string, enabled: boolean) => Promise<H1DynamicReadOnlyLiveStartResult>;
+type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status">;
 
 let statusValue: H1DynamicReadOnlyServerStatus = status(false, false, false, "DISABLED", null, 0);
 let attemptPromise: Promise<H1DynamicReadOnlyServerStatus> | null = null;
+let liveService: StatusService | null = null;
 
 function status(
   enabled: boolean,
@@ -40,8 +49,14 @@ function status(
     reason,
     asOfDate,
     subscribedTokenCount,
+    connected: false,
+    socketState: "UNAVAILABLE",
+    receivedPacketCount: 0,
+    rejectedPacketCount: 0,
+    lastPacketTimestamp: null,
     productionImpact: "NONE",
     readOnly: true,
+    forwardsDownstream: false,
     affectsDirection: false,
     affectsVerdict: false,
     affectsExecution: false,
@@ -60,7 +75,17 @@ export function isH1DynamicReadOnlyLiveEnabled(env: NodeJS.ProcessEnv = process.
 }
 
 export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatus {
-  return { ...statusValue };
+  if (!liveService) return { ...statusValue };
+  const live = liveService.status();
+  return {
+    ...statusValue,
+    connected: live.connected,
+    socketState: live.state,
+    receivedPacketCount: live.receivedPacketCount,
+    rejectedPacketCount: live.rejectedPacketCount,
+    lastPacketTimestamp: live.lastPacketTimestamp,
+    forwardsDownstream: false,
+  };
 }
 
 /**
@@ -76,6 +101,7 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(
 ): Promise<H1DynamicReadOnlyServerStatus> {
   const enabled = isH1DynamicReadOnlyLiveEnabled(env);
   if (!enabled) {
+    liveService = null;
     statusValue = status(false, false, false, "DISABLED", null, 0);
     return getH1DynamicReadOnlyServerStatus();
   }
@@ -86,8 +112,10 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(
   attemptPromise = (async () => {
     try {
       const live = await startFn(asOfDate, true);
+      liveService = live.service;
       statusValue = status(true, true, live.started, live.reason, asOfDate, live.subscribedTokenCount);
     } catch {
+      liveService = null;
       statusValue = status(true, true, false, "START_FAILED", asOfDate, 0);
     }
     return getH1DynamicReadOnlyServerStatus();
@@ -98,5 +126,6 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(
 export function resetH1DynamicReadOnlyServerBootstrapForTest(): void {
   if (process.env.NODE_ENV !== "test") throw new Error("H1_SERVER_BOOTSTRAP_RESET_TEST_ONLY");
   attemptPromise = null;
+  liveService = null;
   statusValue = status(false, false, false, "DISABLED", null, 0);
 }

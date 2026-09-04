@@ -1,4 +1,5 @@
 import { runH1ExactLiveContractDiscoveryHttp } from "./h1-exact-live-contract-discovery-http.js";
+import { runH1LiveContractSelectionStartupAudit } from "./h1-live-contract-selection-startup-audit.js";
 
 const asOfDate = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Kolkata",
@@ -12,8 +13,10 @@ setTimeout(() => {
     symbols: "NIFTY,SENSEX,BANKNIFTY",
     asOfDate,
   })
-    .then((result) => {
+    .then(async (result) => {
       console.log(`[H1_EXACT_LIVE_CONTRACT_DISCOVERY_STARTUP_AUDIT] ${JSON.stringify(result)}`);
+      const selection = await runH1LiveContractSelectionStartupAudit(asOfDate);
+      console.log(`[H1_LIVE_CONTRACT_SELECTION_STARTUP_AUDIT] ${JSON.stringify(selection)}`);
     })
     .catch((err) => {
       console.error(`[H1_EXACT_LIVE_CONTRACT_DISCOVERY_STARTUP_AUDIT] ${JSON.stringify({

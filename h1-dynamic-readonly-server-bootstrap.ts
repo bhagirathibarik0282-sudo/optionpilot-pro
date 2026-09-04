@@ -1,5 +1,6 @@
 import { startH1DynamicReadOnlyLiveChain, type H1DynamicReadOnlyLiveStartResult } from "./h1-dynamic-readonly-live-chain.js";
 import type { H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-websocket-service.js";
+import type { H1LiveExactRawEvidenceMissing } from "./h1-live-exact-raw-evidence-store.js";
 
 export const H1_DYNAMIC_READONLY_LIVE_ENV = "H1_DYNAMIC_READONLY_LIVE_ENABLED" as const;
 
@@ -21,6 +22,7 @@ export interface H1DynamicReadOnlyServerStatus {
   rawEvidenceFreshTokenCount: number;
   rawEvidenceMissingTokenCount: number;
   rawEvidenceStaleTokenCount: number;
+  rawEvidenceMissing: H1LiveExactRawEvidenceMissing[];
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
@@ -65,6 +67,7 @@ function status(
     rawEvidenceFreshTokenCount: 0,
     rawEvidenceMissingTokenCount: subscribedTokenCount,
     rawEvidenceStaleTokenCount: 0,
+    rawEvidenceMissing: [],
     greekEvidenceStatus: "NOT_CONFIGURED",
     productionImpact: "NONE",
     readOnly: true,
@@ -87,7 +90,7 @@ export function isH1DynamicReadOnlyLiveEnabled(env: NodeJS.ProcessEnv = process.
 }
 
 export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatus {
-  if (!liveService) return { ...statusValue };
+  if (!liveService) return { ...statusValue, rawEvidenceMissing: statusValue.rawEvidenceMissing.map((x) => ({ ...x })) };
   const live = liveService.status();
   return {
     ...statusValue,
@@ -101,6 +104,7 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
     rawEvidenceFreshTokenCount: live.rawEvidenceFreshTokenCount,
     rawEvidenceMissingTokenCount: live.rawEvidenceMissingTokenCount,
     rawEvidenceStaleTokenCount: live.rawEvidenceStaleTokenCount,
+    rawEvidenceMissing: (live.rawEvidenceMissing ?? []).map((x) => ({ ...x })),
     greekEvidenceStatus: live.greekEvidenceStatus,
     forwardsDownstream: false,
   };
@@ -114,12 +118,6 @@ function scheduleDelayedLiveProofLog(): void {
   proofTimer.unref?.();
 }
 
-/**
- * Server-safe entrypoint. Unless the explicit env flag is exactly true, it does
- * not call the live selection chain and therefore cannot open a Kite socket.
- * The returned/public status intentionally contains no credentials or service
- * handle. A single process may attempt startup at most once.
- */
 export async function startH1DynamicReadOnlyLiveFromServerEnv(
   env: NodeJS.ProcessEnv = process.env,
   startFn: StartFn = startH1DynamicReadOnlyLiveChain,

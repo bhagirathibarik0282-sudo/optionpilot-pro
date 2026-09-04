@@ -88,6 +88,31 @@ function validatePolicy(raw: unknown): H1ExactShadowPolicy {
   return p;
 }
 
+function validateExactPeerCapacity(registryEntries: KiteImmediateTokenEntry[], policy: H1ExactShadowPolicy): void {
+  const byToken = new Map(registryEntries.map((entry) => [entry.instrumentToken, entry]));
+  const configured = policy.contracts.map((row) => {
+    const entry = byToken.get(row.instrumentToken);
+    if (!entry) throw new Error("KITE_H1_EXACT_CONTRACT_NOT_IN_REGISTRY");
+    if (entry.role !== "OPTION" || !entry.expiry || !Number.isFinite(entry.strike) || Number(entry.strike) <= 0 ||
+        (entry.optionSide !== "CE" && entry.optionSide !== "PE")) {
+      throw new Error("KITE_H1_EXACT_CONTRACT_OPTION_IDENTITY_REQUIRED");
+    }
+    return entry as KiteImmediateTokenEntry & { role: "OPTION"; expiry: string; strike: number; optionSide: "CE" | "PE" };
+  });
+
+  for (const target of configured) {
+    const peerExpiries = new Set(
+      configured
+        .filter((peer) => peer.instrumentToken !== target.instrumentToken &&
+          peer.symbol === target.symbol && peer.optionSide === target.optionSide && peer.expiry !== target.expiry)
+        .map((peer) => peer.expiry),
+    );
+    if (peerExpiries.size < policy.burdenPolicy.requiredPeerCount) {
+      throw new Error("KITE_H1_EXACT_INSUFFICIENT_CONFIGURED_PEER_EXPIRIES");
+    }
+  }
+}
+
 export function readH1ExactShadowLiveConfig(env: NodeJS.ProcessEnv = process.env): H1ExactShadowLiveConfig {
   const enabled = env.KITE_H1_EXACT_SHADOW_ENABLED === "true";
   const apiKey = env.KITE_API_KEY?.trim() || null;
@@ -101,11 +126,7 @@ export function readH1ExactShadowLiveConfig(env: NodeJS.ProcessEnv = process.env
   const registryEntries = parseJson(registryRaw, "KITE_SHADOW_REGISTRY_JSON_INVALID");
   if (!Array.isArray(registryEntries) || registryEntries.length === 0) throw new Error("KITE_SHADOW_REGISTRY_JSON_EMPTY");
   const policy = validatePolicy(parseJson(policyRaw, "KITE_H1_EXACT_POLICY_JSON_INVALID"));
-
-  const registryTokens = new Set((registryEntries as KiteImmediateTokenEntry[]).map((x) => x.instrumentToken));
-  if (policy.contracts.some((x) => !registryTokens.has(x.instrumentToken))) {
-    throw new Error("KITE_H1_EXACT_CONTRACT_NOT_IN_REGISTRY");
-  }
+  validateExactPeerCapacity(registryEntries as KiteImmediateTokenEntry[], policy);
   return { enabled: true, apiKey, registryEntries: registryEntries as KiteImmediateTokenEntry[], policy };
 }
 

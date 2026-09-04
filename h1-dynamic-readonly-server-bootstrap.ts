@@ -16,6 +16,12 @@ export interface H1DynamicReadOnlyServerStatus {
   receivedPacketCount: number;
   rejectedPacketCount: number;
   lastPacketTimestamp: string | null;
+  rawEvidenceReady: boolean;
+  rawEvidenceExpectedTokenCount: number;
+  rawEvidenceFreshTokenCount: number;
+  rawEvidenceMissingTokenCount: number;
+  rawEvidenceStaleTokenCount: number;
+  greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
   forwardsDownstream: false;
@@ -54,6 +60,12 @@ function status(
     receivedPacketCount: 0,
     rejectedPacketCount: 0,
     lastPacketTimestamp: null,
+    rawEvidenceReady: false,
+    rawEvidenceExpectedTokenCount: subscribedTokenCount,
+    rawEvidenceFreshTokenCount: 0,
+    rawEvidenceMissingTokenCount: subscribedTokenCount,
+    rawEvidenceStaleTokenCount: 0,
+    greekEvidenceStatus: "NOT_CONFIGURED",
     productionImpact: "NONE",
     readOnly: true,
     forwardsDownstream: false,
@@ -84,6 +96,12 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
     receivedPacketCount: live.receivedPacketCount,
     rejectedPacketCount: live.rejectedPacketCount,
     lastPacketTimestamp: live.lastPacketTimestamp,
+    rawEvidenceReady: live.rawEvidenceReady,
+    rawEvidenceExpectedTokenCount: live.rawEvidenceExpectedTokenCount,
+    rawEvidenceFreshTokenCount: live.rawEvidenceFreshTokenCount,
+    rawEvidenceMissingTokenCount: live.rawEvidenceMissingTokenCount,
+    rawEvidenceStaleTokenCount: live.rawEvidenceStaleTokenCount,
+    greekEvidenceStatus: live.greekEvidenceStatus,
     forwardsDownstream: false,
   };
 }

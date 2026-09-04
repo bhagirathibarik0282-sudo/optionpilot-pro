@@ -12,6 +12,7 @@ import { runH1ObservedCandidate30mGross } from "./h1-observed-candidate-30m-gros
 import { runH1ObservedCandidateMdiEvidenceHttp } from "./h1-observed-candidate-mdi-evidence-http.js";
 import { diagnoseObservedCandidateCoverage } from "./h1-observed-candidate-coverage-diagnostic.js";
 import { auditCandidateReconstruction } from "./h1-candidate-reconstruction-audit.js";
+import { runH1ExactLiveContractDiscoveryHttp } from "./h1-exact-live-contract-discovery-http.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const MEANINGFUL_ACCEPTANCE_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
@@ -78,6 +79,15 @@ export function mountResearchRoutes(app: Hono): void {
     }
     const result = await getMeaningfulLiveAcceptanceStatus(requested || null);
     return c.json(result);
+  });
+
+  app.get("/api/research/h1-exact-live-contract-discovery", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const result = await runH1ExactLiveContractDiscoveryHttp({
+      symbols: c.req.query("symbols"),
+      asOfDate: c.req.query("date"),
+    });
+    return c.json(result, result.ok ? 200 : 503);
   });
 
   app.get("/api/research/h1-observed-candidate-30m-gross", async (c) => {

@@ -7,10 +7,11 @@ import {
   startH1DynamicReadOnlyLiveFromServerEnv,
 } from "../h1-dynamic-readonly-server-bootstrap.js";
 import type { H1DynamicReadOnlyLiveStartResult } from "../h1-dynamic-readonly-live-chain.js";
+import type { H1LiveExactReadOnlyWebSocketService } from "../h1-live-exact-readonly-websocket-service.js";
 
 process.env.NODE_ENV = "test";
 
-function liveResult(started = true): H1DynamicReadOnlyLiveStartResult {
+function liveResult(started = true, service: H1LiveExactReadOnlyWebSocketService | null = null): H1DynamicReadOnlyLiveStartResult {
   return {
     version: "H1_DYNAMIC_READONLY_LIVE_CHAIN_V1",
     started,
@@ -23,7 +24,7 @@ function liveResult(started = true): H1DynamicReadOnlyLiveStartResult {
     affectsExecution: false,
     affectsTelegram: false,
     failClosed: true,
-    service: null,
+    service,
   };
 }
 
@@ -39,6 +40,9 @@ test("default/off env performs zero live-chain calls", async () => {
   assert.equal(out.attempted, false);
   assert.equal(out.started, false);
   assert.equal(out.reason, "DISABLED");
+  assert.equal(out.connected, false);
+  assert.equal(out.socketState, "UNAVAILABLE");
+  assert.equal(out.receivedPacketCount, 0);
   assert.equal(out.affectsExecution, false);
   assert.equal(out.affectsTelegram, false);
 });
@@ -72,6 +76,49 @@ test("enabled path calls the read-only chain once and exposes no service handle"
   assert.equal("service" in first, false);
 });
 
+test("public status reflects ongoing read-only socket packet counters without exposing service", async () => {
+  resetH1DynamicReadOnlyServerBootstrapForTest();
+  const fakeService = {
+    status: () => ({
+      version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1" as const,
+      started: true,
+      connected: true,
+      state: "OPEN" as const,
+      subscribedTokenCount: 21,
+      receivedPacketCount: 42,
+      rejectedPacketCount: 0,
+      lastPacketTimestamp: "2026-09-04T07:50:00.000Z",
+      productionImpact: "NONE" as const,
+      readOnly: true as const,
+      forwardsDownstream: false as const,
+      affectsDirection: false as const,
+      affectsVerdict: false as const,
+      affectsExecution: false as const,
+      affectsTelegram: false as const,
+      failClosed: true as const,
+    }),
+  } as unknown as H1LiveExactReadOnlyWebSocketService;
+
+  await startH1DynamicReadOnlyLiveFromServerEnv(
+    { H1_DYNAMIC_READONLY_LIVE_ENABLED: "true" },
+    async () => liveResult(true, fakeService),
+    new Date("2026-09-04T04:00:00.000Z"),
+  );
+
+  const out = getH1DynamicReadOnlyServerStatus();
+  assert.equal(out.connected, true);
+  assert.equal(out.socketState, "OPEN");
+  assert.equal(out.receivedPacketCount, 42);
+  assert.equal(out.rejectedPacketCount, 0);
+  assert.equal(out.lastPacketTimestamp, "2026-09-04T07:50:00.000Z");
+  assert.equal(out.forwardsDownstream, false);
+  assert.equal(out.affectsDirection, false);
+  assert.equal(out.affectsVerdict, false);
+  assert.equal(out.affectsExecution, false);
+  assert.equal(out.affectsTelegram, false);
+  assert.equal("service" in out, false);
+});
+
 test("startup exception fails closed", async () => {
   resetH1DynamicReadOnlyServerBootstrapForTest();
   const out = await startH1DynamicReadOnlyLiveFromServerEnv(
@@ -82,5 +129,6 @@ test("startup exception fails closed", async () => {
   assert.equal(out.started, false);
   assert.equal(out.reason, "START_FAILED");
   assert.equal(out.subscribedTokenCount, 0);
+  assert.equal(out.socketState, "UNAVAILABLE");
   assert.deepEqual(getH1DynamicReadOnlyServerStatus(), out);
 });

@@ -2,10 +2,10 @@ import type { CanonicalTelegramCard, TelegramSymbol } from "./telegram-card-cont
 import { TELEGRAM_INDEX_GROUP_ROUTING } from "./telegram-card-contract.js";
 import { renderTelegramCardV2 } from "./telegram-card-renderer-v2.js";
 
-const CHAT_ID_ENV: Record<TelegramSymbol, string> = {
-  NIFTY: "TELEGRAM_NIFTY_CHAT_ID",
-  BANKNIFTY: "TELEGRAM_BANKNIFTY_CHAT_ID",
-  SENSEX: "TELEGRAM_SENSEX_CHAT_ID",
+const CHAT_ID_ENV_CANDIDATES: Record<TelegramSymbol, readonly string[]> = {
+  NIFTY: ["TELEGRAM_CHAT_ID_NIFTY", "TELEGRAM_NIFTY_CHAT_ID"],
+  BANKNIFTY: ["TELEGRAM_CHAT_ID_BANKNIFTY", "TELEGRAM_BANKNIFTY_CHAT_ID"],
+  SENSEX: ["TELEGRAM_CHAT_ID_SENSEX", "TELEGRAM_SENSEX_CHAT_ID"],
 };
 
 /**
@@ -23,6 +23,18 @@ function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`TELEGRAM_CONFIG_MISSING:${name}`);
   return value;
+}
+
+export function resolveTelegramChatId(
+  symbol: TelegramSymbol,
+  env: Record<string, string | undefined> = process.env,
+): { chatId: string; envName: string } {
+  const candidates = CHAT_ID_ENV_CANDIDATES[symbol];
+  for (const name of candidates) {
+    const value = env[name]?.trim();
+    if (value) return { chatId: value, envName: name };
+  }
+  throw new Error(`TELEGRAM_CONFIG_MISSING:${candidates.join("|")}`);
 }
 
 function assertStrictRouting(card: CanonicalTelegramCard): void {
@@ -48,11 +60,8 @@ function istDateKey(now = Date.now()): string {
 /** Strip only volatile clock text. Market/risk numbers are intentionally kept. */
 function normalizeMessageForDedup(message: string): string {
   return message
-    // e.g. "⏰ 2:27:34 pm | Manual review only."
     .replace(/(?:⏰\s*)?\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\s*\|\s*Manual review only\.?/gi, "<MANUAL_REVIEW_TIME>")
-    // e.g. "Time: 2:24:35 pm"
     .replace(/\bTime\s*:\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?\b/gi, "Time:<VOLATILE>")
-    // generic ISO timestamps occasionally embedded by preview paths
     .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z\b/g, "<ISO_TIME>")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
@@ -91,9 +100,6 @@ export async function sendTelegramCardV2(
     const today = istDateKey();
     const previous = lastSent.get(card.symbol);
 
-    // Same semantic state is spoken only once per IST trading date.
-    // Any real market/risk/candidate number change remains in the normalized
-    // message, changes the fingerprint, and is eligible immediately.
     if (previous && previous.istDate === today && previous.fingerprint === fp) {
       return { ok: true, sent: false, symbol: card.symbol, destinationGroup, reason: "DUPLICATE_GUARD" };
     }
@@ -103,7 +109,7 @@ export async function sendTelegramCardV2(
     }
 
     const botToken = requiredEnv("TELEGRAM_BOT_TOKEN");
-    const chatId = requiredEnv(CHAT_ID_ENV[card.symbol]);
+    const chatId = resolveTelegramChatId(card.symbol).chatId;
 
     const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: "POST",

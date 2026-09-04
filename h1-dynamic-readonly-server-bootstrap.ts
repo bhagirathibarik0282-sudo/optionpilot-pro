@@ -104,7 +104,7 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
     rawEvidenceFreshTokenCount: live.rawEvidenceFreshTokenCount,
     rawEvidenceMissingTokenCount: live.rawEvidenceMissingTokenCount,
     rawEvidenceStaleTokenCount: live.rawEvidenceStaleTokenCount,
-    rawEvidenceMissing: live.rawEvidenceMissing.map((x) => ({ ...x })),
+    rawEvidenceMissing: (live.rawEvidenceMissing ?? []).map((x) => ({ ...x })),
     greekEvidenceStatus: live.greekEvidenceStatus,
     forwardsDownstream: false,
   };

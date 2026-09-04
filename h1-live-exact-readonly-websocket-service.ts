@@ -26,6 +26,14 @@ export interface H1LiveExactReadOnlyDirectionObservation {
   blockers: string[];
 }
 
+export interface H1LiveExactReadOnlyShadowInputObservation {
+  symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
+  ready: boolean;
+  direction: "UP" | "DOWN" | null;
+  evidenceTokenCount: number;
+  blockers: string[];
+}
+
 export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   readiness: H1LiveExactMarketWiringReadinessResult;
   apiKey: string;
@@ -56,6 +64,8 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   readOnlyConsumerObservations: H1LiveExactReadOnlyConsumerObservation[];
   readOnlyDirectionReadySymbolCount: number;
   readOnlyDirectionObservations: H1LiveExactReadOnlyDirectionObservation[];
+  readOnlyShadowInputReadySymbolCount: number;
+  readOnlyShadowInputObservations: H1LiveExactReadOnlyShadowInputObservation[];
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
@@ -91,6 +101,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       rawEvidenceReady: false, rawEvidenceExpectedTokenCount: registryTokens.length, rawEvidenceFreshTokenCount: 0,
       rawEvidenceMissingTokenCount: registryTokens.length, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
       readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
+      readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],
       greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
       affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
     };
@@ -104,6 +115,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       nearestPeerReadiness: this.value.nearestPeerReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyConsumerObservations: this.value.readOnlyConsumerObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyDirectionObservations: this.value.readOnlyDirectionObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      readOnlyShadowInputObservations: this.value.readOnlyShadowInputObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
     };
   }
   rawEvidenceStatus(nowIso: string) { return this.rawEvidence.status(nowIso); }
@@ -168,6 +180,20 @@ export class H1LiveExactReadOnlyWebSocketService {
         }
         this.value.readOnlyDirectionObservations = [...directionBySymbol.values()];
         this.value.readOnlyDirectionReadySymbolCount = this.value.readOnlyDirectionObservations.filter((row) => row.ready).length;
+
+        this.value.readOnlyShadowInputObservations = consumer.rows.map((row) => {
+          const direction = directionBySymbol.get(row.symbol);
+          const blockers = [...row.blockers];
+          if (!direction?.ready || !direction.direction) blockers.push(...(direction?.blockers ?? ["VERIFIED_DIRECTION_NOT_READY"]));
+          return {
+            symbol: row.symbol,
+            ready: row.ready && Boolean(direction?.ready && direction.direction),
+            direction: row.ready && direction?.ready ? direction.direction : null,
+            evidenceTokenCount: row.evidenceTokenCount,
+            blockers: [...new Set(blockers)],
+          };
+        });
+        this.value.readOnlyShadowInputReadySymbolCount = this.value.readOnlyShadowInputObservations.filter((row) => row.ready).length;
       },
       onTextMessage: () => {},
       onState: (state) => { this.value.state = state; this.value.connected = state === "OPEN"; },

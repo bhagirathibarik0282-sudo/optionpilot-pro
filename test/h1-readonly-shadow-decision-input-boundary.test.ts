@@ -36,3 +36,16 @@ test("fails closed when a symbol input is missing or direction is unavailable", 
   assert.ok(result.rows.find((row) => row.symbol === "SENSEX")?.blockers.includes("SHADOW_INPUT_MISSING"));
   assert.ok(result.rows.find((row) => row.symbol === "BANKNIFTY")?.blockers.includes("SHADOW_INPUT_MISSING"));
 });
+
+test("fails closed instead of silently accepting duplicate symbol inputs", () => {
+  const result = buildH1ReadOnlyShadowDecisionInputBoundary([
+    { symbol: "NIFTY", ready: true, direction: "UP", evidenceTokenCount: 5, blockers: [] },
+    { symbol: "NIFTY", ready: true, direction: "DOWN", evidenceTokenCount: 5, blockers: [] },
+  ]);
+
+  const nifty = result.rows.find((row) => row.symbol === "NIFTY");
+  assert.equal(nifty?.ready, false);
+  assert.equal(nifty?.direction, null);
+  assert.ok(nifty?.blockers.includes("DUPLICATE_SHADOW_SYMBOL_INPUT"));
+  assert.equal(result.readySymbolCount, 0);
+});

@@ -32,14 +32,20 @@ export interface H1ShadowDirectionAssessmentResult {
 export function assessH1ShadowDirection(
   observer: H1LiveShadowDecisionInputObserverResult,
 ): H1ShadowDirectionAssessmentResult {
+  const observerContractHealthy = observer.productionImpact === "NONE" && observer.readOnly &&
+    !observer.forwardsDownstream && !observer.affectsVerdict && !observer.affectsExecution &&
+    !observer.affectsTelegram && !observer.grantsPromotionAuthority && observer.failClosed;
+  const observedContractHealthy = observer.observed.productionImpact === "NONE" && observer.observed.readOnly &&
+    !observer.observed.forwardsDownstream && !observer.observed.affectsVerdict && !observer.observed.affectsExecution &&
+    !observer.observed.affectsTelegram && !observer.observed.grantsPromotionAuthority && observer.observed.failClosed;
   const sourceHealthy = observer.sourceConnected && observer.sourceSocketState === "OPEN" &&
-    observer.productionImpact === "NONE" && observer.readOnly && !observer.forwardsDownstream &&
-    !observer.affectsVerdict && !observer.affectsExecution && !observer.affectsTelegram &&
-    !observer.grantsPromotionAuthority && observer.failClosed;
+    observer.sourceRejectedPacketCount === 0 && observerContractHealthy && observedContractHealthy;
 
   const rows = observer.observed.rows.map((row): H1ShadowDirectionAssessmentRow => {
     const blockers = new Set(row.blockers);
     if (!sourceHealthy) blockers.add("SHADOW_OBSERVER_SOURCE_UNHEALTHY");
+    if (observer.sourceRejectedPacketCount !== 0) blockers.add(`SOURCE_REJECTED_PACKETS_PRESENT:${observer.sourceRejectedPacketCount}`);
+    if (!observerContractHealthy || !observedContractHealthy) blockers.add("SHADOW_SAFETY_CONTRACT_INVALID");
     if (!row.ready) blockers.add("SHADOW_DECISION_INPUT_NOT_READY");
     if (row.direction !== "UP" && row.direction !== "DOWN") blockers.add("VERIFIED_DIRECTION_UNAVAILABLE");
     const ready = blockers.size === 0;

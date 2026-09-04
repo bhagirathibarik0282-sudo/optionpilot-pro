@@ -1,0 +1,20 @@
+name: H1 Exact Live Contract Discovery CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-exact-live-contract-discovery.ts"
+      - "test/h1-exact-live-contract-discovery.test.ts"
+      - ".github/workflows/h1-exact-live-contract-discovery-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx tsx --test test/h1-exact-live-contract-discovery.test.ts

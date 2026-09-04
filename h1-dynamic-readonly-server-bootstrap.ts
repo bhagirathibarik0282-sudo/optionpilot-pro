@@ -49,6 +49,8 @@ type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status">;
 let statusValue: H1DynamicReadOnlyServerStatus = status(false, false, false, "DISABLED", null, 0);
 let attemptPromise: Promise<H1DynamicReadOnlyServerStatus> | null = null;
 let liveService: StatusService | null = null;
+let initialProofTimer: NodeJS.Timeout | null = null;
+let threeMinuteProofTimer: NodeJS.Timeout | null = null;
 
 function status(enabled: boolean, attempted: boolean, started: boolean, reason: H1DynamicReadOnlyServerStatus["reason"], asOfDate: string | null, subscribedTokenCount: number): H1DynamicReadOnlyServerStatus {
   return {
@@ -103,15 +105,31 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
   };
 }
 
+function clearLiveProofTimers(): void {
+  if (initialProofTimer) clearTimeout(initialProofTimer);
+  if (threeMinuteProofTimer) clearTimeout(threeMinuteProofTimer);
+  initialProofTimer = null;
+  threeMinuteProofTimer = null;
+}
+
 function scheduleDelayedLiveProofLog(): void {
   if (process.env.NODE_ENV === "test") return;
-  const proofTimer = setTimeout(() => console.log(`[H1_DYNAMIC_READONLY_LIVE_PROOF] ${JSON.stringify(getH1DynamicReadOnlyServerStatus())}`), 5_000);
-  proofTimer.unref?.();
+  clearLiveProofTimers();
+  initialProofTimer = setTimeout(() => {
+    initialProofTimer = null;
+    console.log(`[H1_DYNAMIC_READONLY_LIVE_PROOF] ${JSON.stringify(getH1DynamicReadOnlyServerStatus())}`);
+  }, 5_000);
+  threeMinuteProofTimer = setTimeout(() => {
+    threeMinuteProofTimer = null;
+    console.log(`[H1_DYNAMIC_READONLY_3M_LIVE_PROOF] ${JSON.stringify(getH1DynamicReadOnlyServerStatus())}`);
+  }, 180_000);
+  initialProofTimer.unref?.();
+  threeMinuteProofTimer.unref?.();
 }
 
 export async function startH1DynamicReadOnlyLiveFromServerEnv(env: NodeJS.ProcessEnv = process.env, startFn: StartFn = startH1DynamicReadOnlyLiveChain, now = new Date()): Promise<H1DynamicReadOnlyServerStatus> {
   const enabled = isH1DynamicReadOnlyLiveEnabled(env);
-  if (!enabled) { liveService = null; statusValue = status(false, false, false, "DISABLED", null, 0); return getH1DynamicReadOnlyServerStatus(); }
+  if (!enabled) { clearLiveProofTimers(); liveService = null; statusValue = status(false, false, false, "DISABLED", null, 0); return getH1DynamicReadOnlyServerStatus(); }
   if (attemptPromise) return attemptPromise;
   const asOfDate = istDate(now);
   statusValue = status(true, true, false, "PREPARATION_BLOCKED", asOfDate, 0);
@@ -129,5 +147,6 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(env: NodeJS.Proces
 
 export function resetH1DynamicReadOnlyServerBootstrapForTest(): void {
   if (process.env.NODE_ENV !== "test") throw new Error("H1_SERVER_BOOTSTRAP_RESET_TEST_ONLY");
+  clearLiveProofTimers();
   attemptPromise = null; liveService = null; statusValue = status(false, false, false, "DISABLED", null, 0);
 }

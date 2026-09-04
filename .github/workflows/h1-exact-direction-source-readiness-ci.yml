@@ -1,0 +1,20 @@
+name: H1 Exact Direction Source Readiness CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-exact-direction-source-readiness.ts"
+      - "test/h1-exact-direction-source-readiness.test.ts"
+      - ".github/workflows/h1-exact-direction-source-readiness-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx tsx --test test/h1-exact-direction-source-readiness.test.ts

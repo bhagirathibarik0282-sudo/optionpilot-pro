@@ -38,6 +38,7 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
 export class H1LiveExactReadOnlyWebSocketService {
   private transport: KiteWebSocketTransport | null = null;
   private readonly allowedTokens: Set<number>;
+  private readonly firstSeenTokens = new Set<number>();
   private value: H1LiveExactReadOnlyWebSocketStatus;
 
   constructor(private readonly config: H1LiveExactReadOnlyWebSocketServiceConfig) {
@@ -100,6 +101,24 @@ export class H1LiveExactReadOnlyWebSocketService {
             continue;
           }
           this.value.receivedPacketCount += 1;
+          if (!this.firstSeenTokens.has(tick.instrumentToken)) {
+            this.firstSeenTokens.add(tick.instrumentToken);
+            const entry = this.config.readiness.registry?.get(tick.instrumentToken) ?? null;
+            if (process.env.NODE_ENV !== "test" && entry) {
+              console.log(`[H1_DYNAMIC_READONLY_TOKEN_PACKET] ${JSON.stringify({
+                instrumentToken: entry.instrumentToken,
+                symbol: entry.symbol,
+                role: entry.role,
+                instrumentLabel: entry.instrumentLabel,
+                expiry: entry.expiry ?? null,
+                strike: entry.strike ?? null,
+                optionSide: entry.optionSide ?? null,
+                receivedAt,
+                readOnly: true,
+                forwardsDownstream: false,
+              })}`);
+            }
+          }
         }
       },
       onTextMessage: () => {},

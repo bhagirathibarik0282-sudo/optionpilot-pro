@@ -33,6 +33,7 @@ test("observes existing single-socket shadow input without granting authority", 
   assert.equal(result.sourceConnected, true);
   assert.equal(result.sourcePacketCount, 4625);
   assert.equal(result.sourceRejectedPacketCount, 0);
+  assert.deepEqual(result.sourceHealthBlockers, []);
   assert.equal(result.forwardsDownstream, false);
   assert.equal(result.affectsVerdict, false);
   assert.equal(result.affectsExecution, false);
@@ -53,4 +54,20 @@ test("remains fail-closed when no symbol is shadow-input ready", () => {
   const result = observeH1LiveShadowDecisionInput(s);
   assert.equal(result.observed.readySymbolCount, 0);
   assert.ok(result.observed.rows.every((row) => !row.ready && row.direction === null));
+});
+
+test("fails closed on a disconnected or unsafe source even when an old row was ready", () => {
+  const disconnected = status();
+  disconnected.connected = false;
+  disconnected.state = "CLOSED";
+  const closed = observeH1LiveShadowDecisionInput(disconnected);
+  assert.equal(closed.observed.readySymbolCount, 0);
+  assert.ok(closed.sourceHealthBlockers.includes("SOURCE_SOCKET_NOT_OPEN"));
+  assert.ok(closed.observed.rows.find((row) => row.symbol === "NIFTY")?.blockers.includes("SOURCE_SOCKET_NOT_OPEN"));
+
+  const unsafe = status();
+  unsafe.forwardsDownstream = true as false;
+  const contract = observeH1LiveShadowDecisionInput(unsafe);
+  assert.equal(contract.observed.readySymbolCount, 0);
+  assert.ok(contract.sourceHealthBlockers.includes("SOURCE_SAFETY_CONTRACT_INVALID"));
 });

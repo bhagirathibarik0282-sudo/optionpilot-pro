@@ -1,0 +1,29 @@
+name: H1 Wire Market Open Acceptance Status CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "h1-market-open-readiness-acceptance.ts"
+      - "h1-dynamic-readonly-server-bootstrap.ts"
+      - "test/h1-wire-market-open-acceptance-status.test.ts"
+      - "test/h1-market-open-readiness-acceptance.test.ts"
+      - "test/h1-dynamic-readonly-server-bootstrap.test.ts"
+      - ".github/workflows/h1-wire-market-open-acceptance-status-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wire-market-open-acceptance-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify H1 market-open acceptance status wiring
+        run: NODE_ENV=test node --import tsx --test test/h1-wire-market-open-acceptance-status.test.ts test/h1-market-open-readiness-acceptance.test.ts test/h1-dynamic-readonly-server-bootstrap.test.ts

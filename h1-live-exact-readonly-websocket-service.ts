@@ -67,7 +67,7 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   failClosed: true;
 }
 
-const DIRECTION_POLICY = { maxObservationGapMs: 10_000, minAbsoluteSpotMovePct: 0.05 } as const;
+const DIRECTION_POLICY = { maxObservationGapMs: 180_000, minAbsoluteSpotMovePct: 0.05 } as const;
 
 export class H1LiveExactReadOnlyWebSocketService {
   private transport: KiteWebSocketTransport | null = null;

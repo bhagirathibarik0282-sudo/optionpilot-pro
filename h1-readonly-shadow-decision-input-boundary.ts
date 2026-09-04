@@ -41,11 +41,16 @@ const SYMBOLS = ["NIFTY", "SENSEX", "BANKNIFTY"] as const;
 export function buildH1ReadOnlyShadowDecisionInputBoundary(
   input: readonly H1ReadOnlyShadowInputLike[] | null | undefined,
 ): H1ReadOnlyShadowDecisionInputBoundaryResult {
-  const bySymbol = new Map((input ?? []).map((row) => [row.symbol, row]));
+  const sourceRows = input ?? [];
+  const counts = new Map<string, number>();
+  for (const row of sourceRows) counts.set(row.symbol, (counts.get(row.symbol) ?? 0) + 1);
+  const bySymbol = new Map(sourceRows.map((row) => [row.symbol, row]));
+
   const rows: H1ReadOnlyShadowDecisionInputRow[] = SYMBOLS.map((symbol) => {
     const source = bySymbol.get(symbol);
     const blockers = new Set<string>();
     if (!source) blockers.add("SHADOW_INPUT_MISSING");
+    if ((counts.get(symbol) ?? 0) > 1) blockers.add("DUPLICATE_SHADOW_SYMBOL_INPUT");
     if (source && !source.ready) blockers.add("SHADOW_INPUT_NOT_READY");
     if (source && source.direction !== "UP" && source.direction !== "DOWN") blockers.add("VERIFIED_DIRECTION_UNAVAILABLE");
     if (source && (!Number.isInteger(source.evidenceTokenCount) || source.evidenceTokenCount !== 5)) blockers.add(`EXACT_EVIDENCE_BUNDLE_INVALID:${source.evidenceTokenCount}/5`);

@@ -39,15 +39,18 @@ function base(ready: boolean, rows: H1LiveSelectionSpotRow[], blockers: string[]
   return { version:"H1_LIVE_SELECTION_SPOT_REST_V1", ready, rows: ready ? rows : [], blockers:[...new Set(blockers)], source:"KITE_REST_QUOTE_SELECTION_ONLY", productionImpact:"NONE", affectsDirection:false, affectsVerdict:false, affectsExecution:false, affectsTelegram:false, activatesShadow:false, infersTokens:false, credentialsExposed:false, failClosed:true };
 }
 
-function normalizedName(row: KiteInstrumentMasterRow): string {
-  return `${row.name || ""} ${row.tradingsymbol || ""}`.toUpperCase();
-}
+const EXACT_SPOT_IDENTITY: Record<RecorderSymbol, { exchange: string; tradingsymbol: string }> = {
+  NIFTY: { exchange: "NSE", tradingsymbol: "NIFTY 50" },
+  BANKNIFTY: { exchange: "NSE", tradingsymbol: "NIFTY BANK" },
+  SENSEX: { exchange: "BSE", tradingsymbol: "SENSEX" },
+};
 
-function symbolMatches(row: KiteInstrumentMasterRow, symbol: RecorderSymbol): boolean {
-  const text = normalizedName(row);
-  if (symbol === "NIFTY") return text.includes("NIFTY") && !text.includes("BANKNIFTY") && !text.includes("FINNIFTY") && !text.includes("NIFTY BANK");
-  if (symbol === "BANKNIFTY") return text.includes("BANKNIFTY") || text.includes("NIFTY BANK");
-  return text.includes(symbol);
+function isExactSpotRow(row: KiteInstrumentMasterRow, symbol: RecorderSymbol): boolean {
+  const expected = EXACT_SPOT_IDENTITY[symbol];
+  return String(row.segment || "").toUpperCase() === "INDICES"
+    && String(row.exchange || "").toUpperCase() === expected.exchange
+    && String(row.tradingsymbol || "").toUpperCase() === expected.tradingsymbol
+    && Number.isInteger(row.instrument_token);
 }
 
 export async function fetchH1LiveSelectionSpots(request: H1LiveSelectionSpotRequest): Promise<H1LiveSelectionSpotResult> {
@@ -60,7 +63,7 @@ export async function fetchH1LiveSelectionSpots(request: H1LiveSelectionSpotRequ
 
   const selected: Array<{symbol:RecorderSymbol;row:KiteInstrumentMasterRow;key:string}> = [];
   for (const symbol of [...new Set(request.symbols)]) {
-    const matches = request.rows.filter((row) => symbolMatches(row, symbol) && String(row.segment || "").toUpperCase().includes("INDICES") && Number.isInteger(row.instrument_token) && !!row.exchange && !!row.tradingsymbol);
+    const matches = request.rows.filter((row) => isExactSpotRow(row, symbol));
     if (matches.length !== 1) return base(false, [], [`KITE_SPOT_NOT_UNIQUE:${symbol}:${matches.length}`]);
     const row = matches[0];
     selected.push({ symbol, row, key: `${row.exchange}:${row.tradingsymbol}` });

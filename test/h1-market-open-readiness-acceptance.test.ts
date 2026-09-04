@@ -32,6 +32,22 @@ test("inside regular window fails closed until live read-only chain is ready", (
   assert.deepEqual(out.blockers, ["LIVE_SOCKET_NOT_OPEN", "NO_CONSUMER_READY_SYMBOL", "NO_DIRECTION_READY_SYMBOL", "NO_SHADOW_INPUT_READY_SYMBOL"]);
 });
 
+test("weekday holiday-shaped session with open socket but no fresh exact-chain evidence stays blocked", () => {
+  const out = evaluateH1MarketOpenReadinessAcceptance(statusAt(new Date("2026-09-04T05:00:00.000Z"), {
+    connected: true,
+    socketState: "OPEN",
+  }));
+  assert.equal(out.state, "BLOCKED");
+  assert.deepEqual(out.blockers, ["NO_CONSUMER_READY_SYMBOL", "NO_DIRECTION_READY_SYMBOL", "NO_SHADOW_INPUT_READY_SYMBOL"]);
+  assert.equal(out.claimsMarketOpen, false);
+  assert.equal(out.holidayCalendarVerified, false);
+  assert.equal(out.forwardsDownstream, false);
+  assert.equal(out.affectsVerdict, false);
+  assert.equal(out.affectsExecution, false);
+  assert.equal(out.affectsTelegram, false);
+  assert.equal(out.failClosed, true);
+});
+
 test("inside regular window passes when at least one exact read-only symbol chain is ready", () => {
   const out = evaluateH1MarketOpenReadinessAcceptance(statusAt(new Date("2026-09-04T05:00:00.000Z"), {
     connected: true,

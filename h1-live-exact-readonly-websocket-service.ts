@@ -1,5 +1,5 @@
 import type { H1LiveExactMarketWiringReadinessResult } from "./h1-live-exact-market-wiring-readiness.js";
-import { H1LiveExactRawEvidenceStore } from "./h1-live-exact-raw-evidence-store.js";
+import { H1LiveExactRawEvidenceStore, type H1LiveExactRawEvidenceMissing } from "./h1-live-exact-raw-evidence-store.js";
 import { KiteWebSocketTransport, type KiteSocketFactory } from "./kite-websocket-transport.js";
 
 export interface H1LiveExactReadOnlyWebSocketServiceConfig {
@@ -25,6 +25,7 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   rawEvidenceFreshTokenCount: number;
   rawEvidenceMissingTokenCount: number;
   rawEvidenceStaleTokenCount: number;
+  rawEvidenceMissing: H1LiveExactRawEvidenceMissing[];
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
@@ -36,12 +37,6 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   failClosed: true;
 }
 
-/**
- * First live-market activation boundary for the exact-token path.
- * It opens Kite WebSocket FULL mode only for the exact readiness registry and
- * stops at packet receipt plus deterministic raw evidence validation. No packet
- * is sent to selector, verdict, Telegram or execution paths from this service.
- */
 export class H1LiveExactReadOnlyWebSocketService {
   private transport: KiteWebSocketTransport | null = null;
   private readonly allowedTokens: Set<number>;
@@ -81,6 +76,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       rawEvidenceFreshTokenCount: 0,
       rawEvidenceMissingTokenCount: registryTokens.length,
       rawEvidenceStaleTokenCount: 0,
+      rawEvidenceMissing: [],
       greekEvidenceStatus: "NOT_CONFIGURED",
       productionImpact: "NONE",
       readOnly: true,
@@ -93,7 +89,7 @@ export class H1LiveExactReadOnlyWebSocketService {
     };
   }
 
-  status(): H1LiveExactReadOnlyWebSocketStatus { return { ...this.value }; }
+  status(): H1LiveExactReadOnlyWebSocketStatus { return { ...this.value, rawEvidenceMissing: this.value.rawEvidenceMissing.map((x) => ({ ...x })) }; }
 
   rawEvidenceStatus(nowIso: string) { return this.rawEvidence.status(nowIso); }
 
@@ -144,6 +140,7 @@ export class H1LiveExactReadOnlyWebSocketService {
         this.value.rawEvidenceFreshTokenCount = evidence.freshTokenCount;
         this.value.rawEvidenceMissingTokenCount = evidence.missingTokenCount;
         this.value.rawEvidenceStaleTokenCount = evidence.staleTokenCount;
+        this.value.rawEvidenceMissing = evidence.missing;
       },
       onTextMessage: () => {},
       onState: (state) => {

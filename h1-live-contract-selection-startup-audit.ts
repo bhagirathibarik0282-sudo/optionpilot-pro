@@ -1,9 +1,19 @@
 import { resolveKiteAuthoritySession } from "./kite-session-authority.js";
 import { fetchH1KiteLiveInstrumentMaster } from "./h1-kite-live-instrument-master-adapter.js";
-import { fetchH1LiveSelectionSpots } from "./h1-live-selection-spot-rest.js";
-import { selectH1LiveContracts } from "./h1-live-contract-selection.js";
+import { fetchH1LiveSelectionSpots, type H1LiveSelectionSpotResult } from "./h1-live-selection-spot-rest.js";
+import { selectH1LiveContracts, type H1LiveContractSelectionResult } from "./h1-live-contract-selection.js";
 
-export async function runH1LiveContractSelectionStartupAudit(asOfDate:string){
+export interface H1LiveContractSelectionStartupEvidence {
+  selection: H1LiveContractSelectionResult;
+  spots: H1LiveSelectionSpotResult;
+  productionImpact: "NONE";
+  affectsVerdict: false;
+  affectsExecution: false;
+  affectsTelegram: false;
+  failClosed: true;
+}
+
+export async function runH1LiveContractSelectionStartupEvidence(asOfDate:string): Promise<H1LiveContractSelectionStartupEvidence> {
   const apiKey=process.env.KITE_API_KEY?.trim()||"";
   const authority=await resolveKiteAuthoritySession();
   if(!apiKey||!authority.session||!authority.status.active) throw new Error(!apiKey?"KITE_API_KEY_MISSING":`KITE_AUTHORITY_${authority.status.code}`);
@@ -22,5 +32,11 @@ export async function runH1LiveContractSelectionStartupAudit(asOfDate:string){
     console.log(`[H1_LIVE_SPOT_CANDIDATE_DIAGNOSTIC] ${JSON.stringify({ready:false,productionImpact:"NONE",candidateCount:candidates.length,candidates,credentialsExposed:false,writesRailwayVariables:false,activatesShadow:false,affectsVerdict:false,affectsExecution:false,affectsTelegram:false})}`);
     throw new Error(spots.blockers.join("|"));
   }
-  return selectH1LiveContracts(master.rows,spots.rows,asOfDate);
+  const selection=selectH1LiveContracts(master.rows,spots.rows,asOfDate);
+  return {selection,spots,productionImpact:"NONE",affectsVerdict:false,affectsExecution:false,affectsTelegram:false,failClosed:true};
+}
+
+export async function runH1LiveContractSelectionStartupAudit(asOfDate:string){
+  const evidence=await runH1LiveContractSelectionStartupEvidence(asOfDate);
+  return evidence.selection;
 }

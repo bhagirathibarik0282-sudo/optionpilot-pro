@@ -25,18 +25,21 @@ function optionPacket(at: string, ltp: number): KiteDecodedPacket {
   };
 }
 
-function coordinator() {
+function coordinator(onPublisherResolve?: () => void) {
   return new H1KiteExactRuntimeCoordinator({
     registry,
     orderQuantityFor: () => 150,
     greekPolicy: { annualRiskFreeRate: 0.05, annualDividendYield: 0, maxAgeMs: 5_000, maxUnderlyingSkewMs: 2_000 },
-    publisherFor: (_entry, observedAt) => ({
-      moneyness: "ATM",
-      multiExpiryPeers: [{ source: "LIVE_RUNTIME_EXACT", symbol: "NIFTY", side: "CE", expiryDate: "2026-09-15", dte: 12, observedAt, directionalState: "SUPPORTS" }],
-      premiumPolicy: { maxObservationGapMs: 10_000, minPremiumMovePct: 0, minAbsoluteDeltaChange: 0, minCurrentGamma: 0 },
-      burdenPolicy: { maxObservationAgeMs: 30_000, maxAbsThetaPctOfPremium: 1_000, minIv: 0, maxIv: 500, requiredPeerCount: 1, maxConflictingPeerCount: 0 },
-      capitalLiquidityDtePolicy: { maxCapitalPerTrade: 100_000, maxRelativeSpreadPct: 20, minBidDepthCoverageMultiple: 1, minAskDepthCoverageMultiple: 1, allowFallbackDte5To7: true },
-    }),
+    publisherFor: (_entry, _previous, current) => {
+      onPublisherResolve?.();
+      return {
+        moneyness: "ATM",
+        multiExpiryPeers: [{ source: "LIVE_RUNTIME_EXACT", symbol: "NIFTY", side: "CE", expiryDate: "2026-09-15", dte: 12, observedAt: current.observedAt!, directionalState: "SUPPORTS" }],
+        premiumPolicy: { maxObservationGapMs: 10_000, minPremiumMovePct: 0, minAbsoluteDeltaChange: 0, minCurrentGamma: 0 },
+        burdenPolicy: { maxObservationAgeMs: 30_000, maxAbsThetaPctOfPremium: 1_000, minIv: 0, maxIv: 500, requiredPeerCount: 1, maxConflictingPeerCount: 0 },
+        capitalLiquidityDtePolicy: { maxCapitalPerTrade: 100_000, maxRelativeSpreadPct: 20, minBidDepthCoverageMultiple: 1, minAskDepthCoverageMultiple: 1, allowFallbackDte5To7: true },
+      };
+    },
   });
 }
 
@@ -54,6 +57,17 @@ test("option packet fails closed before an exact same-symbol underlying exists",
   assert.equal(out.ready, false);
   assert.equal(out.blocker, "SAME_SYMBOL_EXACT_UNDERLYING_UNAVAILABLE");
   assert.equal(getH1LiveSelectorRegistrySize(), 0);
+});
+
+test("publisher context is resolved only after exact previous/current pair exists", () => {
+  let calls = 0;
+  const runtime = coordinator(() => { calls += 1; });
+  runtime.ingest(indexPacket("2026-09-03T10:00:00.000Z"), "2026-09-03T10:00:00.500Z");
+  runtime.ingest(optionPacket("2026-09-03T10:00:00.000Z", 1.05), "2026-09-03T10:00:00.500Z");
+  assert.equal(calls, 0);
+  runtime.ingest(indexPacket("2026-09-03T10:00:05.000Z"), "2026-09-03T10:00:05.500Z");
+  runtime.ingest(optionPacket("2026-09-03T10:00:05.000Z", 1.20), "2026-09-03T10:00:05.500Z");
+  assert.equal(calls, 1);
 });
 
 test("two forward exact option packets progress baseline then publish", () => {

@@ -1,0 +1,27 @@
+name: H1 Status Market Window Context CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "h1-dynamic-readonly-server-bootstrap.ts"
+      - "h1-regular-market-window-context.ts"
+      - "test/h1-status-market-window-context.test.ts"
+      - ".github/workflows/h1-status-market-window-context-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  status-market-window-context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify read-only H1 status market window context
+        run: NODE_ENV=test node --import tsx --test test/h1-status-market-window-context.test.ts test/h1-dynamic-readonly-server-bootstrap.test.ts test/h1-regular-market-window-context.test.ts

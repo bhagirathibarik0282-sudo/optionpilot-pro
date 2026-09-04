@@ -1,0 +1,22 @@
+name: H1 Exact Peer Directional State Classifier CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-exact-peer-directional-state-classifier.ts"
+      - "test/h1-exact-peer-directional-state-classifier.test.ts"
+      - ".github/workflows/h1-exact-peer-directional-state-classifier-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install
+      - run: npx tsx --test test/h1-exact-peer-directional-state-classifier.test.ts

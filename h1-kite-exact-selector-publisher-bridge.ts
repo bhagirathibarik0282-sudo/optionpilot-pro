@@ -10,9 +10,14 @@ import {
 } from "./h1-live-snapshot-publisher-binding.js";
 import { publishH1LiveGateEvidence } from "./h1-live-selector-registry.js";
 
+export type H1KiteExactPublisherContext = Omit<H1LiveSnapshotPublisherBindingInput, "previous" | "current" | "nowIso">;
+
 export interface H1KiteExactSelectorPublisherBridgeInput {
   snapshot: H1KiteExactOptionSnapshotBindingInput;
-  publisher: Omit<H1LiveSnapshotPublisherBindingInput, "previous" | "current" | "nowIso">;
+  publisherFor: (
+    previous: H1ExactSnapshotBundle,
+    current: H1ExactSnapshotBundle,
+  ) => H1KiteExactPublisherContext;
 }
 
 export interface H1KiteExactSelectorPublisherBridgeResult {
@@ -55,7 +60,8 @@ function result(
 /**
  * Holds only the latest ready exact snapshot per contract. A later exact packet
  * must move time forward before it can become the current publisher snapshot.
- * Nothing is published until the existing publisher binding is itself ready.
+ * Publisher context is resolved only after the exact previous/current pair is
+ * available, so peer evidence can be derived from exact runtime observations.
  */
 export class H1KiteExactSelectorPublisherBridge {
   private readonly latestByContract = new Map<string, H1ExactSnapshotBundle>();
@@ -80,10 +86,18 @@ export class H1KiteExactSelectorPublisherBridge {
       return result(snapshot, null, null, ["NON_FORWARD_EXACT_SNAPSHOT_CHRONOLOGY"]);
     }
 
+    let publisherContext: H1KiteExactPublisherContext;
+    try {
+      publisherContext = input.publisherFor(previous, snapshot);
+    } catch {
+      this.latestByContract.set(key, snapshot);
+      return result(snapshot, null, null, ["PUBLISHER_CONTEXT_RESOLUTION_FAILED"]);
+    }
+
     const publisher = bindH1LiveExactSnapshotsToPublisher({
       previous,
       current: snapshot,
-      ...input.publisher,
+      ...publisherContext,
       nowIso: input.snapshot.nowIso,
     });
 

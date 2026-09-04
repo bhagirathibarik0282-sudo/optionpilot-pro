@@ -3,8 +3,9 @@ import { mapKiteIndexFullPacketToH1ExactUnderlying } from "./h1-kite-exact-under
 import {
   H1KiteExactSelectorPublisherBridge,
   type H1KiteExactSelectorPublisherBridgeResult,
+  type H1KiteExactPublisherContext,
 } from "./h1-kite-exact-selector-publisher-bridge.js";
-import type { H1LiveSnapshotPublisherBindingInput } from "./h1-live-snapshot-publisher-binding.js";
+import type { H1ExactSnapshotBundle } from "./h1-live-exact-snapshot-aggregator.js";
 import { KiteImmediateTokenRegistry, type KiteImmediateTokenEntry } from "./kite-immediate-token-registry.js";
 import type { KiteDecodedPacket } from "./kite-websocket-binary-decoder.js";
 import type { RecorderSymbol } from "./option-recorder-shadow.js";
@@ -15,8 +16,9 @@ export interface H1KiteExactRuntimeCoordinatorConfig {
   greekPolicy: H1KiteGreekModelPolicy;
   publisherFor: (
     entry: KiteImmediateTokenEntry,
-    observedAt: string,
-  ) => Omit<H1LiveSnapshotPublisherBindingInput, "previous" | "current" | "nowIso">;
+    previous: H1ExactSnapshotBundle,
+    current: H1ExactSnapshotBundle,
+  ) => H1KiteExactPublisherContext;
   maxUnderlyingAgeMs?: number;
   maxSnapshotAgeMs?: number;
   maxCrossSourceSkewMs?: number;
@@ -45,6 +47,8 @@ function validTime(value: string | null | undefined): number | null {
  * Coordinates exact Kite index and option FULL packets without opening a socket
  * or attaching to server runtime. Only fresh forward SPOT evidence is cached.
  * OPTION evidence is evaluated only when a same-symbol exact underlying exists.
+ * Publisher policy/peer context is resolved only after an exact snapshot pair
+ * exists, preventing pre-snapshot inference or stale peer injection.
  */
 export class H1KiteExactRuntimeCoordinator {
   private readonly underlyingBySymbol = new Map<RecorderSymbol, H1ExactUnderlyingObservation>();
@@ -87,13 +91,11 @@ export class H1KiteExactRuntimeCoordinator {
     const underlying = this.underlyingBySymbol.get(entry.symbol);
     if (!underlying) return this.result(token, "IGNORED", null, "SAME_SYMBOL_EXACT_UNDERLYING_UNAVAILABLE");
 
-    let publisher: ReturnType<H1KiteExactRuntimeCoordinatorConfig["publisherFor"]>;
     let orderQuantity: number;
     try {
-      publisher = this.config.publisherFor(entry, packet.exchangeTimestamp ?? nowIso);
       orderQuantity = this.config.orderQuantityFor(entry);
     } catch {
-      return this.result(token, "IGNORED", null, "EXACT_POLICY_RESOLUTION_FAILED");
+      return this.result(token, "IGNORED", null, "EXACT_ORDER_QUANTITY_RESOLUTION_FAILED");
     }
     if (!Number.isInteger(orderQuantity) || orderQuantity <= 0) {
       return this.result(token, "IGNORED", null, "INVALID_EXACT_ORDER_QUANTITY");
@@ -111,7 +113,7 @@ export class H1KiteExactRuntimeCoordinator {
         maxSnapshotAgeMs: this.config.maxSnapshotAgeMs,
         maxCrossSourceSkewMs: this.config.maxCrossSourceSkewMs,
       },
-      publisher,
+      publisherFor: (previous, current) => this.config.publisherFor(entry, previous, current),
     });
     return this.result(token, "OPTION_EVALUATED", bridge, bridge.ready ? null : bridge.blockers.join("|"));
   }

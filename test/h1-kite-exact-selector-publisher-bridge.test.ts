@@ -24,7 +24,7 @@ function packet(at: string, ltp: number, depth = true): KiteDecodedPacket {
   };
 }
 
-function input(at: string, ltp: number, depth = true) {
+function input(at: string, ltp: number, depth = true, publisherFor = () => publisher) {
   const nowIso = new Date(Date.parse(at) + 500).toISOString();
   return {
     snapshot: {
@@ -34,16 +34,18 @@ function input(at: string, ltp: number, depth = true) {
       receivedAt: nowIso, nowIso, orderQuantity: 150,
       greekPolicy: { annualRiskFreeRate: 0.05, annualDividendYield: 0, maxAgeMs: 5_000, maxUnderlyingSkewMs: 2_000 },
     },
-    publisher,
+    publisherFor,
   };
 }
 
 test("first ready exact snapshot becomes baseline but is not published", () => {
   clearH1LiveSelectorRegistry();
   const bridge = new H1KiteExactSelectorPublisherBridge();
-  const out = bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.05));
+  let calls = 0;
+  const out = bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.05, true, () => { calls += 1; return publisher; }));
   assert.equal(out.ready, false);
   assert.deepEqual(out.blockers, ["PREVIOUS_EXACT_SNAPSHOT_UNAVAILABLE"]);
+  assert.equal(calls, 0);
   assert.equal(bridge.getTrackedContractCount(), 1);
   assert.equal(getH1LiveSelectorRegistrySize(), 0);
 });
@@ -84,11 +86,20 @@ test("publisher rejection advances exact baseline but never publishes", () => {
   clearH1LiveSelectorRegistry();
   const bridge = new H1KiteExactSelectorPublisherBridge();
   bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.05));
-  const second = input("2026-09-03T10:00:05.000Z", 1.20);
-  second.publisher = { ...publisher, multiExpiryPeers: [] };
-  const out = bridge.ingest(second);
+  const out = bridge.ingest(input("2026-09-03T10:00:05.000Z", 1.20, true, () => ({ ...publisher, multiExpiryPeers: [] })));
   assert.equal(out.ready, false);
   assert.ok(out.blockers.some((x) => x.includes("INSUFFICIENT_EXACT_MULTI_EXPIRY_PEERS")));
+  assert.equal(bridge.getTrackedContractCount(), 1);
+  assert.equal(getH1LiveSelectorRegistrySize(), 0);
+});
+
+test("publisher context failure advances exact baseline but fails closed", () => {
+  clearH1LiveSelectorRegistry();
+  const bridge = new H1KiteExactSelectorPublisherBridge();
+  bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.05));
+  const out = bridge.ingest(input("2026-09-03T10:00:05.000Z", 1.20, true, () => { throw new Error("peer unavailable"); }));
+  assert.equal(out.ready, false);
+  assert.deepEqual(out.blockers, ["PUBLISHER_CONTEXT_RESOLUTION_FAILED"]);
   assert.equal(bridge.getTrackedContractCount(), 1);
   assert.equal(getH1LiveSelectorRegistrySize(), 0);
 });

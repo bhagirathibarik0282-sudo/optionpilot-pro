@@ -9,6 +9,7 @@ on:
       - "test/candidate-ranking-shadow.test.ts"
       - "test/candidate-ranking-shadow-http.test.ts"
       - "test/candidate-ranking-shadow-router-smoke.test.ts"
+      - "test/candidate-ranking-shadow-tie-break.test.ts"
       - ".github/workflows/candidate-ranking-shadow-ci.yml"
   workflow_dispatch:
 
@@ -26,4 +27,4 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Run candidate ranking shadow tests
-        run: NODE_ENV=test node --import tsx --test test/candidate-ranking-shadow.test.ts test/candidate-ranking-shadow-http.test.ts test/candidate-ranking-shadow-router-smoke.test.ts
+        run: NODE_ENV=test node --import tsx --test test/candidate-ranking-shadow.test.ts test/candidate-ranking-shadow-http.test.ts test/candidate-ranking-shadow-router-smoke.test.ts test/candidate-ranking-shadow-tie-break.test.ts

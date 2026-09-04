@@ -14,7 +14,8 @@ export type KiteInstrumentMasterRow = {
 
 export type ImmediateRegistryBuildRequest = {
   symbols: RecorderSymbol[];
-  expiryBySymbol: Partial<Record<RecorderSymbol, string>>;
+  expiryBySymbol?: Partial<Record<RecorderSymbol, string>>;
+  expiriesBySymbol?: Partial<Record<RecorderSymbol, string[]>>;
   strikesBySymbol: Partial<Record<RecorderSymbol, number[]>>;
 };
 
@@ -34,6 +35,17 @@ function findUnique(rows: KiteInstrumentMasterRow[], predicate: (row: KiteInstru
   return matches[0];
 }
 
+function requestedExpiries(request: ImmediateRegistryBuildRequest, symbol: RecorderSymbol): string[] {
+  const explicit = request.expiriesBySymbol?.[symbol];
+  const legacy = request.expiryBySymbol?.[symbol];
+  const raw = explicit ?? (legacy ? [legacy] : []);
+  if (!Array.isArray(raw) || raw.length === 0) throw new Error(`KITE_IMMEDIATE_EXPIRIES_MISSING:${symbol}`);
+  const expiries = raw.map((x) => String(x || "").trim());
+  if (expiries.some((x) => !x)) throw new Error(`KITE_IMMEDIATE_EXPIRY_INVALID:${symbol}`);
+  if (new Set(expiries).size !== expiries.length) throw new Error(`KITE_IMMEDIATE_EXPIRY_DUPLICATE:${symbol}`);
+  return expiries;
+}
+
 export function buildKiteImmediateTokenRegistryFromMaster(
   rows: KiteInstrumentMasterRow[],
   request: ImmediateRegistryBuildRequest,
@@ -43,9 +55,9 @@ export function buildKiteImmediateTokenRegistryFromMaster(
   const entries: KiteImmediateTokenEntry[] = [];
 
   for (const symbol of request.symbols) {
-    const expiry = request.expiryBySymbol[symbol];
+    const expiries = requestedExpiries(request, symbol);
     const strikes = request.strikesBySymbol[symbol] ?? [];
-    if (!expiry || !strikes.length) throw new Error(`KITE_IMMEDIATE_UNIVERSE_MISSING:${symbol}`);
+    if (!strikes.length) throw new Error(`KITE_IMMEDIATE_UNIVERSE_MISSING:${symbol}`);
 
     const spot = findUnique(rows, (row) => symbolMatches(row, symbol) && String(row.segment || "").toUpperCase().includes("INDICES"), `KITE_SPOT_NOT_UNIQUE:${symbol}`);
     entries.push({ instrumentToken: spot.instrument_token, symbol, role: "SPOT", instrumentLabel: spot.tradingsymbol || symbol });
@@ -58,22 +70,24 @@ export function buildKiteImmediateTokenRegistryFromMaster(
     const future = futuresCandidates[0];
     entries.push({ instrumentToken: future.instrument_token, symbol, role: "FUTURE", instrumentLabel: future.tradingsymbol });
 
-    for (const strike of strikes) {
-      for (const side of ["CE", "PE"] as const) {
-        const option = findUnique(rows, (row) => symbolMatches(row, symbol)
-          && String(row.instrument_type || "").toUpperCase() === side
-          && String(row.expiry || "") === expiry
-          && Number(row.strike) === strike,
-        `KITE_OPTION_NOT_UNIQUE:${symbol}:${expiry}:${strike}:${side}`);
-        entries.push({
-          instrumentToken: option.instrument_token,
-          symbol,
-          role: "OPTION",
-          instrumentLabel: option.tradingsymbol,
-          expiry,
-          strike,
-          optionSide: side,
-        });
+    for (const expiry of expiries) {
+      for (const strike of strikes) {
+        for (const side of ["CE", "PE"] as const) {
+          const option = findUnique(rows, (row) => symbolMatches(row, symbol)
+            && String(row.instrument_type || "").toUpperCase() === side
+            && String(row.expiry || "") === expiry
+            && Number(row.strike) === strike,
+          `KITE_OPTION_NOT_UNIQUE:${symbol}:${expiry}:${strike}:${side}`);
+          entries.push({
+            instrumentToken: option.instrument_token,
+            symbol,
+            role: "OPTION",
+            instrumentLabel: option.tradingsymbol,
+            expiry,
+            strike,
+            optionSide: side,
+          });
+        }
       }
     }
   }

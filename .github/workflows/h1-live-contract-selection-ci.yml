@@ -7,7 +7,9 @@ on:
       - 'h1-live-contract-selection.ts'
       - 'h1-live-contract-selection-startup-audit.ts'
       - 'h1-live-contract-discovery-startup-audit.ts'
+      - 'h1-live-selection-exact-registry-preflight.ts'
       - 'test/h1-live-contract-selection.test.ts'
+      - 'test/h1-live-selection-exact-registry-preflight.test.ts'
       - '.github/workflows/h1-live-contract-selection-ci.yml'
 
 jobs:
@@ -19,4 +21,4 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - run: npx tsx --test test/h1-live-contract-selection.test.ts
+      - run: npx tsx --test test/h1-live-contract-selection.test.ts test/h1-live-selection-exact-registry-preflight.test.ts

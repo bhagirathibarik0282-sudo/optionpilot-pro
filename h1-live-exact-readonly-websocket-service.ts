@@ -1,7 +1,17 @@
 import type { H1LiveExactMarketWiringReadinessResult } from "./h1-live-exact-market-wiring-readiness.js";
 import { H1LiveExactRawEvidenceStore, type H1LiveExactRawEvidenceMissing, type H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import { buildNearestValidMonthlyPeerReadiness, type H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
+import { buildH1ReadOnlyEvidenceConsumerBoundary } from "./h1-readonly-evidence-consumer-boundary.js";
 import { KiteWebSocketTransport, type KiteSocketFactory } from "./kite-websocket-transport.js";
+
+export interface H1LiveExactReadOnlyConsumerObservation {
+  symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
+  primaryExpiry: string;
+  nearestPeerExpiry: string;
+  ready: boolean;
+  evidenceTokenCount: number;
+  blockers: string[];
+}
 
 export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   readiness: H1LiveExactMarketWiringReadinessResult;
@@ -29,6 +39,8 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   rawEvidenceMissing: H1LiveExactRawEvidenceMissing[];
   rawEvidenceSymbolReadiness: H1LiveExactRawEvidenceSymbolReadiness[];
   nearestPeerReadiness: H1NearestValidMonthlyPeerReadinessRow[];
+  readOnlyConsumerReadySymbolCount: number;
+  readOnlyConsumerObservations: H1LiveExactReadOnlyConsumerObservation[];
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
@@ -60,6 +72,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       subscribedTokenCount: registryTokens.length, receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
       rawEvidenceReady: false, rawEvidenceExpectedTokenCount: registryTokens.length, rawEvidenceFreshTokenCount: 0,
       rawEvidenceMissingTokenCount: registryTokens.length, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
+      readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [],
       greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
       affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
     };
@@ -71,6 +84,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       rawEvidenceMissing: this.value.rawEvidenceMissing.map((x) => ({ ...x })),
       rawEvidenceSymbolReadiness: this.value.rawEvidenceSymbolReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
       nearestPeerReadiness: this.value.nearestPeerReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      readOnlyConsumerObservations: this.value.readOnlyConsumerObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
     };
   }
   rawEvidenceStatus(nowIso: string) { return this.rawEvidence.status(nowIso); }
@@ -100,7 +114,18 @@ export class H1LiveExactReadOnlyWebSocketService {
         this.value.rawEvidenceStaleTokenCount = evidence.staleTokenCount;
         this.value.rawEvidenceMissing = evidence.missing;
         this.value.rawEvidenceSymbolReadiness = evidence.symbolReadiness;
-        this.value.nearestPeerReadiness = buildNearestValidMonthlyPeerReadiness(this.config.readiness.registry!.entries(), evidence).rows;
+        const nearest = buildNearestValidMonthlyPeerReadiness(this.config.readiness.registry!.entries(), evidence).rows;
+        this.value.nearestPeerReadiness = nearest;
+        const consumer = buildH1ReadOnlyEvidenceConsumerBoundary(evidence, nearest);
+        this.value.readOnlyConsumerReadySymbolCount = consumer.readySymbolCount;
+        this.value.readOnlyConsumerObservations = consumer.rows.map((row) => ({
+          symbol: row.symbol,
+          primaryExpiry: row.primaryExpiry,
+          nearestPeerExpiry: row.nearestPeerExpiry,
+          ready: row.ready,
+          evidenceTokenCount: row.evidenceTokenCount,
+          blockers: [...row.blockers],
+        }));
       },
       onTextMessage: () => {},
       onState: (state) => { this.value.state = state; this.value.connected = state === "OPEN"; },

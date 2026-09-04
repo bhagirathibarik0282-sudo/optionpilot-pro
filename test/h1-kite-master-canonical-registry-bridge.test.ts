@@ -7,12 +7,20 @@ const rows = [
   { instrument_token: 1001, tradingsymbol: "NIFTY26SEPFUT", name: "NIFTY", expiry: "2026-09-24", instrument_type: "FUT", segment: "NFO-FUT", exchange: "NFO" },
   { instrument_token: 2001, tradingsymbol: "NIFTY26SEP24000CE", name: "NIFTY", expiry: "2026-09-24", strike: 24000, instrument_type: "CE", segment: "NFO-OPT", exchange: "NFO" },
   { instrument_token: 2002, tradingsymbol: "NIFTY26SEP24000PE", name: "NIFTY", expiry: "2026-09-24", strike: 24000, instrument_type: "PE", segment: "NFO-OPT", exchange: "NFO" },
+  { instrument_token: 2101, tradingsymbol: "NIFTY26OCT24000CE", name: "NIFTY", expiry: "2026-10-29", strike: 24000, instrument_type: "CE", segment: "NFO-OPT", exchange: "NFO" },
+  { instrument_token: 2102, tradingsymbol: "NIFTY26OCT24000PE", name: "NIFTY", expiry: "2026-10-29", strike: 24000, instrument_type: "PE", segment: "NFO-OPT", exchange: "NFO" },
   { instrument_token: 264969, tradingsymbol: "INDIA VIX", name: "INDIA VIX", segment: "INDICES", exchange: "NSE" },
 ];
 
 const request = {
   symbols: ["NIFTY"] as const,
   expiryBySymbol: { NIFTY: "2026-09-24" },
+  strikesBySymbol: { NIFTY: [24000] },
+};
+
+const multiExpiryRequest = {
+  symbols: ["NIFTY"] as const,
+  expiriesBySymbol: { NIFTY: ["2026-09-24", "2026-10-29"] },
   strikesBySymbol: { NIFTY: [24000] },
 };
 
@@ -30,6 +38,29 @@ test("builds canonical registry from exact Kite master rows without token infere
   assert.equal(option?.expiry, "2026-09-24");
   assert.equal(option?.strike, 24000);
   assert.equal(option?.optionSide, "CE");
+});
+
+test("builds distinct exact option identities across multiple expiries", () => {
+  const result = buildH1CanonicalRegistryFromKiteMaster(rows, multiExpiryRequest as any);
+  assert.equal(result.ready, true);
+  assert.equal(result.blockers.length, 0);
+  assert.equal(result.entries.length, 7);
+  const ceExpiries = result.entries
+    .filter((x) => x.role === "OPTION" && x.optionSide === "CE")
+    .map((x) => x.expiry)
+    .sort();
+  assert.deepEqual(ceExpiries, ["2026-09-24", "2026-10-29"]);
+});
+
+test("fails closed on duplicate requested expiries", () => {
+  const duplicateExpiryRequest = {
+    ...multiExpiryRequest,
+    expiriesBySymbol: { NIFTY: ["2026-09-24", "2026-09-24"] },
+  };
+  const result = buildH1CanonicalRegistryFromKiteMaster(rows, duplicateExpiryRequest as any);
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.entries, []);
+  assert.match(result.blockers[0] ?? "", /KITE_IMMEDIATE_EXPIRY_DUPLICATE/);
 });
 
 test("fails closed with no partial registry when requested option is absent", () => {

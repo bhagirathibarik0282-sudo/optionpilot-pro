@@ -15,10 +15,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npx tsx --test test/h1-live-contract-selection.test.ts test/h1-live-selection-exact-registry-preflight.test.ts
+          cache: 'npm'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install tsx --test test/h1-live-contract-selection.test.ts test/h1-live-selection-exact-registry-preflight.test.ts

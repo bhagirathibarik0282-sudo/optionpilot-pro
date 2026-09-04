@@ -1,4 +1,5 @@
 import type { H1LiveExactMarketWiringReadinessResult } from "./h1-live-exact-market-wiring-readiness.js";
+import { H1LiveExactRawEvidenceStore } from "./h1-live-exact-raw-evidence-store.js";
 import { KiteWebSocketTransport, type KiteSocketFactory } from "./kite-websocket-transport.js";
 
 export interface H1LiveExactReadOnlyWebSocketServiceConfig {
@@ -19,6 +20,12 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   receivedPacketCount: number;
   rejectedPacketCount: number;
   lastPacketTimestamp: string | null;
+  rawEvidenceReady: boolean;
+  rawEvidenceExpectedTokenCount: number;
+  rawEvidenceFreshTokenCount: number;
+  rawEvidenceMissingTokenCount: number;
+  rawEvidenceStaleTokenCount: number;
+  greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
   forwardsDownstream: false;
@@ -30,15 +37,16 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
 }
 
 /**
- * First live-market activation boundary for the PR240-242 exact-token path.
+ * First live-market activation boundary for the exact-token path.
  * It opens Kite WebSocket FULL mode only for the exact readiness registry and
- * deliberately stops at packet receipt/identity validation. No packet is sent
- * to selector, verdict, Telegram or execution paths from this service.
+ * stops at packet receipt plus deterministic raw evidence validation. No packet
+ * is sent to selector, verdict, Telegram or execution paths from this service.
  */
 export class H1LiveExactReadOnlyWebSocketService {
   private transport: KiteWebSocketTransport | null = null;
   private readonly allowedTokens: Set<number>;
   private readonly firstSeenTokens = new Set<number>();
+  private readonly rawEvidence: H1LiveExactRawEvidenceStore;
   private value: H1LiveExactReadOnlyWebSocketStatus;
 
   constructor(private readonly config: H1LiveExactReadOnlyWebSocketServiceConfig) {
@@ -58,6 +66,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       throw new Error("H1_LIVE_EXACT_READINESS_TOKEN_MISMATCH");
     }
     this.allowedTokens = new Set(registryTokens);
+    this.rawEvidence = new H1LiveExactRawEvidenceStore(config.readiness.registry);
     this.value = {
       version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1",
       started: false,
@@ -67,6 +76,12 @@ export class H1LiveExactReadOnlyWebSocketService {
       receivedPacketCount: 0,
       rejectedPacketCount: 0,
       lastPacketTimestamp: null,
+      rawEvidenceReady: false,
+      rawEvidenceExpectedTokenCount: registryTokens.length,
+      rawEvidenceFreshTokenCount: 0,
+      rawEvidenceMissingTokenCount: registryTokens.length,
+      rawEvidenceStaleTokenCount: 0,
+      greekEvidenceStatus: "NOT_CONFIGURED",
       productionImpact: "NONE",
       readOnly: true,
       forwardsDownstream: false,
@@ -79,6 +94,8 @@ export class H1LiveExactReadOnlyWebSocketService {
   }
 
   status(): H1LiveExactReadOnlyWebSocketStatus { return { ...this.value }; }
+
+  rawEvidenceStatus(nowIso: string) { return this.rawEvidence.status(nowIso); }
 
   start(): H1LiveExactReadOnlyWebSocketStatus {
     if (this.transport) throw new Error("H1_LIVE_EXACT_READONLY_ALREADY_STARTED");
@@ -101,6 +118,7 @@ export class H1LiveExactReadOnlyWebSocketService {
             continue;
           }
           this.value.receivedPacketCount += 1;
+          this.rawEvidence.ingest(tick, receivedAt);
           if (!this.firstSeenTokens.has(tick.instrumentToken)) {
             this.firstSeenTokens.add(tick.instrumentToken);
             const entry = this.config.readiness.registry?.get(tick.instrumentToken) ?? null;
@@ -120,6 +138,12 @@ export class H1LiveExactReadOnlyWebSocketService {
             }
           }
         }
+        const evidence = this.rawEvidence.status(receivedAt);
+        this.value.rawEvidenceReady = evidence.ready;
+        this.value.rawEvidenceExpectedTokenCount = evidence.expectedTokenCount;
+        this.value.rawEvidenceFreshTokenCount = evidence.freshTokenCount;
+        this.value.rawEvidenceMissingTokenCount = evidence.missingTokenCount;
+        this.value.rawEvidenceStaleTokenCount = evidence.staleTokenCount;
       },
       onTextMessage: () => {},
       onState: (state) => {

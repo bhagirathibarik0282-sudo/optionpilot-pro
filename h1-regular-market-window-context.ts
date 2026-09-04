@@ -19,16 +19,18 @@ export interface H1RegularMarketWindowContext {
   failClosed: true;
 }
 
-function istMinutesOfDay(now: Date): number {
-  const shifted = new Date(now.getTime() + (5 * 60 + 30) * 60 * 1000);
-  return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+function istDate(now: Date): Date {
+  return new Date(now.getTime() + (5 * 60 + 30) * 60 * 1000);
 }
 
 export function getH1RegularMarketWindowContext(now = new Date()): H1RegularMarketWindowContext {
-  const minutes = istMinutesOfDay(now);
+  const shifted = istDate(now);
+  const minutes = shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+  const day = shifted.getUTCDay();
+  const weekday = day >= 1 && day <= 5;
   const start = 9 * 60 + 15;
   const end = 15 * 60 + 30;
-  const within = minutes >= start && minutes <= end;
+  const within = weekday && minutes >= start && minutes <= end;
   return {
     version: H1_REGULAR_MARKET_WINDOW_CONTEXT_VERSION,
     timezone: "Asia/Kolkata",

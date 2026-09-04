@@ -50,3 +50,21 @@ test("fails closed when observer source is not healthy", () => {
   assert.ok(result.rows.every((row) => row.state === "BLOCKED" && row.direction === null));
   assert.ok(result.rows[0].blockers.includes("SHADOW_OBSERVER_SOURCE_UNHEALTHY"));
 });
+
+test("fails closed when source has rejected packets", () => {
+  const source = observer();
+  source.sourceRejectedPacketCount = 2;
+  const result = assessH1ShadowDirection(source);
+  assert.equal(result.readySymbolCount, 0);
+  assert.ok(result.rows.every((row) => row.state === "BLOCKED"));
+  assert.ok(result.rows[0].blockers.includes("SOURCE_REJECTED_PACKETS_PRESENT:2"));
+});
+
+test("fails closed when nested observed safety contract drifts", () => {
+  const source = observer();
+  source.observed.forwardsDownstream = true as false;
+  const result = assessH1ShadowDirection(source);
+  assert.equal(result.readySymbolCount, 0);
+  assert.ok(result.rows.every((row) => row.state === "BLOCKED"));
+  assert.ok(result.rows[0].blockers.includes("SHADOW_SAFETY_CONTRACT_INVALID"));
+});

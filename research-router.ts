@@ -18,6 +18,7 @@ import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
 import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } from "./research-engine-chain-http.js";
 import { getMeaningfulLiveAcceptanceStatus } from "./meaningful-live-acceptance-monitor.js";
+import { candidateRankingShadowRuntimeStatus, evaluateCandidateRankingShadowHttp } from "./candidate-ranking-shadow-http.js";
 
 export const researchRouter = new Hono();
 
@@ -92,6 +93,16 @@ researchRouter.post("/engine-chain/evaluate", async (c) => {
   if (denied) return denied;
   const body = await c.req.json().catch(() => null);
   const result = evaluateResearchEngineChainHttp(body);
+  return c.json(result, result.ok ? 200 : 400);
+});
+
+researchRouter.get("/candidate-ranking-shadow/status", (c) => {
+  return c.json(candidateRankingShadowRuntimeStatus());
+});
+
+researchRouter.post("/candidate-ranking-shadow/evaluate", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const result = evaluateCandidateRankingShadowHttp(body);
   return c.json(result, result.ok ? 200 : 400);
 });
 

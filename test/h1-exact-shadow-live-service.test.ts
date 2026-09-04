@@ -4,12 +4,16 @@ import { readH1ExactShadowLiveConfig } from "../h1-exact-shadow-live-service.js"
 
 const registry = [
   { instrumentToken: 256265, symbol: "NIFTY", role: "SPOT", instrumentLabel: "NIFTY 50" },
-  { instrumentToken: 111, symbol: "NIFTY", role: "OPTION", instrumentLabel: "NIFTY-24000-CE", expiry: "2026-09-08", strike: 24000, optionSide: "CE" },
+  { instrumentToken: 111, symbol: "NIFTY", role: "OPTION", instrumentLabel: "NIFTY-24000-CE-W1", expiry: "2026-09-08", strike: 24000, optionSide: "CE" },
+  { instrumentToken: 112, symbol: "NIFTY", role: "OPTION", instrumentLabel: "NIFTY-24000-CE-W2", expiry: "2026-09-15", strike: 24000, optionSide: "CE" },
 ];
 
 function policy(requiredPeerCount = 1, token = 111) {
   return {
-    contracts: [{ instrumentToken: token, moneyness: "ATM", orderQuantity: 150, expectedPremiumDirection: "UP" }],
+    contracts: [
+      { instrumentToken: token, moneyness: "ATM", orderQuantity: 150, expectedPremiumDirection: "UP" },
+      { instrumentToken: 112, moneyness: "ATM", orderQuantity: 150, expectedPremiumDirection: "UP" },
+    ],
     greekPolicy: { annualRiskFreeRate: 0.05, annualDividendYield: 0, maxAgeMs: 5000, maxUnderlyingSkewMs: 2000 },
     premiumPolicy: { maxObservationGapMs: 10000, minPremiumMovePct: 0, minAbsoluteDeltaChange: 0, minCurrentGamma: 0 },
     burdenPolicy: { maxObservationAgeMs: 30000, maxAbsThetaPctOfPremium: 1000, minIv: 0, maxIv: 500, requiredPeerCount, maxConflictingPeerCount: 0 },
@@ -44,11 +48,12 @@ test("enabled exact shadow service requires explicit registry and policy", () =>
   assert.throws(() => readH1ExactShadowLiveConfig(env({ KITE_H1_EXACT_POLICY_JSON: "" })), /POLICY_JSON_REQUIRED/);
 });
 
-test("valid explicit policy and registry are accepted without exposing authority", () => {
+test("valid explicit multi-expiry policy and registry are accepted without exposing authority", () => {
   const cfg = readH1ExactShadowLiveConfig(env());
   assert.equal(cfg.enabled, true);
   assert.equal(cfg.apiKey, "k");
-  assert.equal(cfg.registryEntries.length, 2);
+  assert.equal(cfg.registryEntries.length, 3);
+  assert.equal(cfg.policy?.contracts.length, 2);
   assert.equal(cfg.policy?.contracts[0].orderQuantity, 150);
   assert.equal(cfg.policy?.contracts[0].expectedPremiumDirection, "UP");
 });
@@ -77,4 +82,25 @@ test("contract policy must reference the canonical token registry", () => {
   assert.throws(() => readH1ExactShadowLiveConfig(env({
     KITE_H1_EXACT_POLICY_JSON: JSON.stringify(policy(1, 999)),
   })), /CONTRACT_NOT_IN_REGISTRY/);
+});
+
+test("configured contract must be a canonical option identity", () => {
+  const bad = policy() as any;
+  bad.contracts[0].instrumentToken = 256265;
+  assert.throws(() => readH1ExactShadowLiveConfig(env({
+    KITE_H1_EXACT_POLICY_JSON: JSON.stringify(bad),
+  })), /CONTRACT_OPTION_IDENTITY_REQUIRED/);
+});
+
+test("activation fails closed when required different-expiry peers are not configured", () => {
+  const oneExpiry = policy() as any;
+  oneExpiry.contracts = [oneExpiry.contracts[0]];
+  assert.throws(() => readH1ExactShadowLiveConfig(env({
+    KITE_H1_EXACT_POLICY_JSON: JSON.stringify(oneExpiry),
+  })), /INSUFFICIENT_CONFIGURED_PEER_EXPIRIES/);
+
+  const needsTwoPeers = policy(2) as any;
+  assert.throws(() => readH1ExactShadowLiveConfig(env({
+    KITE_H1_EXACT_POLICY_JSON: JSON.stringify(needsTwoPeers),
+  })), /INSUFFICIENT_CONFIGURED_PEER_EXPIRIES/);
 });

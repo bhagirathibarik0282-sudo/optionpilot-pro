@@ -6,11 +6,14 @@ import type { H1KiteGreekModelPolicy } from "./h1-kite-exact-price-greek-adapter
 import type { LivePremiumDeltaGammaPolicy } from "./h1-live-premium-delta-gamma-evaluator.js";
 import type { ThetaIvMultiExpiryPolicy } from "./h1-live-theta-iv-multi-expiry-evaluator.js";
 import type { LiveCapitalLiquidityDtePolicy } from "./h1-live-capital-liquidity-dte-gates.js";
+import { H1ExactPeerRuntimeStore } from "./h1-exact-peer-runtime-store.js";
+import type { H1ExpectedPremiumDirection } from "./h1-exact-peer-directional-state-classifier.js";
 
 export interface H1ExactShadowContractPolicy {
   instrumentToken: number;
   moneyness: "ATM" | "ITM1";
   orderQuantity: number;
+  expectedPremiumDirection: H1ExpectedPremiumDirection;
 }
 
 export interface H1ExactShadowPolicy {
@@ -52,6 +55,7 @@ function validatePolicy(raw: unknown): H1ExactShadowPolicy {
     if (!Number.isInteger(row.instrumentToken) || row.instrumentToken <= 0 ||
         (row.moneyness !== "ATM" && row.moneyness !== "ITM1") ||
         !Number.isInteger(row.orderQuantity) || row.orderQuantity <= 0 ||
+        (row.expectedPremiumDirection !== "UP" && row.expectedPremiumDirection !== "DOWN") ||
         tokens.has(row.instrumentToken)) {
       throw new Error("KITE_H1_EXACT_CONTRACT_POLICY_INVALID");
     }
@@ -123,6 +127,21 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
   const registry = new KiteImmediateTokenRegistry(cfg.registryEntries);
   const policy = cfg.policy!;
   const contractPolicy = new Map(policy.contracts.map((x) => [x.instrumentToken, x]));
+  const peerStore = new H1ExactPeerRuntimeStore({
+    registryEntries: registry.entries(),
+    classifierPolicy: {
+      maxObservationGapMs: policy.premiumPolicy.maxObservationGapMs,
+      minAbsolutePremiumMovePct: policy.premiumPolicy.minPremiumMovePct,
+    },
+    maxObservationAgeMs: policy.burdenPolicy.maxObservationAgeMs,
+    requiredPeerCount: policy.burdenPolicy.requiredPeerCount,
+    expectedDirectionFor: (entry) => {
+      const row = contractPolicy.get(entry.instrumentToken);
+      if (!row) throw new Error("CONTRACT_POLICY_MISSING");
+      return row.expectedPremiumDirection;
+    },
+  });
+
   const runtime = createKiteH1ExactDualPathCore({
     registry,
     cluster: { windowMs: 2_000, minDistinctMetrics: 2 },
@@ -132,12 +151,13 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
     registry,
     greekPolicy: policy.greekPolicy,
     orderQuantityFor: (entry) => contractPolicy.get(entry.instrumentToken)?.orderQuantity ?? 0,
-    publisherFor: (entry) => {
+    publisherFor: (entry, previous, current) => {
       const row = contractPolicy.get(entry.instrumentToken);
       if (!row) throw new Error("CONTRACT_POLICY_MISSING");
+      const peerResult = peerStore.ingestAndResolve(entry.instrumentToken, previous, current, current.observedAt ?? "");
       return {
         moneyness: row.moneyness,
-        multiExpiryPeers: [],
+        multiExpiryPeers: peerResult.ready ? peerResult.resolver!.peers : [],
         premiumPolicy: policy.premiumPolicy,
         burdenPolicy: policy.burdenPolicy,
         capitalLiquidityDtePolicy: policy.capitalLiquidityDtePolicy,
@@ -159,7 +179,7 @@ function status(enabled: boolean, started: boolean, reason: H1ExactShadowLiveRea
   return {
     version: "H1_EXACT_SHADOW_LIVE_SERVICE_V1" as const,
     enabled, started, reason, subscribedTokenCount,
-    multiExpiryPeerStatus: "MISSING_FAIL_CLOSED" as const,
+    multiExpiryPeerStatus: "WIRED_FAIL_CLOSED" as const,
     productionImpact: "NONE" as const,
     telegramSendAllowed: false as const,
     affectsVerdict: false as const,

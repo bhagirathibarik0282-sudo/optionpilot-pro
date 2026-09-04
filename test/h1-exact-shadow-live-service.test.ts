@@ -9,7 +9,7 @@ const registry = [
 
 function policy(requiredPeerCount = 1, token = 111) {
   return {
-    contracts: [{ instrumentToken: token, moneyness: "ATM", orderQuantity: 150 }],
+    contracts: [{ instrumentToken: token, moneyness: "ATM", orderQuantity: 150, expectedPremiumDirection: "UP" }],
     greekPolicy: { annualRiskFreeRate: 0.05, annualDividendYield: 0, maxAgeMs: 5000, maxUnderlyingSkewMs: 2000 },
     premiumPolicy: { maxObservationGapMs: 10000, minPremiumMovePct: 0, minAbsoluteDeltaChange: 0, minCurrentGamma: 0 },
     burdenPolicy: { maxObservationAgeMs: 30000, maxAbsThetaPctOfPremium: 1000, minIv: 0, maxIv: 500, requiredPeerCount, maxConflictingPeerCount: 0 },
@@ -50,6 +50,21 @@ test("valid explicit policy and registry are accepted without exposing authority
   assert.equal(cfg.apiKey, "k");
   assert.equal(cfg.registryEntries.length, 2);
   assert.equal(cfg.policy?.contracts[0].orderQuantity, 150);
+  assert.equal(cfg.policy?.contracts[0].expectedPremiumDirection, "UP");
+});
+
+test("expected premium direction must be explicit and is never inferred from option side", () => {
+  const missing = policy() as any;
+  delete missing.contracts[0].expectedPremiumDirection;
+  assert.throws(() => readH1ExactShadowLiveConfig(env({
+    KITE_H1_EXACT_POLICY_JSON: JSON.stringify(missing),
+  })), /CONTRACT_POLICY_INVALID/);
+
+  const invalid = policy() as any;
+  invalid.contracts[0].expectedPremiumDirection = "BULLISH";
+  assert.throws(() => readH1ExactShadowLiveConfig(env({
+    KITE_H1_EXACT_POLICY_JSON: JSON.stringify(invalid),
+  })), /CONTRACT_POLICY_INVALID/);
 });
 
 test("multi-expiry evidence cannot be silently disabled", () => {

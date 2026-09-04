@@ -11,9 +11,10 @@ const registry = [
 function policy(requiredPeerCount = 1, token = 111) {
   return {
     contracts: [
-      { instrumentToken: token, moneyness: "ATM", orderQuantity: 150, expectedPremiumDirection: "UP" },
-      { instrumentToken: 112, moneyness: "ATM", orderQuantity: 150, expectedPremiumDirection: "UP" },
+      { instrumentToken: token, moneyness: "ATM", orderQuantity: 150 },
+      { instrumentToken: 112, moneyness: "ATM", orderQuantity: 150 },
     ],
+    directionPolicy: { maxObservationGapMs: 10000, minAbsoluteSpotMovePct: 0.05, maxDirectionAgeMs: 15000 },
     greekPolicy: { annualRiskFreeRate: 0.05, annualDividendYield: 0, maxAgeMs: 5000, maxUnderlyingSkewMs: 2000 },
     premiumPolicy: { maxObservationGapMs: 10000, minPremiumMovePct: 0, minAbsoluteDeltaChange: 0, minCurrentGamma: 0 },
     burdenPolicy: { maxObservationAgeMs: 30000, maxAbsThetaPctOfPremium: 1000, minIv: 0, maxIv: 500, requiredPeerCount, maxConflictingPeerCount: 0 },
@@ -48,28 +49,37 @@ test("enabled exact shadow service requires explicit registry and policy", () =>
   assert.throws(() => readH1ExactShadowLiveConfig(env({ KITE_H1_EXACT_POLICY_JSON: "" })), /POLICY_JSON_REQUIRED/);
 });
 
-test("valid explicit multi-expiry policy and registry are accepted without exposing authority", () => {
+test("valid explicit multi-expiry policy uses verified runtime direction policy", () => {
   const cfg = readH1ExactShadowLiveConfig(env());
   assert.equal(cfg.enabled, true);
   assert.equal(cfg.apiKey, "k");
   assert.equal(cfg.registryEntries.length, 3);
   assert.equal(cfg.policy?.contracts.length, 2);
   assert.equal(cfg.policy?.contracts[0].orderQuantity, 150);
-  assert.equal(cfg.policy?.contracts[0].expectedPremiumDirection, "UP");
+  assert.equal(cfg.policy?.directionPolicy.minAbsoluteSpotMovePct, 0.05);
+  assert.equal(cfg.policy?.directionPolicy.maxDirectionAgeMs, 15000);
 });
 
-test("expected premium direction must be explicit and is never inferred from option side", () => {
+test("static per-contract premium direction is explicitly forbidden", () => {
+  const bad = policy() as any;
+  bad.contracts[0].expectedPremiumDirection = "UP";
+  assert.throws(() => readH1ExactShadowLiveConfig(env({
+    KITE_H1_EXACT_POLICY_JSON: JSON.stringify(bad),
+  })), /STATIC_CONTRACT_DIRECTION_FORBIDDEN/);
+});
+
+test("verified live direction policy is mandatory and fail closed", () => {
   const missing = policy() as any;
-  delete missing.contracts[0].expectedPremiumDirection;
+  delete missing.directionPolicy;
   assert.throws(() => readH1ExactShadowLiveConfig(env({
     KITE_H1_EXACT_POLICY_JSON: JSON.stringify(missing),
-  })), /CONTRACT_POLICY_INVALID/);
+  })), /DIRECTION_POLICY_INVALID/);
 
-  const invalid = policy() as any;
-  invalid.contracts[0].expectedPremiumDirection = "BULLISH";
+  const stale = policy() as any;
+  stale.directionPolicy.maxDirectionAgeMs = 0;
   assert.throws(() => readH1ExactShadowLiveConfig(env({
-    KITE_H1_EXACT_POLICY_JSON: JSON.stringify(invalid),
-  })), /CONTRACT_POLICY_INVALID/);
+    KITE_H1_EXACT_POLICY_JSON: JSON.stringify(stale),
+  })), /DIRECTION_POLICY_INVALID/);
 });
 
 test("multi-expiry evidence cannot be silently disabled", () => {

@@ -1,0 +1,26 @@
+name: H1 Regular Market Window Context CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "h1-regular-market-window-context.ts"
+      - "test/h1-regular-market-window-context.test.ts"
+      - ".github/workflows/h1-regular-market-window-context-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regular-market-window-context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify H1 regular market window context
+        run: NODE_ENV=test node --import tsx --test test/h1-regular-market-window-context.test.ts

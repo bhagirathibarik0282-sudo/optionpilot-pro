@@ -12,7 +12,7 @@ export interface H1ResponseStageView {
   direction: "UP" | "DOWN" | "FLAT" | "UNKNOWN";
   confirmed: boolean;
   blockEnd: string;
-  lagMinutesFrom3m: number | null;
+  observedBlockEndOffsetMinutesFrom3m: number | null;
   blockers: string[];
 }
 
@@ -22,6 +22,7 @@ export interface H1TimeLagResponseLadder {
   symbol: "NIFTY" | "BANKNIFTY" | "SENSEX" | null;
   anchorDirection: "UP" | "DOWN" | null;
   highestConfirmedStage: H1ResponseStage | null;
+  causalLagAvailable: false;
   stages: H1ResponseStageView[];
   blockers: string[];
   semantics: "OBSERVED_CLOSED_BLOCK_SEQUENCE_ONLY_NO_CAUSAL_CLAIM";
@@ -96,14 +97,14 @@ export function buildH1TimeLagResponseLadder(
     else chainIntact = false;
 
     const blockMs = row ? Date.parse(row.blockEnd) : NaN;
-    const lag = Number.isFinite(anchorMs) && Number.isFinite(blockMs) ? (blockMs - anchorMs) / 60_000 : null;
+    const offset = Number.isFinite(anchorMs) && Number.isFinite(blockMs) ? (blockMs - anchorMs) / 60_000 : null;
     return {
       timeframe,
       stage: STAGE[timeframe],
       direction: row?.direction ?? "UNKNOWN",
       confirmed,
       blockEnd: row?.blockEnd ?? new Date(0).toISOString(),
-      lagMinutesFrom3m: lag,
+      observedBlockEndOffsetMinutesFrom3m: offset,
       blockers: stageBlockers,
     };
   });
@@ -114,6 +115,7 @@ export function buildH1TimeLagResponseLadder(
     symbol: symbols.size === 1 ? ([...symbols][0] as H1TimeLagResponseLadder["symbol"]) : null,
     anchorDirection,
     highestConfirmedStage: highest,
+    causalLagAvailable: false,
     stages,
     blockers: [...new Set(blockers)],
     semantics: "OBSERVED_CLOSED_BLOCK_SEQUENCE_ONLY_NO_CAUSAL_CLAIM",

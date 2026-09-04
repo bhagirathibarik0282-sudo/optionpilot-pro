@@ -157,3 +157,87 @@ test("candidate ranking shadow evaluate route ranks a valid caller candidate wit
   assert.equal(body.safety.executionAuthority, false);
   assert.equal(body.safety.createsOrders, false);
 });
+
+test("candidate ranking router keeps hard-blocked candidate below eligible candidate", async () => {
+  const baseCandidate = {
+    symbol: "NIFTY",
+    side: "CE",
+    expiryDate: "2026-09-08",
+    dte: 4,
+    moneyness: "ATM",
+    premiumLtp: 120,
+    capitalFit: true,
+    liquidityOk: true,
+    spreadOk: true,
+    premiumResponseConfirmed: true,
+    deltaGammaResponseConfirmed: true,
+    thetaIvBurdenAcceptable: true,
+    multiExpiryConflictAbsent: true,
+    currentOrNearExpiryUsable: true,
+    higherDteUsable: false
+  };
+
+  const eligible = {
+    candidate: { ...baseCandidate, strike: 24000 },
+    evidence: {
+      temporalConfidencePct: 80,
+      premiumEfficiencyPct: 78,
+      liquidityQualityPct: 82,
+      crossDteAgreementPct: 76
+    }
+  };
+
+  const blocked = {
+    candidate: { ...baseCandidate, strike: 24050, liquidityOk: false },
+    evidence: {
+      temporalConfidencePct: 100,
+      premiumEfficiencyPct: 100,
+      liquidityQualityPct: 100,
+      crossDteAgreementPct: 100
+    }
+  };
+
+  const response = await researchRouter.request("/candidate-ranking-shadow/evaluate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ candidates: [blocked, eligible] }),
+  });
+  assert.equal(response.status, 200);
+
+  const body = await response.json() as {
+    ok: boolean;
+    productionImpact: string;
+    candidateCount: number;
+    result: {
+      bestCandidateKey: string | null;
+      ranked: Array<{
+        candidateKey: string;
+        eligible: boolean;
+        rank: number | null;
+        reasons: string[];
+      }>;
+    };
+    safety: {
+      readOnly: boolean;
+      databaseWrites: boolean;
+      telegramWrites: boolean;
+      executionAuthority: boolean;
+      createsOrders: boolean;
+    };
+  };
+
+  assert.equal(body.ok, true);
+  assert.equal(body.productionImpact, "NONE");
+  assert.equal(body.candidateCount, 2);
+  const eligibleRow = body.result.ranked.find((row) => row.eligible);
+  const blockedRow = body.result.ranked.find((row) => !row.eligible);
+  assert.equal(eligibleRow?.rank, 1);
+  assert.equal(body.result.bestCandidateKey, eligibleRow?.candidateKey);
+  assert.equal(blockedRow?.rank, null);
+  assert.ok(blockedRow?.reasons.includes("HARD_SELECTOR_BLOCK"));
+  assert.equal(body.safety.readOnly, true);
+  assert.equal(body.safety.databaseWrites, false);
+  assert.equal(body.safety.telegramWrites, false);
+  assert.equal(body.safety.executionAuthority, false);
+  assert.equal(body.safety.createsOrders, false);
+});

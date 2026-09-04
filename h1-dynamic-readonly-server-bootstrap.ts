@@ -1,5 +1,6 @@
 import { startH1DynamicReadOnlyLiveChain, type H1DynamicReadOnlyLiveStartResult } from "./h1-dynamic-readonly-live-chain.js";
 import { getH1RegularMarketWindowContext, type H1RegularMarketWindowContext } from "./h1-regular-market-window-context.js";
+import { evaluateH1MarketOpenReadinessAcceptance, type H1MarketOpenReadinessAcceptance } from "./h1-market-open-readiness-acceptance.js";
 import type { H1LiveExactReadOnlyConsumerObservation, H1LiveExactReadOnlyDirectionObservation, H1LiveExactReadOnlyShadowInputObservation, H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-websocket-service.js";
 import type { H1LiveExactRawEvidenceMissing, H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import type { H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
@@ -34,6 +35,7 @@ export interface H1DynamicReadOnlyServerStatus {
   readOnlyShadowInputReadySymbolCount: number;
   readOnlyShadowInputObservations: H1LiveExactReadOnlyShadowInputObservation[];
   marketWindowContext: H1RegularMarketWindowContext;
+  marketOpenReadinessAcceptance: H1MarketOpenReadinessAcceptance;
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
@@ -47,6 +49,7 @@ export interface H1DynamicReadOnlyServerStatus {
 
 type StartFn = (asOfDate: string, enabled: boolean) => Promise<H1DynamicReadOnlyLiveStartResult>;
 type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status">;
+type H1StatusWithoutAcceptance = Omit<H1DynamicReadOnlyServerStatus, "marketOpenReadinessAcceptance">;
 
 let statusValue: H1DynamicReadOnlyServerStatus = status(false, false, false, "DISABLED", null, 0);
 let attemptPromise: Promise<H1DynamicReadOnlyServerStatus> | null = null;
@@ -54,8 +57,15 @@ let liveService: StatusService | null = null;
 let initialProofTimer: NodeJS.Timeout | null = null;
 let threeMinuteProofTimer: NodeJS.Timeout | null = null;
 
-function status(enabled: boolean, attempted: boolean, started: boolean, reason: H1DynamicReadOnlyServerStatus["reason"], asOfDate: string | null, subscribedTokenCount: number): H1DynamicReadOnlyServerStatus {
+function withAcceptance(base: H1StatusWithoutAcceptance): H1DynamicReadOnlyServerStatus {
   return {
+    ...base,
+    marketOpenReadinessAcceptance: evaluateH1MarketOpenReadinessAcceptance(base),
+  };
+}
+
+function status(enabled: boolean, attempted: boolean, started: boolean, reason: H1DynamicReadOnlyServerStatus["reason"], asOfDate: string | null, subscribedTokenCount: number): H1DynamicReadOnlyServerStatus {
+  const base: H1StatusWithoutAcceptance = {
     version: "H1_DYNAMIC_READONLY_SERVER_BOOTSTRAP_V1", enabled, attempted, started, reason, asOfDate, subscribedTokenCount,
     connected: false, socketState: "UNAVAILABLE", receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
     rawEvidenceReady: false, rawEvidenceExpectedTokenCount: subscribedTokenCount, rawEvidenceFreshTokenCount: 0,
@@ -65,6 +75,7 @@ function status(enabled: boolean, attempted: boolean, started: boolean, reason: 
     greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
     affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
   };
+  return withAcceptance(base);
 }
 
 function istDate(now = new Date()): string {
@@ -77,19 +88,24 @@ export function isH1DynamicReadOnlyLiveEnabled(env: NodeJS.ProcessEnv = process.
 }
 
 export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatus {
-  if (!liveService) return {
-    ...statusValue,
-    marketWindowContext: getH1RegularMarketWindowContext(),
-    rawEvidenceMissing: statusValue.rawEvidenceMissing.map((x) => ({ ...x })),
-    rawEvidenceSymbolReadiness: statusValue.rawEvidenceSymbolReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
-    nearestPeerReadiness: statusValue.nearestPeerReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
-    readOnlyConsumerObservations: statusValue.readOnlyConsumerObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
-    readOnlyDirectionObservations: statusValue.readOnlyDirectionObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
-    readOnlyShadowInputObservations: statusValue.readOnlyShadowInputObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
-  };
+  if (!liveService) {
+    const { marketOpenReadinessAcceptance: _ignored, ...stored } = statusValue;
+    const base: H1StatusWithoutAcceptance = {
+      ...stored,
+      marketWindowContext: getH1RegularMarketWindowContext(),
+      rawEvidenceMissing: statusValue.rawEvidenceMissing.map((x) => ({ ...x })),
+      rawEvidenceSymbolReadiness: statusValue.rawEvidenceSymbolReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      nearestPeerReadiness: statusValue.nearestPeerReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      readOnlyConsumerObservations: statusValue.readOnlyConsumerObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      readOnlyDirectionObservations: statusValue.readOnlyDirectionObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      readOnlyShadowInputObservations: statusValue.readOnlyShadowInputObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
+    };
+    return withAcceptance(base);
+  }
   const live = liveService.status();
-  return {
-    ...statusValue,
+  const { marketOpenReadinessAcceptance: _ignored, ...stored } = statusValue;
+  const base: H1StatusWithoutAcceptance = {
+    ...stored,
     marketWindowContext: getH1RegularMarketWindowContext(),
     connected: live.connected, socketState: live.state, receivedPacketCount: live.receivedPacketCount,
     rejectedPacketCount: live.rejectedPacketCount, lastPacketTimestamp: live.lastPacketTimestamp,
@@ -107,6 +123,7 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
     readOnlyShadowInputObservations: (live.readOnlyShadowInputObservations ?? []).map((x) => ({ ...x, blockers: [...x.blockers] })),
     greekEvidenceStatus: live.greekEvidenceStatus, forwardsDownstream: false,
   };
+  return withAcceptance(base);
 }
 
 function clearLiveProofTimers(): void {

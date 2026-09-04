@@ -29,6 +29,18 @@ export interface H1LiveExactRawEvidenceMissing {
   reason: string;
 }
 
+export interface H1LiveExactRawEvidenceSymbolReadiness {
+  symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
+  primaryExpiry: string | null;
+  primaryReady: boolean;
+  multiExpiryReady: boolean;
+  primaryExpectedTokenCount: number;
+  primaryFreshTokenCount: number;
+  totalExpectedTokenCount: number;
+  totalFreshTokenCount: number;
+  blockers: string[];
+}
+
 export interface H1LiveExactRawEvidenceStatus {
   version: "H1_LIVE_EXACT_RAW_EVIDENCE_STORE_V1";
   ready: boolean;
@@ -38,6 +50,7 @@ export interface H1LiveExactRawEvidenceStatus {
   missingTokenCount: number;
   rows: H1LiveExactRawEvidenceRow[];
   missing: H1LiveExactRawEvidenceMissing[];
+  symbolReadiness: H1LiveExactRawEvidenceSymbolReadiness[];
   blockers: string[];
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
@@ -167,6 +180,33 @@ export class H1LiveExactRawEvidenceStore {
     if (missing.length) blockers.push(`MISSING_EXACT_TOKENS:${missing.length}`);
     if (stale) blockers.push(`STALE_EXACT_TOKENS:${stale}`);
 
+    const freshTokens = new Set(rows.map((row) => row.instrumentToken));
+    const symbols = this.registry.coveredSymbols().filter((s): s is "NIFTY" | "SENSEX" | "BANKNIFTY" =>
+      s === "NIFTY" || s === "SENSEX" || s === "BANKNIFTY");
+    const symbolReadiness = symbols.map((symbol): H1LiveExactRawEvidenceSymbolReadiness => {
+      const entries = this.registry.entries().filter((entry) => entry.symbol === symbol && (entry.role === "SPOT" || entry.role === "OPTION"));
+      const expiries = [...new Set(entries.filter((entry) => entry.role === "OPTION" && entry.expiry).map((entry) => entry.expiry!))].sort();
+      const primaryExpiry = expiries[0] ?? null;
+      const primaryEntries = entries.filter((entry) => entry.role === "SPOT" || (entry.role === "OPTION" && entry.expiry === primaryExpiry));
+      const primaryFresh = primaryEntries.filter((entry) => freshTokens.has(entry.instrumentToken)).length;
+      const totalFresh = entries.filter((entry) => freshTokens.has(entry.instrumentToken)).length;
+      const rowBlockers: string[] = [];
+      if (!primaryExpiry) rowBlockers.push("PRIMARY_EXPIRY_UNAVAILABLE");
+      if (primaryFresh !== primaryEntries.length) rowBlockers.push(`PRIMARY_EVIDENCE_INCOMPLETE:${primaryFresh}/${primaryEntries.length}`);
+      if (totalFresh !== entries.length) rowBlockers.push(`MULTI_EXPIRY_EVIDENCE_INCOMPLETE:${totalFresh}/${entries.length}`);
+      return {
+        symbol,
+        primaryExpiry,
+        primaryReady: primaryExpiry != null && primaryEntries.length === 3 && primaryFresh === 3,
+        multiExpiryReady: entries.length > 0 && totalFresh === entries.length,
+        primaryExpectedTokenCount: primaryEntries.length,
+        primaryFreshTokenCount: primaryFresh,
+        totalExpectedTokenCount: entries.length,
+        totalFreshTokenCount: totalFresh,
+        blockers: rowBlockers,
+      };
+    });
+
     return {
       version: "H1_LIVE_EXACT_RAW_EVIDENCE_STORE_V1",
       ready: blockers.length === 0 && rows.length === expected.length,
@@ -176,6 +216,7 @@ export class H1LiveExactRawEvidenceStore {
       missingTokenCount: missing.length,
       rows,
       missing,
+      symbolReadiness,
       blockers,
       greekEvidenceStatus: "NOT_CONFIGURED",
       productionImpact: "NONE",

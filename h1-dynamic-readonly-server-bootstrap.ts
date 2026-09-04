@@ -1,4 +1,5 @@
 import { startH1DynamicReadOnlyLiveChain, type H1DynamicReadOnlyLiveStartResult } from "./h1-dynamic-readonly-live-chain.js";
+import { getH1RegularMarketWindowContext, type H1RegularMarketWindowContext } from "./h1-regular-market-window-context.js";
 import type { H1LiveExactReadOnlyConsumerObservation, H1LiveExactReadOnlyDirectionObservation, H1LiveExactReadOnlyShadowInputObservation, H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-websocket-service.js";
 import type { H1LiveExactRawEvidenceMissing, H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import type { H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
@@ -32,6 +33,7 @@ export interface H1DynamicReadOnlyServerStatus {
   readOnlyDirectionObservations: H1LiveExactReadOnlyDirectionObservation[];
   readOnlyShadowInputReadySymbolCount: number;
   readOnlyShadowInputObservations: H1LiveExactReadOnlyShadowInputObservation[];
+  marketWindowContext: H1RegularMarketWindowContext;
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
@@ -59,7 +61,7 @@ function status(enabled: boolean, attempted: boolean, started: boolean, reason: 
     rawEvidenceReady: false, rawEvidenceExpectedTokenCount: subscribedTokenCount, rawEvidenceFreshTokenCount: 0,
     rawEvidenceMissingTokenCount: subscribedTokenCount, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
     readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
-    readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],
+    readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [], marketWindowContext: getH1RegularMarketWindowContext(),
     greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
     affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
   };
@@ -77,6 +79,7 @@ export function isH1DynamicReadOnlyLiveEnabled(env: NodeJS.ProcessEnv = process.
 export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatus {
   if (!liveService) return {
     ...statusValue,
+    marketWindowContext: getH1RegularMarketWindowContext(),
     rawEvidenceMissing: statusValue.rawEvidenceMissing.map((x) => ({ ...x })),
     rawEvidenceSymbolReadiness: statusValue.rawEvidenceSymbolReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
     nearestPeerReadiness: statusValue.nearestPeerReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
@@ -87,6 +90,7 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
   const live = liveService.status();
   return {
     ...statusValue,
+    marketWindowContext: getH1RegularMarketWindowContext(),
     connected: live.connected, socketState: live.state, receivedPacketCount: live.receivedPacketCount,
     rejectedPacketCount: live.rejectedPacketCount, lastPacketTimestamp: live.lastPacketTimestamp,
     rawEvidenceReady: live.rawEvidenceReady, rawEvidenceExpectedTokenCount: live.rawEvidenceExpectedTokenCount,

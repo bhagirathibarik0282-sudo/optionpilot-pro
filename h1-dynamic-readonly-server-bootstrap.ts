@@ -88,6 +88,14 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
   };
 }
 
+function scheduleDelayedLiveProofLog(): void {
+  if (process.env.NODE_ENV === "test") return;
+  const proofTimer = setTimeout(() => {
+    console.log(`[H1_DYNAMIC_READONLY_LIVE_PROOF] ${JSON.stringify(getH1DynamicReadOnlyServerStatus())}`);
+  }, 5_000);
+  proofTimer.unref?.();
+}
+
 /**
  * Server-safe entrypoint. Unless the explicit env flag is exactly true, it does
  * not call the live selection chain and therefore cannot open a Kite socket.
@@ -114,6 +122,7 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(
       const live = await startFn(asOfDate, true);
       liveService = live.service;
       statusValue = status(true, true, live.started, live.reason, asOfDate, live.subscribedTokenCount);
+      if (live.started && liveService) scheduleDelayedLiveProofLog();
     } catch {
       liveService = null;
       statusValue = status(true, true, false, "START_FAILED", asOfDate, 0);

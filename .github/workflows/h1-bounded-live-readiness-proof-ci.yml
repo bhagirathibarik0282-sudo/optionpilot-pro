@@ -19,4 +19,4 @@ jobs:
           node-version: "22"
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Verify bounded one-shot H1 readiness proof
-        run: NODE_ENV=test node --import tsx --test test/h1-bounded-live-readiness-proof.test.ts test/h1-market-open-acceptance-capture.test.ts
+        run: NODE_ENV=test node --import tsx --test test/h1-bounded-live-readiness-proof.test.ts test/h1-market-open-acceptance-capture.test.ts test/h1-weekday-acceptance-capture-scheduler.test.ts

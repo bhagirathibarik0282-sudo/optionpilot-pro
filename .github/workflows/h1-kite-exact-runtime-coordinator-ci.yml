@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - 'h1-kite-exact-runtime-coordinator.ts'
+      - 'h1-live-exact-market-wiring-readiness.ts'
       - 'test/h1-kite-exact-runtime-coordinator.test.ts'
+      - 'test/h1-live-exact-market-wiring-readiness.test.ts'
       - '.github/workflows/h1-kite-exact-runtime-coordinator-ci.yml'
   workflow_dispatch:
 
@@ -17,5 +19,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-audit --no-fund
-      - run: npx tsx --test test/h1-kite-exact-runtime-coordinator.test.ts
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install tsx --test test/h1-kite-exact-runtime-coordinator.test.ts test/h1-live-exact-market-wiring-readiness.test.ts

@@ -2,6 +2,9 @@ import type { H1LiveExactMarketWiringReadinessResult } from "./h1-live-exact-mar
 import { H1LiveExactRawEvidenceStore, type H1LiveExactRawEvidenceMissing, type H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import { buildNearestValidMonthlyPeerReadiness, type H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
 import { buildH1ReadOnlyEvidenceConsumerBoundary } from "./h1-readonly-evidence-consumer-boundary.js";
+import { deriveH1ExactLiveSpotDirection } from "./h1-exact-live-spot-direction-provider.js";
+import { auditH1ExactDirectionSourceReadiness } from "./h1-exact-direction-source-readiness.js";
+import type { H1ExactUnderlyingObservation } from "./h1-kite-exact-price-greek-adapter.js";
 import { KiteWebSocketTransport, type KiteSocketFactory } from "./kite-websocket-transport.js";
 
 export interface H1LiveExactReadOnlyConsumerObservation {
@@ -10,6 +13,16 @@ export interface H1LiveExactReadOnlyConsumerObservation {
   nearestPeerExpiry: string;
   ready: boolean;
   evidenceTokenCount: number;
+  blockers: string[];
+}
+
+export interface H1LiveExactReadOnlyDirectionObservation {
+  symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
+  ready: boolean;
+  direction: "UP" | "DOWN" | null;
+  spotMovePct: number | null;
+  sourceReady: boolean;
+  sourceId: string | null;
   blockers: string[];
 }
 
@@ -41,6 +54,8 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   nearestPeerReadiness: H1NearestValidMonthlyPeerReadinessRow[];
   readOnlyConsumerReadySymbolCount: number;
   readOnlyConsumerObservations: H1LiveExactReadOnlyConsumerObservation[];
+  readOnlyDirectionReadySymbolCount: number;
+  readOnlyDirectionObservations: H1LiveExactReadOnlyDirectionObservation[];
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
@@ -52,11 +67,14 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   failClosed: true;
 }
 
+const DIRECTION_POLICY = { maxObservationGapMs: 10_000, minAbsoluteSpotMovePct: 0.05 } as const;
+
 export class H1LiveExactReadOnlyWebSocketService {
   private transport: KiteWebSocketTransport | null = null;
   private readonly allowedTokens: Set<number>;
   private readonly firstSeenTokens = new Set<number>();
   private readonly rawEvidence: H1LiveExactRawEvidenceStore;
+  private readonly directionBaselineBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], H1ExactUnderlyingObservation>();
   private value: H1LiveExactReadOnlyWebSocketStatus;
 
   constructor(private readonly config: H1LiveExactReadOnlyWebSocketServiceConfig) {
@@ -72,7 +90,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       subscribedTokenCount: registryTokens.length, receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
       rawEvidenceReady: false, rawEvidenceExpectedTokenCount: registryTokens.length, rawEvidenceFreshTokenCount: 0,
       rawEvidenceMissingTokenCount: registryTokens.length, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
-      readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [],
+      readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
       greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
       affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
     };
@@ -85,6 +103,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       rawEvidenceSymbolReadiness: this.value.rawEvidenceSymbolReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
       nearestPeerReadiness: this.value.nearestPeerReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyConsumerObservations: this.value.readOnlyConsumerObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      readOnlyDirectionObservations: this.value.readOnlyDirectionObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
     };
   }
   rawEvidenceStatus(nowIso: string) { return this.rawEvidence.status(nowIso); }
@@ -119,13 +138,36 @@ export class H1LiveExactReadOnlyWebSocketService {
         const consumer = buildH1ReadOnlyEvidenceConsumerBoundary(evidence, nearest);
         this.value.readOnlyConsumerReadySymbolCount = consumer.readySymbolCount;
         this.value.readOnlyConsumerObservations = consumer.rows.map((row) => ({
-          symbol: row.symbol,
-          primaryExpiry: row.primaryExpiry,
-          nearestPeerExpiry: row.nearestPeerExpiry,
-          ready: row.ready,
-          evidenceTokenCount: row.evidenceTokenCount,
-          blockers: [...row.blockers],
+          symbol: row.symbol, primaryExpiry: row.primaryExpiry, nearestPeerExpiry: row.nearestPeerExpiry,
+          ready: row.ready, evidenceTokenCount: row.evidenceTokenCount, blockers: [...row.blockers],
         }));
+
+        const directionBySymbol = new Map(this.value.readOnlyDirectionObservations.map((row) => [row.symbol, row]));
+        for (const row of evidence.rows.filter((x) => x.role === "SPOT")) {
+          const current: H1ExactUnderlyingObservation = { source: "LIVE_RUNTIME_EXACT", symbol: row.symbol, observedAt: row.observedAt, receivedAt: row.receivedAt, price: row.ltp };
+          const baseline = this.directionBaselineBySymbol.get(row.symbol);
+          if (!baseline) { this.directionBaselineBySymbol.set(row.symbol, current); continue; }
+          const previousMs = Date.parse(baseline.observedAt);
+          const currentMs = Date.parse(current.observedAt);
+          if (!Number.isFinite(previousMs) || !Number.isFinite(currentMs) || currentMs <= previousMs) continue;
+          const derived = deriveH1ExactLiveSpotDirection(baseline, current, DIRECTION_POLICY);
+          const source = auditH1ExactDirectionSourceReadiness({
+            source: derived.source, sourceId: derived.sourceId, liveRuntimeExact: derived.liveRuntimeExact,
+            deterministic: derived.deterministic, optionSideInferenceUsed: false, callerStaticDirectionUsed: false,
+          });
+          directionBySymbol.set(row.symbol, {
+            symbol: row.symbol,
+            ready: derived.ready && source.ready,
+            direction: derived.ready && source.ready ? derived.direction : null,
+            spotMovePct: derived.spotMovePct,
+            sourceReady: source.ready,
+            sourceId: source.sourceId,
+            blockers: [...new Set([...derived.blockers, ...source.blockers])],
+          });
+          if (derived.ready || derived.blockers.includes("SPOT_OBSERVATION_GAP_EXCEEDED")) this.directionBaselineBySymbol.set(row.symbol, current);
+        }
+        this.value.readOnlyDirectionObservations = [...directionBySymbol.values()];
+        this.value.readOnlyDirectionReadySymbolCount = this.value.readOnlyDirectionObservations.filter((row) => row.ready).length;
       },
       onTextMessage: () => {},
       onState: (state) => { this.value.state = state; this.value.connected = state === "OPEN"; },

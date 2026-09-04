@@ -2,6 +2,7 @@ import { startH1DynamicReadOnlyLiveChain, type H1DynamicReadOnlyLiveStartResult 
 import { getH1RegularMarketWindowContext, type H1RegularMarketWindowContext } from "./h1-regular-market-window-context.js";
 import { evaluateH1MarketOpenReadinessAcceptance, type H1MarketOpenReadinessAcceptance } from "./h1-market-open-readiness-acceptance.js";
 import { buildH1MarketOpenAcceptanceCapture } from "./h1-market-open-acceptance-capture.js";
+import { scheduleH1WeekdayAcceptanceCapture, type H1WeekdayAcceptanceCaptureCancel } from "./h1-weekday-acceptance-capture-scheduler.js";
 import type { H1LiveExactReadOnlyConsumerObservation, H1LiveExactReadOnlyDirectionObservation, H1LiveExactReadOnlyShadowInputObservation, H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-websocket-service.js";
 import type { H1LiveExactRawEvidenceMissing, H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import type { H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
@@ -57,6 +58,7 @@ let attemptPromise: Promise<H1DynamicReadOnlyServerStatus> | null = null;
 let liveService: StatusService | null = null;
 let initialProofTimer: NodeJS.Timeout | null = null;
 let threeMinuteProofTimer: NodeJS.Timeout | null = null;
+let weekdayAcceptanceCaptureCancel: H1WeekdayAcceptanceCaptureCancel | null = null;
 
 function withAcceptance(base: H1StatusWithoutAcceptance): H1DynamicReadOnlyServerStatus {
   return {
@@ -130,8 +132,15 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
 function clearLiveProofTimers(): void {
   if (initialProofTimer) clearTimeout(initialProofTimer);
   if (threeMinuteProofTimer) clearTimeout(threeMinuteProofTimer);
+  weekdayAcceptanceCaptureCancel?.();
   initialProofTimer = null;
   threeMinuteProofTimer = null;
+  weekdayAcceptanceCaptureCancel = null;
+}
+
+function logCompactAcceptanceCapture(): void {
+  const liveStatus = getH1DynamicReadOnlyServerStatus();
+  console.log(`[H1_MARKET_OPEN_ACCEPTANCE_CAPTURE] ${JSON.stringify(buildH1MarketOpenAcceptanceCapture(liveStatus))}`);
 }
 
 function scheduleDelayedLiveProofLog(): void {
@@ -147,6 +156,7 @@ function scheduleDelayedLiveProofLog(): void {
     console.log(`[H1_DYNAMIC_READONLY_3M_LIVE_PROOF] ${JSON.stringify(liveStatus)}`);
     console.log(`[H1_MARKET_OPEN_ACCEPTANCE_CAPTURE] ${JSON.stringify(buildH1MarketOpenAcceptanceCapture(liveStatus))}`);
   }, 180_000);
+  weekdayAcceptanceCaptureCancel = scheduleH1WeekdayAcceptanceCapture(logCompactAcceptanceCapture);
   initialProofTimer.unref?.();
   threeMinuteProofTimer.unref?.();
 }

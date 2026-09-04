@@ -1,8 +1,17 @@
-import type { H1DynamicReadOnlyServerStatus } from "./h1-dynamic-readonly-server-bootstrap.js";
+import type { H1RegularMarketWindowContext } from "./h1-regular-market-window-context.js";
 
 export const H1_MARKET_OPEN_READINESS_ACCEPTANCE_VERSION = "H1_MARKET_OPEN_READINESS_ACCEPTANCE_V1" as const;
 
 export type H1MarketOpenReadinessAcceptanceState = "PASS" | "BLOCKED" | "OUTSIDE_REGULAR_WINDOW";
+
+export interface H1MarketOpenReadinessAcceptanceInput {
+  marketWindowContext: H1RegularMarketWindowContext;
+  connected: boolean;
+  socketState: "READY" | "CONNECTING" | "RECONNECTING" | "OPEN" | "CLOSED" | "ERROR" | "UNAVAILABLE";
+  readOnlyConsumerReadySymbolCount: number;
+  readOnlyDirectionReadySymbolCount: number;
+  readOnlyShadowInputReadySymbolCount: number;
+}
 
 export interface H1MarketOpenReadinessAcceptance {
   version: typeof H1_MARKET_OPEN_READINESS_ACCEPTANCE_VERSION;
@@ -22,15 +31,7 @@ export interface H1MarketOpenReadinessAcceptance {
 }
 
 export function evaluateH1MarketOpenReadinessAcceptance(
-  status: Pick<
-    H1DynamicReadOnlyServerStatus,
-    | "marketWindowContext"
-    | "connected"
-    | "socketState"
-    | "readOnlyConsumerReadySymbolCount"
-    | "readOnlyDirectionReadySymbolCount"
-    | "readOnlyShadowInputReadySymbolCount"
-  >,
+  status: H1MarketOpenReadinessAcceptanceInput,
 ): H1MarketOpenReadinessAcceptance {
   const blockers: string[] = [];
   const within = status.marketWindowContext.regularMarketWindowState === "WITHIN_REGULAR_MARKET_WINDOW";

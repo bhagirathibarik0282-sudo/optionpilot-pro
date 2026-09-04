@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node scripts/wire-storage-v3-runtime.mjs && node scripts/wire-outcome-history-runtime.mjs && node scripts/wire-telegram-fingerprint-runtime.mjs && node scripts/wire-option-buying-risk-runtime.mjs && (tsx kite-shadow-runtime-service.ts & tsx h1-exact-shadow-live-service.ts & tsx server.ts)",
+    "start": "node scripts/wire-storage-v3-runtime.mjs && node scripts/wire-outcome-history-runtime.mjs && node scripts/wire-telegram-fingerprint-runtime.mjs && node scripts/wire-option-buying-risk-runtime.mjs && (tsx h1-live-contract-discovery-startup-audit.ts & tsx kite-shadow-runtime-service.ts & tsx h1-exact-shadow-live-service.ts & tsx server.ts)",
     "start:kite-shadow": "tsx kite-shadow-runtime-service.ts",
     "start:option-recorder": "tsx option-recorder-service.ts",
     "eod:archive": "tsx eod-archive-job.ts",

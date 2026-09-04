@@ -21,6 +21,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: npx --no-install tsx --test test/h1-live-contract-selection.test.ts test/h1-live-selection-exact-registry-preflight.test.ts

@@ -241,3 +241,92 @@ test("candidate ranking router keeps hard-blocked candidate below eligible candi
   assert.equal(body.safety.executionAuthority, false);
   assert.equal(body.safety.createsOrders, false);
 });
+
+test("candidate ranking router order is invariant to caller candidate order", async () => {
+  const baseCandidate = {
+    symbol: "NIFTY",
+    side: "CE",
+    expiryDate: "2026-09-08",
+    dte: 4,
+    moneyness: "ATM",
+    premiumLtp: 120,
+    capitalFit: true,
+    liquidityOk: true,
+    spreadOk: true,
+    premiumResponseConfirmed: true,
+    deltaGammaResponseConfirmed: true,
+    thetaIvBurdenAcceptable: true,
+    multiExpiryConflictAbsent: true,
+    currentOrNearExpiryUsable: true,
+    higherDteUsable: false
+  };
+
+  const stronger = {
+    candidate: { ...baseCandidate, strike: 24000 },
+    evidence: {
+      temporalConfidencePct: 92,
+      premiumEfficiencyPct: 90,
+      liquidityQualityPct: 94,
+      crossDteAgreementPct: 88
+    }
+  };
+
+  const weaker = {
+    candidate: { ...baseCandidate, strike: 24050 },
+    evidence: {
+      temporalConfidencePct: 70,
+      premiumEfficiencyPct: 68,
+      liquidityQualityPct: 72,
+      crossDteAgreementPct: 66
+    }
+  };
+
+  async function evaluate(candidates: unknown[]) {
+    const response = await researchRouter.request("/candidate-ranking-shadow/evaluate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ candidates }),
+    });
+    assert.equal(response.status, 200);
+    return await response.json() as {
+      ok: boolean;
+      productionImpact: string;
+      result: {
+        bestCandidateKey: string | null;
+        ranked: Array<{ candidateKey: string; eligible: boolean; rank: number | null }>;
+      };
+      safety: {
+        readOnly: boolean;
+        databaseWrites: boolean;
+        telegramWrites: boolean;
+        executionAuthority: boolean;
+        createsOrders: boolean;
+      };
+    };
+  }
+
+  const forward = await evaluate([stronger, weaker]);
+  const reverse = await evaluate([weaker, stronger]);
+
+  assert.equal(forward.ok, true);
+  assert.equal(reverse.ok, true);
+  assert.equal(forward.productionImpact, "NONE");
+  assert.equal(reverse.productionImpact, "NONE");
+  assert.equal(forward.result.bestCandidateKey, reverse.result.bestCandidateKey);
+
+  const forwardRanks = new Map(forward.result.ranked.map((row) => [row.candidateKey, row.rank]));
+  const reverseRanks = new Map(reverse.result.ranked.map((row) => [row.candidateKey, row.rank]));
+  assert.deepEqual([...forwardRanks.entries()].sort(), [...reverseRanks.entries()].sort());
+  assert.equal(forwardRanks.get(forward.result.bestCandidateKey ?? ""), 1);
+  assert.equal(reverseRanks.get(reverse.result.bestCandidateKey ?? ""), 1);
+  assert.equal(forward.safety.readOnly, true);
+  assert.equal(reverse.safety.readOnly, true);
+  assert.equal(forward.safety.databaseWrites, false);
+  assert.equal(reverse.safety.databaseWrites, false);
+  assert.equal(forward.safety.telegramWrites, false);
+  assert.equal(reverse.safety.telegramWrites, false);
+  assert.equal(forward.safety.executionAuthority, false);
+  assert.equal(reverse.safety.executionAuthority, false);
+  assert.equal(forward.safety.createsOrders, false);
+  assert.equal(reverse.safety.createsOrders, false);
+});

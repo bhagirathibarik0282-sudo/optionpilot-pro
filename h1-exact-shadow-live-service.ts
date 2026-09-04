@@ -8,16 +8,23 @@ import type { ThetaIvMultiExpiryPolicy } from "./h1-live-theta-iv-multi-expiry-e
 import type { LiveCapitalLiquidityDtePolicy } from "./h1-live-capital-liquidity-dte-gates.js";
 import { H1ExactPeerRuntimeStore } from "./h1-exact-peer-runtime-store.js";
 import type { H1ExpectedPremiumDirection } from "./h1-exact-peer-directional-state-classifier.js";
+import { H1ExactLiveSpotDirectionStore } from "./h1-exact-live-spot-direction-store.js";
+import type { H1ExactLiveSpotDirectionPolicy } from "./h1-exact-live-spot-direction-provider.js";
+import type { RecorderSymbol } from "./option-recorder-shadow.js";
 
 export interface H1ExactShadowContractPolicy {
   instrumentToken: number;
   moneyness: "ATM" | "ITM1";
   orderQuantity: number;
-  expectedPremiumDirection: H1ExpectedPremiumDirection;
+}
+
+export interface H1ExactShadowDirectionPolicy extends H1ExactLiveSpotDirectionPolicy {
+  maxDirectionAgeMs: number;
 }
 
 export interface H1ExactShadowPolicy {
   contracts: H1ExactShadowContractPolicy[];
+  directionPolicy: H1ExactShadowDirectionPolicy;
   greekPolicy: H1KiteGreekModelPolicy;
   premiumPolicy: LivePremiumDeltaGammaPolicy;
   burdenPolicy: ThetaIvMultiExpiryPolicy;
@@ -46,6 +53,12 @@ function finite(value: unknown, minimum = 0): boolean {
   return typeof value === "number" && Number.isFinite(value) && value >= minimum;
 }
 
+function validTime(value: string | null | undefined): number | null {
+  if (typeof value !== "string") return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 function validatePolicy(raw: unknown): H1ExactShadowPolicy {
   if (!raw || typeof raw !== "object") throw new Error("KITE_H1_EXACT_POLICY_INVALID");
   const p = raw as H1ExactShadowPolicy;
@@ -55,11 +68,16 @@ function validatePolicy(raw: unknown): H1ExactShadowPolicy {
     if (!Number.isInteger(row.instrumentToken) || row.instrumentToken <= 0 ||
         (row.moneyness !== "ATM" && row.moneyness !== "ITM1") ||
         !Number.isInteger(row.orderQuantity) || row.orderQuantity <= 0 ||
-        (row.expectedPremiumDirection !== "UP" && row.expectedPremiumDirection !== "DOWN") ||
         tokens.has(row.instrumentToken)) {
       throw new Error("KITE_H1_EXACT_CONTRACT_POLICY_INVALID");
     }
+    if ((row as any).expectedPremiumDirection != null) throw new Error("KITE_H1_EXACT_STATIC_CONTRACT_DIRECTION_FORBIDDEN");
     tokens.add(row.instrumentToken);
+  }
+  if (!finite(p.directionPolicy?.maxObservationGapMs, 1) ||
+      !finite(p.directionPolicy?.minAbsoluteSpotMovePct) ||
+      !finite(p.directionPolicy?.maxDirectionAgeMs, 1)) {
+    throw new Error("KITE_H1_EXACT_DIRECTION_POLICY_INVALID");
   }
   if (!finite(p.greekPolicy?.annualRiskFreeRate) || !finite(p.greekPolicy?.annualDividendYield) ||
       !finite(p.greekPolicy?.maxAgeMs, 1) || !finite(p.greekPolicy?.maxUnderlyingSkewMs, 1)) {
@@ -148,6 +166,25 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
   const registry = new KiteImmediateTokenRegistry(cfg.registryEntries);
   const policy = cfg.policy!;
   const contractPolicy = new Map(policy.contracts.map((x) => [x.instrumentToken, x]));
+  const directionStore = new H1ExactLiveSpotDirectionStore({
+    registry,
+    policy: {
+      maxObservationGapMs: policy.directionPolicy.maxObservationGapMs,
+      minAbsoluteSpotMovePct: policy.directionPolicy.minAbsoluteSpotMovePct,
+    },
+    maxUnderlyingAgeMs: policy.greekPolicy.maxAgeMs,
+  });
+  let currentRuntimeNowIso: string | null = null;
+
+  const liveDirectionFor = (symbol: RecorderSymbol) => {
+    const direction = directionStore.directionFor(symbol);
+    const nowMs = validTime(currentRuntimeNowIso);
+    const observedMs = validTime(direction?.currentObservedAt);
+    if (!direction?.ready || !direction.direction || nowMs == null || observedMs == null ||
+        nowMs < observedMs || nowMs - observedMs > policy.directionPolicy.maxDirectionAgeMs) return null;
+    return direction.direction;
+  };
+
   const peerStore = new H1ExactPeerRuntimeStore({
     registryEntries: registry.entries(),
     classifierPolicy: {
@@ -157,17 +194,25 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
     maxObservationAgeMs: policy.burdenPolicy.maxObservationAgeMs,
     requiredPeerCount: policy.burdenPolicy.requiredPeerCount,
     expectedDirectionFor: (entry) => {
-      const row = contractPolicy.get(entry.instrumentToken);
-      if (!row) throw new Error("CONTRACT_POLICY_MISSING");
-      return row.expectedPremiumDirection;
+      const direction = liveDirectionFor(entry.symbol);
+      if (!direction || (entry.optionSide !== "CE" && entry.optionSide !== "PE")) {
+        throw new Error("VERIFIED_LIVE_DIRECTION_UNAVAILABLE");
+      }
+      const optionShouldRise = (direction === "UP" && entry.optionSide === "CE") ||
+        (direction === "DOWN" && entry.optionSide === "PE");
+      return (optionShouldRise ? "UP" : "DOWN") as H1ExpectedPremiumDirection;
     },
   });
 
-  const runtime = createKiteH1ExactDualPathCore({
+  const rawRuntime = createKiteH1ExactDualPathCore({
     registry,
     cluster: { windowMs: 2_000, minDistinctMetrics: 2 },
     maxTickAgeMs: 5_000,
-    trendFor: () => ({ side: "NONE", valid: false }),
+    trendFor: (symbol) => {
+      const direction = liveDirectionFor(symbol);
+      if (!direction) return { side: "NONE", valid: false };
+      return { side: direction === "UP" ? "CE" : "PE", valid: true };
+    },
   }, {
     registry,
     greekPolicy: policy.greekPolicy,
@@ -186,6 +231,15 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
     },
   });
 
+  const runtime = {
+    ingestPacket: async (packet: Parameters<typeof rawRuntime.ingestPacket>[0], receivedAt: string, nowIso: string = receivedAt) => {
+      currentRuntimeNowIso = nowIso;
+      const entry = registry.get(packet?.instrumentToken ?? 0);
+      if (entry?.role === "SPOT") directionStore.ingest(packet, receivedAt);
+      return rawRuntime.ingestPacket(packet, receivedAt, nowIso);
+    },
+  };
+
   const supervisor = new KiteH1ExactShadowSupervisor({
     enabled: true, apiKey: cfg.apiKey, accessToken: authority.session.accessToken,
     registry, runtime, reconnectDelayMs: 1_000, reconnectMaxAttempts: 10,
@@ -200,6 +254,7 @@ function status(enabled: boolean, started: boolean, reason: H1ExactShadowLiveRea
   return {
     version: "H1_EXACT_SHADOW_LIVE_SERVICE_V1" as const,
     enabled, started, reason, subscribedTokenCount,
+    directionSourceStatus: "VERIFIED_RUNTIME_BOUND_FAIL_CLOSED" as const,
     multiExpiryPeerStatus: "WIRED_FAIL_CLOSED" as const,
     productionImpact: "NONE" as const,
     telegramSendAllowed: false as const,

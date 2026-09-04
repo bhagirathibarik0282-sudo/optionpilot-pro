@@ -31,6 +31,8 @@ function fakeSocket(sent: string[]) {
   };
 }
 
+const depth = { buy:[{price:100,quantity:50,orders:2}], sell:[{price:101,quantity:60,orders:3}] };
+
 test("starts only exact readiness tokens in Kite FULL mode and remains non-authoritative", () => {
   const sent:string[] = [];
   const socket = fakeSocket(sent);
@@ -57,7 +59,6 @@ test("raw exact evidence becomes ready only with fresh spot plus all exact optio
   const r = readiness();
   const store = new H1LiveExactRawEvidenceStore(r.registry!, 5_000);
   const t = "2026-09-04T08:10:00.000Z";
-  const depth = { buy:[{price:100,quantity:50,orders:2}], sell:[{price:101,quantity:60,orders:3}] };
   assert.equal(store.ingest({mode:"full",instrumentToken:99,lastPrice:25050,exchangeTimestamp:t,isIndex:true}, t), true);
   assert.equal(store.ingest({mode:"full",instrumentToken:3,lastPrice:100.5,exchangeTimestamp:t,isIndex:false,marketDepth:depth}, t), true);
   let status = store.status(t);
@@ -68,12 +69,36 @@ test("raw exact evidence becomes ready only with fresh spot plus all exact optio
   status = store.status(t);
   assert.equal(status.ready, true);
   assert.equal(status.freshTokenCount, 3);
-  assert.equal(status.missingTokenCount, 0);
+  assert.equal(status.symbolReadiness[0].primaryReady, true);
+  assert.equal(status.symbolReadiness[0].multiExpiryReady, true);
   assert.equal(status.affectsVerdict, false);
   assert.equal(status.affectsExecution, false);
   const stale = store.status("2026-09-04T08:10:06.000Z");
   assert.equal(stale.ready, false);
   assert.equal(stale.staleTokenCount, 3);
+});
+
+test("primary evidence can be ready while stale or missing peer expiry remains multi-expiry blocked", () => {
+  const registry = new KiteImmediateTokenRegistry([
+    { instrumentToken: 99, symbol: "BANKNIFTY", role: "SPOT", instrumentLabel: "NIFTY BANK" },
+    { instrumentToken: 3, symbol: "BANKNIFTY", role: "OPTION", instrumentLabel: "BNSEPCE", expiry: "2026-09-29", strike: 57600, optionSide: "CE" },
+    { instrumentToken: 4, symbol: "BANKNIFTY", role: "OPTION", instrumentLabel: "BNSEPPE", expiry: "2026-09-29", strike: 57600, optionSide: "PE" },
+    { instrumentToken: 5, symbol: "BANKNIFTY", role: "OPTION", instrumentLabel: "BNOCTCE", expiry: "2026-10-27", strike: 57600, optionSide: "CE" },
+    { instrumentToken: 6, symbol: "BANKNIFTY", role: "OPTION", instrumentLabel: "BNOCTPE", expiry: "2026-10-27", strike: 57600, optionSide: "PE" },
+  ]);
+  const store = new H1LiveExactRawEvidenceStore(registry, 5_000);
+  const t = "2026-09-04T08:10:00.000Z";
+  store.ingest({mode:"full",instrumentToken:99,lastPrice:57600,exchangeTimestamp:t,isIndex:true}, t);
+  store.ingest({mode:"full",instrumentToken:3,lastPrice:500,exchangeTimestamp:t,isIndex:false,marketDepth:depth}, t);
+  store.ingest({mode:"full",instrumentToken:4,lastPrice:480,exchangeTimestamp:t,isIndex:false,marketDepth:depth}, t);
+  const status = store.status(t);
+  assert.equal(status.ready, false);
+  assert.equal(status.symbolReadiness[0].primaryExpiry, "2026-09-29");
+  assert.equal(status.symbolReadiness[0].primaryReady, true);
+  assert.equal(status.symbolReadiness[0].multiExpiryReady, false);
+  assert.equal(status.symbolReadiness[0].primaryFreshTokenCount, 3);
+  assert.equal(status.symbolReadiness[0].totalFreshTokenCount, 3);
+  assert.match(status.symbolReadiness[0].blockers.join("|"), /MULTI_EXPIRY_EVIDENCE_INCOMPLETE/);
 });
 
 test("fails closed when readiness is not ready", () => {

@@ -1,0 +1,23 @@
+name: H1 Exact Peer Runtime Store CI
+
+on:
+  pull_request:
+    paths:
+      - 'h1-exact-peer-runtime-store.ts'
+      - 'h1-exact-shadow-live-service.ts'
+      - 'test/h1-exact-peer-runtime-store.test.ts'
+      - 'test/h1-exact-shadow-live-service.test.ts'
+      - '.github/workflows/h1-exact-peer-runtime-store-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npx tsx --test test/h1-exact-peer-runtime-store.test.ts test/h1-exact-shadow-live-service.test.ts

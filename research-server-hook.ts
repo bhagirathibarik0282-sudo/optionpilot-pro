@@ -13,6 +13,11 @@ import { runH1ObservedCandidateMdiEvidenceHttp } from "./h1-observed-candidate-m
 import { diagnoseObservedCandidateCoverage } from "./h1-observed-candidate-coverage-diagnostic.js";
 import { auditCandidateReconstruction } from "./h1-candidate-reconstruction-audit.js";
 import { runH1ExactLiveContractDiscoveryHttp } from "./h1-exact-live-contract-discovery-http.js";
+import {
+  getH1DynamicReadOnlyServerStatus,
+  isH1DynamicReadOnlyLiveEnabled,
+  startH1DynamicReadOnlyLiveFromServerEnv,
+} from "./h1-dynamic-readonly-server-bootstrap.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const MEANINGFUL_ACCEPTANCE_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
@@ -20,6 +25,28 @@ const MEANINGFUL_ACCEPTANCE_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
 installTelegramCombinationBridge();
 installMeaningfulLiveTelegramBridge();
 installMeaningfulLiveAcceptanceMonitor();
+
+// H1 exact live path remains hard-default OFF. Only the exact env value `true`
+// may start the read-only WebSocket chain. The chain itself has no direction,
+// verdict, Telegram or execution authority and fails closed at every boundary.
+if (process.env.NODE_ENV !== "test" && isH1DynamicReadOnlyLiveEnabled()) {
+  void startH1DynamicReadOnlyLiveFromServerEnv()
+    .then((result) => console.log(`[H1_DYNAMIC_READONLY_LIVE] ${JSON.stringify(result)}`))
+    .catch((err) => console.error(`[H1_DYNAMIC_READONLY_LIVE] ${JSON.stringify({
+      version: "H1_DYNAMIC_READONLY_SERVER_BOOTSTRAP_V1",
+      enabled: true,
+      attempted: true,
+      started: false,
+      reason: err instanceof Error ? err.message : "START_FAILED",
+      productionImpact: "NONE",
+      readOnly: true,
+      affectsDirection: false,
+      affectsVerdict: false,
+      affectsExecution: false,
+      affectsTelegram: false,
+      failClosed: true,
+    })}`));
+}
 
 const h1StartupAuditTimer = setTimeout(() => {
   void runH1PilotHttpAudit()
@@ -79,6 +106,11 @@ export function mountResearchRoutes(app: Hono): void {
     }
     const result = await getMeaningfulLiveAcceptanceStatus(requested || null);
     return c.json(result);
+  });
+
+  app.get("/api/research/h1-dynamic-readonly-live-status", (c) => {
+    c.header("Cache-Control", "no-store");
+    return c.json(getH1DynamicReadOnlyServerStatus());
   });
 
   app.get("/api/research/h1-exact-live-contract-discovery", async (c) => {

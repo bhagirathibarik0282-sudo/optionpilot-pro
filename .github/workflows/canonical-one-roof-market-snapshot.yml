@@ -17,3 +17,4 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npx tsx test/canonical-one-roof-market-snapshot.test.ts
       - run: node --import tsx --test test/execution-admission-ledger.test.ts
+      - run: node --import tsx --test test/locked-candidate-consumer-contract.test.ts

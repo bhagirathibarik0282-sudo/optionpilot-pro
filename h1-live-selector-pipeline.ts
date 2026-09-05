@@ -1,5 +1,8 @@
 import { assembleLiveExecutionCandidateInput, type LiveGateEvidencePacket } from "./h1-live-gate-evidence-assembler.js";
-import { produceH1LiveSelectorDecisions } from "./h1-live-selector-decision-producer.js";
+import {
+  produceH1LiveSelectorDecisions,
+  type H1LiveSelectorEvaluation,
+} from "./h1-live-selector-decision-producer.js";
 import type { H1ForwardCandidateDecisionInput } from "./h1-forward-candidate-decision-binding.js";
 
 export interface H1LiveSelectorPipelineInput {
@@ -13,6 +16,7 @@ export interface H1LiveSelectorPipelineResult {
   version: "H1_LIVE_SELECTOR_PIPELINE_V1";
   eligibleForLiveH1Marking: boolean;
   decisions: H1ForwardCandidateDecisionInput[];
+  evaluations: H1LiveSelectorEvaluation[];
   assembledCount: number;
   blockedCount: number;
   rejected: { index: number; blockers: string[] }[];
@@ -29,11 +33,11 @@ export function runH1LiveSelectorPipeline(input: unknown): H1LiveSelectorPipelin
   };
 
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return { ...base, eligibleForLiveH1Marking: false, decisions: [], assembledCount: 0, blockedCount: 0, rejected: [{ index: -1, blockers: ["INVALID_PIPELINE_INPUT"] }], producerRejected: [] };
+    return { ...base, eligibleForLiveH1Marking: false, decisions: [], evaluations: [], assembledCount: 0, blockedCount: 0, rejected: [{ index: -1, blockers: ["INVALID_PIPELINE_INPUT"] }], producerRejected: [] };
   }
   const raw = input as Record<string, unknown>;
   if (raw.provenance !== "LIVE_RUNTIME_EXACT" || typeof raw.nowIso !== "string" || !Array.isArray(raw.packets)) {
-    return { ...base, eligibleForLiveH1Marking: false, decisions: [], assembledCount: 0, blockedCount: 0, rejected: [{ index: -1, blockers: ["LIVE_RUNTIME_EXACT_PIPELINE_INPUT_REQUIRED"] }], producerRejected: [] };
+    return { ...base, eligibleForLiveH1Marking: false, decisions: [], evaluations: [], assembledCount: 0, blockedCount: 0, rejected: [{ index: -1, blockers: ["LIVE_RUNTIME_EXACT_PIPELINE_INPUT_REQUIRED"] }], producerRejected: [] };
   }
 
   const maxAgeMs = typeof raw.maxAgeMs === "number" && Number.isFinite(raw.maxAgeMs) && raw.maxAgeMs > 0 ? raw.maxAgeMs : 90_000;
@@ -56,6 +60,7 @@ export function runH1LiveSelectorPipeline(input: unknown): H1LiveSelectorPipelin
     ...base,
     eligibleForLiveH1Marking: eligible,
     decisions: eligible ? produced.decisions : [],
+    evaluations: eligible ? produced.evaluations : [],
     assembledCount: candidates.length,
     blockedCount: rejected.length,
     rejected,

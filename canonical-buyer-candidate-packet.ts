@@ -33,27 +33,32 @@ export interface CanonicalBuyerCandidatePacketResult {
   failClosed: true;
 }
 
-/**
- * Authority-preserving adapter for the existing execution candidate selector.
- *
- * Important semantics:
- * - It never re-selects or re-ranks a contract.
- * - CE/PE is retained only as option contract side; it is never interpreted as
- *   BUYER/SELLER business role.
- * - A packet exists only when EXECUTION_CANDIDATE_SELECTOR_V2 returns SELECT.
- * - This preparation layer has no Telegram or execution authority by itself.
- */
-export function buildCanonicalBuyerCandidatePacket(
-  input: ExecutionCandidateInput,
-): CanonicalBuyerCandidatePacketResult {
-  const selector = selectExecutionCandidate(input);
+function expectedCandidateKey(input: ExecutionCandidateInput): string {
+  return `${input.symbol}:${input.side}:${input.strike}:${input.expiryDate}:DTE${input.dte}:${input.moneyness}`;
+}
 
-  if (selector.decision !== "SELECT" || !selector.candidateKey || selector.premiumLtp == null) {
+/**
+ * Builds the canonical packet from an already-evaluated authoritative selector
+ * result. This is the preferred path when a live producer has already called
+ * EXECUTION_CANDIDATE_SELECTOR_V2, because it prevents selector re-execution.
+ */
+export function buildCanonicalBuyerCandidatePacketFromSelection(
+  input: ExecutionCandidateInput,
+  selector: ExecutionCandidateResult,
+): CanonicalBuyerCandidatePacketResult {
+  const identityMatches = selector.candidateKey === expectedCandidateKey(input);
+  if (
+    selector.version !== "EXECUTION_CANDIDATE_SELECTOR_V2" ||
+    selector.decision !== "SELECT" ||
+    !selector.candidateKey ||
+    selector.premiumLtp == null ||
+    !identityMatches
+  ) {
     return {
       decision: "BLOCK",
       packet: null,
       selector,
-      reasonCodes: selector.reasonCodes,
+      reasonCodes: identityMatches ? selector.reasonCodes : [...selector.reasonCodes, "CANONICAL_SELECTOR_IDENTITY_MISMATCH"],
       failClosed: true,
     };
   }
@@ -86,4 +91,16 @@ export function buildCanonicalBuyerCandidatePacket(
     reasonCodes: selector.reasonCodes,
     failClosed: true,
   };
+}
+
+/**
+ * Authority-preserving adapter for callers that do not already hold the hard
+ * selector result. It calls the hard selector once, then delegates to the
+ * pre-evaluated path above.
+ */
+export function buildCanonicalBuyerCandidatePacket(
+  input: ExecutionCandidateInput,
+): CanonicalBuyerCandidatePacketResult {
+  const selector = selectExecutionCandidate(input);
+  return buildCanonicalBuyerCandidatePacketFromSelection(input, selector);
 }

@@ -32,6 +32,7 @@ test("builds fail-closed date-wise 3m/6m/15m/30m theory evidence", () => {
   assert.equal(result.affectsExecution, false);
   assert.equal(result.labels.includes("PROVISIONAL_HYPOTHESIS"), true);
   assert.equal(result.dataQuality.coverageStatus, "PARTIAL");
+  assert.equal(result.cas.state, "UNAVAILABLE");
 });
 
 test("does not convert missing replay evidence into a neutral verdict", () => {
@@ -39,6 +40,7 @@ test("does not convert missing replay evidence into a neutral verdict", () => {
   assert.equal(result.ok, false);
   assert.equal(result.dayVerdict, "UNAVAILABLE");
   assert.equal(result.dataQuality.coverageStatus, "INSUFFICIENT");
+  assert.equal(result.cas.evidenceStatus, "DATA_UNAVAILABLE");
 });
 
 test("excludes non-TRUE truth-marker rows from theory evidence", () => {

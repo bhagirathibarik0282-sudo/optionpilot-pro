@@ -111,3 +111,38 @@ test("fails closed on readiness token mismatch or missing credentials", () => {
   assert.throws(() => new H1LiveExactReadOnlyWebSocketService({ readiness:mismatch, apiKey:"key", accessToken:"token" }), /TOKEN_MISMATCH/);
   assert.throws(() => new H1LiveExactReadOnlyWebSocketService({ readiness:readiness(), apiKey:"", accessToken:"token" }), /CREDENTIALS_REQUIRED/);
 });
+
+
+test("subscribes exact constituent tokens on the same read-only socket without granting authority", () => {
+  const sent:string[] = [];
+  const socket = fakeSocket(sent);
+  const service = new H1LiveExactReadOnlyWebSocketService({
+    readiness: readiness(), apiKey: "key", accessToken: "token", socketFactory: () => socket,
+    constituentRegistry: [
+      { instrumentToken: 101, parentSymbol: "NIFTY", role: "HEAVYWEIGHT", tradingsymbol: "HDFCBANK", sector: "BANK", weight: 12, source: "KITE_INSTRUMENT_MASTER" },
+      { instrumentToken: 102, parentSymbol: "NIFTY", role: "SECTOR_CONSTITUENT", tradingsymbol: "RELIANCE", sector: "ENERGY", weight: 10, source: "KITE_INSTRUMENT_MASTER" },
+    ],
+  });
+  const initial = service.start();
+  assert.equal(initial.subscribedTokenCount, 5);
+  socket.fire("open");
+  assert.deepEqual(JSON.parse(sent[0]), { a: "subscribe", v: [99,3,4,101,102] });
+  assert.deepEqual(JSON.parse(sent[1]), { a: "mode", v: ["full", [99,3,4,101,102]] });
+  const constituent = service.constituentEvidenceStatus("NIFTY");
+  assert.equal(constituent?.expectedTokenCount, 2);
+  assert.equal(constituent?.availableTokenCount, 0);
+  assert.deepEqual(constituent?.missingTokens, [101,102]);
+  assert.equal(constituent?.readOnly, true);
+  assert.equal(constituent?.affectsExecution, false);
+  assert.equal(constituent?.affectsTelegram, false);
+  assert.deepEqual(service.constituentTicks("NIFTY"), []);
+});
+
+test("fails closed when a constituent token overlaps the immediate registry", () => {
+  assert.throws(() => new H1LiveExactReadOnlyWebSocketService({
+    readiness: readiness(), apiKey: "key", accessToken: "token",
+    constituentRegistry: [
+      { instrumentToken: 99, parentSymbol: "NIFTY", role: "HEAVYWEIGHT", tradingsymbol: "HDFCBANK", sector: "BANK", weight: 12, source: "KITE_INSTRUMENT_MASTER" },
+    ],
+  }), /CONSTITUENT_TOKEN_OVERLAP/);
+});

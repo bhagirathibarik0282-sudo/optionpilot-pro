@@ -6,6 +6,10 @@ import { deriveH1ExactLiveSpotDirection } from "./h1-exact-live-spot-direction-p
 import { auditH1ExactDirectionSourceReadiness } from "./h1-exact-direction-source-readiness.js";
 import type { H1ExactUnderlyingObservation } from "./h1-kite-exact-price-greek-adapter.js";
 import { KiteWebSocketTransport, type KiteSocketFactory } from "./kite-websocket-transport.js";
+import { CanonicalConstituentTickStore, type CanonicalConstituentTickStoreStatus } from "./canonical-constituent-tick-store.js";
+import type { CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
+import type { CanonicalConstituentTokenEntry } from "./canonical-constituent-token-registry.js";
+import type { CanonicalMarketSymbol } from "./canonical-one-roof-market-snapshot.js";
 
 export interface H1LiveExactReadOnlyConsumerObservation {
   symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
@@ -41,6 +45,7 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   socketFactory?: KiteSocketFactory;
   reconnectDelayMs?: number;
   reconnectMaxAttempts?: number;
+  constituentRegistry?: CanonicalConstituentTokenEntry[];
 }
 
 export interface H1LiveExactReadOnlyWebSocketStatus {
@@ -82,6 +87,7 @@ const DIRECTION_POLICY = { maxObservationGapMs: 180_000, minAbsoluteSpotMovePct:
 export class H1LiveExactReadOnlyWebSocketService {
   private transport: KiteWebSocketTransport | null = null;
   private readonly allowedTokens: Set<number>;
+  private readonly constituentEvidence: CanonicalConstituentTickStore | null;
   private readonly firstSeenTokens = new Set<number>();
   private readonly rawEvidence: H1LiveExactRawEvidenceStore;
   private readonly directionBaselineBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], H1ExactUnderlyingObservation>();
@@ -93,11 +99,19 @@ export class H1LiveExactReadOnlyWebSocketService {
     if (!config.apiKey?.trim() || !config.accessToken?.trim()) throw new Error("KITE_H1_READONLY_CREDENTIALS_REQUIRED");
     const registryTokens = config.readiness.registry.tokens();
     if (registryTokens.length !== config.readiness.instrumentTokens.length || registryTokens.some((token) => !config.readiness.instrumentTokens.includes(token))) throw new Error("H1_LIVE_EXACT_READINESS_TOKEN_MISMATCH");
-    this.allowedTokens = new Set(registryTokens);
+    const constituentEntries = config.constituentRegistry ?? [];
+    const constituentTokens = constituentEntries.map((entry) => entry.instrumentToken);
+    if (constituentTokens.some((token) => registryTokens.includes(token))) {
+      throw new Error("H1_LIVE_EXACT_CONSTITUENT_TOKEN_OVERLAP");
+    }
+    this.constituentEvidence = constituentEntries.length > 0
+      ? new CanonicalConstituentTickStore(constituentEntries)
+      : null;
+    this.allowedTokens = new Set([...registryTokens, ...constituentTokens]);
     this.rawEvidence = new H1LiveExactRawEvidenceStore(config.readiness.registry);
     this.value = {
       version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1", started: false, connected: false, state: "READY",
-      subscribedTokenCount: registryTokens.length, receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
+      subscribedTokenCount: this.allowedTokens.size, receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
       rawEvidenceReady: false, rawEvidenceExpectedTokenCount: registryTokens.length, rawEvidenceFreshTokenCount: 0,
       rawEvidenceMissingTokenCount: registryTokens.length, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
       readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
@@ -119,6 +133,12 @@ export class H1LiveExactReadOnlyWebSocketService {
     };
   }
   rawEvidenceStatus(nowIso: string) { return this.rawEvidence.status(nowIso); }
+  constituentTicks(parentSymbol?: CanonicalMarketSymbol): CanonicalConstituentTick[] {
+    return this.constituentEvidence?.ticks(parentSymbol) ?? [];
+  }
+  constituentEvidenceStatus(parentSymbol?: CanonicalMarketSymbol): CanonicalConstituentTickStoreStatus | null {
+    return this.constituentEvidence?.status(parentSymbol) ?? null;
+  }
 
   start(): H1LiveExactReadOnlyWebSocketStatus {
     if (this.transport) throw new Error("H1_LIVE_EXACT_READONLY_ALREADY_STARTED");
@@ -130,6 +150,10 @@ export class H1LiveExactReadOnlyWebSocketService {
         for (const tick of ticks) {
           if (!this.allowedTokens.has(tick.instrumentToken)) { this.value.rejectedPacketCount += 1; continue; }
           this.value.receivedPacketCount += 1;
+          if (this.constituentEvidence?.hasToken(tick.instrumentToken)) {
+            if (!this.constituentEvidence.ingest(tick, receivedAt)) this.value.rejectedPacketCount += 1;
+            continue;
+          }
           this.rawEvidence.ingest(tick, receivedAt);
           if (!this.firstSeenTokens.has(tick.instrumentToken)) {
             this.firstSeenTokens.add(tick.instrumentToken);

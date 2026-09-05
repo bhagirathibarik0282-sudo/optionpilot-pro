@@ -1,5 +1,5 @@
 import { buildCanonicalOneRoofMarketSnapshot, type CanonicalMarketComponent, type CanonicalOneRoofMarketSnapshotInput } from "./canonical-one-roof-market-snapshot.js";
-import { buildCanonicalConstituentComponents, type CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
+import { buildCanonicalConstituentLiveComponent, type CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
 import type { CanonicalConstituentTokenEntry } from "./canonical-constituent-token-registry.js";
 
 export interface CanonicalShadowSnapshotAssemblerInput extends Omit<CanonicalOneRoofMarketSnapshotInput, "components"> {
@@ -16,12 +16,21 @@ export interface CanonicalShadowSnapshotAssemblerInput extends Omit<CanonicalOne
  */
 export function buildCanonicalShadowSnapshot(input: CanonicalShadowSnapshotAssemblerInput) {
   const base = input.baseComponents.filter((component) => component.family !== "HEAVYWEIGHTS" && component.family !== "SECTOR_BREADTH");
-  const constituentComponents = buildCanonicalConstituentComponents({
+  const heavyweightComponent = buildCanonicalConstituentLiveComponent({
     parentSymbol: input.symbol,
+    role: "HEAVYWEIGHT",
     asOfMs: input.asOfMs,
     registry: input.constituentRegistry,
     ticks: input.constituentTicks,
-    maxAgeMs: input.constituentFreshnessMs,
+    maxTickAgeMs: input.constituentFreshnessMs,
+  });
+  const sectorBreadthComponent = buildCanonicalConstituentLiveComponent({
+    parentSymbol: input.symbol,
+    role: "SECTOR_CONSTITUENT",
+    asOfMs: input.asOfMs,
+    registry: input.constituentRegistry,
+    ticks: input.constituentTicks,
+    maxTickAgeMs: input.constituentFreshnessMs,
   });
 
   return buildCanonicalOneRoofMarketSnapshot({
@@ -31,7 +40,7 @@ export function buildCanonicalShadowSnapshot(input: CanonicalShadowSnapshotAssem
     minuteClosed: input.minuteClosed,
     connectionId: input.connectionId,
     instrumentMasterVersion: input.instrumentMasterVersion,
-    components: [...base, ...constituentComponents],
+    components: [...base, heavyweightComponent, sectorBreadthComponent],
     freshnessBudgetsMs: input.freshnessBudgetsMs,
     ingestTelemetry: input.ingestTelemetry,
   });

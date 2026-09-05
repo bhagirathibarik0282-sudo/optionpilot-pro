@@ -20,6 +20,7 @@ import {
 } from "./h1-dynamic-readonly-server-bootstrap.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
+const THEORY_LAB_HREF = "/api/research/h1-theory-dashboard";
 const MEANINGFUL_ACCEPTANCE_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
 
 installTelegramCombinationBridge();
@@ -74,6 +75,14 @@ export function mountResearchRoutes(app: Hono): void {
     if (!html.includes("</body>") || html.includes("data-optionpilot-intelligence-shortcut")) return;
 
     const shortcut = `
+      <a
+        data-optionpilot-theory-lab-shortcut="true"
+        href="${THEORY_LAB_HREF}"
+        aria-label="Open Date-wise Theory Lab"
+        style="position:fixed;right:12px;bottom:108px;z-index:9999;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;border:1px solid rgba(187,156,255,.55);border-radius:999px;background:rgba(8,18,24,.94);color:#cfbaff;text-decoration:none;font:700 12px/1.1 system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:.02em;box-shadow:0 0 18px rgba(187,156,255,.18);backdrop-filter:blur(8px)">
+        <span aria-hidden="true">⌁</span>
+        <span>Date-wise Theory Lab</span>
+      </a>
       <a
         data-optionpilot-intelligence-shortcut="true"
         href="${INTELLIGENCE_LAYER_HREF}"

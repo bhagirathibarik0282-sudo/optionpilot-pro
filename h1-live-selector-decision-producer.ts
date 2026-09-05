@@ -1,4 +1,8 @@
-import { selectExecutionCandidate, type ExecutionCandidateInput } from "./execution-candidate-selector.js";
+import {
+  selectExecutionCandidate,
+  type ExecutionCandidateInput,
+  type ExecutionCandidateResult,
+} from "./execution-candidate-selector.js";
 import type { H1ForwardCandidateDecisionInput } from "./h1-forward-candidate-decision-binding.js";
 
 export type H1LiveSelectorInputProvenance = "LIVE_RUNTIME_EXACT";
@@ -8,11 +12,17 @@ export interface H1LiveSelectorProducerInput {
   candidates: unknown[];
 }
 
+export interface H1LiveSelectorEvaluation {
+  candidate: ExecutionCandidateInput;
+  selector: ExecutionCandidateResult;
+}
+
 export interface H1LiveSelectorProducerResult {
   version: "H1_LIVE_SELECTOR_DECISION_PRODUCER_V1";
   sourceClass: "LIVE_DETERMINISTIC_EXACT" | "UNAVAILABLE";
   eligibleForLiveH1Marking: boolean;
   decisions: H1ForwardCandidateDecisionInput[];
+  evaluations: H1LiveSelectorEvaluation[];
   rejected: { index: number; reason: string }[];
   failClosed: true;
   semantics: "EXACT_EXECUTION_SELECTOR_INPUTS_ONLY_NO_SHADOW_OR_INFERENCE";
@@ -111,11 +121,13 @@ export function produceH1LiveSelectorDecisions(input: unknown): H1LiveSelectorPr
       sourceClass: "UNAVAILABLE",
       eligibleForLiveH1Marking: false,
       decisions: [],
+      evaluations: [],
       rejected: [{ index: -1, reason: "LIVE_RUNTIME_EXACT_INPUT_REQUIRED" }],
     };
   }
 
   const decisions: H1ForwardCandidateDecisionInput[] = [];
+  const evaluations: H1LiveSelectorEvaluation[] = [];
   const rejected: { index: number; reason: string }[] = [];
 
   input.candidates.forEach((raw, index) => {
@@ -124,16 +136,17 @@ export function produceH1LiveSelectorDecisions(input: unknown): H1LiveSelectorPr
       rejected.push({ index, reason: "INVALID_OR_INCOMPLETE_EXECUTION_CANDIDATE_INPUT" });
       return;
     }
-    const result = selectExecutionCandidate(candidate);
+    const selector = selectExecutionCandidate(candidate);
+    evaluations.push({ candidate, selector });
     decisions.push({
       symbol: candidate.symbol,
       expiry: candidate.expiryDate,
       strike: candidate.strike,
       side: candidate.side,
-      decision: result.decision,
-      reasonCodes: [...result.reasonCodes],
+      decision: selector.decision,
+      reasonCodes: [...selector.reasonCodes],
       gates: gatesOf(candidate),
-      selectorVersion: result.version,
+      selectorVersion: selector.version,
     });
   });
 
@@ -142,6 +155,7 @@ export function produceH1LiveSelectorDecisions(input: unknown): H1LiveSelectorPr
     sourceClass: "LIVE_DETERMINISTIC_EXACT",
     eligibleForLiveH1Marking: true,
     decisions,
+    evaluations,
     rejected,
   };
 }

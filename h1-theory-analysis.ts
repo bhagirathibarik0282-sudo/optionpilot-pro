@@ -272,9 +272,15 @@ export function analyzeH1TheoryReplay(request: H1ReplayRequest, replay: H1Replay
   const snapshots = buildSnapshots(replay);
   const firstTimestamp = snapshots[0]?.timestamp ?? null;
   const lastTimestamp = snapshots[snapshots.length - 1]?.timestamp ?? null;
-  const quality = snapshots.length >= 60 ? "COMPLETE_ENOUGH" : snapshots.length >= 10 ? "PARTIAL" : "INSUFFICIENT";
+  // A regular 09:15-15:30 session has about 126 three-minute boundaries.
+  // Require roughly 80% coverage before using the positive label; sparse
+  // full-day rows must remain PARTIAL even when the first/last timestamps span
+  // the whole session.
+  const quality = snapshots.length >= 100 ? "COMPLETE_ENOUGH" : snapshots.length >= 10 ? "PARTIAL" : "INSUFFICIENT";
   const dataQuality = {
-    markerCount: replay.counts?.markers ?? 0,
+    // Only truth-eligible rows are displayed here. replay.counts.markers may
+    // also include STALE/INVALID marker states and would overstate coverage.
+    markerCount: snapshots.length,
     marketMinutes: snapshots.length,
     chainRows: replay.counts?.chain ?? 0,
     optionRows: replay.counts?.options ?? 0,

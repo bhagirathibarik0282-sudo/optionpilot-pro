@@ -109,7 +109,6 @@ export function produceVerifiedLiveBusinessEvidence(input: LiveBusinessEvidenceP
 
   for (const horizon of HORIZONS) {
     const rows = input.facts.filter((fact) => fact?.horizon === horizon);
-    const seen = new Set<LiveBusinessEvidenceFamily>();
     const buyer: number[] = [];
     const seller: number[] = [];
     const reasons: string[] = [];
@@ -124,7 +123,6 @@ export function produceVerifiedLiveBusinessEvidence(input: LiveBusinessEvidenceP
         continue;
       }
       const row = matches[0];
-      seen.add(family);
       if (row.provenance !== "LIVE_BUSINESS_FACT_VERIFIED_V1") {
         blockers.push(`${horizon}:${family}:INVALID_PROVENANCE`);
         evidenceReady = false;
@@ -164,16 +162,22 @@ export function produceVerifiedLiveBusinessEvidence(input: LiveBusinessEvidenceP
       evidenceReady = false;
     }
 
+    const devilFlags = unique(horizonDevilFlags);
+    if (devilFlags.length > 0) {
+      blockers.push(`${horizon}:DEVIL_CHECK_BLOCKED`);
+      evidenceReady = false;
+    }
+    aggregateDevilFlags.push(...devilFlags);
+
     const buyerScore = evidenceReady ? mean(buyer) : null;
     const sellerScore = evidenceReady ? mean(seller) : null;
-    const devilFlags = unique(horizonDevilFlags);
-    aggregateDevilFlags.push(...devilFlags);
+    if (buyerScore == null || sellerScore == null) evidenceReady = false;
 
     horizons.push({
       horizon,
       buyerScore,
       sellerScore,
-      evidenceReady: evidenceReady && buyerScore !== null && sellerScore !== null && devilFlags.length === 0,
+      evidenceReady,
       devilFlags,
       reasons: unique(reasons),
     });
@@ -182,6 +186,9 @@ export function produceVerifiedLiveBusinessEvidence(input: LiveBusinessEvidenceP
   const telegramView = horizons.find((h) => h.horizon === input.telegramHorizon) ?? null;
   if (!telegramView || !telegramView.evidenceReady || telegramView.buyerScore == null) {
     blockers.push("TELEGRAM_HORIZON_NOT_READY");
+  }
+  if (horizons.some((h) => !h.evidenceReady)) {
+    blockers.push("ALL_REQUIRED_HORIZONS_MUST_BE_READY");
   }
 
   const uniqueBlockers = unique(blockers);

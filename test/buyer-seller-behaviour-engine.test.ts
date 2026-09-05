@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { classifyBuyerSellerBehaviour, type BuyerSellerEvidence } from "../buyer-seller-behaviour-engine.ts";
+import {
+  buildBusinessHorizonView,
+  evaluateBuyerTelegramEligibility,
+  scoreToStars,
+} from "../business-buyer-seller-layer.ts";
 
 const base: BuyerSellerEvidence = {
   dataFresh: true, contractValid: true,
@@ -40,4 +45,35 @@ test("engine has no live authority", () => {
   assert.equal(r.affectsTelegram, false);
   assert.equal(r.affectsVerdict, false);
   assert.equal(r.affectsExecution, false);
+});
+
+test("business ratings are bounded and ambiguity is translated to WAIT", () => {
+  assert.equal(scoreToStars(-10), 1);
+  assert.equal(scoreToStars(65), 4);
+  assert.equal(scoreToStars(500), 5);
+  const view = buildBusinessHorizonView({
+    horizon: "INTRADAY",
+    buyerScore: 85,
+    sellerScore: 25,
+    evidenceReady: false,
+  });
+  assert.equal(view.action, "WAIT");
+  assert.equal(view.headline, "No clear edge — wait");
+});
+
+test("business edge requires material buyer seller score separation", () => {
+  assert.equal(buildBusinessHorizonView({ horizon: "MULTIDAY", buyerScore: 72, sellerScore: 63, evidenceReady: true }).action, "WAIT");
+  assert.equal(buildBusinessHorizonView({ horizon: "INTRADAY", buyerScore: 86, sellerScore: 38, evidenceReady: true }).action, "BUYER_EDGE");
+  assert.equal(buildBusinessHorizonView({ horizon: "EXPIRY", buyerScore: 35, sellerScore: 88, evidenceReady: true }).action, "SELLER_EDGE");
+});
+
+test("buyer-only Telegram gate blocks seller leakage and weak buyer candidates", () => {
+  assert.equal(evaluateBuyerTelegramEligibility({ role: "OPTION_SELLER", candidateStatus: "READY", qualityStars: 5 }).allowed, false);
+  assert.equal(evaluateBuyerTelegramEligibility({ role: "OPTION_BUYER", candidateStatus: "WATCH", qualityStars: 5 }).allowed, false);
+  assert.equal(evaluateBuyerTelegramEligibility({ role: "OPTION_BUYER", candidateStatus: "READY", qualityStars: 3 }).allowed, false);
+  assert.equal(evaluateBuyerTelegramEligibility({ role: "OPTION_BUYER", candidateStatus: "READY", qualityStars: 5, devilFlags: ["spread shock"] }).allowed, false);
+  assert.deepEqual(
+    evaluateBuyerTelegramEligibility({ role: "OPTION_BUYER", candidateStatus: "READY", qualityStars: 4 }),
+    { allowed: true, reason: "BUYER_READY" },
+  );
 });

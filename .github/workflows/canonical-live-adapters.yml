@@ -17,3 +17,4 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: node --import tsx --test test/canonical-constituent-token-registry.test.ts
       - run: node --import tsx --test test/canonical-constituent-live-component.test.ts
+      - run: node --import tsx --test test/canonical-shadow-snapshot-assembler.test.ts

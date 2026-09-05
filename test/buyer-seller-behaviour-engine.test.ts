@@ -8,6 +8,7 @@ import {
 } from "../business-buyer-seller-layer.ts";
 import { buildCanonicalBuyerCandidatePacket } from "../canonical-buyer-candidate-packet.ts";
 import { consumeCanonicalBusinessPacket } from "../canonical-business-consumer.ts";
+import { evaluateCanonicalTelegramTransport } from "../canonical-telegram-transport-gate.ts";
 
 const base: BuyerSellerEvidence = {
   dataFresh: true, contractValid: true,
@@ -182,4 +183,42 @@ test("canonical consumer blocks Telegram on quality or devil flags without chang
   assert.equal(devil.telegram.reason, "DEVIL_CHECK_BLOCKED");
   assert.equal(weak.buyerCandidate?.candidateKey, canonical.packet?.candidateKey);
   assert.equal(devil.buyerCandidate?.candidateKey, canonical.packet?.candidateKey);
+});
+
+test("canonical Telegram transport passes only the exact approved buyer candidate", () => {
+  const canonical = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, side: "PE" });
+  assert.ok(canonical.packet);
+  const consumer = consumeCanonicalBusinessPacket({ packet: canonical.packet, telegramQualityStars: 5, horizons: [] });
+  const result = evaluateCanonicalTelegramTransport({ consumer, meaningfulCandidateKey: canonical.packet!.candidateKey });
+  assert.deepEqual(result, {
+    allowed: true,
+    reason: "CANONICAL_BUYER_TRANSPORT_READY",
+    candidateKey: canonical.packet!.candidateKey,
+    failClosed: true,
+  });
+});
+
+test("canonical Telegram transport fails closed on missing consumer or candidate identity", () => {
+  const missing = evaluateCanonicalTelegramTransport({ consumer: null, meaningfulCandidateKey: "anything" });
+  assert.equal(missing.allowed, false);
+  assert.equal(missing.reason, "CANONICAL_CONSUMER_MISSING");
+
+  const canonical = buildCanonicalBuyerCandidatePacket(buyerCandidateBase);
+  assert.ok(canonical.packet);
+  const consumer = consumeCanonicalBusinessPacket({ packet: canonical.packet, telegramQualityStars: 5, horizons: [] });
+  const noKey = evaluateCanonicalTelegramTransport({ consumer, meaningfulCandidateKey: null });
+  const mismatch = evaluateCanonicalTelegramTransport({ consumer, meaningfulCandidateKey: "NIFTY:PE:99999:2099-01-01:DTE0:ATM" });
+  assert.equal(noKey.reason, "MEANINGFUL_CANDIDATE_MISSING");
+  assert.equal(mismatch.reason, "CANDIDATE_IDENTITY_MISMATCH");
+  assert.equal(noKey.failClosed, true);
+  assert.equal(mismatch.failClosed, true);
+});
+
+test("canonical Telegram transport respects buyer quality and devil gate blocks", () => {
+  const canonical = buildCanonicalBuyerCandidatePacket(buyerCandidateBase);
+  assert.ok(canonical.packet);
+  const weak = consumeCanonicalBusinessPacket({ packet: canonical.packet, telegramQualityStars: 3, horizons: [] });
+  const devil = consumeCanonicalBusinessPacket({ packet: canonical.packet, telegramQualityStars: 5, devilFlags: ["spread shock"], horizons: [] });
+  assert.equal(evaluateCanonicalTelegramTransport({ consumer: weak, meaningfulCandidateKey: canonical.packet!.candidateKey }).reason, "BUYER_TELEGRAM_GATE_BLOCKED");
+  assert.equal(evaluateCanonicalTelegramTransport({ consumer: devil, meaningfulCandidateKey: canonical.packet!.candidateKey }).reason, "BUYER_TELEGRAM_GATE_BLOCKED");
 });

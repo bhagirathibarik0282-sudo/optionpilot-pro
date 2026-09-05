@@ -6,6 +6,7 @@ import {
   evaluateBuyerTelegramEligibility,
   scoreToStars,
 } from "../business-buyer-seller-layer.ts";
+import { buildCanonicalBuyerCandidatePacket } from "../canonical-buyer-candidate-packet.ts";
 
 const base: BuyerSellerEvidence = {
   dataFresh: true, contractValid: true,
@@ -13,6 +14,25 @@ const base: BuyerSellerEvidence = {
   buyersLosingStrength: false, sellersLosingStrength: false,
   buyingRejected: false, sellingRejected: false,
   shortCovering: false, longUnwinding: false,
+};
+
+const buyerCandidateBase = {
+  symbol: "NIFTY" as const,
+  side: "CE" as const,
+  strike: 25000,
+  expiryDate: "2026-09-08",
+  dte: 2,
+  moneyness: "ATM" as const,
+  premiumLtp: 150,
+  capitalFit: true,
+  liquidityOk: true,
+  spreadOk: true,
+  premiumResponseConfirmed: true,
+  deltaGammaResponseConfirmed: true,
+  thetaIvBurdenAcceptable: true,
+  multiExpiryConflictAbsent: true,
+  currentOrNearExpiryUsable: true,
+  higherDteUsable: false,
 };
 
 test("clean buyer control is classified", () => {
@@ -76,4 +96,34 @@ test("buyer-only Telegram gate blocks seller leakage and weak buyer candidates",
     evaluateBuyerTelegramEligibility({ role: "OPTION_BUYER", candidateStatus: "READY", qualityStars: 4 }),
     { allowed: true, reason: "BUYER_READY" },
   );
+});
+
+test("canonical packet preserves hard selector authority and candidate key", () => {
+  const result = buildCanonicalBuyerCandidatePacket(buyerCandidateBase);
+  assert.equal(result.decision, "READY");
+  assert.ok(result.packet);
+  assert.equal(result.selector.decision, "SELECT");
+  assert.equal(result.packet?.candidateKey, result.selector.candidateKey);
+  assert.equal(result.packet?.sourceAuthority, "EXECUTION_CANDIDATE_SELECTOR_V2");
+  assert.equal(result.packet?.role, "OPTION_BUYER");
+  assert.equal(result.packet?.affectsTelegram, false);
+  assert.equal(result.packet?.affectsExecution, false);
+  assert.equal(result.packet?.aiMayOverride, false);
+});
+
+test("PE remains an option buyer contract and is never remapped to seller role", () => {
+  const result = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, side: "PE" });
+  assert.equal(result.decision, "READY");
+  assert.equal(result.packet?.optionSide, "PE");
+  assert.equal(result.packet?.role, "OPTION_BUYER");
+  assert.match(result.packet?.candidateKey ?? "", /:PE:/);
+});
+
+test("hard selector BLOCK cannot create a canonical buyer packet", () => {
+  const result = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, spreadOk: false });
+  assert.equal(result.decision, "BLOCK");
+  assert.equal(result.packet, null);
+  assert.equal(result.selector.decision, "BLOCK");
+  assert.ok(result.reasonCodes.includes("SPREAD_GATE_FAILED"));
+  assert.equal(result.failClosed, true);
 });

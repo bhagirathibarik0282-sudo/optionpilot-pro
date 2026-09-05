@@ -1,4 +1,5 @@
 import type { H1ReplayHttpResult, H1ReplayRequest } from "./h1-replay-http.js";
+import { analyzeH1CasProxy, type H1CasProxyResult } from "./h1-cas-proxy.js";
 
 export type TheoryDirection = "BULLISH" | "BEARISH" | "BALANCED" | "UNAVAILABLE";
 export type TheoryStatus = "VERIFIED_OBSERVATION" | "PARTIAL_EVIDENCE" | "INSUFFICIENT_DATA";
@@ -54,6 +55,7 @@ export interface H1TheoryAnalysisResult {
   };
   latestWindows: TheoryWindowEvidence[];
   transitions: TheoryTransitionEvent[];
+  cas: H1CasProxyResult;
   dayVerdict: TheoryDirection;
   theorySequence: readonly [
     "RESPONSE_EFFICIENCY",
@@ -295,6 +297,7 @@ export function analyzeH1TheoryReplay(request: H1ReplayRequest, replay: H1Replay
       dataQuality,
       latestWindows: [],
       transitions: [],
+      cas: analyzeH1CasProxy(request, replay),
       dayVerdict: "UNAVAILABLE",
       limitations: [replay.reason ?? "NO_VERIFIED_REPLAY_ROWS"],
       reason: replay.reason ?? "NO_VERIFIED_REPLAY_ROWS",
@@ -313,5 +316,5 @@ export function analyzeH1TheoryReplay(request: H1ReplayRequest, replay: H1Replay
     "Historical findings cannot override live evidence, verdict, Telegram, candidate selection or execution.",
   ];
   if (quality !== "COMPLETE_ENOUGH") limitations.unshift("Recorded-day coverage is incomplete; conclusions are partial.");
-  return { ...base, ok: true, dataQuality, latestWindows, transitions, dayVerdict, limitations };
+  return { ...base, ok: true, dataQuality, latestWindows, transitions, cas: analyzeH1CasProxy(request, replay), dayVerdict, limitations };
 }

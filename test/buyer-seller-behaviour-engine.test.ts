@@ -7,6 +7,7 @@ import {
   scoreToStars,
 } from "../business-buyer-seller-layer.ts";
 import { buildCanonicalBuyerCandidatePacket } from "../canonical-buyer-candidate-packet.ts";
+import { consumeCanonicalBusinessPacket } from "../canonical-business-consumer.ts";
 
 const base: BuyerSellerEvidence = {
   dataFresh: true, contractValid: true,
@@ -126,4 +127,59 @@ test("hard selector BLOCK cannot create a canonical buyer packet", () => {
   assert.equal(result.selector.decision, "BLOCK");
   assert.ok(result.reasonCodes.includes("SPREAD_GATE_FAILED"));
   assert.equal(result.failClosed, true);
+});
+
+test("canonical consumer gives dashboard and Telegram the same candidate", () => {
+  const canonical = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, side: "PE" });
+  assert.ok(canonical.packet);
+  const result = consumeCanonicalBusinessPacket({
+    packet: canonical.packet,
+    telegramQualityStars: 5,
+    horizons: [
+      { horizon: "INTRADAY", buyerScore: 88, sellerScore: 32, evidenceReady: true },
+      { horizon: "MULTIDAY", buyerScore: 70, sellerScore: 62, evidenceReady: true },
+      { horizon: "EXPIRY", buyerScore: 84, sellerScore: 40, evidenceReady: true },
+    ],
+  });
+  assert.equal(result.buyerCandidate?.candidateKey, canonical.packet?.candidateKey);
+  assert.equal(result.candidateKey, canonical.packet?.candidateKey);
+  assert.equal(result.buyerCandidate?.optionSide, "PE");
+  assert.equal(result.buyerCandidate?.role, "OPTION_BUYER");
+  assert.equal(result.telegram.allowed, true);
+  assert.equal(result.sameCanonicalCandidateForDashboardAndTelegram, true);
+  assert.equal(result.horizons[1]?.action, "WAIT");
+  assert.equal(result.affectsExecution, false);
+  assert.equal(result.createsOrders, false);
+  assert.equal(result.aiMayOverride, false);
+});
+
+test("canonical consumer fails closed when packet is absent", () => {
+  const result = consumeCanonicalBusinessPacket({
+    packet: null,
+    telegramQualityStars: 5,
+    horizons: [{ horizon: "INTRADAY", buyerScore: 95, sellerScore: 10, evidenceReady: true }],
+  });
+  assert.equal(result.buyerCandidate, null);
+  assert.equal(result.candidateKey, null);
+  assert.deepEqual(result.telegram, { allowed: false, reason: "CANDIDATE_NOT_READY" });
+});
+
+test("canonical consumer blocks Telegram on quality or devil flags without changing dashboard identity", () => {
+  const canonical = buildCanonicalBuyerCandidatePacket(buyerCandidateBase);
+  assert.ok(canonical.packet);
+  const weak = consumeCanonicalBusinessPacket({
+    packet: canonical.packet,
+    telegramQualityStars: 3,
+    horizons: [],
+  });
+  const devil = consumeCanonicalBusinessPacket({
+    packet: canonical.packet,
+    telegramQualityStars: 5,
+    devilFlags: ["spread shock"],
+    horizons: [],
+  });
+  assert.equal(weak.telegram.reason, "QUALITY_BELOW_GATE");
+  assert.equal(devil.telegram.reason, "DEVIL_CHECK_BLOCKED");
+  assert.equal(weak.buyerCandidate?.candidateKey, canonical.packet?.candidateKey);
+  assert.equal(devil.buyerCandidate?.candidateKey, canonical.packet?.candidateKey);
 });

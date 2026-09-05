@@ -31,6 +31,7 @@ test("builds fail-closed date-wise 3m/6m/15m/30m theory evidence", () => {
   assert.equal(result.dayVerdict, "BULLISH");
   assert.equal(result.affectsExecution, false);
   assert.equal(result.labels.includes("PROVISIONAL_HYPOTHESIS"), true);
+  assert.equal(result.dataQuality.coverageStatus, "PARTIAL");
 });
 
 test("does not convert missing replay evidence into a neutral verdict", () => {
@@ -46,4 +47,5 @@ test("excludes non-TRUE truth-marker rows from theory evidence", () => {
   const result = analyzeH1TheoryReplay(request, source);
   assert.equal(result.dataQuality.marketMinutes, 15);
   assert.equal(result.dataQuality.coverageStatus, "PARTIAL");
+  assert.equal(result.dataQuality.markerCount, 15);
 });

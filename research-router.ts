@@ -19,6 +19,8 @@ import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
 import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } from "./research-engine-chain-http.js";
 import { getMeaningfulLiveAcceptanceStatus } from "./meaningful-live-acceptance-monitor.js";
 import { candidateRankingShadowRuntimeStatus, evaluateCandidateRankingShadowHttp } from "./candidate-ranking-shadow-http.js";
+import { listH1TheoryRecordedDates, runH1TheoryDateAnalysis } from "./h1-theory-history.js";
+import { renderH1TheoryDashboardHtml } from "./h1-theory-dashboard-view.js";
 
 export const researchRouter = new Hono();
 
@@ -151,6 +153,42 @@ researchRouter.get("/h1-replay-intelligence", async (c) => {
   }
   const result = await runH1ReplayIntelligenceHttp(parsed.value);
   return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/h1-theory-dates", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const result = await listH1TheoryRecordedDates();
+  return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/h1-theory-analysis", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const parsed = parseH1ReplayRequest({
+    symbol: c.req.query("symbol"),
+    tradeDate: c.req.query("date"),
+    fromTime: c.req.query("from"),
+    toTime: c.req.query("to"),
+    scope: c.req.query("scope"),
+  });
+  if (!parsed.ok) {
+    return c.json({
+      ok: false,
+      mode: "READ_ONLY_H1_DATEWISE_THEORY_ANALYSIS_V1",
+      productionImpact: "NONE",
+      request: null,
+      reason: parsed.reason,
+      affectsVerdict: false,
+      affectsTelegram: false,
+      affectsExecution: false,
+    }, 400);
+  }
+  const result = await runH1TheoryDateAnalysis(parsed.value);
+  return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/h1-theory-dashboard", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.html(renderH1TheoryDashboardHtml());
 });
 
 researchRouter.get("/meaningful-live-acceptance", async (c) => {

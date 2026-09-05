@@ -1,19 +1,28 @@
-# OptionPilot Pro — Final Canonical Architecture Freeze V1
+# OptionPilot Pro — Final Canonical Architecture Freeze V2
 
-Status: DESIGN_FREEZE
-Purpose: prevent duplicate authority, divergent dashboard/Telegram/Kite state, and unnecessary engine proliferation.
+Status: DESIGN_FREEZE / SHADOW_ONLY
+Purpose: prevent duplicate authority, divergent Dashboard/Telegram/Kite state, stale-data promotion, and unsafe execution enablement.
 
 ## 1. Non-negotiable source policy
-- Kite WebSocket is the primary live market-data source for subscribed instruments.
-- Kite instrument master is the contract/token identity source.
-- Kite order updates are execution truth.
+- Every received Kite WebSocket packet is raw live-market evidence for subscribed instruments; do not use generic TBT wording as a substitute for the actual received-packet contract.
+- Kite instrument master is the sole contract/token/expiry/strike/lot-size identity source.
+- Kite order updates are execution truth only after a separately approved live-execution stage.
 - No module may fabricate, interpolate, or independently reconstruct a live tradable fact.
+- Railway deployment is outside this PR and remains unchanged.
 
 ## 2. One-roof market snapshot
-Every live observation belongs to one canonical identity:
+Every live observation belongs to one canonical identity and must retain:
 - snapshotId
-- observedAt/exchange timestamp where available
 - symbol/session identity
+- connectionId
+- instrumentMasterVersion
+- exchangeTimestamp
+- receivedAt
+- processedAt
+- ingestSeq
+- provenance (`KITE_WS`, `KITE_INSTRUMENT_MASTER`, `LOCAL_DERIVED`)
+- source time range where a component is derived from a window
+- minute-close status
 
 Required evidence slots:
 1. market structure
@@ -23,44 +32,51 @@ Required evidence slots:
 5. multi-DTE
 6. volatility/IV/Greeks where supported
 7. heavyweights
-8. sector/market breadth
+8. sector breadth
 9. response ladder (1m/3m/6m/15m/30m)
 10. liquidity/executability
 
-A valid observation is recordable even if filtering is not ready. Missing/late evidence never erases the observed market truth.
+Heavyweights and sector breadth are separate mandatory evidence families. Neither is candidate authority.
+A valid observation is recordable even when strict filtering is not ready. Missing/late evidence never erases observed market truth.
 
-## 3. Tick ingestion and processing separation
-Kite tick -> fast ingest queue -> canonical raw state.
+## 3. Freshness and quality
+- There is no universal production freshness value such as 90 seconds.
+- Freshness is family-specific and must be calibrated from observed live behaviour.
+- Until a required family has a calibrated budget, the snapshot state is `SHADOW_UNCALIBRATED` and new entries are blocked.
+- Stale/future/duplicate/invalid-timestamp/devil-flagged evidence fails closed for candidate promotion.
+- Internal blockers remain auditable; user-facing language stays action-oriented.
+
+## 4. Tick ingestion, backpressure and processing separation
+Kite WebSocket packet -> fast ingest queue -> canonical raw state.
 Processing, recording and UI rendering are separate consumers.
 - WebSocket callback must not perform heavy calculations or blocking persistence.
-- Tick truth has priority over UI animation.
-- Dashboard may batch visual refreshes while backend retains all received ticks.
-- Queue lag/backpressure must be monitored.
+- Every received packet must retain exchange/receive/process timing and ingest sequence.
+- Queue depth, queue lag, dropped-packet count and backpressure state are telemetry, not UI decoration.
+- Backpressure or packet drop means `BLOCK_NEW_ENTRIES`; raw observation remains recordable.
+- Dashboard may batch visual refreshes while backend retains received-packet truth.
 
-## 4. Recorder contract
-- Raw received ticks are append-only audit truth.
+## 5. Recorder contract
+- Raw received packets are append-only audit truth.
 - Every completed 1-minute snapshot becomes immutable historical evidence.
 - 3m/6m/15m/30m are analysis windows, not feed refresh intervals.
-- Later outcome analysis must be stored separately and must never rewrite the original decision/state.
+- Later outcome analysis is separate and never rewrites the original decision/state.
 - Rejected/no-trade states are first-class journal records.
 
-## 5. Deterministic processing chain
-Canonical snapshot -> deterministic calculations -> Buyer/Seller interpretation -> hard eligibility -> hard candidate selector -> risk gate -> final locked trade packet.
+## 6. Deterministic authority chain
+Kite WebSocket packet -> raw evidence -> canonical snapshot -> freshness gates -> independent Buyer/Seller interpretation -> hard eligibility -> `EXECUTION_CANDIDATE_SELECTOR_V2` -> dynamic risk lifecycle -> immutable locked trade packet -> Dashboard + Telegram + Kite-shadow + Recorder/Journal.
 
-No dashboard, Telegram formatter, journal, AI layer or Kite adapter may independently select/re-rank/reconstruct a candidate.
+Exactly one deterministic hard candidate authority exists.
+No Dashboard, Telegram formatter, journal, AI layer, quantum layer or Kite adapter may independently select, re-rank or reconstruct a candidate.
 
-## 6. Buyer/Seller interpretation
-Every evidence family should express Buyer Support and Seller Support where derivable.
-User-facing language must be action-oriented rather than generic ambiguity labels.
-Valid neutral state:
-- Buyer advantage not established
-- Seller advantage not established
-- Wait for the named confirmation condition
+## 7. Buyer/Seller interpretation
+Buyer and Seller are independent deterministic interpretations.
+- Buyer absent does not imply Seller.
+- Seller absent does not imply Buyer.
+- Missing required evidence blocks promotion instead of inventing a side.
+- Valid neutral language: Buyer advantage not established / Seller advantage not established / wait for named confirmation.
 
-Never invent a Seller edge merely because Buyer edge is absent.
-
-## 7. Final locked trade packet
-One final authoritative packet feeds all trade consumers. It must bind at minimum:
+## 8. Final locked trade packet
+One authoritative packet feeds all downstream consumers. It must bind at minimum:
 - decisionId
 - snapshotId
 - candidateKey
@@ -72,123 +88,93 @@ One final authoritative packet feeds all trade consumers. It must bind at minimu
 - moneyness
 - reference premium
 - quantity/lot intent
-- risk/SL/TSL/target policy reference
+- dynamic risk/SL/TSL/target policy reference
 - selector version/reasons
 - freshness timestamp
+- locked packet hash
 
+An idempotency ledger must ensure one decisionId cannot generate duplicate candidate transport or duplicate order intent.
 OPTION_BUYER includes both CE buying and PE buying. Legacy directional SELL labels must never convert PE buying into a seller/business role.
 
-## 8. Consumer equality rule
-The same locked candidate identity must be used by:
+## 9. Consumer equality rule
+The exact same locked candidate identity must be used by:
 - Dashboard highlighted candidate
 - Telegram candidate message
-- Kite executable order intent
+- Kite-shadow order intent
 - Recorder/journal
 
-Formatting may differ by surface, but candidate identity and authority may not.
-Any identity/freshness mismatch blocks candidate Telegram transport and Kite execution.
+Formatting may differ, identity may not. Consumers must never reconstruct or re-rank the candidate.
+Any identity/freshness/hash mismatch blocks Telegram transport and Kite-shadow execution.
+Telegram remains buyer-candidate transport only; it cannot authorize a trade.
 
-## 9. Race and duplicate protection
-Immediately before Telegram send and before order build/submit:
-- verify snapshotId
-- verify decisionId
-- verify candidateKey
-- verify freshness
-- verify canonical gate still passes
+## 10. Execution safety and truth
+Real-money Kite submission is disabled in this V2 correction stage.
+Shadow lifecycle contract:
+Signal -> candidate lock -> risk gate -> execution eligibility -> shadow order intent -> acknowledgement/reject simulation or broker-observation receipt -> position lifecycle -> SL/TSL/exit -> P&L journal.
 
-Idempotency: one decisionId cannot generate duplicate candidate Telegram alerts or duplicate order intents.
-
-## 10. Execution truth
-Decision reference premium is not the same as actual broker fill.
 Store separately:
 - decision/reference price
-- submitted order details
-- broker acknowledgement/rejection
-- actual fill price
+- intended/submitted order details
+- acknowledgement/rejection state
+- actual fill price when a real broker-observation source exists
 - slippage
 - realized/unrealized P&L
-All execution receipts return to the same decisionId.
 
-## 11. Dashboard freeze
-Main tabs:
-1. LIVE MARKET
-2. OPTIONPILOT EDGE™
-3. INTELLIGENT JOURNAL
-4. EVIDENCE MEMORY
-5. PERFORMANCE
-6. EXECUTION
+All receipts return to the same decisionId. Duplicate/replayed decisions fail closed. Dynamic risk lifecycle is authoritative; fixed point SL/target values are not live authority.
 
-Neon/marketing visuals are presentation only and never feed calculations.
-Live visual tape may refresh sub-second/near-live; analytical horizons remain 1m/3m/6m/15m/30m.
+## 11. NIFTY/SENSEX exclusivity
+The hard eligibility/risk boundary must preserve index exclusivity: an active eligible trade lifecycle in one of NIFTY or SENSEX blocks a competing new live-authority lifecycle in the other. Quantum may inspect this only in shadow research.
 
-## 12. Intelligent journal
-Automatic event/minute records include:
-- what changed since prior state
-- Buyer behaviour
-- Seller behaviour
-- premium behaviour
-- heavyweight/sector/market breadth context
-- candidate considered
-- pass/reject/no-trade reason
-- Telegram status
-- Kite order/fill/reject status
-- later outcome annotation
+## 12. Dashboard freeze
+Dashboard is projection/display only. It may not alter evidence, score, candidate identity, risk, Telegram permission or execution authority.
+Business views may separate Buyer and Seller interpretation, but both must project deterministic upstream truth.
 
-Market-psychology labels (absorption, exhaustion, acceptance, rejection, chasing, short-covering, participation expansion/narrowing, etc.) require measurable evidence; AI may not invent them.
+## 13. Intelligent journal and evidence memory
+Automatic event/minute records include what changed, Buyer/Seller behaviour, premium behaviour, heavyweight and sector-breadth context, candidate considered, pass/reject/no-trade reason, Telegram status, execution status and later outcome annotation.
+Closed 1-minute states are same-day historical evidence immediately. Historical similarity provides context/confidence only and cannot override current hard-selector authority.
 
-## 13. Historical/evidence memory
-Closed 1-minute states become same-day historical evidence immediately.
-Comparison hierarchy may use:
-- immediate 1m/3m/6m/15m/30m memory
-- today-so-far regime
-- recent days
-- similar historical state fingerprints
-
-Historical similarity provides context/confidence only and cannot override current hard-selector authority.
-
-## 14. AI boundary
-AI may summarize, explain, journal and compare verified deterministic outputs.
-AI may not:
-- invent market facts
-- certify raw-data quality on its own
-- change CE/PE/strike/expiry/DTE
-- override candidate selector or risk gate
-- authorize Telegram transport or Kite execution
+## 14. Haiku / AI boundary
+Haiku may explain, summarize, journal, format and name missing confirmation.
+Haiku/AI may never change:
+- BUY/BLOCK
+- CE/PE
+- strike/expiry/DTE
+- decisionId/candidateKey
+- entry/risk/SL/TSL/quantity
+- eligibility/selector result
+- Telegram authorization
+- Kite authorization
 
 ## 15. Quantum boundary
-Quantum/QUBO is SHADOW_RESEARCH_ONLY until separately validated.
-It may rank only already-eligible deterministic candidates and may compare:
-- DTE/strike alternatives
-- premium response
-- liquidity/spread
-- theta/IV burden
-- 3m/6m/15m/30m stability
-- candidate churn
-- NIFTY/SENSEX exclusivity
-Its divergence from the classical selector is recorded. It has no live Telegram/execution authority.
+Quantum/QUBO is `SHADOW_RESEARCH_ONLY`.
+It may compare only candidates that have already passed hard deterministic eligibility and may inspect DTE/strike alternatives, premium response, liquidity/spread, theta/IV burden, 3m/6m/15m/30m stability, candidate churn and NIFTY/SENSEX exclusivity.
+It cannot promote, send, authorize risk, or execute.
 
 ## 16. Build order — frozen chain
-A. One-roof snapshot envelope
-B. Existing live-source adapters into the envelope, with heavyweight/sector verification
+A. PR #304 V2 one-roof snapshot contract
+B. Existing live-source adapters into the envelope, including verified heavyweight and sector-breadth adapters
 C. Deterministic live business-evidence producer
-D. Exact hard-selector + canonical buyer packet
-E. Final locked trade-packet/idempotency boundary
-F. Dashboard/Telegram/Kite consumers from the same packet
+D. Exact hard selector + canonical buyer packet
+E. Locked trade-packet hash + idempotency ledger
+F. Dashboard/Telegram/Kite-shadow consumers from the exact same packet
 G. Intelligent journal + immutable minute evidence
 H. Evidence-memory comparisons
-I. Shadow quantum optimizer
+I. Shadow quantum comparison
 J. Shadow execution/P&L verification
-K. Only after all gates pass: separate explicit decision on real-money enablement/deployment
+K. Only after all gates pass: separate explicit user decision on real-money enablement, merge/deployment and Railway work
 
 ## 17. Devil-check gates for every PR
-Every implementation PR must answer:
-- Did this create a second candidate authority? If yes: reject.
-- Can stale data reach Telegram/Kite? If yes: reject.
-- Can UI/AI/quantum alter the locked candidate? If yes: reject.
-- Can recorder failure erase market truth or silently change decisions? If yes: reject.
-- Can Dashboard/Telegram/Kite disagree on candidate identity? If yes: reject.
-- Are unverified heavyweight/sector facts being fabricated? If yes: reject.
-- Are research-only outputs promoted into live authority? If yes: reject.
-- Is any Railway deployment/execution authority added without explicit user approval? If yes: reject.
+Reject a change if any answer below is yes:
+- Did it create a second candidate authority?
+- Can stale/uncalibrated/backpressured data reach candidate transport or execution?
+- Can UI/AI/quantum alter the locked candidate?
+- Can recorder failure erase market truth or silently rewrite a decision?
+- Can Dashboard/Telegram/Kite-shadow disagree on candidate identity?
+- Are unverified heavyweight/sector facts fabricated?
+- Are research-only outputs promoted into live authority?
+- Is real-money Kite submission enabled?
+- Is Railway touched, deployed, or merged without explicit user approval?
+
+Final Deep Research verdict: **MODIFY, then GO for live-market shadow testing. Do not enable real-money execution yet.**
 
 Branding: OPTIONPILOT PRO™ / OPTIONPILOT EDGE™ — Exclusively Designed by Bhagirathi Sir.

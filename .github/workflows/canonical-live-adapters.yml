@@ -20,6 +20,7 @@ jobs:
       - run: node --import tsx --test test/canonical-official-index-universe-freeze.test.ts
       - run: node --import tsx --test test/canonical-official-universe-ingest.test.ts
       - run: node --import tsx --test test/canonical-heavyweight-sector-selection-policy.test.ts
+      - run: node --import tsx --test test/canonical-selection-startup-bridge.test.ts
       - run: node --import tsx --test test/h1-dynamic-readonly-live-chain.test.ts
       - run: node --import tsx --test test/canonical-constituent-live-component.test.ts
       - run: node --import tsx --test test/canonical-constituent-tick-store.test.ts

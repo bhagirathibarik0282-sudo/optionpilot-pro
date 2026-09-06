@@ -1,0 +1,18 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { fetchOfficialFiiDiiLiveV3, NSE_FII_DII_OFFICIAL_ENDPOINTS } from "../canonical-fii-dii-live-fetch-v3.ts";
+
+test("live NSE FII DII source is practically reachable and returns one complete recent session", async () => {
+  const result = await fetchOfficialFiiDiiLiveV3({ retryCount: 2 });
+  assert.equal(result.ok, true, result.blocker ?? "NSE live fetch failed");
+  assert.equal(result.rows.length, 2);
+  assert.ok(result.sourceUrl && NSE_FII_DII_OFFICIAL_ENDPOINTS.includes(result.sourceUrl as any));
+  const dates = [...new Set(result.rows.map((row) => row.date))];
+  assert.equal(dates.length, 1);
+  assert.equal(result.rows.some((row) => row.category === "FII_FPI"), true);
+  assert.equal(result.rows.some((row) => row.category === "DII"), true);
+  const latest = Date.parse(`${dates[0]}T00:00:00Z`);
+  const now = Date.now();
+  assert.ok(latest <= now + 86_400_000, "NSE returned a future-dated session");
+  assert.ok(now - latest <= 7 * 86_400_000, `NSE session is unexpectedly stale: ${dates[0]}`);
+});

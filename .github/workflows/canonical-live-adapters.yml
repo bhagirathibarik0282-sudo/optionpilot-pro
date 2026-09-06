@@ -29,6 +29,8 @@ jobs:
       - run: node --import tsx --test test/canonical-business-deterministic-scoring.test.ts
       - run: node --import tsx --test test/canonical-normalized-family-support-producer.test.ts
       - run: node --import tsx --test test/canonical-fii-dii-official-context.test.ts
+      - run: node --import tsx --test test/canonical-fii-dii-practical-ingest-v2.test.ts
+      - run: node --import tsx --test test/canonical-fii-dii-live-practical-probe.test.ts
       - run: node --import tsx --test test/h1-dynamic-readonly-live-chain.test.ts
       - run: node --import tsx --test test/canonical-constituent-live-component.test.ts
       - run: node --import tsx --test test/canonical-constituent-tick-store.test.ts

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { archiveKey, decideEodArchive, indiaTradingDateFromIso, isIsoTradingDate, isPastArchiveCutoff, isWeekdayTradingCandidate } from "../eod-archive-core.js";
+import { archiveKey, decideEodArchive, indiaTradingDateFromIso, isIsoTradingDate, isPastArchiveCutoff, isWeekdayTradingCandidate, resolveEodTradingDate } from "../eod-archive-core.js";
 
 test("valid same-day archive runs after EOD cutoff when source data exists", () => {
   const d = decideEodArchive({ tradingDate: "2026-08-28", nowIso: "2026-08-28T10:20:00Z", alreadyCompleted: false, sourceRecordCount: 42 });
@@ -50,8 +50,18 @@ test("India date conversion is timezone-correct across UTC boundary", () => {
 });
 
 test("cutoff helper is timezone-correct", () => {
-  assert.equal(isPastArchiveCutoff("2026-08-28T10:14:00Z"), false); // 15:44 IST
-  assert.equal(isPastArchiveCutoff("2026-08-28T10:15:00Z"), true);  // 15:45 IST
+  assert.equal(isPastArchiveCutoff("2026-08-28T10:14:00Z"), false);
+  assert.equal(isPastArchiveCutoff("2026-08-28T10:15:00Z"), true);
+});
+
+test("stale override is ignored during normal cron operation", () => {
+  assert.equal(resolveEodTradingDate("2026-09-04T10:30:00Z", "2026-08-28", false), "2026-09-04");
+});
+
+test("historical override requires explicit backfill authority", () => {
+  assert.equal(resolveEodTradingDate("2026-09-04T10:30:00Z", "2026-08-28", true), "2026-08-28");
+  assert.throws(() => resolveEodTradingDate("2026-09-04T10:30:00Z", "bad-date", true), /EOD_ARCHIVE_OVERRIDE_DATE_INVALID/);
+  assert.throws(() => resolveEodTradingDate("2026-09-04T10:30:00Z", "2026-09-05", true), /EOD_ARCHIVE_OVERRIDE_DATE_FUTURE/);
 });
 
 test("archive key is deterministic and invalid dates are rejected", () => {

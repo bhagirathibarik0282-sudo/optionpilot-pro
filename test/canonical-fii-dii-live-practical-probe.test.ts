@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fetchOfficialFiiDiiApi } from "../canonical-fii-dii-practical-ingest-v2.ts";
+import { fetchOfficialFiiDiiLiveV3, NSE_FII_DII_OFFICIAL_ENDPOINTS } from "../canonical-fii-dii-live-fetch-v3.ts";
 
-test("live NSE FII DII endpoint is practically reachable and returns one complete recent session", async () => {
-  const result = await fetchOfficialFiiDiiApi({ retryCount: 2 });
+test("live NSE FII DII source is practically reachable and returns one complete recent session", async () => {
+  const result = await fetchOfficialFiiDiiLiveV3({ retryCount: 2 });
   assert.equal(result.ok, true, result.blocker ?? "NSE live fetch failed");
   assert.equal(result.rows.length, 2);
+  assert.ok(result.sourceUrl && NSE_FII_DII_OFFICIAL_ENDPOINTS.includes(result.sourceUrl as any));
   const dates = [...new Set(result.rows.map((row) => row.date))];
   assert.equal(dates.length, 1);
   assert.equal(result.rows.some((row) => row.category === "FII_FPI"), true);

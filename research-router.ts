@@ -16,6 +16,7 @@ import { safeResearchDbClient } from "./research-index-db.js";
 import { buildCanonicalMarketDnaHistoricalFusionRuntime } from "./canonical-market-dna-historical-fusion-runtime.js";
 import { buildCanonicalIntelligenceDashboardModel } from "./canonical-intelligence-dashboard-model.js";
 import { renderCanonicalIntelligenceDashboardHtml } from "./canonical-intelligence-dashboard-view.js";
+import { runFiiDiiProductionReadinessHttp } from "./canonical-fii-dii-production-readiness-http.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
@@ -144,6 +145,12 @@ researchRouter.get("/broad-market-size/market-dna-context", async (c) => {
 
 researchRouter.get("/broad-market-size/status", async (c) => {
   return c.json(researchIndexRuntimeStatus());
+});
+
+researchRouter.get("/fii-dii/production-readiness", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const result = await runFiiDiiProductionReadinessHttp();
+  return c.json(result.body, result.status);
 });
 
 researchRouter.get("/engine-chain/status", (c) => {

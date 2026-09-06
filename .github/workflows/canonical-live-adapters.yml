@@ -25,6 +25,7 @@ jobs:
       - run: node --import tsx --test test/canonical-readonly-shadow-composition.test.ts
       - run: node --import tsx --test test/canonical-readonly-shadow-activation-boundary.test.ts
       - run: node --import tsx --test test/canonical-live-shadow-snapshot-source.test.ts
+      - run: node --import tsx --test test/canonical-business-evidence-input-adapter.test.ts
       - run: node --import tsx --test test/h1-dynamic-readonly-live-chain.test.ts
       - run: node --import tsx --test test/canonical-constituent-live-component.test.ts
       - run: node --import tsx --test test/canonical-constituent-tick-store.test.ts

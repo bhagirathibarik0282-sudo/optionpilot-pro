@@ -13,6 +13,8 @@ import { buildResearchDashboardModel } from "./research-dashboard-model.js";
 import { renderResearchDashboardHtml } from "./research-dashboard-view.js";
 import type { ResearchIndexCode } from "./research-index-types.js";
 import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
+import { auditResearchIndexArchiveRecovery } from "./research-index-recovery-audit.js";
+import { safeResearchDbClient } from "./research-index-db.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
@@ -80,6 +82,27 @@ researchRouter.get("/broad-market-size/readiness", async (c) => {
   }
   const audit = await getResearchIndexReadiness();
   return c.json({ ok: true, ...audit });
+});
+
+researchRouter.get("/broad-market-size/recovery-audit", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const ready = await initResearchIndexRuntime();
+  if (!ready) {
+    return c.json({
+      ok: false,
+      mode: "RESEARCH_MODE",
+      productionImpact: "NONE",
+      ready: false,
+      reason: "RESEARCH_DB_UNAVAILABLE",
+      readOnly: true,
+      affectsVerdict: false,
+      affectsCandidate: false,
+      affectsTelegram: false,
+      affectsExecution: false,
+    }, 503);
+  }
+  const audit = await auditResearchIndexArchiveRecovery(safeResearchDbClient);
+  return c.json({ ok: audit.ready, mode: "RESEARCH_MODE", productionImpact: "NONE", ...audit }, audit.ready ? 200 : 503);
 });
 
 researchRouter.get("/broad-market-size/status", async (c) => {

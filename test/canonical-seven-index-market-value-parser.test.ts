@@ -1,49 +1,74 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseOfficialIndexMarketValueHtml, fetchOfficialSevenIndexMarketValues } from "../canonical-seven-index-market-value-parser.ts";
+import { parseOfficialNseAllIndicesPayload, fetchOfficialSevenIndexMarketValues, SEVEN_INDEX_NSE_API_NAMES } from "../canonical-seven-index-market-value-parser.ts";
 import { CANONICAL_SEVEN_INDEX_SCOPE } from "../canonical-seven-index-intelligence-freeze.ts";
 
-function html(ltp: string, change: string, pct: string) {
-  return `<html><body><header><span>${ltp}</span><span>${change}</span><span>${pct}%</span></header><div>As on ,</div><h3>Index Movers</h3><table><tr><td>ABC</td><td>1.00</td><td>100.00</td></tr></table></body></html>`;
+function payload(overrides: Record<string, unknown> = {}) {
+  return {
+    data: CANONICAL_SEVEN_INDEX_SCOPE.map((indexId, i) => {
+      const previousClose = 10000 + i * 1000;
+      const variation = 50 + i;
+      const last = previousClose + variation;
+      return {
+        index: SEVEN_INDEX_NSE_API_NAMES[indexId],
+        last,
+        variation,
+        percentChange: Number(((variation / previousClose) * 100).toFixed(2)),
+        previousClose,
+        advances: 10 + i,
+        declines: 5 + i,
+        unchanged: 1,
+        ...overrides,
+      };
+    }),
+  };
 }
 
-test("parses official index-level LTP/change/% and derives previous close", () => {
-  const parsed = parseOfficialIndexMarketValueHtml({ indexId: "NIFTY_50", html: html("25,205.20", "100.95", "0.40"), fetchedAt: "2026-09-06T03:00:00.000Z" });
-  assert.equal(parsed.blocker, null);
-  assert.equal(parsed.row?.ltp, 25205.2);
-  assert.equal(parsed.row?.change, 100.95);
-  assert.equal(parsed.row?.changePct, 0.4);
-  assert.equal(parsed.row?.previousClose, 25104.25);
+test("parses exact seven official NSE allIndices rows and market values", () => {
+  const result = parseOfficialNseAllIndicesPayload(payload(), "2026-09-06T03:00:00.000Z");
+  assert.equal(result.ready, true, JSON.stringify(result.blockers));
+  assert.equal(result.rows.length, 7);
+  assert.deepEqual(result.rows.map((row) => row.indexId), CANONICAL_SEVEN_INDEX_SCOPE);
+  assert.equal(result.rows[0].nseApiName, "NIFTY 50");
+  assert.equal(result.rows[0].ltp, 10050);
+  assert.equal(result.rows[0].previousClose, 10000);
 });
 
-test("fails closed on ambiguous header, arithmetic mismatch and page mismatch", () => {
-  const ambiguous = html("25,205.20", "100.95", "0.40").replace("</header>", `<span>10,000.00 50.00 0.50%</span></header>`);
-  assert.match(parseOfficialIndexMarketValueHtml({ indexId: "NIFTY_50", html: ambiguous }).blocker ?? "", /HEADER_AMBIGUOUS/);
-  assert.match(parseOfficialIndexMarketValueHtml({ indexId: "NIFTY_50", html: html("25,205.20", "100.95", "1.40") }).blocker ?? "", /ARITHMETIC_MISMATCH/);
-  assert.match(parseOfficialIndexMarketValueHtml({ indexId: "NIFTY_50", html: "<html>no marker</html>" }).blocker ?? "", /PAGE_MISMATCH/);
+test("fails closed on missing/duplicate identities and arithmetic mismatch", () => {
+  const missing = payload();
+  (missing.data as Record<string, unknown>[]).pop();
+  assert.equal(parseOfficialNseAllIndicesPayload(missing).ready, false);
+
+  const duplicate = payload();
+  (duplicate.data as Record<string, unknown>[]).push({ ...(duplicate.data as Record<string, unknown>[])[0] });
+  assert.equal(parseOfficialNseAllIndicesPayload(duplicate).ready, false);
+
+  const bad = payload();
+  (bad.data as Record<string, unknown>[])[0].variation = 999;
+  assert.equal(parseOfficialNseAllIndicesPayload(bad).ready, false);
 });
 
-test("all-seven fetch fails closed if server returns same default page for every requested index", async () => {
-  const fakeFetch = async () => new Response(html("25,205.20", "100.95", "0.40"), { status: 200 });
-  const result = await fetchOfficialSevenIndexMarketValues(fakeFetch as typeof fetch);
-  assert.equal(result.rows.length, 0);
+test("fails closed when values collapse to implausibly identical index rows", () => {
+  const same = payload();
+  for (const row of same.data as Record<string, unknown>[]) {
+    row.last = 10050;
+    row.previousClose = 10000;
+    row.variation = 50;
+    row.percentChange = 0.5;
+  }
+  const result = parseOfficialNseAllIndicesPayload(same);
   assert.equal(result.ready, false);
-  assert.ok(result.blockers.some((b) => b.startsWith("SEVEN_INDEX_MARKET_VALUE_NOT_DISTINCT:")));
+  assert.ok(result.blockers.some((b) => b.startsWith("SEVEN_INDEX_API_VALUES_NOT_DISTINCT:")));
 });
 
-test("all-seven fetch accepts distinct validated market values and preserves no-authority boundary", async () => {
-  let i = 0;
-  const fakeFetch = async () => {
-    const n = i++;
-    const prev = 10000 + n * 1000;
-    const change = 50 + n;
-    const ltp = prev + change;
-    const pct = (change / prev) * 100;
-    return new Response(html(ltp.toFixed(2), change.toFixed(2), pct.toFixed(2)), { status: 200 });
+test("fetch uses exact official payload and preserves no-authority boundary", async () => {
+  const fakeFetch = async (url: string | URL | Request) => {
+    if (String(url).includes("/api/allIndices")) return Response.json(payload(), { status: 200 });
+    return new Response("home", { status: 200, headers: { "set-cookie": "nse=abc; Path=/" } });
   };
   const result = await fetchOfficialSevenIndexMarketValues(fakeFetch as typeof fetch);
   assert.equal(result.ready, true, JSON.stringify(result.blockers));
-  assert.deepEqual(result.rows.map((r) => r.indexId), CANONICAL_SEVEN_INDEX_SCOPE);
+  assert.equal(result.rows.length, 7);
   assert.equal(result.readOnly, true);
   assert.equal(result.contextOnly, true);
   assert.equal(result.calculatesWeightedBreadth, false);

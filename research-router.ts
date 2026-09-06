@@ -22,7 +22,7 @@ import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
 import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } from "./research-engine-chain-http.js";
 import { getMeaningfulLiveAcceptanceStatus } from "./meaningful-live-acceptance-monitor.js";
-import { candidateRankingShadowRuntimeStatus, evaluateCandidateRankingShadowHttp } from "./candidate-ranking-shadow-http.js";
+import { candidateRankingShadowRuntimeStatus, evaluateCandidateRankingShadowHttp } from "./candidate-ranking-shadow-http.js";\nimport { businessShadowLiveRuntimeStatus, evaluateBusinessShadowLiveHttp } from "./business-shadow-live-http-v1.js";
 import { listH1TheoryRecordedDates, runH1TheoryDateAnalysis } from "./h1-theory-history.js";
 import { renderH1TheoryDashboardHtml } from "./h1-theory-dashboard-view.js";
 
@@ -172,6 +172,18 @@ researchRouter.get("/candidate-ranking-shadow/status", (c) => {
 researchRouter.post("/candidate-ranking-shadow/evaluate", async (c) => {
   const body = await c.req.json().catch(() => null);
   const result = evaluateCandidateRankingShadowHttp(body);
+  return c.json(result, result.ok ? 200 : 400);
+});
+
+researchRouter.get("/business-shadow-live/status", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.json(businessShadowLiveRuntimeStatus());
+});
+
+researchRouter.post("/business-shadow-live/evaluate", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const body = await c.req.json().catch(() => null);
+  const result = evaluateBusinessShadowLiveHttp(body);
   return c.json(result, result.ok ? 200 : 400);
 });
 

@@ -41,6 +41,8 @@ jobs:
       - run: node --import tsx --test test/canonical-market-dna-context.test.ts
       - run: node --import tsx --test test/research-index-recovery-audit.test.ts
       - run: node --import tsx --test test/research-index-recovery-production-practical.test.ts
+      - run: node --import tsx --test test/canonical-market-dna-historical-memory.test.ts
+      - run: node --import tsx --test test/canonical-market-dna-historical-memory-runtime.test.ts
       - run: node --import tsx --test test/h1-dynamic-readonly-live-chain.test.ts
       - run: node --import tsx --test test/canonical-constituent-live-component.test.ts
       - run: node --import tsx --test test/canonical-constituent-tick-store.test.ts

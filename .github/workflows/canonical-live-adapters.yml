@@ -46,6 +46,7 @@ jobs:
       - run: node --import tsx --test test/canonical-market-dna-historical-fusion.test.ts
       - run: node --import tsx --test test/canonical-market-dna-production-practical.test.ts
       - run: node --import tsx --test test/canonical-intelligence-dashboard-model.test.ts
+      - run: node --import tsx --test test/canonical-intelligence-dashboard-production-practical.test.ts
       - run: node --import tsx --test test/h1-dynamic-readonly-live-chain.test.ts
       - run: node --import tsx --test test/canonical-constituent-live-component.test.ts
       - run: node --import tsx --test test/canonical-constituent-tick-store.test.ts

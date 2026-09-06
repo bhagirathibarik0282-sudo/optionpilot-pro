@@ -39,6 +39,7 @@ jobs:
       - run: node --import tsx --test test/canonical-seven-index-market-value-parser.test.ts
       - run: node --import tsx --test test/canonical-seven-index-market-value-live-practical.test.ts
       - run: node --import tsx --test test/canonical-market-dna-context.test.ts
+      - run: node --import tsx --test test/research-index-recovery-audit.test.ts
       - run: node --import tsx --test test/h1-dynamic-readonly-live-chain.test.ts
       - run: node --import tsx --test test/canonical-constituent-live-component.test.ts
       - run: node --import tsx --test test/canonical-constituent-tick-store.test.ts

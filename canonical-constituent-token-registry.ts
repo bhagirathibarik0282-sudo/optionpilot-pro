@@ -32,8 +32,8 @@ function validWeight(value: unknown): value is number {
 /**
  * Resolve only explicitly requested constituent contracts from the Kite instrument master.
  * This registry never infers heavyweight membership, sector membership, weights or direction.
- * Missing/duplicate identity fails closed so downstream canonical HEAVYWEIGHTS/SECTOR_BREADTH
- * evidence cannot be fabricated from cross-index proxies.
+ * A single instrument token may legitimately belong to multiple parent indices and/or roles;
+ * the membership key must still be unique, and instrument-master identity must be exact.
  */
 export function buildCanonicalConstituentTokenRegistry(
   rows: KiteInstrumentMasterRow[],
@@ -42,8 +42,8 @@ export function buildCanonicalConstituentTokenRegistry(
   if (!Array.isArray(rows) || rows.length === 0) throw new Error("KITE_INSTRUMENT_MASTER_EMPTY");
   if (!Array.isArray(requests) || requests.length === 0) throw new Error("CANONICAL_CONSTITUENT_REQUESTS_EMPTY");
 
-  const seenTokens = new Set<number>();
   const seenKeys = new Set<string>();
+  const tokenIdentity = new Map<number, string>();
   const entries: CanonicalConstituentTokenEntry[] = [];
 
   for (const request of requests) {
@@ -71,8 +71,13 @@ export function buildCanonicalConstituentTokenRegistry(
     const key = `${request.parentSymbol}|${request.role}|${tradingsymbol}|${sector ?? ""}`;
     if (seenKeys.has(key)) throw new Error(`CANONICAL_CONSTITUENT_DUPLICATE_REQUEST:${key}`);
     seenKeys.add(key);
-    if (seenTokens.has(row.instrument_token)) throw new Error(`CANONICAL_CONSTITUENT_DUPLICATE_TOKEN:${row.instrument_token}`);
-    seenTokens.add(row.instrument_token);
+
+    const resolvedIdentity = normalize(row.tradingsymbol);
+    const existingIdentity = tokenIdentity.get(row.instrument_token);
+    if (existingIdentity != null && existingIdentity !== resolvedIdentity) {
+      throw new Error(`CANONICAL_CONSTITUENT_TOKEN_IDENTITY_CONFLICT:${row.instrument_token}:${existingIdentity}:${resolvedIdentity}`);
+    }
+    tokenIdentity.set(row.instrument_token, resolvedIdentity);
 
     entries.push({
       instrumentToken: row.instrument_token,

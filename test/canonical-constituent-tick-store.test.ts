@@ -28,6 +28,24 @@ test("records exact constituent packets with triple timestamps and monotonic seq
   assert.deepEqual(store.status("NIFTY").missingTokens, []);
 });
 
+test("deduplicates WebSocket token subscription while preserving cross-index memberships", () => {
+  const shared = [
+    { instrumentToken: 101, parentSymbol: "NIFTY" as const, role: "HEAVYWEIGHT" as const, tradingsymbol: "HDFCBANK", sector: "BANK", weight: 12, source: "KITE_INSTRUMENT_MASTER" as const },
+    { instrumentToken: 101, parentSymbol: "NIFTY" as const, role: "SECTOR_CONSTITUENT" as const, tradingsymbol: "HDFCBANK", sector: "BANK", weight: 12, source: "KITE_INSTRUMENT_MASTER" as const },
+    { instrumentToken: 101, parentSymbol: "BANKNIFTY" as const, role: "HEAVYWEIGHT" as const, tradingsymbol: "HDFCBANK", sector: "BANK", weight: 28, source: "KITE_INSTRUMENT_MASTER" as const },
+  ];
+  const store = new CanonicalConstituentTickStore(shared);
+  assert.deepEqual(store.tokens(), [101]);
+  assert.equal(store.status().expectedTokenCount, 1);
+  assert.equal(store.status("NIFTY").expectedTokenCount, 1);
+  assert.equal(store.status("BANKNIFTY").expectedTokenCount, 1);
+  assert.equal(store.ingest(packet(101), receivedAt, processedAtMs), true);
+  assert.equal(store.ticks("NIFTY").length, 1);
+  assert.equal(store.ticks("BANKNIFTY").length, 1);
+  assert.equal(store.status("NIFTY").availableTokenCount, 1);
+  assert.equal(store.status("BANKNIFTY").availableTokenCount, 1);
+});
+
 test("fails closed for invalid, future, non-full and reverse-chronology packets", () => {
   const store = new CanonicalConstituentTickStore(registry);
   assert.equal(store.ingest(packet(101), receivedAt, processedAtMs), true);
@@ -54,7 +72,11 @@ test("ignores unregistered packets without creating evidence or authority", () =
   assert.equal(status.failClosed, true);
 });
 
-test("rejects empty or duplicate-token registries", () => {
+test("rejects empty, exact duplicate membership and token identity conflicts", () => {
   assert.throws(() => new CanonicalConstituentTickStore([]), /REGISTRY_REQUIRED/);
-  assert.throws(() => new CanonicalConstituentTickStore([registry[0], { ...registry[0] }]), /TOKEN_DUPLICATE/);
+  assert.throws(() => new CanonicalConstituentTickStore([registry[0], { ...registry[0] }]), /MEMBERSHIP_DUPLICATE/);
+  assert.throws(() => new CanonicalConstituentTickStore([
+    registry[0],
+    { ...registry[0], parentSymbol: "SENSEX" as const, tradingsymbol: "RELIANCE" },
+  ]), /TOKEN_IDENTITY_CONFLICT:101/);
 });

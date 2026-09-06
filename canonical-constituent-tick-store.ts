@@ -26,13 +26,18 @@ function time(value: string | null | undefined): number | null {
   return Number.isFinite(ms) && ms > 0 ? ms : null;
 }
 
+function normalized(value: unknown): string {
+  return typeof value === "string" ? value.trim().toUpperCase() : "";
+}
+
 /**
  * Captures only explicitly registered constituent packets from the shared Kite WebSocket.
- * It records exchange/receive/process time plus a local monotonic ingest sequence.
- * It does not infer membership, direction, breadth, quality, candidates or execution.
+ * Multiple canonical memberships may share one exact instrument token. The store therefore
+ * subscribes and stores once per token while preserving every parent/role membership for
+ * parent-scoped readiness checks. It does not infer membership, direction or authority.
  */
 export class CanonicalConstituentTickStore {
-  private readonly registryByToken = new Map<number, CanonicalConstituentTokenEntry>();
+  private readonly registryByToken = new Map<number, CanonicalConstituentTokenEntry[]>();
   private readonly latestByToken = new Map<number, CanonicalConstituentTick>();
   private rejectedPacketCount = 0;
   private ingestSeq = 0;
@@ -41,14 +46,24 @@ export class CanonicalConstituentTickStore {
     if (!Array.isArray(entries) || entries.length === 0) {
       throw new Error("CANONICAL_CONSTITUENT_TICK_STORE_REGISTRY_REQUIRED");
     }
+    const membershipKeys = new Set<string>();
     for (const entry of entries) {
       if (!Number.isInteger(entry.instrumentToken) || entry.instrumentToken <= 0) {
         throw new Error("CANONICAL_CONSTITUENT_TICK_STORE_TOKEN_INVALID");
       }
-      if (this.registryByToken.has(entry.instrumentToken)) {
-        throw new Error(`CANONICAL_CONSTITUENT_TICK_STORE_TOKEN_DUPLICATE:${entry.instrumentToken}`);
+      const tradingsymbol = normalized(entry.tradingsymbol);
+      if (!tradingsymbol) throw new Error("CANONICAL_CONSTITUENT_TICK_STORE_TRADINGSYMBOL_REQUIRED");
+      const memberships = this.registryByToken.get(entry.instrumentToken) ?? [];
+      if (memberships.length > 0 && memberships.some((existing) => normalized(existing.tradingsymbol) !== tradingsymbol)) {
+        throw new Error(`CANONICAL_CONSTITUENT_TICK_STORE_TOKEN_IDENTITY_CONFLICT:${entry.instrumentToken}`);
       }
-      this.registryByToken.set(entry.instrumentToken, { ...entry });
+      const membershipKey = `${entry.parentSymbol}|${entry.role}|${tradingsymbol}|${normalized(entry.sector)}`;
+      if (membershipKeys.has(membershipKey)) {
+        throw new Error(`CANONICAL_CONSTITUENT_TICK_STORE_MEMBERSHIP_DUPLICATE:${membershipKey}`);
+      }
+      membershipKeys.add(membershipKey);
+      memberships.push({ ...entry });
+      this.registryByToken.set(entry.instrumentToken, memberships);
     }
   }
 
@@ -61,8 +76,8 @@ export class CanonicalConstituentTickStore {
   }
 
   ingest(packet: KiteDecodedPacket, receivedAt: string, processedAtMs = Date.now()): boolean {
-    const entry = this.registryByToken.get(packet?.instrumentToken ?? 0);
-    if (!entry) return false;
+    const memberships = this.registryByToken.get(packet?.instrumentToken ?? 0);
+    if (!memberships || memberships.length === 0) return false;
 
     const exchangeTimestampMs = time(packet.exchangeTimestamp);
     const receivedAtMs = time(receivedAt);
@@ -80,15 +95,15 @@ export class CanonicalConstituentTickStore {
       return false;
     }
 
-    const previous = this.latestByToken.get(entry.instrumentToken);
+    const previous = this.latestByToken.get(packet.instrumentToken);
     if (previous && exchangeTimestampMs < previous.exchangeTimestampMs) {
       this.rejectedPacketCount += 1;
       return false;
     }
 
     this.ingestSeq += 1;
-    this.latestByToken.set(entry.instrumentToken, {
-      instrumentToken: entry.instrumentToken,
+    this.latestByToken.set(packet.instrumentToken, {
+      instrumentToken: packet.instrumentToken,
       exchangeTimestampMs,
       receivedAtMs,
       processedAtMs,
@@ -98,14 +113,18 @@ export class CanonicalConstituentTickStore {
     return true;
   }
 
+  private expectedTokens(parentSymbol?: CanonicalMarketSymbol): number[] {
+    const tokens: number[] = [];
+    for (const [token, memberships] of this.registryByToken.entries()) {
+      if (parentSymbol == null || memberships.some((entry) => entry.parentSymbol === parentSymbol)) {
+        tokens.push(token);
+      }
+    }
+    return tokens;
+  }
+
   ticks(parentSymbol?: CanonicalMarketSymbol): CanonicalConstituentTick[] {
-    const allowed = parentSymbol == null
-      ? null
-      : new Set(
-        [...this.registryByToken.values()]
-          .filter((entry) => entry.parentSymbol === parentSymbol)
-          .map((entry) => entry.instrumentToken),
-      );
+    const allowed = parentSymbol == null ? null : new Set(this.expectedTokens(parentSymbol));
     return [...this.latestByToken.values()]
       .filter((tick) => allowed == null || allowed.has(tick.instrumentToken))
       .sort((a, b) => a.ingestSeq - b.ingestSeq)
@@ -113,9 +132,7 @@ export class CanonicalConstituentTickStore {
   }
 
   status(parentSymbol?: CanonicalMarketSymbol): CanonicalConstituentTickStoreStatus {
-    const expected = [...this.registryByToken.values()]
-      .filter((entry) => parentSymbol == null || entry.parentSymbol === parentSymbol)
-      .map((entry) => entry.instrumentToken);
+    const expected = this.expectedTokens(parentSymbol);
     const missingTokens = expected.filter((token) => !this.latestByToken.has(token));
     return {
       version: "CANONICAL_CONSTITUENT_TICK_STORE_V1",

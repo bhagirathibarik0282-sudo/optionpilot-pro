@@ -31,7 +31,24 @@ test("fails closed when requested constituent is absent or ambiguous", () => {
   );
 });
 
-test("never infers sector and rejects duplicate token ownership", () => {
+test("allows one exact token to serve multiple canonical index memberships and roles", () => {
+  const out = buildCanonicalConstituentTokenRegistry(rows, [
+    { parentSymbol: "NIFTY", role: "HEAVYWEIGHT", tradingsymbol: "HDFCBANK", weight: 11 },
+    { parentSymbol: "NIFTY", role: "SECTOR_CONSTITUENT", tradingsymbol: "HDFCBANK", sector: "BANK", weight: 11 },
+    { parentSymbol: "BANKNIFTY", role: "HEAVYWEIGHT", tradingsymbol: "HDFCBANK", weight: 28 },
+    { parentSymbol: "BANKNIFTY", role: "SECTOR_CONSTITUENT", tradingsymbol: "HDFCBANK", sector: "BANK", weight: 28 },
+  ]);
+  assert.equal(out.length, 4);
+  assert.deepEqual([...new Set(out.map((entry) => entry.instrumentToken))], [102]);
+  assert.deepEqual(out.map((entry) => `${entry.parentSymbol}:${entry.role}`), [
+    "NIFTY:HEAVYWEIGHT",
+    "NIFTY:SECTOR_CONSTITUENT",
+    "BANKNIFTY:HEAVYWEIGHT",
+    "BANKNIFTY:SECTOR_CONSTITUENT",
+  ]);
+});
+
+test("never infers sector and rejects exact duplicate membership", () => {
   assert.throws(
     () => buildCanonicalConstituentTokenRegistry(rows, [{ parentSymbol: "BANKNIFTY", role: "SECTOR_CONSTITUENT", tradingsymbol: "ICICIBANK" }]),
     /CANONICAL_SECTOR_REQUIRED:ICICIBANK/,
@@ -39,9 +56,9 @@ test("never infers sector and rejects duplicate token ownership", () => {
   assert.throws(
     () => buildCanonicalConstituentTokenRegistry(rows, [
       { parentSymbol: "NIFTY", role: "HEAVYWEIGHT", tradingsymbol: "RELIANCE" },
-      { parentSymbol: "SENSEX", role: "HEAVYWEIGHT", tradingsymbol: "RELIANCE" },
+      { parentSymbol: "NIFTY", role: "HEAVYWEIGHT", tradingsymbol: "RELIANCE" },
     ]),
-    /CANONICAL_CONSTITUENT_DUPLICATE_TOKEN:101/,
+    /CANONICAL_CONSTITUENT_DUPLICATE_REQUEST:NIFTY\|HEAVYWEIGHT\|RELIANCE\|/,
   );
 });
 

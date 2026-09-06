@@ -7,6 +7,9 @@ test("explicitly disabled chain returns without starting live market wiring", as
   assert.equal(out.started,false);
   assert.equal(out.reason,"DISABLED");
   assert.equal(out.subscribedTokenCount,0);
+  assert.equal(out.constituentRegistryReady,false);
+  assert.equal(out.constituentTokenCount,0);
+  assert.deepEqual(out.constituentBlockers,[]);
   assert.equal(out.service,null);
   assert.equal(out.readOnly,true);
   assert.equal(out.affectsVerdict,false);

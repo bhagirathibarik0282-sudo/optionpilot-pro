@@ -29,7 +29,7 @@ test("production Intelligence dashboard exposes canonical Market DNA only", asyn
   assert.ok(body.divergenceState);
 });
 
-test("production Intelligence HTML view is canonical display-only", async () => {
+test("production Intelligence HTML view is canonical context-only display", async () => {
   const response = await fetch(VIEW_URL, { headers: { accept: "text/html" } });
   assert.equal(response.ok, true, `HTTP_${response.status}`);
   const html = await response.text();
@@ -37,5 +37,5 @@ test("production Intelligence HTML view is canonical display-only", async () => 
   assert.match(html, /MARKET DNA/i);
   assert.match(html, /TRUE WEIGHTED BREADTH/i);
   assert.match(html, /NOT READY/i);
-  assert.match(html, /DISPLAY ONLY/i);
+  assert.match(html, /Context-only; no direction, verdict, candidate, Telegram or execution authority/i);
 });

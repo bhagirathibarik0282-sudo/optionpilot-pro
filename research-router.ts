@@ -9,13 +9,13 @@ import {
   rebuildResearchIndexMetrics,
   researchIndexRuntimeStatus,
 } from "./research-index-runtime.js";
-import { buildResearchDashboardModel } from "./research-dashboard-model.js";
-import { renderResearchDashboardHtml } from "./research-dashboard-view.js";
 import type { ResearchIndexCode } from "./research-index-types.js";
 import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 import { auditResearchIndexArchiveRecovery } from "./research-index-recovery-audit.js";
 import { safeResearchDbClient } from "./research-index-db.js";
 import { buildCanonicalMarketDnaHistoricalFusionRuntime } from "./canonical-market-dna-historical-fusion-runtime.js";
+import { buildCanonicalIntelligenceDashboardModel } from "./canonical-intelligence-dashboard-model.js";
+import { renderCanonicalIntelligenceDashboardHtml } from "./canonical-intelligence-dashboard-view.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
@@ -58,16 +58,30 @@ researchRouter.get("/broad-market-size", async (c) => {
 });
 
 researchRouter.get("/broad-market-size/dashboard", async (c) => {
-  await initResearchIndexRuntime();
-  const snapshot = await getResearchIndexSnapshot();
-  return c.json(buildResearchDashboardModel(snapshot));
+  c.header("Cache-Control", "no-store");
+  const ready = await initResearchIndexRuntime();
+  if (!ready) {
+    return c.json({
+      ok: false,
+      ready: false,
+      source: "MARKET_DNA_CONTEXT",
+      reason: "RESEARCH_DB_UNAVAILABLE",
+    }, 503);
+  }
+  const fusion = await buildCanonicalMarketDnaHistoricalFusionRuntime(safeResearchDbClient);
+  const model = buildCanonicalIntelligenceDashboardModel(fusion);
+  return c.json({ ok: model.ready, ...model }, model.ready ? 200 : 503);
 });
 
 researchRouter.get("/broad-market-size/view", async (c) => {
-  await initResearchIndexRuntime();
-  const snapshot = await getResearchIndexSnapshot();
-  const model = buildResearchDashboardModel(snapshot);
-  return c.html(renderResearchDashboardHtml(model));
+  c.header("Cache-Control", "no-store");
+  const ready = await initResearchIndexRuntime();
+  if (!ready) {
+    return c.html("<!doctype html><title>OptionPilot Intelligence</title><h1>INTELLIGENCE CONTEXT: UNAVAILABLE</h1>", 503);
+  }
+  const fusion = await buildCanonicalMarketDnaHistoricalFusionRuntime(safeResearchDbClient);
+  const model = buildCanonicalIntelligenceDashboardModel(fusion);
+  return c.html(renderCanonicalIntelligenceDashboardHtml(model), model.ready ? 200 : 503);
 });
 
 researchRouter.get("/broad-market-size/readiness", async (c) => {

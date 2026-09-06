@@ -24,6 +24,7 @@ import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } fro
 import { getMeaningfulLiveAcceptanceStatus } from "./meaningful-live-acceptance-monitor.js";
 import { candidateRankingShadowRuntimeStatus, evaluateCandidateRankingShadowHttp } from "./candidate-ranking-shadow-http.js";
 import { businessShadowLiveRuntimeStatus, evaluateBusinessShadowLiveHttp } from "./business-shadow-live-http-v1.js";
+import { businessShadowRegistryRuntimeStatus, evaluateBusinessShadowRegistryHttp } from "./business-shadow-registry-http-v1.js";
 import { listH1TheoryRecordedDates, runH1TheoryDateAnalysis } from "./h1-theory-history.js";
 import { renderH1TheoryDashboardHtml } from "./h1-theory-dashboard-view.js";
 
@@ -185,6 +186,18 @@ researchRouter.post("/business-shadow-live/evaluate", async (c) => {
   c.header("Cache-Control", "no-store");
   const body = await c.req.json().catch(() => null);
   const result = evaluateBusinessShadowLiveHttp(body);
+  return c.json(result, result.ok ? 200 : 400);
+});
+
+researchRouter.get("/business-shadow-registry/status", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.json(businessShadowRegistryRuntimeStatus());
+});
+
+researchRouter.post("/business-shadow-registry/evaluate", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const body = await c.req.json().catch(() => null);
+  const result = evaluateBusinessShadowRegistryHttp(body);
   return c.json(result, result.ok ? 200 : 400);
 });
 

@@ -48,7 +48,7 @@ function makeResult(values: number[]): SevenIndexMarketValueResult {
 }
 
 test("classifies broad risk-on without granting a duplicate directional vote", () => {
-  const result = buildMarketDnaContext(makeResult([0.6, 0.55, 0.58, 0.62, 0.65, 0.7, 0.75]));
+  const result = buildMarketDnaContext(makeResult([0.6, 0.58, 0.59, 0.61, 0.62, 0.63, 0.64]));
   assert.equal(result.ready, true);
   assert.equal(result.regime, "BROAD_RISK_ON");
   assert.equal(result.rotationState, "BROAD_SYNCHRONY");

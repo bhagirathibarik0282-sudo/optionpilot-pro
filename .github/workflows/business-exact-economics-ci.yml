@@ -1,0 +1,20 @@
+name: Business Exact Economics CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  business-exact-economics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: node --import tsx --test test/business-exact-economics-v1.test.ts
+      - run: node --import tsx --test test/h1-live-exact-snapshot-aggregator.test.ts
+      - run: node --import tsx --test test/business-shadow-registry-adapter-v1.test.ts

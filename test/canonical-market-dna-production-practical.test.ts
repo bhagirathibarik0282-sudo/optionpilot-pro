@@ -15,9 +15,9 @@ test("production Market DNA context consumes live seven-index data plus recovere
   assert.equal(body.readOnly, true);
   assert.equal(body.duplicateVoteForbidden, true);
   assert.equal(body.grantsDirectionalSupport, false);
-  assert.equal(body.affectsVerdict, false);
-  assert.equal(body.affectsCandidate, false);
-  assert.equal(body.affectsTelegram, false);
+  assert.equal(body.affectsVerdictDirectly, false);
+  assert.equal(body.affectsCandidateDirectly, false);
+  assert.equal(body.affectsTelegramDirectly, false);
   assert.equal(body.affectsExecution, false);
   assert.equal(body.repairsMissingEvidence, false);
 

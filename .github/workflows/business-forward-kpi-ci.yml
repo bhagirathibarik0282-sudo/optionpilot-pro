@@ -1,0 +1,20 @@
+name: Business Forward KPI CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  business-forward-kpi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: node --import tsx --test test/business-forward-kpi-v1.test.ts
+      - run: node --import tsx --test test/business-forward-journal-v1.test.ts
+      - run: node --import tsx --test test/business-forward-economics-proof-v1.test.ts

@@ -2,10 +2,12 @@ import { resolveKiteAuthoritySession } from "./kite-session-authority.js";
 import { fetchH1KiteLiveInstrumentMaster } from "./h1-kite-live-instrument-master-adapter.js";
 import { fetchH1LiveSelectionSpots, type H1LiveSelectionSpotResult } from "./h1-live-selection-spot-rest.js";
 import { selectH1LiveContracts, type H1LiveContractSelectionResult } from "./h1-live-contract-selection.js";
+import { prepareCanonicalConstituentStartup, type CanonicalConstituentStartupResult } from "./canonical-constituent-startup-adapter.js";
 
 export interface H1LiveContractSelectionStartupEvidence {
   selection: H1LiveContractSelectionResult;
   spots: H1LiveSelectionSpotResult;
+  constituents: CanonicalConstituentStartupResult;
   productionImpact: "NONE";
   affectsVerdict: false;
   affectsExecution: false;
@@ -33,7 +35,8 @@ export async function runH1LiveContractSelectionStartupEvidence(asOfDate:string)
     throw new Error(spots.blockers.join("|"));
   }
   const selection=selectH1LiveContracts(master.rows,spots.rows,asOfDate);
-  return {selection,spots,productionImpact:"NONE",affectsVerdict:false,affectsExecution:false,affectsTelegram:false,failClosed:true};
+  const constituents=prepareCanonicalConstituentStartup(master.rows,process.env.CANONICAL_CONSTITUENT_REQUESTS_JSON);
+  return {selection,spots,constituents,productionImpact:"NONE",affectsVerdict:false,affectsExecution:false,affectsTelegram:false,failClosed:true};
 }
 
 export async function runH1LiveContractSelectionStartupAudit(asOfDate:string){

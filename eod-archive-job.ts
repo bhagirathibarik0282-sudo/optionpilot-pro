@@ -1,5 +1,5 @@
 import pg, { type PoolClient } from "pg";
-import { archiveKey, decideEodArchive, indiaTradingDateFromIso, isWeekdayTradingCandidate } from "./eod-archive-core.js";
+import { archiveKey, decideEodArchive, isWeekdayTradingCandidate, resolveEodTradingDate } from "./eod-archive-core.js";
 import { uploadEodArchiveToDrive } from "./eod-drive-upload.js";
 
 const { Pool } = pg;
@@ -83,7 +83,8 @@ async function buildPayload(client: PoolClient, tradingDate: string) {
 }
 
 export async function runEodArchive(nowIso = new Date().toISOString()) {
-  const tradingDate = process.env.EOD_ARCHIVE_TRADING_DATE?.trim() || indiaTradingDateFromIso(nowIso);
+  const allowBackfillOverride = process.env.EOD_ARCHIVE_ALLOW_BACKFILL_OVERRIDE?.trim().toLowerCase() === "true";
+  const tradingDate = resolveEodTradingDate(nowIso, process.env.EOD_ARCHIVE_TRADING_DATE, allowBackfillOverride);
   if (!isWeekdayTradingCandidate(tradingDate)) {
     console.log(`[EOD_ARCHIVE] skip date=${tradingDate} reason=NON_WEEKDAY`);
     return { ok: true, status: "SKIPPED_NO_DATA", tradingDate, reason: "NON_WEEKDAY" };
@@ -184,7 +185,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(JSON.stringify(r));
     process.exit(r.ok ? 0 : 1);
   }).catch((err) => {
-    console.error(`[EOD_ARCHIVE] fatal ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[EOD_ARCHIVE] fatal ${err instanceof Error ? err.message : err}`);
     process.exit(1);
   });
 }

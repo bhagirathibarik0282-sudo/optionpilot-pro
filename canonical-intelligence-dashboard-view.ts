@@ -28,6 +28,6 @@ export function renderCanonicalIntelligenceDashboardHtml(model: CanonicalIntelli
     <div class="card"><div class="label">HISTORY</div><div class="value">${esc(model.historicalObservationFloor)} rows</div><div class="sub">latest ${esc(model.latestHistoricalTradeDate)}</div></div>
   </section>
   <section class="card section"><div class="label">HISTORICAL WINDOWS</div><div class="pills">${windows}</div></section>
-  <section class="card section"><div class="label">READINESS / BLOCKERS</div><div class="pills">${blockers}</div><div class="safety">7/7 coverage: ${model.exactSevenCoverage ? "YES" : "NO"} · archive beyond 320: ${model.archiveBeyond320Ready ? "YES" : "NO"} · 10-year window: ${model.tenYearWindowReady ? "YES" : "NO"}. Context-only; no direction, verdict, candidate, Telegram or execution authority.</div></section>
+  <section class="card section"><div class="label">READINESS / BLOCKERS</div><div class="pills">${blockers}</div><div class="safety">DISPLAY ONLY · 7/7 coverage: ${model.exactSevenCoverage ? "YES" : "NO"} · archive beyond 320: ${model.archiveBeyond320Ready ? "YES" : "NO"} · 10-year window: ${model.tenYearWindowReady ? "YES" : "NO"}. Context-only; no direction, verdict, candidate, Telegram or execution authority.</div></section>
   </main></body></html>`;
 }

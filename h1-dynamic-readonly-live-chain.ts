@@ -10,6 +10,9 @@ export interface H1DynamicReadOnlyLiveStartResult {
   started: boolean;
   reason: "DISABLED" | "STARTED" | "AUTHORITY_UNAVAILABLE" | "PREPARATION_BLOCKED";
   subscribedTokenCount: number;
+  constituentRegistryReady: boolean;
+  constituentTokenCount: number;
+  constituentBlockers: string[];
   productionImpact: "NONE";
   readOnly: true;
   affectsDirection: false;
@@ -20,8 +23,21 @@ export interface H1DynamicReadOnlyLiveStartResult {
   service: H1LiveExactReadOnlyWebSocketService | null;
 }
 
-function result(started:boolean, reason:H1DynamicReadOnlyLiveStartResult["reason"], subscribedTokenCount=0, service:H1LiveExactReadOnlyWebSocketService|null=null): H1DynamicReadOnlyLiveStartResult {
-  return {version:"H1_DYNAMIC_READONLY_LIVE_CHAIN_V1",started,reason,subscribedTokenCount,productionImpact:"NONE",readOnly:true,affectsDirection:false,affectsVerdict:false,affectsExecution:false,affectsTelegram:false,failClosed:true,service};
+function result(
+  started:boolean,
+  reason:H1DynamicReadOnlyLiveStartResult["reason"],
+  subscribedTokenCount=0,
+  service:H1LiveExactReadOnlyWebSocketService|null=null,
+  constituentRegistryReady=false,
+  constituentTokenCount=0,
+  constituentBlockers:string[]=[],
+): H1DynamicReadOnlyLiveStartResult {
+  return {
+    version:"H1_DYNAMIC_READONLY_LIVE_CHAIN_V1",started,reason,subscribedTokenCount,
+    constituentRegistryReady,constituentTokenCount,constituentBlockers:[...constituentBlockers],
+    productionImpact:"NONE",readOnly:true,affectsDirection:false,affectsVerdict:false,
+    affectsExecution:false,affectsTelegram:false,failClosed:true,service,
+  };
 }
 
 export async function startH1DynamicReadOnlyLiveChain(asOfDate:string, enabled:boolean): Promise<H1DynamicReadOnlyLiveStartResult> {
@@ -50,9 +66,10 @@ export async function startH1DynamicReadOnlyLiveChain(asOfDate:string, enabled:b
       readiness,
       apiKey,
       accessToken:authority.session.accessToken,
+      constituentRegistry:evidence.constituents.ready ? evidence.constituents.registry : undefined,
     });
     const status=service.start();
-    return result(true,"STARTED",status.subscribedTokenCount,service);
+    return result(true,"STARTED",status.subscribedTokenCount,service,evidence.constituents.ready,evidence.constituents.registry.length,evidence.constituents.blockers);
   } catch {
     return result(false,"PREPARATION_BLOCKED");
   }

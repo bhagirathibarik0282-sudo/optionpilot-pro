@@ -135,16 +135,29 @@ export function buildMarketDnaContext(input: SevenIndexMarketValueResult): Marke
   else if (sizeRotationSpread <= -0.2 || largeCapConcentrationSpread >= 0.2) rotationState = "LARGE_CAP_LEAD";
 
   let divergenceState: DivergenceState = "NONE";
-  if (largeCap > 0.15 && broad < -0.05 || largeCap < -0.15 && broad > 0.05) divergenceState = "LARGECAP_VS_BROAD";
-  else if (broad > 0.15 && midSmall < -0.05 || broad < -0.15 && midSmall > 0.05) divergenceState = "BROAD_VS_MID_SMALL";
+  if ((largeCap > 0.15 && broad < -0.05) || (largeCap < -0.15 && broad > 0.05)) divergenceState = "LARGECAP_VS_BROAD";
+  else if ((broad > 0.15 && midSmall < -0.05) || (broad < -0.15 && midSmall > 0.05)) divergenceState = "BROAD_VS_MID_SMALL";
   else if ((advancing > 0 && declining > 0) && Math.max(...returns) - Math.min(...returns) >= 0.8) divergenceState = "INTERNAL_MIXED";
 
+  // Specific structural regimes take precedence over generic all-green/all-red breadth.
+  // This prevents strong size rotation or large-cap concentration from being hidden inside
+  // a broad-risk label merely because six or seven indices share the same sign.
   let regime: MarketDnaRegime = "MIXED";
-  if (advancing >= 6 && largeCap > 0 && broad > 0 && midSmall > 0) regime = "BROAD_RISK_ON";
-  else if (declining >= 6 && largeCap < 0 && broad < 0 && midSmall < 0) regime = "BROAD_RISK_OFF";
-  else if (largeCap > 0.15 && largeCapConcentrationSpread >= 0.2 && midSmall <= largeCap - 0.25) regime = "NARROW_LARGECAP";
+  if (largeCap > 0.15 && largeCapConcentrationSpread >= 0.2 && midSmall <= largeCap - 0.25) regime = "NARROW_LARGECAP";
   else if (midSmall > 0.15 && sizeRotationSpread >= 0.2) regime = "MID_SMALL_ROTATION";
   else if (largeCap >= -0.05 && broad < -0.15 && midSmall < -0.2) regime = "DEFENSIVE_LARGECAP";
+  else if (
+    advancing >= 6 &&
+    largeCap > 0 && broad > 0 && midSmall > 0 &&
+    Math.abs(largeCapConcentrationSpread) <= 0.2 &&
+    Math.abs(sizeRotationSpread) <= 0.2
+  ) regime = "BROAD_RISK_ON";
+  else if (
+    declining >= 6 &&
+    largeCap < 0 && broad < 0 && midSmall < 0 &&
+    Math.abs(largeCapConcentrationSpread) <= 0.2 &&
+    Math.abs(sizeRotationSpread) <= 0.2
+  ) regime = "BROAD_RISK_OFF";
   else if (divergenceState !== "NONE" || Math.abs(participationBreadthPct) <= 14.3) regime = "TRANSITION";
 
   return {

@@ -14,11 +14,13 @@ export type CanonicalFamilyStance = "BUYER_SUPPORT" | "SELLER_SUPPORT" | "BALANC
 export interface CanonicalDeterministicFamilySignal {
   family: CanonicalMarketFamily;
   stance: CanonicalFamilyStance;
-  strength: number; // 0..100, explicit deterministic strength from the family engine.
+  strength: number;
   deterministic: true;
   evidenceReady: true;
   sourceId: string;
   sourceManifestHash: string;
+  sourceSemantics: "EXPLICIT_DIRECTIONAL_SUPPORT";
+  grantsDirectionalSupport: true;
   devilFlags: string[];
 }
 
@@ -29,6 +31,7 @@ export interface CanonicalNormalizedFamilySupportResult {
   normalizedEvidence: CanonicalNormalizedBusinessFamilyEvidence[];
   blockers: string[];
   deterministic: true;
+  directionalAuthorityRequired: true;
   rawPayloadHeuristicsUsed: false;
   aiMayOverride: false;
   candidateSelected: false;
@@ -47,6 +50,7 @@ function fail(blockers: string[]): CanonicalNormalizedFamilySupportResult {
     normalizedEvidence: [],
     blockers: [...new Set(blockers)],
     deterministic: true,
+    directionalAuthorityRequired: true,
     rawPayloadHeuristicsUsed: false,
     aiMayOverride: false,
     candidateSelected: false,
@@ -69,9 +73,9 @@ function supportFor(signal: CanonicalDeterministicFamilySignal): [number, number
 }
 
 /**
- * Converts explicit deterministic family-engine stance/strength into the normalized 0..100
- * buyer/seller support contract consumed by canonical business scoring. It never inspects opaque
- * raw payloads and never infers stance from prices, labels, AI text, or Telegram state.
+ * Converts only an explicit directional-support contract from a deterministic family engine.
+ * Context-only evidence (for example positioning/volatility context that explicitly disclaims
+ * direction truth) is not eligible and must never be relabelled into buyer/seller support here.
  */
 export function produceCanonicalNormalizedFamilySupport(input: {
   businessEvidence: CanonicalBusinessEvidenceInputAdapterResult;
@@ -102,6 +106,8 @@ export function produceCanonicalNormalizedFamilySupport(input: {
     const signal = matches[0];
     if (
       signal.deterministic !== true || signal.evidenceReady !== true
+      || signal.sourceSemantics !== "EXPLICIT_DIRECTIONAL_SUPPORT"
+      || signal.grantsDirectionalSupport !== true
       || !["BUYER_SUPPORT","SELLER_SUPPORT","BALANCED"].includes(signal.stance)
       || !validStrength(signal.strength)
       || typeof signal.sourceId !== "string" || !signal.sourceId.trim()
@@ -134,6 +140,7 @@ export function produceCanonicalNormalizedFamilySupport(input: {
     normalizedEvidence,
     blockers: [],
     deterministic: true,
+    directionalAuthorityRequired: true,
     rawPayloadHeuristicsUsed: false,
     aiMayOverride: false,
     candidateSelected: false,

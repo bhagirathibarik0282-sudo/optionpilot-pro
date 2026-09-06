@@ -25,6 +25,7 @@ import { getMeaningfulLiveAcceptanceStatus } from "./meaningful-live-acceptance-
 import { candidateRankingShadowRuntimeStatus, evaluateCandidateRankingShadowHttp } from "./candidate-ranking-shadow-http.js";
 import { businessShadowLiveRuntimeStatus, evaluateBusinessShadowLiveHttp } from "./business-shadow-live-http-v1.js";
 import { businessShadowRegistryRuntimeStatus, evaluateBusinessShadowRegistryHttp } from "./business-shadow-registry-http-v1.js";
+import { businessForwardProofRuntimeStatus, evaluateBusinessForwardProofHttp } from "./business-forward-proof-http-v1.js";
 import { listH1TheoryRecordedDates, runH1TheoryDateAnalysis } from "./h1-theory-history.js";
 import { renderH1TheoryDashboardHtml } from "./h1-theory-dashboard-view.js";
 
@@ -198,6 +199,18 @@ researchRouter.post("/business-shadow-registry/evaluate", async (c) => {
   c.header("Cache-Control", "no-store");
   const body = await c.req.json().catch(() => null);
   const result = evaluateBusinessShadowRegistryHttp(body);
+  return c.json(result, result.ok ? 200 : 400);
+});
+
+researchRouter.get("/business-forward-proof/status", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.json(businessForwardProofRuntimeStatus());
+});
+
+researchRouter.post("/business-forward-proof/evaluate", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const body = await c.req.json().catch(() => null);
+  const result = evaluateBusinessForwardProofHttp(body);
   return c.json(result, result.ok ? 200 : 400);
 });
 

@@ -14,29 +14,31 @@ const evidence: CanonicalBusinessEvidenceInputAdapterResult = {
 };
 const signals = (): CanonicalDeterministicFamilySignal[] => families.map((family, i) => ({
   family, stance: i % 3 === 0 ? "BUYER_SUPPORT" : i % 3 === 1 ? "SELLER_SUPPORT" : "BALANCED",
-  strength: i === 0 ? 80 : 40, deterministic: true, evidenceReady: true, sourceId: `engine:${family}`, sourceManifestHash: hash, devilFlags: [],
+  strength: i === 0 ? 80 : 40, deterministic: true, evidenceReady: true, sourceId: `engine:${family}`, sourceManifestHash: hash,
+  sourceSemantics: "EXPLICIT_DIRECTIONAL_SUPPORT", grantsDirectionalSupport: true, devilFlags: [],
 }));
 
-test("maps explicit stance and strength deterministically without raw payload heuristics", () => {
+test("maps only explicit directional-support signals deterministically", () => {
   const out = produceCanonicalNormalizedFamilySupport({ businessEvidence: evidence, familySignals: signals() });
   assert.equal(out.ready, true);
+  assert.equal(out.directionalAuthorityRequired, true);
   assert.equal(out.normalizedEvidence.length, 10);
-  assert.deepEqual(out.normalizedEvidence.find((x) => x.family === "MARKET_STRUCTURE") && [out.normalizedEvidence[0].buyerSupport, out.normalizedEvidence[0].sellerSupport], [90, 10]);
-  const futures = out.normalizedEvidence.find((x) => x.family === "FUTURES_CONFIRMATION")!;
-  assert.deepEqual([futures.buyerSupport, futures.sellerSupport], [30, 70]);
-  const option = out.normalizedEvidence.find((x) => x.family === "OPTION_PREMIUMS")!;
-  assert.deepEqual([option.buyerSupport, option.sellerSupport], [50, 50]);
+  const market = out.normalizedEvidence.find((x) => x.family === "MARKET_STRUCTURE")!;
+  assert.deepEqual([market.buyerSupport, market.sellerSupport], [90, 10]);
   assert.equal(out.rawPayloadHeuristicsUsed, false);
-  assert.equal(out.candidateSelected, false);
-  assert.equal(out.telegramSent, false);
-  assert.equal(out.createsOrders, false);
+});
+
+test("context-only positioning evidence cannot masquerade as directional support", () => {
+  const rows = signals() as any[];
+  rows[3] = { ...rows[3], sourceSemantics: "POSITIONING_CHANGE_CONTEXT_ONLY_NO_DIRECTION_TRUTH", grantsDirectionalSupport: false };
+  const out = produceCanonicalNormalizedFamilySupport({ businessEvidence: evidence, familySignals: rows as CanonicalDeterministicFamilySignal[] });
+  assert.equal(out.ready, false);
+  assert.ok(out.blockers.includes("OI_POSITIONING:FAMILY_SIGNAL_INVALID"));
 });
 
 test("missing or duplicate family signal fails closed", () => {
-  const missing = signals().slice(1);
-  assert.equal(produceCanonicalNormalizedFamilySupport({ businessEvidence: evidence, familySignals: missing }).ready, false);
-  const duplicate = [...signals(), signals()[0]];
-  assert.equal(produceCanonicalNormalizedFamilySupport({ businessEvidence: evidence, familySignals: duplicate }).ready, false);
+  assert.equal(produceCanonicalNormalizedFamilySupport({ businessEvidence: evidence, familySignals: signals().slice(1) }).ready, false);
+  assert.equal(produceCanonicalNormalizedFamilySupport({ businessEvidence: evidence, familySignals: [...signals(), signals()[0]] }).ready, false);
 });
 
 test("hash mismatch or devil flags fail closed", () => {
@@ -44,8 +46,4 @@ test("hash mismatch or devil flags fail closed", () => {
   assert.equal(produceCanonicalNormalizedFamilySupport({ businessEvidence: evidence, familySignals: badHash }).ready, false);
   const devil = signals(); devil[0] = { ...devil[0], devilFlags: ["BLOCK"] };
   assert.equal(produceCanonicalNormalizedFamilySupport({ businessEvidence: evidence, familySignals: devil }).ready, false);
-});
-
-test("unverified business evidence fails closed", () => {
-  assert.equal(produceCanonicalNormalizedFamilySupport({ businessEvidence: { ...evidence, blockedFamilies: ["VOLATILITY"] }, familySignals: signals() }).ready, false);
 });

@@ -15,6 +15,7 @@ import type { ResearchIndexCode } from "./research-index-types.js";
 import { RESEARCH_INDEX_CODES } from "./research-index-health.js";
 import { auditResearchIndexArchiveRecovery } from "./research-index-recovery-audit.js";
 import { safeResearchDbClient } from "./research-index-db.js";
+import { buildCanonicalMarketDnaHistoricalFusionRuntime } from "./canonical-market-dna-historical-fusion-runtime.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
@@ -103,6 +104,28 @@ researchRouter.get("/broad-market-size/recovery-audit", async (c) => {
   }
   const audit = await auditResearchIndexArchiveRecovery(safeResearchDbClient);
   return c.json({ ok: audit.ready, mode: "RESEARCH_MODE", productionImpact: "NONE", ...audit }, audit.ready ? 200 : 503);
+});
+
+researchRouter.get("/broad-market-size/market-dna-context", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const ready = await initResearchIndexRuntime();
+  if (!ready) {
+    return c.json({
+      ok: false,
+      mode: "RESEARCH_MODE",
+      productionImpact: "NONE",
+      ready: false,
+      reason: "RESEARCH_DB_UNAVAILABLE",
+      readOnly: true,
+      contextOnly: true,
+      affectsVerdictDirectly: false,
+      affectsCandidateDirectly: false,
+      affectsTelegramDirectly: false,
+      affectsExecution: false,
+    }, 503);
+  }
+  const result = await buildCanonicalMarketDnaHistoricalFusionRuntime(safeResearchDbClient);
+  return c.json({ ok: result.ready, mode: "RESEARCH_MODE", productionImpact: "NONE", ...result }, result.ready ? 200 : 503);
 });
 
 researchRouter.get("/broad-market-size/status", async (c) => {

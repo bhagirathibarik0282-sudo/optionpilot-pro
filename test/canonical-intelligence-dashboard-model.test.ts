@@ -89,6 +89,7 @@ test("dashboard consumes only canonical live plus historical fusion", () => {
   assert.match(html, /Same canonical live \+ recovered historical context/);
   assert.match(html, /TRUE WEIGHTED BREADTH/);
   assert.match(html, /NOT READY/);
+  assert.match(html, /DISPLAY ONLY/);
 });
 
 test("dashboard fails closed on unready fusion", () => {

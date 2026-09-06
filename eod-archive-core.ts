@@ -43,6 +43,16 @@ export function indiaTradingDateFromIso(nowIso: string): string {
   return indiaParts(nowIso).date;
 }
 
+export function resolveEodTradingDate(nowIso: string, overrideRaw?: string, allowBackfillOverride = false): string {
+  const currentIndiaDate = indiaTradingDateFromIso(nowIso);
+  const override = overrideRaw?.trim();
+  if (!override) return currentIndiaDate;
+  if (!allowBackfillOverride) return currentIndiaDate;
+  if (!isIsoTradingDate(override)) throw new Error("EOD_ARCHIVE_OVERRIDE_DATE_INVALID");
+  if (override > currentIndiaDate) throw new Error("EOD_ARCHIVE_OVERRIDE_DATE_FUTURE");
+  return override;
+}
+
 export function isWeekdayTradingCandidate(tradingDate: string): boolean {
   if (!isIsoTradingDate(tradingDate)) return false;
   const dow = new Date(`${tradingDate}T00:00:00Z`).getUTCDay();
@@ -64,8 +74,6 @@ export function decideEodArchive(input: EodArchiveDecisionInput): EodArchiveDeci
     return { shouldRun: false, status: "TOO_EARLY", reason: "FUTURE_TRADING_DATE" };
   }
 
-  // Same-day archives are allowed only after a safety buffer beyond the normal
-  // 15:30 IST cash-session close. Historical/retry dates can run at any time.
   if (input.tradingDate === todayIndia && !isPastArchiveCutoff(input.nowIso)) {
     return { shouldRun: false, status: "TOO_EARLY", reason: "BEFORE_EOD_CUTOFF" };
   }

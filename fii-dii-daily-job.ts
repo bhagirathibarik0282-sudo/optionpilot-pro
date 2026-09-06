@@ -1,7 +1,9 @@
 import { fetchOfficialFiiDiiLiveV3 } from "./canonical-fii-dii-live-fetch-v3.js";
 import { normalizedCashFromOfficialRows } from "./canonical-fii-dii-production-row.js";
+import { assertFiiDiiSessionNotBehindMarketSession } from "./canonical-fii-dii-production-readiness.js";
 import {
   ensureFiiDiiSchema,
+  latestRecordedMarketSessionDate,
   upsertFiiDiiCashDaily,
   withFiiDiiDb,
 } from "./fii-dii-store.js";
@@ -19,6 +21,17 @@ async function main(): Promise<void> {
       rows: fetched.rows,
       sourceUrl: fetched.sourceUrl,
     });
+
+    let expectedMarketSessionDate: string | null = null;
+    try {
+      expectedMarketSessionDate = await latestRecordedMarketSessionDate(pool);
+      assertFiiDiiSessionNotBehindMarketSession(data.date, expectedMarketSessionDate);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "FII_DII_FRESHNESS_CHECK_FAILED";
+      if (message.startsWith("FII_DII_OFFICIAL_SESSION_BEHIND_MARKET:")) throw err;
+      console.warn("[FII_DII_DAILY] freshness comparison unavailable", message);
+    }
+
     await upsertFiiDiiCashDaily(pool, data);
 
     const verify = await pool.query<{
@@ -56,6 +69,7 @@ async function main(): Promise<void> {
 
     return {
       storedTradeDate: data.date,
+      expectedMarketSessionDate,
       source: data.source,
       sourceUrl: data.sourceUrl,
       fetchedAt: data.fetchedAt,

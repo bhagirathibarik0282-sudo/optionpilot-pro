@@ -33,6 +33,7 @@ jobs:
       - run: node --import tsx --test test/canonical-fii-dii-live-practical-probe.test.ts
       - run: node --import tsx --test test/canonical-fii-dii-dashboard-context-adapter.test.ts
       - run: node --import tsx --test test/canonical-fii-dii-production-row.test.ts
+      - run: node --import tsx --test test/canonical-fii-dii-production-readiness.test.ts
       - run: node --import tsx --test test/canonical-seven-index-intelligence-freeze.test.ts
       - run: node --import tsx --test test/canonical-seven-index-live-source-probe.test.ts
       - run: node --import tsx --test test/canonical-seven-index-live-source-practical-probe.test.ts

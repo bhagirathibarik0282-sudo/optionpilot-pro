@@ -16,6 +16,8 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: node --import tsx --test test/canonical-constituent-token-registry.test.ts
+      - run: node --import tsx --test test/canonical-constituent-startup-adapter.test.ts
+      - run: node --import tsx --test test/h1-dynamic-readonly-live-chain.test.ts
       - run: node --import tsx --test test/canonical-constituent-live-component.test.ts
       - run: node --import tsx --test test/canonical-constituent-tick-store.test.ts
       - run: node --import tsx --test test/h1-live-exact-readonly-websocket-service.test.ts

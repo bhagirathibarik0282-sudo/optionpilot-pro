@@ -122,9 +122,17 @@ export class H1KiteExactSelectorPublisherBridge {
       return result(snapshot, publisher, publication, [`REGISTRY_${publication.reason}`]);
     }
 
-    // Successful publication closes this response window and the current exact
-    // snapshot becomes the baseline for the next bounded window.
-    this.latestByContract.set(key, snapshot);
+    const responseConfirmed =
+      publisher.producer.packet.gates.premiumResponseConfirmed?.value === true &&
+      publisher.producer.packet.gates.deltaGammaResponseConfirmed?.value === true;
+
+    // Always publish the exact gate packet so the selector sees truthful
+    // current false/true gate state. Only close the response window after both
+    // response gates confirm; otherwise retain the original baseline so
+    // premium/delta/gamma evidence can accumulate within maxObservationGapMs.
+    if (responseConfirmed) {
+      this.latestByContract.set(key, snapshot);
+    }
     return result(snapshot, publisher, publication, []);
   }
 

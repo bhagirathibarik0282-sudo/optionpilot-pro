@@ -62,3 +62,21 @@ test("research router exposes read-only business dashboard routes", () => {
   assert.match(router, /READ_ONLY_BUSINESS_DASHBOARD_V1/);
   assert.doesNotMatch(router, /researchRouter\.post\("\/business-dashboard"/);
 });
+
+test("dashboard intelligence remains low-noise and fail-closed without verified live edge", () => {
+  canonicalBusinessRuntimeRegistry.clear();
+  const out = buildBusinessDashboardV1("SENSEX", new Date().toISOString());
+  assert.equal(out.intelligence.length, 9);
+  assert.ok(out.intelligence.every((x) => x.state === "WAIT"));
+  assert.equal(out.intelligence.find((x) => x.key === "MARKET_DNA")?.detail, "Context-only layer; never counted as an extra vote");
+  const html = renderBusinessDashboardV1Html(out);
+  assert.match(html, /SMC \+ Candle Context/);
+  assert.match(html, /Futures/);
+  assert.match(html, /CE\/PE Premium Reality/);
+  assert.match(html, /OI \/ PCR \/ Wall Migration/);
+  assert.match(html, /Multi-DTE/);
+  assert.match(html, /IV \/ Skew/);
+  assert.match(html, /Market DNA/);
+  assert.match(html, /Heavyweights \/ Sectors/);
+  assert.match(html, /Liquidity \/ Executability/);
+});

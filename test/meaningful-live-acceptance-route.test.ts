@@ -48,8 +48,8 @@ test("preflight selector counts are isolated to the requested symbol", () => {
 test("preflight exposes per-contract selector decisions without changing authority", () => {
   assert.match(meaningful, /selectorDecisions/);
   assert.match(meaningful, /reasonCodes:\s*\[\.\.\.d\.reasonCodes\]/);
-  assert.match(meaningful, /changesTelegramPayload:\s*false/);
-  assert.match(meaningful, /changesExecution:\s*false/);
+  assert.match(monitor, /changesTelegramPayload:\s*false/);
+  assert.match(monitor, /changesExecution:\s*false/);
 });
 
 test("meaningful live window may use exactly one fresh live selector SELECT when DB candidate flag is absent", () => {

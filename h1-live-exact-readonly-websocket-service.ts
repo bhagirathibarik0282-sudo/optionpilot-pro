@@ -10,7 +10,7 @@ import { CanonicalConstituentTickStore, type CanonicalConstituentTickStoreStatus
 import type { CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
 import type { CanonicalConstituentTokenEntry } from "./canonical-constituent-token-registry.js";
 import type { CanonicalMarketSymbol } from "./canonical-one-roof-market-snapshot.js";
-import { resolveH1SelectorProductionPolicy } from "./h1-selector-production-policy.js";
+import { readH1SelectorCanonicalPolicySource } from "./h1-selector-canonical-policy-source.js";
 
 export interface H1LiveExactReadOnlyConsumerObservation {
   symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
@@ -151,10 +151,10 @@ export class H1LiveExactReadOnlyWebSocketService {
 
   start(): H1LiveExactReadOnlyWebSocketStatus {
     if (this.transport) throw new Error("H1_LIVE_EXACT_READONLY_ALREADY_STARTED");
-    const selectorPolicy = resolveH1SelectorProductionPolicy();
-    this.value.selectorRuntimePolicyReady = selectorPolicy.ready;
+    const selectorPolicySource = readH1SelectorCanonicalPolicySource();
+    this.value.selectorRuntimePolicyReady = selectorPolicySource.ready;
     this.value.selectorRuntimeAttached = false;
-    this.value.selectorRuntimeBlockers = selectorPolicy.ready ? ["SELECTOR_RUNTIME_ATTACHMENT_CONTEXT_REQUIRED"] : [...selectorPolicy.blockers];
+    this.value.selectorRuntimeBlockers = selectorPolicySource.ready ? ["SELECTOR_RUNTIME_ATTACHMENT_CONTEXT_REQUIRED"] : [...selectorPolicySource.blockers];
     this.transport = new KiteWebSocketTransport({
       apiKey: this.config.apiKey, accessToken: this.config.accessToken, instrumentTokens: [...this.allowedTokens], mode: "full", socketFactory: this.config.socketFactory,
       reconnect: { enabled: true, delayMs: this.config.reconnectDelayMs ?? 1_000, maxAttempts: this.config.reconnectMaxAttempts ?? 10 },

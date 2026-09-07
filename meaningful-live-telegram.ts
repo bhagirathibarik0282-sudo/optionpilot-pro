@@ -661,13 +661,13 @@ function mapPremiumRows(rows: Array<Record<string, unknown>>): LivePremiumPoint[
 
 async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promise<LiveNarrativeWindow | null> {
   const p = getPool();
-  if (!p) return null;
+  if (!p) { console.log(`[MEANINGFUL_WINDOW_DIAG] ${JSON.stringify({ symbol, stage:"NO_DB_POOL" })}`); return null; }
   const marketResult = await p.query(`
     SELECT minute_bucket, exchange_timestamp, freshness_status, spot_ltp, future_ltp, pdh, pdl
     FROM market_snapshot_1m WHERE symbol=$1 ORDER BY minute_bucket DESC LIMIT 4
   `, [symbol]);
   const market = mapMarketRows([...marketResult.rows].reverse());
-  if (market.length < 2) return null;
+  if (market.length < 2) { console.log(`[MEANINGFUL_WINDOW_DIAG] ${JSON.stringify({ symbol, stage:"MARKET_HISTORY_LT2", count:market.length })}`); return null; }
   const latestMarket = market.at(-1)!;
 
   const candidateResult = await p.query(`
@@ -683,7 +683,7 @@ async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promis
     const liveSelects = selector.decisions.filter((decision) =>
       decision.symbol === symbol && decision.decision === "SELECT"
     );
-    if (!selector.eligibleForLiveH1Marking || liveSelects.length !== 1) return null;
+    if (!selector.eligibleForLiveH1Marking || liveSelects.length !== 1) { console.log(`[MEANINGFUL_WINDOW_DIAG] ${JSON.stringify({ symbol, stage:"SELECTOR_FALLBACK_NOT_UNIQUE", eligible:selector.eligibleForLiveH1Marking, selectCount:liveSelects.length, decisions:selector.decisions.filter((d) => d.symbol === symbol).map((d) => ({ expiry:d.expiry, strike:d.strike, side:d.side, decision:d.decision, reasonCodes:d.reasonCodes })) })}`); return null; }
     const selected = liveSelects[0];
     const fallbackResult = await p.query(`
       SELECT symbol, minute_bucket, quote_timestamp, expiry::text, dte, strike, option_type, ltp, pdh, pdl, validation_status
@@ -694,7 +694,7 @@ async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promis
       ORDER BY minute_bucket DESC LIMIT 4
     `, [symbol, selected.expiry, selected.strike, selected.side, latestMarket.atMs]);
     candidateLatest = mapPremiumRows(fallbackResult.rows);
-    if (candidateLatest.length === 0) return null;
+    if (candidateLatest.length === 0) { console.log(`[MEANINGFUL_WINDOW_DIAG] ${JSON.stringify({ symbol, stage:"SELECTOR_EXACT_HISTORY_EMPTY", expiry:selected.expiry, strike:selected.strike, side:selected.side })}`); return null; }
   }
 
   const hintedSide = inferSideFromOriginal(originalText);
@@ -702,9 +702,9 @@ async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promis
   const nearLatest = candidateLatest.filter((point) => Math.abs(point.atMs - latestMinute) <= 90_000);
   const sides = [...new Set(nearLatest.map((point) => point.side))];
   const chosenSide = hintedSide && nearLatest.some((point) => point.side === hintedSide) ? hintedSide : sides.length === 1 ? sides[0] : null;
-  if (!chosenSide) return null;
+  if (!chosenSide) { console.log(`[MEANINGFUL_WINDOW_DIAG] ${JSON.stringify({ symbol, stage:"CANDIDATE_SIDE_AMBIGUOUS", sides, hintedSide })}`); return null; }
   const chosen = nearLatest.find((point) => point.side === chosenSide) ?? null;
-  if (!chosen) return null;
+  if (!chosen) { console.log(`[MEANINGFUL_WINDOW_DIAG] ${JSON.stringify({ symbol, stage:"CANDIDATE_CHOICE_MISSING", chosenSide })}`); return null; }
 
   const candidateHistoryResult = await p.query(`
     SELECT symbol, minute_bucket, quote_timestamp, expiry::text, dte, strike, option_type, ltp, pdh, pdl, validation_status
@@ -713,7 +713,7 @@ async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promis
     ORDER BY minute_bucket DESC LIMIT 4
   `, [symbol, chosen.expiry, chosen.strike, chosen.side]);
   const candidate = mapPremiumRows([...candidateHistoryResult.rows].reverse());
-  if (candidate.length < 2) return null;
+  if (candidate.length < 2) { console.log(`[MEANINGFUL_WINDOW_DIAG] ${JSON.stringify({ symbol, stage:"CANDIDATE_HISTORY_LT2", expiry:chosen.expiry, strike:chosen.strike, side:chosen.side, count:candidate.length })}`); return null; }
 
   const oppositeSide: LiveSide = chosen.side === "CE" ? "PE" : "CE";
   const oppositePick = await p.query(`

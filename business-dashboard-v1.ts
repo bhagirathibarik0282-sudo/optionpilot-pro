@@ -1,5 +1,6 @@
 import { buildBusinessHorizonView, type BusinessHorizonView } from "./business-buyer-seller-layer.js";
 import { canonicalBusinessRuntimeRegistry } from "./canonical-business-runtime-registry.js";
+import type { CanonicalBuyerDashboardCandidate } from "./canonical-business-consumer.js";
 import { collectH1LiveSelectorDecisions } from "./h1-live-selector-registry.js";
 
 export const BUSINESS_DASHBOARD_V1 = "BUSINESS_DASHBOARD_V1" as const;
@@ -11,9 +12,7 @@ export interface BusinessDashboardV1Model {
   ready: boolean;
   state: "CANDIDATE_READY" | "WAIT";
   headline: string;
-  candidate: ReturnType<typeof canonicalBusinessRuntimeRegistry.read> extends infer T
-    ? T extends { buyerCandidate: infer C } ? C : never
-    : never;
+  candidate: CanonicalBuyerDashboardCandidate | null;
   horizons: BusinessHorizonView[];
   selector: {
     selectCount: number;

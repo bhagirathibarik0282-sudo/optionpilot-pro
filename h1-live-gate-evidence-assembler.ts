@@ -34,9 +34,19 @@ export interface LiveCandidateIdentityEvidence {
   provenance: "LIVE_RUNTIME_EXACT";
 }
 
+export interface LiveResponseMetricsEvidence {
+  premiumMovePct: number;
+  absoluteDeltaChange: number;
+  currentGamma: number;
+  observedAt: string;
+  source: string;
+  provenance: "LIVE_RUNTIME_EXACT";
+}
+
 export interface LiveGateEvidencePacket {
   identity: LiveCandidateIdentityEvidence;
   gates: Partial<Record<LiveGateName, LiveBooleanGateEvidence>>;
+  responseMetrics?: LiveResponseMetricsEvidence;
 }
 
 export interface LiveGateEvidenceAssemblerResult {

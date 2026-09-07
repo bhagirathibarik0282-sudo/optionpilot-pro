@@ -55,6 +55,20 @@ export function collectH1LiveSelectorDecisions(nowIso: string, maxAgeMs = 90_000
   });
 }
 
+export function collectH1LiveResponseMetrics(nowIso: string, maxAgeMs = 90_000) {
+  const nowMs = validIso(nowIso);
+  if (nowMs === null) return [];
+  const out = [];
+  for (const [key, entry] of entries) {
+    const age = nowMs - entry.publishedAtMs;
+    if (age < 0 || age > maxAgeMs) continue;
+    const metrics = entry.packet.responseMetrics;
+    if (!metrics || metrics.provenance !== "LIVE_RUNTIME_EXACT") continue;
+    out.push({ key, identity: { ...entry.packet.identity }, metrics: { ...metrics } });
+  }
+  return out;
+}
+
 export function clearH1LiveSelectorRegistry(): void {
   entries.clear();
 }

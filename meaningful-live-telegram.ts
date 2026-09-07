@@ -757,6 +757,9 @@ export interface MeaningfulLivePreflightDiagnostic {
   dataQuality: DataQualityState | null;
   meaningfulChanges: string[];
   triggerFingerprint: string | null;
+  selectorSelectCount: number;
+  selectorBlockCount: number;
+  selectorReasonCodes: string[];
   affectsTelegram: false;
   affectsVerdict: false;
   affectsExecution: false;
@@ -770,16 +773,22 @@ export async function getMeaningfulLivePreflightDiagnostic(symbol: NarrativeSymb
   if (!window) {
     const selectorRegistrySize = getH1LiveSelectorRegistrySize();
     const selector = collectH1LiveSelectorDecisions(new Date().toISOString());
+    const selectDecisions = selector.decisions.filter((decision) => decision.decision === "SELECT");
+    const blockDecisions = selector.decisions.filter((decision) => decision.decision === "BLOCK");
+    const selectorReasonCodes = [...new Set(blockDecisions.flatMap((decision) => decision.reasonCodes ?? []))];
     const reason = selectorRegistrySize === 0
       ? "LIVE_SELECTOR_REGISTRY_EMPTY"
       : !selector.eligibleForLiveH1Marking
         ? "LIVE_SELECTOR_NOT_ELIGIBLE"
         : selector.decisions.length === 0
           ? "LIVE_SELECTOR_NO_DECISIONS"
-          : "LIVE_WINDOW_UNAVAILABLE";
+          : selectDecisions.length === 0
+            ? "LIVE_SELECTOR_NO_SELECT_DECISION"
+            : "LIVE_WINDOW_UNAVAILABLE";
     return {
       symbol, ready: false, reason, candidateKey: null, direction: "NEUTRAL",
       state: null, dataQuality: null, meaningfulChanges: [], triggerFingerprint: null,
+      selectorSelectCount: selectDecisions.length, selectorBlockCount: blockDecisions.length, selectorReasonCodes,
       affectsTelegram: false, affectsVerdict: false, affectsExecution: false, createsOrders: false,
     };
   }
@@ -794,6 +803,7 @@ export async function getMeaningfulLivePreflightDiagnostic(symbol: NarrativeSymb
     dataQuality: decision.dataQuality,
     meaningfulChanges: [...decision.meaningfulChanges],
     triggerFingerprint: decision.triggerFingerprint,
+    selectorSelectCount: 1, selectorBlockCount: 0, selectorReasonCodes: [],
     affectsTelegram: false,
     affectsVerdict: false,
     affectsExecution: false,

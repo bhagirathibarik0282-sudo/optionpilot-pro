@@ -25,6 +25,7 @@ function replay() {
 
 function dashboard() {
   return {
+    symbol: "NIFTY",
     ready: true,
     state: "CANDIDATE_READY",
     candidate: { candidateKey: "NIFTY|CE|23800|2026-09-08" },
@@ -63,6 +64,7 @@ test("strict forward evidence requires derived OI, positioning, canonical candid
   assert.equal(out.forwardEvidenceReady, true);
   assert.equal(out.state, "STRICT_FORWARD_EVIDENCE_PROVEN");
   assert.equal(out.gates.derivedOiTruth.ready, true);
+  assert.equal(out.gates.derivedOiTruth.derivedRows, 1, "null first observation must not be coerced into a zero derived row");
   assert.equal(out.gates.derivedOiTruth.separateNativeAndDerivedFieldsObserved, true);
   assert.equal(out.gates.positioningContext.ready, true);
   assert.equal(out.gates.sameCanonicalCandidateDashboardTelegram, true);
@@ -90,4 +92,12 @@ test("wrong OI provenance and candidate identity mismatch fail closed without en
   assert.equal(out.context.contextDoesNotBlockDevelopmentReadiness, true);
   assert.equal(out.safety.executionEnabled, false);
   assert.equal(out.safety.failClosed, true);
+});
+
+test("replay/dashboard symbol mismatch cannot prove the requested forward-test symbol", () => {
+  const d = dashboard();
+  d.symbol = "SENSEX";
+  const out = buildMarketForwardTestReadiness({ symbol: "NIFTY", replay: replay(), dashboard: d, telegramAcceptance: telegram(), fiiDiiContext: readyContext, marketDnaContext: readyContext });
+  assert.equal(out.forwardEvidenceReady, false);
+  assert.ok(out.liveBlockers.includes("CANONICAL_BUYER_CANDIDATE_PENDING"));
 });

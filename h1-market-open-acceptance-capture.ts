@@ -10,7 +10,9 @@ export interface H1MarketOpenAcceptanceCaptureInput {
   rawEvidenceStaleTokenCount: number;
   readOnlyConsumerReadySymbolCount: number;
   readOnlyDirectionReadySymbolCount: number;
+  readOnlyDirectionObservations?: Array<{ symbol: string; ready: boolean; direction: string | null; spotMovePct: number | null; blockers: string[] }>;
   readOnlyShadowInputReadySymbolCount: number;
+  readOnlyShadowInputObservations?: Array<{ symbol: string; ready: boolean; direction: string | null; evidenceTokenCount: number; blockers: string[] }>;
   marketWindowContext: {
     regularMarketWindowState: string;
     holidayCalendarVerified: false;
@@ -52,6 +54,10 @@ export interface H1MarketOpenAcceptanceCapture {
     state: string;
     blockers: string[];
   };
+  detail: {
+    direction: Array<{ symbol: string; ready: boolean; direction: string | null; spotMovePct: number | null; blockers: string[] }>;
+    shadowInput: Array<{ symbol: string; ready: boolean; direction: string | null; evidenceTokenCount: number; blockers: string[] }>;
+  };
   claimsMarketOpen: false;
   holidayCalendarVerified: false;
   productionImpact: "NONE";
@@ -87,6 +93,10 @@ export function buildH1MarketOpenAcceptanceCapture(
     acceptance: {
       state: status.marketOpenReadinessAcceptance.state,
       blockers: [...status.marketOpenReadinessAcceptance.blockers],
+    },
+    detail: {
+      direction: (status.readOnlyDirectionObservations ?? []).map((row) => ({ ...row, blockers: [...row.blockers] })),
+      shadowInput: (status.readOnlyShadowInputObservations ?? []).map((row) => ({ ...row, blockers: [...row.blockers] })),
     },
     claimsMarketOpen: false,
     holidayCalendarVerified: false,

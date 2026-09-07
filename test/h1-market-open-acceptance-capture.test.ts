@@ -64,7 +64,9 @@ test("captures blockers without inventing readiness", () => {
     rawEvidenceStaleTokenCount: 16,
     readOnlyConsumerReadySymbolCount: 1,
     readOnlyDirectionReadySymbolCount: 0,
+    readOnlyDirectionObservations: [{ symbol: "NIFTY", ready: false, direction: null, spotMovePct: 0, blockers: ["SPOT_DIRECTION_NEUTRAL"] }],
     readOnlyShadowInputReadySymbolCount: 0,
+    readOnlyShadowInputObservations: [{ symbol: "NIFTY", ready: false, direction: null, evidenceTokenCount: 5, blockers: ["SPOT_DIRECTION_NEUTRAL"] }],
     marketWindowContext: {
       regularMarketWindowState: "WITHIN_REGULAR_MARKET_WINDOW",
       holidayCalendarVerified: false,
@@ -89,4 +91,6 @@ test("captures blockers without inventing readiness", () => {
   assert.notEqual(out.acceptance.blockers, blockers);
   assert.equal(out.readiness.directionReadySymbolCount, 0);
   assert.equal(out.readiness.shadowInputReadySymbolCount, 0);
+  assert.deepEqual(out.detail.direction[0].blockers, ["SPOT_DIRECTION_NEUTRAL"]);
+  assert.deepEqual(out.detail.shadowInput[0].blockers, ["SPOT_DIRECTION_NEUTRAL"]);
 });

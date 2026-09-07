@@ -82,7 +82,10 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   failClosed: true;
 }
 
-const DIRECTION_POLICY = { maxObservationGapMs: 180_000, minAbsoluteSpotMovePct: 0.05 } as const;
+// Market-open acceptance validates that an exact deterministic live direction source is alive;
+// it must not require a discretionary/strategy-size move. A zero threshold still fails closed
+// on an unchanged spot because deriveH1ExactLiveSpotDirection explicitly rejects spotMovePct === 0.
+export const H1_MARKET_OPEN_DIRECTION_POLICY = { maxObservationGapMs: 180_000, minAbsoluteSpotMovePct: 0 } as const;
 
 export class H1LiveExactReadOnlyWebSocketService {
   private transport: KiteWebSocketTransport | null = null;
@@ -186,7 +189,7 @@ export class H1LiveExactReadOnlyWebSocketService {
           const previousMs = Date.parse(baseline.observedAt);
           const currentMs = Date.parse(current.observedAt);
           if (!Number.isFinite(previousMs) || !Number.isFinite(currentMs) || currentMs <= previousMs) continue;
-          const derived = deriveH1ExactLiveSpotDirection(baseline, current, DIRECTION_POLICY);
+          const derived = deriveH1ExactLiveSpotDirection(baseline, current, H1_MARKET_OPEN_DIRECTION_POLICY);
           const source = auditH1ExactDirectionSourceReadiness({
             source: derived.source, sourceId: derived.sourceId, liveRuntimeExact: derived.liveRuntimeExact,
             deterministic: derived.deterministic, optionSideInferenceUsed: false, callerStaticDirectionUsed: false,

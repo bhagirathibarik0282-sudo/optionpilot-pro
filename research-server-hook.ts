@@ -9,6 +9,7 @@ import {
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { calibrateH1DeltaThreshold } from "./h1-delta-threshold-calibration-v1.js";
+import { calibrateH1DeltaByDte } from "./h1-delta-dte-regime-calibration-v1.js";
 import { runH1DeltaOosCalibration } from "./h1-delta-oos-calibration-v1.js";
 import { evaluateH1DeltaThresholdStability } from "./h1-delta-threshold-stability-v1.js";
 import { parseLegacyRecorderRecoveryRequest, runLegacyRecorderRecoveryHttp } from "./h1-legacy-recorder-recovery-http.js";
@@ -270,11 +271,22 @@ export function mountResearchRoutes(app: Hono): void {
     if (!parsed.ok) return c.json({ ok:false, mode:"READ_ONLY_H1_DELTA_THRESHOLD_CALIBRATION_V1", productionImpact:"NONE", reason:parsed.reason }, 400);
     const replay = await runH1ReplayHttp(parsed.value);
     if (!replay.ok) return c.json({ ok:false, mode:"READ_ONLY_H1_DELTA_THRESHOLD_CALIBRATION_V1", productionImpact:"NONE", reason:replay.reason }, 503);
-    const rows=(replay.options ?? []).map((o:any)=>({
-      symbol:String(o.symbol), minuteBucket:new Date(String(o.minute_bucket)).toISOString(), expiry:String(o.expiry),
-      strike:Number(o.strike), optionType:String(o.option_type) as "CE"|"PE", ltp:Number(o.ltp), delta:Number(o.delta), gamma:Number(o.gamma),
-    }));
-    return c.json({ ok:true, mode:"READ_ONLY_H1_DELTA_THRESHOLD_CALIBRATION_V1", request:parsed.value, ...calibrateH1DeltaThreshold(rows) });
+    const tradeDayMs=Date.parse(`${parsed.value.tradeDate}T00:00:00Z`);
+    const rows=(replay.options ?? []).map((o:any)=>{
+      const expiry=String(o.expiry).slice(0,10);
+      const dte=Math.max(0,Math.round((Date.parse(`${expiry}T00:00:00Z`)-tradeDayMs)/86_400_000));
+      return {
+        symbol:String(o.symbol), minuteBucket:new Date(String(o.minute_bucket)).toISOString(), expiry,
+        strike:Number(o.strike), optionType:String(o.option_type) as "CE"|"PE", ltp:Number(o.ltp), delta:Number(o.delta), gamma:Number(o.gamma), dte,
+      };
+    });
+    return c.json({
+      ok:true,
+      mode:"READ_ONLY_H1_DELTA_THRESHOLD_CALIBRATION_V1",
+      request:parsed.value,
+      ...calibrateH1DeltaThreshold(rows),
+      dteCalibration:calibrateH1DeltaByDte(rows),
+    });
   });
 
   app.get("/api/research/h1-candidate-reconstruction-audit", async (c) => {

@@ -74,6 +74,9 @@ export interface OptionSnapshot1mRow {
   volume?: number | null;
   oi?: number | null;
   oiChange?: number | null;
+  derivedOiChange?: number | null;
+  derivedOiChangeSource?: string | null;
+  derivedOiChangeGapSeconds?: number | null;
   iv?: number | null;
   delta?: number | null;
   gamma?: number | null;
@@ -186,6 +189,9 @@ export async function dbInit(): Promise<void> {
         volume BIGINT,
         oi BIGINT,
         oi_change BIGINT,
+        derived_oi_change BIGINT,
+        derived_oi_change_source TEXT,
+        derived_oi_change_gap_seconds INTEGER,
         iv DOUBLE PRECISION,
         delta DOUBLE PRECISION,
         gamma DOUBLE PRECISION,
@@ -205,6 +211,10 @@ export async function dbInit(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         UNIQUE(symbol, minute_bucket, expiry, strike, option_type)
       );
+      ALTER TABLE option_snapshot_1m
+        ADD COLUMN IF NOT EXISTS derived_oi_change BIGINT,
+        ADD COLUMN IF NOT EXISTS derived_oi_change_source TEXT,
+        ADD COLUMN IF NOT EXISTS derived_oi_change_gap_seconds INTEGER;
       CREATE INDEX IF NOT EXISTS idx_option_snapshot_1m_contract_time ON option_snapshot_1m (symbol, expiry, strike, option_type, minute_bucket DESC);
       CREATE INDEX IF NOT EXISTS idx_option_snapshot_1m_symbol_time ON option_snapshot_1m (symbol, minute_bucket DESC);
 
@@ -380,19 +390,65 @@ export async function dbUpsertOptionSnapshot1m(row: OptionSnapshot1mRow): Promis
   const p = getPool();
   if (!p) return;
   try {
+    let derivedOiChange = row.derivedOiChange ?? null;
+    let derivedOiChangeSource = row.derivedOiChangeSource ?? null;
+    let derivedOiChangeGapSeconds = row.derivedOiChangeGapSeconds ?? null;
+
+    if (derivedOiChange == null && row.oi != null && Number.isFinite(row.oi)) {
+      const previous = await p.query<{ oi: string | number | null; minute_bucket: string | Date }>(`
+        SELECT oi, minute_bucket
+        FROM option_snapshot_1m
+        WHERE symbol = $1
+          AND expiry = $2::date
+          AND strike = $3
+          AND option_type = $4
+          AND minute_bucket < $5::timestamptz
+          AND (minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = ($5::timestamptz AT TIME ZONE 'Asia/Kolkata')::date
+          AND oi IS NOT NULL
+        ORDER BY minute_bucket DESC
+        LIMIT 1
+      `, [row.symbol, row.expiry, row.strike, row.optionType, row.minuteBucket]);
+      const prior = previous.rows[0];
+      if (prior) {
+        const priorOi = Number(prior.oi);
+        const currentOi = Number(row.oi);
+        const priorMs = new Date(prior.minute_bucket).getTime();
+        const currentMs = new Date(row.minuteBucket).getTime();
+        const gapSeconds = Math.round((currentMs - priorMs) / 1000);
+        if (Number.isFinite(priorOi) && Number.isFinite(currentOi) && Number.isFinite(gapSeconds) && gapSeconds > 0) {
+          derivedOiChange = currentOi - priorOi;
+          derivedOiChangeSource = "DERIVED_PREVIOUS_PERSISTED_SNAPSHOT";
+          derivedOiChangeGapSeconds = gapSeconds;
+        }
+      }
+    }
+
+    // Derived values are never written without explicit provenance and a real positive observation gap.
+    if (derivedOiChange != null && (!derivedOiChangeSource || derivedOiChangeGapSeconds == null || derivedOiChangeGapSeconds <= 0)) {
+      derivedOiChange = null;
+      derivedOiChangeSource = null;
+      derivedOiChangeGapSeconds = null;
+    }
+
     await p.query(`
       INSERT INTO option_snapshot_1m (
         symbol, minute_bucket, snapshot_id, expiry, expiry_bucket, dte, strike, option_type, atm_offset,
-        is_candidate, is_wall, ltp, bid, ask, spread, volume, oi, oi_change, iv, delta, gamma, vega, theta,
-        intrinsic, extrinsic, day_high, day_low, pdh, pdl, quote_timestamp, quote_age_seconds,
-        liquidity_status, validation_status, calculation_version
+        is_candidate, is_wall, ltp, bid, ask, spread, volume, oi, oi_change,
+        derived_oi_change, derived_oi_change_source, derived_oi_change_gap_seconds,
+        iv, delta, gamma, vega, theta, intrinsic, extrinsic, day_high, day_low, pdh, pdl,
+        quote_timestamp, quote_age_seconds, liquidity_status, validation_status, calculation_version
       ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+        $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37
       ) ON CONFLICT (symbol, minute_bucket, expiry, strike, option_type) DO UPDATE SET
         snapshot_id=EXCLUDED.snapshot_id, expiry_bucket=EXCLUDED.expiry_bucket, dte=EXCLUDED.dte,
         atm_offset=EXCLUDED.atm_offset, is_candidate=EXCLUDED.is_candidate, is_wall=EXCLUDED.is_wall,
         ltp=EXCLUDED.ltp, bid=EXCLUDED.bid, ask=EXCLUDED.ask, spread=EXCLUDED.spread, volume=EXCLUDED.volume,
-        oi=EXCLUDED.oi, oi_change=EXCLUDED.oi_change, iv=EXCLUDED.iv, delta=EXCLUDED.delta, gamma=EXCLUDED.gamma,
+        oi=EXCLUDED.oi, oi_change=EXCLUDED.oi_change,
+        derived_oi_change=EXCLUDED.derived_oi_change,
+        derived_oi_change_source=EXCLUDED.derived_oi_change_source,
+        derived_oi_change_gap_seconds=EXCLUDED.derived_oi_change_gap_seconds,
+        iv=EXCLUDED.iv, delta=EXCLUDED.delta, gamma=EXCLUDED.gamma,
         vega=EXCLUDED.vega, theta=EXCLUDED.theta, intrinsic=EXCLUDED.intrinsic, extrinsic=EXCLUDED.extrinsic,
         day_high=EXCLUDED.day_high, day_low=EXCLUDED.day_low, pdh=EXCLUDED.pdh, pdl=EXCLUDED.pdl,
         quote_timestamp=EXCLUDED.quote_timestamp, quote_age_seconds=EXCLUDED.quote_age_seconds,
@@ -401,6 +457,7 @@ export async function dbUpsertOptionSnapshot1m(row: OptionSnapshot1mRow): Promis
     `, [
       row.symbol,row.minuteBucket,row.snapshotId ?? null,row.expiry,row.expiryBucket ?? null,row.dte ?? null,row.strike,row.optionType,row.atmOffset ?? null,
       row.isCandidate ?? false,row.isWall ?? false,row.ltp ?? null,row.bid ?? null,row.ask ?? null,row.spread ?? null,row.volume ?? null,row.oi ?? null,row.oiChange ?? null,
+      derivedOiChange,derivedOiChangeSource,derivedOiChangeGapSeconds,
       row.iv ?? null,row.delta ?? null,row.gamma ?? null,row.vega ?? null,row.theta ?? null,row.intrinsic ?? null,row.extrinsic ?? null,row.dayHigh ?? null,row.dayLow ?? null,
       row.pdh ?? null,row.pdl ?? null,row.quoteTimestamp ?? null,row.quoteAgeSeconds ?? null,row.liquidityStatus ?? null,row.validationStatus ?? null,row.calculationVersion ?? null,
     ]);

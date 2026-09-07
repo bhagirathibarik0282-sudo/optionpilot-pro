@@ -74,7 +74,7 @@ function status(enabled: boolean, attempted: boolean, started: boolean, reason: 
     rawEvidenceReady: false, rawEvidenceExpectedTokenCount: subscribedTokenCount, rawEvidenceFreshTokenCount: 0,
     rawEvidenceMissingTokenCount: subscribedTokenCount, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
     readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
-    readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [], marketWindowContext: getH1RegularMarketWindowContext(),
+    readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],\n    selectorRuntimePolicyReady: false, selectorRuntimeAttached: false, selectorRuntimeBlockers: [],\n    marketWindowContext: getH1RegularMarketWindowContext(),
     greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
     affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
   };

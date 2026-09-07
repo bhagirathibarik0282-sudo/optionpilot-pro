@@ -80,3 +80,23 @@ test("invalid policy or non-exact evidence fails closed", () => {
   assert.equal(nonExact.ready, false);
   assert.ok(nonExact.blockers.includes("LIVE_RUNTIME_EXACT_SPOT_PAIR_REQUIRED"));
 });
+
+
+test("market-open liveness policy accepts any non-zero exact spot move while unchanged spot still blocks", () => {
+  const marketOpenPolicy = { maxObservationGapMs: 180_000, minAbsoluteSpotMovePct: 0 };
+  const moved = deriveH1ExactLiveSpotDirection(
+    spot("NIFTY", "2026-09-07T03:47:00.000Z", 24000),
+    spot("NIFTY", "2026-09-07T03:48:00.000Z", 24000.5),
+    marketOpenPolicy,
+  );
+  assert.equal(moved.ready, true);
+  assert.equal(moved.direction, "UP");
+
+  const flat = deriveH1ExactLiveSpotDirection(
+    spot("NIFTY", "2026-09-07T03:47:00.000Z", 24000),
+    spot("NIFTY", "2026-09-07T03:48:00.000Z", 24000),
+    marketOpenPolicy,
+  );
+  assert.equal(flat.ready, false);
+  assert.ok(flat.blockers.includes("SPOT_DIRECTION_NEUTRAL"));
+});

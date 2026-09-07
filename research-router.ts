@@ -30,6 +30,7 @@ import { listH1TheoryRecordedDates, runH1TheoryDateAnalysis } from "./h1-theory-
 import { renderH1TheoryDashboardHtml } from "./h1-theory-dashboard-view.js";
 import { buildBusinessDashboardV1, type BusinessDashboardSymbol } from "./business-dashboard-v1.js";
 import { renderBusinessDashboardV1Html } from "./business-dashboard-v1-view.js";
+import { evaluateH1DteAwareShadowThreshold } from "./h1-dte-aware-shadow-threshold-v1.js";
 
 export const researchRouter = new Hono();
 

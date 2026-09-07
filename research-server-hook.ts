@@ -257,7 +257,7 @@ export function mountResearchRoutes(app: Hono): void {
       if(!parsed.ok) return c.json({ok:false,mode:"READ_ONLY_H1_DELTA_OOS_CALIBRATION_V1",productionImpact:"NONE",reason:parsed.reason,tradeDate},400);
       const replay=await runH1ReplayHttp(parsed.value);
       if(!replay.ok) return c.json({ok:false,mode:"READ_ONLY_H1_DELTA_OOS_CALIBRATION_V1",productionImpact:"NONE",reason:replay.reason,tradeDate},503);
-      days.push({tradeDate,rows:(replay.options??[]).map((o:any)=>({symbol:String(o.symbol),minuteBucket:new Date(String(o.minute_bucket)).toISOString(),expiry:String(o.expiry),strike:Number(o.strike),optionType:String(o.option_type),ltp:Number(o.ltp),delta:Number(o.delta),gamma:Number(o.gamma)}))});
+      days.push({tradeDate,rows:(replay.options??[]).map((o:any)=>({symbol:String(o.symbol),minuteBucket:new Date(String(o.minute_bucket)).toISOString(),expiry:String(o.expiry),strike:Number(o.strike),optionType:String(o.option_type),ltp:Number(o.ltp),delta:Number(o.delta),gamma:Number(o.gamma),dte:Number(o.dte)}))});
     }
     return c.json({ok:true,mode:"READ_ONLY_H1_DELTA_OOS_CALIBRATION_V1",...runH1DeltaOosCalibration(days)});
   });

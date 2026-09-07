@@ -10,7 +10,9 @@ import { CanonicalConstituentTickStore, type CanonicalConstituentTickStoreStatus
 import type { CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
 import type { CanonicalConstituentTokenEntry } from "./canonical-constituent-token-registry.js";
 import type { CanonicalMarketSymbol } from "./canonical-one-roof-market-snapshot.js";
-import { readH1SelectorCanonicalPolicySource } from "./h1-selector-canonical-policy-source.js";
+import { getH1SelectorShadowProductionPolicy } from "./h1-selector-shadow-profile.js";
+import { H1KiteExactRuntimeCoordinator } from "./h1-kite-exact-runtime-coordinator.js";
+import { H1ExactPeerRuntimeStore } from "./h1-exact-peer-runtime-store.js";
 
 export interface H1LiveExactReadOnlyConsumerObservation {
   symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
@@ -73,7 +75,7 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   readOnlyShadowInputReadySymbolCount: number;
   readOnlyShadowInputObservations: H1LiveExactReadOnlyShadowInputObservation[];
   selectorRuntimePolicyReady: boolean;
-  selectorRuntimeAttached: false;
+  selectorRuntimeAttached: boolean;
   selectorRuntimeBlockers: string[];
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
@@ -98,6 +100,9 @@ export class H1LiveExactReadOnlyWebSocketService {
   private readonly firstSeenTokens = new Set<number>();
   private readonly rawEvidence: H1LiveExactRawEvidenceStore;
   private readonly directionBaselineBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], H1ExactUnderlyingObservation>();
+  private readonly selectorDirectionBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], "UP" | "DOWN">();
+  private selectorCoordinator: H1KiteExactRuntimeCoordinator | null = null;
+  private selectorPeerStore: H1ExactPeerRuntimeStore | null = null;
   private value: H1LiveExactReadOnlyWebSocketStatus;
 
   constructor(private readonly config: H1LiveExactReadOnlyWebSocketServiceConfig) {
@@ -151,10 +156,52 @@ export class H1LiveExactReadOnlyWebSocketService {
 
   start(): H1LiveExactReadOnlyWebSocketStatus {
     if (this.transport) throw new Error("H1_LIVE_EXACT_READONLY_ALREADY_STARTED");
-    const selectorPolicySource = readH1SelectorCanonicalPolicySource();
-    this.value.selectorRuntimePolicyReady = selectorPolicySource.ready;
-    this.value.selectorRuntimeAttached = false;
-    this.value.selectorRuntimeBlockers = selectorPolicySource.ready ? ["SELECTOR_RUNTIME_ATTACHMENT_CONTEXT_REQUIRED"] : [...selectorPolicySource.blockers];
+    const selectorProfile = getH1SelectorShadowProductionPolicy();
+    const selectorRegistry = this.config.readiness.registry!;
+    const lotSizeByToken = this.config.readiness.lotSizeByOptionToken ?? {};
+    const optionEntries = selectorRegistry.entries().filter((entry) => entry.role === "OPTION");
+    const quantityMissing = optionEntries.filter((entry) => !Number.isInteger(lotSizeByToken[entry.instrumentToken]) || lotSizeByToken[entry.instrumentToken] <= 0);
+    this.value.selectorRuntimePolicyReady = selectorProfile.selectorPolicy.ready;
+    if (quantityMissing.length > 0) {
+      this.value.selectorRuntimeAttached = false;
+      this.value.selectorRuntimeBlockers = quantityMissing.map((entry) => `VERIFIED_LOT_SIZE_REQUIRED:${entry.instrumentToken}`);
+    } else {
+      this.selectorPeerStore = new H1ExactPeerRuntimeStore({
+        registryEntries: selectorRegistry.entries(),
+        classifierPolicy: {
+          maxObservationGapMs: selectorProfile.premiumPolicy.maxObservationGapMs,
+          minAbsolutePremiumMovePct: selectorProfile.premiumPolicy.minPremiumMovePct,
+        },
+        maxObservationAgeMs: selectorProfile.burdenPolicy.maxObservationAgeMs,
+        requiredPeerCount: selectorProfile.burdenPolicy.requiredPeerCount,
+        expectedDirectionFor: (entry) => {
+          const direction = this.selectorDirectionBySymbol.get(entry.symbol);
+          if (!direction || (entry.optionSide !== "CE" && entry.optionSide !== "PE")) throw new Error("VERIFIED_LIVE_DIRECTION_UNAVAILABLE");
+          const optionShouldRise = (direction === "UP" && entry.optionSide === "CE") || (direction === "DOWN" && entry.optionSide === "PE");
+          return optionShouldRise ? "UP" : "DOWN";
+        },
+      });
+      this.selectorCoordinator = new H1KiteExactRuntimeCoordinator({
+        registry: selectorRegistry,
+        orderQuantityFor: (entry) => lotSizeByToken[entry.instrumentToken] ?? 0,
+        greekPolicy: selectorProfile.greekPolicy,
+        maxUnderlyingAgeMs: selectorProfile.greekPolicy.maxAgeMs,
+        maxSnapshotAgeMs: selectorProfile.greekPolicy.maxAgeMs,
+        maxCrossSourceSkewMs: selectorProfile.greekPolicy.maxUnderlyingSkewMs,
+        publisherFor: (entry, previous, current) => {
+          const peer = this.selectorPeerStore!.ingestAndResolve(entry.instrumentToken, previous, current, current.observedAt ?? "");
+          return {
+            moneyness: "ATM",
+            multiExpiryPeers: peer.ready ? peer.resolver!.peers : [],
+            premiumPolicy: selectorProfile.premiumPolicy,
+            burdenPolicy: selectorProfile.burdenPolicy,
+            capitalLiquidityDtePolicy: selectorProfile.capitalLiquidityDtePolicy,
+          };
+        },
+      });
+      this.value.selectorRuntimeAttached = true;
+      this.value.selectorRuntimeBlockers = [];
+    }
     this.transport = new KiteWebSocketTransport({
       apiKey: this.config.apiKey, accessToken: this.config.accessToken, instrumentTokens: [...this.allowedTokens], mode: "full", socketFactory: this.config.socketFactory,
       reconnect: { enabled: true, delayMs: this.config.reconnectDelayMs ?? 1_000, maxAttempts: this.config.reconnectMaxAttempts ?? 10 },
@@ -168,6 +215,7 @@ export class H1LiveExactReadOnlyWebSocketService {
             continue;
           }
           this.rawEvidence.ingest(tick, receivedAt);
+          this.selectorCoordinator?.ingest(tick, receivedAt, receivedAt);
           if (!this.firstSeenTokens.has(tick.instrumentToken)) {
             this.firstSeenTokens.add(tick.instrumentToken);
             const entry = this.config.readiness.registry?.get(tick.instrumentToken) ?? null;
@@ -204,10 +252,13 @@ export class H1LiveExactReadOnlyWebSocketService {
             source: derived.source, sourceId: derived.sourceId, liveRuntimeExact: derived.liveRuntimeExact,
             deterministic: derived.deterministic, optionSideInferenceUsed: false, callerStaticDirectionUsed: false,
           });
+          const selectorDirectionReady = derived.ready && source.ready && Boolean(derived.direction);
+          if (selectorDirectionReady) this.selectorDirectionBySymbol.set(row.symbol, derived.direction!);
+          else this.selectorDirectionBySymbol.delete(row.symbol);
           directionBySymbol.set(row.symbol, {
             symbol: row.symbol,
-            ready: derived.ready && source.ready,
-            direction: derived.ready && source.ready ? derived.direction : null,
+            ready: selectorDirectionReady,
+            direction: selectorDirectionReady ? derived.direction : null,
             spotMovePct: derived.spotMovePct,
             sourceReady: source.ready,
             sourceId: source.sourceId,
@@ -241,6 +292,9 @@ export class H1LiveExactReadOnlyWebSocketService {
   }
 
   stop(): H1LiveExactReadOnlyWebSocketStatus {
+    this.selectorCoordinator?.clear(); this.selectorCoordinator = null;
+    this.selectorPeerStore?.clear(); this.selectorPeerStore = null;
+    this.selectorDirectionBySymbol.clear();
     this.transport?.disconnect(); this.transport = null; this.value.started = false; this.value.connected = false; this.value.state = "CLOSED"; return this.status();
   }
 }

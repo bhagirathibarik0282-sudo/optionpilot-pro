@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseH1ReplayRequest } from "../h1-replay-http.js";
+import { buildH1ReplayContinuity, parseH1ReplayRequest } from "../h1-replay-http.js";
 
 test("accepts bounded NIFTY full-session replay request", () => {
   const parsed = parseH1ReplayRequest({
@@ -46,4 +46,32 @@ test("rejects reverse time ranges and unknown scopes", () => {
 
   const badScope = parseH1ReplayRequest({ symbol: "NIFTY", tradeDate: "2026-08-31", scope: "raw" });
   assert.deepEqual(badScope, { ok: false, reason: "INVALID_SCOPE" });
+});
+
+
+test("continuity audit exposes missing 3-minute recorder buckets instead of calling a partial day complete", () => {
+  const request = {
+    symbol: "SENSEX",
+    tradeDate: "2026-09-03",
+    fromTime: "09:15",
+    toTime: "09:24",
+    scope: "CORE",
+  } as const;
+  const rows = [
+    { minute_bucket: "2026-09-03T03:45:00.000Z", truth_verdict: "TRUE" },
+    { minute_bucket: "2026-09-03T03:51:00.000Z", truth_verdict: "STALE" },
+  ];
+  const canonical = [{ minute_bucket: "2026-09-03T03:45:00.000Z" }];
+  const c = buildH1ReplayContinuity(request, rows, canonical);
+  assert.equal(c.expectedBuckets, 4);
+  assert.equal(c.observedMarkerBuckets, 2);
+  assert.equal(c.complete, false);
+  assert.deepEqual(c.missingBuckets, [
+    "2026-09-03T03:48:00.000Z",
+    "2026-09-03T03:54:00.000Z",
+  ]);
+  assert.equal(c.truthCounts.TRUE, 1);
+  assert.equal(c.truthCounts.STALE, 1);
+  assert.equal(c.canonicalArchiveBuckets, 1);
+  assert.equal(c.allParameterArchiveSemantics, "FULL_RUNTIME_INDEX_METRICS_JSONB");
 });

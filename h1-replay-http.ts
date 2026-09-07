@@ -17,10 +17,12 @@ export interface H1ReplayHttpResult {
   mode: "READ_ONLY_H1_3M_REPLAY";
   productionImpact: "NONE";
   request: H1ReplayRequest | null;
-  counts?: { market: number; options: number; chain: number; markers: number };
+  counts?: { market: number; options: number; chain: number; markers: number; canonical: number };
   market?: Record<string, unknown>[];
   options?: Record<string, unknown>[];
   chain?: Record<string, unknown>[];
+  canonical?: Record<string, unknown>[];
+  continuity?: H1ReplayContinuity;
   reason?: string;
 }
 
@@ -85,6 +87,77 @@ async function rows<T extends Record<string, unknown>>(sql: string, params: unkn
   return result.rows;
 }
 
+export interface H1ReplayContinuity {
+  cadenceMinutes: 3;
+  expectedBuckets: number;
+  observedMarkerBuckets: number;
+  missingBuckets: string[];
+  firstObserved: string | null;
+  lastObserved: string | null;
+  coveragePct: number;
+  complete: boolean;
+  truthCounts: Record<string, number>;
+  canonicalArchiveBuckets: number;
+  canonicalCoveragePct: number;
+  allParameterArchiveSemantics: "FULL_RUNTIME_INDEX_METRICS_JSONB";
+}
+
+function expectedBucketIsos(request: H1ReplayRequest): string[] {
+  const start = Date.parse(`${request.tradeDate}T${request.fromTime}:00+05:30`);
+  const end = Date.parse(`${request.tradeDate}T${request.toTime}:00+05:30`);
+  const out: string[] = [];
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) return out;
+  for (let t = start; t <= end; t += 3 * 60_000) out.push(new Date(t).toISOString());
+  return out;
+}
+
+export function buildH1ReplayContinuity(
+  request: H1ReplayRequest,
+  markerRows: Array<{ minute_bucket: unknown; truth_verdict: unknown }>,
+  canonicalRows: Array<{ minute_bucket: unknown }>,
+): H1ReplayContinuity {
+  const expected = expectedBucketIsos(request);
+  const observed = new Set(
+    markerRows
+      .map((r) => {
+        const t = Date.parse(String(r.minute_bucket ?? ""));
+        return Number.isFinite(t) ? new Date(t).toISOString() : null;
+      })
+      .filter((v): v is string => v !== null),
+  );
+  const canonical = new Set(
+    canonicalRows
+      .map((r) => {
+        const t = Date.parse(String(r.minute_bucket ?? ""));
+        return Number.isFinite(t) ? new Date(t).toISOString() : null;
+      })
+      .filter((v): v is string => v !== null),
+  );
+  const missingBuckets = expected.filter((x) => !observed.has(x));
+  const observedSorted = [...observed].sort();
+  const truthCounts: Record<string, number> = {};
+  for (const row of markerRows) {
+    const k = String(row.truth_verdict ?? "UNKNOWN");
+    truthCounts[k] = (truthCounts[k] ?? 0) + 1;
+  }
+  const coveragePct = expected.length ? (observed.size / expected.length) * 100 : 0;
+  const canonicalCoveragePct = expected.length ? (canonical.size / expected.length) * 100 : 0;
+  return {
+    cadenceMinutes: 3,
+    expectedBuckets: expected.length,
+    observedMarkerBuckets: observed.size,
+    missingBuckets,
+    firstObserved: observedSorted[0] ?? null,
+    lastObserved: observedSorted[observedSorted.length - 1] ?? null,
+    coveragePct,
+    complete: expected.length > 0 && missingBuckets.length === 0,
+    truthCounts,
+    canonicalArchiveBuckets: canonical.size,
+    canonicalCoveragePct,
+    allParameterArchiveSemantics: "FULL_RUNTIME_INDEX_METRICS_JSONB",
+  };
+}
+
 function markerCte(): string {
   return `WITH markers AS (
     SELECT DISTINCT ON (payload->>'symbol', date_trunc('minute', (payload->>'minuteBucket')::timestamptz))
@@ -118,7 +191,7 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
   const cte = markerCte();
 
   try {
-    const [market, chain, options, markerCount] = await Promise.all([
+    const [market, chain, options, markerRows, canonical] = await Promise.all([
       rows(`${cte}
         SELECT
           m.symbol, m.minute_bucket, h.truth_verdict,
@@ -156,8 +229,31 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
         JOIN markers h ON h.symbol = o.symbol AND h.minute_bucket = o.minute_bucket
         WHERE ($5::text = 'FULL' OR o.atm_offset BETWEEN -7 AND 7)
         ORDER BY o.minute_bucket ASC, o.expiry ASC, o.strike ASC, o.option_type ASC`, [...params, request.scope]),
-      rows<{ count: string }>(`${cte} SELECT COUNT(*)::text AS count FROM markers`, params),
+      rows<{ minute_bucket: unknown; truth_verdict: unknown }>(
+        `${cte} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`,
+        params,
+      ),
+      rows<Record<string, unknown>>(`
+        SELECT
+          (payload->>'minuteBucket')::timestamptz AS minute_bucket,
+          payload->>'symbol' AS symbol,
+          payload->>'snapshotId' AS snapshot_id,
+          payload->>'truthVerdict' AS truth_verdict,
+          payload->>'sourceTimestamp' AS source_timestamp,
+          payload->>'calculationVersion' AS calculation_version,
+          payload->'market' AS market
+        FROM app_state_log
+        WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'
+          AND payload->>'symbol' = $1
+          AND payload->>'minuteBucket' IS NOT NULL
+          AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
+          AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
+          AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+        ORDER BY (payload->>'minuteBucket')::timestamptz ASC
+      `, params),
     ]);
+
+    const continuity = buildH1ReplayContinuity(request, markerRows, canonical);
 
     return {
       ok: true,
@@ -168,11 +264,14 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
         market: market.length,
         options: options.length,
         chain: chain.length,
-        markers: Number(markerCount[0]?.count ?? 0),
+        markers: markerRows.length,
+        canonical: canonical.length,
       },
       market,
       options,
       chain,
+      canonical,
+      continuity,
     };
   } catch (err) {
     return {

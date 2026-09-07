@@ -2100,9 +2100,34 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     for (const s of sessions.values()) {
       if (s.expiresAt > Date.now()) { activeSession = s; break; }
     }
+
+    // H1_CONTINUOUS_RECORDER_AUTHORITY_FALLBACK_V1:
+    // the scheduled recorder must not depend on an open dashboard/browser session.
+    // Reuse the encrypted shared Kite authority already maintained by Phase 62.
+    // This creates an ephemeral read-only market-data session object only; it is NOT
+    // inserted into the browser session map and grants no order/execution authority.
+    if (!activeSession) {
+      const authority = phase62RestoredKiteAuthority ?? (await resolveKiteAuthoritySession()).session;
+      if (authority && authority.expiresAt > Date.now()) {
+        phase62RestoredKiteAuthority = authority;
+        activeSession = {
+          accessToken: authority.accessToken,
+          userId: authority.userId,
+          email: authority.email ?? "",
+          loginTime: authority.loginTime,
+          expiresAt: authority.expiresAt,
+        };
+      }
+    }
+
     if (!activeSession) {
       recorderSession.status = "DEGRADED";
-      recorderSession.lastErrorRedacted = "No active Kite session available";
+      recorderSession.lastErrorRedacted = "No active or persisted Kite authority session available";
+      void dbInsert("H1_RECORDER_AUTHORITY_BLOCKED", {
+        tradingDate: today,
+        observedAt: new Date().toISOString(),
+        reason: "KITE_AUTHORITY_UNAVAILABLE",
+      }).catch(() => {});
       return;
     }
 

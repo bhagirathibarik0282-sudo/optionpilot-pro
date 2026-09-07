@@ -208,6 +208,22 @@ export async function recordH1FromRuntimeSnapshot(
     attempted += 1;
     const recordNow = new Date(market.timestamp);
     const symbol = market.symbol.toUpperCase();
+
+    // H1_CANONICAL_MARKET_ARCHIVE_V1:
+    // Preserve the complete runtime IndexMetrics object exactly as observed so
+    // future research/backtests are not limited to today's normalized columns.
+    // collectMarkets() only admits market/index metric objects; no Kite token,
+    // cookie, browser session id, or broker credential is present in this payload.
+    await dbInsert("H1_CANONICAL_MARKET_ARCHIVE", {
+      version: "H1_CANONICAL_MARKET_ARCHIVE_V1",
+      symbol,
+      snapshotId: market.snapshotId,
+      minuteBucket: minuteBucketIso(recordNow),
+      sourceTimestamp: market.timestamp,
+      truthVerdict,
+      calculationVersion,
+      market: raw,
+    });
     const symbolDecisions = binding.accepted.filter((x) => x.symbol === symbol);
     const symbolCandidateKeys = new Set(
       symbolDecisions

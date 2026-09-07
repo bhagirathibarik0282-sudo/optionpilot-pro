@@ -19,3 +19,11 @@ test("acceptance monitor cannot change Telegram payload, verdict, execution, or 
   assert.match(monitor, /changesExecution:\s*false/);
   assert.match(monitor, /createsOrders:\s*false/);
 });
+
+
+test("acceptance status exposes read-only meaningful Telegram preflight diagnostic", () => {
+  assert.match(monitor, /getMeaningfulLivePreflightDiagnostic/);
+  assert.match(monitor, /preflight:/);
+  assert.match(monitor, /changesTelegramPayload:\s*false/);
+  assert.match(monitor, /changesExecution:\s*false/);
+});

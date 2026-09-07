@@ -132,3 +132,4 @@ test("startup exception fails closed", async () => {
   assert.equal(out.socketState, "UNAVAILABLE");
   assert.deepEqual(getH1DynamicReadOnlyServerStatus(), out);
 });
+\n\ntest("disabled status keeps selector runtime fail-closed", async () => {\n  resetH1DynamicReadOnlyServerBootstrapForTest();\n  const out = await startH1DynamicReadOnlyLiveFromServerEnv({}, async () => liveResult());\n  assert.equal(out.selectorRuntimePolicyReady, false);\n  assert.equal(out.selectorRuntimeAttached, false);\n  assert.deepEqual(out.selectorRuntimeBlockers, []);\n});\n

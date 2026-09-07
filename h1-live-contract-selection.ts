@@ -4,6 +4,7 @@ import type { H1LiveSelectionSpotRow } from "./h1-live-selection-spot-rest.js";
 
 export interface H1LiveSelectedContractPeerPair {
   expiry: string;
+  lotSize: number;
   strike: number;
   ceInstrumentToken: number;
   peInstrumentToken: number;
@@ -60,7 +61,9 @@ function nearestCommonPair(optionRows:KiteInstrumentMasterRow[], expiry:string, 
     if(d<best || (d===best && candidate<strike)) strike=candidate;
   }
   const pair=byStrike.get(strike)!;
-  return { expiry, strike, ceInstrumentToken:pair.ce!.instrument_token, peInstrumentToken:pair.pe!.instrument_token, ceTradingsymbol:pair.ce!.tradingsymbol, peTradingsymbol:pair.pe!.tradingsymbol };
+  const ceLot=Number(pair.ce!.lot_size), peLot=Number(pair.pe!.lot_size);
+  if(!Number.isInteger(ceLot)||ceLot<=0||!Number.isInteger(peLot)||peLot<=0||ceLot!==peLot) return null;
+  return { expiry, lotSize:ceLot, strike, ceInstrumentToken:pair.ce!.instrument_token, peInstrumentToken:pair.pe!.instrument_token, ceTradingsymbol:pair.ce!.tradingsymbol, peTradingsymbol:pair.pe!.tradingsymbol };
 }
 
 export function selectH1LiveContracts(rows:KiteInstrumentMasterRow[], spots:H1LiveSelectionSpotRow[], asOfDate:string):H1LiveContractSelectionResult {

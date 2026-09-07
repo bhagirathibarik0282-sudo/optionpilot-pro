@@ -88,6 +88,9 @@ test("public status reflects ongoing read-only socket packet counters without ex
       receivedPacketCount: 42,
       rejectedPacketCount: 0,
       lastPacketTimestamp: "2026-09-04T07:50:00.000Z",
+      selectorRuntimePolicyReady: true,
+      selectorRuntimeAttached: true,
+      selectorRuntimeBlockers: [],
       productionImpact: "NONE" as const,
       readOnly: true as const,
       forwardsDownstream: false as const,
@@ -111,6 +114,9 @@ test("public status reflects ongoing read-only socket packet counters without ex
   assert.equal(out.receivedPacketCount, 42);
   assert.equal(out.rejectedPacketCount, 0);
   assert.equal(out.lastPacketTimestamp, "2026-09-04T07:50:00.000Z");
+  assert.equal(out.selectorRuntimePolicyReady, true);
+  assert.equal(out.selectorRuntimeAttached, true);
+  assert.deepEqual(out.selectorRuntimeBlockers, []);
   assert.equal(out.forwardsDownstream, false);
   assert.equal(out.affectsDirection, false);
   assert.equal(out.affectsVerdict, false);
@@ -132,4 +138,12 @@ test("startup exception fails closed", async () => {
   assert.equal(out.socketState, "UNAVAILABLE");
   assert.deepEqual(getH1DynamicReadOnlyServerStatus(), out);
 });
-\n\ntest("disabled status keeps selector runtime fail-closed", async () => {\n  resetH1DynamicReadOnlyServerBootstrapForTest();\n  const out = await startH1DynamicReadOnlyLiveFromServerEnv({}, async () => liveResult());\n  assert.equal(out.selectorRuntimePolicyReady, false);\n  assert.equal(out.selectorRuntimeAttached, false);\n  assert.deepEqual(out.selectorRuntimeBlockers, []);\n});\n
+
+
+test("disabled status keeps selector runtime fail-closed", async () => {
+  resetH1DynamicReadOnlyServerBootstrapForTest();
+  const out = await startH1DynamicReadOnlyLiveFromServerEnv({}, async () => liveResult());
+  assert.equal(out.selectorRuntimePolicyReady, false);
+  assert.equal(out.selectorRuntimeAttached, false);
+  assert.deepEqual(out.selectorRuntimeBlockers, []);
+});

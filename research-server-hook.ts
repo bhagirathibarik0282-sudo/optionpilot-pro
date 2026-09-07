@@ -8,6 +8,7 @@ import {
 } from "./meaningful-live-acceptance-monitor.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
+import { parseLegacyRecorderRecoveryRequest, runLegacyRecorderRecoveryHttp } from "./h1-legacy-recorder-recovery-http.js";
 import { runH1ObservedCandidate30mGross } from "./h1-observed-candidate-30m-gross.js";
 import { runH1ObservedCandidateMdiEvidenceHttp } from "./h1-observed-candidate-mdi-evidence-http.js";
 import { diagnoseObservedCandidateCoverage } from "./h1-observed-candidate-coverage-diagnostic.js";
@@ -115,6 +116,24 @@ export function mountResearchRoutes(app: Hono): void {
     }
     const result = await getMeaningfulLiveAcceptanceStatus(requested || null);
     return c.json(result);
+  });
+
+  app.get("/api/research/h1-legacy-recorder-recovery", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const parsed = parseLegacyRecorderRecoveryRequest({
+      symbol: c.req.query("symbol"),
+      tradeDate: c.req.query("date"),
+    });
+    if (!parsed.ok) {
+      return c.json({
+        ok: false,
+        mode: "H1_LEGACY_RECORDER_RECOVERY_V1",
+        productionImpact: "NONE",
+        reason: parsed.reason,
+      }, 400);
+    }
+    const result = await runLegacyRecorderRecoveryHttp(parsed.symbol, parsed.tradeDate);
+    return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
   });
 
   app.get("/api/research/h1-dynamic-readonly-live-status", (c) => {

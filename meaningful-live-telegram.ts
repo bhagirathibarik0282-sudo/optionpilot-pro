@@ -677,8 +677,25 @@ async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promis
     ORDER BY minute_bucket DESC, dte ASC NULLS LAST, abs(COALESCE(atm_offset, 99)) ASC
     LIMIT 20
   `, [symbol, latestMarket.atMs]);
-  const candidateLatest = mapPremiumRows(candidateResult.rows);
-  if (candidateLatest.length === 0) return null;
+  let candidateLatest = mapPremiumRows(candidateResult.rows);
+  if (candidateLatest.length === 0) {
+    const selector = collectH1LiveSelectorDecisions(new Date().toISOString());
+    const liveSelects = selector.decisions.filter((decision) =>
+      decision.symbol === symbol && decision.decision === "SELECT"
+    );
+    if (!selector.eligibleForLiveH1Marking || liveSelects.length !== 1) return null;
+    const selected = liveSelects[0];
+    const fallbackResult = await p.query(`
+      SELECT symbol, minute_bucket, quote_timestamp, expiry::text, dte, strike, option_type, ltp, pdh, pdl, validation_status
+      FROM option_snapshot_1m
+      WHERE symbol=$1 AND expiry=$2::date AND strike=$3 AND option_type=$4
+        AND ltp IS NOT NULL
+        AND minute_bucket >= to_timestamp($5/1000.0) - interval '3 minutes'
+      ORDER BY minute_bucket DESC LIMIT 4
+    `, [symbol, selected.expiry, selected.strike, selected.side, latestMarket.atMs]);
+    candidateLatest = mapPremiumRows(fallbackResult.rows);
+    if (candidateLatest.length === 0) return null;
+  }
 
   const hintedSide = inferSideFromOriginal(originalText);
   const latestMinute = Math.max(...candidateLatest.map((point) => point.atMs));

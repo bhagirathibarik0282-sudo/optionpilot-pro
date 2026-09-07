@@ -146,3 +146,12 @@ test("fails closed when a constituent token overlaps the immediate registry", ()
     ],
   }), /CONSTITUENT_TOKEN_OVERLAP/);
 });
+
+
+test("selector runtime stays fail-closed when production policy is unverified", () => {
+  const source = readFileSync(new URL("../h1-live-exact-readonly-websocket-service.ts", import.meta.url), "utf8");
+  assert.match(source, /resolveH1SelectorProductionPolicy\(\)/);
+  assert.match(source, /selectorRuntimePolicyReady/);
+  assert.match(source, /selectorRuntimeAttached:\s*false/);
+  assert.match(source, /SELECTOR_RUNTIME_ATTACHMENT_CONTEXT_REQUIRED|PREMIUM_POLICY_UNVERIFIED/);
+});

@@ -21,6 +21,7 @@ function record(value: unknown): AnyRecord | null {
 }
 
 function finite(value: unknown): number | null {
+  if (value == null || value === "") return null;
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -147,23 +148,25 @@ function telegramProof(symbol: MarketForwardTestSymbol, value: unknown) {
 
 function contextState(value: unknown, fallback: string) {
   const root = record(value);
-  const ready = root?.ready === true || root?.ok === true && root?.ready !== false;
-  const blockers = Array.isArray(root?.blockers) ? root!.blockers!.map(String) : [];
+  const ready = root?.ready === true;
+  const blockers = Array.isArray(root?.blockers) ? root.blockers.map(String) : [];
   return { ready, blockers, state: ready ? "READY" as const : "WAIT" as const, reason: text(root?.reason) ?? (blockers[0] ?? fallback) };
 }
 
 export function buildMarketForwardTestReadiness(input: MarketForwardTestReadinessInput) {
-  const recorderReady = input.replay.ok === true && (input.replay.counts?.market ?? 0) > 0 && (input.replay.counts?.options ?? 0) > 0 && (input.replay.counts?.chain ?? 0) > 1;
+  const replaySymbolMatches = input.replay.request?.symbol === input.symbol;
+  const recorderReady = replaySymbolMatches && input.replay.ok === true && (input.replay.counts?.market ?? 0) > 0 && (input.replay.counts?.options ?? 0) > 0 && (input.replay.counts?.chain ?? 0) > 1;
   const oi = optionOiTruth(input.replay);
   const positioning = positioningTruth(input.replay);
   const dashboardCandidateKey = input.dashboard.candidate?.candidateKey ?? null;
-  const dashboardReady = input.dashboard.ready === true && dashboardCandidateKey != null;
+  const dashboardReady = input.dashboard.symbol === input.symbol && input.dashboard.ready === true && dashboardCandidateKey != null;
   const telegram = telegramProof(input.symbol, input.telegramAcceptance);
   const sameCandidate = dashboardCandidateKey != null && telegram.candidateKey != null && dashboardCandidateKey === telegram.candidateKey;
   const fiiDii = contextState(input.fiiDiiContext, "FII_DII_CONTEXT_PENDING");
   const marketDna = contextState(input.marketDnaContext, "MARKET_DNA_CONTEXT_PENDING");
 
   const liveBlockers: string[] = [];
+  if (!replaySymbolMatches) liveBlockers.push("H1_REPLAY_SYMBOL_MISMATCH");
   if (!recorderReady) liveBlockers.push("H1_RECORDER_EVIDENCE_PENDING");
   if (!oi.ready) liveBlockers.push(oi.blocker ?? "DERIVED_OI_PROOF_PENDING");
   if (!positioning.ready) liveBlockers.push("POSITIONING_CONTEXT_PROOF_PENDING");
@@ -183,7 +186,7 @@ export function buildMarketForwardTestReadiness(input: MarketForwardTestReadines
     forwardEvidenceReady,
     liveBlockers: [...new Set(liveBlockers)],
     gates: {
-      recorder: { ready: recorderReady, counts: input.replay.counts ?? null, continuity: input.replay.continuity ?? null },
+      recorder: { ready: recorderReady, replaySymbolMatches, counts: input.replay.counts ?? null, continuity: input.replay.continuity ?? null },
       derivedOiTruth: oi,
       positioningContext: positioning,
       canonicalBusiness: { ready: dashboardReady, candidateKey: dashboardCandidateKey, horizons: input.dashboard.horizons, state: input.dashboard.state },

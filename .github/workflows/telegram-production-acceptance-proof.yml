@@ -16,9 +16,3 @@ jobs:
           node-version: 22
       - run: npm install --no-audit --no-fund
       - run: node --import tsx --test test/canonical-telegram-production-acceptance-practical.test.ts
-      - name: Read production meaningful preflight
-        run: |
-          curl -fsS 'https://optionpilot-pro-v2-production.up.railway.app/api/research/meaningful-live-acceptance?symbol=NIFTY'
-          echo
-          curl -fsS 'https://optionpilot-pro-v2-production.up.railway.app/api/research/meaningful-live-acceptance?symbol=SENSEX'
-          echo

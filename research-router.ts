@@ -28,6 +28,8 @@ import { businessShadowRegistryRuntimeStatus, evaluateBusinessShadowRegistryHttp
 import { businessForwardProofRuntimeStatus, evaluateBusinessForwardProofHttp } from "./business-forward-proof-http-v1.js";
 import { listH1TheoryRecordedDates, runH1TheoryDateAnalysis } from "./h1-theory-history.js";
 import { renderH1TheoryDashboardHtml } from "./h1-theory-dashboard-view.js";
+import { buildBusinessDashboardV1, type BusinessDashboardSymbol } from "./business-dashboard-v1.js";
+import { renderBusinessDashboardV1Html } from "./business-dashboard-v1-view.js";
 
 export const researchRouter = new Hono();
 
@@ -212,6 +214,26 @@ researchRouter.post("/business-forward-proof/evaluate", async (c) => {
   const body = await c.req.json().catch(() => null);
   const result = evaluateBusinessForwardProofHttp(body);
   return c.json(result, result.ok ? 200 : 400);
+});
+
+
+researchRouter.get("/business-dashboard", (c) => {
+  c.header("Cache-Control", "no-store");
+  const raw = (c.req.query("symbol") ?? "NIFTY").trim().toUpperCase();
+  if (raw !== "NIFTY" && raw !== "SENSEX") {
+    return c.json({ ok:false, mode:"READ_ONLY_BUSINESS_DASHBOARD_V1", productionImpact:"NONE", reason:"BUSINESS_DASHBOARD_SYMBOL_NOT_SUPPORTED", allowed:["NIFTY","SENSEX"] }, 400);
+  }
+  const model = buildBusinessDashboardV1(raw as BusinessDashboardSymbol);
+  return c.json({ ok:true, mode:"READ_ONLY_BUSINESS_DASHBOARD_V1", productionImpact:"NONE", ...model });
+});
+
+researchRouter.get("/business-dashboard/view", (c) => {
+  c.header("Cache-Control", "no-store");
+  const raw = (c.req.query("symbol") ?? "NIFTY").trim().toUpperCase();
+  if (raw !== "NIFTY" && raw !== "SENSEX") {
+    return c.html("<!doctype html><title>OptionPilot Business Dashboard</title><h1>Unsupported symbol</h1>", 400);
+  }
+  return c.html(renderBusinessDashboardV1Html(buildBusinessDashboardV1(raw as BusinessDashboardSymbol)));
 });
 
 researchRouter.get("/h1-pilot-audit", async (c) => {

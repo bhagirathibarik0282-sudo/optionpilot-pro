@@ -36,6 +36,9 @@ export interface H1DynamicReadOnlyServerStatus {
   readOnlyDirectionObservations: H1LiveExactReadOnlyDirectionObservation[];
   readOnlyShadowInputReadySymbolCount: number;
   readOnlyShadowInputObservations: H1LiveExactReadOnlyShadowInputObservation[];
+  selectorRuntimePolicyReady: boolean;
+  selectorRuntimeAttached: boolean;
+  selectorRuntimeBlockers: string[];
   marketWindowContext: H1RegularMarketWindowContext;
   marketOpenReadinessAcceptance: H1MarketOpenReadinessAcceptance;
   greekEvidenceStatus: "NOT_CONFIGURED";
@@ -74,7 +77,9 @@ function status(enabled: boolean, attempted: boolean, started: boolean, reason: 
     rawEvidenceReady: false, rawEvidenceExpectedTokenCount: subscribedTokenCount, rawEvidenceFreshTokenCount: 0,
     rawEvidenceMissingTokenCount: subscribedTokenCount, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
     readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
-    readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],\n    selectorRuntimePolicyReady: false, selectorRuntimeAttached: false, selectorRuntimeBlockers: [],\n    marketWindowContext: getH1RegularMarketWindowContext(),
+    readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],
+    selectorRuntimePolicyReady: false, selectorRuntimeAttached: false, selectorRuntimeBlockers: [],
+    marketWindowContext: getH1RegularMarketWindowContext(),
     greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
     affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
   };
@@ -102,6 +107,7 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
       readOnlyConsumerObservations: statusValue.readOnlyConsumerObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyDirectionObservations: statusValue.readOnlyDirectionObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyShadowInputObservations: statusValue.readOnlyShadowInputObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      selectorRuntimeBlockers: [...statusValue.selectorRuntimeBlockers],
     };
     return withAcceptance(base);
   }
@@ -124,6 +130,9 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
     readOnlyDirectionObservations: (live.readOnlyDirectionObservations ?? []).map((x) => ({ ...x, blockers: [...x.blockers] })),
     readOnlyShadowInputReadySymbolCount: live.readOnlyShadowInputReadySymbolCount ?? 0,
     readOnlyShadowInputObservations: (live.readOnlyShadowInputObservations ?? []).map((x) => ({ ...x, blockers: [...x.blockers] })),
+    selectorRuntimePolicyReady: live.selectorRuntimePolicyReady ?? false,
+    selectorRuntimeAttached: live.selectorRuntimeAttached ?? false,
+    selectorRuntimeBlockers: [...(live.selectorRuntimeBlockers ?? [])],
     greekEvidenceStatus: live.greekEvidenceStatus, forwardsDownstream: false,
   };
   return withAcceptance(base);

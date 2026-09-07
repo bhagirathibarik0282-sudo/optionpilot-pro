@@ -221,6 +221,7 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
           o.snapshot_id, o.expiry, o.expiry_bucket, o.dte,
           o.strike, o.option_type, o.atm_offset, o.is_candidate, o.is_wall,
           o.ltp, o.bid, o.ask, o.spread, o.volume, o.oi, o.oi_change,
+          o.derived_oi_change, o.derived_oi_change_source, o.derived_oi_change_gap_seconds,
           o.iv, o.delta, o.gamma, o.vega, o.theta, o.intrinsic, o.extrinsic,
           o.day_high, o.day_low, o.pdh, o.pdl,
           o.quote_timestamp, o.quote_age_seconds,

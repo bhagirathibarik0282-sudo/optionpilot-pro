@@ -186,6 +186,9 @@ export async function dbInit(): Promise<void> {
         volume BIGINT,
         oi BIGINT,
         oi_change BIGINT,
+        derived_oi_change BIGINT,
+        derived_oi_change_source TEXT,
+        derived_oi_change_gap_seconds INTEGER,
         iv DOUBLE PRECISION,
         delta DOUBLE PRECISION,
         gamma DOUBLE PRECISION,
@@ -205,6 +208,10 @@ export async function dbInit(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         UNIQUE(symbol, minute_bucket, expiry, strike, option_type)
       );
+      ALTER TABLE option_snapshot_1m
+        ADD COLUMN IF NOT EXISTS derived_oi_change BIGINT,
+        ADD COLUMN IF NOT EXISTS derived_oi_change_source TEXT,
+        ADD COLUMN IF NOT EXISTS derived_oi_change_gap_seconds INTEGER;
       CREATE INDEX IF NOT EXISTS idx_option_snapshot_1m_contract_time ON option_snapshot_1m (symbol, expiry, strike, option_type, minute_bucket DESC);
       CREATE INDEX IF NOT EXISTS idx_option_snapshot_1m_symbol_time ON option_snapshot_1m (symbol, minute_bucket DESC);
 
@@ -381,18 +388,50 @@ export async function dbUpsertOptionSnapshot1m(row: OptionSnapshot1mRow): Promis
   if (!p) return;
   try {
     await p.query(`
+      WITH prior AS (
+        SELECT oi, minute_bucket
+        FROM option_snapshot_1m
+        WHERE symbol = $1
+          AND expiry = $4::date
+          AND strike = $7
+          AND option_type = $8
+          AND minute_bucket < $2::timestamptz
+          AND (minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = ($2::timestamptz AT TIME ZONE 'Asia/Kolkata')::date
+          AND oi IS NOT NULL
+        ORDER BY minute_bucket DESC
+        LIMIT 1
+      ), derived AS (
+        SELECT
+          CASE WHEN p.oi IS NOT NULL AND $17::bigint IS NOT NULL THEN $17::bigint - p.oi ELSE NULL END AS oi_delta,
+          CASE WHEN p.oi IS NOT NULL AND $17::bigint IS NOT NULL THEN 'DERIVED_PREVIOUS_PERSISTED_SNAPSHOT'::text ELSE NULL END AS oi_delta_source,
+          CASE WHEN p.minute_bucket IS NOT NULL AND $17::bigint IS NOT NULL
+            THEN EXTRACT(EPOCH FROM ($2::timestamptz - p.minute_bucket))::integer
+            ELSE NULL
+          END AS oi_delta_gap_seconds
+        FROM (SELECT 1) seed
+        LEFT JOIN prior p ON TRUE
+      )
       INSERT INTO option_snapshot_1m (
         symbol, minute_bucket, snapshot_id, expiry, expiry_bucket, dte, strike, option_type, atm_offset,
-        is_candidate, is_wall, ltp, bid, ask, spread, volume, oi, oi_change, iv, delta, gamma, vega, theta,
-        intrinsic, extrinsic, day_high, day_low, pdh, pdl, quote_timestamp, quote_age_seconds,
-        liquidity_status, validation_status, calculation_version
-      ) VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34
-      ) ON CONFLICT (symbol, minute_bucket, expiry, strike, option_type) DO UPDATE SET
+        is_candidate, is_wall, ltp, bid, ask, spread, volume, oi, oi_change,
+        derived_oi_change, derived_oi_change_source, derived_oi_change_gap_seconds,
+        iv, delta, gamma, vega, theta, intrinsic, extrinsic, day_high, day_low, pdh, pdl,
+        quote_timestamp, quote_age_seconds, liquidity_status, validation_status, calculation_version
+      )
+      SELECT
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+        derived.oi_delta,derived.oi_delta_source,derived.oi_delta_gap_seconds,
+        $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34
+      FROM derived
+      ON CONFLICT (symbol, minute_bucket, expiry, strike, option_type) DO UPDATE SET
         snapshot_id=EXCLUDED.snapshot_id, expiry_bucket=EXCLUDED.expiry_bucket, dte=EXCLUDED.dte,
         atm_offset=EXCLUDED.atm_offset, is_candidate=EXCLUDED.is_candidate, is_wall=EXCLUDED.is_wall,
         ltp=EXCLUDED.ltp, bid=EXCLUDED.bid, ask=EXCLUDED.ask, spread=EXCLUDED.spread, volume=EXCLUDED.volume,
-        oi=EXCLUDED.oi, oi_change=EXCLUDED.oi_change, iv=EXCLUDED.iv, delta=EXCLUDED.delta, gamma=EXCLUDED.gamma,
+        oi=EXCLUDED.oi, oi_change=EXCLUDED.oi_change,
+        derived_oi_change=EXCLUDED.derived_oi_change,
+        derived_oi_change_source=EXCLUDED.derived_oi_change_source,
+        derived_oi_change_gap_seconds=EXCLUDED.derived_oi_change_gap_seconds,
+        iv=EXCLUDED.iv, delta=EXCLUDED.delta, gamma=EXCLUDED.gamma,
         vega=EXCLUDED.vega, theta=EXCLUDED.theta, intrinsic=EXCLUDED.intrinsic, extrinsic=EXCLUDED.extrinsic,
         day_high=EXCLUDED.day_high, day_low=EXCLUDED.day_low, pdh=EXCLUDED.pdh, pdl=EXCLUDED.pdl,
         quote_timestamp=EXCLUDED.quote_timestamp, quote_age_seconds=EXCLUDED.quote_age_seconds,

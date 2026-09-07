@@ -33,7 +33,7 @@ test("production Telegram acceptance monitor is safe and exposes truthful transp
 
 
 test("diagnostic: print local server candidate wiring anchors", () => {
-  const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+  const source = readFileSync(new globalThis.URL("../server.ts", import.meta.url), "utf8");
   const needles = ["recordH1FromRuntimeSnapshot", "selectExecutionCandidate", "candidateDecisions", "runtimeCandidateDecisions", "EXECUTION_CANDIDATE_SELECTOR"];
   const contexts = Object.fromEntries(needles.map((needle) => {
     const idx = source.indexOf(needle);

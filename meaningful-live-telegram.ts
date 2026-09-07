@@ -872,7 +872,24 @@ export function installMeaningfulLiveTelegramBridge(): void {
 
       await hydrateMemory();
       const window = await loadWindow(symbol, originalText);
-      if (!window) { console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason:"LIVE_WINDOW_UNAVAILABLE" })}`); return syntheticSuppressedResponse(); }
+      if (!window) {
+        const selectorRegistrySize = getH1LiveSelectorRegistrySize();
+        const selector = collectH1LiveSelectorDecisions(new Date().toISOString());
+        const symbolDecisions = selector.decisions.filter((decision) => decision.symbol === symbol);
+        const selectCount = symbolDecisions.filter((decision) => decision.decision === "SELECT").length;
+        const blockCount = symbolDecisions.filter((decision) => decision.decision === "BLOCK").length;
+        const reason = selectorRegistrySize === 0
+          ? "LIVE_SELECTOR_REGISTRY_EMPTY"
+          : !selector.eligibleForLiveH1Marking
+            ? "LIVE_SELECTOR_NOT_ELIGIBLE"
+            : symbolDecisions.length === 0
+              ? "LIVE_SELECTOR_NO_DECISIONS"
+              : selectCount === 0
+                ? "LIVE_SELECTOR_NO_SELECT_DECISION"
+                : "LIVE_WINDOW_UNAVAILABLE";
+        console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason, selectorSelectCount:selectCount, selectorBlockCount:blockCount })}`);
+        return syntheticSuppressedResponse();
+      }
 
       const previous = memory.get(symbol);
       const decision = deriveLiveMeaningfulDecision(window, previous);

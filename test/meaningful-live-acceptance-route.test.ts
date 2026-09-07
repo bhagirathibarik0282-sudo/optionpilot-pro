@@ -59,3 +59,10 @@ test("meaningful live window may use exactly one fresh live selector SELECT when
   assert.match(meaningful, /expiry=\$2::date AND strike=\$3 AND option_type=\$4/);
   assert.match(monitor, /changesExecution:\s*false/);
 });
+
+test("Telegram bridge reports selector BLOCK-only state truthfully instead of generic live-window unavailable", () => {
+  assert.match(meaningful, /LIVE_SELECTOR_NO_SELECT_DECISION/);
+  assert.match(meaningful, /selectorSelectCount/);
+  assert.match(meaningful, /selectorBlockCount/);
+  assert.match(meaningful, /state:"SUPPRESSED"/);
+});

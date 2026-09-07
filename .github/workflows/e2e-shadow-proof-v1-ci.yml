@@ -1,0 +1,16 @@
+name: E2E Shadow Proof V1 CI
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  e2e-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: node --import tsx --test test/e2e-shadow-proof-v1.test.ts test/kite-execution-shadow-v1.test.ts test/real-execution-readiness-v1.test.ts

@@ -10,6 +10,7 @@ export type KiteInstrumentMasterRow = {
   instrument_type?: string | null;
   segment?: string | null;
   exchange?: string | null;
+  lot_size?: number | null;
 };
 
 export type ImmediateRegistryBuildRequest = {

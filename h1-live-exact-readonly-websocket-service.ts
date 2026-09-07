@@ -10,6 +10,7 @@ import { CanonicalConstituentTickStore, type CanonicalConstituentTickStoreStatus
 import type { CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
 import type { CanonicalConstituentTokenEntry } from "./canonical-constituent-token-registry.js";
 import type { CanonicalMarketSymbol } from "./canonical-one-roof-market-snapshot.js";
+import { resolveH1SelectorProductionPolicy } from "./h1-selector-production-policy.js";
 
 export interface H1LiveExactReadOnlyConsumerObservation {
   symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
@@ -71,6 +72,9 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   readOnlyDirectionObservations: H1LiveExactReadOnlyDirectionObservation[];
   readOnlyShadowInputReadySymbolCount: number;
   readOnlyShadowInputObservations: H1LiveExactReadOnlyShadowInputObservation[];
+  selectorRuntimePolicyReady: boolean;
+  selectorRuntimeAttached: false;
+  selectorRuntimeBlockers: string[];
   greekEvidenceStatus: "NOT_CONFIGURED";
   productionImpact: "NONE";
   readOnly: true;
@@ -119,6 +123,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       rawEvidenceMissingTokenCount: registryTokens.length, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
       readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
       readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],
+      selectorRuntimePolicyReady: false, selectorRuntimeAttached: false, selectorRuntimeBlockers: [],
       greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
       affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
     };
@@ -133,6 +138,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       readOnlyConsumerObservations: this.value.readOnlyConsumerObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyDirectionObservations: this.value.readOnlyDirectionObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyShadowInputObservations: this.value.readOnlyShadowInputObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      selectorRuntimeBlockers: [...this.value.selectorRuntimeBlockers],
     };
   }
   rawEvidenceStatus(nowIso: string) { return this.rawEvidence.status(nowIso); }
@@ -145,6 +151,10 @@ export class H1LiveExactReadOnlyWebSocketService {
 
   start(): H1LiveExactReadOnlyWebSocketStatus {
     if (this.transport) throw new Error("H1_LIVE_EXACT_READONLY_ALREADY_STARTED");
+    const selectorPolicy = resolveH1SelectorProductionPolicy();
+    this.value.selectorRuntimePolicyReady = selectorPolicy.ready;
+    this.value.selectorRuntimeAttached = false;
+    this.value.selectorRuntimeBlockers = selectorPolicy.ready ? ["SELECTOR_RUNTIME_ATTACHMENT_CONTEXT_REQUIRED"] : [...selectorPolicy.blockers];
     this.transport = new KiteWebSocketTransport({
       apiKey: this.config.apiKey, accessToken: this.config.accessToken, instrumentTokens: [...this.allowedTokens], mode: "full", socketFactory: this.config.socketFactory,
       reconnect: { enabled: true, delayMs: this.config.reconnectDelayMs ?? 1_000, maxAttempts: this.config.reconnectMaxAttempts ?? 10 },

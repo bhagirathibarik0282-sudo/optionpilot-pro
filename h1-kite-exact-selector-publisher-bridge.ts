@@ -90,8 +90,17 @@ export class H1KiteExactSelectorPublisherBridge {
     try {
       publisherContext = input.publisherFor(previous, snapshot);
     } catch {
-      this.latestByContract.set(key, snapshot);
       return result(snapshot, null, null, ["PUBLISHER_CONTEXT_RESOLUTION_FAILED"]);
+    }
+
+    const maxGapMs = publisherContext?.premiumPolicy?.maxObservationGapMs;
+    if (!Number.isFinite(maxGapMs) || Number(maxGapMs) <= 0) {
+      return result(snapshot, null, null, ["INVALID_PUBLISHER_OBSERVATION_WINDOW"]);
+    }
+    const gapMs = currentMs - previousMs;
+    if (gapMs > Number(maxGapMs)) {
+      this.latestByContract.set(key, snapshot);
+      return result(snapshot, null, null, ["PREVIOUS_EXACT_SNAPSHOT_WINDOW_EXPIRED"]);
     }
 
     const publisher = bindH1LiveExactSnapshotsToPublisher({
@@ -101,10 +110,9 @@ export class H1KiteExactSelectorPublisherBridge {
       nowIso: input.snapshot.nowIso,
     });
 
-    // A valid forward exact observation becomes the next baseline even when
-    // policy evidence blocks this publication attempt.
-    this.latestByContract.set(key, snapshot);
-
+    // Keep the original exact baseline while gates are blocked so response
+    // evidence can accumulate across the bounded observation window instead
+    // of degenerating into adjacent-tick comparisons.
     if (!publisher.ready || !publisher.producer?.packet) {
       return result(snapshot, publisher, null, publisher.blockers.map((x) => `PUBLISHER_${x}`));
     }
@@ -114,6 +122,9 @@ export class H1KiteExactSelectorPublisherBridge {
       return result(snapshot, publisher, publication, [`REGISTRY_${publication.reason}`]);
     }
 
+    // Successful publication closes this response window and the current exact
+    // snapshot becomes the baseline for the next bounded window.
+    this.latestByContract.set(key, snapshot);
     return result(snapshot, publisher, publication, []);
   }
 

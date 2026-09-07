@@ -82,7 +82,7 @@ test("duplicate or reverse timestamp cannot replace the latest baseline", () => 
   assert.equal(getH1LiveSelectorRegistrySize(), 0);
 });
 
-test("publisher rejection advances exact baseline but never publishes", () => {
+test("publisher rejection retains exact baseline so response can accumulate within the bounded window", () => {
   clearH1LiveSelectorRegistry();
   const bridge = new H1KiteExactSelectorPublisherBridge();
   bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.05));
@@ -93,7 +93,7 @@ test("publisher rejection advances exact baseline but never publishes", () => {
   assert.equal(getH1LiveSelectorRegistrySize(), 0);
 });
 
-test("publisher context failure advances exact baseline but fails closed", () => {
+test("publisher context failure retains baseline and fails closed", () => {
   clearH1LiveSelectorRegistry();
   const bridge = new H1KiteExactSelectorPublisherBridge();
   bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.05));
@@ -102,4 +102,35 @@ test("publisher context failure advances exact baseline but fails closed", () =>
   assert.deepEqual(out.blockers, ["PUBLISHER_CONTEXT_RESOLUTION_FAILED"]);
   assert.equal(bridge.getTrackedContractCount(), 1);
   assert.equal(getH1LiveSelectorRegistrySize(), 0);
+});
+
+
+test("window expiry resets baseline without publishing stale response evidence", () => {
+  clearH1LiveSelectorRegistry();
+  const bridge = new H1KiteExactSelectorPublisherBridge();
+  bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.05));
+  const out = bridge.ingest(input("2026-09-03T10:00:11.000Z", 1.20));
+  assert.equal(out.ready, false);
+  assert.deepEqual(out.blockers, ["PREVIOUS_EXACT_SNAPSHOT_WINDOW_EXPIRED"]);
+  assert.equal(getH1LiveSelectorRegistrySize(), 0);
+
+  const next = bridge.ingest(input("2026-09-03T10:00:15.000Z", 1.25));
+  assert.equal(next.ready, true);
+  assert.equal(getH1LiveSelectorRegistrySize(), 1);
+});
+
+test("blocked adjacent ticks can accumulate against the retained baseline", () => {
+  clearH1LiveSelectorRegistry();
+  const bridge = new H1KiteExactSelectorPublisherBridge();
+  const strict = {
+    ...publisher,
+    premiumPolicy: { ...publisher.premiumPolicy, minPremiumMovePct: 10 },
+  };
+  bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.00, true, () => strict));
+  const early = bridge.ingest(input("2026-09-03T10:00:02.000Z", 1.05, true, () => strict));
+  assert.equal(early.ready, false);
+  assert.equal(getH1LiveSelectorRegistrySize(), 0);
+  const accumulated = bridge.ingest(input("2026-09-03T10:00:05.000Z", 1.20, true, () => strict));
+  assert.equal(accumulated.ready, true);
+  assert.equal(getH1LiveSelectorRegistrySize(), 1);
 });

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const router = readFileSync(new URL("../research-router.ts", import.meta.url), "utf8");
 const monitor = readFileSync(new URL("../meaningful-live-acceptance-monitor.ts", import.meta.url), "utf8");
+const meaningful = readFileSync(new URL("../meaningful-live-telegram.ts", import.meta.url), "utf8");
 
 test("meaningful live acceptance status is exposed read-only under research router", () => {
   assert.match(router, /researchRouter\.get\("\/meaningful-live-acceptance"/);
@@ -52,9 +53,9 @@ test("preflight exposes per-contract selector decisions without changing authori
 });
 
 test("meaningful live window may use exactly one fresh live selector SELECT when DB candidate flag is absent", () => {
-  assert.match(monitor, /collectH1LiveSelectorDecisions/);
-  assert.match(monitor, /decision\.symbol === symbol && decision\.decision === "SELECT"/);
-  assert.match(monitor, /liveSelects\.length !== 1/);
-  assert.match(monitor, /expiry=\$2::date AND strike=\$3 AND option_type=\$4/);
+  assert.match(meaningful, /collectH1LiveSelectorDecisions/);
+  assert.match(meaningful, /decision\.symbol === symbol && decision\.decision === "SELECT"/);
+  assert.match(meaningful, /liveSelects\.length !== 1/);
+  assert.match(meaningful, /expiry=\$2::date AND strike=\$3 AND option_type=\$4/);
   assert.match(monitor, /changesExecution:\s*false/);
 });

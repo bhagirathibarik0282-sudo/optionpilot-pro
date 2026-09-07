@@ -11,8 +11,10 @@ function bucketForDte(dte:number):DteBucket|null {
   if(dte<=9) return "MID_5_9";
   return "FAR_10_PLUS";
 }
-function dteFrom(tradeDate:string, expiry:string):number|null {
-  const a=Date.parse(`${tradeDate.slice(0,10)}T00:00:00Z`), b=Date.parse(`${expiry.slice(0,10)}T00:00:00Z`);
+function dteFrom(tradeDate:string, row:H1DeltaCalibrationObservation & {dte?:number}):number|null {
+  const canonical=Number(row.dte);
+  if(Number.isInteger(canonical)&&canonical>=0) return canonical;
+  const a=Date.parse(`${tradeDate.slice(0,10)}T00:00:00Z`), b=Date.parse(`${String(row.expiry).slice(0,10)}T00:00:00Z`);
   if(!Number.isFinite(a)||!Number.isFinite(b)) return null;
   const d=Math.round((b-a)/86_400_000);
   return d>=0?d:null;
@@ -39,7 +41,7 @@ export function runH1DeltaOosCalibration(days:H1DeltaOosDay[]) {
   const overall=runCore(days);
   const dteBuckets=DTE_BUCKETS.map(bucket=>({
     bucket,
-    ...runCore(days.map(d=>({tradeDate:d.tradeDate,rows:d.rows.filter(r=>bucketForDte(dteFrom(d.tradeDate,r.expiry)??NaN)===bucket)}))),
+    ...runCore(days.map(d=>({tradeDate:d.tradeDate,rows:d.rows.filter(r=>bucketForDte(dteFrom(d.tradeDate,r as H1DeltaCalibrationObservation & {dte?:number})??NaN)===bucket)}))),
   }));
   return {version:"H1_DELTA_OOS_CALIBRATION_V1",semantics:"HISTORICAL_RESEARCH_ONLY",productionImpact:"NONE",...overall,dteOosCalibration:{version:"H1_DELTA_DTE_OOS_READBACK_V1",semantics:"HISTORICAL_RESEARCH_ONLY",productionImpact:"NONE",buckets:dteBuckets,affectsSelector:false,affectsTelegram:false,affectsExecution:false,failClosed:true}};
 }

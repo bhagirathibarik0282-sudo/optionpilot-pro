@@ -27,3 +27,11 @@ test("acceptance status exposes read-only meaningful Telegram preflight diagnost
   assert.match(monitor, /changesTelegramPayload:\s*false/);
   assert.match(monitor, /changesExecution:\s*false/);
 });
+
+
+test("preflight distinguishes selector BLOCK-only state from missing live window", () => {
+  assert.match(monitor, /LIVE_SELECTOR_NO_SELECT_DECISION/);
+  assert.match(monitor, /selectorSelectCount/);
+  assert.match(monitor, /selectorBlockCount/);
+  assert.match(monitor, /selectorReasonCodes/);
+});

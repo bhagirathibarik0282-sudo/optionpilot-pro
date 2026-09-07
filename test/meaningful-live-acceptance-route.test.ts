@@ -50,3 +50,11 @@ test("preflight exposes per-contract selector decisions without changing authori
   assert.match(monitor, /changesTelegramPayload:\s*false/);
   assert.match(monitor, /changesExecution:\s*false/);
 });
+
+test("meaningful live window may use exactly one fresh live selector SELECT when DB candidate flag is absent", () => {
+  assert.match(monitor, /collectH1LiveSelectorDecisions/);
+  assert.match(monitor, /decision\.symbol === symbol && decision\.decision === "SELECT"/);
+  assert.match(monitor, /liveSelects\.length !== 1/);
+  assert.match(monitor, /expiry=\$2::date AND strike=\$3 AND option_type=\$4/);
+  assert.match(monitor, /changesExecution:\s*false/);
+});

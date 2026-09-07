@@ -1,0 +1,18 @@
+name: Business Calibration Gate CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  calibration-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: node --import tsx --test test/business-calibration-gate-v1.test.ts test/business-forward-kpi-v1.test.ts test/h1-oos-calibration.test.ts

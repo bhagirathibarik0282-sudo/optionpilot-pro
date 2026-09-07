@@ -83,7 +83,7 @@ export function parseKiteInstrumentMasterCsv(csv: string): KiteInstrumentMasterR
   if (lines.length < 2) throw new Error("KITE_INSTRUMENT_MASTER_NO_DATA_ROWS");
 
   const header = parseCsvLine(lines[0]).map((x) => x.trim().toLowerCase());
-  const required = ["instrument_token", "tradingsymbol", "name", "expiry", "strike", "instrument_type", "segment", "exchange"];
+  const required = ["instrument_token", "tradingsymbol", "name", "expiry", "strike", "instrument_type", "segment", "exchange", "lot_size"];
   const index = new Map(header.map((name, i) => [name, i]));
   for (const key of required) {
     if (!index.has(key)) throw new Error(`KITE_INSTRUMENT_MASTER_HEADER_MISSING:${key}`);
@@ -106,6 +106,7 @@ export function parseKiteInstrumentMasterCsv(csv: string): KiteInstrumentMasterR
       instrument_type: optionalText(fields[index.get("instrument_type")!]),
       segment: optionalText(fields[index.get("segment")!]),
       exchange: optionalText(fields[index.get("exchange")!]),
+      lot_size: optionalNumber(fields[index.get("lot_size")!]),
     });
   }
   if (rows.length === 0) throw new Error("KITE_INSTRUMENT_MASTER_NO_DATA_ROWS");

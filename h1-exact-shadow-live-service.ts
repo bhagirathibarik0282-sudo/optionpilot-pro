@@ -59,7 +59,7 @@ function validTime(value: string | null | undefined): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function validatePolicy(raw: unknown): H1ExactShadowPolicy {
+export function validateH1ExactShadowPolicy(raw: unknown): H1ExactShadowPolicy {
   if (!raw || typeof raw !== "object") throw new Error("KITE_H1_EXACT_POLICY_INVALID");
   const p = raw as H1ExactShadowPolicy;
   if (!Array.isArray(p.contracts) || p.contracts.length === 0) throw new Error("KITE_H1_EXACT_CONTRACT_POLICY_REQUIRED");
@@ -143,7 +143,7 @@ export function readH1ExactShadowLiveConfig(env: NodeJS.ProcessEnv = process.env
   if (!policyRaw) throw new Error("KITE_H1_EXACT_POLICY_JSON_REQUIRED");
   const registryEntries = parseJson(registryRaw, "KITE_SHADOW_REGISTRY_JSON_INVALID");
   if (!Array.isArray(registryEntries) || registryEntries.length === 0) throw new Error("KITE_SHADOW_REGISTRY_JSON_EMPTY");
-  const policy = validatePolicy(parseJson(policyRaw, "KITE_H1_EXACT_POLICY_JSON_INVALID"));
+  const policy = validateH1ExactShadowPolicy(parseJson(policyRaw, "KITE_H1_EXACT_POLICY_JSON_INVALID"));
   validateExactPeerCapacity(registryEntries as KiteImmediateTokenEntry[], policy);
   return { enabled: true, apiKey, registryEntries: registryEntries as KiteImmediateTokenEntry[], policy };
 }

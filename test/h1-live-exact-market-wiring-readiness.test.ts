@@ -23,14 +23,15 @@ function selection(): H1LiveContractSelectionResult {
       symbol: "NIFTY",
       spot: 25031,
       expiry: "2026-09-08",
+      lotSize: 50,
       strike: 25050,
       ceInstrumentToken: 3,
       peInstrumentToken: 4,
       ceTradingsymbol: "NIFTY08CE",
       peTradingsymbol: "NIFTY08PE",
       peerPairs: [
-        { expiry: "2026-09-15", strike: 25000, ceInstrumentToken: 5, peInstrumentToken: 6, ceTradingsymbol: "NIFTY15CE", peTradingsymbol: "NIFTY15PE" },
-        { expiry: "2026-09-22", strike: 25050, ceInstrumentToken: 7, peInstrumentToken: 8, ceTradingsymbol: "NIFTY22CE", peTradingsymbol: "NIFTY22PE" },
+        { expiry: "2026-09-15", lotSize: 50, strike: 25000, ceInstrumentToken: 5, peInstrumentToken: 6, ceTradingsymbol: "NIFTY15CE", peTradingsymbol: "NIFTY15PE" },
+        { expiry: "2026-09-22", lotSize: 50, strike: 25050, ceInstrumentToken: 7, peInstrumentToken: 8, ceTradingsymbol: "NIFTY22CE", peTradingsymbol: "NIFTY22PE" },
       ],
     }],
   };
@@ -57,6 +58,8 @@ test("builds only exact live WS subscription registry from PR241 output", () => 
   assert.equal(out.startsSocket, false);
   assert.equal(out.selectedSymbolCount, 1);
   assert.equal(out.selectedOptionTokenCount, 6);
+  assert.equal(out.lotSizeByOptionToken[3], 50);
+  assert.equal(out.lotSizeByOptionToken[8], 50);
   assert.equal(out.affectsVerdict, false);
   assert.equal(out.affectsExecution, false);
   assert.equal(out.affectsTelegram, false);

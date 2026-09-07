@@ -26,6 +26,7 @@ test("parses exact Kite instrument-master CSV metadata", () => {
     instrument_type: "CE",
     segment: "NFO-OPT",
     exchange: "NFO",
+    lot_size: 65,
   });
 });
 

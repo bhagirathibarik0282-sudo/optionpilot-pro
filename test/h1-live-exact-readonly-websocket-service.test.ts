@@ -14,6 +14,7 @@ function readiness(): H1LiveExactMarketWiringReadinessResult {
   return {
     version: "H1_LIVE_EXACT_MARKET_WIRING_READINESS_V1", ready: true, registry,
     instrumentTokens: [99,3,4], mode: "full", selectedSymbolCount: 1, selectedOptionTokenCount: 2,
+    lotSizeByOptionToken: { 3: 50, 4: 50 },
     blockers: [], source: "PR241_EXACT_REGISTRY_FILTERED_FOR_LIVE_WS", productionImpact: "NONE",
     startsSocket: false, affectsDirection: false, affectsVerdict: false, affectsExecution: false,
     affectsTelegram: false, activatesShadow: false, infersTokens: false, failClosed: true,
@@ -148,10 +149,16 @@ test("fails closed when a constituent token overlaps the immediate registry", ()
 });
 
 
-test("selector runtime stays fail-closed when production policy is unverified", () => {
-  const source = readFileSync(new URL("../h1-live-exact-readonly-websocket-service.ts", import.meta.url), "utf8");
-  assert.match(source, /resolveH1SelectorProductionPolicy\(\)/);
-  assert.match(source, /selectorRuntimePolicyReady/);
-  assert.match(source, /selectorRuntimeAttached:\s*false/);
-  assert.match(source, /SELECTOR_RUNTIME_ATTACHMENT_CONTEXT_REQUIRED|PREMIUM_POLICY_UNVERIFIED/);
+test("selector runtime attaches shadow-only coordinator with verified lot size", () => {
+  const sent:string[] = [];
+  const socket = fakeSocket(sent);
+  const service = new H1LiveExactReadOnlyWebSocketService({
+    readiness: readiness(), apiKey: "key", accessToken: "token", socketFactory: () => socket,
+  });
+  const out = service.start();
+  assert.equal(out.selectorRuntimePolicyReady, true);
+  assert.equal(out.selectorRuntimeAttached, true);
+  assert.deepEqual(out.selectorRuntimeBlockers, []);
+  assert.equal(out.affectsTelegram, false);
+  assert.equal(out.affectsExecution, false);
 });

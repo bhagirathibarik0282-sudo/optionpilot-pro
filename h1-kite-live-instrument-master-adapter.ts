@@ -106,6 +106,7 @@ export function parseKiteInstrumentMasterCsv(csv: string): KiteInstrumentMasterR
       instrument_type: optionalText(fields[index.get("instrument_type")!]),
       segment: optionalText(fields[index.get("segment")!]),
       exchange: optionalText(fields[index.get("exchange")!]),
+      lot_size: index.has("lot_size") ? optionalNumber(fields[index.get("lot_size")!]) : null,
     });
   }
   if (rows.length === 0) throw new Error("KITE_INSTRUMENT_MASTER_NO_DATA_ROWS");

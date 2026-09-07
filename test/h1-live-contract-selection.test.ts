@@ -4,16 +4,16 @@ import { selectH1LiveContracts } from "../h1-live-contract-selection.js";
 import { fetchH1LiveSelectionSpots } from "../h1-live-selection-spot-rest.js";
 
 const rows:any[]=[
- {instrument_token:1,tradingsymbol:"NIFTY26SEP25000CE",name:"NIFTY",expiry:"2026-09-08",strike:25000,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO"},
- {instrument_token:2,tradingsymbol:"NIFTY26SEP25000PE",name:"NIFTY",expiry:"2026-09-08",strike:25000,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO"},
- {instrument_token:3,tradingsymbol:"NIFTY26SEP25050CE",name:"NIFTY",expiry:"2026-09-08",strike:25050,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO"},
- {instrument_token:4,tradingsymbol:"NIFTY26SEP25050PE",name:"NIFTY",expiry:"2026-09-08",strike:25050,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO"},
- {instrument_token:5,tradingsymbol:"NIFTY26SEP1525000CE",name:"NIFTY",expiry:"2026-09-15",strike:25000,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO"},
- {instrument_token:6,tradingsymbol:"NIFTY26SEP1525000PE",name:"NIFTY",expiry:"2026-09-15",strike:25000,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO"},
- {instrument_token:7,tradingsymbol:"NIFTY26SEP2225050CE",name:"NIFTY",expiry:"2026-09-22",strike:25050,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO"},
- {instrument_token:8,tradingsymbol:"NIFTY26SEP2225050PE",name:"NIFTY",expiry:"2026-09-22",strike:25050,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO"},
- {instrument_token:9,tradingsymbol:"NIFTY26SEP2925000CE",name:"NIFTY",expiry:"2026-09-29",strike:25000,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO"},
- {instrument_token:10,tradingsymbol:"NIFTY26SEP2925000PE",name:"NIFTY",expiry:"2026-09-29",strike:25000,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO"},
+ {instrument_token:1,tradingsymbol:"NIFTY26SEP25000CE",name:"NIFTY",expiry:"2026-09-08",strike:25000,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
+ {instrument_token:2,tradingsymbol:"NIFTY26SEP25000PE",name:"NIFTY",expiry:"2026-09-08",strike:25000,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
+ {instrument_token:3,tradingsymbol:"NIFTY26SEP25050CE",name:"NIFTY",expiry:"2026-09-08",strike:25050,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
+ {instrument_token:4,tradingsymbol:"NIFTY26SEP25050PE",name:"NIFTY",expiry:"2026-09-08",strike:25050,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
+ {instrument_token:5,tradingsymbol:"NIFTY26SEP1525000CE",name:"NIFTY",expiry:"2026-09-15",strike:25000,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
+ {instrument_token:6,tradingsymbol:"NIFTY26SEP1525000PE",name:"NIFTY",expiry:"2026-09-15",strike:25000,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
+ {instrument_token:7,tradingsymbol:"NIFTY26SEP2225050CE",name:"NIFTY",expiry:"2026-09-22",strike:25050,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
+ {instrument_token:8,tradingsymbol:"NIFTY26SEP2225050PE",name:"NIFTY",expiry:"2026-09-22",strike:25050,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
+ {instrument_token:9,tradingsymbol:"NIFTY26SEP2925000CE",name:"NIFTY",expiry:"2026-09-29",strike:25000,instrument_type:"CE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
+ {instrument_token:10,tradingsymbol:"NIFTY26SEP2925000PE",name:"NIFTY",expiry:"2026-09-29",strike:25000,instrument_type:"PE",segment:"NFO-OPT",exchange:"NFO",lot_size:50},
 ];
 
 test("selects nearest common CE/PE strike without inferring token",()=>{

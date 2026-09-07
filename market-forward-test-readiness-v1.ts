@@ -137,13 +137,19 @@ function telegramProof(symbol: MarketForwardTestSymbol, value: unknown) {
   const acceptance = text(symbolState?.acceptance);
   const journal = record(symbolState?.journal);
   const latest = record(journal?.latest);
-  const candidateKey = text(latest?.candidateKey);
+  const meaningfulContractKey = text(latest?.candidateKey);
   return {
     ready: acceptance === "PASS_MEANINGFUL_EVENT_AND_JOURNAL_VERIFIED",
     acceptance: acceptance ?? "NO_ACCEPTANCE_STATE",
-    candidateKey,
+    meaningfulContractKey,
     blocker: acceptance === "PASS_MEANINGFUL_EVENT_AND_JOURNAL_VERIFIED" ? null : "MEANINGFUL_TELEGRAM_LIVE_PROOF_PENDING",
   };
+}
+
+function expectedMeaningfulContractKey(dashboard: BusinessDashboardV1Model): string | null {
+  const candidate = dashboard.candidate;
+  if (!candidate) return null;
+  return `${candidate.symbol}|${candidate.expiryDate}|${candidate.strike}|${candidate.optionSide}`;
 }
 
 function contextState(value: unknown, fallback: string) {
@@ -161,7 +167,8 @@ export function buildMarketForwardTestReadiness(input: MarketForwardTestReadines
   const dashboardCandidateKey = input.dashboard.candidate?.candidateKey ?? null;
   const dashboardReady = input.dashboard.symbol === input.symbol && input.dashboard.ready === true && dashboardCandidateKey != null;
   const telegram = telegramProof(input.symbol, input.telegramAcceptance);
-  const sameCandidate = dashboardCandidateKey != null && telegram.candidateKey != null && dashboardCandidateKey === telegram.candidateKey;
+  const expectedContractKey = expectedMeaningfulContractKey(input.dashboard);
+  const sameContractIdentity = expectedContractKey != null && telegram.meaningfulContractKey != null && expectedContractKey === telegram.meaningfulContractKey;
   const fiiDii = contextState(input.fiiDiiContext, "FII_DII_CONTEXT_PENDING");
   const marketDna = contextState(input.marketDnaContext, "MARKET_DNA_CONTEXT_PENDING");
 
@@ -172,7 +179,7 @@ export function buildMarketForwardTestReadiness(input: MarketForwardTestReadines
   if (!positioning.ready) liveBlockers.push("POSITIONING_CONTEXT_PROOF_PENDING");
   if (!dashboardReady) liveBlockers.push("CANONICAL_BUYER_CANDIDATE_PENDING");
   if (!telegram.ready) liveBlockers.push("MEANINGFUL_TELEGRAM_LIVE_PROOF_PENDING");
-  if (dashboardReady && telegram.ready && !sameCandidate) liveBlockers.push("DASHBOARD_TELEGRAM_CANDIDATE_MISMATCH");
+  if (dashboardReady && telegram.ready && !sameContractIdentity) liveBlockers.push("DASHBOARD_TELEGRAM_CONTRACT_IDENTITY_MISMATCH");
 
   const forwardEvidenceReady = liveBlockers.length === 0;
   return {
@@ -189,9 +196,10 @@ export function buildMarketForwardTestReadiness(input: MarketForwardTestReadines
       recorder: { ready: recorderReady, replaySymbolMatches, counts: input.replay.counts ?? null, continuity: input.replay.continuity ?? null },
       derivedOiTruth: oi,
       positioningContext: positioning,
-      canonicalBusiness: { ready: dashboardReady, candidateKey: dashboardCandidateKey, horizons: input.dashboard.horizons, state: input.dashboard.state },
+      canonicalBusiness: { ready: dashboardReady, canonicalCandidateKey: dashboardCandidateKey, expectedMeaningfulContractKey: expectedContractKey, horizons: input.dashboard.horizons, state: input.dashboard.state },
       meaningfulTelegram: telegram,
-      sameCanonicalCandidateDashboardTelegram: sameCandidate,
+      sameContractIdentityDashboardMeaningfulTelegram: sameContractIdentity,
+      identitySemantics: "CONTRACT_IDENTITY_ONLY_CANONICAL_TRANSPORT_AUTHORITY_IS_SEPARATE" as const,
     },
     context: {
       fiiDii,

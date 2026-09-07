@@ -134,3 +134,23 @@ test("blocked adjacent ticks can accumulate against the retained baseline", () =
   assert.equal(accumulated.ready, true);
   assert.equal(getH1LiveSelectorRegistrySize(), 1);
 });
+
+
+test("published false response gates retain the original baseline until confirmation", () => {
+  clearH1LiveSelectorRegistry();
+  const bridge = new H1KiteExactSelectorPublisherBridge();
+  const strict = {
+    ...publisher,
+    premiumPolicy: { ...publisher.premiumPolicy, minPremiumMovePct: 10, minAbsoluteDeltaChange: 0.01, minCurrentGamma: 0 },
+  };
+  bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.00, true, () => strict));
+
+  const early = bridge.ingest(input("2026-09-03T10:00:02.000Z", 1.05, true, () => strict));
+  assert.equal(early.ready, true);
+  assert.equal(early.publisher?.producer?.packet?.gates.premiumResponseConfirmed?.value, false);
+  assert.equal(getH1LiveSelectorRegistrySize(), 1);
+
+  const accumulated = bridge.ingest(input("2026-09-03T10:00:05.000Z", 1.20, true, () => strict));
+  assert.equal(accumulated.ready, true);
+  assert.equal(accumulated.publisher?.producer?.packet?.gates.premiumResponseConfirmed?.value, true);
+});

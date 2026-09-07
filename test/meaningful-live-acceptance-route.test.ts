@@ -31,25 +31,25 @@ test("acceptance status exposes read-only meaningful Telegram preflight diagnost
 
 
 test("preflight distinguishes selector BLOCK-only state from missing live window", () => {
-  assert.match(monitor, /LIVE_SELECTOR_NO_SELECT_DECISION/);
-  assert.match(monitor, /selectorSelectCount/);
-  assert.match(monitor, /selectorBlockCount/);
-  assert.match(monitor, /selectorReasonCodes/);
+  assert.match(meaningful, /LIVE_SELECTOR_NO_SELECT_DECISION/);
+  assert.match(meaningful, /selectorSelectCount/);
+  assert.match(meaningful, /selectorBlockCount/);
+  assert.match(meaningful, /selectorReasonCodes/);
 });
 
 
 test("preflight selector counts are isolated to the requested symbol", () => {
-  assert.match(monitor, /selector\.decisions\.filter\(\(decision\) => decision\.symbol === symbol\)/);
-  assert.match(monitor, /symbolDecisions\.filter\(\(decision\) => decision\.decision === "SELECT"\)/);
-  assert.match(monitor, /symbolDecisions\.filter\(\(decision\) => decision\.decision === "BLOCK"\)/);
+  assert.match(meaningful, /selector\.decisions\.filter\(\(decision\) => decision\.symbol === symbol\)/);
+  assert.match(meaningful, /symbolDecisions\.filter\(\(decision\) => decision\.decision === "SELECT"\)/);
+  assert.match(meaningful, /symbolDecisions\.filter\(\(decision\) => decision\.decision === "BLOCK"\)/);
 });
 
 
 test("preflight exposes per-contract selector decisions without changing authority", () => {
-  assert.match(monitor, /selectorDecisions/);
-  assert.match(monitor, /reasonCodes:\s*\[\.\.\.d\.reasonCodes\]/);
-  assert.match(monitor, /changesTelegramPayload:\s*false/);
-  assert.match(monitor, /changesExecution:\s*false/);
+  assert.match(meaningful, /selectorDecisions/);
+  assert.match(meaningful, /reasonCodes:\s*\[\.\.\.d\.reasonCodes\]/);
+  assert.match(meaningful, /changesTelegramPayload:\s*false/);
+  assert.match(meaningful, /changesExecution:\s*false/);
 });
 
 test("meaningful live window may use exactly one fresh live selector SELECT when DB candidate flag is absent", () => {

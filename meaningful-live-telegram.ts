@@ -760,6 +760,7 @@ export interface MeaningfulLivePreflightDiagnostic {
   selectorSelectCount: number;
   selectorBlockCount: number;
   selectorReasonCodes: string[];
+  selectorDecisions: Array<{ expiry: string; strike: number; side: "CE" | "PE"; decision: "SELECT" | "BLOCK"; reasonCodes: string[] }>;
   affectsTelegram: false;
   affectsVerdict: false;
   affectsExecution: false;
@@ -790,6 +791,7 @@ export async function getMeaningfulLivePreflightDiagnostic(symbol: NarrativeSymb
       symbol, ready: false, reason, candidateKey: null, direction: "NEUTRAL",
       state: null, dataQuality: null, meaningfulChanges: [], triggerFingerprint: null,
       selectorSelectCount: selectDecisions.length, selectorBlockCount: blockDecisions.length, selectorReasonCodes,
+      selectorDecisions: symbolDecisions.map((d) => ({ expiry: d.expiry, strike: d.strike, side: d.side, decision: d.decision, reasonCodes: [...d.reasonCodes] })),
       affectsTelegram: false, affectsVerdict: false, affectsExecution: false, createsOrders: false,
     };
   }
@@ -804,7 +806,7 @@ export async function getMeaningfulLivePreflightDiagnostic(symbol: NarrativeSymb
     dataQuality: decision.dataQuality,
     meaningfulChanges: [...decision.meaningfulChanges],
     triggerFingerprint: decision.triggerFingerprint,
-    selectorSelectCount: 1, selectorBlockCount: 0, selectorReasonCodes: [],
+    selectorSelectCount: 1, selectorBlockCount: 0, selectorReasonCodes: [], selectorDecisions: [],
     affectsTelegram: false,
     affectsVerdict: false,
     affectsExecution: false,

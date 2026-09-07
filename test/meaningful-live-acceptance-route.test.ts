@@ -42,3 +42,11 @@ test("preflight selector counts are isolated to the requested symbol", () => {
   assert.match(monitor, /symbolDecisions\.filter\(\(decision\) => decision\.decision === "SELECT"\)/);
   assert.match(monitor, /symbolDecisions\.filter\(\(decision\) => decision\.decision === "BLOCK"\)/);
 });
+
+
+test("preflight exposes per-contract selector decisions without changing authority", () => {
+  assert.match(monitor, /selectorDecisions/);
+  assert.match(monitor, /reasonCodes:\s*\[\.\.\.d\.reasonCodes\]/);
+  assert.match(monitor, /changesTelegramPayload:\s*false/);
+  assert.match(monitor, /changesExecution:\s*false/);
+});

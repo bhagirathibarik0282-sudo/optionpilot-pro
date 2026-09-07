@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 const URL = "https://optionpilot-pro-v2-production.up.railway.app/api/research/meaningful-live-acceptance";
 
@@ -28,4 +29,15 @@ test("production Telegram acceptance monitor is safe and exposes truthful transp
   const sent = expected.reduce((n, symbol) => n + Number(body.symbols[symbol].runtime?.meaningfulSent ?? 0), 0);
   console.log(`PRODUCTION_MEANINGFUL_SEND_COUNT_SINCE_PROCESS_START=${sent}`);
   console.log(`PRODUCTION_PREFLIGHT_DIAGNOSTIC=${JSON.stringify(Object.fromEntries(expected.map((symbol) => [symbol, body.symbols?.[symbol]?.preflight ?? null])))}`);
+});
+
+
+test("diagnostic: print local server candidate wiring anchors", () => {
+  const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+  const needles = ["recordH1FromRuntimeSnapshot", "selectExecutionCandidate", "candidateDecisions", "runtimeCandidateDecisions", "EXECUTION_CANDIDATE_SELECTOR"];
+  const contexts = Object.fromEntries(needles.map((needle) => {
+    const idx = source.indexOf(needle);
+    return [needle, idx < 0 ? null : source.slice(Math.max(0, idx - 900), Math.min(source.length, idx + 1800))];
+  }));
+  console.log("SERVER_CANDIDATE_WIRING_CONTEXT=" + JSON.stringify(contexts));
 });

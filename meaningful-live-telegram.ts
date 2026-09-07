@@ -786,17 +786,18 @@ export function installMeaningfulLiveTelegramBridge(): void {
 
       await hydrateMemory();
       const window = await loadWindow(symbol, originalText);
-      if (!window) return syntheticSuppressedResponse();
+      if (!window) { console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason:"LIVE_WINDOW_UNAVAILABLE" })}`); return syntheticSuppressedResponse(); }
 
       const previous = memory.get(symbol);
       const decision = deriveLiveMeaningfulDecision(window, previous);
-      if (!decision.ok || !decision.candidateKey) return syntheticSuppressedResponse();
+      if (!decision.ok || !decision.candidateKey) { console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason:decision.reason })}`); return syntheticSuppressedResponse(); }
 
       if (decision.reason === "NO_MEANINGFUL_CHANGE") {
         confirmationTracker.reset(symbol);
+        console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason:"NO_MEANINGFUL_CHANGE" })}`);
         return syntheticSuppressedResponse();
       }
-      if (!decision.triggerFingerprint || !decision.narrativeHtml || !decision.narrativeText || !decision.footprint) return syntheticSuppressedResponse();
+      if (!decision.triggerFingerprint || !decision.narrativeHtml || !decision.narrativeText || !decision.footprint) { console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason:"INCOMPLETE_MEANINGFUL_DECISION" })}`); return syntheticSuppressedResponse(); }
 
       const confirmationKey = `${decision.candidateKey}|${decision.state}|${decision.footprint.classification}|${decision.meaningfulChanges.join("|")}`;
       const consecutiveConfirmations = confirmationTracker.observe(symbol, confirmationKey);
@@ -822,14 +823,16 @@ export function installMeaningfulLiveTelegramBridge(): void {
         lastSpokenFingerprint: previous?.fingerprint ?? null,
       });
 
-      if (!trigger.shouldSpeak) return syntheticSuppressedResponse();
+      if (!trigger.shouldSpeak) { console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason:trigger.reason ?? "TRIGGER_BLOCKED" })}`); return syntheticSuppressedResponse(); }
 
       let html = appendExistingAi(decision.narrativeHtml, originalText);
       if (html.length > MAX_LIVE_TEXT) html = decision.narrativeHtml;
-      if (html.length > MAX_LIVE_TEXT) return syntheticSuppressedResponse();
+      if (html.length > MAX_LIVE_TEXT) { console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason:"MESSAGE_TOO_LONG" })}`); return syntheticSuppressedResponse(); }
 
+      console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"ATTEMPTED", candidateKey:decision.candidateKey, reason:decision.reason })}`);
       const response = await originalFetch(input, { ...init, body: JSON.stringify({ ...payload, text: html, parse_mode: "HTML", disable_web_page_preview: true }) });
       if (await telegramResponseOk(response)) {
+        console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SENT", candidateKey:decision.candidateKey })}`);
         const current = window.market.at(-1)!;
         const stateSinceMs = previous?.state === decision.state ? previous.stateSinceMs : current.atMs;
         const record: NarrativeMemoryRecord = {
@@ -846,6 +849,8 @@ export function installMeaningfulLiveTelegramBridge(): void {
         memory.commit(record);
         confirmationTracker.reset(symbol);
         void persistMeaningfulEvent(record, decision.narrativeText, html);
+      } else {
+        console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"FAILED", candidateKey:decision.candidateKey, status:response.status })}`);
       }
       return response;
     } catch (err) {

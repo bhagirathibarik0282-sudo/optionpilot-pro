@@ -19,6 +19,7 @@ import { renderCanonicalIntelligenceDashboardHtml } from "./canonical-intelligen
 import { runFiiDiiProductionReadinessHttp } from "./canonical-fii-dii-production-readiness-http.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
+import { compactH1Replay } from "./h1-replay-compact-v1.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
 import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } from "./research-engine-chain-http.js";
 import { getMeaningfulLiveAcceptanceStatus } from "./meaningful-live-acceptance-monitor.js";
@@ -261,7 +262,10 @@ researchRouter.get("/h1-replay", async (c) => {
     }, 400);
   }
   const result = await runH1ReplayHttp(parsed.value);
-  return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+  const response = (c.req.query("format") ?? "").trim().toLowerCase() === "compact"
+    ? compactH1Replay(result)
+    : result;
+  return c.json(response, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
 });
 
 researchRouter.get("/h1-replay-intelligence", async (c) => {

@@ -1,0 +1,226 @@
+{
+  "version": "OPTIONPILOT_COVERAGE_MANIFEST_V1",
+  "statusEnum": [
+    "PROVEN",
+    "PARTIAL",
+    "NOT_PROVEN",
+    "BLOCKED"
+  ],
+  "architecture": [
+    "KITE_LIVE_TRUTH",
+    "RECORDER_CONTINUITY",
+    "CANONICAL_ARCHIVE",
+    "DETERMINISTIC_ENGINES",
+    "CANDIDATE_AUTHORITY",
+    "TELEGRAM_DASHBOARD",
+    "FORWARD_OUTCOMES",
+    "HISTORICAL_CALIBRATION",
+    "EXECUTION_SHADOW",
+    "REAL_EXECUTION_READINESS"
+  ],
+  "rules": {
+    "mergedIsNotWorking": true,
+    "missingDataMustRemainMissing": true,
+    "oneCandidateAuthority": true,
+    "smcInterpretationOnly": true,
+    "candleContextAllowed": [
+      "DISPLACEMENT",
+      "REJECTION",
+      "FAILED_BREAK",
+      "COMPRESSION_TO_EXPANSION"
+    ],
+    "recoveredHistoricalSeparated": true,
+    "recorderRequiresCanonicalArchive": true,
+    "replayRequiresContinuity": true,
+    "twoFixRootCauseRule": true,
+    "railwayAiAgentForbidden": true
+  },
+  "components": [
+    {
+      "id": "kite_live_truth",
+      "status": "NOT_PROVEN",
+      "storage": "N/A",
+      "replay": "N/A",
+      "consumer": "live-runtime",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "recorder_continuity",
+      "status": "PARTIAL",
+      "storage": "market_snapshot_1m/option_snapshot_1m/chain_state_1m",
+      "replay": "h1-replay",
+      "consumer": "historical-research",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "canonical_archive",
+      "status": "PARTIAL",
+      "storage": "app_state_log:H1_CANONICAL_MARKET_ARCHIVE",
+      "replay": "h1-replay.canonical",
+      "consumer": "historical-research",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "spot_structure",
+      "status": "PARTIAL",
+      "storage": "market_snapshot_1m",
+      "replay": "h1-replay.market",
+      "consumer": "business-view",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "smc_structure",
+      "status": "NOT_PROVEN",
+      "storage": "canonical",
+      "replay": "pending",
+      "consumer": "interpretation-only",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "candle_context",
+      "status": "NOT_PROVEN",
+      "storage": "canonical",
+      "replay": "pending",
+      "consumer": "interpretation-only",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "futures",
+      "status": "PARTIAL",
+      "storage": "market_snapshot_1m+canonical",
+      "replay": "h1-replay",
+      "consumer": "business-view",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "heavyweights_sectors",
+      "status": "NOT_PROVEN",
+      "storage": "canonical/pending-normalized",
+      "replay": "pending",
+      "consumer": "business-view",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "vix",
+      "status": "PARTIAL",
+      "storage": "market_snapshot_1m",
+      "replay": "h1-replay.market",
+      "consumer": "business-view",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "premium_pair",
+      "status": "PARTIAL",
+      "storage": "option_snapshot_1m+canonical",
+      "replay": "h1-replay.options",
+      "consumer": "candidate/business-view",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "exact_contract_identity",
+      "status": "PARTIAL",
+      "storage": "option_snapshot_1m+canonical",
+      "replay": "h1-replay.options",
+      "consumer": "candidate",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "oi_pcr_walls",
+      "status": "BLOCKED",
+      "storage": "chain_state_1m+canonical",
+      "replay": "h1-replay.chain",
+      "consumer": "business-view",
+      "runtimeEvidence": null,
+      "blocker": "wall fields/migrations not yet runtime-proven end-to-end"
+    },
+    {
+      "id": "multi_dte",
+      "status": "PARTIAL",
+      "storage": "option_snapshot_1m+canonical",
+      "replay": "h1-replay.options",
+      "consumer": "business-view",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "iv_skew",
+      "status": "PARTIAL",
+      "storage": "option_snapshot_1m+canonical",
+      "replay": "h1-replay.options",
+      "consumer": "business-view",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "greeks_residual",
+      "status": "NOT_PROVEN",
+      "storage": "canonical/pending-derived",
+      "replay": "pending",
+      "consumer": "research",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "depth_microprice_liquidity",
+      "status": "NOT_PROVEN",
+      "storage": "canonical/pending-normalized",
+      "replay": "pending",
+      "consumer": "candidate/executability",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "candidate_authority",
+      "status": "PARTIAL",
+      "storage": "candidate_history+H1 decision audit",
+      "replay": "candidate audit endpoints",
+      "consumer": "telegram/dashboard/shadow",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "telegram_meaningful_dedup",
+      "status": "NOT_PROVEN",
+      "storage": "runtime logs/evidence",
+      "replay": "N/A",
+      "consumer": "telegram",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "business_views_stars",
+      "status": "NOT_PROVEN",
+      "storage": "pending business proof",
+      "replay": "business proof endpoints",
+      "consumer": "dashboard",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "forward_outcomes",
+      "status": "PARTIAL",
+      "storage": "forward journal/outcome history",
+      "replay": "business forward proof",
+      "consumer": "calibration",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "historical_calibration",
+      "status": "NOT_PROVEN",
+      "storage": "research store",
+      "replay": "historical research",
+      "consumer": "research only",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "execution_shadow",
+      "status": "NOT_PROVEN",
+      "storage": "shadow evidence",
+      "replay": "shadow proof",
+      "consumer": "readiness",
+      "runtimeEvidence": null
+    },
+    {
+      "id": "real_execution_readiness",
+      "status": "BLOCKED",
+      "storage": "N/A",
+      "replay": "N/A",
+      "consumer": "execution",
+      "runtimeEvidence": null,
+      "blocker": "requires prior live and shadow proof"
+    }
+  ]
+}

@@ -27,4 +27,5 @@ test("production Telegram acceptance monitor is safe and exposes truthful transp
 
   const sent = expected.reduce((n, symbol) => n + Number(body.symbols[symbol].runtime?.meaningfulSent ?? 0), 0);
   console.log(`PRODUCTION_MEANINGFUL_SEND_COUNT_SINCE_PROCESS_START=${sent}`);
+  console.log(`PRODUCTION_PREFLIGHT_DIAGNOSTIC=${JSON.stringify(Object.fromEntries(expected.map((symbol) => [symbol, body.symbols?.[symbol]?.preflight ?? null])))}`);
 });

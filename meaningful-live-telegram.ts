@@ -14,6 +14,7 @@ import {
   type PremiumNarrativeBlock,
 } from "./meaningful-market-narrative.js";
 import { evaluateMessageTrigger } from "./message-trigger-engine.js";
+import { collectH1LiveSelectorDecisions, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
 import { buildMeaningfulTelegramCardV2 } from "./telegram-meaningful-card-v2.js";
 
 const { Pool } = pg;
@@ -767,8 +768,17 @@ export async function getMeaningfulLivePreflightDiagnostic(symbol: NarrativeSymb
   await hydrateMemory();
   const window = await loadWindow(symbol, "");
   if (!window) {
+    const selectorRegistrySize = getH1LiveSelectorRegistrySize();
+    const selector = collectH1LiveSelectorDecisions(new Date().toISOString());
+    const reason = selectorRegistrySize === 0
+      ? "LIVE_SELECTOR_REGISTRY_EMPTY"
+      : !selector.eligibleForLiveH1Marking
+        ? "LIVE_SELECTOR_NOT_ELIGIBLE"
+        : selector.decisions.length === 0
+          ? "LIVE_SELECTOR_NO_DECISIONS"
+          : "LIVE_WINDOW_UNAVAILABLE";
     return {
-      symbol, ready: false, reason: "LIVE_WINDOW_UNAVAILABLE", candidateKey: null, direction: "NEUTRAL",
+      symbol, ready: false, reason, candidateKey: null, direction: "NEUTRAL",
       state: null, dataQuality: null, meaningfulChanges: [], triggerFingerprint: null,
       affectsTelegram: false, affectsVerdict: false, affectsExecution: false, createsOrders: false,
     };

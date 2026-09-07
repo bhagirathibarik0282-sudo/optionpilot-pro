@@ -9,15 +9,17 @@ function bucketFor(dte:number):H1DeltaDteBucket|null {
   if(dte<=9) return "MID_5_9";
   return "FAR_10_PLUS";
 }
-function dteFrom(day:string, expiry:string):number|null {
-  const a=Date.parse(`${day.slice(0,10)}T00:00:00Z`), b=Date.parse(`${expiry.slice(0,10)}T00:00:00Z`);
+function dteFrom(day:string, row:{expiry:string; dte?:number}):number|null {
+  const canonical=Number(row.dte);
+  if(Number.isInteger(canonical)&&canonical>=0) return canonical;
+  const a=Date.parse(`${day.slice(0,10)}T00:00:00Z`), b=Date.parse(`${String(row.expiry).slice(0,10)}T00:00:00Z`);
   if(!Number.isFinite(a)||!Number.isFinite(b)) return null;
   const d=Math.round((b-a)/86_400_000);
   return d>=0?d:null;
 }
 export function runH1DeltaDteOosCalibration(days:H1DeltaOosDay[]){
   const buckets=BUCKETS.map(bucket=>{
-    const bucketDays=days.map(d=>({tradeDate:d.tradeDate,rows:d.rows.filter(r=>bucketFor(dteFrom(d.tradeDate,r.expiry)??NaN)===bucket)}));
+    const bucketDays=days.map(d=>({tradeDate:d.tradeDate,rows:d.rows.filter(r=>bucketFor(dteFrom(d.tradeDate,r as typeof r & {dte?:number})??NaN)===bucket)}));
     const result=runH1DeltaOosCalibration(bucketDays);
     return {bucket,...result};
   });

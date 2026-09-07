@@ -320,6 +320,30 @@ researchRouter.get("/h1-theory-dashboard", (c) => {
   return c.html(renderH1TheoryDashboardHtml());
 });
 
+researchRouter.get("/h1-dte-aware-shadow-threshold", (c) => {
+  c.header("Cache-Control", "no-store");
+  const dte = Number(c.req.query("dte"));
+  const delta = Number(c.req.query("delta"));
+  if (!Number.isInteger(dte) || dte < 0 || !Number.isFinite(delta) || delta < 0) {
+    return c.json({
+      ok: false,
+      mode: "READ_ONLY_H1_DTE_AWARE_SHADOW_THRESHOLD_V1",
+      productionImpact: "NONE",
+      reason: "VALID_DTE_AND_DELTA_REQUIRED",
+      affectsSelector: false,
+      affectsTelegram: false,
+      affectsExecution: false,
+    }, 400);
+  }
+  const result = evaluateH1DteAwareShadowThreshold({ dte, absoluteDeltaChange: delta });
+  return c.json({
+    ok: true,
+    mode: "READ_ONLY_H1_DTE_AWARE_SHADOW_THRESHOLD_V1",
+    productionImpact: "NONE",
+    ...result,
+  });
+});
+
 researchRouter.get("/meaningful-live-acceptance", async (c) => {
   const result = await getMeaningfulLiveAcceptanceStatus(c.req.query("symbol"));
   return c.json({

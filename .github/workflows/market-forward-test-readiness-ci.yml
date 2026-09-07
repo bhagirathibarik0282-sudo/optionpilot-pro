@@ -1,0 +1,22 @@
+name: Market Forward Test Readiness CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  market-forward-test-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/market-forward-test-readiness-v1.test.ts test/market-forward-test-readiness-http-v1.test.ts
+      - run: node scripts/wire-market-forward-test-readiness-runtime.mjs --check

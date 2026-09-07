@@ -28,7 +28,19 @@ function dashboard() {
     symbol: "NIFTY",
     ready: true,
     state: "CANDIDATE_READY",
-    candidate: { candidateKey: "NIFTY|CE|23800|2026-09-08" },
+    candidate: {
+      candidateKey: "NIFTY:CE:23800:2026-09-08:DTE0:ATM",
+      symbol: "NIFTY",
+      optionSide: "CE",
+      strike: 23800,
+      expiryDate: "2026-09-08",
+      dte: 0,
+      moneyness: "ATM",
+      premiumLtp: 100,
+      dteBucket: "CURRENT_OR_NEAR",
+      role: "OPTION_BUYER",
+      sourceAuthority: "EXECUTION_CANDIDATE_SELECTOR_V2",
+    },
     horizons: [
       { horizon: "INTRADAY", action: "BUYER_FAVOURED", buyerStars: 5, sellerStars: 2, devilCheck: "PASS" },
       { horizon: "MULTIDAY", action: "BUYER_FAVOURED", buyerStars: 4, sellerStars: 2, devilCheck: "PASS" },
@@ -37,13 +49,13 @@ function dashboard() {
   } as any;
 }
 
-function telegram(candidateKey = "NIFTY|CE|23800|2026-09-08") {
+function telegram(meaningfulContractKey = "NIFTY|2026-09-08|23800|CE") {
   return {
     ok: true,
     symbols: {
       NIFTY: {
         acceptance: "PASS_MEANINGFUL_EVENT_AND_JOURNAL_VERIFIED",
-        journal: { latest: { candidateKey } },
+        journal: { latest: { candidateKey: meaningfulContractKey } },
       },
     },
   };
@@ -51,7 +63,7 @@ function telegram(candidateKey = "NIFTY|CE|23800|2026-09-08") {
 
 const readyContext = { ok: true, ready: true, blockers: [] };
 
-test("strict forward evidence requires derived OI, positioning, canonical candidate and meaningful Telegram identity", () => {
+test("strict forward evidence requires derived OI, positioning, canonical business and same Telegram contract identity", () => {
   const out = buildMarketForwardTestReadiness({
     symbol: "NIFTY",
     replay: replay(),
@@ -67,7 +79,9 @@ test("strict forward evidence requires derived OI, positioning, canonical candid
   assert.equal(out.gates.derivedOiTruth.derivedRows, 1, "null first observation must not be coerced into a zero derived row");
   assert.equal(out.gates.derivedOiTruth.separateNativeAndDerivedFieldsObserved, true);
   assert.equal(out.gates.positioningContext.ready, true);
-  assert.equal(out.gates.sameCanonicalCandidateDashboardTelegram, true);
+  assert.equal(out.gates.sameContractIdentityDashboardMeaningfulTelegram, true);
+  assert.equal(out.gates.canonicalBusiness.canonicalCandidateKey, "NIFTY:CE:23800:2026-09-08:DTE0:ATM");
+  assert.equal(out.gates.canonicalBusiness.expectedMeaningfulContractKey, "NIFTY|2026-09-08|23800|CE");
   assert.equal(out.safety.executionEnabled, false);
   assert.equal(out.safety.placesOrder, false);
 });
@@ -82,13 +96,13 @@ test("development stays ready but live proof stays pending before post-deploy de
   assert.ok(out.liveBlockers.includes("DERIVED_OI_NOT_OBSERVED_YET"));
 });
 
-test("wrong OI provenance and candidate identity mismatch fail closed without enabling execution", () => {
+test("wrong OI provenance and Telegram contract identity mismatch fail closed without enabling execution", () => {
   const r = replay();
   r.options[1].derived_oi_change_source = "UNKNOWN_SOURCE";
-  const out = buildMarketForwardTestReadiness({ symbol: "NIFTY", replay: r, dashboard: dashboard(), telegramAcceptance: telegram("OTHER"), fiiDiiContext: { ready: false, blockers: ["ACCUMULATING"] }, marketDnaContext: { ready: false, blockers: ["WAIT"] } });
+  const out = buildMarketForwardTestReadiness({ symbol: "NIFTY", replay: r, dashboard: dashboard(), telegramAcceptance: telegram("NIFTY|2026-09-08|23900|CE"), fiiDiiContext: { ready: false, blockers: ["ACCUMULATING"] }, marketDnaContext: { ready: false, blockers: ["WAIT"] } });
   assert.equal(out.forwardEvidenceReady, false);
   assert.ok(out.liveBlockers.includes("DERIVED_OI_TRUTH_INVALID"));
-  assert.ok(out.liveBlockers.includes("DASHBOARD_TELEGRAM_CANDIDATE_MISMATCH"));
+  assert.ok(out.liveBlockers.includes("DASHBOARD_TELEGRAM_CONTRACT_IDENTITY_MISMATCH"));
   assert.equal(out.context.contextDoesNotBlockDevelopmentReadiness, true);
   assert.equal(out.safety.executionEnabled, false);
   assert.equal(out.safety.failClosed, true);

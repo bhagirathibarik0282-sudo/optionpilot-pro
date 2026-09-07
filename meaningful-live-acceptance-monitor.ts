@@ -1,6 +1,7 @@
 import { dbLoadRecent } from "./db.js";
 import type { NarrativeMemoryRecord, NarrativeSymbol } from "./meaningful-market-narrative.js";
 import { getLastTelegramTriggerDiagnostic } from "./message-trigger-engine.js";
+import { getMeaningfulLivePreflightDiagnostic } from "./meaningful-live-telegram.js";
 
 const INSTALL_FLAG = "__OPTIONPILOT_MEANINGFUL_ACCEPTANCE_MONITOR_V1__";
 const MEMORY_KIND = "meaningful_narrative_event";
@@ -220,6 +221,8 @@ export async function getMeaningfulLiveAcceptanceStatus(requestedSymbol?: string
     ? [selected as NarrativeSymbol]
     : [...SYMBOLS];
   const events = await dbLoadRecent<PersistedMeaningfulEvent>(MEMORY_KIND, 300);
+  const preflightEntries = await Promise.all(symbols.map(async (symbol) => [symbol, await getMeaningfulLivePreflightDiagnostic(symbol)] as const));
+  const preflightBySymbol = new Map(preflightEntries);
   const nowMs = Date.now();
 
   return {
@@ -238,6 +241,7 @@ export async function getMeaningfulLiveAcceptanceStatus(requestedSymbol?: string
         acceptance: acceptanceState(runtimeState, journal),
         runtime: runtimeState,
         triggerDiagnostic,
+        preflight: preflightBySymbol.get(symbol) ?? null,
         journal,
       }];
     })),

@@ -22,7 +22,7 @@ test("broker rejection with zero fill is reconciled without residual order",()=>
 
 test("partial fill plus rejection requires reconciliation and protects only filled quantity",()=>{
  const r=reconcileBrokerOrder({brokerConnected:true,expectedQty:150,filledQty:50,pendingQty:0,brokerStatus:"REJECTED",hasDuplicateResidualIntent:false,orderStateFresh:true});
- assert.equal(r.decision,"RECONCILE");assert.equal(r.protectFilledQty,50);assert.equal(r.allowNewEntry,false);assert.equal(r.allowResidualIntent,false);assert.deepEqual(r.reasonCodes,["TERMINAL_STATUS_WITH_PARTIAL_FILL"]);
+ assert.equal(r.decision,"RECONCILE");assert.equal(r.protectFilledQty,50);assert.equal(r.allowNewEntry,false);assert.equal(r.allowResidualIntent,true);assert.equal(r.residualQty,100);assert.deepEqual(r.reasonCodes,["PARTIAL_FILL_RECONCILIATION_REQUIRED"]);
 });
 
 test("live authorization remains impossible even when every readiness input passes",()=>{

@@ -101,11 +101,15 @@ export async function sendTelegramCardV2(
     const previous = lastSent.get(card.symbol);
 
     if (previous && previous.istDate === today && previous.fingerprint === fp) {
-      return { ok: true, sent: false, symbol: card.symbol, destinationGroup, reason: "DUPLICATE_GUARD" };
+      const result = { ok: true, sent: false, symbol: card.symbol, destinationGroup, reason: "DUPLICATE_GUARD" } as const;
+      console.log(`[TELEGRAM_V2_SEND_RESULT] ${JSON.stringify(result)}`);
+      return result;
     }
 
     if (dryRun) {
-      return { ok: true, sent: false, symbol: card.symbol, destinationGroup, reason: "DRY_RUN" };
+      const result = { ok: true, sent: false, symbol: card.symbol, destinationGroup, reason: "DRY_RUN" } as const;
+      console.log(`[TELEGRAM_V2_SEND_RESULT] ${JSON.stringify(result)}`);
+      return result;
     }
 
     const botToken = requiredEnv("TELEGRAM_BOT_TOKEN");
@@ -128,20 +132,24 @@ export async function sendTelegramCardV2(
 
     lastSent.set(card.symbol, { fingerprint: fp, istDate: today });
 
-    return {
+    const result = {
       ok: true,
       sent: true,
       symbol: card.symbol,
       destinationGroup,
       telegramMessageId: payload.result?.message_id ?? null,
-    };
+    } as const;
+    console.log(`[TELEGRAM_V2_SEND_RESULT] ${JSON.stringify(result)}`);
+    return result;
   } catch (error) {
-    return {
+    const result = {
       ok: false,
       sent: false,
       symbol: card.symbol,
       destinationGroup,
       error: error instanceof Error ? error.message : String(error),
-    };
+    } as const;
+    console.log(`[TELEGRAM_V2_SEND_RESULT] ${JSON.stringify(result)}`);
+    return result;
   }
 }

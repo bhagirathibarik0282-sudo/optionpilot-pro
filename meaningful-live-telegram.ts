@@ -745,6 +745,52 @@ async function loadWindow(symbol: NarrativeSymbol, originalText: string): Promis
   return { symbol, market, chain, candidate, opposite, nextDte };
 }
 
+
+export interface MeaningfulLivePreflightDiagnostic {
+  symbol: NarrativeSymbol;
+  ready: boolean;
+  reason: string;
+  candidateKey: string | null;
+  direction: "BULLISH" | "BEARISH" | "NEUTRAL";
+  state: NarrativeState | null;
+  dataQuality: DataQualityState | null;
+  meaningfulChanges: string[];
+  triggerFingerprint: string | null;
+  affectsTelegram: false;
+  affectsVerdict: false;
+  affectsExecution: false;
+  createsOrders: false;
+}
+
+/** Read-only diagnostic of the same live DB window used by the meaningful Telegram bridge. */
+export async function getMeaningfulLivePreflightDiagnostic(symbol: NarrativeSymbol): Promise<MeaningfulLivePreflightDiagnostic> {
+  await hydrateMemory();
+  const window = await loadWindow(symbol, "");
+  if (!window) {
+    return {
+      symbol, ready: false, reason: "LIVE_WINDOW_UNAVAILABLE", candidateKey: null, direction: "NEUTRAL",
+      state: null, dataQuality: null, meaningfulChanges: [], triggerFingerprint: null,
+      affectsTelegram: false, affectsVerdict: false, affectsExecution: false, createsOrders: false,
+    };
+  }
+  const decision = deriveLiveMeaningfulDecision(window, memory.get(symbol));
+  return {
+    symbol,
+    ready: decision.ok && Boolean(decision.candidateKey),
+    reason: decision.reason,
+    candidateKey: decision.candidateKey,
+    direction: decision.direction,
+    state: decision.state,
+    dataQuality: decision.dataQuality,
+    meaningfulChanges: [...decision.meaningfulChanges],
+    triggerFingerprint: decision.triggerFingerprint,
+    affectsTelegram: false,
+    affectsVerdict: false,
+    affectsExecution: false,
+    createsOrders: false,
+  };
+}
+
 export function syntheticSuppressedResponse(): Response {
   return new Response(JSON.stringify({ ok: true, result: { message_id: 0, date: Math.floor(Date.now() / 1000), text: "OPTIONPILOT_MEANINGFUL_SUPPRESSED_UNCHANGED" } }), { status: 200, headers: { "content-type": "application/json" } });
 }

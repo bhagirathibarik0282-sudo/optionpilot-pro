@@ -19,7 +19,7 @@ import {
   isH1DynamicReadOnlyLiveEnabled,
   startH1DynamicReadOnlyLiveFromServerEnv,
 } from "./h1-dynamic-readonly-server-bootstrap.js";
-import { collectH1LiveSelectorDecisions, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
+import { collectH1LiveSelectorDecisions, collectH1LiveResponseMetrics, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const THEORY_LAB_HREF = "/api/research/h1-theory-dashboard";
@@ -153,6 +153,7 @@ export function mountResearchRoutes(app: Hono): void {
       productionImpact: "NONE",
       observedAt: nowIso,
       registrySize: getH1LiveSelectorRegistrySize(),
+      responseMetrics: collectH1LiveResponseMetrics(nowIso),
       ...result,
       readOnly: true,
       forwardsDownstream: false,

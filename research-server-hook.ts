@@ -9,6 +9,7 @@ import {
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { calibrateH1DeltaThreshold } from "./h1-delta-threshold-calibration-v1.js";
+import { runH1DeltaOosCalibration } from "./h1-delta-oos-calibration-v1.js";
 import { parseLegacyRecorderRecoveryRequest, runLegacyRecorderRecoveryHttp } from "./h1-legacy-recorder-recovery-http.js";
 import { runH1ObservedCandidate30mGross } from "./h1-observed-candidate-30m-gross.js";
 import { runH1ObservedCandidateMdiEvidenceHttp } from "./h1-observed-candidate-mdi-evidence-http.js";
@@ -232,6 +233,22 @@ export function mountResearchRoutes(app: Hono): void {
     const replay = await runH1ReplayHttp(parsed.value);
     const result = diagnoseObservedCandidateCoverage(parsed.value, replay);
     return c.json({ ok: replay.ok && result.blockers.length === 0, ...result, reason: replay.reason }, replay.ok ? 200 : 503);
+  });
+
+  app.get("/api/research/h1-delta-oos-calibration", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const symbol=c.req.query("symbol") ?? "NIFTY";
+    const dates=String(c.req.query("dates") ?? "").split(",").map(x=>x.trim()).filter(Boolean);
+    if(dates.length<4 || dates.length>20) return c.json({ok:false,mode:"READ_ONLY_H1_DELTA_OOS_CALIBRATION_V1",productionImpact:"NONE",reason:"DATES_REQUIRE_4_TO_20"},400);
+    const days=[] as any[];
+    for(const tradeDate of dates){
+      const parsed=parseH1ReplayRequest({symbol,tradeDate,fromTime:c.req.query("from")??"09:15",toTime:c.req.query("to")??"15:30",scope:c.req.query("scope")??"CORE"});
+      if(!parsed.ok) return c.json({ok:false,mode:"READ_ONLY_H1_DELTA_OOS_CALIBRATION_V1",productionImpact:"NONE",reason:parsed.reason,tradeDate},400);
+      const replay=await runH1ReplayHttp(parsed.value);
+      if(!replay.ok) return c.json({ok:false,mode:"READ_ONLY_H1_DELTA_OOS_CALIBRATION_V1",productionImpact:"NONE",reason:replay.reason,tradeDate},503);
+      days.push({tradeDate,rows:(replay.options??[]).map((o:any)=>({symbol:String(o.symbol),minuteBucket:new Date(String(o.minute_bucket)).toISOString(),expiry:String(o.expiry),strike:Number(o.strike),optionType:String(o.option_type),ltp:Number(o.ltp),delta:Number(o.delta),gamma:Number(o.gamma)}))});
+    }
+    return c.json({ok:true,mode:"READ_ONLY_H1_DELTA_OOS_CALIBRATION_V1",...runH1DeltaOosCalibration(days)});
   });
 
   app.get("/api/research/h1-delta-threshold-calibration", async (c) => {

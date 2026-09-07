@@ -35,3 +35,10 @@ test("preflight distinguishes selector BLOCK-only state from missing live window
   assert.match(monitor, /selectorBlockCount/);
   assert.match(monitor, /selectorReasonCodes/);
 });
+
+
+test("preflight selector counts are isolated to the requested symbol", () => {
+  assert.match(monitor, /selector\.decisions\.filter\(\(decision\) => decision\.symbol === symbol\)/);
+  assert.match(monitor, /symbolDecisions\.filter\(\(decision\) => decision\.decision === "SELECT"\)/);
+  assert.match(monitor, /symbolDecisions\.filter\(\(decision\) => decision\.decision === "BLOCK"\)/);
+});

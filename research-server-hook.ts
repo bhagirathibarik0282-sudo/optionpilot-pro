@@ -271,15 +271,10 @@ export function mountResearchRoutes(app: Hono): void {
     if (!parsed.ok) return c.json({ ok:false, mode:"READ_ONLY_H1_DELTA_THRESHOLD_CALIBRATION_V1", productionImpact:"NONE", reason:parsed.reason }, 400);
     const replay = await runH1ReplayHttp(parsed.value);
     if (!replay.ok) return c.json({ ok:false, mode:"READ_ONLY_H1_DELTA_THRESHOLD_CALIBRATION_V1", productionImpact:"NONE", reason:replay.reason }, 503);
-    const tradeDayMs=Date.parse(`${parsed.value.tradeDate}T00:00:00Z`);
-    const rows=(replay.options ?? []).map((o:any)=>{
-      const expiry=String(o.expiry).slice(0,10);
-      const dte=Math.max(0,Math.round((Date.parse(`${expiry}T00:00:00Z`)-tradeDayMs)/86_400_000));
-      return {
-        symbol:String(o.symbol), minuteBucket:new Date(String(o.minute_bucket)).toISOString(), expiry,
-        strike:Number(o.strike), optionType:String(o.option_type) as "CE"|"PE", ltp:Number(o.ltp), delta:Number(o.delta), gamma:Number(o.gamma), dte,
-      };
-    });
+    const rows=(replay.options ?? []).map((o:any)=>({
+      symbol:String(o.symbol), minuteBucket:new Date(String(o.minute_bucket)).toISOString(), expiry:String(o.expiry),
+      strike:Number(o.strike), optionType:String(o.option_type) as "CE"|"PE", ltp:Number(o.ltp), delta:Number(o.delta), gamma:Number(o.gamma), dte:Number(o.dte),
+    }));
     return c.json({
       ok:true,
       mode:"READ_ONLY_H1_DELTA_THRESHOLD_CALIBRATION_V1",

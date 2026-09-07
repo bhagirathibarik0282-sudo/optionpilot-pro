@@ -10,6 +10,7 @@ export interface H1LiveExactMarketWiringReadinessResult {
   mode: "full";
   selectedSymbolCount: number;
   selectedOptionTokenCount: number;
+  lotSizeByOptionToken: Record<number, number>;
   blockers: string[];
   source: "PR241_EXACT_REGISTRY_FILTERED_FOR_LIVE_WS";
   productionImpact: "NONE";
@@ -29,6 +30,7 @@ function result(
   selectedSymbolCount: number,
   selectedOptionTokenCount: number,
   blockers: string[],
+  lotSizeByOptionToken: Record<number, number> = {},
 ): H1LiveExactMarketWiringReadinessResult {
   return {
     version: "H1_LIVE_EXACT_MARKET_WIRING_READINESS_V1",
@@ -38,6 +40,7 @@ function result(
     mode: "full",
     selectedSymbolCount: ready ? selectedSymbolCount : 0,
     selectedOptionTokenCount: ready ? selectedOptionTokenCount : 0,
+    lotSizeByOptionToken: ready ? { ...lotSizeByOptionToken } : {},
     blockers: [...new Set(blockers)],
     source: "PR241_EXACT_REGISTRY_FILTERED_FOR_LIVE_WS",
     productionImpact: "NONE",
@@ -130,7 +133,15 @@ export function prepareH1LiveExactMarketWiring(
     if (optionCount !== expectedOptionCount) {
       return result(false, null, 0, 0, [`EXACT_OPTION_TOKEN_COUNT_MISMATCH:${optionCount}:${expectedOptionCount}`]);
     }
-    return result(true, registry, selection.rows.length, optionCount, []);
+    const lotSizeByOptionToken: Record<number, number> = {};
+    for (const row of selection.rows) {
+      for (const pair of [row, ...row.peerPairs]) {
+        if (!Number.isInteger(pair.lotSize) || pair.lotSize <= 0) return result(false, null, 0, 0, [`INVALID_VERIFIED_LOT_SIZE:${row.symbol}:${pair.expiry}`]);
+        lotSizeByOptionToken[pair.ceInstrumentToken] = pair.lotSize;
+        lotSizeByOptionToken[pair.peInstrumentToken] = pair.lotSize;
+      }
+    }
+    return result(true, registry, selection.rows.length, optionCount, [], lotSizeByOptionToken);
   } catch (error) {
     const message = error instanceof Error && error.message ? error.message : "UNKNOWN_REGISTRY_ERROR";
     return result(false, null, 0, 0, [`LIVE_MARKET_WIRING_REGISTRY_FAILED:${message}`]);

@@ -43,3 +43,10 @@ test("research mutation endpoints reject an invalid admin token", async () => {
     else process.env.RESEARCH_ADMIN_TOKEN = previous;
   }
 });
+
+
+test("read-only DTE-aware shadow threshold route is exposed without mutation authority", async () => {
+  const source = await import("../research-router.js");
+  const paths = source.researchRouter.routes.map((route) => route.path);
+  assert.ok(paths.includes("/h1-dte-aware-shadow-threshold"));
+});

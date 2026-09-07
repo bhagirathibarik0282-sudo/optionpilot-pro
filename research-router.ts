@@ -30,6 +30,7 @@ import { listH1TheoryRecordedDates, runH1TheoryDateAnalysis } from "./h1-theory-
 import { renderH1TheoryDashboardHtml } from "./h1-theory-dashboard-view.js";
 import { buildBusinessDashboardV1, type BusinessDashboardSymbol } from "./business-dashboard-v1.js";
 import { renderBusinessDashboardV1Html } from "./business-dashboard-v1-view.js";
+import { evaluateH1DteAwareShadowThreshold } from "./h1-dte-aware-shadow-threshold-v1.js";
 
 export const researchRouter = new Hono();
 
@@ -317,6 +318,30 @@ researchRouter.get("/h1-theory-analysis", async (c) => {
 researchRouter.get("/h1-theory-dashboard", (c) => {
   c.header("Cache-Control", "no-store");
   return c.html(renderH1TheoryDashboardHtml());
+});
+
+researchRouter.get("/h1-dte-aware-shadow-threshold", (c) => {
+  c.header("Cache-Control", "no-store");
+  const dte = Number(c.req.query("dte"));
+  const delta = Number(c.req.query("delta"));
+  if (!Number.isInteger(dte) || dte < 0 || !Number.isFinite(delta) || delta < 0) {
+    return c.json({
+      ok: false,
+      mode: "READ_ONLY_H1_DTE_AWARE_SHADOW_THRESHOLD_V1",
+      productionImpact: "NONE",
+      reason: "VALID_DTE_AND_DELTA_REQUIRED",
+      affectsSelector: false,
+      affectsTelegram: false,
+      affectsExecution: false,
+    }, 400);
+  }
+  const result = evaluateH1DteAwareShadowThreshold({ dte, absoluteDeltaChange: delta });
+  return c.json({
+    ok: true,
+    mode: "READ_ONLY_H1_DTE_AWARE_SHADOW_THRESHOLD_V1",
+    productionImpact: "NONE",
+    ...result,
+  });
 });
 
 researchRouter.get("/meaningful-live-acceptance", async (c) => {

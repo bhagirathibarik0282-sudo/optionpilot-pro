@@ -114,7 +114,18 @@ export function produceH1LivePublisherPacket(input: H1LivePublisherPacketProduce
   return {
     version: "H1_LIVE_PUBLISHER_PACKET_PRODUCER_V1",
     ready: true,
-    packet: { identity, gates },
+    packet: {
+      identity,
+      gates,
+      responseMetrics: {
+        premiumMovePct: premium.premiumMovePct!,
+        absoluteDeltaChange: premium.absoluteDeltaChange!,
+        currentGamma: premium.currentGamma!,
+        observedAt: premiumObservedAt,
+        source: premium.version,
+        provenance: "LIVE_RUNTIME_EXACT",
+      },
+    },
     blockers: [],
     failClosed: true,
     semantics: "RAW_LIVE_EXACT_INPUTS_BOUND_TO_ONE_CONTRACT_NO_RESULT_REUSE",

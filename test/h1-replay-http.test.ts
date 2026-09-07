@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { buildH1ReplayContinuity, parseH1ReplayRequest } from "../h1-replay-http.js";
 
 test("accepts bounded NIFTY full-session replay request", () => {
@@ -48,6 +49,21 @@ test("rejects reverse time ranges and unknown scopes", () => {
   assert.deepEqual(badScope, { ok: false, reason: "INVALID_SCOPE" });
 });
 
+test("option OI truth persistence keeps native and derived change separate with auditable provenance", () => {
+  const dbSource = readFileSync(new URL("../db.ts", import.meta.url), "utf8");
+  const replaySource = readFileSync(new URL("../h1-replay-http.ts", import.meta.url), "utf8");
+
+  assert.match(dbSource, /oi_change BIGINT,/);
+  assert.match(dbSource, /derived_oi_change BIGINT,/);
+  assert.match(dbSource, /derived_oi_change_source TEXT,/);
+  assert.match(dbSource, /derived_oi_change_gap_seconds INTEGER,/);
+  assert.match(dbSource, /DERIVED_PREVIOUS_PERSISTED_SNAPSHOT/);
+  assert.match(dbSource, /AT TIME ZONE 'Asia\/Kolkata'/);
+  assert.match(dbSource, /EXTRACT\(EPOCH FROM \(\$2::timestamptz - p\.minute_bucket\)\)::integer/);
+  assert.match(dbSource, /oi=EXCLUDED\.oi, oi_change=EXCLUDED\.oi_change,/);
+  assert.doesNotMatch(dbSource, /oi_change=EXCLUDED\.derived_oi_change/);
+  assert.match(replaySource, /o\.derived_oi_change, o\.derived_oi_change_source, o\.derived_oi_change_gap_seconds/);
+});
 
 test("continuity audit exposes missing 3-minute recorder buckets instead of calling a partial day complete", () => {
   const request = {

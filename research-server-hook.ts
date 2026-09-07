@@ -19,6 +19,7 @@ import {
   isH1DynamicReadOnlyLiveEnabled,
   startH1DynamicReadOnlyLiveFromServerEnv,
 } from "./h1-dynamic-readonly-server-bootstrap.js";
+import { collectH1LiveSelectorDecisions, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const THEORY_LAB_HREF = "/api/research/h1-theory-dashboard";
@@ -139,6 +140,28 @@ export function mountResearchRoutes(app: Hono): void {
   app.get("/api/research/h1-dynamic-readonly-live-status", (c) => {
     c.header("Cache-Control", "no-store");
     return c.json(getH1DynamicReadOnlyServerStatus());
+  });
+
+  app.get("/api/research/h1-live-selector-decisions", (c) => {
+    c.header("Cache-Control", "no-store");
+    const nowIso = new Date().toISOString();
+    const result = collectH1LiveSelectorDecisions(nowIso);
+    return c.json({
+      ok: true,
+      version: "H1_LIVE_SELECTOR_DECISION_READBACK_V1",
+      mode: "READ_ONLY",
+      productionImpact: "NONE",
+      observedAt: nowIso,
+      registrySize: getH1LiveSelectorRegistrySize(),
+      ...result,
+      readOnly: true,
+      forwardsDownstream: false,
+      affectsDirection: false,
+      affectsVerdict: false,
+      affectsTelegram: false,
+      affectsExecution: false,
+      failClosed: true,
+    });
   });
 
   app.get("/api/research/h1-exact-live-contract-discovery", async (c) => {

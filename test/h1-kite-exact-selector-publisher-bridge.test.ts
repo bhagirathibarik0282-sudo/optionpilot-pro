@@ -141,6 +141,7 @@ test("published false response gates retain the original baseline until confirma
   const bridge = new H1KiteExactSelectorPublisherBridge();
   const strict = {
     ...publisher,
+    multiExpiryPeers: publisher.multiExpiryPeers.map((peer) => ({ ...peer, observedAt: "2026-09-03T10:00:00.000Z" })),
     premiumPolicy: { ...publisher.premiumPolicy, minPremiumMovePct: 10, minAbsoluteDeltaChange: 0.01, minCurrentGamma: 0 },
   };
   bridge.ingest(input("2026-09-03T10:00:00.000Z", 1.00, true, () => strict));

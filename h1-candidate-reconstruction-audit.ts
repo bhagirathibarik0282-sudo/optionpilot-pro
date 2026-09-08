@@ -10,7 +10,7 @@ export interface CandidateGateAuditRow {
 }
 
 export interface H1CandidateReconstructionAuditResult {
-  mode: "READ_ONLY_H1_CANDIDATE_RECONSTRUCTION_AUDIT_V1";
+  mode: "READ_ONLY_H1_CANDIDATE_RECONSTRUCTION_AUDIT_V2";
   productionImpact: "NONE";
   request: H1ReplayRequest;
   totalOptionRows: number;
@@ -18,6 +18,10 @@ export interface H1CandidateReconstructionAuditResult {
   reconstructableGateCount: number;
   partialGateCount: number;
   notRecordedGateCount: number;
+  provableGates: string[];
+  partialGates: string[];
+  unprovableGates: string[];
+  businessUse: "STRUCTURAL_RESEARCH_ONLY_NOT_SELECTOR_QUALIFICATION";
   fullSelectorReconstructionPossible: false;
   blockers: string[];
   semantics: "AUDIT_ONLY_DO_NOT_INFER_EXECUTION_SELECTOR_QUALIFICATION";
@@ -49,14 +53,17 @@ export function auditCandidateReconstruction(
     { gate: "fallback_dte_approved", state: "NOT_RECORDED", evidence: ["dte"], note: "Required for NIFTY/SENSEX DTE 5-7 but approval boolean is not persisted." },
   ];
 
-  const reconstructableGateCount = gates.filter(g => g.state === "RECONSTRUCTABLE").length;
-  const partialGateCount = gates.filter(g => g.state === "PARTIAL").length;
-  const notRecordedGateCount = gates.filter(g => g.state === "NOT_RECORDED").length;
+  const provableGates = gates.filter(g => g.state === "RECONSTRUCTABLE").map(g => g.gate);
+  const partialGates = gates.filter(g => g.state === "PARTIAL").map(g => g.gate);
+  const unprovableGates = gates.filter(g => g.state === "NOT_RECORDED").map(g => g.gate);
+  const reconstructableGateCount = provableGates.length;
+  const partialGateCount = partialGates.length;
+  const notRecordedGateCount = unprovableGates.length;
   const blockers = ["FULL_EXECUTION_SELECTOR_RECONSTRUCTION_NOT_POSSIBLE_FROM_H1_REPLAY_FIELDS"];
   if (!replay.ok) blockers.unshift(replay.reason ?? "H1_REPLAY_UNAVAILABLE");
 
   return {
-    mode: "READ_ONLY_H1_CANDIDATE_RECONSTRUCTION_AUDIT_V1",
+    mode: "READ_ONLY_H1_CANDIDATE_RECONSTRUCTION_AUDIT_V2",
     productionImpact: "NONE",
     request,
     totalOptionRows: rows.length,
@@ -64,6 +71,10 @@ export function auditCandidateReconstruction(
     reconstructableGateCount,
     partialGateCount,
     notRecordedGateCount,
+    provableGates,
+    partialGates,
+    unprovableGates,
+    businessUse: "STRUCTURAL_RESEARCH_ONLY_NOT_SELECTOR_QUALIFICATION",
     fullSelectorReconstructionPossible: false,
     blockers,
     semantics: "AUDIT_ONLY_DO_NOT_INFER_EXECUTION_SELECTOR_QUALIFICATION",

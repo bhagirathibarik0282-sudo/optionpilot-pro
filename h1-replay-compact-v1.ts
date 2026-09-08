@@ -1,4 +1,5 @@
 import type { H1ReplayHttpResult } from "./h1-replay-http.js";
+import { buildH1Dte0TransitionCalibration } from "./h1-dte0-transition-calibration-v1.js";
 
 export interface H1CompactTable {
   columns: string[];
@@ -19,6 +20,7 @@ export interface H1ReplayCompactResult {
   chain?: H1CompactTable;
   canonical?: H1CompactTable;
   continuity?: H1ReplayHttpResult["continuity"];
+  dte0Calibration?: ReturnType<typeof buildH1Dte0TransitionCalibration>;
   reason?: string;
 }
 
@@ -45,6 +47,9 @@ export function expandRows(table: H1CompactTable): Record<string, unknown>[] {
 }
 
 export function compactH1Replay(result: H1ReplayHttpResult): H1ReplayCompactResult {
+  const dte0Calibration = result.ok && result.request
+    ? buildH1Dte0TransitionCalibration(result.request, result)
+    : undefined;
   return {
     ok: result.ok,
     mode: "READ_ONLY_H1_3M_REPLAY_COMPACT_V1",
@@ -59,6 +64,7 @@ export function compactH1Replay(result: H1ReplayHttpResult): H1ReplayCompactResu
     ...(result.chain ? { chain: compactRows(result.chain) } : {}),
     ...(result.canonical ? { canonical: compactRows(result.canonical) } : {}),
     ...(result.continuity ? { continuity: result.continuity } : {}),
+    ...(dte0Calibration ? { dte0Calibration } : {}),
     ...(result.reason ? { reason: result.reason } : {}),
   };
 }

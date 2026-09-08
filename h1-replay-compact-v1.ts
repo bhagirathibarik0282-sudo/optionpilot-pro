@@ -15,12 +15,12 @@ export interface H1ReplayCompactResult {
   lossless: true;
   request: H1ReplayHttpResult["request"];
   counts?: H1ReplayHttpResult["counts"];
+  dte0Calibration?: ReturnType<typeof buildH1Dte0TransitionCalibration>;
   market?: H1CompactTable;
   options?: H1CompactTable;
   chain?: H1CompactTable;
   canonical?: H1CompactTable;
   continuity?: H1ReplayHttpResult["continuity"];
-  dte0Calibration?: ReturnType<typeof buildH1Dte0TransitionCalibration>;
   reason?: string;
 }
 
@@ -59,12 +59,12 @@ export function compactH1Replay(result: H1ReplayHttpResult): H1ReplayCompactResu
     lossless: true,
     request: result.request,
     ...(result.counts ? { counts: result.counts } : {}),
+    ...(dte0Calibration ? { dte0Calibration } : {}),
     ...(result.market ? { market: compactRows(result.market) } : {}),
     ...(result.options ? { options: compactRows(result.options) } : {}),
     ...(result.chain ? { chain: compactRows(result.chain) } : {}),
     ...(result.canonical ? { canonical: compactRows(result.canonical) } : {}),
     ...(result.continuity ? { continuity: result.continuity } : {}),
-    ...(dte0Calibration ? { dte0Calibration } : {}),
     ...(result.reason ? { reason: result.reason } : {}),
   };
 }

@@ -11,7 +11,7 @@ const request: H1ReplayRequest = {
   scope: "CORE",
 };
 
-test("DTE0 transition calibration is read-only and does not promote thresholds", () => {
+test("DTE0 transition calibration accepts PostgreSQL Date buckets and remains read-only", () => {
   const replay: H1ReplayHttpResult = {
     ok: true,
     mode: "READ_ONLY_H1_3M_REPLAY",
@@ -20,7 +20,7 @@ test("DTE0 transition calibration is read-only and does not promote thresholds",
     counts: { market: 2, options: 2, chain: 0, markers: 2, canonical: 2 },
     options: [
       {
-        minute_bucket: "2026-09-08T08:48:00.000Z",
+        minute_bucket: new Date("2026-09-08T08:48:00.000Z"),
         expiry_bucket: "Current Expiry",
         dte: 0,
         strike: 23650,
@@ -35,7 +35,7 @@ test("DTE0 transition calibration is read-only and does not promote thresholds",
         validation_status: "RESEARCH_ELIGIBLE",
       },
       {
-        minute_bucket: "2026-09-08T08:51:00.000Z",
+        minute_bucket: new Date("2026-09-08T08:51:00.000Z"),
         expiry_bucket: "Current Expiry",
         dte: 0,
         strike: 23650,
@@ -60,10 +60,13 @@ test("DTE0 transition calibration is read-only and does not promote thresholds",
   assert.equal(result.safety.affectsExecution, false);
   assert.equal(result.safety.thresholdPromoted, false);
   assert.equal(result.safety.dte0ThresholdInvented, false);
+  assert.equal(result.atmDte0PointCount, 2);
   assert.equal(result.windowCount, 1);
 
   const window = result.windows[0];
   assert.equal(window.side, "PE");
+  assert.equal(window.from, "2026-09-08T08:48:00.000Z");
+  assert.equal(window.to, "2026-09-08T08:51:00.000Z");
   assert.ok((window.observed.premiumMovePct ?? 0) > 9);
   assert.ok(window.observed.absoluteDeltaChange > 0.02);
   assert.ok(window.observed.absoluteDeltaChange < 0.03);

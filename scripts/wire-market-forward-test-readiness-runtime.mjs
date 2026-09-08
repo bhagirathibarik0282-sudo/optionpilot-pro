@@ -22,6 +22,11 @@ if (src.includes(oldForwardImport) && !src.includes(forwardImport)) {
   replaceOnce(anchorImport, `${anchorImport}\n${forwardImport}`, "forward-test readiness import");
 }
 
+const selectorDiagnosticImport = 'import { runCanonicalSelectorDiagnosticHttp } from "./canonical-selector-diagnostic-http-v1.js";';
+if (!src.includes(selectorDiagnosticImport)) {
+  replaceOnce(forwardImport, `${forwardImport}\n${selectorDiagnosticImport}`, "canonical selector diagnostic import");
+}
+
 const anchorRoute = 'researchRouter.get("/meaningful-live-acceptance", async (c) => {';
 const forwardRoute = `researchRouter.get("/market-forward-test-readiness", async (c) => {
   c.header("Cache-Control", "no-store");
@@ -54,6 +59,20 @@ const diagnosticRoute = `researchRouter.get("/positioning-pair-diagnostic", asyn
 if (!src.includes('researchRouter.get("/positioning-pair-diagnostic"')) {
   const readinessAnchor = 'researchRouter.get("/market-forward-test-readiness", async (c) => {';
   replaceOnce(readinessAnchor, `${diagnosticRoute}${readinessAnchor}`, "positioning pair diagnostic route");
+}
+
+const selectorDiagnosticRoute = `researchRouter.get("/canonical-selector-diagnostic", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const result = runCanonicalSelectorDiagnosticHttp({
+    symbol: c.req.query("symbol"),
+  });
+  return c.json(result.body, result.status);
+});
+
+`;
+if (!src.includes('researchRouter.get("/canonical-selector-diagnostic"')) {
+  const positioningAnchor = 'researchRouter.get("/positioning-pair-diagnostic", async (c) => {';
+  replaceOnce(positioningAnchor, `${selectorDiagnosticRoute}${positioningAnchor}`, "canonical selector diagnostic route");
 }
 
 if (checkOnly) {

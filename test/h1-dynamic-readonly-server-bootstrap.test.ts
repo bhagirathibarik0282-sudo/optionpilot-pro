@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   getH1DynamicReadOnlyServerStatus,
   isH1DynamicReadOnlyLiveEnabled,
-  refreshH1DynamicReadOnlyLiveFromServerEnv,
+  rebindH1DynamicReadOnlyLiveAfterAuthorityPersist,
   resetH1DynamicReadOnlyServerBootstrapForTest,
   startH1DynamicReadOnlyLiveFromServerEnv,
 } from "../h1-dynamic-readonly-server-bootstrap.js";
@@ -173,7 +173,7 @@ test("disabled status keeps selector runtime fail-closed", async () => {
   assert.deepEqual(out.selectorRuntimeBlockers, []);
 });
 
-test("lifecycle refresh restarts the read-only chain on IST date rollover", async () => {
+test("fresh Kite authority persistence rebinds read-only chain with current IST date", async () => {
   resetH1DynamicReadOnlyServerBootstrapForTest();
   const env = { H1_DYNAMIC_READONLY_LIVE_ENABLED: "true" };
   const dates: string[] = [];
@@ -184,19 +184,18 @@ test("lifecycle refresh restarts the read-only chain on IST date rollover", asyn
   };
 
   await startH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-08T18:29:00.000Z"));
-  const refreshed = await refreshH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-08T18:31:00.000Z"));
+  const rebound = await rebindH1DynamicReadOnlyLiveAfterAuthorityPersist(env, startFn, new Date("2026-09-08T18:31:00.000Z"));
 
-  assert.equal(refreshed.refreshed, true);
-  assert.equal(refreshed.reason, "IST_DATE_ROLLOVER");
   assert.deepEqual(dates, ["2026-09-08", "2026-09-09"]);
   assert.equal(stops, 1);
-  assert.equal(refreshed.status.asOfDate, "2026-09-09");
-  assert.equal(refreshed.status.started, true);
-  assert.equal(refreshed.status.affectsExecution, false);
-  assert.equal(refreshed.status.affectsTelegram, false);
+  assert.equal(rebound.asOfDate, "2026-09-09");
+  assert.equal(rebound.started, true);
+  assert.equal(rebound.connected, true);
+  assert.equal(rebound.affectsExecution, false);
+  assert.equal(rebound.affectsTelegram, false);
 });
 
-test("lifecycle refresh retries a chain that was not started", async () => {
+test("fresh Kite authority persistence retries an initially blocked read-only chain", async () => {
   resetH1DynamicReadOnlyServerBootstrapForTest();
   const env = { H1_DYNAMIC_READONLY_LIVE_ENABLED: "true" };
   let calls = 0;
@@ -207,36 +206,23 @@ test("lifecycle refresh retries a chain that was not started", async () => {
 
   const first = await startH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T03:40:00.000Z"));
   assert.equal(first.started, false);
-  const refreshed = await refreshH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T03:41:00.000Z"));
+  const rebound = await rebindH1DynamicReadOnlyLiveAfterAuthorityPersist(env, startFn, new Date("2026-09-09T03:41:00.000Z"));
 
-  assert.equal(refreshed.refreshed, true);
-  assert.equal(refreshed.reason, "RUNTIME_NOT_STARTED");
   assert.equal(calls, 2);
-  assert.equal(refreshed.status.started, true);
-  assert.equal(refreshed.status.connected, true);
+  assert.equal(rebound.started, true);
+  assert.equal(rebound.connected, true);
+  assert.equal(rebound.productionImpact, "NONE");
 });
 
-test("lifecycle refresh rebinds an unhealthy socket but leaves a healthy same-day socket alone", async () => {
+test("authority rebind is inert when dynamic live mode is disabled", async () => {
   resetH1DynamicReadOnlyServerBootstrapForTest();
-  const env = { H1_DYNAMIC_READONLY_LIVE_ENABLED: "true" };
   let calls = 0;
-  let stops = 0;
-  const startFn = async () => {
+  const out = await rebindH1DynamicReadOnlyLiveAfterAuthorityPersist({}, async () => {
     calls += 1;
-    const state = calls === 1 ? "ERROR" : "OPEN";
-    return liveResult(true, fakeLifecycleService(state, () => { stops += 1; }));
-  };
-
-  await startH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T04:00:00.000Z"));
-  const recovered = await refreshH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T04:01:00.000Z"));
-  assert.equal(recovered.refreshed, true);
-  assert.equal(recovered.reason, "SOCKET_UNHEALTHY");
-  assert.equal(calls, 2);
-  assert.equal(stops, 1);
-  assert.equal(recovered.status.connected, true);
-
-  const healthy = await refreshH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T04:02:00.000Z"));
-  assert.equal(healthy.refreshed, false);
-  assert.equal(healthy.reason, null);
-  assert.equal(calls, 2);
+    return liveResult();
+  });
+  assert.equal(calls, 0);
+  assert.equal(out.enabled, false);
+  assert.equal(out.affectsExecution, false);
+  assert.equal(out.affectsTelegram, false);
 });

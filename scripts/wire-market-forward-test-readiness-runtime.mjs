@@ -14,8 +14,11 @@ function replaceOnce(from, to, label) {
 }
 
 const anchorImport = 'import { buildH1LiveDteShadowComparison } from "./h1-live-dte-shadow-comparison-v1.js";';
-const forwardImport = 'import { runMarketForwardTestReadinessHttp } from "./market-forward-test-readiness-http-v1.js";';
-if (!src.includes(forwardImport)) {
+const forwardImport = 'import { runMarketForwardTestReadinessHttp, runPositioningPairDiagnosticHttp } from "./market-forward-test-readiness-http-v1.js";';
+const oldForwardImport = 'import { runMarketForwardTestReadinessHttp } from "./market-forward-test-readiness-http-v1.js";';
+if (src.includes(oldForwardImport) && !src.includes(forwardImport)) {
+  src = src.replace(oldForwardImport, forwardImport);
+} else if (!src.includes(forwardImport)) {
   replaceOnce(anchorImport, `${anchorImport}\n${forwardImport}`, "forward-test readiness import");
 }
 
@@ -34,6 +37,23 @@ const forwardRoute = `researchRouter.get("/market-forward-test-readiness", async
 `;
 if (!src.includes('researchRouter.get("/market-forward-test-readiness"')) {
   replaceOnce(anchorRoute, `${forwardRoute}${anchorRoute}`, "forward-test readiness route");
+}
+
+const diagnosticRoute = `researchRouter.get("/positioning-pair-diagnostic", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const result = await runPositioningPairDiagnosticHttp({
+    symbol: c.req.query("symbol"),
+    tradeDate: c.req.query("date"),
+    fromTime: c.req.query("from"),
+    toTime: c.req.query("to"),
+  });
+  return c.json(result.body, result.status);
+});
+
+`;
+if (!src.includes('researchRouter.get("/positioning-pair-diagnostic"')) {
+  const readinessAnchor = 'researchRouter.get("/market-forward-test-readiness", async (c) => {';
+  replaceOnce(readinessAnchor, `${diagnosticRoute}${readinessAnchor}`, "positioning pair diagnostic route");
 }
 
 if (checkOnly) {

@@ -1,7 +1,9 @@
 import { runH1LiveSelectorPipeline, type H1LiveSelectorPipelineResult } from "./h1-live-selector-pipeline.js";
 import type { LiveGateEvidencePacket } from "./h1-live-gate-evidence-assembler.js";
+import { dbInsert } from "./db.js";
 
 export const H1_LIVE_SELECTOR_REGISTRY_VERSION = "H1_LIVE_SELECTOR_REGISTRY_V1" as const;
+export const H1_LIVE_GATE_EVIDENCE_PERSIST_KIND = "H1_LIVE_GATE_EVIDENCE_PACKET_V1" as const;
 
 type RegistryEntry = {
   key: string;
@@ -28,6 +30,32 @@ export function publishH1LiveGateEvidence(packet: LiveGateEvidencePacket): { acc
   const publishedAtMs = validIso(packet?.identity?.observedAt);
   if (!key || publishedAtMs === null) return { accepted: false, reason: "INVALID_LIVE_GATE_PACKET" };
   entries.set(key, { key, packet, publishedAtMs });
+  void dbInsert(H1_LIVE_GATE_EVIDENCE_PERSIST_KIND, {
+    version: H1_LIVE_GATE_EVIDENCE_PERSIST_KIND,
+    key,
+    publishedAt: packet.identity.observedAt,
+    identity: { ...packet.identity },
+    gates: Object.fromEntries(Object.entries(packet.gates ?? {}).map(([gate, evidence]) => [gate, evidence ? { ...evidence } : evidence])),
+    responseMetrics: packet.responseMetrics ? { ...packet.responseMetrics } : null,
+    policyDiagnostics: packet.policyDiagnostics ? {
+      premiumDeltaGamma: {
+        ...packet.policyDiagnostics.premiumDeltaGamma,
+        reasonCodes: [...packet.policyDiagnostics.premiumDeltaGamma.reasonCodes],
+      },
+      thetaIv: {
+        ...packet.policyDiagnostics.thetaIv,
+        reasonCodes: [...packet.policyDiagnostics.thetaIv.reasonCodes],
+      },
+      observedAt: packet.policyDiagnostics.observedAt,
+      provenance: packet.policyDiagnostics.provenance,
+    } : null,
+    productionImpact: "NONE",
+    readOnlyEvidencePersistence: true,
+    affectsSelector: false,
+    affectsTelegram: false,
+    affectsVerdict: false,
+    affectsExecution: false,
+  });
   return { accepted: true, reason: "LIVE_GATE_PACKET_ACCEPTED" };
 }
 

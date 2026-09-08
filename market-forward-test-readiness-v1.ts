@@ -27,6 +27,7 @@ function finite(value: unknown): number | null {
 }
 
 function text(value: unknown): string | null {
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null;
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 

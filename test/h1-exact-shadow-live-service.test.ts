@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readH1ExactShadowLiveConfig } from "../h1-exact-shadow-live-service.js";
+import { buildH1ExactShadowLiveStatus, readH1ExactShadowLiveConfig } from "../h1-exact-shadow-live-service.js";
 
 const registry = [
   { instrumentToken: 256265, symbol: "NIFTY", role: "SPOT", instrumentLabel: "NIFTY 50" },
@@ -38,6 +38,28 @@ test("disabled exact shadow service is inert", () => {
   assert.equal(cfg.enabled, false);
   assert.equal(cfg.policy, null);
   assert.deepEqual(cfg.registryEntries, []);
+});
+
+test("startup evidence stays read-only and fail-closed", () => {
+  const out = buildH1ExactShadowLiveStatus(
+    false,
+    false,
+    "DISABLED",
+    0,
+    "KITE_H1_EXACT_POLICY_JSON_REQUIRED",
+    "2026-09-08T13:30:00.000Z",
+  );
+  assert.equal(out.started, false);
+  assert.equal(out.blockerDetail, "KITE_H1_EXACT_POLICY_JSON_REQUIRED");
+  assert.equal(out.telegramSendAllowed, false);
+  assert.equal(out.affectsExecution, false);
+  assert.equal(out.createsOrders, false);
+  assert.equal(out.failClosed, true);
+  assert.equal(out.semantics, "STARTUP_STATE_ONLY_NOT_LIVE_PACKET_PROOF");
+  assert.equal(
+    buildH1ExactShadowLiveStatus(false, false, "DISABLED", 0, "request failed: secret=abc").blockerDetail,
+    "EXACT_SHADOW_START_FAILED",
+  );
 });
 
 test("old and exact Kite shadow services cannot be enabled together", () => {

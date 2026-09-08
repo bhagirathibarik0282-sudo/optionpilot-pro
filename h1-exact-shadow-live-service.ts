@@ -11,6 +11,9 @@ import type { H1ExpectedPremiumDirection } from "./h1-exact-peer-directional-sta
 import { H1ExactLiveSpotDirectionStore } from "./h1-exact-live-spot-direction-store.js";
 import type { H1ExactLiveSpotDirectionPolicy } from "./h1-exact-live-spot-direction-provider.js";
 import type { RecorderSymbol } from "./option-recorder-shadow.js";
+import { dbInsert, dbLoadRecent } from "./db.js";
+
+export const H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND = "H1_EXACT_SHADOW_LIVE_STATUS_V1" as const;
 
 export interface H1ExactShadowContractPolicy {
   instrumentToken: number;
@@ -45,6 +48,34 @@ export type H1ExactShadowLiveReason =
   | "AUTHORITY_UNAVAILABLE"
   | "STARTED";
 
+export interface H1ExactShadowLiveStatus {
+  version: "H1_EXACT_SHADOW_LIVE_SERVICE_V1";
+  enabled: boolean;
+  started: boolean;
+  reason: H1ExactShadowLiveReason;
+  blockerDetail: string | null;
+  subscribedTokenCount: number;
+  observedAt: string;
+  directionSourceStatus: "VERIFIED_RUNTIME_BOUND_FAIL_CLOSED";
+  multiExpiryPeerStatus: "WIRED_FAIL_CLOSED";
+  productionImpact: "NONE";
+  telegramSendAllowed: false;
+  affectsVerdict: false;
+  affectsExecution: false;
+  createsOrders: false;
+  failClosed: true;
+  semantics: "STARTUP_STATE_ONLY_NOT_LIVE_PACKET_PROOF";
+}
+
+export async function persistH1ExactShadowLiveStatus(value: H1ExactShadowLiveStatus): Promise<void> {
+  await dbInsert(H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND, value);
+}
+
+export async function loadLatestH1ExactShadowLiveStatus(): Promise<H1ExactShadowLiveStatus | null> {
+  const rows = await dbLoadRecent<H1ExactShadowLiveStatus>(H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND, 1);
+  return rows.at(-1) ?? null;
+}
+
 function parseJson(raw: string, code: string): unknown {
   try { return JSON.parse(raw); } catch { throw new Error(code); }
 }
@@ -57,6 +88,12 @@ function validTime(value: string | null | undefined): number | null {
   if (typeof value !== "string") return null;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
+}
+
+function safeBlockerDetail(value: string | null): string | null {
+  if (value == null || !value.trim()) return null;
+  const normalized = value.trim();
+  return /^[A-Z0-9_]{3,96}$/.test(normalized) ? normalized : "EXACT_SHADOW_START_FAILED";
 }
 
 export function validateH1ExactShadowPolicy(raw: unknown): H1ExactShadowPolicy {
@@ -153,15 +190,16 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
   try {
     cfg = readH1ExactShadowLiveConfig(env);
   } catch (error) {
-    const reason = error instanceof Error && error.message === "DUPLICATE_SHADOW_RUNTIME_FORBIDDEN"
+    const blockerDetail = error instanceof Error ? error.message : "INVALID_EXACT_SHADOW_CONFIGURATION";
+    const reason = blockerDetail === "DUPLICATE_SHADOW_RUNTIME_FORBIDDEN"
       ? "DUPLICATE_SHADOW_RUNTIME_FORBIDDEN" : "DISABLED";
-    return status(false, false, reason, 0);
+    return recordStatus(buildH1ExactShadowLiveStatus(false, false, reason, 0, blockerDetail));
   }
-  if (!cfg.enabled) return status(false, false, "DISABLED", 0);
-  if (!cfg.apiKey) return status(true, false, "API_KEY_MISSING", 0);
+  if (!cfg.enabled) return recordStatus(buildH1ExactShadowLiveStatus(false, false, "DISABLED", 0));
+  if (!cfg.apiKey) return recordStatus(buildH1ExactShadowLiveStatus(true, false, "API_KEY_MISSING", 0));
 
   const authority = await resolveKiteAuthoritySession();
-  if (!authority.session) return status(true, false, "AUTHORITY_UNAVAILABLE", 0);
+  if (!authority.session) return recordStatus(buildH1ExactShadowLiveStatus(true, false, "AUTHORITY_UNAVAILABLE", 0));
 
   const registry = new KiteImmediateTokenRegistry(cfg.registryEntries);
   const policy = cfg.policy!;
@@ -245,32 +283,45 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
     registry, runtime, reconnectDelayMs: 1_000, reconnectMaxAttempts: 10,
   });
   supervisor.start();
-  const out = status(true, true, "STARTED", registry.tokens().length);
-  console.log(JSON.stringify(out));
+  const out = await recordStatus(buildH1ExactShadowLiveStatus(true, true, "STARTED", registry.tokens().length));
   return { ...out, supervisor };
 }
 
-function status(enabled: boolean, started: boolean, reason: H1ExactShadowLiveReason, subscribedTokenCount: number) {
+export function buildH1ExactShadowLiveStatus(
+  enabled: boolean,
+  started: boolean,
+  reason: H1ExactShadowLiveReason,
+  subscribedTokenCount: number,
+  blockerDetail: string | null = null,
+  observedAt = new Date().toISOString(),
+): H1ExactShadowLiveStatus {
   return {
     version: "H1_EXACT_SHADOW_LIVE_SERVICE_V1" as const,
-    enabled, started, reason, subscribedTokenCount,
+    enabled, started, reason, blockerDetail: safeBlockerDetail(blockerDetail), subscribedTokenCount, observedAt,
     directionSourceStatus: "VERIFIED_RUNTIME_BOUND_FAIL_CLOSED" as const,
     multiExpiryPeerStatus: "WIRED_FAIL_CLOSED" as const,
     productionImpact: "NONE" as const,
     telegramSendAllowed: false as const,
     affectsVerdict: false as const,
     affectsExecution: false as const,
+    createsOrders: false as const,
+    failClosed: true as const,
+    semantics: "STARTUP_STATE_ONLY_NOT_LIVE_PACKET_PROOF" as const,
   };
 }
 
+async function recordStatus(value: H1ExactShadowLiveStatus): Promise<H1ExactShadowLiveStatus> {
+  await persistH1ExactShadowLiveStatus(value);
+  console.log(JSON.stringify(value));
+  return value;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  startH1ExactShadowLiveService().catch((error) => {
-    console.error(JSON.stringify({
-      version: "H1_EXACT_SHADOW_LIVE_SERVICE_V1", started: false,
-      reason: error instanceof Error ? error.message : "UNKNOWN_ERROR",
-      productionImpact: "NONE", telegramSendAllowed: false,
-      affectsVerdict: false, affectsExecution: false,
-    }));
+  startH1ExactShadowLiveService().catch(async (error) => {
+    const detail = error instanceof Error ? error.message : "UNKNOWN_ERROR";
+    const failure = buildH1ExactShadowLiveStatus(false, false, "DISABLED", 0, detail);
+    await persistH1ExactShadowLiveStatus(failure);
+    console.error(JSON.stringify(failure));
     process.exitCode = 2;
   });
 }

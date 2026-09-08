@@ -26,6 +26,7 @@ import {
 } from "./h1-dynamic-readonly-server-bootstrap.js";
 import { collectH1LiveSelectorDecisions, collectH1LiveResponseMetrics, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
 import { runH1LiveGateEvidenceHistoryHttp } from "./h1-live-gate-evidence-history-http-v1.js";
+import { H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND, loadLatestH1ExactShadowLiveStatus } from "./h1-exact-shadow-live-service.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const THEORY_LAB_HREF = "/api/research/h1-theory-dashboard";
@@ -146,6 +147,29 @@ export function mountResearchRoutes(app: Hono): void {
   app.get("/api/research/h1-dynamic-readonly-live-status", (c) => {
     c.header("Cache-Control", "no-store");
     return c.json(getH1DynamicReadOnlyServerStatus());
+  });
+
+  app.get("/api/research/h1-exact-shadow-live-status", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const latest = await loadLatestH1ExactShadowLiveStatus();
+    return c.json({
+      ok: true,
+      mode: "READ_ONLY_H1_EXACT_SHADOW_LIVE_STATUS_V1",
+      productionImpact: "NONE",
+      persistKind: H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND,
+      startupEvidenceAvailable: latest != null,
+      startupStarted: latest?.started === true,
+      livePacketProofGranted: false,
+      latest,
+      blocker: latest ? (latest.started ? null : latest.blockerDetail ?? latest.reason) : "NO_PERSISTED_EXACT_SHADOW_STATUS",
+      semantics: "STARTUP_STATE_ONLY_NOT_LIVE_PACKET_PROOF",
+      readOnly: true,
+      affectsVerdict: false,
+      affectsTelegram: false,
+      affectsExecution: false,
+      createsOrders: false,
+      failClosed: true,
+    });
   });
 
   app.get("/api/research/h1-live-selector-decisions", (c) => {

@@ -1,4 +1,4 @@
-import { collectH1LiveSelectorDecisions, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
+import { collectH1LiveGateEvidenceAudit, collectH1LiveSelectorDecisions, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
 
 export interface CanonicalSelectorDiagnosticQuery {
   symbol?: string | null;
@@ -12,7 +12,7 @@ export function runCanonicalSelectorDiagnosticHttp(query: CanonicalSelectorDiagn
       status: 400,
       body: {
         ok: false,
-        mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V1",
+        mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V2",
         productionImpact: "NONE",
         reason: "FORWARD_TEST_SYMBOL_NOT_SUPPORTED",
         allowed: ["NIFTY", "SENSEX"],
@@ -27,7 +27,7 @@ export function runCanonicalSelectorDiagnosticHttp(query: CanonicalSelectorDiagn
       status: 400,
       body: {
         ok: false,
-        mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V1",
+        mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V2",
         productionImpact: "NONE",
         reason: "INVALID_NOW_ISO",
         executionEnabled: false,
@@ -37,6 +37,7 @@ export function runCanonicalSelectorDiagnosticHttp(query: CanonicalSelectorDiagn
 
   const registrySizeBeforeCollect = getH1LiveSelectorRegistrySize();
   const pipeline = collectH1LiveSelectorDecisions(nowIso);
+  const gateEvidence = collectH1LiveGateEvidenceAudit(nowIso).filter((entry) => entry.identity.symbol === symbol);
   const symbolDecisions = pipeline.decisions.filter((decision) => decision.symbol === symbol);
   const symbolEvaluations = pipeline.evaluations.filter((evaluation) => evaluation.candidate.symbol === symbol);
   const selects = symbolDecisions.filter((decision) => decision.decision === "SELECT");
@@ -47,7 +48,7 @@ export function runCanonicalSelectorDiagnosticHttp(query: CanonicalSelectorDiagn
     status: 200,
     body: {
       ok: true,
-      mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V1",
+      mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V2",
       productionImpact: "NONE",
       symbol,
       nowIso,
@@ -63,6 +64,7 @@ export function runCanonicalSelectorDiagnosticHttp(query: CanonicalSelectorDiagn
       reasonCodes,
       decisions: symbolDecisions,
       evaluations: symbolEvaluations,
+      gateEvidence,
       ready: selects.length > 0,
       blocker: selects.length > 0
         ? null

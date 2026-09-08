@@ -26,7 +26,15 @@ const candidate = {
 function buildConsumer() {
   const packet = buildCanonicalBuyerCandidatePacket(candidate).packet;
   assert.ok(packet);
-  return consumeCanonicalBusinessPacket({ packet, telegramQualityStars: 5, horizons: [] });
+  return consumeCanonicalBusinessPacket({
+    packet,
+    telegramQualityStars: 5,
+    horizons: [
+      { horizon: "INTRADAY", buyerScore: 85, sellerScore: 30, evidenceReady: true },
+      { horizon: "MULTIDAY", buyerScore: 75, sellerScore: 45, evidenceReady: true },
+      { horizon: "EXPIRY", buyerScore: 80, sellerScore: 35, evidenceReady: true },
+    ],
+  });
 }
 
 test("missing and stale runtime state fail closed", () => {
@@ -56,6 +64,36 @@ test("registry rejects mismatched symbol and candidate identity", () => {
     buyerCandidate: consumer.buyerCandidate ? { ...consumer.buyerCandidate, candidateKey: "BROKEN" } : null,
   };
   assert.equal(registry.publish("NIFTY", broken, now), false);
+});
+
+test("registry rejects forged authority, role, key shape, and incomplete horizons", () => {
+  const now = 1_000_000;
+  const registry = new CanonicalBusinessRuntimeRegistry(60_000, () => now);
+  const consumer = buildConsumer();
+  assert.equal(registry.publish("NIFTY", {
+    ...consumer,
+    buyerCandidate: { ...consumer.buyerCandidate!, sourceAuthority: "OTHER" as never },
+  }, now), false);
+  assert.equal(registry.publish("NIFTY", {
+    ...consumer,
+    buyerCandidate: { ...consumer.buyerCandidate!, role: "OPTION_SELLER" as never },
+  }, now), false);
+  assert.equal(registry.publish("NIFTY", {
+    ...consumer,
+    candidateKey: "NIFTY:CE:25000:FORGED",
+    buyerCandidate: { ...consumer.buyerCandidate!, candidateKey: "NIFTY:CE:25000:FORGED" },
+  }, now), false);
+  assert.equal(registry.publish("NIFTY", { ...consumer, horizons: consumer.horizons.slice(0, 2) }, now), false);
+  assert.equal(registry.publish("NIFTY", { ...consumer, horizons: undefined as never }, now), false);
+});
+
+test("registry rejects any downstream authority escalation", () => {
+  const now = 1_000_000;
+  const registry = new CanonicalBusinessRuntimeRegistry(60_000, () => now);
+  const consumer = buildConsumer();
+  assert.equal(registry.publish("NIFTY", { ...consumer, affectsExecution: true as never }, now), false);
+  assert.equal(registry.publish("NIFTY", { ...consumer, createsOrders: true as never }, now), false);
+  assert.equal(registry.publish("NIFTY", { ...consumer, aiMayOverride: true as never }, now), false);
 });
 
 test("clear removes runtime authority", () => {

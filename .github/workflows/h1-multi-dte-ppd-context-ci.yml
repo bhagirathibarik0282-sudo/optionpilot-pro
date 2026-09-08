@@ -1,0 +1,18 @@
+name: H1 Multi-DTE PPD Context CI
+on:
+  pull_request:
+    paths:
+      - 'h1-premium-pair-divergence-v1.ts'
+      - 'h1-multi-dte-ppd-context-v1.ts'
+      - 'test/h1-multi-dte-ppd-context-v1.test.ts'
+      - '.github/workflows/h1-multi-dte-ppd-context-ci.yml'
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/h1-premium-pair-divergence-v1.test.ts test/h1-multi-dte-ppd-context-v1.test.ts

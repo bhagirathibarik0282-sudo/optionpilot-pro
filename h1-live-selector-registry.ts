@@ -87,12 +87,25 @@ export function collectH1LiveGateEvidenceAudit(nowIso: string, maxAgeMs = 90_000
       } : null];
     }));
     const metrics = entry.packet.responseMetrics;
+    const policyDiagnostics = entry.packet.policyDiagnostics;
     out.push({
       key,
       ageMs,
       identity: { ...entry.packet.identity },
       gates: gateEvidence,
       responseMetrics: metrics ? { ...metrics } : null,
+      policyDiagnostics: policyDiagnostics ? {
+        premiumDeltaGamma: {
+          ...policyDiagnostics.premiumDeltaGamma,
+          reasonCodes: [...policyDiagnostics.premiumDeltaGamma.reasonCodes],
+        },
+        thetaIv: {
+          ...policyDiagnostics.thetaIv,
+          reasonCodes: [...policyDiagnostics.thetaIv.reasonCodes],
+        },
+        observedAt: policyDiagnostics.observedAt,
+        provenance: policyDiagnostics.provenance,
+      } : null,
     });
   }
   return out;

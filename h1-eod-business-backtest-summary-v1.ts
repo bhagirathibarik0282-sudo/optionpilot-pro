@@ -49,12 +49,51 @@ export function parseH1EodBusinessBacktestTop(raw: string | null | undefined):
 }
 
 type ReplayRow = Record<string, unknown>;
+type Side = "CE" | "PE";
 
 type ForwardOutcome = {
   horizonMinutes: 6 | 15 | 30;
   observedAt: string;
   premiumLtp: number;
   premiumMovePctFromWindowEnd: number | null;
+};
+
+type AtmPoint = {
+  minute: string;
+  expiry: string;
+  dte: number;
+  side: Side;
+  strike: number;
+  atmOffset: number;
+  ltp: number;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  iv: number | null;
+  liquidityStatus: string | null;
+  validationStatus: string | null;
+};
+
+type ObservedTransition = {
+  expiry: string;
+  dte: number;
+  side: Side;
+  strike: number;
+  from: string;
+  to: string;
+  observed: {
+    premiumLtpFrom: number;
+    premiumLtpTo: number;
+    premiumMovePct: number | null;
+    deltaFrom: number | null;
+    deltaTo: number | null;
+    absoluteDeltaChange: number | null;
+    currentGamma: number | null;
+    theta: number | null;
+    iv: number | null;
+    liquidityStatus: string | null;
+    validationStatus: string | null;
+  };
 };
 
 function minuteMap(rows: ReplayRow[]): Map<string, ReplayRow> {
@@ -76,17 +115,83 @@ function currentExpiryChainMap(rows: ReplayRow[]): Map<string, ReplayRow> {
   return out;
 }
 
-function dte0AtmOptionMap(rows: ReplayRow[]): Map<string, ReplayRow> {
-  const out = new Map<string, ReplayRow>();
-  for (const row of rows) {
-    const minute = iso(row.minute_bucket);
-    const side = s(row.option_type);
-    const strike = n(row.strike);
-    if (!minute || (side !== "CE" && side !== "PE") || strike == null) continue;
-    if (n(row.dte) !== 0 || n(row.atm_offset) !== 0 || s(row.expiry_bucket) !== "Current Expiry") continue;
-    out.set(`${minute}|${side}|${strike}`, row);
+function toCurrentExpiryPoint(row: ReplayRow): AtmPoint | null {
+  const minute = iso(row.minute_bucket);
+  const expiry = iso(row.expiry)?.slice(0, 10) ?? s(row.expiry);
+  const side = s(row.option_type);
+  const dte = n(row.dte);
+  const strike = n(row.strike);
+  const atmOffset = n(row.atm_offset);
+  const ltp = n(row.ltp);
+  if (!minute || !expiry || (side !== "CE" && side !== "PE")) return null;
+  if (dte == null || strike == null || atmOffset == null || ltp == null || ltp <= 0) return null;
+  if (s(row.expiry_bucket) !== "Current Expiry") return null;
+  return {
+    minute,
+    expiry,
+    dte,
+    side,
+    strike,
+    atmOffset,
+    ltp,
+    delta: n(row.delta),
+    gamma: n(row.gamma),
+    theta: n(row.theta),
+    iv: n(row.iv),
+    liquidityStatus: s(row.liquidity_status),
+    validationStatus: s(row.validation_status),
+  };
+}
+
+function buildObservedAtmTransitions(rows: ReplayRow[]): { transitions: ObservedTransition[]; optionByKey: Map<string, AtmPoint> } {
+  const points = rows.map(toCurrentExpiryPoint).filter((x): x is AtmPoint => x !== null);
+  const optionByKey = new Map<string, AtmPoint>();
+  const groups = new Map<string, AtmPoint[]>();
+
+  for (const point of points) {
+    optionByKey.set(`${point.minute}|${point.expiry}|${point.side}|${point.strike}`, point);
+    const key = `${point.expiry}|${point.side}|${point.strike}`;
+    const group = groups.get(key) ?? [];
+    group.push(point);
+    groups.set(key, group);
   }
-  return out;
+
+  const transitions: ObservedTransition[] = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => Date.parse(a.minute) - Date.parse(b.minute));
+    for (let i = 1; i < group.length; i += 1) {
+      const previous = group[i - 1];
+      const current = group[i];
+      if (Date.parse(current.minute) - Date.parse(previous.minute) !== 3 * 60_000) continue;
+      if (current.atmOffset !== 0) continue;
+      const absoluteDeltaChange = previous.delta != null && current.delta != null
+        ? Math.abs(current.delta - previous.delta)
+        : null;
+      transitions.push({
+        expiry: current.expiry,
+        dte: current.dte,
+        side: current.side,
+        strike: current.strike,
+        from: previous.minute,
+        to: current.minute,
+        observed: {
+          premiumLtpFrom: previous.ltp,
+          premiumLtpTo: current.ltp,
+          premiumMovePct: pctChange(previous.ltp, current.ltp),
+          deltaFrom: previous.delta,
+          deltaTo: current.delta,
+          absoluteDeltaChange,
+          currentGamma: current.gamma,
+          theta: current.theta,
+          iv: current.iv,
+          liquidityStatus: current.liquidityStatus,
+          validationStatus: current.validationStatus,
+        },
+      });
+    }
+  }
+
+  return { transitions, optionByKey };
 }
 
 function sessionSummary(marketRows: ReplayRow[]) {
@@ -162,9 +267,12 @@ export function buildH1EodBusinessBacktestSummary(
   }
 
   const calibration = buildH1Dte0TransitionCalibration(request, replay);
+  const { transitions, optionByKey } = buildObservedAtmTransitions(replay.options ?? []);
   const marketByMinute = minuteMap(replay.market ?? []);
   const chainByMinute = currentExpiryChainMap(replay.chain ?? []);
-  const optionByKey = dte0AtmOptionMap(replay.options ?? []);
+  const dte0PolicyByWindow = new Map(
+    calibration.windows.map((window) => [`${window.from}|${window.to}|${window.side}|${window.strike}`, window.currentPolicy] as const),
+  );
 
   const blockerCounts: Record<string, number> = {};
   for (const window of calibration.windows) {
@@ -173,7 +281,7 @@ export function buildH1EodBusinessBacktestSummary(
     }
   }
 
-  const ranked = [...calibration.windows]
+  const ranked = [...transitions]
     .sort((a, b) => {
       const aMove = Math.abs(a.observed.premiumMovePct ?? 0);
       const bMove = Math.abs(b.observed.premiumMovePct ?? 0);
@@ -183,31 +291,36 @@ export function buildH1EodBusinessBacktestSummary(
     .map((window) => {
       const market = marketByMinute.get(window.to);
       const chain = chainByMinute.get(window.to);
-      const blockers = policyBlockers(window.currentPolicy);
+      const responsePolicy = dte0PolicyByWindow.get(`${window.from}|${window.to}|${window.side}|${window.strike}`) ?? null;
+      const blockers = responsePolicy ? policyBlockers(responsePolicy) : [];
       const forwardOutcomes = ([6, 15, 30] as const)
         .map((horizonMinutes): ForwardOutcome | null => {
           const observedAt = atOffsetIso(window.to, horizonMinutes);
-          const row = optionByKey.get(`${observedAt}|${window.side}|${window.strike}`);
-          const premiumLtp = n(row?.ltp);
-          if (premiumLtp == null) return null;
+          const point = optionByKey.get(`${observedAt}|${window.expiry}|${window.side}|${window.strike}`);
+          if (!point) return null;
           return {
             horizonMinutes,
             observedAt,
-            premiumLtp,
-            premiumMovePctFromWindowEnd: pctChange(window.observed.premiumLtpTo, premiumLtp),
+            premiumLtp: point.ltp,
+            premiumMovePctFromWindowEnd: pctChange(window.observed.premiumLtpTo, point.ltp),
           };
         })
         .filter((x): x is ForwardOutcome => x !== null);
 
       return {
+        expiry: window.expiry,
+        dte: window.dte,
         side: window.side,
         strike: window.strike,
         from: window.from,
         to: window.to,
         observed: window.observed,
-        responsePolicy: window.currentPolicy,
+        responsePolicy,
+        responsePolicySource: responsePolicy ? "EXISTING_DTE0_CALIBRATION_POLICY" as const : "NOT_APPLIED_OUTSIDE_DTE0" as const,
         responsePolicyBlockers: blockers,
-        responsePolicyState: blockers.length === 0 ? "RESPONSE_POLICY_PASS" as const : "RESPONSE_POLICY_BLOCKED" as const,
+        responsePolicyState: responsePolicy
+          ? (blockers.length === 0 ? "RESPONSE_POLICY_PASS" as const : "RESPONSE_POLICY_BLOCKED" as const)
+          : "POLICY_NOT_RECONSTRUCTED" as const,
         selectorQualification: "NOT_PROVEN_FROM_HISTORICAL_REPLAY" as const,
         marketContext: {
           spotLtp: n(market?.spot_ltp),
@@ -261,14 +374,21 @@ export function buildH1EodBusinessBacktestSummary(
       unprovableGates: reconstruction.unprovableGates,
       blockers: reconstruction.blockers,
     },
+    transitionEvidence: {
+      semantics: "CURRENT_EXPIRY_ATM_OBSERVED_3M_TRANSITIONS_RESEARCH_ONLY" as const,
+      totalObservedWindowCount: transitions.length,
+      topRequested: boundedTop,
+      topReturned: ranked.length,
+      ranking: "ABSOLUTE_OBSERVED_PREMIUM_MOVE_ONLY_NOT_CANDIDATE_SCORE" as const,
+      windows: ranked,
+    },
     dte0Evidence: {
       atmDte0PointCount: calibration.atmDte0PointCount,
       totalWindowCount: calibration.windowCount,
       evidenceState: calibration.evidenceState,
       blockerCounts,
-      topRequested: boundedTop,
-      topReturned: ranked.length,
-      windows: ranked,
+      policySource: "EXISTING_H1_DTE0_TRANSITION_CALIBRATION_V1" as const,
+      thresholdPromoted: false as const,
     },
     boundedOutput: {
       rawMarketRowsOmitted: true as const,

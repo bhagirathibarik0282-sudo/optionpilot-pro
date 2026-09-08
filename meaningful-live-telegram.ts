@@ -16,6 +16,8 @@ import {
 import { evaluateMessageTrigger } from "./message-trigger-engine.js";
 import { collectH1LiveSelectorDecisions, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
 import { buildMeaningfulTelegramCardV2 } from "./telegram-meaningful-card-v2.js";
+import { canonicalBusinessRuntimeRegistry } from "./canonical-business-runtime-registry.js";
+import { evaluateCanonicalTelegramTransport } from "./canonical-telegram-transport-gate.js";
 
 const { Pool } = pg;
 
@@ -778,6 +780,9 @@ export interface MeaningfulLivePreflightDiagnostic {
   selectorBlockCount: number;
   selectorReasonCodes: string[];
   selectorDecisions: Array<{ expiry: string; strike: number; side: "CE" | "PE"; decision: "SELECT" | "BLOCK"; reasonCodes: string[] }>;
+  canonicalCandidateKey: string | null;
+  canonicalTransportAllowed: boolean;
+  canonicalTransportReason: string;
   affectsTelegram: false;
   affectsVerdict: false;
   affectsExecution: false;
@@ -809,21 +814,39 @@ export async function getMeaningfulLivePreflightDiagnostic(symbol: NarrativeSymb
       state: null, dataQuality: null, meaningfulChanges: [], triggerFingerprint: null,
       selectorSelectCount: selectDecisions.length, selectorBlockCount: blockDecisions.length, selectorReasonCodes,
       selectorDecisions: symbolDecisions.map((d) => ({ expiry: d.expiry, strike: d.strike, side: d.side, decision: d.decision, reasonCodes: [...d.reasonCodes] })),
+      canonicalCandidateKey: canonicalBusinessRuntimeRegistry.read(symbol)?.candidateKey ?? null,
+      canonicalTransportAllowed: false,
+      canonicalTransportReason: "MEANINGFUL_CANDIDATE_MISSING",
       affectsTelegram: false, affectsVerdict: false, affectsExecution: false, createsOrders: false,
     };
   }
   const decision = deriveLiveMeaningfulDecision(window, memory.get(symbol));
+  const selector = collectH1LiveSelectorDecisions(new Date().toISOString());
+  const symbolDecisions = selector.decisions.filter((entry) => entry.symbol === symbol);
+  const selectDecisions = symbolDecisions.filter((entry) => entry.decision === "SELECT");
+  const blockDecisions = symbolDecisions.filter((entry) => entry.decision === "BLOCK");
+  const selectorReasonCodes = [...new Set(blockDecisions.flatMap((entry) => entry.reasonCodes ?? []))];
+  const transport = evaluateCanonicalTelegramTransport({
+    consumer: canonicalBusinessRuntimeRegistry.read(symbol),
+    meaningfulCandidateKey: decision.candidateKey,
+  });
   return {
     symbol,
-    ready: decision.ok && Boolean(decision.candidateKey),
-    reason: decision.reason,
+    ready: decision.ok && Boolean(decision.candidateKey) && transport.allowed,
+    reason: decision.ok && decision.candidateKey && !transport.allowed ? transport.reason : decision.reason,
     candidateKey: decision.candidateKey,
     direction: decision.direction,
     state: decision.state,
     dataQuality: decision.dataQuality,
     meaningfulChanges: [...decision.meaningfulChanges],
     triggerFingerprint: decision.triggerFingerprint,
-    selectorSelectCount: 1, selectorBlockCount: 0, selectorReasonCodes: [], selectorDecisions: [],
+    selectorSelectCount: selectDecisions.length,
+    selectorBlockCount: blockDecisions.length,
+    selectorReasonCodes,
+    selectorDecisions: symbolDecisions.map((entry) => ({ expiry: entry.expiry, strike: entry.strike, side: entry.side, decision: entry.decision, reasonCodes: [...entry.reasonCodes] })),
+    canonicalCandidateKey: transport.candidateKey,
+    canonicalTransportAllowed: transport.allowed,
+    canonicalTransportReason: transport.reason,
     affectsTelegram: false,
     affectsVerdict: false,
     affectsExecution: false,
@@ -833,6 +856,10 @@ export async function getMeaningfulLivePreflightDiagnostic(symbol: NarrativeSymb
 
 export function syntheticSuppressedResponse(): Response {
   return new Response(JSON.stringify({ ok: true, result: { message_id: 0, date: Math.floor(Date.now() / 1000), text: "OPTIONPILOT_MEANINGFUL_SUPPRESSED_UNCHANGED" } }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+export function meaningfulBridgeFailureDisposition(ownedCandidateMessage: boolean): "SUPPRESS" | "PASS_THROUGH" {
+  return ownedCandidateMessage ? "SUPPRESS" : "PASS_THROUGH";
 }
 
 async function telegramResponseOk(response: Response): Promise<boolean> {
@@ -862,6 +889,7 @@ export function installMeaningfulLiveTelegramBridge(): void {
 
   const originalFetch = globalThis.fetch.bind(globalThis);
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    let ownedCandidateMessage = false;
     try {
       const url = requestUrl(input);
       if (!url.includes("api.telegram.org/") || !url.includes("/sendMessage") || typeof init?.body !== "string") return originalFetch(input, init);
@@ -869,6 +897,7 @@ export function installMeaningfulLiveTelegramBridge(): void {
       const originalText = typeof payload.text === "string" ? payload.text : "";
       const symbol = inferSymbol(originalText);
       if (!symbol || !isMeaningfulBridgeOwnedTelegramText(originalText)) return originalFetch(input, init);
+      ownedCandidateMessage = true;
 
       await hydrateMemory();
       const window = await loadWindow(symbol, originalText);
@@ -894,6 +923,15 @@ export function installMeaningfulLiveTelegramBridge(): void {
       const previous = memory.get(symbol);
       const decision = deriveLiveMeaningfulDecision(window, previous);
       if (!decision.ok || !decision.candidateKey) { console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason:decision.reason })}`); return syntheticSuppressedResponse(); }
+
+      const transport = evaluateCanonicalTelegramTransport({
+        consumer: canonicalBusinessRuntimeRegistry.read(symbol),
+        meaningfulCandidateKey: decision.candidateKey,
+      });
+      if (!transport.allowed) {
+        console.log(`[MEANINGFUL_TELEGRAM_PROOF] ${JSON.stringify({ symbol, state:"SUPPRESSED", reason:transport.reason, meaningfulCandidateKey:decision.candidateKey, canonicalCandidateKey:transport.candidateKey })}`);
+        return syntheticSuppressedResponse();
+      }
 
       if (decision.reason === "NO_MEANINGFUL_CHANGE") {
         confirmationTracker.reset(symbol);
@@ -957,7 +995,9 @@ export function installMeaningfulLiveTelegramBridge(): void {
       }
       return response;
     } catch (err) {
-      console.error("[Meaningful Telegram] bridge failed open:", err instanceof Error ? err.message : String(err));
+      const disposition = meaningfulBridgeFailureDisposition(ownedCandidateMessage);
+      console.error(`[Meaningful Telegram] bridge failed ${disposition === "SUPPRESS" ? "closed" : "open"}:`, err instanceof Error ? err.message : String(err));
+      if (disposition === "SUPPRESS") return syntheticSuppressedResponse();
       return originalFetch(input, init);
     }
   }) as typeof fetch;

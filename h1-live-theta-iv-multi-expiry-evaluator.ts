@@ -92,7 +92,8 @@ export function evaluateLiveThetaIvAndMultiExpiry(
   let thetaIvBurdenAcceptable = false;
   let multiExpiryConflictAbsent = false;
 
-  if (reasons.length === 0) {
+  const hardInputBlocker = reasons.length > 0;
+  if (!hardInputBlocker) {
     const thetaPct = Math.abs(current.theta) / current.premiumLtp * 100;
     thetaIvBurdenAcceptable = thetaPct <= policy.maxAbsThetaPctOfPremium && current.iv >= policy.minIv && current.iv <= policy.maxIv;
     if (!thetaIvBurdenAcceptable) reasons.push("THETA_IV_BURDEN_UNACCEPTABLE");

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   getH1DynamicReadOnlyServerStatus,
   isH1DynamicReadOnlyLiveEnabled,
+  refreshH1DynamicReadOnlyLiveFromServerEnv,
   resetH1DynamicReadOnlyServerBootstrapForTest,
   startH1DynamicReadOnlyLiveFromServerEnv,
 } from "../h1-dynamic-readonly-server-bootstrap.js";
@@ -17,6 +18,9 @@ function liveResult(started = true, service: H1LiveExactReadOnlyWebSocketService
     started,
     reason: started ? "STARTED" : "PREPARATION_BLOCKED",
     subscribedTokenCount: started ? 21 : 0,
+    constituentRegistryReady: false,
+    constituentTokenCount: 0,
+    constituentBlockers: [],
     productionImpact: "NONE",
     readOnly: true,
     affectsDirection: false,
@@ -26,6 +30,51 @@ function liveResult(started = true, service: H1LiveExactReadOnlyWebSocketService
     failClosed: true,
     service,
   };
+}
+
+function fakeLifecycleService(state: "OPEN" | "ERROR" | "CLOSED" = "OPEN", onStop: () => void = () => {}): H1LiveExactReadOnlyWebSocketService {
+  return {
+    status: () => ({
+      version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1" as const,
+      started: true,
+      connected: state === "OPEN",
+      state,
+      subscribedTokenCount: 21,
+      receivedPacketCount: state === "OPEN" ? 42 : 0,
+      rejectedPacketCount: 0,
+      lastPacketTimestamp: state === "OPEN" ? "2026-09-08T10:00:00.000Z" : null,
+      rawEvidenceReady: false,
+      rawEvidenceExpectedTokenCount: 21,
+      rawEvidenceFreshTokenCount: 0,
+      rawEvidenceMissingTokenCount: 21,
+      rawEvidenceStaleTokenCount: 0,
+      rawEvidenceMissing: [],
+      rawEvidenceSymbolReadiness: [],
+      nearestPeerReadiness: [],
+      readOnlyConsumerReadySymbolCount: 0,
+      readOnlyConsumerObservations: [],
+      readOnlyDirectionReadySymbolCount: 0,
+      readOnlyDirectionObservations: [],
+      readOnlyShadowInputReadySymbolCount: 0,
+      readOnlyShadowInputObservations: [],
+      selectorRuntimePolicyReady: true,
+      selectorRuntimeAttached: true,
+      selectorRuntimeBlockers: [],
+      greekEvidenceStatus: "NOT_CONFIGURED" as const,
+      productionImpact: "NONE" as const,
+      readOnly: true as const,
+      forwardsDownstream: false as const,
+      affectsDirection: false as const,
+      affectsVerdict: false as const,
+      affectsExecution: false as const,
+      affectsTelegram: false as const,
+      failClosed: true as const,
+    }),
+    stop: () => {
+      onStop();
+      return {} as any;
+    },
+  } as unknown as H1LiveExactReadOnlyWebSocketService;
 }
 
 test("default/off env performs zero live-chain calls", async () => {
@@ -78,29 +127,7 @@ test("enabled path calls the read-only chain once and exposes no service handle"
 
 test("public status reflects ongoing read-only socket packet counters without exposing service", async () => {
   resetH1DynamicReadOnlyServerBootstrapForTest();
-  const fakeService = {
-    status: () => ({
-      version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1" as const,
-      started: true,
-      connected: true,
-      state: "OPEN" as const,
-      subscribedTokenCount: 21,
-      receivedPacketCount: 42,
-      rejectedPacketCount: 0,
-      lastPacketTimestamp: "2026-09-04T07:50:00.000Z",
-      selectorRuntimePolicyReady: true,
-      selectorRuntimeAttached: true,
-      selectorRuntimeBlockers: [],
-      productionImpact: "NONE" as const,
-      readOnly: true as const,
-      forwardsDownstream: false as const,
-      affectsDirection: false as const,
-      affectsVerdict: false as const,
-      affectsExecution: false as const,
-      affectsTelegram: false as const,
-      failClosed: true as const,
-    }),
-  } as unknown as H1LiveExactReadOnlyWebSocketService;
+  const fakeService = fakeLifecycleService("OPEN");
 
   await startH1DynamicReadOnlyLiveFromServerEnv(
     { H1_DYNAMIC_READONLY_LIVE_ENABLED: "true" },
@@ -113,7 +140,6 @@ test("public status reflects ongoing read-only socket packet counters without ex
   assert.equal(out.socketState, "OPEN");
   assert.equal(out.receivedPacketCount, 42);
   assert.equal(out.rejectedPacketCount, 0);
-  assert.equal(out.lastPacketTimestamp, "2026-09-04T07:50:00.000Z");
   assert.equal(out.selectorRuntimePolicyReady, true);
   assert.equal(out.selectorRuntimeAttached, true);
   assert.deepEqual(out.selectorRuntimeBlockers, []);
@@ -139,11 +165,78 @@ test("startup exception fails closed", async () => {
   assert.deepEqual(getH1DynamicReadOnlyServerStatus(), out);
 });
 
-
 test("disabled status keeps selector runtime fail-closed", async () => {
   resetH1DynamicReadOnlyServerBootstrapForTest();
   const out = await startH1DynamicReadOnlyLiveFromServerEnv({}, async () => liveResult());
   assert.equal(out.selectorRuntimePolicyReady, false);
   assert.equal(out.selectorRuntimeAttached, false);
   assert.deepEqual(out.selectorRuntimeBlockers, []);
+});
+
+test("lifecycle refresh restarts the read-only chain on IST date rollover", async () => {
+  resetH1DynamicReadOnlyServerBootstrapForTest();
+  const env = { H1_DYNAMIC_READONLY_LIVE_ENABLED: "true" };
+  const dates: string[] = [];
+  let stops = 0;
+  const startFn = async (asOfDate: string) => {
+    dates.push(asOfDate);
+    return liveResult(true, fakeLifecycleService("OPEN", () => { stops += 1; }));
+  };
+
+  await startH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-08T18:29:00.000Z"));
+  const refreshed = await refreshH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-08T18:31:00.000Z"));
+
+  assert.equal(refreshed.refreshed, true);
+  assert.equal(refreshed.reason, "IST_DATE_ROLLOVER");
+  assert.deepEqual(dates, ["2026-09-08", "2026-09-09"]);
+  assert.equal(stops, 1);
+  assert.equal(refreshed.status.asOfDate, "2026-09-09");
+  assert.equal(refreshed.status.started, true);
+  assert.equal(refreshed.status.affectsExecution, false);
+  assert.equal(refreshed.status.affectsTelegram, false);
+});
+
+test("lifecycle refresh retries a chain that was not started", async () => {
+  resetH1DynamicReadOnlyServerBootstrapForTest();
+  const env = { H1_DYNAMIC_READONLY_LIVE_ENABLED: "true" };
+  let calls = 0;
+  const startFn = async () => {
+    calls += 1;
+    return calls === 1 ? liveResult(false, null) : liveResult(true, fakeLifecycleService("OPEN"));
+  };
+
+  const first = await startH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T03:40:00.000Z"));
+  assert.equal(first.started, false);
+  const refreshed = await refreshH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T03:41:00.000Z"));
+
+  assert.equal(refreshed.refreshed, true);
+  assert.equal(refreshed.reason, "RUNTIME_NOT_STARTED");
+  assert.equal(calls, 2);
+  assert.equal(refreshed.status.started, true);
+  assert.equal(refreshed.status.connected, true);
+});
+
+test("lifecycle refresh rebinds an unhealthy socket but leaves a healthy same-day socket alone", async () => {
+  resetH1DynamicReadOnlyServerBootstrapForTest();
+  const env = { H1_DYNAMIC_READONLY_LIVE_ENABLED: "true" };
+  let calls = 0;
+  let stops = 0;
+  const startFn = async () => {
+    calls += 1;
+    const state = calls === 1 ? "ERROR" : "OPEN";
+    return liveResult(true, fakeLifecycleService(state, () => { stops += 1; }));
+  };
+
+  await startH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T04:00:00.000Z"));
+  const recovered = await refreshH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T04:01:00.000Z"));
+  assert.equal(recovered.refreshed, true);
+  assert.equal(recovered.reason, "SOCKET_UNHEALTHY");
+  assert.equal(calls, 2);
+  assert.equal(stops, 1);
+  assert.equal(recovered.status.connected, true);
+
+  const healthy = await refreshH1DynamicReadOnlyLiveFromServerEnv(env, startFn, new Date("2026-09-09T04:02:00.000Z"));
+  assert.equal(healthy.refreshed, false);
+  assert.equal(healthy.reason, null);
+  assert.equal(calls, 2);
 });

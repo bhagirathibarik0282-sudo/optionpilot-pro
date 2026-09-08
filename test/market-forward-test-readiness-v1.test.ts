@@ -86,6 +86,21 @@ test("strict forward evidence requires derived OI, positioning, canonical busine
   assert.equal(out.safety.placesOrder, false);
 });
 
+test("normalizes ISO expiry timestamps before positioning identity validation", () => {
+  const r = replay();
+  r.chain = r.chain.map((row: any) => ({ ...row, expiry: "2026-09-08T00:00:00.000Z" }));
+  const out = buildMarketForwardTestReadiness({
+    symbol: "NIFTY",
+    replay: r,
+    dashboard: dashboard(),
+    telegramAcceptance: telegram(),
+    fiiDiiContext: readyContext,
+    marketDnaContext: readyContext,
+  });
+  assert.equal(out.gates.positioningContext.ready, true);
+  assert.equal(out.gates.positioningContext.expiry, "2026-09-08");
+});
+
 test("development stays ready but live proof stays pending before post-deploy derived OI exists", () => {
   const r = replay();
   r.options = r.options.map((row: any) => ({ ...row, derived_oi_change: null, derived_oi_change_source: null, derived_oi_change_gap_seconds: null }));

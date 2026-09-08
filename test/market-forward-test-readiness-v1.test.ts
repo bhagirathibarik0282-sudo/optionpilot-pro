@@ -101,9 +101,13 @@ test("normalizes ISO expiry timestamps before positioning identity validation", 
   assert.equal(out.gates.positioningContext.expiry, "2026-09-08");
 });
 
-test("normalizes database Date-object expiry values before positioning identity validation", () => {
+test("normalizes database Date-object expiry and minute-bucket values", () => {
   const r = replay();
-  r.chain = r.chain.map((row: any) => ({ ...row, expiry: new Date("2026-09-08T00:00:00.000Z") }));
+  r.chain = r.chain.map((row: any) => ({
+    ...row,
+    expiry: new Date("2026-09-08T00:00:00.000Z"),
+    minute_bucket: new Date(row.minute_bucket),
+  }));
   const out = buildMarketForwardTestReadiness({
     symbol: "NIFTY",
     replay: r,

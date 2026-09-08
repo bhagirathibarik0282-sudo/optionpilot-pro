@@ -16,6 +16,15 @@ function s(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function iso(value: unknown): string | null {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString();
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+  }
+  return null;
+}
+
 function pctChange(previous: number, current: number): number | null {
   if (!Number.isFinite(previous) || !Number.isFinite(current) || previous <= 0) return null;
   return ((current - previous) / previous) * 100;
@@ -37,7 +46,7 @@ type Point = {
 };
 
 function toPoint(row: ReplayOption): Point | null {
-  const minuteBucket = s(row.minute_bucket);
+  const minuteBucket = iso(row.minute_bucket);
   const side = s(row.option_type);
   const strike = n(row.strike);
   const premiumLtp = n(row.ltp);

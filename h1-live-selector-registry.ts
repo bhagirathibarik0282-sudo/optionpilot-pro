@@ -69,6 +69,35 @@ export function collectH1LiveResponseMetrics(nowIso: string, maxAgeMs = 90_000) 
   return out;
 }
 
+export function collectH1LiveGateEvidenceAudit(nowIso: string, maxAgeMs = 90_000) {
+  const nowMs = validIso(nowIso);
+  if (nowMs === null) return [];
+  const targetGates = ["premiumResponseConfirmed", "deltaGammaResponseConfirmed", "thetaIvBurdenAcceptable"] as const;
+  const out = [];
+  for (const [key, entry] of entries) {
+    const ageMs = nowMs - entry.publishedAtMs;
+    if (ageMs < 0 || ageMs > maxAgeMs) continue;
+    const gateEvidence = Object.fromEntries(targetGates.map((gate) => {
+      const evidence = entry.packet.gates?.[gate];
+      return [gate, evidence ? {
+        value: evidence.value,
+        source: evidence.source,
+        observedAt: evidence.observedAt,
+        provenance: evidence.provenance,
+      } : null];
+    }));
+    const metrics = entry.packet.responseMetrics;
+    out.push({
+      key,
+      ageMs,
+      identity: { ...entry.packet.identity },
+      gates: gateEvidence,
+      responseMetrics: metrics ? { ...metrics } : null,
+    });
+  }
+  return out;
+}
+
 export function clearH1LiveSelectorRegistry(): void {
   entries.clear();
 }

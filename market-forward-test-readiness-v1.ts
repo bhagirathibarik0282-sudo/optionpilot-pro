@@ -35,6 +35,15 @@ function isoMs(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizedExpiryDate(value: unknown): string | null {
+  const raw = text(value);
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
 function optionOiTruth(replay: H1ReplayHttpResult) {
   const rows = replay.options ?? [];
   let derivedRows = 0;
@@ -76,7 +85,7 @@ function positioningTruth(replay: H1ReplayHttpResult) {
   const chain = replay.chain ?? [];
   const byExpiry = new Map<string, AnyRecord[]>();
   for (const row of chain) {
-    const expiry = text(row.expiry);
+    const expiry = normalizedExpiryDate(row.expiry);
     if (!expiry) continue;
     const bucket = byExpiry.get(expiry) ?? [];
     bucket.push(row);

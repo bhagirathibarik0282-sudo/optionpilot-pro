@@ -11,6 +11,7 @@ import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { calibrateH1DeltaThreshold } from "./h1-delta-threshold-calibration-v1.js";
 import { calibrateH1DeltaByDte } from "./h1-delta-dte-regime-calibration-v1.js";
 import { runH1DeltaOosCalibration } from "./h1-delta-oos-calibration-v1.js";
+import { runH1Dte0MultidayOosHttp } from "./h1-dte0-multiday-oos-http-v1.js";
 import { evaluateH1DeltaThresholdStability } from "./h1-delta-threshold-stability-v1.js";
 import { parseLegacyRecorderRecoveryRequest, runLegacyRecorderRecoveryHttp } from "./h1-legacy-recorder-recovery-http.js";
 import { runH1ObservedCandidate30mGross } from "./h1-observed-candidate-30m-gross.js";
@@ -261,6 +262,8 @@ export function mountResearchRoutes(app: Hono): void {
     }
     return c.json({ok:true,mode:"READ_ONLY_H1_DELTA_OOS_CALIBRATION_V1",...runH1DeltaOosCalibration(days)});
   });
+
+  app.get("/api/research/h1-dte0-multiday-oos", runH1Dte0MultidayOosHttp);
 
   app.get("/api/research/h1-delta-threshold-calibration", async (c) => {
     c.header("Cache-Control", "no-store");

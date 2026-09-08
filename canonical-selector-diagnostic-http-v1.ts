@@ -12,7 +12,7 @@ export function runCanonicalSelectorDiagnosticHttp(query: CanonicalSelectorDiagn
       status: 400,
       body: {
         ok: false,
-        mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V2",
+        mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V3",
         productionImpact: "NONE",
         reason: "FORWARD_TEST_SYMBOL_NOT_SUPPORTED",
         allowed: ["NIFTY", "SENSEX"],
@@ -27,7 +27,7 @@ export function runCanonicalSelectorDiagnosticHttp(query: CanonicalSelectorDiagn
       status: 400,
       body: {
         ok: false,
-        mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V2",
+        mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V3",
         productionImpact: "NONE",
         reason: "INVALID_NOW_ISO",
         executionEnabled: false,
@@ -48,7 +48,7 @@ export function runCanonicalSelectorDiagnosticHttp(query: CanonicalSelectorDiagn
     status: 200,
     body: {
       ok: true,
-      mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V2",
+      mode: "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V3",
       productionImpact: "NONE",
       symbol,
       nowIso,

@@ -111,6 +111,13 @@ export function produceH1LivePublisherPacket(input: H1LivePublisherPacketProduce
     }
   }
 
+  const premiumMovePct = premium.premiumMovePct!;
+  const absoluteDeltaChange = premium.absoluteDeltaChange!;
+  const currentGamma = premium.currentGamma!;
+  const thetaPctOfPremium = Math.abs(input.burdenSnapshot.theta) / input.burdenSnapshot.premiumLtp * 100;
+  const thetaPass = thetaPctOfPremium <= input.burdenPolicy.maxAbsThetaPctOfPremium;
+  const ivPass = input.burdenSnapshot.iv >= input.burdenPolicy.minIv && input.burdenSnapshot.iv <= input.burdenPolicy.maxIv;
+
   return {
     version: "H1_LIVE_PUBLISHER_PACKET_PRODUCER_V1",
     ready: true,
@@ -118,11 +125,41 @@ export function produceH1LivePublisherPacket(input: H1LivePublisherPacketProduce
       identity,
       gates,
       responseMetrics: {
-        premiumMovePct: premium.premiumMovePct!,
-        absoluteDeltaChange: premium.absoluteDeltaChange!,
-        currentGamma: premium.currentGamma!,
+        premiumMovePct,
+        absoluteDeltaChange,
+        currentGamma,
         observedAt: premiumObservedAt,
         source: premium.version,
+        provenance: "LIVE_RUNTIME_EXACT",
+      },
+      policyDiagnostics: {
+        premiumDeltaGamma: {
+          minPremiumMovePct: input.premiumPolicy.minPremiumMovePct,
+          premiumMovePct,
+          premiumPass: premiumMovePct >= input.premiumPolicy.minPremiumMovePct,
+          minAbsoluteDeltaChange: input.premiumPolicy.minAbsoluteDeltaChange,
+          absoluteDeltaChange,
+          deltaPass: absoluteDeltaChange >= input.premiumPolicy.minAbsoluteDeltaChange,
+          minCurrentGamma: input.premiumPolicy.minCurrentGamma,
+          currentGamma,
+          gammaPass: currentGamma >= input.premiumPolicy.minCurrentGamma,
+          deltaGammaPass: premium.deltaGammaResponseConfirmed!,
+          reasonCodes: [...premium.reasonCodes],
+        },
+        thetaIv: {
+          theta: input.burdenSnapshot.theta,
+          iv: input.burdenSnapshot.iv,
+          premiumLtp: input.burdenSnapshot.premiumLtp,
+          thetaPctOfPremium,
+          maxAbsThetaPctOfPremium: input.burdenPolicy.maxAbsThetaPctOfPremium,
+          thetaPass,
+          minIv: input.burdenPolicy.minIv,
+          maxIv: input.burdenPolicy.maxIv,
+          ivPass,
+          thetaIvPass: burden.thetaIvBurdenAcceptable,
+          reasonCodes: [...burden.reasonCodes],
+        },
+        observedAt: burdenObservedAt,
         provenance: "LIVE_RUNTIME_EXACT",
       },
     },

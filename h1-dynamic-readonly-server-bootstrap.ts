@@ -3,12 +3,12 @@ import { getH1RegularMarketWindowContext, type H1RegularMarketWindowContext } fr
 import { evaluateH1MarketOpenReadinessAcceptance, type H1MarketOpenReadinessAcceptance } from "./h1-market-open-readiness-acceptance.js";
 import { buildH1MarketOpenAcceptanceCapture } from "./h1-market-open-acceptance-capture.js";
 import { scheduleH1WeekdayAcceptanceCapture, type H1WeekdayAcceptanceCaptureCancel } from "./h1-weekday-acceptance-capture-scheduler.js";
+import { subscribeKiteAuthoritySessionPersisted, type KiteAuthoritySessionPersistedUnsubscribe } from "./kite-session-authority.js";
 import type { H1LiveExactReadOnlyConsumerObservation, H1LiveExactReadOnlyDirectionObservation, H1LiveExactReadOnlyShadowInputObservation, H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-websocket-service.js";
 import type { H1LiveExactRawEvidenceMissing, H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import type { H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
 
 export const H1_DYNAMIC_READONLY_LIVE_ENV = "H1_DYNAMIC_READONLY_LIVE_ENABLED" as const;
-export const H1_DYNAMIC_READONLY_LIFECYCLE_REFRESH_MS = 60_000 as const;
 
 export interface H1DynamicReadOnlyServerStatus {
   version: "H1_DYNAMIC_READONLY_SERVER_BOOTSTRAP_V1";
@@ -53,11 +53,6 @@ export interface H1DynamicReadOnlyServerStatus {
   failClosed: true;
 }
 
-export type H1DynamicReadOnlyLifecycleRefreshReason =
-  | "IST_DATE_ROLLOVER"
-  | "RUNTIME_NOT_STARTED"
-  | "SOCKET_UNHEALTHY";
-
 type StartFn = (asOfDate: string, enabled: boolean) => Promise<H1DynamicReadOnlyLiveStartResult>;
 type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status" | "stop">;
 type H1StatusWithoutAcceptance = Omit<H1DynamicReadOnlyServerStatus, "marketOpenReadinessAcceptance">;
@@ -68,8 +63,8 @@ let liveService: StatusService | null = null;
 let initialProofTimer: NodeJS.Timeout | null = null;
 let threeMinuteProofTimer: NodeJS.Timeout | null = null;
 let weekdayAcceptanceCaptureCancel: H1WeekdayAcceptanceCaptureCancel | null = null;
-let lifecycleRefreshTimer: NodeJS.Timeout | null = null;
-let lifecycleRefreshInFlight = false;
+let authoritySessionPersistedUnsubscribe: KiteAuthoritySessionPersistedUnsubscribe | null = null;
+let authorityRebindInFlight = false;
 
 function withAcceptance(base: H1StatusWithoutAcceptance): H1DynamicReadOnlyServerStatus {
   return {
@@ -155,10 +150,10 @@ function clearLiveProofTimers(): void {
   weekdayAcceptanceCaptureCancel = null;
 }
 
-function clearLifecycleRefreshTimer(): void {
-  if (lifecycleRefreshTimer) clearInterval(lifecycleRefreshTimer);
-  lifecycleRefreshTimer = null;
-  lifecycleRefreshInFlight = false;
+function clearAuthorityRebindSubscription(): void {
+  authoritySessionPersistedUnsubscribe?.();
+  authoritySessionPersistedUnsubscribe = null;
+  authorityRebindInFlight = false;
 }
 
 function logCompactAcceptanceCapture(): void {
@@ -184,51 +179,20 @@ function scheduleDelayedLiveProofLog(): void {
   threeMinuteProofTimer.unref?.();
 }
 
-function lifecycleRefreshReason(now = new Date()): H1DynamicReadOnlyLifecycleRefreshReason | null {
-  const current = getH1DynamicReadOnlyServerStatus();
-  if (current.asOfDate !== istDate(now)) return "IST_DATE_ROLLOVER";
-  if (!current.started) return "RUNTIME_NOT_STARTED";
-  if (!current.connected && (current.socketState === "ERROR" || current.socketState === "CLOSED")) return "SOCKET_UNHEALTHY";
-  return null;
-}
-
-export async function restartH1DynamicReadOnlyLiveFromServerEnv(
+export async function rebindH1DynamicReadOnlyLiveAfterAuthorityPersist(
   env: NodeJS.ProcessEnv = process.env,
   startFn: StartFn = startH1DynamicReadOnlyLiveChain,
   now = new Date(),
 ): Promise<H1DynamicReadOnlyServerStatus> {
-  if (!isH1DynamicReadOnlyLiveEnabled(env)) {
-    clearLiveProofTimers();
-    clearLifecycleRefreshTimer();
-    liveService?.stop();
-    liveService = null;
-    attemptPromise = null;
-    statusValue = status(false, false, false, "DISABLED", null, 0);
-    return getH1DynamicReadOnlyServerStatus();
-  }
+  if (!isH1DynamicReadOnlyLiveEnabled(env)) return getH1DynamicReadOnlyServerStatus();
+  const previous = getH1DynamicReadOnlyServerStatus();
   liveService?.stop();
   liveService = null;
   clearLiveProofTimers();
   attemptPromise = null;
-  return startH1DynamicReadOnlyLiveFromServerEnv(env, startFn, now);
-}
-
-export async function refreshH1DynamicReadOnlyLiveFromServerEnv(
-  env: NodeJS.ProcessEnv = process.env,
-  startFn: StartFn = startH1DynamicReadOnlyLiveChain,
-  now = new Date(),
-): Promise<{ refreshed: boolean; reason: H1DynamicReadOnlyLifecycleRefreshReason | null; status: H1DynamicReadOnlyServerStatus }> {
-  if (!isH1DynamicReadOnlyLiveEnabled(env)) {
-    const current = await restartH1DynamicReadOnlyLiveFromServerEnv(env, startFn, now);
-    return { refreshed: false, reason: null, status: current };
-  }
-  const reason = lifecycleRefreshReason(now);
-  if (!reason) return { refreshed: false, reason: null, status: getH1DynamicReadOnlyServerStatus() };
-  const previous = getH1DynamicReadOnlyServerStatus();
-  const next = await restartH1DynamicReadOnlyLiveFromServerEnv(env, startFn, now);
+  const next = await startH1DynamicReadOnlyLiveFromServerEnv(env, startFn, now);
   if (process.env.NODE_ENV !== "test") {
-    console.log(`[H1_DYNAMIC_READONLY_LIFECYCLE_REFRESH] ${JSON.stringify({
-      reason,
+    console.log(`[H1_DYNAMIC_READONLY_AUTHORITY_REBIND] ${JSON.stringify({
       previousAsOfDate: previous.asOfDate,
       nextAsOfDate: next.asOfDate,
       previousSocketState: previous.socketState,
@@ -241,28 +205,28 @@ export async function refreshH1DynamicReadOnlyLiveFromServerEnv(
       failClosed: true,
     })}`);
   }
-  return { refreshed: true, reason, status: next };
+  return next;
 }
 
-function scheduleLifecycleRefresh(): void {
-  if (process.env.NODE_ENV === "test" || lifecycleRefreshTimer) return;
-  lifecycleRefreshTimer = setInterval(() => {
-    if (lifecycleRefreshInFlight) return;
-    lifecycleRefreshInFlight = true;
-    void refreshH1DynamicReadOnlyLiveFromServerEnv().catch(() => undefined).finally(() => {
-      lifecycleRefreshInFlight = false;
+function armAuthorityRebindSubscription(): void {
+  if (process.env.NODE_ENV === "test" || authoritySessionPersistedUnsubscribe) return;
+  authoritySessionPersistedUnsubscribe = subscribeKiteAuthoritySessionPersisted(() => {
+    if (authorityRebindInFlight) return;
+    authorityRebindInFlight = true;
+    void rebindH1DynamicReadOnlyLiveAfterAuthorityPersist().catch(() => undefined).finally(() => {
+      authorityRebindInFlight = false;
     });
-  }, H1_DYNAMIC_READONLY_LIFECYCLE_REFRESH_MS);
-  lifecycleRefreshTimer.unref?.();
+  });
 }
 
 export async function startH1DynamicReadOnlyLiveFromServerEnv(env: NodeJS.ProcessEnv = process.env, startFn: StartFn = startH1DynamicReadOnlyLiveChain, now = new Date()): Promise<H1DynamicReadOnlyServerStatus> {
   const enabled = isH1DynamicReadOnlyLiveEnabled(env);
   if (!enabled) {
     clearLiveProofTimers();
-    clearLifecycleRefreshTimer();
+    clearAuthorityRebindSubscription();
     liveService?.stop();
     liveService = null;
+    attemptPromise = null;
     statusValue = status(false, false, false, "DISABLED", null, 0);
     return getH1DynamicReadOnlyServerStatus();
   }
@@ -279,7 +243,7 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(env: NodeJS.Proces
       liveService = null;
       statusValue = status(true, true, false, "START_FAILED", asOfDate, 0);
     }
-    scheduleLifecycleRefresh();
+    armAuthorityRebindSubscription();
     return getH1DynamicReadOnlyServerStatus();
   })();
   return attemptPromise;
@@ -288,7 +252,7 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(env: NodeJS.Proces
 export function resetH1DynamicReadOnlyServerBootstrapForTest(): void {
   if (process.env.NODE_ENV !== "test") throw new Error("H1_SERVER_BOOTSTRAP_RESET_TEST_ONLY");
   clearLiveProofTimers();
-  clearLifecycleRefreshTimer();
+  clearAuthorityRebindSubscription();
   attemptPromise = null;
   liveService = null;
   statusValue = status(false, false, false, "DISABLED", null, 0);

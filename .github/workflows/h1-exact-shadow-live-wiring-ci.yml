@@ -4,9 +4,11 @@ on:
   pull_request:
     paths:
       - 'h1-exact-shadow-live-service.ts'
+      - 'research-server-hook.ts'
       - 'kite-shadow-runtime-service.ts'
       - 'package.json'
       - 'test/h1-exact-shadow-live-service.test.ts'
+      - 'test/h1-exact-shadow-live-status-route.test.ts'
       - 'test/kite-shadow-runtime-service.test.ts'
       - '.github/workflows/h1-exact-shadow-live-wiring-ci.yml'
   workflow_dispatch:
@@ -21,7 +23,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --no-audit --no-fund
-      - run: npx tsx --test test/h1-exact-shadow-live-service.test.ts test/kite-shadow-runtime-service.test.ts
+      - run: npx tsx --test test/h1-exact-shadow-live-service.test.ts test/h1-exact-shadow-live-status-route.test.ts test/kite-shadow-runtime-service.test.ts
       - run: npm run start:h1-exact-shadow
         env:
           KITE_H1_EXACT_SHADOW_ENABLED: 'false'

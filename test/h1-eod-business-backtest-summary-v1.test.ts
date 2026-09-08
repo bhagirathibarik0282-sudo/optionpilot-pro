@@ -15,11 +15,12 @@ const request: H1ReplayRequest = {
   scope: "CORE",
 };
 
-function optionRow(minute_bucket: string, ltp: number, delta: number) {
+function optionRow(minute_bucket: string, ltp: number, delta: number, dte = 0) {
   return {
     minute_bucket: new Date(minute_bucket),
+    expiry: dte === 0 ? "2026-09-08" : "2026-09-15",
     expiry_bucket: "Current Expiry",
-    dte: 0,
+    dte,
     strike: 23650,
     option_type: "PE",
     atm_offset: 0,
@@ -108,11 +109,13 @@ test("EOD business summary stays bounded and preserves Sep-8 PE response evidenc
   assert.equal(result.canonicalLiveProof, false);
   assert.equal(result.selectorQualificationProven, false);
   assert.equal(result.boundedOutput.rawOptionRowsOmitted, true);
-  assert.equal(result.dte0Evidence.topReturned, 1);
-  assert.equal(result.dte0Evidence.windows[0].side, "PE");
-  assert.ok((result.dte0Evidence.windows[0].observed.premiumMovePct ?? 0) > 9);
-  assert.equal(result.dte0Evidence.windows[0].responsePolicy.premiumPass, true);
-  assert.equal(result.dte0Evidence.windows[0].responsePolicy.deltaPass, false);
+  assert.equal(result.transitionEvidence.topReturned, 1);
+  assert.equal(result.transitionEvidence.windows[0].side, "PE");
+  assert.equal(result.transitionEvidence.windows[0].dte, 0);
+  assert.ok((result.transitionEvidence.windows[0].observed.premiumMovePct ?? 0) > 9);
+  assert.equal(result.transitionEvidence.windows[0].responsePolicy?.premiumPass, true);
+  assert.equal(result.transitionEvidence.windows[0].responsePolicy?.deltaPass, false);
+  assert.equal(result.dte0Evidence.thresholdPromoted, false);
   assert.equal(result.safety.affectsTelegram, false);
   assert.equal(result.safety.affectsExecution, false);
 
@@ -120,6 +123,24 @@ test("EOD business summary stays bounded and preserves Sep-8 PE response evidenc
   assert.equal(serialized.includes('"options"'), false);
   assert.equal(serialized.includes('"market"'), false);
   assert.ok(serialized.length < 25_000);
+});
+
+test("non-DTE0 transitions are compacted without inventing a policy", () => {
+  const nonDteReplay: H1ReplayHttpResult = {
+    ...replay,
+    options: [
+      optionRow("2026-09-08T05:00:00.000Z", 100, -0.4, 7),
+      optionRow("2026-09-08T05:03:00.000Z", 106, -0.42, 7),
+    ],
+  };
+  const result = buildH1EodBusinessBacktestSummary(request, nonDteReplay, 1);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.transitionEvidence.topReturned, 1);
+  assert.equal(result.transitionEvidence.windows[0].dte, 7);
+  assert.equal(result.transitionEvidence.windows[0].responsePolicy, null);
+  assert.equal(result.transitionEvidence.windows[0].responsePolicySource, "NOT_APPLIED_OUTSIDE_DTE0");
+  assert.equal(result.transitionEvidence.windows[0].selectorQualification, "NOT_PROVEN_FROM_HISTORICAL_REPLAY");
 });
 
 test("top is fail-closed to 1..20", () => {

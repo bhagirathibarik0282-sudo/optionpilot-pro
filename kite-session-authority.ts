@@ -13,6 +13,29 @@ type AuthorityCode =
   | "USER_MISMATCH"
   | "INVALID_INPUT";
 
+export type KiteAuthoritySessionPersistedListener = () => void | Promise<void>;
+export type KiteAuthoritySessionPersistedUnsubscribe = () => void;
+
+const authoritySessionPersistedListeners = new Set<KiteAuthoritySessionPersistedListener>();
+
+export function subscribeKiteAuthoritySessionPersisted(
+  listener: KiteAuthoritySessionPersistedListener,
+): KiteAuthoritySessionPersistedUnsubscribe {
+  if (typeof listener !== "function") throw new Error("KITE_AUTHORITY_SESSION_LISTENER_REQUIRED");
+  authoritySessionPersistedListeners.add(listener);
+  return () => authoritySessionPersistedListeners.delete(listener);
+}
+
+function publishKiteAuthoritySessionPersisted(): void {
+  for (const listener of [...authoritySessionPersistedListeners]) {
+    try {
+      void Promise.resolve(listener()).catch(() => undefined);
+    } catch {
+      // Session persistence must remain authoritative even if a read-only observer fails.
+    }
+  }
+}
+
 export interface KiteAuthoritySessionInput {
   accessToken: string;
   sessionId: string;
@@ -190,16 +213,15 @@ export async function persistKiteAuthoritySession(
   );
   if (write === null) return { ok: false, status: publicStatus("STORAGE_UNAVAILABLE") };
 
-  return {
-    ok: true,
-    status: publicStatus("ACTIVE", {
-      userId: input.userId,
-      email: input.email ?? null,
-      loginTime: new Date(input.loginTime).toISOString(),
-      expiresAt: new Date(input.expiresAt).toISOString(),
-      tokenFingerprint: fingerprint,
-    }),
-  };
+  const status = publicStatus("ACTIVE", {
+    userId: input.userId,
+    email: input.email ?? null,
+    loginTime: new Date(input.loginTime).toISOString(),
+    expiresAt: new Date(input.expiresAt).toISOString(),
+    tokenFingerprint: fingerprint,
+  });
+  publishKiteAuthoritySessionPersisted();
+  return { ok: true, status };
 }
 
 export async function resolveKiteAuthoritySession(now = Date.now()): Promise<{

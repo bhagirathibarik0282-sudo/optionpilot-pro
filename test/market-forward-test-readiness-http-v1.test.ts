@@ -37,7 +37,7 @@ test("positioning diagnostic rejects invalid date before runtime read", async ()
 test("canonical selector diagnostic rejects unsupported symbol fail closed", () => {
   const out = runCanonicalSelectorDiagnosticHttp({ symbol: "BANKNIFTY", nowIso: "2026-09-08T06:30:00.000Z" });
   assert.equal(out.status, 400);
-  assert.equal(out.body.mode, "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V3");
+  assert.equal(out.body.mode, "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V4");
   assert.equal(out.body.reason, "FORWARD_TEST_SYMBOL_NOT_SUPPORTED");
   assert.equal(out.body.executionEnabled, false);
 });
@@ -46,7 +46,7 @@ test("canonical selector diagnostic does not fabricate a candidate when live reg
   clearH1LiveSelectorRegistry();
   const out = runCanonicalSelectorDiagnosticHttp({ symbol: "NIFTY", nowIso: "2026-09-08T06:30:00.000Z" });
   assert.equal(out.status, 200);
-  assert.equal(out.body.mode, "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V3");
+  assert.equal(out.body.mode, "READ_ONLY_CANONICAL_SELECTOR_DIAGNOSTIC_V4");
   assert.equal(out.body.ready, false);
   assert.equal(out.body.selectCount, 0);
   assert.equal(out.body.blocker, "NO_FRESH_LIVE_GATE_PACKETS_IN_REGISTRY");

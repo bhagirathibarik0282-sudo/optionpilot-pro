@@ -65,7 +65,7 @@ jobs:
             ['Acceptance endpoint mounted', hook.includes('/api/research/meaningful-live-acceptance')],
             ['Acceptance monitor does not mutate Telegram', monitor.includes('changesTelegramPayload: false')],
             ['Acceptance monitor journal check', monitor.includes('POSTGRES_APP_STATE_LOG')],
-            ['Live bridge fail-open', live.includes('bridge failed open')],
+            ['Owned live candidate bridge fails closed', live.includes('meaningfulBridgeFailureDisposition') && live.includes('disposition === "SUPPRESS"')],
             ['Same-timestamp leadership guard', live.includes('LEAD_TIMESTAMP_TIE_UNRESOLVED')],
             ['No execution authority', live.includes('affectsExecution: false') && live.includes('affectsVerdict: false')],
             ['Persistent narrative journal', live.includes('meaningful_narrative_event')],
@@ -90,6 +90,7 @@ jobs:
             test/message-trigger-engine.test.ts \
             test/meaningful-market-narrative.test.ts \
             test/meaningful-live-telegram.test.ts \
+            test/canonical-telegram-live-identity.test.ts \
             test/meaningful-live-acceptance-monitor.test.ts \
             test/telegram-human-live-talk.test.ts \
             test/telegram-style-route.test.ts \

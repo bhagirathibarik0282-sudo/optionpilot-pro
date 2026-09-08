@@ -3,6 +3,7 @@ import { getH1RegularMarketWindowContext, type H1RegularMarketWindowContext } fr
 import { evaluateH1MarketOpenReadinessAcceptance, type H1MarketOpenReadinessAcceptance } from "./h1-market-open-readiness-acceptance.js";
 import { buildH1MarketOpenAcceptanceCapture } from "./h1-market-open-acceptance-capture.js";
 import { scheduleH1WeekdayAcceptanceCapture, type H1WeekdayAcceptanceCaptureCancel } from "./h1-weekday-acceptance-capture-scheduler.js";
+import { subscribeKiteAuthoritySessionPersisted, type KiteAuthoritySessionPersistedUnsubscribe } from "./kite-session-authority.js";
 import type { H1LiveExactReadOnlyConsumerObservation, H1LiveExactReadOnlyDirectionObservation, H1LiveExactReadOnlyShadowInputObservation, H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-websocket-service.js";
 import type { H1LiveExactRawEvidenceMissing, H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import type { H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
@@ -53,7 +54,7 @@ export interface H1DynamicReadOnlyServerStatus {
 }
 
 type StartFn = (asOfDate: string, enabled: boolean) => Promise<H1DynamicReadOnlyLiveStartResult>;
-type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status">;
+type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status" | "stop">;
 type H1StatusWithoutAcceptance = Omit<H1DynamicReadOnlyServerStatus, "marketOpenReadinessAcceptance">;
 
 let statusValue: H1DynamicReadOnlyServerStatus = status(false, false, false, "DISABLED", null, 0);
@@ -62,6 +63,8 @@ let liveService: StatusService | null = null;
 let initialProofTimer: NodeJS.Timeout | null = null;
 let threeMinuteProofTimer: NodeJS.Timeout | null = null;
 let weekdayAcceptanceCaptureCancel: H1WeekdayAcceptanceCaptureCancel | null = null;
+let authoritySessionPersistedUnsubscribe: KiteAuthoritySessionPersistedUnsubscribe | null = null;
+let authorityRebindInFlight = false;
 
 function withAcceptance(base: H1StatusWithoutAcceptance): H1DynamicReadOnlyServerStatus {
   return {
@@ -147,6 +150,12 @@ function clearLiveProofTimers(): void {
   weekdayAcceptanceCaptureCancel = null;
 }
 
+function clearAuthorityRebindSubscription(): void {
+  authoritySessionPersistedUnsubscribe?.();
+  authoritySessionPersistedUnsubscribe = null;
+  authorityRebindInFlight = false;
+}
+
 function logCompactAcceptanceCapture(): void {
   const liveStatus = getH1DynamicReadOnlyServerStatus();
   console.log(`[H1_MARKET_OPEN_ACCEPTANCE_CAPTURE] ${JSON.stringify(buildH1MarketOpenAcceptanceCapture(liveStatus))}`);
@@ -170,9 +179,57 @@ function scheduleDelayedLiveProofLog(): void {
   threeMinuteProofTimer.unref?.();
 }
 
+export async function rebindH1DynamicReadOnlyLiveAfterAuthorityPersist(
+  env: NodeJS.ProcessEnv = process.env,
+  startFn: StartFn = startH1DynamicReadOnlyLiveChain,
+  now = new Date(),
+): Promise<H1DynamicReadOnlyServerStatus> {
+  if (!isH1DynamicReadOnlyLiveEnabled(env)) return getH1DynamicReadOnlyServerStatus();
+  const previous = getH1DynamicReadOnlyServerStatus();
+  liveService?.stop();
+  liveService = null;
+  clearLiveProofTimers();
+  attemptPromise = null;
+  const next = await startH1DynamicReadOnlyLiveFromServerEnv(env, startFn, now);
+  if (process.env.NODE_ENV !== "test") {
+    console.log(`[H1_DYNAMIC_READONLY_AUTHORITY_REBIND] ${JSON.stringify({
+      previousAsOfDate: previous.asOfDate,
+      nextAsOfDate: next.asOfDate,
+      previousSocketState: previous.socketState,
+      nextSocketState: next.socketState,
+      nextStarted: next.started,
+      productionImpact: "NONE",
+      affectsVerdict: false,
+      affectsExecution: false,
+      affectsTelegram: false,
+      failClosed: true,
+    })}`);
+  }
+  return next;
+}
+
+function armAuthorityRebindSubscription(): void {
+  if (process.env.NODE_ENV === "test" || authoritySessionPersistedUnsubscribe) return;
+  authoritySessionPersistedUnsubscribe = subscribeKiteAuthoritySessionPersisted(() => {
+    if (authorityRebindInFlight) return;
+    authorityRebindInFlight = true;
+    void rebindH1DynamicReadOnlyLiveAfterAuthorityPersist().catch(() => undefined).finally(() => {
+      authorityRebindInFlight = false;
+    });
+  });
+}
+
 export async function startH1DynamicReadOnlyLiveFromServerEnv(env: NodeJS.ProcessEnv = process.env, startFn: StartFn = startH1DynamicReadOnlyLiveChain, now = new Date()): Promise<H1DynamicReadOnlyServerStatus> {
   const enabled = isH1DynamicReadOnlyLiveEnabled(env);
-  if (!enabled) { clearLiveProofTimers(); liveService = null; statusValue = status(false, false, false, "DISABLED", null, 0); return getH1DynamicReadOnlyServerStatus(); }
+  if (!enabled) {
+    clearLiveProofTimers();
+    clearAuthorityRebindSubscription();
+    liveService?.stop();
+    liveService = null;
+    attemptPromise = null;
+    statusValue = status(false, false, false, "DISABLED", null, 0);
+    return getH1DynamicReadOnlyServerStatus();
+  }
   if (attemptPromise) return attemptPromise;
   const asOfDate = istDate(now);
   statusValue = status(true, true, false, "PREPARATION_BLOCKED", asOfDate, 0);
@@ -182,7 +239,11 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(env: NodeJS.Proces
       liveService = live.service;
       statusValue = status(true, true, live.started, live.reason, asOfDate, live.subscribedTokenCount);
       if (live.started && liveService) scheduleDelayedLiveProofLog();
-    } catch { liveService = null; statusValue = status(true, true, false, "START_FAILED", asOfDate, 0); }
+    } catch {
+      liveService = null;
+      statusValue = status(true, true, false, "START_FAILED", asOfDate, 0);
+    }
+    armAuthorityRebindSubscription();
     return getH1DynamicReadOnlyServerStatus();
   })();
   return attemptPromise;
@@ -191,5 +252,8 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(env: NodeJS.Proces
 export function resetH1DynamicReadOnlyServerBootstrapForTest(): void {
   if (process.env.NODE_ENV !== "test") throw new Error("H1_SERVER_BOOTSTRAP_RESET_TEST_ONLY");
   clearLiveProofTimers();
-  attemptPromise = null; liveService = null; statusValue = status(false, false, false, "DISABLED", null, 0);
+  clearAuthorityRebindSubscription();
+  attemptPromise = null;
+  liveService = null;
+  statusValue = status(false, false, false, "DISABLED", null, 0);
 }

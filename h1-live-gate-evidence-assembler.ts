@@ -43,10 +43,42 @@ export interface LiveResponseMetricsEvidence {
   provenance: "LIVE_RUNTIME_EXACT";
 }
 
+export interface LiveGatePolicyDiagnosticsEvidence {
+  premiumDeltaGamma: {
+    minPremiumMovePct: number;
+    premiumMovePct: number;
+    premiumPass: boolean;
+    minAbsoluteDeltaChange: number;
+    absoluteDeltaChange: number;
+    deltaPass: boolean;
+    minCurrentGamma: number;
+    currentGamma: number;
+    gammaPass: boolean;
+    deltaGammaPass: boolean;
+    reasonCodes: string[];
+  };
+  thetaIv: {
+    theta: number;
+    iv: number;
+    premiumLtp: number;
+    thetaPctOfPremium: number;
+    maxAbsThetaPctOfPremium: number;
+    thetaPass: boolean;
+    minIv: number;
+    maxIv: number;
+    ivPass: boolean;
+    thetaIvPass: boolean;
+    reasonCodes: string[];
+  };
+  observedAt: string;
+  provenance: "LIVE_RUNTIME_EXACT";
+}
+
 export interface LiveGateEvidencePacket {
   identity: LiveCandidateIdentityEvidence;
   gates: Partial<Record<LiveGateName, LiveBooleanGateEvidence>>;
   responseMetrics?: LiveResponseMetricsEvidence;
+  policyDiagnostics?: LiveGatePolicyDiagnosticsEvidence;
 }
 
 export interface LiveGateEvidenceAssemblerResult {

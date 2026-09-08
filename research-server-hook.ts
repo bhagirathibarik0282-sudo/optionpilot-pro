@@ -25,6 +25,7 @@ import {
   startH1DynamicReadOnlyLiveFromServerEnv,
 } from "./h1-dynamic-readonly-server-bootstrap.js";
 import { collectH1LiveSelectorDecisions, collectH1LiveResponseMetrics, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
+import { runH1LiveGateEvidenceHistoryHttp } from "./h1-live-gate-evidence-history-http-v1.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const THEORY_LAB_HREF = "/api/research/h1-theory-dashboard";
@@ -169,6 +170,8 @@ export function mountResearchRoutes(app: Hono): void {
       failClosed: true,
     });
   });
+
+  app.get("/api/research/h1-live-gate-evidence-history", runH1LiveGateEvidenceHistoryHttp);
 
   app.get("/api/research/h1-exact-live-contract-discovery", async (c) => {
     c.header("Cache-Control", "no-store");

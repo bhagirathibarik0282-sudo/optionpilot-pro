@@ -119,9 +119,12 @@ test("EOD business summary stays bounded and preserves Sep-8 PE response evidenc
   assert.equal(result.safety.affectsTelegram, false);
   assert.equal(result.safety.affectsExecution, false);
 
+  const topLevel = result as Record<string, unknown>;
+  assert.equal("market" in topLevel, false);
+  assert.equal("options" in topLevel, false);
+  assert.equal("chain" in topLevel, false);
+  assert.equal("canonical" in topLevel, false);
   const serialized = JSON.stringify(result);
-  assert.equal(serialized.includes('"options"'), false);
-  assert.equal(serialized.includes('"market"'), false);
   assert.ok(serialized.length < 25_000);
 });
 

@@ -8,6 +8,10 @@ import {
 } from "./meaningful-live-acceptance-monitor.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
+import {
+  buildH1EodBusinessBacktestSummary,
+  parseH1EodBusinessBacktestTop,
+} from "./h1-eod-business-backtest-summary-v1.js";
 import { calibrateH1DeltaThreshold } from "./h1-delta-threshold-calibration-v1.js";
 import { calibrateH1DeltaByDte } from "./h1-delta-dte-regime-calibration-v1.js";
 import { runH1DeltaOosCalibration } from "./h1-delta-oos-calibration-v1.js";
@@ -329,6 +333,44 @@ export function mountResearchRoutes(app: Hono): void {
     const replay = await runH1ReplayHttp(parsed.value);
     const result = auditCandidateReconstruction(parsed.value, replay);
     return c.json({ ok: replay.ok, ...result, reason: replay.reason }, replay.ok ? 200 : 503);
+  });
+
+  app.get("/api/research/h1-eod-business-backtest-summary", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const parsed = parseH1ReplayRequest({
+      symbol: c.req.query("symbol"),
+      tradeDate: c.req.query("date"),
+      fromTime: c.req.query("from"),
+      toTime: c.req.query("to"),
+      scope: c.req.query("scope"),
+    });
+    if (!parsed.ok) {
+      return c.json({
+        ok: false,
+        mode: "H1_EOD_BUSINESS_BACKTEST_SUMMARY_V1",
+        productionImpact: "NONE",
+        request: null,
+        reason: parsed.reason,
+        canonicalLiveProof: false,
+        selectorQualificationProven: false,
+      }, 400);
+    }
+    const top = parseH1EodBusinessBacktestTop(c.req.query("top"));
+    if (!top.ok) {
+      return c.json({
+        ok: false,
+        mode: "H1_EOD_BUSINESS_BACKTEST_SUMMARY_V1",
+        productionImpact: "NONE",
+        request: parsed.value,
+        reason: top.reason,
+        allowedTopRange: [1, 20],
+        canonicalLiveProof: false,
+        selectorQualificationProven: false,
+      }, 400);
+    }
+    const replay = await runH1ReplayHttp(parsed.value);
+    const result = buildH1EodBusinessBacktestSummary(parsed.value, replay, top.value);
+    return c.json(result, replay.ok || replay.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
   });
 
   app.route("/api/research", researchRouter);

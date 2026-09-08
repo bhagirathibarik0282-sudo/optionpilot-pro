@@ -12,4 +12,18 @@ test("publisher preserves exact premium delta gamma metrics without changing gat
   assert.equal(r.ready,true);
   assert.deepEqual(r.packet?.responseMetrics,{premiumMovePct:2,absoluteDeltaChange:0.030000000000000027,currentGamma:0.002,observedAt:"2026-09-07T08:00:10.000Z",source:"H1_LIVE_PREMIUM_DELTA_GAMMA_EVALUATOR_V1",provenance:"LIVE_RUNTIME_EXACT"});
   assert.equal(r.packet?.gates.deltaGammaResponseConfirmed?.value,true);
+  assert.equal(r.packet?.policyDiagnostics?.premiumDeltaGamma.minPremiumMovePct,2);
+  assert.equal(r.packet?.policyDiagnostics?.premiumDeltaGamma.minAbsoluteDeltaChange,0.03);
+  assert.equal(r.packet?.policyDiagnostics?.premiumDeltaGamma.minCurrentGamma,0.001);
+  assert.equal(r.packet?.policyDiagnostics?.premiumDeltaGamma.premiumPass,true);
+  assert.equal(r.packet?.policyDiagnostics?.premiumDeltaGamma.deltaPass,true);
+  assert.equal(r.packet?.policyDiagnostics?.premiumDeltaGamma.gammaPass,true);
+  assert.equal(r.packet?.policyDiagnostics?.thetaIv.theta,-1);
+  assert.equal(r.packet?.policyDiagnostics?.thetaIv.iv,15);
+  assert.equal(r.packet?.policyDiagnostics?.thetaIv.maxAbsThetaPctOfPremium,3);
+  assert.equal(r.packet?.policyDiagnostics?.thetaIv.minIv,8);
+  assert.equal(r.packet?.policyDiagnostics?.thetaIv.maxIv,30);
+  assert.equal(r.packet?.policyDiagnostics?.thetaIv.thetaPass,true);
+  assert.equal(r.packet?.policyDiagnostics?.thetaIv.ivPass,true);
+  assert.equal(r.packet?.policyDiagnostics?.thetaIv.thetaIvPass,r.packet?.gates.thetaIvBurdenAcceptable?.value);
 });

@@ -33,7 +33,10 @@ function isoMs(value: unknown): number | null {
 }
 
 function normalizedExpiryDate(value: unknown): string | null {
-  const raw = text(value);
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString().slice(0, 10) : null;
+  }
+  const raw = typeof value === "string" ? value.trim() : String(value ?? "").trim();
   if (!raw) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
   const ms = Date.parse(raw);
@@ -55,7 +58,7 @@ function summarizePositioningRow(row: AnyRecord | null) {
   const invalidFields = Object.entries(required).filter(([, value]) => value == null || value <= 0).map(([key]) => key);
   return {
     minuteBucket: text(row.minute_bucket),
-    rawExpiry: text(row.expiry),
+    rawExpiry: row.expiry instanceof Date ? row.expiry.toISOString() : text(row.expiry),
     normalizedExpiry: normalizedExpiryDate(row.expiry),
     ...required,
     invalidFields,

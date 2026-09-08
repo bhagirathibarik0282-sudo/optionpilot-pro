@@ -18,6 +18,7 @@ export interface MarketForwardTestReadinessQuery {
 type AnyRecord = Record<string, unknown>;
 
 function text(value: unknown): string | null {
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null;
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 

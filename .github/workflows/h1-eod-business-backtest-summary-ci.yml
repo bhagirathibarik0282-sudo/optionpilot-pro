@@ -1,0 +1,21 @@
+name: H1 EOD Business Backtest Summary CI
+on:
+  pull_request:
+    paths:
+      - 'h1-eod-business-backtest-summary-v1.ts'
+      - 'h1-dte0-transition-calibration-v1.ts'
+      - 'h1-candidate-reconstruction-audit.ts'
+      - 'h1-replay-http.ts'
+      - 'research-server-hook.ts'
+      - 'test/h1-eod-business-backtest-summary-v1.test.ts'
+      - '.github/workflows/h1-eod-business-backtest-summary-ci.yml'
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/h1-eod-business-backtest-summary-v1.test.ts

@@ -20,6 +20,7 @@ import { runFiiDiiProductionReadinessHttp } from "./canonical-fii-dii-production
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import { compactH1Replay } from "./h1-replay-compact-v1.js";
+import { buildH1Dte0TransitionCalibration } from "./h1-dte0-transition-calibration-v1.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
 import { evaluateResearchEngineChainHttp, researchEngineChainRuntimeStatus } from "./research-engine-chain-http.js";
 import { getMeaningfulLiveAcceptanceStatus } from "./meaningful-live-acceptance-monitor.js";
@@ -266,6 +267,39 @@ researchRouter.get("/h1-replay", async (c) => {
     ? compactH1Replay(result)
     : result;
   return c.json(response, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/h1-dte0-transition-calibration", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const parsed = parseH1ReplayRequest({
+    symbol: c.req.query("symbol"),
+    tradeDate: c.req.query("date"),
+    fromTime: c.req.query("from"),
+    toTime: c.req.query("to"),
+    scope: c.req.query("scope"),
+  });
+  if (!parsed.ok) {
+    return c.json({
+      ok: false,
+      mode: "H1_DTE0_TRANSITION_CALIBRATION_V1",
+      productionImpact: "NONE",
+      request: null,
+      reason: parsed.reason,
+      safety: { readOnly: true, affectsSelector: false, affectsTelegram: false, affectsExecution: false, failClosed: true },
+    }, 400);
+  }
+  const replay = await runH1ReplayHttp(parsed.value);
+  if (!replay.ok) {
+    return c.json({
+      ok: false,
+      mode: "H1_DTE0_TRANSITION_CALIBRATION_V1",
+      productionImpact: "NONE",
+      request: parsed.value,
+      reason: replay.reason,
+      safety: { readOnly: true, affectsSelector: false, affectsTelegram: false, affectsExecution: false, failClosed: true },
+    }, replay.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+  }
+  return c.json(buildH1Dte0TransitionCalibration(parsed.value, replay));
 });
 
 researchRouter.get("/h1-replay-intelligence", async (c) => {

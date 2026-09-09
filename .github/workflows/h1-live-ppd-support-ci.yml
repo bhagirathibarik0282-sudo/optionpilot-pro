@@ -1,0 +1,34 @@
+name: H1 Live PPD Supporting Evidence CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-live-ppd-support-v1.ts"
+      - "h1-live-gate-evidence-assembler.ts"
+      - "h1-live-selector-registry.ts"
+      - "test/h1-live-ppd-support-v1.test.ts"
+      - ".github/workflows/h1-live-ppd-support-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "h1-live-ppd-support-v1.ts"
+      - "h1-live-gate-evidence-assembler.ts"
+      - "h1-live-selector-registry.ts"
+      - "test/h1-live-ppd-support-v1.test.ts"
+      - ".github/workflows/h1-live-ppd-support-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  focused-ppd-support:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Focused live PPD supporting-evidence tests
+        run: NODE_ENV=test node --import tsx --test test/h1-live-ppd-support-v1.test.ts test/h1-live-gate-evidence-assembler.test.ts test/h1-live-selector-decision-producer.test.ts test/execution-candidate-selector.test.ts

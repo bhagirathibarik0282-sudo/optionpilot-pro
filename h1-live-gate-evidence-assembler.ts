@@ -1,4 +1,5 @@
 import type { ExecutionCandidateInput } from "./execution-candidate-selector.js";
+import type { LivePpdSupportEvidence } from "./h1-live-ppd-support-v1.js";
 
 export const H1_LIVE_GATE_EVIDENCE_ASSEMBLER_VERSION = "H1_LIVE_GATE_EVIDENCE_ASSEMBLER_V1" as const;
 
@@ -79,6 +80,19 @@ export interface LiveGateEvidencePacket {
   gates: Partial<Record<LiveGateName, LiveBooleanGateEvidence>>;
   responseMetrics?: LiveResponseMetricsEvidence;
   policyDiagnostics?: LiveGatePolicyDiagnosticsEvidence;
+  ppdSupport?: LivePpdSupportEvidence;
+}
+
+export interface LivePpdSupportAudit {
+  present: boolean;
+  fresh: boolean;
+  identityMatched: boolean;
+  candidateConfirmed: boolean;
+  companionGatesReady: boolean;
+  usedAsPremiumRescue: boolean;
+  source: string | null;
+  observedAt: string | null;
+  reasonCodes: string[];
 }
 
 export interface LiveGateEvidenceAssemblerResult {
@@ -87,6 +101,7 @@ export interface LiveGateEvidenceAssemblerResult {
   candidate: ExecutionCandidateInput | null;
   blockers: string[];
   gateAudit: Record<LiveGateName, { present: boolean; fresh: boolean; source: string | null; observedAt: string | null }>;
+  ppdAudit: LivePpdSupportAudit;
   failClosed: true;
   semantics: "LIVE_EXACT_GATE_EVIDENCE_ONLY_NO_DEFAULTS_NO_INFERENCE";
 }
@@ -131,6 +146,53 @@ function requiredGates(identity: LiveCandidateIdentityEvidence): LiveGateName[] 
     if (identity.dte >= 5 && identity.dte <= 7) out.push("fallbackDteApproved");
   }
   return out;
+}
+
+function buildPpdAudit(
+  packet: LiveGateEvidencePacket,
+  identity: LiveCandidateIdentityEvidence | undefined,
+  nowMs: number | null,
+  maxAgeMs: number,
+): LivePpdSupportAudit {
+  const evidence = packet?.ppdSupport;
+  const observedMs = evidence ? validIso(evidence.observedAt) : null;
+  const age = nowMs !== null && observedMs !== null ? nowMs - observedMs : Number.POSITIVE_INFINITY;
+  const fresh = !!evidence
+    && evidence.provenance === "LIVE_RUNTIME_EXACT"
+    && typeof evidence.source === "string"
+    && evidence.source.length > 0
+    && observedMs !== null
+    && age >= 0
+    && age <= maxAgeMs;
+  const identityMatched = !!evidence && !!identity
+    && evidence.symbol === identity.symbol
+    && evidence.expiryDate === identity.expiryDate
+    && evidence.strike === identity.strike
+    && evidence.candidateSide === identity.side;
+  const candidateConfirmed = !!evidence
+    && evidence.supportingOnly === true
+    && evidence.standaloneTrigger === false
+    && evidence.allRequiredWindowsReady === true
+    && evidence.candidateConfirmed === true;
+  const companionGatesReady = packet?.gates?.liquidityOk?.value === true
+    && packet?.gates?.spreadOk?.value === true
+    && packet?.gates?.deltaGammaResponseConfirmed?.value === true
+    && packet?.gates?.thetaIvBurdenAcceptable?.value === true
+    && packet?.gates?.multiExpiryConflictAbsent?.value === true;
+  const rawPremiumPass = packet?.gates?.premiumResponseConfirmed?.value === true;
+  const usedAsPremiumRescue = !rawPremiumPass && fresh && identityMatched && candidateConfirmed && companionGatesReady;
+
+  return {
+    present: !!evidence,
+    fresh,
+    identityMatched,
+    candidateConfirmed,
+    companionGatesReady,
+    usedAsPremiumRescue,
+    source: evidence?.source ?? null,
+    observedAt: evidence?.observedAt ?? null,
+    reasonCodes: evidence ? [...evidence.reasonCodes] : [],
+  };
 }
 
 export function assembleLiveExecutionCandidateInput(
@@ -182,6 +244,8 @@ export function assembleLiveExecutionCandidateInput(
     if (identityAge < 0 || identityAge > maxAgeMs) blockers.push("STALE_LIVE_CANDIDATE_IDENTITY");
   }
 
+  const ppdAudit = buildPpdAudit(packet, identity, nowMs, maxAgeMs);
+
   if (blockers.length > 0 || !identity || !validIdentity(identity)) {
     return {
       version: H1_LIVE_GATE_EVIDENCE_ASSEMBLER_VERSION,
@@ -189,6 +253,7 @@ export function assembleLiveExecutionCandidateInput(
       candidate: null,
       blockers,
       gateAudit,
+      ppdAudit,
       failClosed: true,
       semantics: "LIVE_EXACT_GATE_EVIDENCE_ONLY_NO_DEFAULTS_NO_INFERENCE",
     };
@@ -206,7 +271,7 @@ export function assembleLiveExecutionCandidateInput(
     capitalFit: gate("capitalFit"),
     liquidityOk: gate("liquidityOk"),
     spreadOk: gate("spreadOk"),
-    premiumResponseConfirmed: gate("premiumResponseConfirmed"),
+    premiumResponseConfirmed: gate("premiumResponseConfirmed") || ppdAudit.usedAsPremiumRescue,
     deltaGammaResponseConfirmed: gate("deltaGammaResponseConfirmed"),
     thetaIvBurdenAcceptable: gate("thetaIvBurdenAcceptable"),
     multiExpiryConflictAbsent: gate("multiExpiryConflictAbsent"),
@@ -223,6 +288,7 @@ export function assembleLiveExecutionCandidateInput(
     candidate,
     blockers: [],
     gateAudit,
+    ppdAudit,
     failClosed: true,
     semantics: "LIVE_EXACT_GATE_EVIDENCE_ONLY_NO_DEFAULTS_NO_INFERENCE",
   };

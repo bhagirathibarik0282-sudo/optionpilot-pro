@@ -34,6 +34,12 @@ jobs:
           print('REPLAY_COUNTS', json.dumps(d.get('counts'), separators=(',',':')))
           assert d.get('ok') is True, d.get('reason')
           assert (d.get('counts') or {}).get('options',0) > 0, 'NO_OPTION_ROWS'
+          chain=d.get('chain') or []
+          print('CHAIN_ROW_COUNT', len(chain))
+          if chain:
+            print('CHAIN_KEYS', sorted(chain[0].keys()))
+            for row in chain[:3]:
+              print('CHAIN_SAMPLE', json.dumps(row, separators=(',',':'), default=str))
           PY
 
       - name: Calculate exact 3m 6m 15m 30m PPD

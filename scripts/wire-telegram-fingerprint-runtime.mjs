@@ -50,6 +50,12 @@ replaceOnce(
   "daily fingerprint clear",
 );
 
+replaceOnce(
+  "  const sendAlertSpaced = async (message: string, symbolForChat?: V2PremiumSymbol): Promise<void> => {\n    if (!alertIsFirstSend) await new Promise((resolve) => setTimeout(resolve, 1100));",
+  "  const sendAlertSpaced = async (message: string, symbolForChat?: V2PremiumSymbol): Promise<void> => {\n    // Legacy structure/risk NO TRADE diagnostics remain internal only. Canonical meaningful Telegram owns user-facing transport.\n    if (message.includes(\"| NO TRADE</b>\") && message.includes(\"Manual review only.\")) return;\n    if (!alertIsFirstSend) await new Promise((resolve) => setTimeout(resolve, 1100));",
+  "legacy no-trade transport suppression",
+);
+
 if (checkOnly) {
   if (src === original) {
     console.log("telegram fingerprint runtime wiring already applied");

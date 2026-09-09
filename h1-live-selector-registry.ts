@@ -1,5 +1,10 @@
 import { runH1LiveSelectorPipeline, type H1LiveSelectorPipelineResult } from "./h1-live-selector-pipeline.js";
 import type { LiveGateEvidencePacket } from "./h1-live-gate-evidence-assembler.js";
+import {
+  buildH1LivePpdSupport,
+  clearH1LivePpdHistory,
+  recordH1LivePpdQuote,
+} from "./h1-live-ppd-support-v1.js";
 import { bindH1SelectToShadowExecution, type H1SelectShadowExecutionBindingResult } from "./h1-select-shadow-execution-binding.js";
 import {
   clearH1ShadowExecutionEvidenceRegistry,
@@ -30,6 +35,20 @@ function packetKey(packet: LiveGateEvidencePacket): string | null {
   if (!id || id.provenance !== "LIVE_RUNTIME_EXACT") return null;
   if (!id.symbol || !id.expiryDate || !id.side || !Number.isFinite(id.strike)) return null;
   return `${id.symbol}|${id.expiryDate}|${id.strike}|${id.side}`;
+}
+
+function samePair(a: LiveGateEvidencePacket, b: LiveGateEvidencePacket): boolean {
+  return a.identity.symbol === b.identity.symbol
+    && a.identity.expiryDate === b.identity.expiryDate
+    && a.identity.strike === b.identity.strike;
+}
+
+function refreshPpdSupportForPair(packet: LiveGateEvidencePacket): void {
+  for (const entry of entries.values()) {
+    if (!samePair(entry.packet, packet)) continue;
+    const support = buildH1LivePpdSupport(entry.packet.identity);
+    if (support) entry.packet = { ...entry.packet, ppdSupport: support };
+  }
 }
 
 function selectorCandidateKey(decision: H1LiveSelectorPipelineResult["decisions"][number]): string | null {
@@ -79,32 +98,44 @@ export function publishH1LiveGateEvidence(packet: LiveGateEvidencePacket): { acc
   const key = packetKey(packet);
   const publishedAtMs = validIso(packet?.identity?.observedAt);
   if (!key || publishedAtMs === null) return { accepted: false, reason: "INVALID_LIVE_GATE_PACKET" };
+
+  recordH1LivePpdQuote(packet.identity);
   entries.set(key, { key, packet, publishedAtMs });
+  refreshPpdSupportForPair(packet);
+  const enrichedPacket = entries.get(key)?.packet ?? packet;
+  const ppdCanSupportSelector = enrichedPacket.ppdSupport?.candidateConfirmed === true;
+
   void dbInsert(H1_LIVE_GATE_EVIDENCE_PERSIST_KIND, {
     version: H1_LIVE_GATE_EVIDENCE_PERSIST_KIND,
     key,
-    publishedAt: packet.identity.observedAt,
-    identity: { ...packet.identity },
-    gates: Object.fromEntries(Object.entries(packet.gates ?? {}).map(([gate, evidence]) => [gate, evidence ? { ...evidence } : evidence])),
-    responseMetrics: packet.responseMetrics ? { ...packet.responseMetrics } : null,
-    policyDiagnostics: packet.policyDiagnostics ? {
+    publishedAt: enrichedPacket.identity.observedAt,
+    identity: { ...enrichedPacket.identity },
+    gates: Object.fromEntries(Object.entries(enrichedPacket.gates ?? {}).map(([gate, evidence]) => [gate, evidence ? { ...evidence } : evidence])),
+    responseMetrics: enrichedPacket.responseMetrics ? { ...enrichedPacket.responseMetrics } : null,
+    policyDiagnostics: enrichedPacket.policyDiagnostics ? {
       premiumDeltaGamma: {
-        ...packet.policyDiagnostics.premiumDeltaGamma,
-        reasonCodes: [...packet.policyDiagnostics.premiumDeltaGamma.reasonCodes],
+        ...enrichedPacket.policyDiagnostics.premiumDeltaGamma,
+        reasonCodes: [...enrichedPacket.policyDiagnostics.premiumDeltaGamma.reasonCodes],
       },
       thetaIv: {
-        ...packet.policyDiagnostics.thetaIv,
-        reasonCodes: [...packet.policyDiagnostics.thetaIv.reasonCodes],
+        ...enrichedPacket.policyDiagnostics.thetaIv,
+        reasonCodes: [...enrichedPacket.policyDiagnostics.thetaIv.reasonCodes],
       },
-      observedAt: packet.policyDiagnostics.observedAt,
-      provenance: packet.policyDiagnostics.provenance,
+      observedAt: enrichedPacket.policyDiagnostics.observedAt,
+      provenance: enrichedPacket.policyDiagnostics.provenance,
     } : null,
-    productionImpact: "NONE",
+    ppdSupport: enrichedPacket.ppdSupport ? {
+      ...enrichedPacket.ppdSupport,
+      windows: enrichedPacket.ppdSupport.windows.map((window) => ({ ...window })),
+      reasonCodes: [...enrichedPacket.ppdSupport.reasonCodes],
+    } : null,
+    productionImpact: ppdCanSupportSelector ? "SELECTOR_SUPPORTING_EVIDENCE" : "NONE",
     readOnlyEvidencePersistence: true,
-    affectsSelector: false,
-    affectsTelegram: false,
+    affectsSelector: ppdCanSupportSelector,
+    affectsTelegram: ppdCanSupportSelector,
     affectsVerdict: false,
     affectsExecution: false,
+    ppdStandaloneTrigger: false,
   });
   return { accepted: true, reason: "LIVE_GATE_PACKET_ACCEPTED" };
 }
@@ -170,6 +201,7 @@ export function collectH1LiveGateEvidenceAudit(nowIso: string, maxAgeMs = 90_000
     }));
     const metrics = entry.packet.responseMetrics;
     const policyDiagnostics = entry.packet.policyDiagnostics;
+    const ppdSupport = entry.packet.ppdSupport;
     out.push({
       key,
       ageMs,
@@ -188,6 +220,11 @@ export function collectH1LiveGateEvidenceAudit(nowIso: string, maxAgeMs = 90_000
         observedAt: policyDiagnostics.observedAt,
         provenance: policyDiagnostics.provenance,
       } : null,
+      ppdSupport: ppdSupport ? {
+        ...ppdSupport,
+        windows: ppdSupport.windows.map((window) => ({ ...window })),
+        reasonCodes: [...ppdSupport.reasonCodes],
+      } : null,
     });
   }
   return out;
@@ -195,6 +232,7 @@ export function collectH1LiveGateEvidenceAudit(nowIso: string, maxAgeMs = 90_000
 
 export function clearH1LiveSelectorRegistry(): void {
   entries.clear();
+  clearH1LivePpdHistory();
   clearH1ShadowExecutionEvidenceRegistry();
 }
 

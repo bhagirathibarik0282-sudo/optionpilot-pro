@@ -42,7 +42,7 @@ test("renders compact meaningful transition card with candidate/opposite/PCR/wal
   assert.match(text, /🧱 CE Wall 24100/);
   assert.match(text, /🧱 PE Wall 24000/);
   assert.match(text, /📊 PCR: 0\.740 → 0\.820 ↑/);
-  assert.match(text, /🛒 CART: 23950 PE — WATCH ONLY/);
+  assert.match(text, /🛒 CARTED \/ WATCH: 23950 PE — WATCH ONLY/);
 });
 
 test("does not invent unavailable optional data", () => {

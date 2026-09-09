@@ -56,6 +56,12 @@ replaceOnce(
   "legacy no-trade transport suppression",
 );
 
+replaceOnce(
+  "  for (const s of sessions.values()) {\n    if (s.expiresAt > Date.now()) { activeSession = s; break; }\n  }\n  if (!activeSession) return;\n\n  const symbols: V2PremiumSymbol[] = [\"NIFTY\", \"BANKNIFTY\", \"SENSEX\"];",
+  "  for (const s of sessions.values()) {\n    if (s.expiresAt > Date.now()) { activeSession = s; break; }\n  }\n\n  // TELEGRAM_FAST_PERSISTED_AUTHORITY_FALLBACK_V1:\n  // Reuse the same encrypted Phase 62 read-only authority as the Recorder.\n  // The ephemeral session is never inserted into the browser session map.\n  if (!activeSession) {\n    const authority = phase62RestoredKiteAuthority ?? (await resolveKiteAuthoritySession()).session;\n    if (authority && authority.expiresAt > Date.now()) {\n      phase62RestoredKiteAuthority = authority;\n      activeSession = {\n        accessToken: authority.accessToken,\n        userId: authority.userId,\n        email: authority.email ?? \"\",\n        loginTime: authority.loginTime,\n        expiresAt: authority.expiresAt,\n      };\n    }\n  }\n  if (!activeSession) return;\n\n  const symbols: V2PremiumSymbol[] = [\"NIFTY\", \"BANKNIFTY\", \"SENSEX\"];",
+  "Telegram fast persisted authority fallback",
+);
+
 if (checkOnly) {
   if (src === original) {
     console.log("telegram fingerprint runtime wiring already applied");

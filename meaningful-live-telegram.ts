@@ -180,7 +180,12 @@ function requestUrl(input: Parameters<typeof fetch>[0]): string {
   return input.url;
 }
 
-function inferSymbol(text: string): NarrativeSymbol | null {
+export function inferMeaningfulTelegramSymbol(text: string): NarrativeSymbol | null {
+  // Fast snapshot cards include all three index names inside their shared
+  // PCR box. The card heading is the authoritative routing identity; a
+  // whole-body search would incorrectly classify every card as BANKNIFTY.
+  const snapshotHeading = text.match(/\b(BANKNIFTY|SENSEX|NIFTY)\s+MARKET\s+SNAPSHOT\b/i);
+  if (snapshotHeading?.[1]) return snapshotHeading[1].toUpperCase() as NarrativeSymbol;
   if (/\bBANKNIFTY\b/i.test(text)) return "BANKNIFTY";
   if (/\bSENSEX\b/i.test(text)) return "SENSEX";
   if (/\bNIFTY\b/i.test(text)) return "NIFTY";
@@ -895,7 +900,7 @@ export function installMeaningfulLiveTelegramBridge(): void {
       if (!url.includes("api.telegram.org/") || !url.includes("/sendMessage") || typeof init?.body !== "string") return originalFetch(input, init);
       const payload = JSON.parse(init.body) as TelegramPayload;
       const originalText = typeof payload.text === "string" ? payload.text : "";
-      const symbol = inferSymbol(originalText);
+      const symbol = inferMeaningfulTelegramSymbol(originalText);
       if (!symbol || !isMeaningfulBridgeOwnedTelegramText(originalText)) return originalFetch(input, init);
       ownedCandidateMessage = true;
 

@@ -1,7 +1,7 @@
 import { dbLoadRecent } from "./db.js";
 import type { NarrativeMemoryRecord, NarrativeSymbol } from "./meaningful-market-narrative.js";
 import { getLastTelegramTriggerDiagnostic } from "./message-trigger-engine.js";
-import { getMeaningfulLivePreflightDiagnostic } from "./meaningful-live-telegram.js";
+import { getMeaningfulLivePreflightDiagnostic, inferMeaningfulTelegramSymbol } from "./meaningful-live-telegram.js";
 
 const INSTALL_FLAG = "__OPTIONPILOT_MEANINGFUL_ACCEPTANCE_MONITOR_V1__";
 const MEMORY_KIND = "meaningful_narrative_event";
@@ -75,13 +75,6 @@ function requestUrl(input: Parameters<typeof fetch>[0]): string {
   return input.url;
 }
 
-function inferSymbol(text: string): NarrativeSymbol | null {
-  if (/\bBANKNIFTY\b/i.test(text)) return "BANKNIFTY";
-  if (/\bSENSEX\b/i.test(text)) return "SENSEX";
-  if (/\bNIFTY\b/i.test(text)) return "NIFTY";
-  return null;
-}
-
 function looksLikeFastMarketSnapshot(text: string): boolean {
   const markers = ["PCR", "Wall", "WALL", "Intrinsic", "Extrinsic", "OI", "Premium", "PREMIUM"];
   return markers.filter((marker) => text.includes(marker)).length >= 3;
@@ -128,7 +121,7 @@ export function installMeaningfulLiveAcceptanceMonitor(): void {
     try {
       const payload = JSON.parse(init.body) as { text?: string };
       const text = typeof payload.text === "string" ? payload.text : "";
-      symbol = inferSymbol(text);
+      symbol = inferMeaningfulTelegramSymbol(text);
       if (!symbol || !looksLikeFastMarketSnapshot(text)) return observedFetch(input, init);
     } catch {
       return observedFetch(input, init);

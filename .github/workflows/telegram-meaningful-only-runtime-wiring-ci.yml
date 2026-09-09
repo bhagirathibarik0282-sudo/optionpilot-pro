@@ -1,0 +1,24 @@
+name: Telegram Meaningful-Only Runtime Wiring CI
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - scripts/wire-telegram-fingerprint-runtime.mjs
+      - server.ts
+      - .github/workflows/telegram-meaningful-only-runtime-wiring-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-wiring:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify exact runtime wiring against current server source
+        run: node scripts/wire-telegram-fingerprint-runtime.mjs --check

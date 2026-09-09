@@ -1,9 +1,11 @@
 import { runH1LiveSelectorPipeline, type H1LiveSelectorPipelineResult } from "./h1-live-selector-pipeline.js";
 import type { LiveGateEvidencePacket } from "./h1-live-gate-evidence-assembler.js";
+import { bindH1SelectToShadowExecution, type H1SelectShadowExecutionBindingResult } from "./h1-select-shadow-execution-binding.js";
 import { dbInsert } from "./db.js";
 
 export const H1_LIVE_SELECTOR_REGISTRY_VERSION = "H1_LIVE_SELECTOR_REGISTRY_V1" as const;
 export const H1_LIVE_GATE_EVIDENCE_PERSIST_KIND = "H1_LIVE_GATE_EVIDENCE_PACKET_V1" as const;
+export const H1_SELECT_SHADOW_RUNTIME_AUDIT_KIND = "H1_SELECT_SHADOW_RUNTIME_AUDIT_V1" as const;
 
 type RegistryEntry = {
   key: string;
@@ -23,6 +25,42 @@ function packetKey(packet: LiveGateEvidencePacket): string | null {
   if (!id || id.provenance !== "LIVE_RUNTIME_EXACT") return null;
   if (!id.symbol || !id.expiryDate || !id.side || !Number.isFinite(id.strike)) return null;
   return `${id.symbol}|${id.expiryDate}|${id.strike}|${id.side}`;
+}
+
+function unavailableExecutionEvidence() {
+  return {
+    orderBuildDecision: "BLOCK" as const,
+    executionRiskDecision: "BLOCK" as const,
+    killSwitchDecision: "BLOCK" as const,
+    idempotencyDecision: "BLOCK" as const,
+    exactContractBound: false,
+    evidencePersistenceConfirmed: false,
+    brokerSessionReady: false,
+  };
+}
+
+function auditShadowRuntimeBindings(result: H1LiveSelectorPipelineResult, observedAt: string): void {
+  for (const decision of result.decisions) {
+    const binding: H1SelectShadowExecutionBindingResult = bindH1SelectToShadowExecution({
+      selectorDecision: decision,
+      authorizationEvidence: unavailableExecutionEvidence(),
+    });
+
+    void dbInsert(H1_SELECT_SHADOW_RUNTIME_AUDIT_KIND, {
+      version: H1_SELECT_SHADOW_RUNTIME_AUDIT_KIND,
+      observedAt,
+      selectorPipelineVersion: result.version,
+      candidateKey: binding.candidateKey,
+      selectorDecision: binding.selectorDecision,
+      authorizationDecision: binding.authorization.decision,
+      authorizationReasonCodes: [...binding.authorization.reasonCodes],
+      executionEvidenceState: "UNAVAILABLE_FAIL_CLOSED",
+      failClosed: true,
+      shadowOnly: true,
+      placesOrder: false,
+      productionImpact: "NONE",
+    });
+  }
 }
 
 export function publishH1LiveGateEvidence(packet: LiveGateEvidencePacket): { accepted: boolean; reason: string } {
@@ -62,7 +100,9 @@ export function publishH1LiveGateEvidence(packet: LiveGateEvidencePacket): { acc
 export function collectH1LiveSelectorDecisions(nowIso: string, maxAgeMs = 90_000): H1LiveSelectorPipelineResult {
   const nowMs = validIso(nowIso);
   if (nowMs === null) {
-    return runH1LiveSelectorPipeline({ provenance: "LIVE_RUNTIME_EXACT", nowIso, maxAgeMs, packets: [] });
+    const result = runH1LiveSelectorPipeline({ provenance: "LIVE_RUNTIME_EXACT", nowIso, maxAgeMs, packets: [] });
+    auditShadowRuntimeBindings(result, nowIso);
+    return result;
   }
 
   const packets: LiveGateEvidencePacket[] = [];
@@ -75,12 +115,14 @@ export function collectH1LiveSelectorDecisions(nowIso: string, maxAgeMs = 90_000
     packets.push(entry.packet);
   }
 
-  return runH1LiveSelectorPipeline({
+  const result = runH1LiveSelectorPipeline({
     provenance: "LIVE_RUNTIME_EXACT",
     nowIso,
     maxAgeMs,
     packets,
   });
+  auditShadowRuntimeBindings(result, nowIso);
+  return result;
 }
 
 export function collectH1LiveResponseMetrics(nowIso: string, maxAgeMs = 90_000) {

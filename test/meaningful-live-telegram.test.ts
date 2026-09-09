@@ -5,6 +5,7 @@ import {
   attributeMarketFootprintConservatively,
   buildFootprintEvents,
   deriveLiveMeaningfulDecision,
+  inferMeaningfulTelegramSymbol,
   isMeaningfulBridgeOwnedTelegramText,
   syntheticSuppressedResponse,
   toTelegramHtml,
@@ -165,4 +166,11 @@ test("meaningful bridge owns standalone legacy alerts that lack PCR/OI/premium m
 test("meaningful bridge does not recapture consolidated output or unrelated Telegram text", () => {
   assert.equal(isMeaningfulBridgeOwnedTelegramText("🧭 OPTIONPILOT MEANINGFUL V1\nNIFTY • BULLISH PRESSURE"), false);
   assert.equal(isMeaningfulBridgeOwnedTelegramText("Manual operator note for NIFTY"), false);
+});
+
+test("fast snapshot identity comes from its heading, not the shared multi-index PCR box", () => {
+  const sharedPcrBox = "PCR INFO BOX\nNIFTY | 0.90\nBANKNIFTY | 0.80\nSENSEX | 1.10\nWall OI Premium";
+  assert.equal(inferMeaningfulTelegramSymbol(`🔔 <b>NIFTY MARKET SNAPSHOT</b>\n${sharedPcrBox}`), "NIFTY");
+  assert.equal(inferMeaningfulTelegramSymbol(`🔔 <b>SENSEX MARKET SNAPSHOT</b>\n${sharedPcrBox}`), "SENSEX");
+  assert.equal(inferMeaningfulTelegramSymbol(`🔔 <b>BANKNIFTY MARKET SNAPSHOT</b>\n${sharedPcrBox}`), "BANKNIFTY");
 });

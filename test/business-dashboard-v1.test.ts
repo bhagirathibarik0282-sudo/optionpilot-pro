@@ -24,20 +24,13 @@ test("dashboard reuses the same canonical business candidate and horizon views",
   const now = Date.now();
   const consumer:any = {
     version:"CANONICAL_BUSINESS_CONSUMER_V1",
-    buyerCandidate:{
-      candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",
-      role:"OPTION_BUYER",symbol:"NIFTY",optionSide:"CE",strike:23800,expiryDate:"2026-09-08",
-      dte:1,moneyness:"ATM",premiumLtp:120,dteBucket:"CURRENT_OR_NEAR",sourceAuthority:"EXECUTION_CANDIDATE_SELECTOR_V2",
-    },
+    buyerCandidate:{candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",role:"OPTION_BUYER",symbol:"NIFTY",optionSide:"CE",strike:23800,expiryDate:"2026-09-08",dte:1,moneyness:"ATM",premiumLtp:120,dteBucket:"CURRENT_OR_NEAR",sourceAuthority:"EXECUTION_CANDIDATE_SELECTOR_V2"},
     horizons:[
       {horizon:"INTRADAY",action:"BUYER_EDGE",buyerStars:5,sellerStars:2,headline:"Buyer edge",reasons:[],devilCheck:"PASS"},
       {horizon:"MULTIDAY",action:"WAIT",buyerStars:3,sellerStars:3,headline:"No clear edge — wait",reasons:[],devilCheck:"PASS"},
       {horizon:"EXPIRY",action:"SELLER_EDGE",buyerStars:2,sellerStars:4,headline:"Seller edge",reasons:[],devilCheck:"PASS"},
     ],
-    telegram:{allowed:true,reason:"BUYER_READY"},
-    candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",
-    sameCanonicalCandidateForDashboardAndTelegram:true,
-    affectsExecution:false,createsOrders:false,aiMayOverride:false,
+    telegram:{allowed:true,reason:"BUYER_READY"},candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",sameCanonicalCandidateForDashboardAndTelegram:true,affectsExecution:false,createsOrders:false,aiMayOverride:false,
   };
   assert.equal(canonicalBusinessRuntimeRegistry.publish("NIFTY", consumer, now), true);
   const out = buildBusinessDashboardV1("NIFTY", new Date(now).toISOString());
@@ -81,21 +74,22 @@ test("dashboard intelligence remains low-noise and fail-closed without verified 
   assert.match(html, /Liquidity \/ Executability/);
 });
 
-test("dashboard view consumes only exposed live truth and marks unwired sources explicitly", () => {
+test("dashboard view wires every business intelligence card only to read-only verified sources", () => {
   canonicalBusinessRuntimeRegistry.clear();
   const html = renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY", new Date().toISOString()));
   assert.match(html, /\/api\/research\/h1-live-selector-decisions/);
+  assert.match(html, /\/api\/research\/positioning-pair-diagnostic/);
+  assert.match(html, /\/api\/research\/h1-replay\?/);
+  assert.match(html, /\/api\/research\/h1-replay-intelligence/);
   assert.match(html, /\/api\/research\/broad-market-size\/dashboard/);
-  assert.match(html, /data-intel-key="PREMIUM_REALITY"/);
-  assert.match(html, /data-intel-key="MULTI_DTE"/);
-  assert.match(html, /data-intel-key="LIQUIDITY"/);
-  assert.match(html, /data-intel-key="HISTORICAL_EDGE"/);
+  for (const key of ["SMC_CANDLE","FUTURES","PREMIUM_REALITY","OI_PCR_WALLS","MULTI_DTE","IV_SKEW","MARKET_DNA","HEAVYWEIGHTS_SECTORS","LIQUIDITY","HISTORICAL_EDGE"]) assert.match(html, new RegExp(`data-intel-key="${key}"`));
   assert.match(html, /Theta\/IV burden pass/);
   assert.match(html, /conflict-clear/);
-  assert.match(html, /exact skew value is not exposed; no skew fabricated/);
-  assert.match(html, /NOT WIRED/);
-  assert.match(html, /no value fabricated/);
+  assert.match(html, /exact skew not exposed; no skew fabricated/);
+  assert.match(html, /pattern labels only when separately verified/);
+  assert.match(html, /constituent-level heavyweight\/sector detail remains fail-closed until verified/);
   assert.match(html, /coverage only, not a claimed trade edge/);
-  assert.doesNotMatch(html, /notWired\('IV_SKEW'/);
+  assert.doesNotMatch(html, /notWired\(/);
   assert.doesNotMatch(html, /fetch\([^)]*method\s*:\s*["']POST/i);
+  assert.doesNotMatch(html, /createsOrders\s*=\s*true/i);
 });

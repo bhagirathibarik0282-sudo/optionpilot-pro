@@ -90,8 +90,12 @@ test("dashboard view consumes only exposed live truth and marks unwired sources 
   assert.match(html, /data-intel-key="MULTI_DTE"/);
   assert.match(html, /data-intel-key="LIQUIDITY"/);
   assert.match(html, /data-intel-key="HISTORICAL_EDGE"/);
+  assert.match(html, /Theta\/IV burden pass/);
+  assert.match(html, /conflict-clear/);
+  assert.match(html, /exact skew value is not exposed; no skew fabricated/);
   assert.match(html, /NOT WIRED/);
   assert.match(html, /no value fabricated/);
   assert.match(html, /coverage only, not a claimed trade edge/);
+  assert.doesNotMatch(html, /notWired\('IV_SKEW'/);
   assert.doesNotMatch(html, /fetch\([^)]*method\s*:\s*["']POST/i);
 });

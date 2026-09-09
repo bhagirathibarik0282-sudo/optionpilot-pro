@@ -23,5 +23,7 @@ jobs:
           node-version: "22"
       - name: Verify exact runtime wiring against current server source
         run: node scripts/wire-telegram-fingerprint-runtime.mjs --check
+      - name: Install test dependency
+        run: npm install --ignore-scripts --no-audit --no-fund
       - name: Verify Telegram fast cycle persisted authority fallback
         run: node --import tsx --test test/telegram-fast-authority-fallback.test.ts

@@ -80,3 +80,18 @@ test("dashboard intelligence remains low-noise and fail-closed without verified 
   assert.match(html, /Heavyweights \/ Sectors/);
   assert.match(html, /Liquidity \/ Executability/);
 });
+
+test("dashboard view consumes only exposed live truth and marks unwired sources explicitly", () => {
+  canonicalBusinessRuntimeRegistry.clear();
+  const html = renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY", new Date().toISOString()));
+  assert.match(html, /\/api\/research\/h1-live-selector-decisions/);
+  assert.match(html, /\/api\/research\/broad-market-size\/dashboard/);
+  assert.match(html, /data-intel-key="PREMIUM_REALITY"/);
+  assert.match(html, /data-intel-key="MULTI_DTE"/);
+  assert.match(html, /data-intel-key="LIQUIDITY"/);
+  assert.match(html, /data-intel-key="HISTORICAL_EDGE"/);
+  assert.match(html, /NOT WIRED/);
+  assert.match(html, /no value fabricated/);
+  assert.match(html, /coverage only, not a claimed trade edge/);
+  assert.doesNotMatch(html, /fetch\([^)]*method\s*:\s*["']POST/i);
+});

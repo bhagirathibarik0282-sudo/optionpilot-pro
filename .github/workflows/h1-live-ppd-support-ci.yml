@@ -10,6 +10,7 @@ on:
       - "scripts/analyze-h1-ppd-replay.py"
       - "scripts/backtest-sep9-fused-candidates.py"
       - "scripts/backtest-fused-freshness-multiday.py"
+      - "scripts/backtest-volume-fused-engine-7d.py"
       - ".github/workflows/h1-live-ppd-support-ci.yml"
   push:
     branches: [main]
@@ -21,6 +22,7 @@ on:
       - "scripts/analyze-h1-ppd-replay.py"
       - "scripts/backtest-sep9-fused-candidates.py"
       - "scripts/backtest-fused-freshness-multiday.py"
+      - "scripts/backtest-volume-fused-engine-7d.py"
       - ".github/workflows/h1-live-ppd-support-ci.yml"
 
 permissions:
@@ -45,54 +47,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Fetch Sep-9 NIFTY FULL replay read-only
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --show-error --silent --location \
-            --retry 3 --retry-delay 2 --max-time 180 \
-            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=2026-09-09&from=09%3A15&to=15%3A30&scope=FULL' \
-            -o /tmp/nifty-sep9-full.json
+        run: curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 180 'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=2026-09-09&from=09%3A15&to=15%3A30&scope=FULL' -o /tmp/nifty-sep9-full.json
       - name: Calculate exact 3m 6m 15m 30m PPD
         run: python scripts/analyze-h1-ppd-replay.py /tmp/nifty-sep9-full.json --output /tmp/nifty-sep9-ppd.json | tee /tmp/nifty-sep9-ppd-summary.log
       - name: Backtest selected fused candidates with exact MFE MAE
         run: python scripts/backtest-sep9-fused-candidates.py /tmp/nifty-sep9-full.json /tmp/nifty-sep9-fused-backtest.json | tee /tmp/nifty-sep9-fused-backtest.log
-      - name: Fetch Sep-1 to Sep-9 trading-day FULL replays
+      - name: Fetch seven trading dates for all three indices
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/nifty-multiday
-          for d in 2026-09-01 2026-09-02 2026-09-03 2026-09-04 2026-09-07 2026-09-08 2026-09-09; do
-            echo "FETCH $d"
-            curl --fail --show-error --silent --location --retry 2 --retry-delay 1 --max-time 180 \
-              "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=${d}&from=09%3A15&to=15%3A30&scope=FULL" \
-              -o "/tmp/nifty-multiday/${d}.json"
+          mkdir -p /tmp/index7d
+          for s in NIFTY SENSEX BANKNIFTY; do
+            mkdir -p "/tmp/index7d/${s}"
+            for d in 2026-09-01 2026-09-02 2026-09-03 2026-09-04 2026-09-07 2026-09-08 2026-09-09; do
+              echo "FETCH ${s} ${d}"
+              curl --fail --show-error --silent --location --retry 2 --retry-delay 1 --max-time 180 \
+                "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=${s}&date=${d}&from=09%3A15&to=15%3A30&scope=FULL" \
+                -o "/tmp/index7d/${s}/${d}.json"
+            done
           done
-      - name: Backtest fused freshness verdict across seven trading days
-        run: python scripts/backtest-fused-freshness-multiday.py /tmp/nifty-multiday /tmp/nifty-fused-freshness-multiday.json | tee /tmp/nifty-fused-freshness-multiday.log
-      - name: Safety assertion
+      - name: Backtest volume percent and deep fused option engine across three indices
+        run: python scripts/backtest-volume-fused-engine-7d.py /tmp/index7d /tmp/volume-fused-7d.json | tee /tmp/volume-fused-7d.log
+      - name: Safety and calculation devil check
         run: |
           python - <<'PY'
           import json
-          d=json.load(open('/tmp/nifty-sep9-ppd.json'))
-          b=json.load(open('/tmp/nifty-sep9-fused-backtest.json'))
-          m=json.load(open('/tmp/nifty-fused-freshness-multiday.json'))
-          assert d['productionImpact']=='NONE'
-          assert d['safety']=={'readOnly': True, 'affectsSelector': False, 'affectsTelegram': False, 'affectsExecution': False, 'failClosed': True}
-          assert b['safety']=={'readOnly': True, 'affectsSelector': False, 'affectsTelegram': False, 'affectsExecution': False}
-          assert m['mode']=='READ_ONLY_FUSED_FRESHNESS_MULTIDAY_BACKTEST_V1'
-          print('PPD_REPLAY_SAFETY_PASS')
-          print('FUSED_BACKTEST_SAFETY_PASS')
-          print('MULTIDAY_BACKTEST_SAFETY_PASS')
+          r=json.load(open('/tmp/volume-fused-7d.json'))
+          assert r['productionImpact']=='NONE'
+          assert r['method']['noFutureLeakage'] is True
+          assert r['method']['crossExpiryPremiumSubtraction'] is False
+          assert r['method']['nearestTimestampSubstitution'] is False
+          assert r['safety']=={'readOnly':True,'affectsSelector':False,'affectsTelegram':False,'affectsExecution':False,'failClosed':True}
+          assert 'cumulative_volume(t)-cumulative_volume(t-w)' in r['method']['volumeRule']
+          print('VOLUME_FUSED_7D_DEVIL_CHECK_PASS')
           PY
       - name: Upload numerical audit
         uses: actions/upload-artifact@v4
         with:
-          name: nifty-sep9-ppd-audit
+          name: volume-fused-7d-audit
           path: |
             /tmp/nifty-sep9-ppd.json
-            /tmp/nifty-sep9-ppd-summary.log
             /tmp/nifty-sep9-fused-backtest.json
-            /tmp/nifty-sep9-fused-backtest.log
-            /tmp/nifty-fused-freshness-multiday.json
-            /tmp/nifty-fused-freshness-multiday.log
+            /tmp/volume-fused-7d.json
+            /tmp/volume-fused-7d.log
           retention-days: 7

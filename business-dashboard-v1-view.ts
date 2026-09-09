@@ -31,11 +31,11 @@ export function renderBusinessDashboardV1Html(model: BusinessDashboardV1Model): 
   .section{margin-top:10px}.row{display:flex;gap:8px;flex-wrap:wrap}.intelgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.intel{background:#08111f;border-radius:12px;padding:10px}.intel span,.intel b,.intel small{display:block}.intel span{font-size:10px;font-weight:900}.intel b{font-size:10px;margin-top:5px}.intel small{font-size:10px;color:var(--m);margin-top:5px;line-height:1.4}.pill{font-size:9px;border:1px solid var(--l);border-radius:999px;padding:5px 8px;color:var(--m)}.meta{font-size:11px;color:var(--m);line-height:1.5}.truth{margin-top:8px;font-size:10px;color:var(--m)}
   @media(max-width:720px){.grid,.intelgrid{grid-template-columns:1fr}.title{font-size:21px}}
   </style></head><body><main class="wrap">
-    <section class="hero"><div class="ey">BUSINESS DASHBOARD V1 · ${esc(model.symbol)}</div><div class="title">${esc(model.headline)}</div><div class="candidate">${candidate}</div><div class="sub">Buyer/Seller · Intraday / Multiday / Expiry · same canonical buyer candidate as Telegram.</div><div class="truth" id="truth-status">Refreshing exposed live truth…</div></section>
+    <section class="hero"><div class="ey">BUSINESS DASHBOARD V1 · ${esc(model.symbol)}</div><div class="title">${esc(model.headline)}</div><div class="candidate">${candidate}</div><div class="sub">Buyer/Seller · Intraday / Multiday / Expiry · same canonical buyer candidate as Telegram.</div><div class="truth" id="truth-status">Refreshing verified business sources…</div></section>
     <section class="grid">${horizons}</section>
-    <section class="card section"><div class="ey">BUSINESS INTELLIGENCE · LIVE VALUES WHEN EXPOSED</div><div class="intelgrid">${intelligence}<div class="intel" data-intel-key="HISTORICAL_EDGE"><span>Historical Edge</span><b class="wait" data-state>WAIT</b><small data-detail>Loading historical evidence coverage</small></div></div></section>
+    <section class="card section"><div class="ey">BUSINESS INTELLIGENCE · VERIFIED SOURCE WIRING</div><div class="intelgrid">${intelligence}<div class="intel" data-intel-key="HISTORICAL_EDGE"><span>Historical Edge</span><b class="wait" data-state>WAIT</b><small data-detail>Loading historical evidence coverage</small></div></div></section>
     <section class="card section"><div class="ey">LIVE SELECTOR</div><div class="meta">SELECT ${model.selector.selectCount} · BLOCK ${model.selector.blockCount}</div><div class="row" style="margin-top:8px">${reasons || '<span class="pill">NO BLOCK REASONS</span>'}</div></section>
-    <section class="card section"><div class="meta">READ ONLY · no candidate re-ranking · no Telegram mutation · no execution/order authority. A card is never marked LIVE from a label alone.</div></section>
+    <section class="card section"><div class="meta">READ ONLY · no candidate re-ranking · no Telegram mutation · no execution/order authority. Missing source values remain WAIT/CONTEXT and are never fabricated.</div></section>
   </main>
   <script>
   (function(){
@@ -43,48 +43,64 @@ export function renderBusinessDashboardV1Html(model: BusinessDashboardV1Model): 
     function card(key){return document.querySelector('[data-intel-key="'+key+'"]');}
     function setCard(key,state,detail,cls){var el=card(key);if(!el)return;var s=el.querySelector('[data-state]');var d=el.querySelector('[data-detail]');s.textContent=state;s.className=cls||'wait';d.textContent=detail;}
     function num(v,d){return Number.isFinite(Number(v))?Number(v).toFixed(d==null?2:d):'—';}
-    function notWired(key,label){setCard(key,'NOT WIRED',label+' source is not exposed to Business Dashboard V1; no value fabricated.','bad');}
+    function tableRows(t){if(!t||!Array.isArray(t.columns)||!Array.isArray(t.rows))return[];return t.rows.map(function(v){var o={};t.columns.forEach(function(k,i){o[k]=v[i];});return o;});}
+    function istNow(){var p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());var x={};p.forEach(function(i){x[i.type]=i.value;});return {date:x.year+'-'+x.month+'-'+x.day,h:Number(x.hour),m:Number(x.minute)};}
+    function hhmm(mins){mins=Math.max(555,Math.min(930,mins));return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');}
+    var z=istNow(), nowMin=z.h*60+z.m, toMin=nowMin<555?555:(nowMin>930?930:nowMin), fromMin=Math.max(555,toMin-36), from=hhmm(fromMin), to=hhmm(toMin);
+
     fetch('/api/research/h1-live-selector-decisions',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP_'+r.status);return r.json();}).then(function(x){
       var metrics=(x.responseMetrics||[]).filter(function(r){return r.identity&&r.identity.symbol===symbol;});
       var decisions=(x.decisions||[]).filter(function(r){return r.symbol===symbol;});
       metrics.sort(function(a,b){return (a.identity.dte||999)-(b.identity.dte||999);});
-      if(metrics.length){
-        var m=metrics[0];
-        setCard('PREMIUM_REALITY','LIVE',m.identity.side+' '+m.identity.expiryDate+' ₹'+num(m.identity.premiumLtp,2)+' · move '+num(m.metrics.premiumMovePct,2)+'% · ΔΔ '+num(m.metrics.absoluteDeltaChange,4)+' · γ '+num(m.metrics.currentGamma,6),'buy');
-      } else {
-        setCard('PREMIUM_REALITY','WAIT','No live exact premium metric exposed for '+symbol,'wait');
-      }
+      if(metrics.length){var m=metrics[0];setCard('PREMIUM_REALITY','LIVE',m.identity.side+' '+m.identity.expiryDate+' ₹'+num(m.identity.premiumLtp,2)+' · move '+num(m.metrics.premiumMovePct,2)+'% · ΔΔ '+num(m.metrics.absoluteDeltaChange,4)+' · γ '+num(m.metrics.currentGamma,6),'buy');}
+      else setCard('PREMIUM_REALITY','WAIT','No live exact premium metric exposed for '+symbol,'wait');
       if(decisions.length){
-        var expiries=[];decisions.forEach(function(r){var k=r.expiry+' DTE '+(r.gates&&r.gates.currentOrNearExpiryUsable===true?'near':'other');if(expiries.indexOf(k)<0)expiries.push(k);});
+        var expiries=[];decisions.forEach(function(r){var k=r.expiry+' '+(r.gates&&r.gates.currentOrNearExpiryUsable===true?'near':'other');if(expiries.indexOf(k)<0)expiries.push(k);});
         var multiPass=decisions.filter(function(d){return d.gates&&d.gates.multiExpiryConflictAbsent===true;}).length;
         var thetaIvPass=decisions.filter(function(d){return d.gates&&d.gates.thetaIvBurdenAcceptable===true;}).length;
-        setCard('MULTI_DTE','LIVE',expiries.slice(0,4).join(' · ')+' · conflict-clear '+multiPass+'/'+decisions.length,'buy');
-        setCard('IV_SKEW','LIVE GATE','Theta/IV burden pass '+thetaIvPass+'/'+decisions.length+' · exact skew value is not exposed; no skew fabricated',thetaIvPass>0?'buy':'wait');
         var liquid=decisions.filter(function(d){return d.gates&&d.gates.liquidityOk===true;}).length;
         var spread=decisions.filter(function(d){return d.gates&&d.gates.spreadOk===true;}).length;
+        setCard('MULTI_DTE','LIVE',expiries.slice(0,4).join(' · ')+' · conflict-clear '+multiPass+'/'+decisions.length,'buy');
+        setCard('IV_SKEW','LIVE GATE','Theta/IV burden pass '+thetaIvPass+'/'+decisions.length+' · exact skew not exposed; no skew fabricated',thetaIvPass>0?'buy':'wait');
         setCard('LIQUIDITY','LIVE',liquid+'/'+decisions.length+' liquidity pass · '+spread+'/'+decisions.length+' spread pass','buy');
       } else {
         setCard('MULTI_DTE','WAIT','No live exact multi-DTE selector decisions exposed for '+symbol,'wait');
         setCard('IV_SKEW','WAIT','No live exact Theta/IV gate decision exposed for '+symbol,'wait');
         setCard('LIQUIDITY','WAIT','No selector gate decisions exposed','wait');
       }
-      notWired('SMC_CANDLE','SMC/Candle interpretation');
-      notWired('FUTURES','Futures value/confirmation');
-      notWired('OI_PCR_WALLS','OI/PCR/wall migration');
-      notWired('HEAVYWEIGHTS_SECTORS','Heavyweight/sector live detail');
-      document.getElementById('truth-status').textContent='Live selector truth refreshed · '+metrics.length+' exact contract metrics · '+decisions.length+' decisions';
-    }).catch(function(e){document.getElementById('truth-status').textContent='Live selector truth unavailable · '+e.message;});
+    }).catch(function(){setCard('PREMIUM_REALITY','WAIT','Live selector source unavailable','wait');setCard('MULTI_DTE','WAIT','Live selector source unavailable','wait');setCard('IV_SKEW','WAIT','Live selector source unavailable','wait');setCard('LIQUIDITY','WAIT','Live selector source unavailable','wait');});
+
+    fetch('/api/research/positioning-pair-diagnostic?symbol='+encodeURIComponent(symbol)+'&date='+z.date+'&from='+from+'&to='+to,{cache:'no-store'}).then(function(r){return r.json();}).then(function(x){
+      var pair=(x.pairs||[]).filter(function(p){return p&&p.current;}).slice(-1)[0];
+      if(!pair||!pair.current){setCard('OI_PCR_WALLS','WAIT','No verified positioning pair for current session window','wait');return;}
+      var c=pair.current,p=pair.previous||{};
+      setCard('OI_PCR_WALLS',x.ready?'LIVE':'CONTEXT','PCR '+num(c.fullChainOiPcr,3)+' (±7 '+num(c.band7OiPcr,3)+', vol '+num(c.volumePcr,3)+') · Call wall '+num(c.callWallStrike,0)+' / '+num(c.callWallStrength,2)+' · Put wall '+num(c.putWallStrike,0)+' / '+num(c.putWallStrength,2)+(p.callWallStrike?' · prev C/P '+num(p.callWallStrike,0)+'/'+num(p.putWallStrike,0):''),x.ready?'buy':'wait');
+    }).catch(function(){setCard('OI_PCR_WALLS','WAIT','Verified positioning source unavailable','wait');});
+
+    fetch('/api/research/h1-replay?symbol='+encodeURIComponent(symbol)+'&date='+z.date+'&from='+from+'&to='+to+'&scope=CORE&format=compact',{cache:'no-store'}).then(function(r){return r.json();}).then(function(x){
+      var market=tableRows(x.market),m=market[market.length-1];
+      if(!m){setCard('FUTURES','WAIT','No verified market snapshot in current session window','wait');return;}
+      setCard('FUTURES','LIVE','Fut ₹'+num(m.future_ltp,2)+' · VWAP '+num(m.future_vwap,2)+' · basis '+num(m.future_basis,2)+' · OI '+num(m.future_oi,0)+' · ΔOI '+num(m.future_oi_change,0)+' · volume '+num(m.future_volume,0),'buy');
+    }).catch(function(){setCard('FUTURES','WAIT','Verified futures snapshot unavailable','wait');});
+
+    fetch('/api/research/h1-replay-intelligence?symbol='+encodeURIComponent(symbol)+'&date='+z.date+'&from=09:15&to='+to+'&scope=CORE',{cache:'no-store'}).then(function(r){return r.json();}).then(function(x){
+      var t=x.temporal;
+      if(!t){setCard('SMC_CANDLE','WAIT','Verified temporal structure context unavailable','wait');return;}
+      setCard('SMC_CANDLE','CONTEXT','3m '+t.clue3m.direction+' '+num(t.clue3m.returnPct,3)+'% · 6m '+t.confirm6m.direction+' '+num(t.confirm6m.returnPct,3)+'% · 15m '+t.validate15m.direction+' '+num(t.validate15m.returnPct,3)+'% · 30m '+t.sustain30m.direction+' '+num(t.sustain30m.returnPct,3)+'% · pattern labels only when separately verified','wait');
+    }).catch(function(){setCard('SMC_CANDLE','WAIT','Verified temporal structure source unavailable','wait');});
 
     fetch('/api/research/broad-market-size/dashboard',{cache:'no-store'}).then(function(r){return r.json().then(function(j){return {ok:r.ok,body:j};});}).then(function(v){var x=v.body||{};
       if(v.ok&&x.ready){
-        setCard('MARKET_DNA','LIVE',(x.regime||'—')+' · rotation '+(x.rotationState||'—')+' · breadth '+num(x.participationBreadthPct,1)+'% · weighted '+num(x.weightedConstituentBreadthPct,1)+'%','buy');
-        var w=x.historicalWindowReady||{};var ready=Object.keys(w).filter(function(k){return w[k]===true;});
-        setCard('HISTORICAL_EDGE','CONTEXT', 'Latest '+(x.latestHistoricalTradeDate||'—')+' · ready windows '+(ready.length?ready.join(', '):'none')+' · coverage only, not a claimed trade edge','wait');
+        setCard('MARKET_DNA','LIVE',(x.regime||'—')+' · rotation '+(x.rotationState||'—')+' · participation '+num(x.participationBreadthPct,1)+'% · weighted '+num(x.weightedConstituentBreadthPct,1)+'%','buy');
+        setCard('HEAVYWEIGHTS_SECTORS','CONTEXT','Verified cross-index participation '+num(x.participationBreadthPct,1)+'% · concentration '+(x.concentrationState||'—')+' · size rotation '+(x.sizeRotationState||x.rotationState||'—')+' · constituent-level heavyweight/sector detail remains fail-closed until verified','wait');
+        var w=x.historicalWindowReady||{},ready=Object.keys(w).filter(function(k){return w[k]===true;});
+        setCard('HISTORICAL_EDGE','CONTEXT','Latest '+(x.latestHistoricalTradeDate||'—')+' · ready windows '+(ready.length?ready.join(', '):'none')+' · coverage only, not a claimed trade edge','wait');
       } else {
-        setCard('MARKET_DNA','WAIT','Market DNA context not ready','wait');
-        setCard('HISTORICAL_EDGE','WAIT','Historical context not ready; no edge claimed','wait');
+        setCard('MARKET_DNA','WAIT','Market DNA context not ready','wait');setCard('HEAVYWEIGHTS_SECTORS','WAIT','Verified breadth context not ready','wait');setCard('HISTORICAL_EDGE','WAIT','Historical context not ready; no edge claimed','wait');
       }
-    }).catch(function(){setCard('MARKET_DNA','WAIT','Market DNA context unavailable','wait');setCard('HISTORICAL_EDGE','WAIT','Historical context unavailable','wait');});
+    }).catch(function(){setCard('MARKET_DNA','WAIT','Market DNA context unavailable','wait');setCard('HEAVYWEIGHTS_SECTORS','WAIT','Verified breadth context unavailable','wait');setCard('HISTORICAL_EDGE','WAIT','Historical context unavailable','wait');});
+
+    document.getElementById('truth-status').textContent='Verified source wiring active · selector + positioning + futures + temporal context + Market DNA';
   })();
   </script></body></html>`;
 }

@@ -51,21 +51,26 @@ export function renderBusinessDashboardV1Html(model: BusinessDashboardV1Model): 
       if(metrics.length){
         var m=metrics[0];
         setCard('PREMIUM_REALITY','LIVE',m.identity.side+' '+m.identity.expiryDate+' ₹'+num(m.identity.premiumLtp,2)+' · move '+num(m.metrics.premiumMovePct,2)+'% · ΔΔ '+num(m.metrics.absoluteDeltaChange,4)+' · γ '+num(m.metrics.currentGamma,6),'buy');
-        var expiries=[];metrics.forEach(function(r){var k=r.identity.expiryDate+' DTE '+r.identity.dte;if(expiries.indexOf(k)<0)expiries.push(k);});
-        setCard('MULTI_DTE','LIVE',expiries.slice(0,4).join(' · '),'buy');
       } else {
         setCard('PREMIUM_REALITY','WAIT','No live exact premium metric exposed for '+symbol,'wait');
-        setCard('MULTI_DTE','WAIT','No live exact multi-DTE metric exposed for '+symbol,'wait');
       }
       if(decisions.length){
+        var expiries=[];decisions.forEach(function(r){var k=r.expiry+' DTE '+(r.gates&&r.gates.currentOrNearExpiryUsable===true?'near':'other');if(expiries.indexOf(k)<0)expiries.push(k);});
+        var multiPass=decisions.filter(function(d){return d.gates&&d.gates.multiExpiryConflictAbsent===true;}).length;
+        var thetaIvPass=decisions.filter(function(d){return d.gates&&d.gates.thetaIvBurdenAcceptable===true;}).length;
+        setCard('MULTI_DTE','LIVE',expiries.slice(0,4).join(' · ')+' · conflict-clear '+multiPass+'/'+decisions.length,'buy');
+        setCard('IV_SKEW','LIVE GATE','Theta/IV burden pass '+thetaIvPass+'/'+decisions.length+' · exact skew value is not exposed; no skew fabricated',thetaIvPass>0?'buy':'wait');
         var liquid=decisions.filter(function(d){return d.gates&&d.gates.liquidityOk===true;}).length;
         var spread=decisions.filter(function(d){return d.gates&&d.gates.spreadOk===true;}).length;
         setCard('LIQUIDITY','LIVE',liquid+'/'+decisions.length+' liquidity pass · '+spread+'/'+decisions.length+' spread pass','buy');
-      } else setCard('LIQUIDITY','WAIT','No selector gate decisions exposed','wait');
+      } else {
+        setCard('MULTI_DTE','WAIT','No live exact multi-DTE selector decisions exposed for '+symbol,'wait');
+        setCard('IV_SKEW','WAIT','No live exact Theta/IV gate decision exposed for '+symbol,'wait');
+        setCard('LIQUIDITY','WAIT','No selector gate decisions exposed','wait');
+      }
       notWired('SMC_CANDLE','SMC/Candle interpretation');
       notWired('FUTURES','Futures value/confirmation');
       notWired('OI_PCR_WALLS','OI/PCR/wall migration');
-      notWired('IV_SKEW','IV/skew');
       notWired('HEAVYWEIGHTS_SECTORS','Heavyweight/sector live detail');
       document.getElementById('truth-status').textContent='Live selector truth refreshed · '+metrics.length+' exact contract metrics · '+decisions.length+' decisions';
     }).catch(function(e){document.getElementById('truth-status').textContent='Live selector truth unavailable · '+e.message;});

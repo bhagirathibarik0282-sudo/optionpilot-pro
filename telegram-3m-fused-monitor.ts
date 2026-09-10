@@ -17,9 +17,9 @@ export interface FusedNumericInput {
   basis?: number | null;
   pcr?: number | null;
   callWallStrike?: number | null;
-  callWallOi?: number | null;
+  callWallStrength?: number | null;
   putWallStrike?: number | null;
-  putWallOi?: number | null;
+  putWallStrength?: number | null;
   vix?: number | null;
   cePremium?: number | null;
   pePremium?: number | null;
@@ -130,7 +130,7 @@ function numericLines(x?: FusedNumericInput): string[] {
   return [
     `Spot ${n(x.spot)} | Fut ${n(x.future)} | Basis ${signed(x.basis)}`,
     `PCR ${n(x.pcr, 3)} | VIX ${n(x.vix, 2)} | CE ₹${n(x.cePremium)} | PE ₹${n(x.pePremium)}`,
-    `CE Wall ${n(x.callWallStrike, 0)} / OI ${n(x.callWallOi, 0)} | PE Wall ${n(x.putWallStrike, 0)} / OI ${n(x.putWallOi, 0)}`,
+    `CE Wall ${n(x.callWallStrike, 0)} • Strength ${n(x.callWallStrength, 2)} | PE Wall ${n(x.putWallStrike, 0)} • Strength ${n(x.putWallStrength, 2)}`,
   ];
 }
 

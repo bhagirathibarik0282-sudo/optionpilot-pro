@@ -32,6 +32,37 @@ test("builds a business-readable bullish fused view without execution authority"
   assert.match(view.text, /Action: WAIT/);
 });
 
+test("renders exact wall strike and strength without mislabeling strength as OI", () => {
+  const view = buildThreeMinuteFusedTelegramView({
+    symbol: "SENSEX",
+    atLabel: "10:09 IST",
+    families: [
+      { label: "Futures", stance: "NEUTRAL", verified: true },
+      { label: "Premium", stance: "NEUTRAL", verified: true },
+      { label: "OI/PCR", stance: "NEUTRAL", verified: true },
+    ],
+    numeric: {
+      callWallStrike: 74800,
+      callWallStrength: 2.75,
+      putWallStrike: 74600,
+      putWallStrength: 3.1,
+    },
+  });
+  assert.match(view.text, /CE Wall 74800 • Strength 2\.75/);
+  assert.match(view.text, /PE Wall 74600 • Strength 3\.10/);
+  assert.doesNotMatch(view.text, /Wall .*\/ OI/);
+});
+
+test("missing wall evidence stays unavailable rather than fabricated", () => {
+  const view = buildThreeMinuteFusedTelegramView({
+    symbol: "NIFTY",
+    atLabel: "10:12 IST",
+    families: [],
+    numeric: {},
+  });
+  assert.match(view.text, /CE Wall — • Strength — \| PE Wall — • Strength —/);
+});
+
 test("missing core families cannot produce a misleading five-star directional call", () => {
   const view = buildThreeMinuteFusedTelegramView({
     symbol: "SENSEX",

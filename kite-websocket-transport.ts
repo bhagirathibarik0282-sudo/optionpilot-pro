@@ -2,6 +2,18 @@ import { decodeKiteBinaryFrame, type KiteDecodedPacket } from "./kite-websocket-
 
 export const KITE_WS_ENDPOINT = "wss://ws.kite.trade" as const;
 
+export type KiteGlobalTickObserver = (ticks: KiteDecodedPacket[], receivedAt: string) => void | Promise<void>;
+const GLOBAL_TICK_OBSERVERS = new Set<KiteGlobalTickObserver>();
+export function registerKiteTickObserver(observer: KiteGlobalTickObserver): () => void {
+  GLOBAL_TICK_OBSERVERS.add(observer);
+  return () => GLOBAL_TICK_OBSERVERS.delete(observer);
+}
+function fanoutTicks(ticks: KiteDecodedPacket[], receivedAt: string): void {
+  for (const observer of GLOBAL_TICK_OBSERVERS) {
+    Promise.resolve(observer(ticks, receivedAt)).catch((err) => console.warn(`[KITE_TICK_OBSERVER] ${err instanceof Error ? err.message : String(err)}`));
+  }
+}
+
 export type KiteSocketLike = {
   binaryType: string;
   readyState: number;
@@ -70,13 +82,13 @@ export class KiteWebSocketTransport {
       }
       if (data instanceof ArrayBuffer) {
         const ticks = decodeKiteBinaryFrame(data);
-        if (ticks.length > 0) void this.config.onTicks(ticks, receivedAt);
+        if (ticks.length > 0) { void this.config.onTicks(ticks, receivedAt); fanoutTicks(ticks, receivedAt); }
         return;
       }
       if (ArrayBuffer.isView(data)) {
         const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
         const ticks = decodeKiteBinaryFrame(bytes);
-        if (ticks.length > 0) void this.config.onTicks(ticks, receivedAt);
+        if (ticks.length > 0) { void this.config.onTicks(ticks, receivedAt); fanoutTicks(ticks, receivedAt); }
       }
     });
 
@@ -102,10 +114,7 @@ export class KiteWebSocketTransport {
 
   disconnect(): void {
     this.manualDisconnect = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (!this.socket) return;
     this.socket.close(1000, "normal");
   }

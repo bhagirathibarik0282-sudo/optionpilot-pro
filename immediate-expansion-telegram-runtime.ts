@@ -1,9 +1,10 @@
 import { evaluateImmediateExpansionChain, type ImmediateExpansionChainInput, type ImmediateExpansionChainResult } from "./immediate-expansion-chain.js";
-import { buildHumanLiveTalk } from "./telegram-human-live-talk.js";
 import type { RecorderIngestPayload } from "./option-recorder-runtime.js";
 
+export const SWEET_SPOT_MARKER = "OPTIONPILOT SWEET SPOT ALERT" as const;
+
 export type ImmediateTelegramRuntimeResult = {
-  version: "IMMEDIATE_EXPANSION_TELEGRAM_RUNTIME_V1";
+  version: "IMMEDIATE_EXPANSION_TELEGRAM_RUNTIME_V2";
   semantics: "RESEARCH_SHADOW_ONLY";
   eligible: boolean;
   reason: "NO_IMMEDIATE_CONTEXT" | "WAIT_VERDICT" | "DIRECTIONAL_MESSAGE_READY";
@@ -21,28 +22,41 @@ function sideFromVerdict(verdict: ImmediateExpansionChainResult["verdict"]): "CE
   return "NONE";
 }
 
+function businessText(payload: RecorderIngestPayload, chain: ImmediateExpansionChainResult, side: "CE" | "PE"): string {
+  const action = side === "CE" ? "BUY CE WATCH" : "BUY PE WATCH";
+  const facts = chain.immediateEvents
+    .filter((e) => e.alignment === "FAVOURS_TREND")
+    .map((e) => `• ${e.family}: ${e.fact.trim()}`)
+    .slice(0, 5);
+  const spot = Number.isFinite(payload.market.spot) ? Number(payload.market.spot).toFixed(2) : "—";
+  const fut = Number.isFinite(payload.market.future) ? Number(payload.market.future).toFixed(2) : "—";
+  return [
+    `⚡ ${SWEET_SPOT_MARKER}`,
+    `${payload.market.symbol} • ${action}`,
+    `Spot ${spot} | Fut ${fut}`,
+    "",
+    "WHY NOW",
+    ...(facts.length ? facts : [`• ${chain.whyNow}`]),
+    "",
+    `PRE-MOVEMENT BIAS: ${side === "CE" ? "BULLISH" : "BEARISH"}`,
+    `VERIFIED CLUSTER: ${chain.immediateEvents.length} fresh abnormal events`,
+    `WATCH: ${chain.whatToWatch}`,
+    `INVALIDATION: ${chain.invalidation}`,
+    "",
+    `🎯 BUSINESS ACTION: ${action}`,
+    "Special alert can fire immediately when the verified cluster forms; no 3M/6M/15M boundary required.",
+    "Final trade authority remains with the canonical selector. No execution is created by this alert.",
+  ].join("\n");
+}
+
 /**
- * Composes already-verified immediate events into the deterministic chain and
- * a Telegram-ready human message. This bridge does NOT decide what is abnormal;
- * source/upstream policy must supply fresh abnormal events and cluster readiness.
- * Haiku may consume haikuFacts but cannot alter verdict/message authority.
+ * Immediate Sweet Spot presentation on top of the existing verified expansion chain.
+ * Upstream logic still owns abnormal-change detection, freshness, trend lock and cluster readiness.
+ * This layer never invents thresholds and never changes selector or execution authority.
  */
-export function buildImmediateExpansionTelegramRuntime(
-  payload: RecorderIngestPayload,
-): ImmediateTelegramRuntimeResult {
+export function buildImmediateExpansionTelegramRuntime(payload: RecorderIngestPayload): ImmediateTelegramRuntimeResult {
   if (!payload.immediateExpansion) {
-    return {
-      version: "IMMEDIATE_EXPANSION_TELEGRAM_RUNTIME_V1",
-      semantics: "RESEARCH_SHADOW_ONLY",
-      eligible: false,
-      reason: "NO_IMMEDIATE_CONTEXT",
-      chain: null,
-      text: null,
-      fingerprint: null,
-      haikuFacts: [],
-      affectsVerdict: false,
-      affectsExecution: false,
-    };
+    return { version:"IMMEDIATE_EXPANSION_TELEGRAM_RUNTIME_V2", semantics:"RESEARCH_SHADOW_ONLY", eligible:false, reason:"NO_IMMEDIATE_CONTEXT", chain:null, text:null, fingerprint:null, haikuFacts:[], affectsVerdict:false, affectsExecution:false };
   }
 
   const input: ImmediateExpansionChainInput = {
@@ -56,53 +70,22 @@ export function buildImmediateExpansionTelegramRuntime(
   const side = sideFromVerdict(chain.verdict);
 
   if (side === "NONE") {
-    return {
-      version: "IMMEDIATE_EXPANSION_TELEGRAM_RUNTIME_V1",
-      semantics: "RESEARCH_SHADOW_ONLY",
-      eligible: false,
-      reason: "WAIT_VERDICT",
-      chain,
-      text: null,
-      fingerprint: null,
-      haikuFacts: chain.haikuFacts,
-      affectsVerdict: false,
-      affectsExecution: false,
-    };
+    return { version:"IMMEDIATE_EXPANSION_TELEGRAM_RUNTIME_V2", semantics:"RESEARCH_SHADOW_ONLY", eligible:false, reason:"WAIT_VERDICT", chain, text:null, fingerprint:null, haikuFacts:chain.haikuFacts, affectsVerdict:false, affectsExecution:false };
   }
 
-  const text = buildHumanLiveTalk({
-    style: "SCALP",
-    symbol: payload.market.symbol,
-    side,
-    state: "READY",
-    verdictLocked: true,
-    verifiedFacts: chain.haikuFacts.slice(0, 3),
-    immediate: {
-      whyNow: chain.whyNow,
-      verdict: chain.verdict,
-      whatToWatch: chain.whatToWatch,
-      invalidation: chain.invalidation,
-    },
-  }).text;
-
-  const fingerprint = [
-    payload.market.symbol,
-    payload.market.snapshotId,
-    chain.verdict,
-    ...chain.immediateEvents.map((event) => event.id),
-    text,
-  ].join("|");
+  const text = businessText(payload, chain, side);
+  const fingerprint = [payload.market.symbol, chain.verdict, ...chain.immediateEvents.map((event) => event.id), text].join("|");
 
   return {
-    version: "IMMEDIATE_EXPANSION_TELEGRAM_RUNTIME_V1",
-    semantics: "RESEARCH_SHADOW_ONLY",
-    eligible: true,
-    reason: "DIRECTIONAL_MESSAGE_READY",
+    version:"IMMEDIATE_EXPANSION_TELEGRAM_RUNTIME_V2",
+    semantics:"RESEARCH_SHADOW_ONLY",
+    eligible:true,
+    reason:"DIRECTIONAL_MESSAGE_READY",
     chain,
     text,
     fingerprint,
-    haikuFacts: chain.haikuFacts,
-    affectsVerdict: false,
-    affectsExecution: false,
+    haikuFacts:chain.haikuFacts,
+    affectsVerdict:false,
+    affectsExecution:false,
   };
 }

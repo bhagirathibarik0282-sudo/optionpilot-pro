@@ -33,6 +33,7 @@ if (checkOnly && !src.includes(MARKER) && (!src.includes(dedupAnchor) || !src.in
   const missing = [];
   if (!fusedPrerequisite.includes(dedupAnchor)) missing.push("fused-dedup-anchor");
   if (!recorderPrerequisite.includes("const metricHistory: any[] = Array.isArray(session.telegramMetricHistory)")) missing.push("recorder-metric-history-anchor");
+  if (!recorderPrerequisite.includes("const history: any[] = [...mergedHistory.values()]")) missing.push("recorder-restored-history-anchor");
   const recorderHasLegacyNullJoin = recorderPrerequisite.includes("if (!Number.isFinite(Number(prev.pcr)) && Number.isFinite(Number(prevMetric.pcr)))")
     && recorderPrerequisite.includes("if (!Number.isFinite(Number(prev.vix)) && Number.isFinite(Number(prevMetric.vix)))");
   if (!recorderHasLegacyNullJoin) missing.push("recorder-null-join-anchor");
@@ -50,8 +51,8 @@ if (!src.includes(MARKER)) {
   const dedupReplacement = `${dedupAnchor}\n// ${MARKER}: process-level bounded history owned by the same fused runtime that emits Telegram.\nconst TELEGRAM_PCR_VIX_HISTORY = new Map<string, Array<{ at: number; value: { pcr: number | null; vix: number | null } }>>();`;
   replaceOnce(dedupAnchor, dedupReplacement, "PCR/VIX global history declaration");
 
-  const metricHistoryReplacement = `        const currentAt = Date.now();\n        const metricRows = TELEGRAM_PCR_VIX_HISTORY.get(symbol) ?? [];\n        metricRows.push({\n          at: currentAt,\n          value: {\n            pcr: Number.isFinite(Number(m?.pcr)) ? Number(m.pcr) : null,\n            vix: Number.isFinite(Number(m?.vix)) ? Number(m.vix) : null,\n          },\n        });\n        while (metricRows.length > 40) metricRows.shift();\n        TELEGRAM_PCR_VIX_HISTORY.set(symbol, metricRows);\n        const metricHistory: any[] = metricRows;`;
-  replaceOnce(metricHistoryAnchor, metricHistoryReplacement, "PCR/VIX fused-runtime history ownership");
+  const metricHistoryReplacement = `        const currentAt = Date.now();\n        const metricRows = TELEGRAM_PCR_VIX_HISTORY.get(symbol) ?? [];\n        metricRows.push({\n          at: currentAt,\n          value: {\n            pcr: m?.pcr != null && Number.isFinite(Number(m.pcr)) ? Number(m.pcr) : null,\n            vix: m?.vix != null && Number.isFinite(Number(m.vix)) ? Number(m.vix) : null,\n          },\n        });\n        while (metricRows.length > 40) metricRows.shift();\n        TELEGRAM_PCR_VIX_HISTORY.set(symbol, metricRows);\n        // Restart-safe fallback: seed the same nearest-window lookup from the already-restored\n        // Recorder/RAM history built above. No new DB query, timer, poller, socket or data source.\n        const restoredMetricRows: any[] = (history ?? []).map((h: any) => ({\n          at: h?.at,\n          value: {\n            pcr: h?.value?.pcr != null && Number.isFinite(Number(h.value.pcr)) ? Number(h.value.pcr) : null,\n            vix: h?.value?.vix != null && Number.isFinite(Number(h.value.vix)) ? Number(h.value.vix) : null,\n          },\n        })).filter((h: any) => Number.isFinite(h.at) && (h.value.pcr != null || h.value.vix != null));\n        const mergedMetricRows = new Map<number, any>();\n        for (const h of restoredMetricRows) mergedMetricRows.set(h.at, h);\n        for (const h of metricRows) mergedMetricRows.set(h.at, h); // live process rows win exact timestamp.\n        const metricHistory: any[] = [...mergedMetricRows.values()].sort((a: any, b: any) => a.at - b.at);`;
+  replaceOnce(metricHistoryAnchor, metricHistoryReplacement, "PCR/VIX fused-runtime restart-safe history ownership");
   replaceOnce(nullJoinAnchor, nullJoinReplacement, "PCR/VIX null history join");
 }
 

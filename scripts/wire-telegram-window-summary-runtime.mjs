@@ -6,7 +6,7 @@ const serverFile=path.resolve(root,"server.ts");
 const checkOnly=process.argv.includes("--check");
 let server=fs.readFileSync(serverFile,"utf8");
 const original=server;
-function replaceOnce(src,from,to,label){const count=src.split(from).length-1;if(count===0&&src.includes(to))return src;if(count!==1)throw new Error(`${label}: expected exactly 1 source occurrence, found ${count}`);return src.replace(from,to);}
+function replaceOnce(src,from,to,label){if(src.includes(to))return src;const count=src.split(from).length-1;if(count===0)throw new Error(`${label}: source occurrence not found`);return src.replace(from,to);}
 
 server=replaceOnce(server,
 'import { buildThreeMinuteFusedTelegramView, ThreeMinuteFusedDedup } from "./telegram-3m-fused-monitor.js";',
@@ -41,3 +41,4 @@ server=replaceOnce(server,
 if(checkOnly){console.log(server===original?"telegram window summary runtime wiring already applied":"telegram window summary runtime wiring check passed");process.exit(0);}
 if(server!==original)fs.writeFileSync(serverFile,server,"utf8");
 console.log(server!==original?"telegram window summary runtime wiring applied":"telegram window summary runtime wiring already applied");
+await import("./wire-telegram-business-watch-v1.mjs");

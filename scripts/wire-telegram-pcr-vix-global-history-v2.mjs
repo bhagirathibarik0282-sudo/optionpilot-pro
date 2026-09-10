@@ -1,3 +1,4 @@
+import "./wire-telegram-recorder-metric-persistence-v1.mjs";
 import fs from "node:fs";
 import path from "node:path";
 

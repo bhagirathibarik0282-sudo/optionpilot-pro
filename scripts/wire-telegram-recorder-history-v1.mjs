@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 const file = path.resolve(process.cwd(), "server.ts");
-const prerequisiteFile = path.resolve(process.cwd(), "scripts/wire-telegram-business-flow-v1.mjs");
+const fusedPrerequisiteFile = path.resolve(process.cwd(), "scripts/wire-telegram-3m-fused-runtime.mjs");
+const businessPrerequisiteFile = path.resolve(process.cwd(), "scripts/wire-telegram-business-flow-v1.mjs");
 const packageFile = path.resolve(process.cwd(), "package.json");
 const checkOnly = process.argv.includes("--check");
 let src = fs.readFileSync(file, "utf8");
@@ -20,26 +21,25 @@ function replaceOnce(from, to, label) {
   src = src.replace(from, to);
 }
 
-// In CI --check mode server.ts is intentionally not mutated by the prerequisite dry-run.
-// Verify stable semantic markers in the prerequisite source plus exact startup ordering.
-// The real startup still performs the strict exact-anchor replacement and fails closed on drift.
+// In CI --check mode server.ts is intentionally not mutated by prerequisite dry-runs.
+// Verify the fused-runtime source that creates history, the business-flow source that
+// creates option helpers, and their exact startup order before this recorder fallback.
+// Real startup still performs strict exact-anchor replacement and fails closed on drift.
 if (checkOnly && !src.includes(MARKER) && !src.includes(historyAnchor)) {
-  const prerequisite = fs.readFileSync(prerequisiteFile, "utf8");
+  const fusedPrerequisite = fs.readFileSync(fusedPrerequisiteFile, "utf8");
+  const businessPrerequisite = fs.readFileSync(businessPrerequisiteFile, "utf8");
   const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
   const startup = String(pkg?.scripts?.start ?? "");
-  const prerequisiteMarkers = [
-    ["history", "const history: any[] = (session.snapshotHistory ?? []).map"],
-    ["expiry", "const exp: any = v2CurrentExpiry(snapshot);"],
-    ["option-tail", "rows.find((r: any) => r?.isAtm)"],
-  ];
-  const missing = prerequisiteMarkers
-    .filter(([, marker]) => !prerequisite.includes(marker))
-    .map(([label]) => label);
+  const missing: string[] = [];
+  if (!fusedPrerequisite.includes("const history: any[] = (session.snapshotHistory ?? []).map")) missing.push("history");
+  if (!businessPrerequisite.includes("const exp: any = v2CurrentExpiry(snapshot);")) missing.push("expiry");
+  if (!businessPrerequisite.includes("rows.find((r: any) => r?.isAtm)")) missing.push("option-tail");
   if (missing.length) throw new Error(`recorder-history prerequisite markers missing: ${missing.join(",")}`);
 
+  const fusedPos = startup.indexOf("node scripts/wire-telegram-3m-fused-runtime.mjs");
   const businessPos = startup.indexOf("node scripts/wire-telegram-business-flow-v1.mjs");
   const recorderPos = startup.indexOf("node scripts/wire-telegram-recorder-history-v1.mjs");
-  if (businessPos < 0 || recorderPos < 0 || businessPos >= recorderPos) {
+  if (fusedPos < 0 || businessPos < 0 || recorderPos < 0 || !(fusedPos < businessPos && businessPos < recorderPos)) {
     throw new Error("recorder-history startup dependency order invalid");
   }
   console.log("telegram recorder-history prerequisite wiring check passed");

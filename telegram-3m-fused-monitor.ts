@@ -212,6 +212,7 @@ export function buildThreeMinuteFusedTelegramView(input: ThreeMinuteFusedInput):
     "",
     "📍 PRICE + FUTURES",
     `Spot ${n(x.spot)} | Fut ${n(x.future)} | Basis ${signed(x.basis)}`,
+    timeRow("T0", input.timeline),
     timeRow("T3", input.timeline),
     timeRow("T6", input.timeline),
     timeRow("T15", input.timeline),

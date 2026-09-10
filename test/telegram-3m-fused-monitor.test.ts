@@ -20,6 +20,10 @@ test("builds a business-readable bullish fused view without execution authority"
       { label: "Structure", stance: "BULLISH", verified: true },
     ],
     numeric: { spot: 24050, future: 24072, basis: 22, pcr: 1.02, vix: 11.4, cePremium: 121, pePremium: 98 },
+    timeline: [
+      { label: "T0", state: "TRENDING_UP" },
+      { label: "T3", spotChange: 18, futureChange: 20, pcrChange: 0.02, cePremiumChangePct: 3.2, pePremiumChangePct: -2.1, state: "BULLISH_CONFIRMATION" },
+    ],
     canonicalAction: "WAIT",
   });
   assert.equal(view.marker, THREE_MINUTE_FUSED_MARKER);
@@ -60,7 +64,7 @@ test("missing wall evidence stays unavailable rather than fabricated", () => {
     families: [],
     numeric: {},
   });
-  assert.match(view.text, /CE Wall — • Strength — \| PE Wall — • Strength —/);
+  assert.match(view.text, /CE Wall — \| PE Wall —/);
 });
 
 test("missing core families cannot produce a misleading five-star directional call", () => {

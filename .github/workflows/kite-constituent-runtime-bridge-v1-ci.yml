@@ -1,0 +1,33 @@
+name: Kite Constituent Runtime Bridge V1 CI
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "kite-constituent-runtime-bridge-v1.ts"
+      - "test/kite-constituent-runtime-bridge-v1.test.ts"
+      - ".github/workflows/kite-constituent-runtime-bridge-v1-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-runtime-bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Focused constituent runtime bridge devil check
+        run: node --import tsx --test test/kite-constituent-runtime-bridge-v1.test.ts test/canonical-constituent-token-registry.test.ts test/canonical-constituent-live-component.test.ts
+      - name: Safety surface check
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -E 'placeOrder|executeOrder|createOrder|modifyOrder|sendMessage|api.telegram.org|KiteTicker|new WebSocket' kite-constituent-runtime-bridge-v1.ts
+          grep -q 'opensSocket: false' kite-constituent-runtime-bridge-v1.ts
+          grep -q 'createsOrders: false' kite-constituent-runtime-bridge-v1.ts

@@ -30,7 +30,7 @@ if (checkOnly && !src.includes(MARKER) && !src.includes(historyAnchor)) {
   const businessPrerequisite = fs.readFileSync(businessPrerequisiteFile, "utf8");
   const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
   const startup = String(pkg?.scripts?.start ?? "");
-  const missing: string[] = [];
+  const missing = [];
   if (!fusedPrerequisite.includes("const history: any[] = (session.snapshotHistory ?? []).map")) missing.push("history");
   if (!businessPrerequisite.includes("const exp: any = v2CurrentExpiry(snapshot);")) missing.push("expiry");
   if (!businessPrerequisite.includes("rows.find((r: any) => r?.isAtm)")) missing.push("option-tail");

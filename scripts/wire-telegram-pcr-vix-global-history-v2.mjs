@@ -33,7 +33,9 @@ if (checkOnly && !src.includes(MARKER) && (!src.includes(dedupAnchor) || !src.in
   const missing = [];
   if (!fusedPrerequisite.includes(dedupAnchor)) missing.push("fused-dedup-anchor");
   if (!recorderPrerequisite.includes("const metricHistory: any[] = Array.isArray(session.telegramMetricHistory)")) missing.push("recorder-metric-history-anchor");
-  if (!recorderPrerequisite.includes(nullJoinAnchor)) missing.push("recorder-null-join-anchor");
+  const recorderHasLegacyNullJoin = recorderPrerequisite.includes("if (!Number.isFinite(Number(prev.pcr)) && Number.isFinite(Number(prevMetric.pcr)))")
+    && recorderPrerequisite.includes("if (!Number.isFinite(Number(prev.vix)) && Number.isFinite(Number(prevMetric.vix)))");
+  if (!recorderHasLegacyNullJoin) missing.push("recorder-null-join-anchor");
   if (!testScript.includes("wire-telegram-pcr-vix-global-history-v2.mjs --check")) missing.push("test-check-hook");
   const fusedPos = startup.indexOf("node scripts/wire-telegram-3m-fused-runtime.mjs");
   const recorderPos = startup.indexOf("node scripts/wire-telegram-recorder-history-v1.mjs");

@@ -11,6 +11,8 @@ const original = src;
 const MARKER = "OPTIONPILOT_TELEGRAM_PCR_VIX_GLOBAL_HISTORY_V2";
 const dedupAnchor = "const TELEGRAM_3M_FUSED_DEDUP = new ThreeMinuteFusedDedup();";
 const metricHistoryAnchor = `        const currentAt = Date.now();\n        const metricHistory: any[] = Array.isArray(session.telegramMetricHistory)\n          ? session.telegramMetricHistory.map((h: any) => ({ at: Date.parse(String(h?.timestamp ?? "")), value: h?.[symbol] }))\n              .filter((h: any) => Number.isFinite(h.at) && h.value)\n          : [];`;
+const nullJoinAnchor = `          if (prev && prevMetric) {\n            if (!Number.isFinite(Number(prev.pcr)) && Number.isFinite(Number(prevMetric.pcr))) prev.pcr = Number(prevMetric.pcr);\n            if (!Number.isFinite(Number(prev.vix)) && Number.isFinite(Number(prevMetric.vix))) prev.vix = Number(prevMetric.vix);\n          }`;
+const nullJoinReplacement = `          if (prev && prevMetric) {\n            const prevPcrMissing = prev.pcr == null || prev.pcr === "" || !Number.isFinite(Number(prev.pcr));\n            const prevVixMissing = prev.vix == null || prev.vix === "" || !Number.isFinite(Number(prev.vix));\n            if (prevPcrMissing && prevMetric.pcr != null && Number.isFinite(Number(prevMetric.pcr))) prev.pcr = Number(prevMetric.pcr);\n            if (prevVixMissing && prevMetric.vix != null && Number.isFinite(Number(prevMetric.vix))) prev.vix = Number(prevMetric.vix);\n          }`;
 
 function replaceOnce(from, to, label) {
   const count = src.split(from).length - 1;
@@ -31,6 +33,9 @@ if (checkOnly && !src.includes(MARKER) && (!src.includes(dedupAnchor) || !src.in
   const missing = [];
   if (!fusedPrerequisite.includes(dedupAnchor)) missing.push("fused-dedup-anchor");
   if (!recorderPrerequisite.includes("const metricHistory: any[] = Array.isArray(session.telegramMetricHistory)")) missing.push("recorder-metric-history-anchor");
+  const recorderHasLegacyNullJoin = recorderPrerequisite.includes("if (!Number.isFinite(Number(prev.pcr)) && Number.isFinite(Number(prevMetric.pcr)))")
+    && recorderPrerequisite.includes("if (!Number.isFinite(Number(prev.vix)) && Number.isFinite(Number(prevMetric.vix)))");
+  if (!recorderHasLegacyNullJoin) missing.push("recorder-null-join-anchor");
   if (!testScript.includes("wire-telegram-pcr-vix-global-history-v2.mjs --check")) missing.push("test-check-hook");
   const fusedPos = startup.indexOf("node scripts/wire-telegram-3m-fused-runtime.mjs");
   const recorderPos = startup.indexOf("node scripts/wire-telegram-recorder-history-v1.mjs");
@@ -47,6 +52,7 @@ if (!src.includes(MARKER)) {
 
   const metricHistoryReplacement = `        const currentAt = Date.now();\n        const metricRows = TELEGRAM_PCR_VIX_HISTORY.get(symbol) ?? [];\n        metricRows.push({\n          at: currentAt,\n          value: {\n            pcr: Number.isFinite(Number(m?.pcr)) ? Number(m.pcr) : null,\n            vix: Number.isFinite(Number(m?.vix)) ? Number(m.vix) : null,\n          },\n        });\n        while (metricRows.length > 40) metricRows.shift();\n        TELEGRAM_PCR_VIX_HISTORY.set(symbol, metricRows);\n        const metricHistory: any[] = metricRows;`;
   replaceOnce(metricHistoryAnchor, metricHistoryReplacement, "PCR/VIX fused-runtime history ownership");
+  replaceOnce(nullJoinAnchor, nullJoinReplacement, "PCR/VIX null history join");
 }
 
 if (checkOnly) {

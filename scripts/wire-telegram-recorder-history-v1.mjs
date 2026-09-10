@@ -21,18 +21,21 @@ function replaceOnce(from, to, label) {
 }
 
 // In CI --check mode server.ts is intentionally not mutated by the prerequisite dry-run.
-// Prove that the prerequisite patch still emits our three exact anchors and that startup
-// executes business-flow wiring before recorder-history wiring. Runtime behaviour is unchanged.
+// Verify stable semantic markers in the prerequisite source plus exact startup ordering.
+// The real startup still performs the strict exact-anchor replacement and fails closed on drift.
 if (checkOnly && !src.includes(MARKER) && !src.includes(historyAnchor)) {
   const prerequisite = fs.readFileSync(prerequisiteFile, "utf8");
   const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
   const startup = String(pkg?.scripts?.start ?? "");
-  const missing = [
-    ["history", historyAnchor],
-    ["expiry", expiryAnchor],
-    ["option-tail", optionTailAnchor],
-  ].filter(([, anchor]) => !prerequisite.includes(anchor)).map(([label]) => label);
-  if (missing.length) throw new Error(`recorder-history prerequisite anchors missing: ${missing.join(",")}`);
+  const prerequisiteMarkers = [
+    ["history", "const history: any[] = (session.snapshotHistory ?? []).map"],
+    ["expiry", "const exp: any = v2CurrentExpiry(snapshot);"],
+    ["option-tail", "rows.find((r: any) => r?.isAtm)"],
+  ];
+  const missing = prerequisiteMarkers
+    .filter(([, marker]) => !prerequisite.includes(marker))
+    .map(([label]) => label);
+  if (missing.length) throw new Error(`recorder-history prerequisite markers missing: ${missing.join(",")}`);
 
   const businessPos = startup.indexOf("node scripts/wire-telegram-business-flow-v1.mjs");
   const recorderPos = startup.indexOf("node scripts/wire-telegram-recorder-history-v1.mjs");

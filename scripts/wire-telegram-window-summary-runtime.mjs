@@ -41,3 +41,4 @@ server=replaceOnce(server,
 if(checkOnly){console.log(server===original?"telegram window summary runtime wiring already applied":"telegram window summary runtime wiring check passed");process.exit(0);}
 if(server!==original)fs.writeFileSync(serverFile,server,"utf8");
 console.log(server!==original?"telegram window summary runtime wiring applied":"telegram window summary runtime wiring already applied");
+await import("./wire-telegram-business-watch-v1.mjs");

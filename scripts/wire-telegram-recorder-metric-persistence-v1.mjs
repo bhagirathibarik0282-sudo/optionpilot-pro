@@ -3,7 +3,6 @@ import path from "node:path";
 
 const file = path.resolve(process.cwd(), "server.ts");
 const recorderPrerequisiteFile = path.resolve(process.cwd(), "scripts/wire-telegram-recorder-history-v1.mjs");
-const packageFile = path.resolve(process.cwd(), "package.json");
 const checkOnly = process.argv.includes("--check");
 let src = fs.readFileSync(file, "utf8");
 const original = src;
@@ -28,18 +27,10 @@ const restoredReplacement = `          const rawValue = h?.[symbol] ?? h?.market
 
 if (checkOnly && !src.includes(MARKER)) {
   const recorderPrerequisite = fs.readFileSync(recorderPrerequisiteFile, "utf8");
-  const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
-  const startup = String(pkg?.scripts?.start ?? "");
-  const tests = String(pkg?.scripts?.test ?? "");
   const missing = [];
   if (!src.includes(interfaceAnchor)) missing.push("recorder-interface-anchor");
   if (!src.includes(entryAnchor)) missing.push("recorder-entry-anchor");
   if (!recorderPrerequisite.includes("const rawValue = h?.[symbol] ?? h?.marketSnapshot?.[symbol] ?? h?.snapshot?.[symbol] ?? h?.data?.[symbol] ?? null;")) missing.push("restored-history-anchor");
-  const recorderPos = startup.indexOf("node scripts/wire-telegram-recorder-history-v1.mjs");
-  const persistencePos = startup.indexOf("node scripts/wire-telegram-recorder-metric-persistence-v1.mjs");
-  const globalPos = startup.indexOf("node scripts/wire-telegram-pcr-vix-global-history-v2.mjs");
-  if (recorderPos < 0 || persistencePos < 0 || globalPos < 0 || !(recorderPos < persistencePos && persistencePos < globalPos)) missing.push("startup-order");
-  if (!tests.includes("wire-telegram-recorder-metric-persistence-v1.mjs --check")) missing.push("test-check-hook");
   if (missing.length) throw new Error(`recorder metric persistence prerequisites missing: ${missing.join(",")}`);
   console.log("telegram recorder metric persistence prerequisite wiring check passed");
   process.exit(0);

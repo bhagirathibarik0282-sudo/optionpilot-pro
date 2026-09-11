@@ -23,10 +23,11 @@ function replaceOnce(from, to, label) {
 }
 
 if (checkOnly && !src.includes(MARKER) && (!src.includes(dedupAnchor) || !src.includes(metricHistoryAnchor))) {
+  // Optional Telegram enrichment is deliberately outside production startup. Check
+  // dependency source contracts and CI coverage, not startup ordering.
   const fusedPrerequisite = fs.readFileSync(fusedPrerequisiteFile, "utf8");
   const recorderPrerequisite = fs.readFileSync(recorderPrerequisiteFile, "utf8");
   const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
-  const startup = String(pkg?.scripts?.start ?? "");
   const testScript = String(pkg?.scripts?.test ?? "");
   const missing = [];
   if (!fusedPrerequisite.includes(dedupAnchor)) missing.push("fused-dedup-anchor");
@@ -35,12 +36,8 @@ if (checkOnly && !src.includes(MARKER) && (!src.includes(dedupAnchor) || !src.in
   const recorderHasLegacyNullJoin = recorderPrerequisite.includes("if (!Number.isFinite(Number(prev.pcr)) && Number.isFinite(Number(prevMetric.pcr)))") && recorderPrerequisite.includes("if (!Number.isFinite(Number(prev.vix)) && Number.isFinite(Number(prevMetric.vix)))");
   if (!recorderHasLegacyNullJoin) missing.push("recorder-null-join-anchor");
   if (!testScript.includes("wire-telegram-pcr-vix-global-history-v2.mjs --check")) missing.push("test-check-hook");
-  const fusedPos = startup.indexOf("node scripts/wire-telegram-3m-fused-runtime.mjs");
-  const recorderPos = startup.indexOf("node scripts/wire-telegram-recorder-history-v1.mjs");
-  const globalPos = startup.indexOf("node scripts/wire-telegram-pcr-vix-global-history-v2.mjs");
-  if (fusedPos < 0 || recorderPos < 0 || globalPos < 0 || !(fusedPos < recorderPos && recorderPos < globalPos)) missing.push("startup-order");
   if (missing.length) throw new Error(`PCR/VIX global history prerequisites missing: ${missing.join(",")}`);
-  console.log("telegram PCR/VIX global history prerequisite wiring check passed");
+  console.log("telegram PCR/VIX global history optional-wiring prerequisite check passed");
   process.exit(0);
 }
 

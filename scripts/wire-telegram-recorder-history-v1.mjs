@@ -26,22 +26,21 @@ function replaceOnce(from, to, label) {
 }
 
 if (checkOnly && !src.includes(MARKER) && !src.includes(historyAnchor)) {
+  // Optional Telegram enrichments are not production-startup prerequisites anymore.
+  // Verify their source dependencies and CI hook without requiring them in `start`.
   const fusedPrerequisite = fs.readFileSync(fusedPrerequisiteFile, "utf8");
   const businessPrerequisite = fs.readFileSync(businessPrerequisiteFile, "utf8");
   const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
-  const startup = String(pkg?.scripts?.start ?? "");
+  const tests = String(pkg?.scripts?.test ?? "");
   const missing = [];
   if (!fusedPrerequisite.includes("const history: any[] = (session.snapshotHistory ?? []).map")) missing.push("history");
   if (!businessPrerequisite.includes("const exp: any = v2CurrentExpiry(snapshot);")) missing.push("expiry");
   if (!businessPrerequisite.includes("rows.find((r: any) => r?.isAtm)")) missing.push("option-tail");
   if (!fusedPrerequisite.includes("const currentAt = Date.now();")) missing.push("nearest");
   if (!businessPrerequisite.includes("const prev: any = nearest(mins);")) missing.push("prev");
+  if (!tests.includes("wire-telegram-recorder-history-v1.mjs --check")) missing.push("test-check-hook");
   if (missing.length) throw new Error(`recorder-history prerequisite markers missing: ${missing.join(",")}`);
-  const fusedPos = startup.indexOf("node scripts/wire-telegram-3m-fused-runtime.mjs");
-  const businessPos = startup.indexOf("node scripts/wire-telegram-business-flow-v1.mjs");
-  const recorderPos = startup.indexOf("node scripts/wire-telegram-recorder-history-v1.mjs");
-  if (fusedPos < 0 || businessPos < 0 || recorderPos < 0 || !(fusedPos < businessPos && businessPos < recorderPos)) throw new Error("recorder-history startup dependency order invalid");
-  console.log("telegram recorder-history prerequisite wiring check passed");
+  console.log("telegram recorder-history optional-wiring prerequisite check passed");
   process.exit(0);
 }
 
@@ -66,4 +65,4 @@ if (!src.includes(MARKER)) {
 }
 
 if (checkOnly) { console.log(src === original ? "telegram recorder-history wiring already applied" : "telegram recorder-history wiring check passed"); process.exit(0); }
-if (src !== original) { fs.writeFileSync(file, src, "utf8"); console.log("telegram recorder-history wiring applied"); } else { console.log("telegram recorder-history wiring already applied"); }
+if (src !== original) { fs.writeFileSync(file, src,"utf8"); console.log("telegram recorder-history wiring applied"); } else { console.log("telegram recorder-history wiring already applied"); }

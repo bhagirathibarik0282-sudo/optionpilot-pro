@@ -5,7 +5,7 @@ import { buildH1MarketOpenAcceptanceCapture } from "./h1-market-open-acceptance-
 import { scheduleH1WeekdayAcceptanceCapture, type H1WeekdayAcceptanceCaptureCancel } from "./h1-weekday-acceptance-capture-scheduler.js";
 import { subscribeKiteAuthoritySessionPersisted, type KiteAuthoritySessionPersistedUnsubscribe } from "./kite-session-authority.js";
 import type { H1LiveExactReadOnlyConsumerObservation, H1LiveExactReadOnlyDirectionObservation, H1LiveExactReadOnlyShadowInputObservation, H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-websocket-service.js";
-import type { H1LiveExactRawEvidenceMissing, H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
+import type { H1LiveExactRawEvidenceMissing, H1LiveExactRawEvidenceRow, H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import type { H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
 
 export const H1_DYNAMIC_READONLY_LIVE_ENV = "H1_DYNAMIC_READONLY_LIVE_ENABLED" as const;
@@ -54,7 +54,7 @@ export interface H1DynamicReadOnlyServerStatus {
 }
 
 type StartFn = (asOfDate: string, enabled: boolean) => Promise<H1DynamicReadOnlyLiveStartResult>;
-type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status" | "stop">;
+type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status" | "stop" | "rawEvidenceStatus">;
 type H1StatusWithoutAcceptance = Omit<H1DynamicReadOnlyServerStatus, "marketOpenReadinessAcceptance">;
 
 let statusValue: H1DynamicReadOnlyServerStatus = status(false, false, false, "DISABLED", null, 0);
@@ -139,6 +139,22 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
     greekEvidenceStatus: live.greekEvidenceStatus, forwardsDownstream: false,
   };
   return withAcceptance(base);
+}
+
+/**
+ * Pull-only observation boundary for already validated exact FULL-packet option rows.
+ * It does not start a socket, mutate the H1 service, or grant selector/execution authority.
+ * Missing/stale evidence returns an empty array and downstream consumers must fail closed.
+ */
+export function getH1DynamicReadOnlyExactOptionRows(nowIso: string = new Date().toISOString()): H1LiveExactRawEvidenceRow[] {
+  if (!liveService) return [];
+  try {
+    return liveService.rawEvidenceStatus(nowIso).rows
+      .filter((row) => row.role === "OPTION")
+      .map((row) => ({ ...row }));
+  } catch {
+    return [];
+  }
 }
 
 function clearLiveProofTimers(): void {

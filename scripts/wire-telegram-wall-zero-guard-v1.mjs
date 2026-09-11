@@ -21,18 +21,17 @@ function replaceOnce(from, to, label) {
 }
 
 if (checkOnly && !src.includes(MARKER) && !src.includes(wallAnchor)) {
+  // Optional Telegram wiring was deliberately removed from production startup so a
+  // diagnostic/formatting patch can never block core runtime boot. In check mode,
+  // verify the dependency source and CI hook instead of requiring startup order.
   const fused = fs.readFileSync(fusedPrerequisiteFile, "utf8");
   const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
-  const startup = String(pkg?.scripts?.start ?? "");
   const tests = String(pkg?.scripts?.test ?? "");
   const missing = [];
   if (!fused.includes('const finiteOrNull = (v: any) => Number.isFinite(Number(v)) ? Number(v) : null;')) missing.push("wall-anchor");
-  const fusedPos = startup.indexOf("node scripts/wire-telegram-3m-fused-runtime.mjs");
-  const guardPos = startup.indexOf("node scripts/wire-telegram-wall-zero-guard-v1.mjs");
-  if (fusedPos < 0 || guardPos < 0 || !(fusedPos < guardPos)) missing.push("startup-order");
   if (!tests.includes("wire-telegram-wall-zero-guard-v1.mjs --check")) missing.push("test-check-hook");
   if (missing.length) throw new Error(`wall zero guard prerequisites missing: ${missing.join(",")}`);
-  console.log("telegram wall zero guard prerequisite wiring check passed");
+  console.log("telegram wall zero guard optional-wiring prerequisite check passed");
   process.exit(0);
 }
 

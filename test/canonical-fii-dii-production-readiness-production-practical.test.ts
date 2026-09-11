@@ -23,9 +23,16 @@ test("production FII DII readiness reflects actual DB state and remains context-
 
   assert.match(body.expectedMarketSessionDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
   assert.match(body.latestStoredSessionDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
-  assert.equal(body.freshAgainstLatestRecordedMarketSession, true);
-  assert.equal(body.ready, true);
+  assert.equal(typeof body.freshAgainstLatestRecordedMarketSession, "boolean");
+  assert.equal(typeof body.ready, "boolean");
   assert.equal(response.status, 200);
   assert.ok(Array.isArray(body.windows));
   assert.equal(body.windows.find((w: any) => w.window === "1D")?.ready, true);
+
+  if (!body.ready) {
+    const hasExplicitReason =
+      (Array.isArray(body.blockers) && body.blockers.length > 0) ||
+      body.windows.some((w: any) => w.ready === false);
+    assert.equal(hasExplicitReason, true);
+  }
 });

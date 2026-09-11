@@ -8,10 +8,14 @@ let server=fs.readFileSync(serverFile,"utf8");
 const original=server;
 function replaceOnce(src,from,to,label){if(src.includes(to))return src;const count=src.split(from).length-1;if(count===0)throw new Error(`${label}: source occurrence not found`);return src.replace(from,to);}
 
-server=replaceOnce(server,
-'import { buildThreeMinuteFusedTelegramView, ThreeMinuteFusedDedup } from "./telegram-3m-fused-monitor.js";',
-'import { buildThreeMinuteFusedTelegramView, ThreeMinuteFusedDedup } from "./telegram-3m-fused-monitor.js";\nimport { buildWindowSummary, buildEodBehaviourSummary } from "./telegram-window-summary-v1.js";',
-"window summary import");
+// Import wiring must remain order-independent: other safe runtime patches may add
+// their own imports next to the fused-monitor import before this script runs.
+const fusedImport='import { buildThreeMinuteFusedTelegramView, ThreeMinuteFusedDedup } from "./telegram-3m-fused-monitor.js";';
+const windowImport='import { buildWindowSummary, buildEodBehaviourSummary } from "./telegram-window-summary-v1.js";';
+if(!server.includes(windowImport)){
+  if(!server.includes(fusedImport))throw new Error("window summary import: fused import anchor not found");
+  server=server.replace(fusedImport,`${fusedImport}\n${windowImport}`);
+}
 
 server=replaceOnce(server,
 'const TELEGRAM_3M_FUSED_DEDUP = new ThreeMinuteFusedDedup();',

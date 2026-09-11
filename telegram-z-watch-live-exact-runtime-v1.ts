@@ -1,6 +1,7 @@
 import type { H1ExactContractIdentity } from "./h1-live-exact-snapshot-aggregator.js";
 import type { H1LiveExactRawEvidenceRow } from "./h1-live-exact-raw-evidence-store.js";
-import { getH1ExactRawRuntimePair, type H1ExactWatchSymbol } from "./h1-exact-raw-runtime-history-v1.js";
+import { getH1DynamicReadOnlyExactOptionRows } from "./h1-dynamic-readonly-server-bootstrap.js";
+import { getH1ExactRawRuntimePair, publishH1ExactRawRuntimeRow, type H1ExactWatchSymbol } from "./h1-exact-raw-runtime-history-v1.js";
 import { buildExactWatchFeedFromRawRows, type ExactWatchFeed, type ExactWatchSideFeed } from "./telegram-z-watch-exact-feed-v1.js";
 
 export interface LiveExactZWatchRuntimeResult {
@@ -41,6 +42,10 @@ export function buildLiveExactZWatchRuntime(
   symbol: H1ExactWatchSymbol,
   nowIso: string = new Date().toISOString(),
 ): LiveExactZWatchRuntimeResult {
+  // Pull only already-validated, fresh exact option rows. The H1 source remains
+  // read-only and does not push into Telegram or change any authority boundary.
+  for (const row of getH1DynamicReadOnlyExactOptionRows(nowIso)) publishH1ExactRawRuntimeRow(row);
+
   const ce = getH1ExactRawRuntimePair(symbol, "CE", nowIso);
   const pe = getH1ExactRawRuntimePair(symbol, "PE", nowIso);
   let feed = buildExactWatchFeedFromRawRows({

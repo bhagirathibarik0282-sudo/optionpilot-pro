@@ -10,8 +10,8 @@ const MARKER = "OPTIONPILOT_TELEGRAM_BUSINESS_FLOW_V1";
 function replaceOnce(from, to, label) {
   const count = src.split(from).length - 1;
   if (count === 0 && src.includes(to)) return;
-  if (count !== 1) throw new Error(`${label}: expected exactly 1 source occurrence, found ${count}`);
-  src = src.replace(from, to);
+  if (count === 0) throw new Error(`${label}: source occurrence not found`);
+  src = src.split(from).join(to);
 }
 
 if (!src.includes(MARKER)) {

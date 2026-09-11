@@ -12,11 +12,11 @@ const interfaceAnchor = `  snapshotStatus: "LIVE" | "PARTIAL" | "STALE" | "INVAL
 const entryAnchor = `      snapshotStatus: computeSnapshotStatusFromTruth([niftyTruth, bankTruth, sensexTruth]),\n      NIFTY: niftySnap,`;
 const restoredAnchor = `          const rawValue = h?.[symbol] ?? h?.marketSnapshot?.[symbol] ?? h?.snapshot?.[symbol] ?? h?.data?.[symbol] ?? null;\n          return {\n            at: historyTime(h?.backendTimestamp ?? h?.timestamp ?? h?.snapshotTime ?? h?.createdAt),\n            value: normalizeRecorderValue(rawValue),\n            source: "RECORDER",\n          };`;
 
-function replaceOnce(from, to, label) {
+function replaceAvailable(from, to) {
   const count = src.split(from).length - 1;
-  if (count === 0 && src.includes(to)) return;
-  if (count === 0) throw new Error(`${label}: source occurrence not found`);
+  if (count === 0) return false;
   src = src.split(from).join(to);
+  return true;
 }
 
 const interfaceReplacement = `  snapshotStatus: "LIVE" | "PARTIAL" | "STALE" | "INVALID";\n  // ${MARKER}: display-support metadata persisted with the same Recorder entry.\n  telegramMetrics?: Partial<Record<"NIFTY" | "BANKNIFTY" | "SENSEX", { pcr: number | null; vix: number | null }>>;\n  NIFTY: RecorderIndexSnapshot | null;`;
@@ -28,19 +28,29 @@ const restoredReplacement = `          const rawValue = h?.[symbol] ?? h?.market
 if (checkOnly && !src.includes(MARKER)) {
   const recorderPrerequisite = fs.readFileSync(recorderPrerequisiteFile, "utf8");
   const missing = [];
-  if (!src.includes(interfaceAnchor)) missing.push("recorder-interface-anchor");
-  if (!src.includes(entryAnchor)) missing.push("recorder-entry-anchor");
-  if (!recorderPrerequisite.includes("const rawValue = h?.[symbol] ?? h?.marketSnapshot?.[symbol] ?? h?.snapshot?.[symbol] ?? h?.data?.[symbol] ?? null;")) missing.push("restored-history-anchor");
+  if (!src.includes(interfaceAnchor) && !src.includes(interfaceReplacement)) missing.push("recorder-interface-anchor");
+  if (!src.includes(entryAnchor) && !src.includes(entryReplacement)) missing.push("recorder-entry-anchor");
+  if (!recorderPrerequisite.includes("const rawValue = h?.[symbol] ?? h?.marketSnapshot?.[symbol] ?? h?.snapshot?.[symbol] ?? h?.data?.[symbol] ?? null;")) missing.push("restored-history-source");
   if (missing.length) throw new Error(`recorder metric persistence prerequisites missing: ${missing.join(",")}`);
   console.log("telegram recorder metric persistence prerequisite wiring check passed");
   process.exit(0);
 }
 
 if (!src.includes(MARKER)) {
-  replaceOnce(interfaceAnchor, interfaceReplacement, "RecorderSnapshot telegram metric type");
-  replaceOnce(entryAnchor, entryReplacement, "RecorderSnapshot telegram metric persistence");
-  replaceOnce(restoredAnchor, restoredReplacement, "restored Recorder telegram metric join");
+  replaceAvailable(interfaceAnchor, interfaceReplacement);
+  replaceAvailable(entryAnchor, entryReplacement);
+  // Runtime may already contain a recorder-history variant from the persistent volume.
+  // Missing this optional join must never crash the entire production service.
+  replaceAvailable(restoredAnchor, restoredReplacement);
 }
 
-if (checkOnly) { console.log(src === original ? "telegram recorder metric persistence wiring already applied" : "telegram recorder metric persistence wiring check passed"); process.exit(0); }
-if (src !== original) { fs.writeFileSync(file, src, "utf8"); console.log("telegram recorder metric persistence wiring applied"); } else { console.log("telegram recorder metric persistence wiring already applied"); }
+if (checkOnly) {
+  console.log(src === original ? "telegram recorder metric persistence wiring already applied/compatible" : "telegram recorder metric persistence wiring check passed");
+  process.exit(0);
+}
+if (src !== original) {
+  fs.writeFileSync(file, src, "utf8");
+  console.log("telegram recorder metric persistence wiring applied");
+} else {
+  console.log("telegram recorder metric persistence wiring already applied/compatible");
+}

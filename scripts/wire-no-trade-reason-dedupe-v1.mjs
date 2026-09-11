@@ -2,6 +2,26 @@ import fs from "node:fs";
 import path from "node:path";
 
 const file = path.resolve(process.cwd(), "server.ts");
+const fusedWirerFile = path.resolve(process.cwd(), "scripts/wire-telegram-3m-fused-runtime.mjs");
+
+// Repair the legacy fused mutator before it can touch server.ts.
+// Its old replaceOnce guard checked src.includes(to) only when the source anchor count was zero.
+// Because several replacement strings intentionally contain their original anchor, repeated process starts
+// could append TELEGRAM_3M_FUSED_DEDUP again. Make the exact replacement idempotent first.
+if (fs.existsSync(fusedWirerFile)) {
+  const oldGuard = '  const count = src.split(from).length - 1;\n  if (count === 0 && src.includes(to)) return src;';
+  const newGuard = '  if (src.includes(to)) return src;\n  const count = src.split(from).length - 1;';
+  const wirerSrc = fs.readFileSync(fusedWirerFile, "utf8");
+  if (wirerSrc.includes(oldGuard)) {
+    fs.writeFileSync(fusedWirerFile, wirerSrc.replace(oldGuard, newGuard), "utf8");
+    console.log("fused Telegram wirer idempotence guard repaired");
+  } else if (wirerSrc.includes(newGuard)) {
+    console.log("fused Telegram wirer idempotence guard already repaired");
+  } else {
+    throw new Error("FUSED_WIRER_IDEMPOTENCE_GUARD_ANCHOR_NOT_FOUND");
+  }
+}
+
 let src = fs.readFileSync(file, "utf8");
 const original = src;
 

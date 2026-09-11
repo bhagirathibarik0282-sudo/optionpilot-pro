@@ -42,5 +42,11 @@ if (src !== original) {
 }
 
 // Narrow observation-only chain: reuse existing proven fused market view and 15m window summary.
-await import("./wire-telegram-3m-fused-runtime.mjs");
+// Guard the fused mutator with its own marker so process restarts cannot append duplicate imports/singletons/blocks.
+const FUSED_MARKER = "OPTIONPILOT_3M_RICH_FUSED_TELEGRAM_RUNTIME_V2";
+if (!fs.readFileSync(file, "utf8").includes(FUSED_MARKER)) {
+  await import("./wire-telegram-3m-fused-runtime.mjs");
+} else {
+  console.log("telegram 3m rich fused runtime wiring already applied");
+}
 await import("./wire-telegram-window-summary-runtime.mjs");

@@ -1,6 +1,5 @@
 import { KiteImmediateTokenRegistry, type KiteImmediateTokenEntry } from "./kite-immediate-token-registry.js";
 import type { KiteDecodedPacket } from "./kite-websocket-binary-decoder.js";
-import { publishH1ExactRawRuntimeRow } from "./h1-exact-raw-runtime-history-v1.js";
 
 export interface H1LiveExactRawEvidenceRow {
   instrumentToken: number;
@@ -126,7 +125,7 @@ export class H1LiveExactRawEvidenceStore {
     const previousMs = time(previous?.observedAt);
     if (previousMs != null && observedMs < previousMs) return this.reject(entry, "NON_FORWARD_CHRONOLOGY");
 
-    const row: H1LiveExactRawEvidenceRow = {
+    this.byToken.set(entry.instrumentToken, {
       instrumentToken: entry.instrumentToken,
       symbol: entry.symbol,
       role: entry.role,
@@ -141,9 +140,7 @@ export class H1LiveExactRawEvidenceStore {
       ask,
       bidQty,
       askQty,
-    };
-    this.byToken.set(entry.instrumentToken, row);
-    if (row.role === "OPTION") publishH1ExactRawRuntimeRow(row);
+    });
     this.lastRejectByToken.delete(entry.instrumentToken);
     return true;
   }

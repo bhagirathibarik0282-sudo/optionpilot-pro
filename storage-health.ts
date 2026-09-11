@@ -1,8 +1,32 @@
 import type { Hono } from "hono";
 import { dbIsConfigured, dbQuerySafe } from "./db.js";
+import { indiaDateFromIso, resolveRetentionDays, retentionCutoffDate } from "./eod-retention-core.js";
 
 type CountRow = { count: string | number };
 type LatestRow = { symbol: string; minute_bucket: string | Date | null; spot_ltp: number | null };
+type RetentionProofTarget = {
+  table: string;
+  dateExpr: string;
+  whereExtra?: string;
+  params?: unknown[];
+};
+
+const RETENTION_PROOF_TARGETS: RetentionProofTarget[] = [
+  { table: "market_snapshot_1m", dateExpr: "(minute_bucket AT TIME ZONE 'Asia/Kolkata')::date" },
+  { table: "option_snapshot_1m", dateExpr: "(minute_bucket AT TIME ZONE 'Asia/Kolkata')::date" },
+  { table: "chain_state_1m", dateExpr: "(minute_bucket AT TIME ZONE 'Asia/Kolkata')::date" },
+  { table: "timeframe_state", dateExpr: "(block_end AT TIME ZONE 'Asia/Kolkata')::date" },
+  { table: "candidate_history", dateExpr: "(observed_at AT TIME ZONE 'Asia/Kolkata')::date" },
+  { table: "trade_plan_history", dateExpr: "(created_at AT TIME ZONE 'Asia/Kolkata')::date" },
+  { table: "trade_event_history", dateExpr: "(event_at AT TIME ZONE 'Asia/Kolkata')::date" },
+  {
+    table: "app_state_log",
+    dateExpr: "(created_at AT TIME ZONE 'Asia/Kolkata')::date",
+    whereExtra: "kind = $2",
+    params: ["meaningful_narrative_event"],
+  },
+  { table: "eod_archive_payloads", dateExpr: "trading_date" },
+];
 
 function n(value: string | number | null | undefined): number {
   const parsed = Number(value ?? 0);
@@ -13,6 +37,19 @@ function iso(value: string | Date | null | undefined): string | null {
   if (!value) return null;
   const d = value instanceof Date ? value : new Date(value);
   return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+async function retentionProofCount(target: RetentionProofTarget, cutoffDate: string): Promise<{ exists: boolean; eligible: number }> {
+  const exists = await dbQuerySafe<{ exists: boolean }>("SELECT to_regclass($1) IS NOT NULL AS exists", [`public.${target.table}`]);
+  if (!exists || !exists.rows[0]?.exists) return { exists: false, eligible: 0 };
+  const extra = target.whereExtra ? ` AND ${target.whereExtra}` : "";
+  const params = [cutoffDate, ...(target.params || [])];
+  const result = await dbQuerySafe<CountRow>(
+    `SELECT COUNT(*)::bigint AS count FROM ${target.table} WHERE ${target.dateExpr} < $1::date${extra}`,
+    params,
+  );
+  if (!result) throw new Error(`RETENTION_PROOF_QUERY_FAILED:${target.table}`);
+  return { exists: true, eligible: n(result.rows[0]?.count) };
 }
 
 export function mountStorageHealthRoutes(app: Hono): void {
@@ -88,5 +125,66 @@ export function mountStorageHealthRoutes(app: Hono): void {
       affectsTelegram: false,
       affectsExecution: false,
     });
+  });
+
+  app.get("/api/storage/retention-proof", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const generatedAt = new Date().toISOString();
+    const retentionDays = resolveRetentionDays(process.env.EOD_RETENTION_DAYS);
+    const today = indiaDateFromIso(generatedAt);
+    const cutoffDate = retentionCutoffDate(today, retentionDays);
+
+    if (!dbIsConfigured()) {
+      return c.json({
+        ok: false,
+        mode: "READ_ONLY_EOD_RETENTION_PROOF_V1",
+        productionImpact: "NONE",
+        reason: "DATABASE_URL_NOT_CONFIGURED",
+        generatedAt,
+        retentionDays,
+        cutoffDate,
+        deletedTotal: 0,
+      }, 503);
+    }
+
+    try {
+      const report: Record<string, { exists: boolean; eligible: number }> = {};
+      for (const target of RETENTION_PROOF_TARGETS) {
+        report[target.table] = await retentionProofCount(target, cutoffDate);
+      }
+      const eligibleTotal = Object.values(report).reduce((sum, item) => sum + item.eligible, 0);
+      return c.json({
+        ok: true,
+        mode: "READ_ONLY_EOD_RETENTION_PROOF_V1",
+        productionImpact: "NONE",
+        generatedAt,
+        retentionDays,
+        today,
+        cutoffDate,
+        eligibleTotal,
+        deletedTotal: 0,
+        report,
+        safety: {
+          readOnly: true,
+          deleteStatementPresent: false,
+          applyEnvironmentIgnored: true,
+          auditTablePreserved: "eod_archive_runs",
+        },
+        affectsVerdict: false,
+        affectsTelegram: false,
+        affectsExecution: false,
+      });
+    } catch (err) {
+      return c.json({
+        ok: false,
+        mode: "READ_ONLY_EOD_RETENTION_PROOF_V1",
+        productionImpact: "NONE",
+        generatedAt,
+        retentionDays,
+        cutoffDate,
+        deletedTotal: 0,
+        reason: err instanceof Error ? err.message : "RETENTION_PROOF_FAILED",
+      }, 503);
+    }
   });
 }

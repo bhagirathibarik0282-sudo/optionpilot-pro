@@ -1,0 +1,22 @@
+name: Institutional Context Backtest CI
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/backfill-institutional-context-2026-08-31-to-2026-09-10.ts'
+      - 'scripts/read-institutional-backtest-window-2026-08-31-to-2026-09-10.ts'
+      - 'test/institutional-context-backtest-window.test.ts'
+      - '.github/workflows/institutional-context-backtest-ci.yml'
+
+jobs:
+  lookahead-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run focused institutional backtest contract
+        run: NODE_ENV=test node --import tsx --test test/institutional-context-backtest-window.test.ts

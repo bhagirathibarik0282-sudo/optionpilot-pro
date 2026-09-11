@@ -24,7 +24,10 @@ for (const importLine of imports) {
 
 if (!src.includes(MARKER)) {
   const anchor = '        if (TELEGRAM_3M_FUSED_DEDUP.shouldEmit(view)) {';
-  if (!src.includes(anchor)) throw new Error("exact Z watch runtime anchor not found");
+  if (!src.includes(anchor)) {
+    console.warn("exact Z watch runtime anchor not found; skipping observation-only Z-WATCH wiring and allowing core service startup");
+    process.exit(0);
+  }
 
   const block = [
     `        // ${MARKER}: exact FULL-packet option evidence only; observation-only and fail-closed.`,

@@ -44,3 +44,4 @@ if (src !== original) {
 // Narrow observation-only chain: reuse existing proven fused market view and 15m window summary.
 await import("./wire-telegram-3m-fused-runtime.mjs");
 await import("./wire-telegram-window-summary-runtime.mjs");
+await import("./wire-telegram-market-pulse-concise-v1.mjs");

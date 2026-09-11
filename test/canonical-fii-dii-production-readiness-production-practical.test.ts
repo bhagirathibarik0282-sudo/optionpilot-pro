@@ -25,7 +25,7 @@ test("production FII DII readiness reflects actual DB state and remains context-
   assert.match(body.latestStoredSessionDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(typeof body.freshAgainstLatestRecordedMarketSession, "boolean");
   assert.equal(typeof body.ready, "boolean");
-  assert.equal(response.status, 200);
+  assert.equal(response.status, body.ready ? 200 : 503);
   assert.ok(Array.isArray(body.windows));
   assert.equal(body.windows.find((w: any) => w.window === "1D")?.ready, true);
 

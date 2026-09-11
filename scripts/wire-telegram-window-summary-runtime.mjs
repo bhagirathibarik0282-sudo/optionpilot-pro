@@ -9,12 +9,14 @@ const original=server;
 function replaceOnce(src,from,to,label){if(src.includes(to))return src;const count=src.split(from).length-1;if(count===0)throw new Error(`${label}: source occurrence not found`);return src.replace(from,to);}
 
 // Import wiring must remain order-independent: other safe runtime patches may add
-// their own imports next to the fused-monitor import before this script runs.
-const fusedImport='import { buildThreeMinuteFusedTelegramView, ThreeMinuteFusedDedup } from "./telegram-3m-fused-monitor.js";';
+// their own imports before this script runs. Insert after the final top-level import.
 const windowImport='import { buildWindowSummary, buildEodBehaviourSummary } from "./telegram-window-summary-v1.js";';
 if(!server.includes(windowImport)){
-  if(!server.includes(fusedImport))throw new Error("window summary import: fused import anchor not found");
-  server=server.replace(fusedImport,`${fusedImport}\n${windowImport}`);
+  const importMatches=[...server.matchAll(/^import[^\n]*;$/gm)];
+  const lastImport=importMatches.at(-1);
+  if(!lastImport || lastImport.index==null)throw new Error("window summary import: no top-level import anchor found");
+  const insertAt=lastImport.index+lastImport[0].length;
+  server=server.slice(0,insertAt)+`\n${windowImport}`+server.slice(insertAt);
 }
 
 server=replaceOnce(server,

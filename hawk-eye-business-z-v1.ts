@@ -66,6 +66,7 @@ const TARGETS: HawkEyeTarget[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
 const MIN_BASELINE_SAMPLES = 30;
 const Z_CAP = 4;
 const FULL_STRENGTH_Z = 2.5;
+const IMPACT_EPS = 1e-9;
 
 function finite(v: unknown): number | null {
   const n = Number(v);
@@ -85,9 +86,11 @@ function safeWeight(v: unknown): number {
   return n === null || n <= 0 ? 1 : clamp(n, 0.05, 5);
 }
 
-function safeImpact(v: unknown): number {
+function calibratedImpact(v: unknown): number | null {
   const n = finite(v);
-  return n === null ? 0 : clamp(n, -1, 1);
+  if (n === null) return null;
+  const impact = clamp(n, -1, 1);
+  return Math.abs(impact) <= IMPACT_EPS ? null : impact;
 }
 
 function zScore(raw: number | null, baseline: HawkEyeBaseline | null): number | null {
@@ -107,10 +110,10 @@ function buildFeatureResult(input: HawkEyeObservation): HawkEyeFeatureResult {
   const sampleCount = input.baseline && Number.isFinite(input.baseline.sampleCount)
     ? Math.max(0, Math.trunc(input.baseline.sampleCount))
     : 0;
-  const targetContribution = Object.fromEntries(TARGETS.map((target) => [
-    target,
-    ready ? z * safeImpact(input.impact[target]) : null,
-  ])) as Record<HawkEyeTarget, number | null>;
+  const targetContribution = Object.fromEntries(TARGETS.map((target) => {
+    const impact = calibratedImpact(input.impact[target]);
+    return [target, ready && impact !== null ? z * impact : null];
+  })) as Record<HawkEyeTarget, number | null>;
   return { family: input.family, feature: input.feature, raw, z, ready, sampleCount, targetContribution };
 }
 
@@ -133,6 +136,7 @@ function buildFamilyResult(
     }
     // Weighted average inside a family prevents a large constituent list from
     // winning merely because it has more rows (anti-double-count protection).
+    // Rows with no calibrated target impact are excluded rather than diluted to zero.
     return [target, weights > 0 ? weighted / weights : null];
   })) as Record<HawkEyeTarget, number | null>;
 

@@ -23,8 +23,10 @@ for (const importLine of imports) {
 }
 
 if (!src.includes(MARKER)) {
-  const anchor = '        if (TELEGRAM_3M_FUSED_DEDUP.shouldEmit(view)) {';
-  if (!src.includes(anchor)) {
+  const pulseAnchor = '        if (pulseDue && TELEGRAM_3M_FUSED_DEDUP.shouldEmit(view)) {';
+  const legacyAnchor = '        if (TELEGRAM_3M_FUSED_DEDUP.shouldEmit(view)) {';
+  const anchor = src.includes(pulseAnchor) ? pulseAnchor : src.includes(legacyAnchor) ? legacyAnchor : null;
+  if (!anchor) {
     console.warn("exact Z watch runtime anchor not found; skipping observation-only Z-WATCH wiring and allowing core service startup");
     process.exit(0);
   }

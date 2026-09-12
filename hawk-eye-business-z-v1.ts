@@ -69,6 +69,8 @@ const FULL_STRENGTH_Z = 2.5;
 const IMPACT_EPS = 1e-9;
 
 function finite(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "string" && !v.trim()) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }

@@ -30,7 +30,7 @@ function minutes(): KiteConstituentMinuteRecord[] {
   });
 }
 
-test("reuses closed constituent minutes for heavyweight and weighted sector rolling features", () => {
+test("reuses closed constituent minutes for heavyweight and parent-scoped weighted sector rolling features", () => {
   const report = buildHawkEyeRuntimeShadowV1({ registry, constituentMinutes: minutes(), asOfMs: AS_OF });
   assert.equal(report.opensSocket, false);
   assert.equal(report.fetchesNetworkData, false);
@@ -40,15 +40,27 @@ test("reuses closed constituent minutes for heavyweight and weighted sector roll
   assert.equal(report.heavyweightSeriesCount, 1);
   assert.equal(report.sectorSeriesCount, 1);
   assert.ok(report.observation.features.some((x) => x.feature === "HDFCBANK_RETURN_3M"));
-  assert.ok(report.observation.features.some((x) => x.feature.includes("FINANCIALS_REGISTERED_WEIGHTED_BASKET_RETURN_15M")));
+  assert.ok(report.observation.features.some((x) => x.feature.includes("NIFTY_FINANCIALS_REGISTERED_WEIGHTED_BASKET_RETURN_15M")));
 });
 
 test("sector basket fails closed when exact weights are unavailable", () => {
   const noWeights = registry.map((row) => row.role === "SECTOR_CONSTITUENT" ? { ...row, weight: null } : row);
   const report = buildHawkEyeRuntimeShadowV1({ registry: noWeights, constituentMinutes: minutes(), asOfMs: AS_OF });
   assert.equal(report.sectorSeriesCount, 0);
-  assert.ok(report.skippedSectorBaskets.some((x) => x === "FINANCIALS:EXACT_WEIGHTS_REQUIRED"));
+  assert.ok(report.skippedSectorBaskets.some((x) => x === "NIFTY_FINANCIALS:EXACT_WEIGHTS_REQUIRED"));
   assert.equal(report.observation.features.some((x) => x.family === "SECTORS"), false);
+});
+
+test("same sector across parent indices remains isolated instead of mixing weights", () => {
+  const crossParent: CanonicalConstituentTokenEntry[] = [
+    ...registry,
+    { instrumentToken: 2, parentSymbol: "SENSEX", role: "SECTOR_CONSTITUENT", tradingsymbol: "BANK_A", sector: "FINANCIALS", weight: 20, source: "KITE_INSTRUMENT_MASTER" },
+    { instrumentToken: 3, parentSymbol: "SENSEX", role: "SECTOR_CONSTITUENT", tradingsymbol: "BANK_B", sector: "FINANCIALS", weight: 80, source: "KITE_INSTRUMENT_MASTER" },
+  ];
+  const report = buildHawkEyeRuntimeShadowV1({ registry: crossParent, constituentMinutes: minutes(), asOfMs: AS_OF });
+  assert.equal(report.sectorSeriesCount, 2);
+  assert.ok(report.observation.features.some((x) => x.feature.includes("NIFTY_FINANCIALS_REGISTERED_WEIGHTED_BASKET_RETURN_3M")));
+  assert.ok(report.observation.features.some((x) => x.feature.includes("SENSEX_FINANCIALS_REGISTERED_WEIGHTED_BASKET_RETURN_3M")));
 });
 
 test("sister series consume only caller-supplied already-fetched canonical snapshots", () => {
@@ -75,11 +87,7 @@ test("sister series consume only caller-supplied already-fetched canonical snaps
 });
 
 test("future closed minutes and future sister snapshots are ignored", () => {
-  const futureMinute = {
-    ...minutes()[0],
-    minuteStartMs: AS_OF + minute,
-    closedAtMs: AS_OF + (2 * minute),
-  };
+  const futureMinute = { ...minutes()[0], minuteStartMs: AS_OF + minute, closedAtMs: AS_OF + (2 * minute) };
   const report = buildHawkEyeRuntimeShadowV1({
     registry,
     constituentMinutes: [...minutes(), futureMinute],

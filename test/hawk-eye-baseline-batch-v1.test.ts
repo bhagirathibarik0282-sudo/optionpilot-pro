@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { loadHawkEyeBaselinesAndRecordCurrentBatch } from "../hawk-eye-baseline-batch-v1.ts";
 import type { HawkEyeBaselineSample } from "../hawk-eye-baseline-store-v1.ts";
 
-const T = 1_000_000;
+const T = 10_000_000;
 
 function sample(target: HawkEyeBaselineSample["target"], feature: string, raw = 5): HawkEyeBaselineSample {
   return { target, family: "HEAVYWEIGHTS", feature, raw, observedAtMs: T, sampleId: "current" };
@@ -28,9 +28,10 @@ function historyRows(kinds: string[]) {
   });
 }
 
-test("batch persistence uses one history read and one insert for many target features", async () => {
+test("batch persistence uses one history read and one JSONB insert for many target features", async () => {
   let calls = 0;
   const seenKinds: string[] = [];
+  let insertPayload: unknown = null;
   const inputs = [sample("NIFTY", "HDFCBANK_RETURN_3M"), sample("BANKNIFTY", "HDFCBANK_RETURN_3M"), sample("SENSEX", "RELIANCE_RETURN_3M")];
   const results = await loadHawkEyeBaselinesAndRecordCurrentBatch(inputs, {
     isConfigured: () => true,
@@ -41,6 +42,8 @@ test("batch persistence uses one history read and one insert for many target fea
         seenKinds.push(...kinds);
         return { rows: historyRows(kinds) as any[] };
       }
+      assert.ok(sql.includes("jsonb_to_recordset"));
+      insertPayload = JSON.parse(String(params[0]));
       return { rows: [{ id: 1 }] as any[] };
     },
   });
@@ -50,6 +53,8 @@ test("batch persistence uses one history read and one insert for many target fea
   assert.ok(seenKinds.some((x) => x.includes(":NIFTY:")));
   assert.ok(seenKinds.some((x) => x.includes(":BANKNIFTY:")));
   assert.ok(seenKinds.some((x) => x.includes(":SENSEX:")));
+  assert.equal(Array.isArray(insertPayload), true);
+  assert.equal((insertPayload as unknown[]).length, 3);
 });
 
 test("current and future history rows never enter the baseline", async () => {

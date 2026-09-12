@@ -172,3 +172,51 @@ test("non-overlap gate reduces overlapping forward-return observations", () => {
   assert.ok((eval3m?.alignedSampleCount ?? 999) <= 30);
   assert.equal(report.nonOverlappingOutcomes, true);
 });
+
+
+import { calibrateHawkEyeImpactsV1 as calibrate } from '../hawk-eye-impact-calibration-v1.ts';
+
+const base = Date.UTC(2026, 8, 1, 4);
+const minute = 60_000;
+const feature = (i: number, step = 10) => ({ family: 'HEAVYWEIGHTS' as const, feature: 'X', observedAtMs: base + i * step * minute, raw: i });
+const quote = (time: number, price: number) => ({ target: 'NIFTY' as const, observedAtMs: time, price });
+
+test('past-only movement cannot become a forward predictive relationship', () => {
+  const features = Array.from({length: 80}, (_, i) => feature(i));
+  const prices = features.flatMap((f, i) => [quote(f.observedAtMs - minute, 100), quote(f.observedAtMs + 3 * minute, 100 + i)]);
+  const r = calibrate(features, prices, {horizonsMinutes: [3]});
+  assert.equal(r.acceptedTargetFeatureCount, 0);
+  assert.equal(r.evaluations[0].alignedSampleCount, 0);
+});
+
+test('actual delayed outcome intervals cannot overlap', () => {
+  const features = Array.from({length: 80}, (_, i) => feature(i, 3));
+  const prices = features.map((f, i) => quote(f.observedAtMs + minute, 100 + i));
+  const r = calibrate(features, prices, {horizonsMinutes: [3]});
+  assert.ok(r.evaluations[0].alignedSampleCount <= 40);
+});
+
+test('test strength cannot tune an accepted impact coefficient', () => {
+  const features = Array.from({length: 80}, (_, i) => feature(i));
+  const prices = (shuffle: boolean) => features.flatMap((f, i) => {
+    const value = shuffle && i >= 60 ? i + ((i % 2) ? -1 : 1) : i;
+    return [quote(f.observedAtMs, 100), quote(f.observedAtMs + 3 * minute, 100 + value)];
+  });
+  const options = {horizonsMinutes: [3], maxStartLagMs: 0, maxFutureLagMs: 0};
+  const a = calibrate(features, prices(false), options);
+  const b = calibrate(features, prices(true), options);
+  assert.equal(a.acceptedTargetFeatureCount, 1);
+  assert.equal(b.acceptedTargetFeatureCount, 1);
+  assert.deepEqual(a.calibrations, b.calibrations);
+});
+
+test('outcomes crossing shared split boundaries are purged even with overlapping research enabled', () => {
+  const features = Array.from({length: 80}, (_, i) => feature(i, 3));
+  const prices = features.map((f, i) => quote(f.observedAtMs + minute, 100 + i));
+  const r = calibrate(features, prices, {horizonsMinutes: [3, 6], nonOverlappingOutcomes: false});
+  const rows = r.evaluations.filter(row => row.target === 'NIFTY');
+  assert.equal(rows[0].trainSampleCount, 39);
+  assert.equal(rows[0].validationSampleCount, 19);
+  assert.equal(rows[1].trainSampleCount, 38);
+  assert.equal(rows[1].validationSampleCount, 18);
+});

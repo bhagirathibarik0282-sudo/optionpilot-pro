@@ -75,6 +75,16 @@ test("many correlated rows inside one family do not inflate score by row count",
     many.families.find((x) => x.family === "HEAVYWEIGHTS")?.targetScore.NIFTY);
 });
 
+test("uncalibrated zero-impact rows do not dilute another target contribution", () => {
+  const report = buildHawkEyeBusinessZReport([
+    obs({ family: "HEAVYWEIGHTS", feature: "BANK_LEADER", raw: 3, impact: { NIFTY: 1, BANKNIFTY: 1, SENSEX: 1 } }),
+    obs({ family: "HEAVYWEIGHTS", feature: "NO_BANK_IMPACT", raw: -3, impact: { NIFTY: 1, BANKNIFTY: 0, SENSEX: 1 } }),
+  ]);
+  const family = report.families.find((x) => x.family === "HEAVYWEIGHTS");
+  assert.equal(family?.targetScore.BANKNIFTY, 3);
+  assert.equal(report.features[1].targetContribution.BANKNIFTY, null);
+});
+
 test("extreme outliers are capped before impact fusion", () => {
   const report = buildHawkEyeBusinessZReport([
     obs({ family: "SISTERS", feature: "OUTLIER", raw: 100 }),

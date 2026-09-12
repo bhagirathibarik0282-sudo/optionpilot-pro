@@ -76,25 +76,41 @@ function heavyweightSeries(registry: CanonicalConstituentTokenEntry[], minutes: 
 }
 
 function sectorSeries(registry: CanonicalConstituentTokenEntry[], minutes: KiteConstituentMinuteRecord[]): { series: HawkEyeLiveSeries[]; skipped: string[] } {
+  // Parent index is part of the group key: the same stock/sector can legitimately have
+  // different exact weights in different indices and must never be mixed or first-wins deduped.
   const groups = new Map<string, CanonicalConstituentTokenEntry[]>();
   for (const row of registry ?? []) {
     if (row.role !== "SECTOR_CONSTITUENT" || !row.sector?.trim()) continue;
-    const key = entity(row.sector);
+    const parent = entity(row.parentSymbol);
+    const sector = entity(row.sector);
+    const key = `${parent}|${sector}`;
     const group = groups.get(key) ?? [];
-    if (!group.some((x) => x.instrumentToken === row.instrumentToken)) group.push(row);
+    if (group.some((x) => x.instrumentToken === row.instrumentToken)) {
+      const existing = group.find((x) => x.instrumentToken === row.instrumentToken)!;
+      if (existing.weight !== row.weight) group.push(row); // conflict will fail closed below.
+    } else {
+      group.push(row);
+    }
     groups.set(key, group);
   }
 
   const series: HawkEyeLiveSeries[] = [];
   const skipped: string[] = [];
-  for (const [sector, rows] of groups) {
+  for (const [groupKey, rows] of groups) {
+    const [parent, sector] = groupKey.split("|");
+    const label = `${parent}_${sector}`;
+    const tokens = new Set(rows.map((row) => row.instrumentToken));
+    if (tokens.size !== rows.length) {
+      skipped.push(`${label}:TOKEN_WEIGHT_CONFLICT`);
+      continue;
+    }
     if (!rows.length || rows.some((row) => !finitePositive(row.weight))) {
-      skipped.push(`${sector}:EXACT_WEIGHTS_REQUIRED`);
+      skipped.push(`${label}:EXACT_WEIGHTS_REQUIRED`);
       continue;
     }
     const totalWeight = rows.reduce((sum, row) => sum + (row.weight ?? 0), 0);
     if (!finitePositive(totalWeight)) {
-      skipped.push(`${sector}:WEIGHT_SUM_INVALID`);
+      skipped.push(`${label}:WEIGHT_SUM_INVALID`);
       continue;
     }
 
@@ -116,9 +132,9 @@ function sectorSeries(registry: CanonicalConstituentTokenEntry[], minutes: KiteC
       if (finitePositive(level) && finitePositive(observedAtMs)) points.push({ observedAtMs, price: level });
     }
     if (points.length) {
-      series.push({ family: "SECTORS", entity: `${sector}_REGISTERED_WEIGHTED_BASKET`, points });
+      series.push({ family: "SECTORS", entity: `${label}_REGISTERED_WEIGHTED_BASKET`, points });
     } else {
-      skipped.push(`${sector}:NO_COMPLETE_CLOSED_MINUTES`);
+      skipped.push(`${label}:NO_COMPLETE_CLOSED_MINUTES`);
     }
   }
   return { series, skipped };
@@ -139,11 +155,7 @@ function sisterSeries(snapshots: HawkEyeSevenIndexSnapshot[], asOfMs: number): H
   return [...groups.entries()].map(([name, points]) => ({ family: "SISTERS" as const, entity: name, points }));
 }
 
-/**
- * Converts already-existing closed constituent minutes plus optional already-fetched
- * canonical seven-index snapshots into Hawk Eye raw observations. No socket, fetch,
- * candidate, Telegram or execution side effect is permitted here.
- */
+/** Existing closed-minute sources only; no socket/fetch/candidate/Telegram/execution side effect. */
 export function buildHawkEyeRuntimeShadowV1(input: HawkEyeRuntimeShadowInput): HawkEyeRuntimeShadowReport {
   if (!finitePositive(input?.asOfMs)) throw new Error("HAWK_EYE_RUNTIME_INVALID_AS_OF");
   const minutes = closedMinutes(input.constituentMinutes ?? [], input.asOfMs);
@@ -151,9 +163,7 @@ export function buildHawkEyeRuntimeShadowV1(input: HawkEyeRuntimeShadowInput): H
   const heavyweights = heavyweightSeries(input.registry ?? [], minutes);
   const sectors = sectorSeries(input.registry ?? [], minutes);
   const all = [...sisters, ...heavyweights, ...sectors.series];
-  const observation = buildHawkEyeLiveObservationReport(all, input.asOfMs, {
-    maxLatestAgeMs: input.maxLatestAgeMs ?? 120_000,
-  });
+  const observation = buildHawkEyeLiveObservationReport(all, input.asOfMs, { maxLatestAgeMs: input.maxLatestAgeMs ?? 120_000 });
   return {
     version: "HAWK_EYE_RUNTIME_SHADOW_V1",
     mode: "SHADOW_OBSERVATION_ONLY",

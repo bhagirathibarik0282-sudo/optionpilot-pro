@@ -44,6 +44,25 @@ test("future points are ignored and cannot leak into current features", () => {
   assert.equal(feature?.sourceCurrentAtMs, T);
 });
 
+test("window is anchored to latest market timestamp rather than request time", () => {
+  const latest = T - m(1);
+  const report = buildHawkEyeLiveObservationReport([
+    {
+      family: "SISTERS",
+      entity: "FINNIFTY",
+      points: [
+        { observedAtMs: latest - m(3), price: 100 },
+        { observedAtMs: latest, price: 103 },
+      ],
+    },
+  ], T, { maxLatestAgeMs: m(2) });
+  const feature = report.features.find((x) => x.feature === "FINNIFTY_RETURN_3M");
+  assert.ok(feature);
+  assert.ok(Math.abs((feature?.raw ?? 0) - 3) < 1e-9);
+  assert.equal(feature?.observedAtMs, latest);
+  assert.equal(feature?.sourceAnchorAtMs, latest - m(3));
+});
+
 test("stale latest observation fails closed", () => {
   const report = buildHawkEyeLiveObservationReport([
     {

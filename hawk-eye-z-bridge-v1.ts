@@ -1,5 +1,6 @@
 import { buildHawkEyeBusinessZReport, type HawkEyeObservation, type HawkEyeTarget, type HawkEyeFamily, type HawkEyeTargetRating } from "./hawk-eye-business-z-v1.ts";
 import { loadHawkEyeBaselineAndRecordCurrent, type HawkEyeBaselineSample, type HawkEyeBaselineStoreResult } from "./hawk-eye-baseline-store-v1.ts";
+import { loadHawkEyeBaselinesAndRecordCurrentBatch } from "./hawk-eye-baseline-batch-v1.ts";
 import type { HawkEyeLiveObservationReport, HawkEyeRawFeature } from "./hawk-eye-live-observation-adapter-v1.ts";
 
 const TARGETS: HawkEyeTarget[] = ["NIFTY", "BANKNIFTY", "SENSEX"];
@@ -15,7 +16,9 @@ export interface HawkEyeImpactCalibration {
 }
 
 export interface HawkEyeZBridgeDeps {
-  loadBaseline: (sample: HawkEyeBaselineSample) => Promise<HawkEyeBaselineStoreResult>;
+  /** Compatibility/test fallback. Runtime default uses loadBaselines. */
+  loadBaseline?: (sample: HawkEyeBaselineSample) => Promise<HawkEyeBaselineStoreResult>;
+  loadBaselines?: (samples: HawkEyeBaselineSample[]) => Promise<HawkEyeBaselineStoreResult[]>;
 }
 
 export interface HawkEyeZBridgeTargetResult {
@@ -41,7 +44,7 @@ export interface HawkEyeZBridgeReport {
 }
 
 const defaultDeps: HawkEyeZBridgeDeps = {
-  loadBaseline: loadHawkEyeBaselineAndRecordCurrent,
+  loadBaselines: loadHawkEyeBaselinesAndRecordCurrentBatch,
 };
 
 function impactKey(family: HawkEyeFamily, feature: string): string {
@@ -80,12 +83,32 @@ function sampleFromFeature(target: HawkEyeTarget, feature: HawkEyeRawFeature): H
   };
 }
 
+function failedBaseline(): HawkEyeBaselineStoreResult {
+  return { baseline: null, sampleCount: 0, persisted: false, reason: "DB_READ_FAILED", historyLimit: 0 };
+}
+
+async function loadAllBaselines(samples: HawkEyeBaselineSample[], deps: HawkEyeZBridgeDeps): Promise<HawkEyeBaselineStoreResult[]> {
+  try {
+    if (deps.loadBaselines) {
+      const results = await deps.loadBaselines(samples);
+      return Array.isArray(results) && results.length === samples.length ? results : samples.map(failedBaseline);
+    }
+    const one = deps.loadBaseline ?? loadHawkEyeBaselineAndRecordCurrent;
+    const results: HawkEyeBaselineStoreResult[] = [];
+    for (const sample of samples) {
+      try { results.push(await one(sample)); }
+      catch { results.push(failedBaseline()); }
+    }
+    return results;
+  } catch {
+    return samples.map(failedBaseline);
+  }
+}
+
 /**
- * Bridges raw live Hawk Eye features into persistent Z baselines and the existing
- * Business Z fusion core. The bridge is target-isolated because baseline history is
- * stored per target/family/feature. It never invents impact coefficients: only supplied,
- * calibrated impacts can contribute to a target rating.
- *
+ * Raw Hawk Eye features -> persistent target-isolated baselines -> Business Z fusion.
+ * Runtime default batches persistence across the whole report, avoiding per-feature query
+ * explosion. Only externally supplied calibrated impacts can influence a rating.
  * Shadow-only: no selector, Telegram, execution, or order wiring.
  */
 export async function buildHawkEyeZBridgeReport(
@@ -93,14 +116,15 @@ export async function buildHawkEyeZBridgeReport(
   calibrations: HawkEyeImpactCalibration[],
   deps: HawkEyeZBridgeDeps = defaultDeps,
 ): Promise<HawkEyeZBridgeReport> {
-  if (!source || source.version !== "HAWK_EYE_LIVE_OBSERVATION_ADAPTER_V1") {
-    throw new Error("HAWK_EYE_Z_BRIDGE_INVALID_SOURCE");
-  }
+  if (!source || source.version !== "HAWK_EYE_LIVE_OBSERVATION_ADAPTER_V1") throw new Error("HAWK_EYE_Z_BRIDGE_INVALID_SOURCE");
 
   const inputFeatures = Array.isArray(source.features) ? source.features : [];
   const features = inputFeatures.slice(0, MAX_FEATURES_PER_REPORT);
   const calibrationByKey = calibrationIndex(calibrations);
+  const allSamples = TARGETS.flatMap((target) => features.map((feature) => sampleFromFeature(target, feature)));
+  const baselineResults = await loadAllBaselines(allSamples, deps);
   const targetEntries: Array<[HawkEyeTarget, HawkEyeZBridgeTargetResult]> = [];
+  let cursor = 0;
 
   for (const target of TARGETS) {
     const observations: HawkEyeObservation[] = [];
@@ -113,23 +137,9 @@ export async function buildHawkEyeZBridgeReport(
       const calibration = calibrationByKey.get(impactKey(feature.family, feature.feature));
       const targetImpact = singleTargetImpact(target, calibration);
       if (targetImpact[target] !== undefined) calibratedFeatureCount++;
-
-      let baselineResult: HawkEyeBaselineStoreResult;
-      try {
-        baselineResult = await deps.loadBaseline(sampleFromFeature(target, feature));
-      } catch {
-        baselineResult = {
-          baseline: null,
-          sampleCount: 0,
-          persisted: false,
-          reason: "DB_READ_FAILED",
-          historyLimit: 0,
-        };
-      }
+      const baselineResult = baselineResults[cursor++] ?? failedBaseline();
       bumpReason(baselineReasons, baselineResult.reason);
-      if (baselineResult.baseline) baselineReadyCount++;
-      else baselineNotReadyCount++;
-
+      if (baselineResult.baseline) baselineReadyCount++; else baselineNotReadyCount++;
       observations.push({
         family: feature.family,
         feature: feature.feature,
@@ -165,7 +175,4 @@ export async function buildHawkEyeZBridgeReport(
   };
 }
 
-export const HAWK_EYE_Z_BRIDGE_V1_LIMITS = Object.freeze({
-  maxFeaturesPerReport: MAX_FEATURES_PER_REPORT,
-  targets: TARGETS,
-});
+export const HAWK_EYE_Z_BRIDGE_V1_LIMITS = Object.freeze({ maxFeaturesPerReport: MAX_FEATURES_PER_REPORT, targets: TARGETS });

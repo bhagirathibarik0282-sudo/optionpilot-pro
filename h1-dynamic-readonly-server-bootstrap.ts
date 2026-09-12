@@ -54,12 +54,18 @@ export interface H1DynamicReadOnlyServerStatus {
 }
 
 type StartFn = (asOfDate: string, enabled: boolean) => Promise<H1DynamicReadOnlyLiveStartResult>;
-type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status" | "stop" | "rawEvidenceStatus">;
+type StatusService = Pick<H1LiveExactReadOnlyWebSocketService, "status" | "stop" | "rawEvidenceStatus">
+  & Partial<Pick<H1LiveExactReadOnlyWebSocketService, "hawkEyeSource">>;
 type H1StatusWithoutAcceptance = Omit<H1DynamicReadOnlyServerStatus, "marketOpenReadinessAcceptance">;
 
 let statusValue: H1DynamicReadOnlyServerStatus = status(false, false, false, "DISABLED", null, 0);
 let attemptPromise: Promise<H1DynamicReadOnlyServerStatus> | null = null;
 let liveService: StatusService | null = null;
+
+/** Pull-only copy from the existing service; never starts a feed or closes a minute. */
+export function getHawkEyeLiveSource() {
+  return liveService?.hawkEyeSource?.() ?? null;
+}
 let initialProofTimer: NodeJS.Timeout | null = null;
 let threeMinuteProofTimer: NodeJS.Timeout | null = null;
 let weekdayAcceptanceCaptureCancel: H1WeekdayAcceptanceCaptureCancel | null = null;

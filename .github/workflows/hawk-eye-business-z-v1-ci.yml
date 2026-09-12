@@ -10,6 +10,13 @@ on:
       - "hawk-eye-z-bridge-v1.ts"
       - "hawk-eye-runtime-shadow-v1.ts"
       - "hawk-eye-impact-calibration-v1.ts"
+      - "hawk-eye-closed-minute-buffer-v1.ts"
+      - "hawk-eye-live-http-v1.ts"
+      - "canonical-constituent-tick-store.ts"
+      - "h1-live-exact-readonly-websocket-service.ts"
+      - "h1-dynamic-readonly-server-bootstrap.ts"
+      - "research-server-hook.ts"
+      - "test/hawk-eye-live-http-v1.test.ts"
       - "test/hawk-eye-business-z-v1.test.ts"
       - "test/hawk-eye-baseline-store-v1.test.ts"
       - "test/hawk-eye-baseline-batch-v1.test.ts"
@@ -36,3 +43,5 @@ jobs:
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Run Hawk Eye business Z safety tests
         run: NODE_ENV=test node --import tsx --test test/hawk-eye-business-z-v1.test.ts test/hawk-eye-baseline-store-v1.test.ts test/hawk-eye-baseline-batch-v1.test.ts test/hawk-eye-live-observation-adapter-v1.test.ts test/hawk-eye-z-bridge-v1.test.ts test/hawk-eye-runtime-shadow-v1.test.ts test/hawk-eye-impact-calibration-v1.test.ts
+      - name: Run live source attachment and regression safety tests
+        run: NODE_ENV=test node --import tsx --test test/hawk-eye-live-http-v1.test.ts test/canonical-constituent-tick-store.test.ts test/h1-live-exact-readonly-websocket-service.test.ts test/h1-dynamic-readonly-server-bootstrap.test.ts

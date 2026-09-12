@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { mountHawkEyeLiveRoute } from "./hawk-eye-live-http-v1.js";
 import { researchRouter } from "./research-router.js";
 import { installTelegramCombinationBridge } from "./telegram-combination-bridge.js";
 import { installMeaningfulLiveTelegramBridge } from "./meaningful-live-telegram.js";
@@ -25,6 +26,7 @@ import { auditCandidateReconstruction } from "./h1-candidate-reconstruction-audi
 import { runH1ExactLiveContractDiscoveryHttp } from "./h1-exact-live-contract-discovery-http.js";
 import {
   getH1DynamicReadOnlyServerStatus,
+  getHawkEyeLiveSource,
   isH1DynamicReadOnlyLiveEnabled,
   startH1DynamicReadOnlyLiveFromServerEnv,
 } from "./h1-dynamic-readonly-server-bootstrap.js";
@@ -76,6 +78,7 @@ const h1StartupAuditTimer = setTimeout(() => {
 h1StartupAuditTimer.unref?.();
 
 export function mountResearchRoutes(app: Hono): void {
+  mountHawkEyeLiveRoute(app, getHawkEyeLiveSource);
   app.use("/", async (c, next) => {
     await next();
 

@@ -23,6 +23,16 @@ test("Hawk Eye fails closed when persistent-quality baseline is not ready", () =
   assert.equal(report.ratings.NIFTY.buyerStars, 0);
 });
 
+test("missing raw data remains null and cannot become a synthetic zero signal", () => {
+  const report = buildHawkEyeBusinessZReport([
+    obs({ family: "SISTERS", feature: "MISSING", raw: null }),
+  ]);
+  assert.equal(report.features[0].raw, null);
+  assert.equal(report.features[0].z, null);
+  assert.equal(report.features[0].ready, false);
+  assert.equal(report.ratings.NIFTY.state, "BASELINE_NOT_READY");
+});
+
 test("aligned sister heavyweight and sector pressure creates high buyer rating", () => {
   const report = buildHawkEyeBusinessZReport([
     obs({ family: "SISTERS", feature: "FINNIFTY_3M", raw: 3 }),

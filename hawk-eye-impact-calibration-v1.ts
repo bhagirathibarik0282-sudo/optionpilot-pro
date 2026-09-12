@@ -75,6 +75,7 @@ export interface HawkEyeImpactCalibrationReport {
 
 interface AlignedPair {
   observedAtMs: number;
+  outcomeAtMs: number;
   x: number;
   y: number;
 }
@@ -158,28 +159,6 @@ function normalizeTargetPrices(points: HawkEyeTargetPricePoint[]): Map<HawkEyeTa
     .sort((a, b) => a.observedAtMs - b.observedAtMs)]));
 }
 
-function latestAtOrBefore(
-  points: Array<{ observedAtMs: number; price: number }>,
-  atMs: number,
-  maxLagMs: number,
-): { observedAtMs: number; price: number } | null {
-  let lo = 0;
-  let hi = points.length - 1;
-  let found: { observedAtMs: number; price: number } | null = null;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const row = points[mid];
-    if (row.observedAtMs <= atMs) {
-      found = row;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  if (!found || atMs - found.observedAtMs > maxLagMs) return null;
-  return found;
-}
-
 function earliestAtOrAfter(
   points: Array<{ observedAtMs: number; price: number }>,
   atMs: number,
@@ -215,25 +194,26 @@ function alignPairs(
   for (const feature of features) {
     const x = finite(feature.raw);
     if (x === null) continue;
-    const start = latestAtOrBefore(targetPrices, feature.observedAtMs, maxStartLagMs);
+    // Start at the decision timestamp or later; never include already-realized movement.
+    const start = earliestAtOrAfter(targetPrices, feature.observedAtMs, maxStartLagMs);
     const desiredFutureMs = feature.observedAtMs + horizonMs;
     const future = earliestAtOrAfter(targetPrices, desiredFutureMs, maxFutureLagMs);
     if (!start || !future) continue;
-    if (start.observedAtMs > feature.observedAtMs || future.observedAtMs <= feature.observedAtMs) continue;
+    if (start.observedAtMs < feature.observedAtMs || future.observedAtMs <= start.observedAtMs) continue;
     if (!(start.price > 0) || !(future.price > 0)) continue;
     const y = ((future.price / start.price) - 1) * 100;
     if (!Number.isFinite(y)) continue;
-    candidates.push({ observedAtMs: feature.observedAtMs, x, y });
+    candidates.push({ observedAtMs: feature.observedAtMs, outcomeAtMs: future.observedAtMs, x, y });
   }
 
   candidates.sort((a, b) => a.observedAtMs - b.observedAtMs);
   if (!nonOverlapping) return candidates;
   const out: AlignedPair[] = [];
-  let lastAcceptedAt = Number.NEGATIVE_INFINITY;
+  let lastOutcomeAt = Number.NEGATIVE_INFINITY;
   for (const row of candidates) {
-    if (row.observedAtMs - lastAcceptedAt < horizonMs) continue;
+    if (row.observedAtMs < lastOutcomeAt) continue;
     out.push(row);
-    lastAcceptedAt = row.observedAtMs;
+    lastOutcomeAt = row.outcomeAtMs;
   }
   return out;
 }
@@ -275,12 +255,11 @@ function spearman(rows: AlignedPair[]): number | null {
   return pearson(ranks(rows.map((row) => row.x)), ranks(rows.map((row) => row.y)));
 }
 
-function splitCorrelation(rows: AlignedPair[]): SplitCorrelation {
-  const trainEnd = Math.floor(rows.length * 0.50);
-  const validationEnd = trainEnd + Math.floor(rows.length * 0.25);
-  const trainRows = rows.slice(0, trainEnd);
-  const validationRows = rows.slice(trainEnd, validationEnd);
-  const testRows = rows.slice(validationEnd);
+function splitCorrelation(rows: AlignedPair[], validationAt: number, testAt: number): SplitCorrelation {
+  // Shared time boundaries across horizons, purging labels that cross a boundary.
+  const trainRows = rows.filter(row => row.observedAtMs < validationAt && row.outcomeAtMs < validationAt);
+  const validationRows = rows.filter(row => row.observedAtMs >= validationAt && row.observedAtMs < testAt && row.outcomeAtMs < testAt);
+  const testRows = rows.filter(row => row.observedAtMs >= testAt);
   return {
     trainN: trainRows.length,
     validationN: validationRows.length,
@@ -363,12 +342,14 @@ export function calibrateHawkEyeImpactsV1(
   for (const group of groupedFeatures.values()) {
     const family = group[0].family;
     const feature = group[0].feature;
+    const validationAt = group[Math.floor(group.length * 0.50)].observedAtMs;
+    const testAt = group[Math.floor(group.length * 0.75)].observedAtMs;
     for (const target of TARGETS) {
       const prices = targetPrices.get(target) ?? [];
       const targetEvals: HawkEyeImpactEvaluation[] = [];
       for (const horizonMinutes of horizons) {
         const rows = alignPairs(group, prices, horizonMinutes, maxStartLagMs, maxFutureLagMs, nonOverlapping);
-        const split = splitCorrelation(rows);
+        const split = splitCorrelation(rows, validationAt, testAt);
         const enough = split.trainN >= minTrainSamples && split.validationN >= minValidationSamples && split.testN >= minTestSamples;
         const trainReady = split.train !== null && Math.abs(split.train) >= minAbsCorrelation;
         const validationStable = enough && trainReady && sameNonZeroSign(split.train, split.validation)
@@ -410,7 +391,6 @@ export function calibrateHawkEyeImpactsV1(
           const conservativeMagnitude = Math.min(
             Math.abs(selected.trainCorrelation ?? 0),
             Math.abs(selected.validationCorrelation ?? 0),
-            Math.abs(selected.testCorrelation ?? 0),
           );
           selected.impact = Number((direction * clamp(conservativeMagnitude, 0, 1)).toFixed(6));
           selected.acceptedOutOfSample = true;
@@ -469,3 +449,4 @@ export const HAWK_EYE_IMPACT_CALIBRATION_V1_LIMITS = Object.freeze({
   defaultMinTestSamples: DEFAULTS.minTestSamples,
   defaultMinAbsCorrelation: DEFAULTS.minAbsCorrelation,
 });
+

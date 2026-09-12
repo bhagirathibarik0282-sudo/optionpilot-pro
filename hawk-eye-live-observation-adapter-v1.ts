@@ -21,6 +21,7 @@ export interface HawkEyeRawFeature {
   metric: "RETURN_PCT" | "VOLUME_RATE";
   windowMinutes: 3 | 6 | 15;
   raw: number;
+  /** Exact latest market observation timestamp used for this feature. */
   observedAtMs: number;
   sourceCurrentAtMs: number;
   sourceAnchorAtMs: number;
@@ -50,7 +51,7 @@ export interface HawkEyeLiveObservationReport {
 export interface HawkEyeLiveObservationOptions {
   /** Latest usable point must be this fresh relative to asOfMs. */
   maxLatestAgeMs?: number;
-  /** Anchor may precede the exact window cutoff by at most this amount. */
+  /** Anchor may precede the exact market-time window cutoff by at most this amount. */
   maxAnchorLagMs?: number;
 }
 
@@ -144,7 +145,9 @@ export function buildHawkEyeLiveObservationReport(
     const skippedWindows: Array<3 | 6 | 15> = [];
     const beforeCount = features.length;
     for (const windowMinutes of WINDOWS) {
-      const cutoffMs = safeAsOfMs - (windowMinutes * 60_000);
+      // Window is measured from the actual latest market observation, not request time.
+      // This avoids shrinking/distorting a 3m window when the latest quote is 1–2m old.
+      const cutoffMs = latest.observedAtMs - (windowMinutes * 60_000);
       const anchor = anchorForWindow(points, cutoffMs, maxAnchorLagMs);
       if (!anchor || anchor.observedAtMs >= latest.observedAtMs) {
         skippedWindows.push(windowMinutes);
@@ -160,7 +163,7 @@ export function buildHawkEyeLiveObservationReport(
           metric: "RETURN_PCT",
           windowMinutes,
           raw: returnPct,
-          observedAtMs: Math.trunc(safeAsOfMs),
+          observedAtMs: latest.observedAtMs,
           sourceCurrentAtMs: latest.observedAtMs,
           sourceAnchorAtMs: anchor.observedAtMs,
         });
@@ -180,7 +183,7 @@ export function buildHawkEyeLiveObservationReport(
               metric: "VOLUME_RATE",
               windowMinutes,
               raw: volumeRate,
-              observedAtMs: Math.trunc(safeAsOfMs),
+              observedAtMs: latest.observedAtMs,
               sourceCurrentAtMs: latest.observedAtMs,
               sourceAnchorAtMs: anchor.observedAtMs,
             });

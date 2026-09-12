@@ -47,6 +47,8 @@ const defaultDeps: HawkEyeBaselineStoreDeps = {
 };
 
 function finite(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "string" && !v.trim()) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -123,9 +125,11 @@ export async function loadHawkEyeBaselineAndRecordCurrent(
     `SELECT payload
        FROM app_state_log
       WHERE kind = $1
-      ORDER BY id DESC
-      LIMIT $2`,
-    [kind, HISTORY_LIMIT + 32],
+        AND (payload->>'observedAtMs') ~ '^[0-9]+$'
+        AND (payload->>'observedAtMs')::bigint < $2
+      ORDER BY (payload->>'observedAtMs')::bigint DESC, id DESC
+      LIMIT $3`,
+    [kind, current.observedAtMs, HISTORY_LIMIT * 2],
   );
   if (!loaded) {
     return { baseline: null, sampleCount: 0, persisted: false, reason: "DB_READ_FAILED", historyLimit: HISTORY_LIMIT };
@@ -136,9 +140,15 @@ export async function loadHawkEyeBaselineAndRecordCurrent(
 
   const inserted = await deps.query<{ id: string | number }>(
     `INSERT INTO app_state_log (kind, payload)
-     VALUES ($1, $2::jsonb)
+     SELECT $1, $2::jsonb
+      WHERE NOT EXISTS (
+        SELECT 1
+          FROM app_state_log
+         WHERE kind = $1
+           AND payload->>'observedAtMs' = $3
+      )
      RETURNING id`,
-    [kind, JSON.stringify(current)],
+    [kind, JSON.stringify(current), String(current.observedAtMs)],
   );
   if (!inserted) {
     return { baseline: null, sampleCount: values.length, persisted: false, reason: "DB_WRITE_FAILED", historyLimit: HISTORY_LIMIT };

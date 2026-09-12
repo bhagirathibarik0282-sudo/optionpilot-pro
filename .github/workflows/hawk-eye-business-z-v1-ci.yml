@@ -1,0 +1,28 @@
+name: Hawk Eye Business Z V1 CI
+
+on:
+  pull_request:
+    paths:
+      - "hawk-eye-business-z-v1.ts"
+      - "hawk-eye-baseline-store-v1.ts"
+      - "test/hawk-eye-business-z-v1.test.ts"
+      - "test/hawk-eye-baseline-store-v1.test.ts"
+      - ".github/workflows/hawk-eye-business-z-v1-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hawk-eye-business-z-v1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run Hawk Eye business Z safety tests
+        run: NODE_ENV=test node --import tsx --test test/hawk-eye-business-z-v1.test.ts test/hawk-eye-baseline-store-v1.test.ts

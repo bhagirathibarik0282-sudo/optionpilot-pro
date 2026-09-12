@@ -2,6 +2,7 @@ import type { CanonicalMarketSymbol } from "./canonical-one-roof-market-snapshot
 import type { CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
 import type { CanonicalConstituentTokenEntry } from "./canonical-constituent-token-registry.js";
 import type { KiteDecodedPacket } from "./kite-websocket-binary-decoder.js";
+import { HawkEyeClosedMinuteBufferV1 } from "./hawk-eye-closed-minute-buffer-v1.js";
 
 export interface CanonicalConstituentTickStoreStatus {
   version: "CANONICAL_CONSTITUENT_TICK_STORE_V1";
@@ -41,6 +42,7 @@ export class CanonicalConstituentTickStore {
   private readonly latestByToken = new Map<number, CanonicalConstituentTick>();
   private rejectedPacketCount = 0;
   private ingestSeq = 0;
+  private readonly hawkEyeMinutes = new HawkEyeClosedMinuteBufferV1();
 
   constructor(entries: CanonicalConstituentTokenEntry[]) {
     if (!Array.isArray(entries) || entries.length === 0) {
@@ -110,7 +112,15 @@ export class CanonicalConstituentTickStore {
       ingestSeq: this.ingestSeq,
       ltp: packet.lastPrice,
     });
+    this.hawkEyeMinutes.ingest(this.latestByToken.get(packet.instrumentToken)!);
     return true;
+  }
+
+  hawkEyeSource() {
+    return {
+      registry: [...this.registryByToken.values()].flat().map(row => ({ ...row })),
+      constituentMinutes: this.hawkEyeMinutes.read(),
+    };
   }
 
   private expectedTokens(parentSymbol?: CanonicalMarketSymbol): number[] {

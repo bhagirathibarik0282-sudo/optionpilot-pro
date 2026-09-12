@@ -153,6 +153,9 @@ export class H1LiveExactReadOnlyWebSocketService {
   constituentEvidenceStatus(parentSymbol?: CanonicalMarketSymbol): CanonicalConstituentTickStoreStatus | null {
     return this.constituentEvidence?.status(parentSymbol) ?? null;
   }
+  hawkEyeSource() {
+    return this.constituentEvidence?.hawkEyeSource() ?? null;
+  }
 
   start(): H1LiveExactReadOnlyWebSocketStatus {
     if (this.transport) throw new Error("H1_LIVE_EXACT_READONLY_ALREADY_STARTED");

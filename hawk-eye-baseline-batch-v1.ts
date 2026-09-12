@@ -76,7 +76,7 @@ function result(reason: HawkEyeBaselineStoreReason, sampleCount = 0, persisted =
 /**
  * Batch persistent baseline loader for Hawk Eye runtime use.
  * One history SELECT + one current-sample INSERT for the entire report.
- * Current/future samples are excluded in JS per exact target/family/feature timestamp,
+ * Current/future samples are excluded per exact target/family/feature timestamp,
  * and duplicates are collapsed by logical timestamp before the baseline is calculated.
  * Any DB read/write failure fails the whole batch closed so partial ratings cannot leak.
  */
@@ -120,13 +120,18 @@ export async function loadHawkEyeBaselinesAndRecordCurrentBatch(
     const key = `${kindFor(row)}|${row.observedAtMs}`;
     if (!currentUnique.has(key)) currentUnique.set(key, row);
   }
-  const inserts = [...currentUnique.values()];
-  const insertKinds = inserts.map(kindFor);
-  const insertPayloads = inserts.map((row) => JSON.stringify(row));
-  const insertTimes = inserts.map((row) => String(row.observedAtMs));
+  const inserts = [...currentUnique.values()].map((row) => ({
+    kind: kindFor(row),
+    payload: row,
+    observedAt: String(row.observedAtMs),
+  }));
+
+  // Use one JSONB payload rather than driver-dependent jsonb[] array encoding.
   const written = await deps.query<{ id: string | number }>(
     `WITH incoming AS (
-       SELECT * FROM unnest($1::text[], $2::jsonb[], $3::text[]) AS x(kind, payload, observed_at)
+       SELECT x.kind, x.payload, x.observed_at
+         FROM jsonb_to_recordset($1::jsonb)
+              AS x(kind text, payload jsonb, observed_at text)
      )
      INSERT INTO app_state_log (kind, payload)
      SELECT i.kind, i.payload
@@ -137,7 +142,7 @@ export async function loadHawkEyeBaselinesAndRecordCurrentBatch(
            AND a.payload->>'observedAtMs' = i.observed_at
       )
      RETURNING id`,
-    [insertKinds, insertPayloads, insertTimes],
+    [JSON.stringify(inserts)],
   );
   if (!written) return normalized.map((row) => row ? result("DB_WRITE_FAILED") : result("INVALID_SAMPLE"));
 
@@ -148,7 +153,7 @@ export async function loadHawkEyeBaselinesAndRecordCurrentBatch(
       if (old.target !== current.target || old.family !== current.family || old.feature !== current.feature) continue;
       const oldTime = finite(old.observedAtMs);
       const oldRaw = finite(old.raw);
-      if (oldTime === null || oldRaw === null || oldTime >= current.observedAtMs) continue;
+      if (oldTime === null || oldRaw === null || oldTime <= 0 || oldTime >= current.observedAtMs) continue;
       byTimestamp.set(Math.trunc(oldTime), oldRaw);
     }
     const values = [...byTimestamp.entries()]

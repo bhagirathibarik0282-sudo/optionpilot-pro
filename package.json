@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node scripts/wire-storage-v3-runtime.mjs && node scripts/wire-outcome-history-runtime.mjs && node scripts/wire-option-buying-risk-runtime.mjs && node scripts/wire-market-forward-test-readiness-runtime.mjs && node scripts/wire-no-trade-reason-dedupe-v1.mjs && node scripts/wire-telegram-z-watch-exact-runtime-v1.mjs && (tsx h1-live-contract-discovery-startup-audit.ts & tsx kite-shadow-runtime-service.ts & tsx h1-exact-shadow-live-service.ts & tsx server.ts)",
+    "start": "node scripts/wire-kite-auth-callback-v2.mjs && node scripts/wire-storage-v3-runtime.mjs && node scripts/wire-outcome-history-runtime.mjs && node scripts/wire-option-buying-risk-runtime.mjs && node scripts/wire-market-forward-test-readiness-runtime.mjs && node scripts/wire-no-trade-reason-dedupe-v1.mjs && node scripts/wire-telegram-z-watch-exact-runtime-v1.mjs && (tsx h1-live-contract-discovery-startup-audit.ts & tsx kite-shadow-runtime-service.ts & tsx h1-exact-shadow-live-service.ts & tsx server.ts)",
     "start:kite-shadow": "tsx kite-shadow-runtime-service.ts",
     "start:option-recorder": "tsx option-recorder-service.ts",
     "eod:archive": "tsx eod-archive-job.ts",
@@ -30,6 +30,7 @@
     "telegram:z-watch:exact:wire:check": "node scripts/wire-telegram-z-watch-exact-runtime-v1.mjs --check",
     "option:risk:wire:check": "node scripts/wire-option-buying-risk-runtime.mjs --check",
     "forward:test:wire:check": "node scripts/wire-market-forward-test-readiness-runtime.mjs --check",
+    "kite:auth:wire:check": "node scripts/wire-kite-auth-callback-v2.mjs --check",
     "kite:runtime:shadow:preflight": "node scripts/kite-runtime-shadow-preflight.mjs",
     "test:market-refresh-singleflight": "NODE_ENV=test node --import tsx --test test/market-refresh-singleflight.test.ts",
     "test:telegram-window-summary": "NODE_ENV=test node --import tsx --test test/telegram-window-summary-v1.test.ts test/telegram-window-runtime-contract.test.ts",

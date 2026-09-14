@@ -53,7 +53,7 @@ function input() {
       futuresConfirmation:{...common,sourceId:"futures",futuresMovePct:0.2,futuresVwapAccepted:true,acceptanceSamples:2},
       oiPositioning:{...common,sourceId:"oi",band7PcrDelta:0.04,volumePcrDelta:0.03,wallAsymmetryPct:4},
       volatility:{...common,sourceId:"vol",candidatePremiumMovePct:4,vixChangePct:0.3,atmIvChangePct:0.4},
-      heavyweights:{...common,sourceId:"heavy",bullishWeightPct:70,bearishWeightPct:20},
+      heavyweights:{...common,sourceId:"H1_EXACT_WEIGHTED_HEAVYWEIGHT_LIVE_ADAPTER_V1" as const,bullishWeightPct:70,bearishWeightPct:20,neutralWeightPct:10,liveWeightCoveragePct:100,liveConstituentCount:4,authorityConstituentCount:4,lookbackMinutes:3,referenceProviderId:"OFFICIAL_NIFTY_PROVIDER",referenceDocumentId:"official-index-weight-file",referenceVersion:"2026-09-14",referenceManifestHash:"sha256:official-reference-manifest",officialWeightAuthorityVerified:true as const,normalizedMissingWeightAway:false as const},
       sectorBreadth:{...common,sourceId:"sector",bullishCount:7,bearishCount:2,totalCount:10},
       responseLadder:{...common,sourceId:"ladder",direction:"UP" as const,confirmedStages:3,totalStages:4 as const},
     },

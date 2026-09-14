@@ -21,6 +21,7 @@ import { persistKiteAuthoritySession, resolveKiteAuthoritySession, getKiteAuthor
 import { revokeKiteAuthoritySession } from "./kite-session-authority-revoke.js";
 import { KeyedSingleFlight, marketAuthorityKey } from "./market-refresh-singleflight.js";
 import { evaluateFuturesVwapAcceptance } from "./futures-vwap-acceptance.js";
+import { shouldRefreshCandidateSnapshot } from "./candidate-snapshot-freshness.js";
 
 interface Instrument {
   instrument_token: number;
@@ -7034,6 +7035,22 @@ async function refreshMarketSnapshot(
     return await session.refreshPromise;
   } finally {
     session.refreshPromise = undefined;
+  }
+}
+
+// Candidate/readiness endpoints are valid when opened directly too. They must
+// not depend on a dashboard tab happening to poll /api/data in the background.
+// The existing single-flight + adaptive TTL keep this bounded; downstream
+// truth/identity/liquidity gates still fail closed if Kite returns bad data.
+async function ensureFreshCandidateMarketSnapshot(session: KiteSession): Promise<void> {
+  const ttlMs = getAdaptiveSnapshotTtlMs();
+  if (shouldRefreshCandidateSnapshot({
+    hasSnapshot: Boolean(session.marketSnapshot),
+    snapshotTimeMs: session.snapshotTime,
+    nowMs: Date.now(),
+    ttlMs,
+  })) {
+    await refreshMarketSnapshot(session);
   }
 }
 
@@ -21240,6 +21257,7 @@ app.get("/api/v2/candidate-selection", async (c) => {
   const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
   const session = getSession(c);
   if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  await ensureFreshCandidateMarketSnapshot(session);
   return c.json(await buildV2CandidateSelection(rawSymbol as V2PremiumSymbol, session, limit));
 });
 
@@ -21250,6 +21268,7 @@ app.get("/api/v2/option-buying-structure", async (c) => {
   }
   const session = getSession(c);
   if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  await ensureFreshCandidateMarketSnapshot(session);
   const rawLimit = Number(c.req.query("limit") || 20);
   const limit = Number.isFinite(rawLimit) ? Math.max(2, Math.min(Math.trunc(rawLimit), RECORDER_MAX_SNAPSHOTS)) : 20;
   const result = await buildV2CandidateSelection(rawSymbol as V2PremiumSymbol, session, limit);
@@ -21266,6 +21285,7 @@ app.get("/api/v2/option-buying-card", async (c) => {
   }
   const session = getSession(c);
   if (!session) return c.json({ error: "Kite not connected. Please connect Kite first." }, 401);
+  await ensureFreshCandidateMarketSnapshot(session);
 
   const symbol = rawSymbol as V2PremiumSymbol;
   const selection = await buildV2CandidateSelection(symbol, session, 20);

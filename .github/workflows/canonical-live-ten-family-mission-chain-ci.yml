@@ -1,0 +1,32 @@
+name: Canonical Live Ten Family Mission Chain CI
+
+on:
+  pull_request:
+    paths:
+      - "canonical-live-ten-family-mission-chain.ts"
+      - "canonical-live-family-signal-registry.ts"
+      - "canonical-business-mission-orchestrator.ts"
+      - "h1-exact-core-family-signal-adapter.ts"
+      - "h1-remaining-family-directional-attestor.ts"
+      - "test/canonical-live-ten-family-mission-chain.test.ts"
+      - ".github/workflows/canonical-live-ten-family-mission-chain-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  devil-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: >-
+          NODE_ENV=test node --import tsx --test
+          test/canonical-live-ten-family-mission-chain.test.ts
+          test/h1-exact-core-family-signal-adapter.test.ts
+          test/h1-remaining-family-directional-attestor.test.ts
+          test/canonical-business-mission-orchestrator.test.ts

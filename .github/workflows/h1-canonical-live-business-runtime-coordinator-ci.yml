@@ -1,0 +1,30 @@
+name: H1 Canonical Live Business Runtime Coordinator CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-canonical-live-business-runtime-coordinator.ts"
+      - "h1-live-seven-family-directional-producer.ts"
+      - "h1-exact-core-family-signal-adapter.ts"
+      - "canonical-live-ten-family-mission-chain.ts"
+      - "test/h1-canonical-live-business-runtime-coordinator.test.ts"
+      - ".github/workflows/h1-canonical-live-business-runtime-coordinator-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  devil-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: >-
+          NODE_ENV=test node --import tsx --test
+          test/h1-canonical-live-business-runtime-coordinator.test.ts
+          test/h1-live-seven-family-directional-producer.test.ts
+          test/canonical-live-ten-family-mission-chain.test.ts

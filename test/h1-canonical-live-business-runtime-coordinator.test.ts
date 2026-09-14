@@ -6,8 +6,8 @@ import { buildCanonicalOneRoofMarketSnapshot, type CanonicalMarketFamily } from 
 import { selectExecutionCandidate } from "../execution-candidate-selector.js";
 import type { LiveGateEvidencePacket, LiveGateName } from "../h1-live-gate-evidence-assembler.js";
 
-const now = Date.parse("2026-09-15T04:05:00.000Z");
-const observedAt = "2026-09-15T04:04:30.000Z";
+const now = Date.now();
+const observedAt = new Date(now - 30_000).toISOString();
 const hash = "runtime-manifest";
 const families: CanonicalMarketFamily[] = ["MARKET_STRUCTURE","FUTURES_CONFIRMATION","OPTION_PREMIUMS","OI_POSITIONING","MULTI_DTE","VOLATILITY","HEAVYWEIGHTS","SECTOR_BREADTH","RESPONSE_LADDER","LIQUIDITY_EXECUTABILITY"];
 
@@ -21,8 +21,8 @@ function packet(): LiveGateEvidencePacket {
 
 function direction() {
   return deriveH1ExactLiveSpotDirection(
-    {source:"LIVE_RUNTIME_EXACT",symbol:"NIFTY",price:23300,observedAt:"2026-09-15T04:03:00.000Z",receivedAt:"2026-09-15T04:03:01.000Z"},
-    {source:"LIVE_RUNTIME_EXACT",symbol:"NIFTY",price:23350,observedAt,receivedAt:"2026-09-15T04:04:31.000Z"},
+    {source:"LIVE_RUNTIME_EXACT",symbol:"NIFTY",price:23300,observedAt:new Date(now-90_000).toISOString(),receivedAt:new Date(now-89_000).toISOString()},
+    {source:"LIVE_RUNTIME_EXACT",symbol:"NIFTY",price:23350,observedAt,receivedAt:new Date(now-29_000).toISOString()},
     {maxObservationGapMs:120_000,minAbsoluteSpotMovePct:0.1},
   );
 }

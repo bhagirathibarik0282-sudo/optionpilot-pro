@@ -24,6 +24,7 @@ type SourceIndex = {
   pdh?: number | null;
   pdl?: number | null;
   vwap?: number | null;
+  futuresLtp?: number | null;
   atmStrike?: number | null;
   ceLtp?: number | null;
   peLtp?: number | null;
@@ -126,17 +127,18 @@ function validHistory(session: SourceSession | RecorderExport): SourceSnapshot[]
 function directionFromHistory(symbol: RecorderSymbol, history: SourceSnapshot[], fallback?: ExportIndex): Side | "NONE" {
   const current = history.at(-1)?.[symbol];
   const previous = history.at(-2)?.[symbol];
-  const spot = finite(current?.spot) ?? finite(fallback?.spot);
-  const prevSpot = finite(previous?.spot);
+  const nearFuture = fallback?.futuresContracts?.find((f) => f.label === "Near") ?? fallback?.futuresContracts?.[0];
+  const future = finite(current?.futuresLtp) ?? finite(nearFuture?.ltp);
+  const prevFuture = finite(previous?.futuresLtp);
   const vwap = finite(current?.vwap) ?? finite(fallback?.vwap);
-  if (spot == null || vwap == null) return "NONE";
-  if (prevSpot != null) {
-    if (spot > prevSpot && spot > vwap) return "CE";
-    if (spot < prevSpot && spot < vwap) return "PE";
+  if (future == null || vwap == null) return "NONE";
+  if (prevFuture != null) {
+    if (future > prevFuture && future > vwap) return "CE";
+    if (future < prevFuture && future < vwap) return "PE";
     return "NONE";
   }
-  if (spot > vwap) return "CE";
-  if (spot < vwap) return "PE";
+  if (future > vwap) return "CE";
+  if (future < vwap) return "PE";
   return "NONE";
 }
 
@@ -161,11 +163,7 @@ function futuresConfirmed(index: ExportIndex | undefined, side: Side): boolean {
   if (!index) return false;
   if (side === "CE" && index.futuresVwapBias === "UP") return true;
   if (side === "PE" && index.futuresVwapBias === "DOWN") return true;
-  const near = index.futuresContracts?.find((f) => f.label === "Near") ?? index.futuresContracts?.[0];
-  const spot = finite(index.spot);
-  const future = finite(near?.ltp);
-  if (spot == null || future == null) return false;
-  return side === "CE" ? future >= spot : future <= spot;
+  return false;
 }
 
 function liquidityAvailable(index: ExportIndex | undefined): boolean {
@@ -203,7 +201,7 @@ function legacyVerdicts(symbol: RecorderSymbol, history: SourceSnapshot[]): Reco
       state: dir !== "NONE" && confirmed ? "TRADEABLE" : "WATCH",
       direction: dir !== "NONE" && confirmed ? dir : "NONE",
       quality: dir !== "NONE" && confirmed ? "MEDIUM" : "LOW",
-      evidence: dir !== "NONE" && confirmed ? ["SPOT_VWAP_DIRECTION", "PREMIUM_CONTINUATION"] : ["SCALP_CONFIRMATION_INCOMPLETE"],
+      evidence: dir !== "NONE" && confirmed ? ["FUTURES_VWAP_DIRECTION", "PREMIUM_CONTINUATION"] : ["SCALP_CONFIRMATION_INCOMPLETE"],
       conflicts: [],
     },
     {
@@ -212,7 +210,7 @@ function legacyVerdicts(symbol: RecorderSymbol, history: SourceSnapshot[]): Reco
       direction: dir !== "NONE" && confirmed && persistent ? dir : "NONE",
       quality: dir !== "NONE" && confirmed && persistent ? "MEDIUM" : "LOW",
       evidence: dir !== "NONE" && confirmed && persistent
-        ? ["THREE_SNAPSHOT_PERSISTENCE", "SPOT_VWAP_DIRECTION", "PREMIUM_CONTINUATION"]
+        ? ["THREE_SNAPSHOT_PERSISTENCE", "FUTURES_VWAP_DIRECTION", "PREMIUM_CONTINUATION"]
         : ["INTRADAY_PERSISTENCE_INCOMPLETE"],
       conflicts: [],
     },
@@ -245,7 +243,7 @@ function enrichedVerdicts(symbol: RecorderSymbol, history: SourceSnapshot[], ind
     direction: scalpPass ? dir : "NONE",
     quality: scalpPass ? "MEDIUM" : "LOW",
     evidence: scalpPass
-      ? ["SPOT_VWAP_DIRECTION", "PREMIUM_CONTINUATION", "FUTURES_CONFIRMATION", "LIQUIDITY_FIELDS_PRESENT"]
+      ? ["FUTURES_VWAP_DIRECTION", "PREMIUM_CONTINUATION", "FUTURES_CONFIRMATION", "LIQUIDITY_FIELDS_PRESENT"]
       : ["SCALP_GATE_INCOMPLETE"],
     conflicts: liquidity ? [] : ["LIQUIDITY_DATA_INCOMPLETE"],
   };
@@ -256,7 +254,7 @@ function enrichedVerdicts(symbol: RecorderSymbol, history: SourceSnapshot[], ind
     direction: traderPass ? dir : "NONE",
     quality: traderPass ? "MEDIUM" : "LOW",
     evidence: traderPass
-      ? ["THREE_SNAPSHOT_PERSISTENCE", "SPOT_VWAP_DIRECTION", "PREMIUM_CONTINUATION", "FUTURES_CONFIRMATION"]
+      ? ["THREE_SNAPSHOT_PERSISTENCE", "FUTURES_VWAP_DIRECTION", "PREMIUM_CONTINUATION", "FUTURES_CONFIRMATION"]
       : ["TRADER_GATE_INCOMPLETE"],
     conflicts: [],
   };

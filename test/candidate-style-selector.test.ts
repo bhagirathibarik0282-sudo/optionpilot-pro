@@ -53,22 +53,25 @@ test("SCALP becomes READY only when scalp-specific gates and confirmations are r
   assert.equal(result.affectsExecution, false);
 });
 
-test("SWING becomes READY independently from scalp rules", () => {
-  const result = selectCandidateStyle(makeInput({ style: "SWING" }));
+test("SWING becomes READY independently from scalp rules for strict DTE 7-13", () => {
+  const result = selectCandidateStyle(makeInput({ style: "SWING", contract: { ...contract, dte: 7 } }));
   assert.equal(result.status, "READY");
   assert.match(result.candidateKey ?? "", /^SWING:NIFTY:CE:/);
+  assert.equal(result.tradeHorizon, "SWING_7_13");
 });
 
-test("same contract cannot collide between SCALP and SWING candidate identities", () => {
+test("the same DTE contract cannot be READY in both SCALP and SWING", () => {
   const scalpResult = selectCandidateStyle(makeInput({ style: "SCALP" }));
   const swingResult = selectCandidateStyle(makeInput({ style: "SWING" }));
-  assert.notEqual(scalpResult.candidateKey, swingResult.candidateKey);
+  assert.equal(scalpResult.status, "READY");
+  assert.equal(swingResult.status, "BLOCKED");
+  assert.ok(swingResult.reasons.includes("TRADE_STYLE_DTE_MISMATCH"));
 });
 
 test("stale truth blocks both styles before any trade-looking candidate is emitted", () => {
   const badShared = { ...shared, truthFresh: false };
   const scalpResult = selectCandidateStyle(makeInput({ style: "SCALP", shared: badShared }));
-  const swingResult = selectCandidateStyle(makeInput({ style: "SWING", shared: badShared }));
+  const swingResult = selectCandidateStyle(makeInput({ style: "SWING", contract: { ...contract, dte: 7 }, shared: badShared }));
   assert.equal(scalpResult.status, "BLOCKED");
   assert.equal(swingResult.status, "BLOCKED");
   assert.equal(scalpResult.candidateKey, null);
@@ -94,7 +97,7 @@ test("unconfirmed positioning is WATCH, not silently ignored", () => {
 });
 
 test("unconfirmed break/failure evidence is WATCH, not silently ignored", () => {
-  const result = selectCandidateStyle(makeInput({ style: "SWING", shared: { ...shared, breakFailureConfirmed: false } }));
+  const result = selectCandidateStyle(makeInput({ style: "SWING", contract: { ...contract, dte: 7 }, shared: { ...shared, breakFailureConfirmed: false } }));
   assert.equal(result.status, "WATCH");
 });
 
@@ -106,20 +109,20 @@ test("bad liquidity hard-blocks candidate selection", () => {
 
 test("SCALP may be READY while SWING is BLOCKED by higher-DTE thesis conflict", () => {
   const scalpResult = selectCandidateStyle(makeInput({ style: "SCALP" }));
-  const swingResult = selectCandidateStyle(makeInput({ style: "SWING", swing: { ...swing, nearExpiryNoiseNotDrivingThesis: false } }));
+  const swingResult = selectCandidateStyle(makeInput({ style: "SWING", contract: { ...contract, dte: 7 }, swing: { ...swing, nearExpiryNoiseNotDrivingThesis: false } }));
   assert.equal(scalpResult.status, "READY");
   assert.equal(swingResult.status, "BLOCKED");
 });
 
 test("SWING may be READY while SCALP is WATCH when fast premium confirmation is absent", () => {
   const scalpResult = selectCandidateStyle(makeInput({ style: "SCALP", scalp: { ...scalp, fastPremiumResponseConfirmed: false } }));
-  const swingResult = selectCandidateStyle(makeInput({ style: "SWING" }));
+  const swingResult = selectCandidateStyle(makeInput({ style: "SWING", contract: { ...contract, dte: 7 } }));
   assert.equal(scalpResult.status, "WATCH");
   assert.equal(swingResult.status, "READY");
 });
 
 test("SWING hard-blocks unacceptable theta/IV burden", () => {
-  const result = selectCandidateStyle(makeInput({ style: "SWING", swing: { ...swing, thetaIvBurdenAcceptable: false } }));
+  const result = selectCandidateStyle(makeInput({ style: "SWING", contract: { ...contract, dte: 7 }, swing: { ...swing, thetaIvBurdenAcceptable: false } }));
   assert.equal(result.status, "BLOCKED");
   assert.ok(result.devilFlags.includes("THETA_IV_BURDEN_UNACCEPTABLE"));
 });
@@ -130,4 +133,20 @@ test("invalid exact contract identity is DATA_UNAVAILABLE", () => {
   assert.equal(result.side, null);
   assert.equal(result.contract, null);
   assert.equal(result.candidateKey, null);
+});
+
+test("DTE 0-1 routes to expiry scalp and DTE 2-6 to normal scalp", () => {
+  const expiry = selectCandidateStyle(makeInput({ contract: { ...contract, dte: 1 } }));
+  const normal = selectCandidateStyle(makeInput({ contract: { ...contract, dte: 6 } }));
+  assert.equal(expiry.status, "READY");
+  assert.equal(expiry.tradeHorizon, "EXPIRY_SCALP_0_1");
+  assert.equal(normal.status, "READY");
+  assert.equal(normal.tradeHorizon, "NORMAL_SCALP_2_6");
+});
+
+test("DTE above 13 is blocked by the strict research horizon", () => {
+  const result = selectCandidateStyle(makeInput({ style: "SWING", contract: { ...contract, dte: 14 } }));
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.tradeHorizon, "UNSUPPORTED");
+  assert.ok(result.reasons.includes("DTE_OUTSIDE_STRICT_0_13_RANGE"));
 });

@@ -9,6 +9,7 @@ function snap(id: string, spot: number, ce: number, pe: number) {
     snapshotStatus: "LIVE",
     NIFTY: {
       spot,
+      futuresLtp: spot + 100,
       vwap: 24700,
       pdh: 24800,
       pdl: 24500,

@@ -1,5 +1,6 @@
 // Research-only SCALP / SWING candidate selector foundation.
 // No Telegram sending, live verdict authority, execution authority, DB writes, or wall-clock access.
+import { routeStrictTradeHorizon, type StrictTradeHorizon } from "./strict-trade-horizon-router.js";
 
 export type CandidateTradeStyle = "SCALP" | "SWING";
 export type CandidateSide = "CE" | "PE";
@@ -54,6 +55,7 @@ export interface CandidateStyleSelectionResult {
   version: "CANDIDATE_STYLE_SELECTOR_V1";
   semantics: "RESEARCH_SHADOW_ONLY";
   style: CandidateTradeStyle;
+  tradeHorizon: StrictTradeHorizon | null;
   side: CandidateSide | null;
   contract: CandidateContractIdentity | null;
   status: CandidateSelectionStatus;
@@ -98,10 +100,12 @@ function baseResult(
   devilFlags: string[],
 ): CandidateStyleSelectionResult {
   const contract = validContract(input.contract) ? input.contract! : null;
+  const tradeHorizon = contract ? routeStrictTradeHorizon(contract.dte).horizon : null;
   return {
     version: "CANDIDATE_STYLE_SELECTOR_V1",
     semantics: "RESEARCH_SHADOW_ONLY",
     style: input.style,
+    tradeHorizon,
     side: contract?.side ?? null,
     contract,
     status,
@@ -120,6 +124,14 @@ export function selectCandidateStyle(input: CandidateStyleSelectionInput): Candi
 
   if (!validContract(input.contract)) {
     return baseResult(input, "DATA_UNAVAILABLE", ["INVALID_OR_MISSING_CONTRACT_IDENTITY"], devilFlags);
+  }
+
+  const horizon = routeStrictTradeHorizon(input.contract!.dte);
+  if (!horizon.supported) {
+    return baseResult(input, "BLOCKED", [horizon.reason], ["STRICT_DTE_HORIZON_NOT_SUPPORTED"]);
+  }
+  if (horizon.expectedStyle !== input.style) {
+    return baseResult(input, "BLOCKED", ["TRADE_STYLE_DTE_MISMATCH"], [`${horizon.horizon}_REQUIRES_${horizon.expectedStyle}`]);
   }
 
   const shared = input.shared;

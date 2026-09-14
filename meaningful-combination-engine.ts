@@ -102,15 +102,15 @@ function atmPair(options: OptionRow[]): { ce: OptionRow | null; pe: OptionRow | 
 
 function comb01(m: MarketRow | null): MeaningfulCombinationResult {
   const id: CombinationId = "COMB-01";
-  const name = "Spot + Futures + VWAP Directional Participation";
+  const name = "Near Futures + Futures VWAP + Basis Directional Participation";
   if (!m || !finite(m.spot_ltp) || !finite(m.future_ltp) || !finite(m.vwap)) {
     return result(id, name, "UNAVAILABLE", "UNKNOWN", ["Spot/futures/VWAP inputs are incomplete."], [], ["spot_ltp", "future_ltp", "vwap"]);
   }
-  const spotAbove = m.spot_ltp > m.vwap;
+  const futureAboveVwap = m.future_ltp > m.vwap;
   const basisUp = m.future_ltp >= m.spot_ltp;
-  if (spotAbove && basisUp) return result(id, name, "SUPPORTIVE", "BULLISH", ["Spot is above VWAP and futures are not discounting spot."], ["spot_ltp", "future_ltp", "vwap"]);
-  if (!spotAbove && !basisUp) return result(id, name, "SUPPORTIVE", "BEARISH", ["Spot is below VWAP and futures trade below spot."], ["spot_ltp", "future_ltp", "vwap"]);
-  return result(id, name, "CONFLICTING", "MIXED", ["Spot/VWAP and futures basis do not align cleanly."], ["spot_ltp", "future_ltp", "vwap"]);
+  if (futureAboveVwap && basisUp) return result(id, name, "SUPPORTIVE", "BULLISH", ["Near futures are above their traded VWAP and not discounting spot."], ["spot_ltp", "future_ltp", "vwap"]);
+  if (!futureAboveVwap && !basisUp) return result(id, name, "SUPPORTIVE", "BEARISH", ["Near futures are below their traded VWAP and trade below spot."], ["spot_ltp", "future_ltp", "vwap"]);
+  return result(id, name, "CONFLICTING", "MIXED", ["Futures/VWAP and futures basis do not align cleanly."], ["spot_ltp", "future_ltp", "vwap"]);
 }
 
 function comb02(options: OptionRow[]): MeaningfulCombinationResult {

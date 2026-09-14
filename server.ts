@@ -20,6 +20,7 @@ import { collectH1LiveSelectorDecisions } from "./h1-live-selector-registry.js";
 import { persistKiteAuthoritySession, resolveKiteAuthoritySession, getKiteAuthorityPublicStatus, kiteSessionIdMatchesFingerprint, type KiteAuthorityResolvedSession } from "./kite-session-authority.js";
 import { revokeKiteAuthoritySession } from "./kite-session-authority-revoke.js";
 import { KeyedSingleFlight, marketAuthorityKey } from "./market-refresh-singleflight.js";
+import { evaluateFuturesVwapAcceptance } from "./futures-vwap-acceptance.js";
 
 interface Instrument {
   instrument_token: number;
@@ -429,6 +430,7 @@ interface RecorderIndexSnapshot {
   pdh: number | null;
   pdl: number | null;
   vwap: number | null;
+  vwapSource?: string | null;
   futuresLtp: number | null;
   futuresOi: number | null;
   atmStrike: number | null;
@@ -1953,7 +1955,8 @@ function toTruthValidatedRecorderIndexSnapshot(m: IndexMetrics | undefined, trut
     change: spotOk ? m.change : null,
     pdh: spotOk && m.pdh > 0 ? m.pdh : null,
     pdl: spotOk && m.pdl > 0 ? m.pdl : null,
-    vwap: spotOk && m.vwap > 0 ? m.vwap : null,
+    vwap: futuresOk && m.vwap > 0 ? m.vwap : null,
+    vwapSource: futuresOk && m.vwap > 0 ? m.vwapSource || null : null,
     futuresLtp: futuresOk && contract && contract.ltp > 0 ? contract.ltp : null,
     futuresOi: futuresOk && contract && contract.oi != null ? contract.oi : null,
     atmStrike: ceOk && atmCe ? atmCe.strike : peOk && atmPe ? atmPe.strike : null,
@@ -1990,6 +1993,7 @@ function toRecorderIndexSnapshot(m: IndexMetrics | undefined): RecorderIndexSnap
     pdh: m.pdh > 0 ? m.pdh : null,
     pdl: m.pdl > 0 ? m.pdl : null,
     vwap: m.vwap > 0 ? m.vwap : null,
+    vwapSource: m.vwap > 0 ? m.vwapSource || null : null,
     futuresLtp: contract && contract.ltp > 0 ? contract.ltp : null,
     futuresOi: contract && contract.oi != null ? contract.oi : null,
     atmStrike: atmCe ? atmCe.strike : atmPe ? atmPe.strike : null,
@@ -14849,7 +14853,7 @@ app.get("/", (c) => {
       // spot-bias proxy (same convention as the Spot+Futures Core Status
       // card), existing futures classification, and Step 5B's Premium
       // Pair conclusion, rather than recomputing any of that logic.
-      const spotBias = (m.vwap > 0) ? (m.current > m.vwap ? 'bullish' : (m.current < m.vwap ? 'bearish' : null)) : null;
+      const spotBias = m.futuresVwapBias === 'UP' ? 'bullish' : (m.futuresVwapBias === 'DOWN' ? 'bearish' : null);
       const contract = (m.futuresContracts && m.futuresContracts[0]) || null;
       let futuresLabel = 'NO CLEAR SIGNAL';
       if (contract && contract.oi != null) {
@@ -15128,7 +15132,7 @@ app.get("/", (c) => {
       const isExpiryDay = current.expiryDate && new Date(current.expiryDate).toDateString() === new Date().toDateString();
 
       // Cross-check with existing modules — reused, not recalculated.
-      const spotBias = (m.vwap > 0) ? (m.current > m.vwap ? 'bullish' : (m.current < m.vwap ? 'bearish' : null)) : null;
+      const spotBias = m.futuresVwapBias === 'UP' ? 'bullish' : (m.futuresVwapBias === 'DOWN' ? 'bearish' : null);
       const contract = (m.futuresContracts && m.futuresContracts[0]) || null;
       let futuresLabel = 'NO CLEAR SIGNAL';
       if (contract && contract.oi != null) {
@@ -20079,10 +20083,14 @@ interface OptionBuyingStructureResult {
   price: {
     spot: number | null;
     vwap: number | null;
+    vwapSource: string | null;
+    futuresLtp: number | null;
     pdh: number | null;
     pdl: number | null;
     pivot: number | null;
     acceptanceSamples: number;
+    futuresAcceptanceSamples: number;
+    spotPivotAcceptanceSamples: number;
     liquidityEvent: "SAMPLED_PDL_SWEEP_RECLAIM" | "SAMPLED_PDH_SWEEP_REJECTION" | "NONE" | "INSUFFICIENT_HISTORY";
   };
   premiums: {
@@ -20251,19 +20259,31 @@ function buildOptionBuyingStructure(
   if (next && !next.sameStrike) warnings.push("Next expiry uses its nearest available ATM strike; raw premiums are not compared across different strikes/DTE.");
 
   const recentSnapshots = recorderSession.snapshots
-    .filter((snap) => snap.snapshotStatus === "LIVE" && snap.truthVerdicts?.[symbol] === "TRUE" && snap[symbol]?.spot != null)
+    .filter((snap) => snap.snapshotStatus === "LIVE" && snap.truthVerdicts?.[symbol] === "TRUE")
     .slice(-Math.max(2, Math.min(maxSnapshots, RECORDER_MAX_SNAPSHOTS)));
   const lastTwo = recentSnapshots.slice(-2);
   const spot = m?.spot && Number.isFinite(m.spot) ? m.spot : null;
   const vwap = m?.vwap && Number.isFinite(m.vwap) ? m.vwap : null;
   const pricePivot = m ? optionBuyingPivot(m.pdh, m.pdl, m.pdcClose) : null;
-  const acceptanceSamples = lastTwo.filter((snap) => {
-    const point = snap[symbol];
-    return point?.spot != null && vwap != null && side != null && (side === "CE" ? point.spot > vwap : point.spot < vwap);
-  }).length;
-  const priceStructure = !!m && !!side && vwap != null && pricePivot != null && acceptanceSamples === 2
-    && (side === "CE" ? m.spot > vwap && m.spot > pricePivot : m.spot < vwap && m.spot < pricePivot);
-  pushGate("SPOT_VWAP_PIVOT_ACCEPTANCE", priceStructure, "Spot must hold its directional side of real index VWAP and daily Fibonacci Pivot for two completed recorder observations.", true, vwap == null || pricePivot == null || lastTwo.length < 2);
+  const nearFuture = m?.futuresContracts?.[0] || null;
+  const priceAcceptance = evaluateFuturesVwapAcceptance({
+    side,
+    spot,
+    dailyPivot: pricePivot,
+    futuresLtp: nearFuture?.ltp,
+    futuresVwap: vwap,
+    futuresVwapSource: m?.vwapSource,
+    nearFutureSymbol: nearFuture?.tradingsymbol,
+    recentObservations: lastTwo.map((snap) => ({ spot: snap[symbol]?.spot, futuresLtp: snap[symbol]?.futuresLtp })),
+  });
+  const acceptanceSamples = Math.min(priceAcceptance.futuresAcceptanceSamples, priceAcceptance.spotPivotAcceptanceSamples);
+  const priceStructure = priceAcceptance.priceStructureAccepted;
+  pushGate("FUTURES_VWAP_ACCEPTANCE", priceAcceptance.futuresVwapAccepted,
+    `Near-futures LTP must hold its directional side of the same contract's traded VWAP for two recorder observations; source ${priceAcceptance.sourceStatus}.`,
+    true, !priceAcceptance.futuresVwapReady);
+  pushGate("SPOT_PIVOT_ACCEPTANCE", priceAcceptance.spotPivotAccepted,
+    "Spot must independently hold its directional side of the daily Fibonacci Pivot for two recorder observations.",
+    true, !priceAcceptance.spotPivotReady);
   const regime = m ? buildV2MarketBehaviourRegime(symbol, session, m) : null;
   pushGate("REGIME_STRUCTURE_ALIGNMENT", !!side && !!regime && !regime.structure?.conflict
     && v2NormalizeDirectionalWord(regime.regime?.pressure) === (side === "CE" ? "UP" : "DOWN"),
@@ -20320,7 +20340,7 @@ function buildOptionBuyingStructure(
     : side === "CE" ? strong ? "STRONG BUY CE" : "BUY CE"
     : strong ? "STRONG BUY PE" : "BUY PE";
   const observations = [
-    `Spot ${spot ?? "missing"}; VWAP ${vwap ?? "missing"}; daily Pivot ${pricePivot ?? "missing"}; accepted samples ${acceptanceSamples}/2.`,
+    `Spot ${spot ?? "missing"}; daily Pivot ${pricePivot ?? "missing"}; near future ${nearFuture?.ltp ?? "missing"}; futures VWAP ${vwap ?? "missing"} (${priceAcceptance.sourceStatus}); futures samples ${priceAcceptance.futuresAcceptanceSamples}/2; spot-pivot samples ${priceAcceptance.spotPivotAcceptanceSamples}/2.`,
     `Premium ${side || "none"}: current ${current?.alignment || "MISSING"}, next ${next?.alignment || "MISSING"}, monthly ${monthly?.alignment || "MISSING"}.`,
     `Same-strike premium changes: favored ${favoredChange ?? "missing"}; opposite ${oppositeChange ?? "missing"}; intrinsic ${intrinsicChange ?? "missing"}; extrinsic ${extrinsicChange ?? "missing"}; IV ${ivChange ?? "missing"}.`,
     `OI PCR ${pcr ?? "missing"} (${pcrTrend}); India VIX ${indiaVix ?? "missing"}; VIX change ${vixChangePercent ?? "missing"}%.`,
@@ -20343,7 +20363,13 @@ function buildOptionBuyingStructure(
     hardBlockReasons,
     warnings,
     evidenceGroups: { priceStructure, premiumBehaviour, pcrOi, volatilityContext, supportiveCount },
-    price: { spot, vwap, pdh: m?.pdh || null, pdl: m?.pdl || null, pivot: pricePivot, acceptanceSamples, liquidityEvent },
+    price: {
+      spot, vwap, vwapSource: m?.vwapSource || null, futuresLtp: nearFuture?.ltp || null,
+      pdh: m?.pdh || null, pdl: m?.pdl || null, pivot: pricePivot, acceptanceSamples,
+      futuresAcceptanceSamples: priceAcceptance.futuresAcceptanceSamples,
+      spotPivotAcceptanceSamples: priceAcceptance.spotPivotAcceptanceSamples,
+      liquidityEvent,
+    },
     premiums: {
       current, next, monthly, favoredChange, oppositeChange, intrinsicChange, extrinsicChange, ivChange,
       dominantDriver: candidate?.evidence.premiumAttributionDriver || null,

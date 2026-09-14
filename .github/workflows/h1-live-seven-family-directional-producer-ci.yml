@@ -1,0 +1,29 @@
+name: H1 Live Seven Family Directional Producer CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-live-seven-family-directional-producer.ts"
+      - "h1-exact-live-spot-direction-provider.ts"
+      - "h1-remaining-family-directional-attestor.ts"
+      - "test/h1-live-seven-family-directional-producer.test.ts"
+      - ".github/workflows/h1-live-seven-family-directional-producer-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  devil-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: >-
+          NODE_ENV=test node --import tsx --test
+          test/h1-live-seven-family-directional-producer.test.ts
+          test/h1-remaining-family-directional-attestor.test.ts
+          test/canonical-live-ten-family-mission-chain.test.ts

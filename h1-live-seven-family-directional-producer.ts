@@ -1,5 +1,6 @@
 import type { CanonicalMarketSymbol } from "./canonical-one-roof-market-snapshot.js";
 import type { H1ExactLiveSpotDirectionResult } from "./h1-exact-live-spot-direction-provider.js";
+import type { H1ExactWeightedHeavyweightFact } from "./h1-exact-weighted-heavyweight-live-adapter.js";
 import type { H1ExactDirectionalFamilyEvidence, H1RemainingDirectionalFamily } from "./h1-remaining-family-directional-attestor.js";
 
 export const H1_LIVE_SEVEN_FAMILY_DIRECTIONAL_PRODUCER_V1 = "H1_LIVE_SEVEN_FAMILY_DIRECTIONAL_PRODUCER_V1" as const;
@@ -18,7 +19,7 @@ export interface H1LiveSevenFamilyFacts {
   futuresConfirmation: Common & { futuresMovePct: number; futuresVwapAccepted: boolean; acceptanceSamples: number };
   oiPositioning: Common & { band7PcrDelta: number; volumePcrDelta: number; wallAsymmetryPct: number };
   volatility: Common & { candidatePremiumMovePct: number; vixChangePct: number; atmIvChangePct: number };
-  heavyweights: Common & { bullishWeightPct: number; bearishWeightPct: number };
+  heavyweights: H1ExactWeightedHeavyweightFact;
   sectorBreadth: Common & { bullishCount: number; bearishCount: number; totalCount: number };
   responseLadder: Common & { direction: Direction; confirmedStages: number; totalStages: 4 };
 }
@@ -190,10 +191,21 @@ export function produceH1LiveSevenDirectionalFamilies(input: {
   } else out.push(evidence("VOLATILITY", vol, direction!, (ratio(vol.candidatePremiumMovePct, policy.minCandidatePremiumMovePct) + (policy.minVolExpansionPct === 0 ? 50 : ratio(volExpansion, policy.minVolExpansionPct))) / 2, input.sourceManifestHash));
 
   const hw = facts.heavyweights;
+  const officialWeightedSource = hw?.sourceId === "H1_EXACT_WEIGHTED_HEAVYWEIGHT_LIVE_ADAPTER_V1"
+    && hw?.officialWeightAuthorityVerified === true
+    && hw?.normalizedMissingWeightAway === false
+    && finite(hw?.liveWeightCoveragePct)
+    && hw.liveWeightCoveragePct > 0
+    && hw.liveWeightCoveragePct <= 100
+    && typeof hw?.referenceProviderId === "string" && hw.referenceProviderId.trim().length > 0
+    && typeof hw?.referenceDocumentId === "string" && hw.referenceDocumentId.trim().length > 0
+    && typeof hw?.referenceVersion === "string" && hw.referenceVersion.trim().length > 0
+    && typeof hw?.referenceManifestHash === "string" && hw.referenceManifestHash.trim().length > 0;
   const hwDirectional = direction === "UP" ? hw.bullishWeightPct : hw.bearishWeightPct;
   const hwOpposite = direction === "UP" ? hw.bearishWeightPct : hw.bullishWeightPct;
   const hwMargin = hwDirectional - hwOpposite;
-  if (!finite(hwDirectional, hwOpposite) || hwDirectional < 0 || hwOpposite < 0 || hwMargin < policy.minHeavyweightDirectionalMarginPct) blockers.push("HEAVYWEIGHTS:POLICY_NOT_CONFIRMED");
+  if (!officialWeightedSource) blockers.push("HEAVYWEIGHTS:OFFICIAL_WEIGHTED_SOURCE_REQUIRED");
+  else if (!finite(hwDirectional, hwOpposite) || hwDirectional < 0 || hwOpposite < 0 || hwMargin < policy.minHeavyweightDirectionalMarginPct) blockers.push("HEAVYWEIGHTS:POLICY_NOT_CONFIRMED");
   else out.push(evidence("HEAVYWEIGHTS", hw, direction!, ratio(hwMargin, policy.minHeavyweightDirectionalMarginPct), input.sourceManifestHash));
 
   const se = facts.sectorBreadth;

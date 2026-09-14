@@ -11,6 +11,7 @@ export const H1_EXACT_WEIGHTED_HEAVYWEIGHT_LIVE_ADAPTER_V1 = "H1_EXACT_WEIGHTED_
 export interface H1ExactWeightedHeavyweightLivePolicy {
   lookbackMinutes: number;
   maxLatestAgeMs: number;
+  maxAuthorityAgeMs: number;
   minWindowCoveragePct: number;
   minLiveWeightCoveragePct: number;
   neutralMovePct: number;
@@ -85,6 +86,7 @@ function validPolicy(policy: H1ExactWeightedHeavyweightLivePolicy | null | undef
     policy
     && Number.isInteger(policy.lookbackMinutes) && policy.lookbackMinutes >= 1 && policy.lookbackMinutes <= 30
     && finitePositive(policy.maxLatestAgeMs)
+    && finitePositive(policy.maxAuthorityAgeMs)
     && finitePositive(policy.minWindowCoveragePct) && policy.minWindowCoveragePct <= 100
     && finitePositive(policy.minLiveWeightCoveragePct) && policy.minLiveWeightCoveragePct <= 100
     && Number.isFinite(policy.neutralMovePct) && policy.neutralMovePct >= 0 && policy.neutralMovePct < 100
@@ -142,6 +144,13 @@ export function deriveH1ExactWeightedHeavyweightLiveFact(input: {
   if (!validPolicy(input?.policy)) blockers.push("INVALID_WEIGHTED_HEAVYWEIGHT_POLICY");
   if (!authorityReady(input?.authority, symbol)) blockers.push("OFFICIAL_WEIGHT_AUTHORITY_NOT_READY");
   if (blockers.length > 0) return blocked(symbol, blockers);
+
+  const authorityAgeMs = input.nowMs - input.authority.asOfMs!;
+  const authorityReceivedAgeMs = input.nowMs - input.authority.receivedAtMs!;
+  if (!Number.isFinite(authorityAgeMs) || authorityAgeMs < 0 || authorityAgeMs > input.policy.maxAuthorityAgeMs
+    || !Number.isFinite(authorityReceivedAgeMs) || authorityReceivedAgeMs < 0) {
+    return blocked(symbol, ["OFFICIAL_WEIGHT_AUTHORITY_STALE_OR_FUTURE"]);
+  }
 
   const registryRows = (Array.isArray(input.registry) ? input.registry : [])
     .filter((row) => row.parentSymbol === symbol && row.role === "HEAVYWEIGHT");

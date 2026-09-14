@@ -22,13 +22,33 @@ function direction() {
   );
 }
 
+function weightedHeavyweights(): H1LiveSevenFamilyFacts["heavyweights"] {
+  return {
+    ...common,
+    sourceId: "H1_EXACT_WEIGHTED_HEAVYWEIGHT_LIVE_ADAPTER_V1",
+    bullishWeightPct: 70,
+    bearishWeightPct: 20,
+    neutralWeightPct: 10,
+    liveWeightCoveragePct: 100,
+    liveConstituentCount: 4,
+    authorityConstituentCount: 4,
+    lookbackMinutes: 3,
+    referenceProviderId: "OFFICIAL_NIFTY_PROVIDER",
+    referenceDocumentId: "official-index-weight-file",
+    referenceVersion: "2026-09-14",
+    referenceManifestHash: "sha256:official-reference-manifest",
+    officialWeightAuthorityVerified: true,
+    normalizedMissingWeightAway: false,
+  };
+}
+
 function facts(): H1LiveSevenFamilyFacts {
   return {
     marketStructure: { ...common, sourceId: "exact-market-structure", spotMovePct: 0.22, spotPivotAccepted: true, structureHoldSamples: 2 },
     futuresConfirmation: { ...common, sourceId: "exact-futures", futuresMovePct: 0.2, futuresVwapAccepted: true, acceptanceSamples: 2 },
     oiPositioning: { ...common, sourceId: "exact-oi", band7PcrDelta: 0.04, volumePcrDelta: 0.03, wallAsymmetryPct: 4 },
     volatility: { ...common, sourceId: "exact-vol", candidatePremiumMovePct: 4, vixChangePct: 0.3, atmIvChangePct: 0.4 },
-    heavyweights: { ...common, sourceId: "exact-heavyweights", bullishWeightPct: 70, bearishWeightPct: 20 },
+    heavyweights: weightedHeavyweights(),
     sectorBreadth: { ...common, sourceId: "exact-sectors", bullishCount: 7, bearishCount: 2, totalCount: 10 },
     responseLadder: { ...common, sourceId: "exact-ladder", direction: "UP", confirmedStages: 3, totalStages: 4 },
   };
@@ -43,6 +63,23 @@ test("produces all seven exact same-direction family facts with transparent poli
   assert.equal(out.evidence.length, 7);
   assert.equal(out.calibratedProbabilityClaimed, false);
   assert.ok(out.evidence.every((row) => row.direction === "UP" && row.strength >= 0 && row.strength <= 100));
+});
+
+test("generic or equal-count heavyweight numbers cannot cross the official weighted boundary", () => {
+  const value = facts();
+  value.heavyweights = {
+    ...common,
+    sourceId: "legacy-equal-count-heavyweights",
+    bullishWeightPct: 70,
+    bearishWeightPct: 20,
+  } as unknown as H1LiveSevenFamilyFacts["heavyweights"];
+  const out = produceH1LiveSevenDirectionalFamilies({
+    symbol: "NIFTY", directionSource: direction(), facts: value, policy,
+    sourceManifestHash: "manifest-live", nowMs: now,
+  });
+  assert.equal(out.ready, false);
+  assert.deepEqual(out.evidence, []);
+  assert.ok(out.blockers.includes("HEAVYWEIGHTS:OFFICIAL_WEIGHTED_SOURCE_REQUIRED"));
 });
 
 test("one opposing family blocks the complete batch", () => {

@@ -1,0 +1,32 @@
+name: Canonical Business Mission Orchestrator CI
+
+on:
+  pull_request:
+    paths:
+      - "canonical-business-mission-orchestrator.ts"
+      - "canonical-business-candidate-mission.ts"
+      - "canonical-business-evidence-input-adapter.ts"
+      - "canonical-normalized-family-support-producer.ts"
+      - "canonical-business-deterministic-scoring.ts"
+      - "test/canonical-business-mission-orchestrator.test.ts"
+      - ".github/workflows/canonical-business-mission-orchestrator-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: >-
+          NODE_ENV=test node --import tsx --test
+          test/canonical-business-mission-orchestrator.test.ts
+          test/canonical-business-candidate-mission.test.ts
+          test/canonical-business-deterministic-scoring.test.ts
+          test/canonical-normalized-family-support-producer.test.ts

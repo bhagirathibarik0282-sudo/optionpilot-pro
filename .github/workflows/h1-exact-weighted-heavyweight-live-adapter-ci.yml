@@ -1,0 +1,30 @@
+name: H1 Exact Weighted Heavyweight Live Adapter CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-exact-weighted-heavyweight-live-adapter.ts"
+      - "h1-official-heavyweight-weight-authority.ts"
+      - "canonical-constituent-token-registry.ts"
+      - "kite-constituent-runtime-bridge-v1.ts"
+      - "test/h1-exact-weighted-heavyweight-live-adapter.test.ts"
+      - "test/h1-official-heavyweight-weight-authority.test.ts"
+      - ".github/workflows/h1-exact-weighted-heavyweight-live-adapter-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  devil-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: >-
+          NODE_ENV=test node --import tsx --test
+          test/h1-exact-weighted-heavyweight-live-adapter.test.ts
+          test/h1-official-heavyweight-weight-authority.test.ts

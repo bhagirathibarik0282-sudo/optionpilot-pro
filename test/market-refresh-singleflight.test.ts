@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { KeyedSingleFlight, marketAuthorityKey } from "../market-refresh-singleflight.js";
+import { shouldRefreshCandidateSnapshot } from "../candidate-snapshot-freshness.js";
 
 test("collapses concurrent refreshes for the same market authority", async () => {
   const gate = new KeyedSingleFlight<number>();
@@ -39,4 +41,20 @@ test("authority key is deterministic and does not expose the access token", () =
   assert.equal(key, marketAuthorityKey(token));
   assert.equal(key.includes(token), false);
   assert.equal(key.length, 64);
+});
+
+test("candidate snapshot freshness refreshes missing, invalid, future and expired state", () => {
+  const base = { hasSnapshot: true, snapshotTimeMs: 1_000, nowMs: 2_000, ttlMs: 3_000 };
+  assert.equal(shouldRefreshCandidateSnapshot(base), false);
+  assert.equal(shouldRefreshCandidateSnapshot({ ...base, hasSnapshot: false }), true);
+  assert.equal(shouldRefreshCandidateSnapshot({ ...base, snapshotTimeMs: null }), true);
+  assert.equal(shouldRefreshCandidateSnapshot({ ...base, snapshotTimeMs: 3_000 }), true);
+  assert.equal(shouldRefreshCandidateSnapshot({ ...base, snapshotTimeMs: -1 }), true);
+  assert.equal(shouldRefreshCandidateSnapshot({ ...base, snapshotTimeMs: 1_000, nowMs: 4_000 }), true);
+});
+
+test("all three candidate-facing routes enforce a fresh snapshot", () => {
+  const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+  assert.match(source, /async function ensureFreshCandidateMarketSnapshot[\s\S]*getAdaptiveSnapshotTtlMs\(\)[\s\S]*await refreshMarketSnapshot\(session\)/);
+  assert.equal((source.match(/await ensureFreshCandidateMarketSnapshot\(session\);/g) || []).length, 3);
 });

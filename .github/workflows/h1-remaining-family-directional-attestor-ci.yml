@@ -1,0 +1,29 @@
+name: H1 Remaining Family Directional Attestor CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-remaining-family-directional-attestor.ts"
+      - "h1-exact-live-spot-direction-provider.ts"
+      - "canonical-live-family-signal-registry.ts"
+      - "test/h1-remaining-family-directional-attestor.test.ts"
+      - ".github/workflows/h1-remaining-family-directional-attestor-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  devil-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: >-
+          NODE_ENV=test node --import tsx --test
+          test/h1-remaining-family-directional-attestor.test.ts
+          test/h1-exact-core-family-signal-adapter.test.ts
+          test/canonical-live-family-signal-registry.test.ts

@@ -1,0 +1,31 @@
+name: Canonical Business Candidate Mission CI
+
+on:
+  pull_request:
+    paths:
+      - "canonical-business-candidate-mission.ts"
+      - "canonical-live-business-publisher.ts"
+      - "canonical-business-runtime-registry.ts"
+      - "canonical-telegram-transport-gate.ts"
+      - "test/canonical-business-candidate-mission.test.ts"
+      - ".github/workflows/canonical-business-candidate-mission-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: >-
+          NODE_ENV=test node --import tsx --test
+          test/canonical-business-candidate-mission.test.ts
+          test/canonical-live-business-publisher.test.ts
+          test/canonical-telegram-live-identity.test.ts
+          test/execution-candidate-selector.test.ts

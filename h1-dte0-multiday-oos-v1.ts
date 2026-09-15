@@ -1,6 +1,7 @@
 import type { buildH1Dte0TransitionCalibration } from "./h1-dte0-transition-calibration-v1.js";
 
 export const H1_DTE0_MULTIDAY_OOS_VERSION = "H1_DTE0_MULTIDAY_OOS_V1" as const;
+export const H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION = 4 as const;
 
 type DayCalibration = ReturnType<typeof buildH1Dte0TransitionCalibration>;
 type Window = DayCalibration["windows"][number];
@@ -44,16 +45,16 @@ export function runH1Dte0MultidayOos(days: H1Dte0MultidayDay[]) {
     .sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
   const usable = ordered.filter((d) => d.calibration.ok && d.calibration.windowCount > 0);
   const blockers: string[] = [];
-  if (usable.length < 4) blockers.push("INSUFFICIENT_DTE0_DAYS_REQUIRE_4");
+  if (usable.length < H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION) blockers.push("INSUFFICIENT_DTE0_DAYS_REQUIRE_4");
 
-  const cut = usable.length >= 4 ? Math.max(1, Math.floor(usable.length * .7)) : usable.length;
+  const cut = usable.length >= H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION ? Math.max(1, Math.floor(usable.length * .7)) : usable.length;
   const calibrationDays = usable.slice(0, cut);
   const oosDays = usable.slice(cut);
   const calibrationWindows = calibrationDays.flatMap((d) => d.calibration.windows);
   const oosWindows = oosDays.flatMap((d) => d.calibration.windows);
   const calibrationStats = stats(calibrationWindows);
   const oosStats = stats(oosWindows);
-  const candidateDeltaP95 = usable.length >= 4 ? calibrationStats.absoluteDeltaChange.p95 : null;
+  const candidateDeltaP95 = usable.length >= H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION ? calibrationStats.absoluteDeltaChange.p95 : null;
 
   let oosDeltaPassRateAtCandidate: number | null = null;
   if (candidateDeltaP95 != null && oosWindows.length) {
@@ -63,6 +64,8 @@ export function runH1Dte0MultidayOos(days: H1Dte0MultidayDay[]) {
       : null;
   }
 
+  const missingUsableDte0Days = Math.max(0, H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION - usable.length);
+
   return {
     ok: blockers.length === 0,
     mode: H1_DTE0_MULTIDAY_OOS_VERSION,
@@ -70,6 +73,16 @@ export function runH1Dte0MultidayOos(days: H1Dte0MultidayDay[]) {
     semantics: "HISTORICAL_REPLAY_RESEARCH_ONLY" as const,
     requestedDayCount: ordered.length,
     usableDayCount: usable.length,
+    readiness: {
+      state: missingUsableDte0Days === 0 ? "READY_FOR_POLICY_VALIDATION" as const : "WAITING_FOR_MORE_DTE0_DAYS" as const,
+      usableDte0DayCount: usable.length,
+      minimumRequiredDte0Days: H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION,
+      missingUsableDte0Days,
+      policyPromotionAuthority: "NONE" as const,
+      selectorAuthority: "NONE" as const,
+      telegramAuthority: "NONE" as const,
+      executionAuthority: "NONE" as const,
+    },
     calibrationDates: calibrationDays.map((d) => d.tradeDate),
     oosDates: oosDays.map((d) => d.tradeDate),
     candidateDeltaP95,

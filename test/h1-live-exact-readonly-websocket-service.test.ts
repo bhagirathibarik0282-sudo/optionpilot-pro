@@ -149,16 +149,22 @@ test("fails closed when a constituent token overlaps the immediate registry", ()
 });
 
 
-test("selector runtime attaches shadow-only coordinator with verified lot size", () => {
+test("selector runtime quarantines shadow-only policy and keeps raw live socket available", () => {
   const sent:string[] = [];
   const socket = fakeSocket(sent);
   const service = new H1LiveExactReadOnlyWebSocketService({
     readiness: readiness(), apiKey: "key", accessToken: "token", socketFactory: () => socket,
+    selectorPolicyEnv: {},
   });
   const out = service.start();
-  assert.equal(out.selectorRuntimePolicyReady, true);
-  assert.equal(out.selectorRuntimeAttached, true);
-  assert.deepEqual(out.selectorRuntimeBlockers, []);
+  assert.equal(out.started, true);
+  assert.equal(out.selectorRuntimePolicyReady, false);
+  assert.equal(out.selectorRuntimeAttached, false);
+  assert.ok(out.selectorRuntimeBlockers.includes("KITE_H1_EXACT_POLICY_JSON_REQUIRED"));
   assert.equal(out.affectsTelegram, false);
   assert.equal(out.affectsExecution, false);
+  socket.fire("open");
+  assert.equal(service.status().connected, true);
+  assert.deepEqual(JSON.parse(sent[0]), { a: "subscribe", v: [99,3,4] });
+  assert.deepEqual(JSON.parse(sent[1]), { a: "mode", v: ["full", [99,3,4]] });
 });

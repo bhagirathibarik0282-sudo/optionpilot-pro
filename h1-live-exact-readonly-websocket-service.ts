@@ -10,7 +10,7 @@ import { CanonicalConstituentTickStore, type CanonicalConstituentTickStoreStatus
 import type { CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
 import type { CanonicalConstituentTokenEntry } from "./canonical-constituent-token-registry.js";
 import type { CanonicalMarketSymbol } from "./canonical-one-roof-market-snapshot.js";
-import { getH1SelectorShadowProductionPolicy } from "./h1-selector-shadow-profile.js";
+import { readH1SelectorCanonicalPolicySource } from "./h1-selector-canonical-policy-source.js";
 import { H1KiteExactRuntimeCoordinator } from "./h1-kite-exact-runtime-coordinator.js";
 import { H1ExactPeerRuntimeStore } from "./h1-exact-peer-runtime-store.js";
 
@@ -49,6 +49,7 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   reconnectDelayMs?: number;
   reconnectMaxAttempts?: number;
   constituentRegistry?: CanonicalConstituentTokenEntry[];
+  selectorPolicyEnv?: NodeJS.ProcessEnv;
 }
 
 export interface H1LiveExactReadOnlyWebSocketStatus {
@@ -159,16 +160,20 @@ export class H1LiveExactReadOnlyWebSocketService {
 
   start(): H1LiveExactReadOnlyWebSocketStatus {
     if (this.transport) throw new Error("H1_LIVE_EXACT_READONLY_ALREADY_STARTED");
-    const selectorProfile = getH1SelectorShadowProductionPolicy();
+    const selectorPolicySource = readH1SelectorCanonicalPolicySource(this.config.selectorPolicyEnv ?? process.env);
     const selectorRegistry = this.config.readiness.registry!;
     const lotSizeByToken = this.config.readiness.lotSizeByOptionToken ?? {};
     const optionEntries = selectorRegistry.entries().filter((entry) => entry.role === "OPTION");
     const quantityMissing = optionEntries.filter((entry) => !Number.isInteger(lotSizeByToken[entry.instrumentToken]) || lotSizeByToken[entry.instrumentToken] <= 0);
-    this.value.selectorRuntimePolicyReady = selectorProfile.selectorPolicy.ready;
-    if (quantityMissing.length > 0) {
+    this.value.selectorRuntimePolicyReady = selectorPolicySource.ready;
+    if (!selectorPolicySource.ready || !selectorPolicySource.exactPolicy) {
+      this.value.selectorRuntimeAttached = false;
+      this.value.selectorRuntimeBlockers = [...selectorPolicySource.blockers];
+    } else if (quantityMissing.length > 0) {
       this.value.selectorRuntimeAttached = false;
       this.value.selectorRuntimeBlockers = quantityMissing.map((entry) => `VERIFIED_LOT_SIZE_REQUIRED:${entry.instrumentToken}`);
     } else {
+      const selectorProfile = selectorPolicySource.exactPolicy;
       this.selectorPeerStore = new H1ExactPeerRuntimeStore({
         registryEntries: selectorRegistry.entries(),
         classifierPolicy: {

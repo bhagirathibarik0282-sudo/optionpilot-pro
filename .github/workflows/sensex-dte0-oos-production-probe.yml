@@ -1,0 +1,42 @@
+name: SENSEX DTE0 Production OOS Probe
+
+on:
+  push:
+    branches:
+      - audit/sensex-dte0-oos-20260915
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe completed SENSEX DTE0 sessions
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-dte0-multiday-oos?symbol=SENSEX&dates=2026-08-20,2026-08-27,2026-09-03,2026-09-10&from=09:15&to=15:30&scope=CORE'
+          status=$(curl --connect-timeout 15 --max-time 120 -sS -o result.json -w '%{http_code}' "$URL")
+          echo "HTTP_STATUS=$status"
+          cat result.json
+          echo
+          python - <<'PY'
+          import json
+          p=json.load(open('result.json'))
+          print('SENSEX_DTE0_SUMMARY='+json.dumps({
+            'ok':p.get('ok'),
+            'requestedDayCount':p.get('requestedDayCount'),
+            'usableDayCount':p.get('usableDayCount'),
+            'calibrationDates':p.get('calibrationDates'),
+            'oosDates':p.get('oosDates'),
+            'candidateDeltaP95':p.get('candidateDeltaP95'),
+            'oosDeltaPassRateAtCandidate':p.get('oosDeltaPassRateAtCandidate'),
+            'calibration':p.get('calibration'),
+            'oos':p.get('oos'),
+            'blockers':p.get('blockers'),
+            'safety':p.get('safety'),
+          }, separators=(',',':')))
+          PY
+          test "$status" = "200"

@@ -39,22 +39,47 @@ function stats(windows: Window[]) {
   };
 }
 
+function fullSessionBoundaryObserved(day: H1Dte0MultidayDay): boolean {
+  const request = day.calibration.request;
+  const continuity = day.calibration.continuity;
+  if (!request || !continuity?.firstObserved || !continuity.lastObserved) return false;
+  if (request.tradeDate !== day.tradeDate || request.fromTime !== "09:15" || request.toTime !== "15:30") return false;
+
+  const openMs = Date.parse(`${day.tradeDate}T09:15:00+05:30`);
+  const closeMs = Date.parse(`${day.tradeDate}T15:30:00+05:30`);
+  const firstObservedMs = Date.parse(continuity.firstObserved);
+  const lastObservedMs = Date.parse(continuity.lastObserved);
+  const cadenceMs = Math.max(1, Number(continuity.cadenceMinutes) || 3) * 60_000;
+
+  return [openMs, closeMs, firstObservedMs, lastObservedMs].every(Number.isFinite)
+    && firstObservedMs <= openMs + cadenceMs
+    && lastObservedMs >= closeMs - cadenceMs;
+}
+
 export function runH1Dte0MultidayOos(days: H1Dte0MultidayDay[]) {
   const ordered = [...days]
     .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.tradeDate))
     .sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
   const usable = ordered.filter((d) => d.calibration.ok && d.calibration.windowCount > 0);
+  const validationEligible = usable.filter(fullSessionBoundaryObserved);
+  const incompleteSessionDates = usable
+    .filter((d) => !fullSessionBoundaryObserved(d))
+    .map((d) => d.tradeDate);
   const blockers: string[] = [];
-  if (usable.length < H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION) blockers.push("INSUFFICIENT_DTE0_DAYS_REQUIRE_4");
+  if (validationEligible.length < H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION) blockers.push("INSUFFICIENT_DTE0_DAYS_REQUIRE_4");
 
-  const cut = usable.length >= H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION ? Math.max(1, Math.floor(usable.length * .7)) : usable.length;
-  const calibrationDays = usable.slice(0, cut);
-  const oosDays = usable.slice(cut);
+  const cut = validationEligible.length >= H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION
+    ? Math.max(1, Math.floor(validationEligible.length * .7))
+    : validationEligible.length;
+  const calibrationDays = validationEligible.slice(0, cut);
+  const oosDays = validationEligible.slice(cut);
   const calibrationWindows = calibrationDays.flatMap((d) => d.calibration.windows);
   const oosWindows = oosDays.flatMap((d) => d.calibration.windows);
   const calibrationStats = stats(calibrationWindows);
   const oosStats = stats(oosWindows);
-  const candidateDeltaP95 = usable.length >= H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION ? calibrationStats.absoluteDeltaChange.p95 : null;
+  const candidateDeltaP95 = validationEligible.length >= H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION
+    ? calibrationStats.absoluteDeltaChange.p95
+    : null;
 
   let oosDeltaPassRateAtCandidate: number | null = null;
   if (candidateDeltaP95 != null && oosWindows.length) {
@@ -64,7 +89,7 @@ export function runH1Dte0MultidayOos(days: H1Dte0MultidayDay[]) {
       : null;
   }
 
-  const missingUsableDte0Days = Math.max(0, H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION - usable.length);
+  const missingUsableDte0Days = Math.max(0, H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION - validationEligible.length);
 
   return {
     ok: blockers.length === 0,
@@ -73,11 +98,16 @@ export function runH1Dte0MultidayOos(days: H1Dte0MultidayDay[]) {
     semantics: "HISTORICAL_REPLAY_RESEARCH_ONLY" as const,
     requestedDayCount: ordered.length,
     usableDayCount: usable.length,
+    validationEligibleDayCount: validationEligible.length,
     readiness: {
       state: missingUsableDte0Days === 0 ? "READY_FOR_POLICY_VALIDATION" as const : "WAITING_FOR_MORE_DTE0_DAYS" as const,
-      usableDte0DayCount: usable.length,
+      usableDte0DayCount: validationEligible.length,
+      observedUsableDte0DayCount: usable.length,
+      completedSessionDte0DayCount: validationEligible.length,
       minimumRequiredDte0Days: H1_DTE0_MIN_USABLE_DAYS_FOR_POLICY_VALIDATION,
       missingUsableDte0Days,
+      incompleteSessionDates,
+      completionRule: "FULL_0915_1530_SESSION_BOUNDARIES_OBSERVED_WITHIN_ONE_REPLAY_CADENCE" as const,
       policyPromotionAuthority: "NONE" as const,
       selectorAuthority: "NONE" as const,
       telegramAuthority: "NONE" as const,
@@ -98,6 +128,7 @@ export function runH1Dte0MultidayOos(days: H1Dte0MultidayDay[]) {
       affectsExecution: false,
       thresholdPromoted: false,
       dte0ThresholdInvented: false,
+      incompleteSessionPromoted: false,
       failClosed: true,
     },
   };

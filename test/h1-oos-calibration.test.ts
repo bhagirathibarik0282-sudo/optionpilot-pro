@@ -7,11 +7,23 @@ function window(id: string, startDate: string, endDate: string, eligibleOutcomes
   return { id, startDate, endDate, eligibleOutcomes, wins, losses, scratches, unknownOrIncomplete: 0 };
 }
 
-function dte0Day(tradeDate: string) {
+function dte0Day(tradeDate: string, lastObserved = `${tradeDate}T10:00:00.000Z`) {
   return {
     tradeDate,
     calibration: {
       ok: true,
+      request: {
+        symbol: "NIFTY",
+        tradeDate,
+        fromTime: "09:15",
+        toTime: "15:30",
+        scope: "CORE",
+      },
+      continuity: {
+        cadenceMinutes: 3,
+        firstObserved: `${tradeDate}T03:45:00.000Z`,
+        lastObserved,
+      },
       windowCount: 1,
       windows: [{
         observed: {
@@ -88,7 +100,7 @@ test("large OOS degradation blocks promotion", () => {
   assert.ok(result.blockers.includes("OOS_PERFORMANCE_DEGRADATION_TOO_LARGE"));
 });
 
-test("DTE0 multiday readiness waits fail-closed with only three usable days", () => {
+test("DTE0 multiday readiness waits fail-closed with only three completed usable days", () => {
   const result = runH1Dte0MultidayOos([
     dte0Day("2026-09-01"),
     dte0Day("2026-09-08"),
@@ -98,8 +110,11 @@ test("DTE0 multiday readiness waits fail-closed with only three usable days", ()
   assert.equal(result.ok, false);
   assert.equal(result.readiness.state, "WAITING_FOR_MORE_DTE0_DAYS");
   assert.equal(result.readiness.usableDte0DayCount, 3);
+  assert.equal(result.readiness.observedUsableDte0DayCount, 3);
+  assert.equal(result.readiness.completedSessionDte0DayCount, 3);
   assert.equal(result.readiness.minimumRequiredDte0Days, 4);
   assert.equal(result.readiness.missingUsableDte0Days, 1);
+  assert.deepEqual(result.readiness.incompleteSessionDates, []);
   assert.equal(result.readiness.policyPromotionAuthority, "NONE");
   assert.equal(result.readiness.selectorAuthority, "NONE");
   assert.equal(result.readiness.telegramAuthority, "NONE");
@@ -109,17 +124,18 @@ test("DTE0 multiday readiness waits fail-closed with only three usable days", ()
   assert.equal(result.safety.affectsExecution, false);
 });
 
-test("DTE0 multiday readiness exposes validation-ready at four days without granting production authority", () => {
+test("DTE0 multiday readiness exposes validation-ready at four completed days without granting production authority", () => {
   const result = runH1Dte0MultidayOos([
     dte0Day("2026-08-25"),
     dte0Day("2026-09-01"),
-    dte0Day("2026-09-08"),
+    dte0Day("2026-09-08", "2026-09-08T09:59:00.000Z"),
     dte0Day("2026-09-15"),
   ]);
 
   assert.equal(result.ok, true);
   assert.equal(result.readiness.state, "READY_FOR_POLICY_VALIDATION");
   assert.equal(result.readiness.usableDte0DayCount, 4);
+  assert.equal(result.readiness.completedSessionDte0DayCount, 4);
   assert.equal(result.readiness.minimumRequiredDte0Days, 4);
   assert.equal(result.readiness.missingUsableDte0Days, 0);
   assert.equal(result.readiness.policyPromotionAuthority, "NONE");
@@ -130,4 +146,30 @@ test("DTE0 multiday readiness exposes validation-ready at four days without gran
   assert.equal(result.safety.affectsSelector, false);
   assert.equal(result.safety.affectsTelegram, false);
   assert.equal(result.safety.affectsExecution, false);
+});
+
+test("partial fourth DTE0 day remains observational and cannot unlock validation", () => {
+  const result = runH1Dte0MultidayOos([
+    dte0Day("2026-08-25"),
+    dte0Day("2026-09-01"),
+    dte0Day("2026-09-08"),
+    dte0Day("2026-09-15", "2026-09-15T09:36:00.000Z"),
+  ]);
+
+  assert.equal(result.usableDayCount, 4);
+  assert.equal(result.validationEligibleDayCount, 3);
+  assert.equal(result.ok, false);
+  assert.equal(result.readiness.state, "WAITING_FOR_MORE_DTE0_DAYS");
+  assert.equal(result.readiness.observedUsableDte0DayCount, 4);
+  assert.equal(result.readiness.completedSessionDte0DayCount, 3);
+  assert.equal(result.readiness.usableDte0DayCount, 3);
+  assert.equal(result.readiness.missingUsableDte0Days, 1);
+  assert.deepEqual(result.readiness.incompleteSessionDates, ["2026-09-15"]);
+  assert.equal(result.candidateDeltaP95, null);
+  assert.deepEqual(result.oosDates, []);
+  assert.equal(result.safety.incompleteSessionPromoted, false);
+  assert.equal(result.readiness.policyPromotionAuthority, "NONE");
+  assert.equal(result.readiness.selectorAuthority, "NONE");
+  assert.equal(result.readiness.telegramAuthority, "NONE");
+  assert.equal(result.readiness.executionAuthority, "NONE");
 });

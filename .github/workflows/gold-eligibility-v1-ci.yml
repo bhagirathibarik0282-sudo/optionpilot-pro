@@ -1,0 +1,29 @@
+name: Gold Eligibility V1 CI
+
+on:
+  pull_request:
+    paths:
+      - 'h1-gold-eligibility-v1.ts'
+      - 'test/h1-gold-eligibility-v1.test.ts'
+      - '.github/workflows/gold-eligibility-v1-ci.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'h1-gold-eligibility-v1.ts'
+      - 'test/h1-gold-eligibility-v1.test.ts'
+      - '.github/workflows/gold-eligibility-v1-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gold-eligibility-devil-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install tsx --test test/h1-gold-eligibility-v1.test.ts

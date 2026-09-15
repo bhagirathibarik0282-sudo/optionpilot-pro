@@ -1,9 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluateOosCalibration } from "../h1-oos-calibration.js";
+import { runH1Dte0MultidayOos } from "../h1-dte0-multiday-oos-v1.js";
 
 function window(id: string, startDate: string, endDate: string, eligibleOutcomes: number, wins: number, losses: number, scratches = 0) {
   return { id, startDate, endDate, eligibleOutcomes, wins, losses, scratches, unknownOrIncomplete: 0 };
+}
+
+function dte0Day(tradeDate: string) {
+  return {
+    tradeDate,
+    calibration: {
+      ok: true,
+      windowCount: 1,
+      windows: [{
+        observed: {
+          absoluteDeltaChange: 0.08,
+          premiumMovePct: 0.5,
+          currentGamma: 0.002,
+          thetaPctOfPremium: 1.2,
+          iv: 12,
+        },
+        currentPolicy: {
+          minPremiumMovePct: 0.25,
+          gammaPass: true,
+        },
+      }],
+    },
+  } as any;
 }
 
 test("strictly separated frozen OOS can unlock later regime-strength calibration", () => {
@@ -62,4 +86,48 @@ test("large OOS degradation blocks promotion", () => {
   });
   assert.equal(result.regimeStrengthMayBeCalibrated, false);
   assert.ok(result.blockers.includes("OOS_PERFORMANCE_DEGRADATION_TOO_LARGE"));
+});
+
+test("DTE0 multiday readiness waits fail-closed with only three usable days", () => {
+  const result = runH1Dte0MultidayOos([
+    dte0Day("2026-09-01"),
+    dte0Day("2026-09-08"),
+    dte0Day("2026-09-15"),
+  ]);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.readiness.state, "WAITING_FOR_MORE_DTE0_DAYS");
+  assert.equal(result.readiness.usableDte0DayCount, 3);
+  assert.equal(result.readiness.minimumRequiredDte0Days, 4);
+  assert.equal(result.readiness.missingUsableDte0Days, 1);
+  assert.equal(result.readiness.policyPromotionAuthority, "NONE");
+  assert.equal(result.readiness.selectorAuthority, "NONE");
+  assert.equal(result.readiness.telegramAuthority, "NONE");
+  assert.equal(result.readiness.executionAuthority, "NONE");
+  assert.equal(result.safety.affectsSelector, false);
+  assert.equal(result.safety.affectsTelegram, false);
+  assert.equal(result.safety.affectsExecution, false);
+});
+
+test("DTE0 multiday readiness exposes validation-ready at four days without granting production authority", () => {
+  const result = runH1Dte0MultidayOos([
+    dte0Day("2026-08-25"),
+    dte0Day("2026-09-01"),
+    dte0Day("2026-09-08"),
+    dte0Day("2026-09-15"),
+  ]);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.readiness.state, "READY_FOR_POLICY_VALIDATION");
+  assert.equal(result.readiness.usableDte0DayCount, 4);
+  assert.equal(result.readiness.minimumRequiredDte0Days, 4);
+  assert.equal(result.readiness.missingUsableDte0Days, 0);
+  assert.equal(result.readiness.policyPromotionAuthority, "NONE");
+  assert.equal(result.readiness.selectorAuthority, "NONE");
+  assert.equal(result.readiness.telegramAuthority, "NONE");
+  assert.equal(result.readiness.executionAuthority, "NONE");
+  assert.equal(result.safety.thresholdPromoted, false);
+  assert.equal(result.safety.affectsSelector, false);
+  assert.equal(result.safety.affectsTelegram, false);
+  assert.equal(result.safety.affectsExecution, false);
 });

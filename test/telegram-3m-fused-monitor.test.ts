@@ -19,7 +19,7 @@ test("builds a business-readable bullish fused view without execution authority"
       { label: "IV/VIX", stance: "NEUTRAL", verified: true },
       { label: "Structure", stance: "BULLISH", verified: true },
     ],
-    numeric: { spot: 24050, future: 24072, basis: 22, pcr: 1.02, vix: 11.4, cePremium: 121, pePremium: 98 },
+    numeric: { spot: 24050, future: 24072, basis: 22, pcr: 1.02, vix: 11.4, cePremium: 121, pePremium: 98, premiumPairIdentity: "NIFTY 2026-09-15 24050 CE/PE" },
     timeline: [
       { label: "T0", state: "TRENDING_UP" },
       { label: "T3", spotChange: 18, futureChange: 20, pcrChange: 0.02, cePremiumChangePct: 3.2, pePremiumChangePct: -2.1, state: "BULLISH_CONFIRMATION" },
@@ -33,6 +33,7 @@ test("builds a business-readable bullish fused view without execution authority"
   assert.equal(view.overridesSelector, false);
   assert.match(view.text, /STATE: TRENDING_UP/);
   assert.match(view.text, /Spot 24050\.00/);
+  assert.match(view.text, /Tracked pair: NIFTY 2026-09-15 24050 CE\/PE/);
   assert.match(view.text, /Action: WAIT/);
 });
 

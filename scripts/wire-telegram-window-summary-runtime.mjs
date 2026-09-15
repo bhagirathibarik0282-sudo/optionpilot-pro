@@ -11,12 +11,15 @@ function replaceOnce(src,from,to,label){if(src.includes(to))return src;const cou
 // Import wiring must remain order-independent: other safe runtime patches may add
 // their own imports before this script runs. Insert after the final top-level import.
 const windowImport='import { buildWindowSummary, buildEodBehaviourSummary } from "./telegram-window-summary-v1.js";';
-if(!server.includes(windowImport)){
+const contractHistoryImport='import { buildContractBoundHistoryPoint, buildContractPairIdentity } from "./telegram-contract-history-bridge-v1.js";';
+for(const requiredImport of [windowImport,contractHistoryImport]){
+if(!server.includes(requiredImport)){
   const importMatches=[...server.matchAll(/^import[^\n]*;$/gm)];
   const lastImport=importMatches.at(-1);
   if(!lastImport || lastImport.index==null)throw new Error("window summary import: no top-level import anchor found");
   const insertAt=lastImport.index+lastImport[0].length;
-  server=server.slice(0,insertAt)+`\n${windowImport}`+server.slice(insertAt);
+  server=server.slice(0,insertAt)+`\n${requiredImport}`+server.slice(insertAt);
+}
 }
 
 server=replaceOnce(server,
@@ -26,12 +29,27 @@ server=replaceOnce(server,
 
 server=replaceOnce(server,
 '            cePremiumChangePct: mins === 3 || mins === 6 || mins === 15 ? (ppdWindow?.usable ? ppdWindow.rawPpdPp : null) : null,\n            pePremiumChangePct: null,',
-'            cePremiumChangePct: null,\n            pePremiumChangePct: null,',
+'            cePremiumChangePct: contractHistory.cePremiumChangePct,\n            pePremiumChangePct: contractHistory.pePremiumChangePct,\n            ceOiChangePct: contractHistory.ceOiChangePct,\n            peOiChangePct: contractHistory.peOiChangePct,\n            ceIvChange: contractHistory.ceIvChange,\n            peIvChange: contractHistory.peIvChange,',
 "remove PPD-as-CE mislabel");
 
 server=replaceOnce(server,
+'          const ppdWindow: any = ppd.find((w: any) => w.windowMinutes === mins);\n          timeline.push({',
+'          const ppdWindow: any = ppd.find((w: any) => w.windowMinutes === mins);\n          const contractHistory = buildContractBoundHistoryPoint({ symbol, previousSnapshot: prev, currentCe: atmCe, currentPe: atmPe, currentFuture: fut });\n          timeline.push({',
+"derive exact contract-bound history");
+
+server=replaceOnce(server,
+'            futureChange: null,',
+'            futureChange: contractHistory.futureChange,',
+"exact futures history");
+
+server=replaceOnce(server,
+'            cePremium: atmCe?.lastPrice ?? null, pePremium: atmPe?.lastPrice ?? null,\n            callWallStrike, callWallStrength, putWallStrike, putWallStrength,',
+'            cePremium: trackedPair.ready ? atmCe?.lastPrice ?? null : null, pePremium: trackedPair.ready ? atmPe?.lastPrice ?? null : null,\n            premiumPairIdentity: trackedPair.label,\n            ceOi: trackedPair.ready ? atmCe?.oi ?? null : null, peOi: trackedPair.ready ? atmPe?.oi ?? null : null,\n            ceIv: trackedPair.ready ? atmCe?.iv ?? null : null, peIv: trackedPair.ready ? atmPe?.iv ?? null : null,\n            atmIv: trackedPair.ready && Number(atmCe?.iv) > 0 && Number(atmPe?.iv) > 0 ? (Number(atmCe.iv) + Number(atmPe.iv)) / 2 : null,\n            ceBid: trackedPair.ready ? atmCe?.bid ?? null : null, ceAsk: trackedPair.ready ? atmCe?.ask ?? null : null,\n            peBid: trackedPair.ready ? atmPe?.bid ?? null : null, peAsk: trackedPair.ready ? atmPe?.ask ?? null : null,\n            ceVolume: trackedPair.ready ? atmCe?.volume ?? null : null, peVolume: trackedPair.ready ? atmPe?.volume ?? null : null,\n            ceDelta: trackedPair.ready ? atmCe?.delta ?? null : null, peDelta: trackedPair.ready ? atmPe?.delta ?? null : null,\n            ceGamma: trackedPair.ready ? atmCe?.gamma ?? null : null, peGamma: trackedPair.ready ? atmPe?.gamma ?? null : null,\n            ceTheta: trackedPair.ready ? atmCe?.theta ?? null : null, peTheta: trackedPair.ready ? atmPe?.theta ?? null : null,\n            ceVega: trackedPair.ready ? atmCe?.vega ?? null : null, peVega: trackedPair.ready ? atmPe?.vega ?? null : null,\n            callWallStrike, callWallStrength, putWallStrike, putWallStrength,',
+"exact current premium pair fields");
+
+server=replaceOnce(server,
 '        const view = buildThreeMinuteFusedTelegramView({',
-'        const summaryWindows = ([3, 6, 15, 30, 60] as const).map((mins) => {\n          const prev: any = nearest(mins);\n          const ppdWindow: any = ppd.find((w: any) => w.windowMinutes === mins);\n          return buildWindowSummary({\n            windowMinutes: mins,\n            spotChange: prev && Number.isFinite(prev.spot) ? Number(m.spot) - Number(prev.spot) : null,\n            futureChange: null,\n            pcrChange: prev && Number.isFinite(prev.pcr) && Number.isFinite(m.pcr) ? Number(m.pcr) - Number(prev.pcr) : null,\n            vixChange: prev && Number.isFinite(prev.vix) && Number.isFinite(m.vix) ? Number(m.vix) - Number(prev.vix) : null,\n            cePremiumChangePct: null, pePremiumChangePct: null,\n            ppdSide: ppdWindow?.usable ? ppdWindow.controllingSide ?? null : null,\n            ppdValuePp: ppdWindow?.usable ? ppdWindow.candidateOrientedPpdPp ?? null : null,\n            heavyweightUp: named.length ? ups : null, heavyweightDown: named.length ? downs : null,\n          });\n        });\n\n        const view = buildThreeMinuteFusedTelegramView({',
+'        const summaryWindows = ([3, 6, 15, 30, 60] as const).map((mins) => {\n          const point: any = timeline.find((p: any) => p.label === `T${mins}`) ?? null;\n          const summaryPrevious: any = point ? null : nearest(mins);\n          const summaryFallback = point ? null : buildContractBoundHistoryPoint({ symbol, previousSnapshot: summaryPrevious, currentCe: atmCe, currentPe: atmPe, currentFuture: fut });\n          const ppdWindow: any = ppd.find((w: any) => w.windowMinutes === mins);\n          return buildWindowSummary({\n            windowMinutes: mins,\n            spotChange: point?.spotChange ?? (summaryPrevious && Number.isFinite(summaryPrevious.spot) ? Number(m.spot) - Number(summaryPrevious.spot) : null),\n            futureChange: point?.futureChange ?? summaryFallback?.futureChange ?? null,\n            pcrChange: point?.pcrChange ?? (summaryPrevious && Number.isFinite(summaryPrevious.pcr) && Number.isFinite(m.pcr) ? Number(m.pcr) - Number(summaryPrevious.pcr) : null),\n            vixChange: point?.vixChange ?? (summaryPrevious && Number.isFinite(summaryPrevious.vix) && Number.isFinite(m.vix) ? Number(m.vix) - Number(summaryPrevious.vix) : null),\n            cePremiumChangePct: point?.cePremiumChangePct ?? summaryFallback?.cePremiumChangePct ?? null,\n            pePremiumChangePct: point?.pePremiumChangePct ?? summaryFallback?.pePremiumChangePct ?? null,\n            ppdSide: ppdWindow?.usable ? ppdWindow.controllingSide ?? null : null,\n            ppdValuePp: ppdWindow?.usable ? ppdWindow.candidateOrientedPpdPp ?? null : null,\n            heavyweightUp: named.length ? ups : null, heavyweightDown: named.length ? downs : null,\n          });\n        });\n\n        const trackedPair = buildContractPairIdentity(symbol, atmCe, atmPe);\n        const view = buildThreeMinuteFusedTelegramView({',
 "build window summaries");
 
 server=replaceOnce(server,

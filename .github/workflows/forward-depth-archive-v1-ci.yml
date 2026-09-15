@@ -1,0 +1,22 @@
+name: Forward Depth Archive V1
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/wire-storage-v3-runtime.mjs'
+      - 'db.ts'
+      - 'storage-v3-adapter.ts'
+      - 'h1-replay-http.ts'
+      - '.github/workflows/forward-depth-archive-v1-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  depth-wiring-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact top-of-book forward archive wiring
+        run: node scripts/wire-storage-v3-runtime.mjs --check

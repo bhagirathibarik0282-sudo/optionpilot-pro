@@ -1,0 +1,57 @@
+name: DTE0 Production OOS Probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/dte0-oos-production-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe completed NIFTY DTE0 sessions
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-dte0-multiday-oos?symbol=NIFTY&dates=2026-08-18,2026-08-25,2026-09-01,2026-09-08&from=09:15&to=15:30&scope=CORE'
+          status=$(curl --connect-timeout 15 --max-time 120 -sS -o completed.json -w '%{http_code}' "$URL")
+          echo "COMPLETED_HTTP_STATUS=$status"
+          cat completed.json
+          echo
+          python - <<'PY'
+          import json
+          p=json.load(open('completed.json'))
+          print('COMPLETED_SUMMARY='+json.dumps({
+            'ok':p.get('ok'), 'mode':p.get('mode'), 'requestedDayCount':p.get('requestedDayCount'),
+            'usableDayCount':p.get('usableDayCount'), 'calibrationDates':p.get('calibrationDates'),
+            'oosDates':p.get('oosDates'), 'candidateDeltaP95':p.get('candidateDeltaP95'),
+            'oosDeltaPassRateAtCandidate':p.get('oosDeltaPassRateAtCandidate'),
+            'blockers':p.get('blockers'), 'safety':p.get('safety')
+          }, separators=(',',':')))
+          PY
+
+      - name: Probe recent NIFTY DTE0 sessions including today
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-dte0-multiday-oos?symbol=NIFTY&dates=2026-08-25,2026-09-01,2026-09-08,2026-09-15&from=09:15&to=15:30&scope=CORE'
+          status=$(curl --connect-timeout 15 --max-time 120 -sS -o recent.json -w '%{http_code}' "$URL")
+          echo "RECENT_HTTP_STATUS=$status"
+          cat recent.json
+          echo
+          python - <<'PY'
+          import json
+          p=json.load(open('recent.json'))
+          print('RECENT_SUMMARY='+json.dumps({
+            'ok':p.get('ok'), 'mode':p.get('mode'), 'requestedDayCount':p.get('requestedDayCount'),
+            'usableDayCount':p.get('usableDayCount'), 'calibrationDates':p.get('calibrationDates'),
+            'oosDates':p.get('oosDates'), 'candidateDeltaP95':p.get('candidateDeltaP95'),
+            'oosDeltaPassRateAtCandidate':p.get('oosDeltaPassRateAtCandidate'),
+            'blockers':p.get('blockers'), 'safety':p.get('safety')
+          }, separators=(',',':')))
+          PY

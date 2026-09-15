@@ -1,0 +1,43 @@
+name: DTE0 Aug25 Recovery Probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/dte0-aug25-recovery-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe compact DTE0 calibration evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-dte0-transition-calibration'
+          for d in 2026-08-18 2026-08-25 2026-09-01 2026-09-08 2026-09-15; do
+            url="$BASE?symbol=NIFTY&date=$d&from=09:15&to=15:30&scope=CORE"
+            status=$(curl --connect-timeout 15 --max-time 120 -sS -o "${d}.json" -w '%{http_code}' "$url")
+            echo "DATE=$d HTTP_STATUS=$status"
+            python - "$d" <<'PY'
+          import json,sys
+          d=sys.argv[1]
+          p=json.load(open(d+'.json'))
+          summary={
+            'date':d,
+            'ok':p.get('ok'),
+            'reason':p.get('reason'),
+            'atmDte0PointCount':p.get('atmDte0PointCount'),
+            'windowCount':p.get('windowCount'),
+            'evidenceState':p.get('evidenceState'),
+            'replayCounts':p.get('replayCounts'),
+            'continuity':p.get('continuity'),
+            'productionImpact':p.get('productionImpact'),
+            'safety':p.get('safety'),
+          }
+          print('DTE0_RECOVERY_SUMMARY='+json.dumps(summary,separators=(',',':')))
+          PY
+          done

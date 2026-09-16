@@ -5,11 +5,14 @@ on:
     paths:
       - 'canonical-one-roof-market-snapshot.ts'
       - 'h1-gold-eligibility-v1.ts'
+      - 'h1-gold-evidence-source-registry-v1.ts'
       - 'h1-gold-evidence-adapter-v1.ts'
+      - 'h1-gold-live-runtime-bridge-v1.ts'
       - 'h1-golden-shadow-candidate-v1.ts'
       - 'test/canonical-one-roof-market-snapshot.test.ts'
       - 'test/h1-gold-eligibility-v1.test.ts'
       - 'test/h1-gold-evidence-adapter-v1.test.ts'
+      - 'test/h1-gold-live-runtime-bridge-v1.test.ts'
       - 'test/h1-golden-shadow-candidate-v1.test.ts'
       - '.github/workflows/gold-eligibility-v1-ci.yml'
   push:
@@ -18,11 +21,14 @@ on:
     paths:
       - 'canonical-one-roof-market-snapshot.ts'
       - 'h1-gold-eligibility-v1.ts'
+      - 'h1-gold-evidence-source-registry-v1.ts'
       - 'h1-gold-evidence-adapter-v1.ts'
+      - 'h1-gold-live-runtime-bridge-v1.ts'
       - 'h1-golden-shadow-candidate-v1.ts'
       - 'test/canonical-one-roof-market-snapshot.test.ts'
       - 'test/h1-gold-eligibility-v1.test.ts'
       - 'test/h1-gold-evidence-adapter-v1.test.ts'
+      - 'test/h1-gold-live-runtime-bridge-v1.test.ts'
       - 'test/h1-golden-shadow-candidate-v1.test.ts'
       - '.github/workflows/gold-eligibility-v1-ci.yml'
 
@@ -38,4 +44,4 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: npx --no-install tsx --test test/canonical-one-roof-market-snapshot.test.ts test/h1-gold-eligibility-v1.test.ts test/h1-gold-evidence-adapter-v1.test.ts test/h1-golden-shadow-candidate-v1.test.ts
+      - run: npx --no-install tsx --test test/canonical-one-roof-market-snapshot.test.ts test/h1-gold-eligibility-v1.test.ts test/h1-gold-evidence-adapter-v1.test.ts test/h1-gold-live-runtime-bridge-v1.test.ts test/h1-golden-shadow-candidate-v1.test.ts

@@ -1,4 +1,9 @@
 import {
+  CANONICAL_ONE_ROOF_MARKET_SNAPSHOT_V2,
+  buildCanonicalOneRoofMarketSnapshot,
+  type CanonicalOneRoofMarketSnapshot,
+} from "./canonical-one-roof-market-snapshot.js";
+import {
   evaluateH1GoldEligibility,
   type GoldEvidenceFamily,
   type GoldEvidenceState,
@@ -12,16 +17,17 @@ export type GoldExactProvenance = "RESEARCH_EXACT" | "LIVE_RUNTIME_EXACT";
 export interface H1GoldExactFamilySignal {
   state: GoldEvidenceState;
   source: string;
-  observedAt?: string;
+  snapshotId: string;
+  observedAt: string;
   provenance: GoldExactProvenance;
   reasonCodes?: string[];
-  synchronized?: boolean;
 }
 
 export interface H1GoldEvidenceAdapterInput {
   symbol: "NIFTY" | "SENSEX";
   side: "CE" | "PE";
   observedAt: string;
+  canonicalSnapshot: CanonicalOneRoofMarketSnapshot;
   dataIntegrity: H1GoldExactFamilySignal;
   premiumPair: H1GoldExactFamilySignal;
   spotStructure: H1GoldExactFamilySignal;
@@ -39,9 +45,11 @@ export interface H1GoldEvidenceFamilyAudit {
   requestedState: GoldEvidenceState | "INVALID";
   adaptedState: GoldEvidenceState;
   source: string | null;
+  snapshotId: string | null;
   observedAt: string | null;
   provenance: GoldExactProvenance | null;
-  synchronized: boolean;
+  canonicalBound: boolean;
+  futureLeakageBlocked: boolean;
   reasonCodes: string[];
 }
 
@@ -50,6 +58,9 @@ export interface H1GoldEvidenceAdapterResult {
   symbol: H1GoldEvidenceAdapterInput["symbol"];
   side: H1GoldEvidenceAdapterInput["side"];
   observedAt: string;
+  canonicalSnapshotId: string | null;
+  canonicalRootValid: boolean;
+  canonicalRootReasonCodes: string[];
   families: Record<GoldEvidenceFamily, GoldEvidenceState>;
   familyAudit: Record<GoldEvidenceFamily, H1GoldEvidenceFamilyAudit>;
   eligibility: H1GoldEligibilityResult;
@@ -60,7 +71,7 @@ export interface H1GoldEvidenceAdapterResult {
   grantsPromotionAuthority: false;
   calculatesThresholds: false;
   failClosed: true;
-  semantics: "EXACT_EVIDENCE_MAPPING_ONLY_NO_MARKET_INFERENCE";
+  semantics: "CANONICAL_EXACT_EVIDENCE_MAPPING_ONLY_NO_MARKET_INFERENCE";
 }
 
 const FAMILIES: GoldEvidenceFamily[] = [
@@ -75,6 +86,17 @@ const FAMILIES: GoldEvidenceFamily[] = [
   "chasePhase",
   "horizonComplete",
 ];
+
+const FORBIDDEN_DECISION_LEAKAGE_MARKERS = [
+  "FORWARD_MFE",
+  "FORWARD_MAE",
+  "FORWARD_OUTCOME",
+  "OUTCOME_LABEL",
+  "POST_ENTRY",
+  "TARGET_HIT",
+  "STOP_HIT",
+  "FUTURE_KNOWN",
+] as const;
 
 function validIso(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
@@ -93,9 +115,54 @@ function normalizeReasonCodes(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function hasForbiddenDecisionLeakage(source: string | null, reasonCodes: string[]): boolean {
+  const haystack = [source ?? "", ...reasonCodes].join("|").toUpperCase();
+  return FORBIDDEN_DECISION_LEAKAGE_MARKERS.some((marker) => haystack.includes(marker));
+}
+
+function validateCanonicalRoot(input: H1GoldEvidenceAdapterInput): string[] {
+  const reasons: string[] = [];
+  const snapshot = input?.canonicalSnapshot;
+  const candidateMs = validIso(input?.observedAt) ? Date.parse(input.observedAt) : Number.NaN;
+
+  if (!snapshot) return ["MISSING_CANONICAL_SNAPSHOT"];
+  if (snapshot.version !== CANONICAL_ONE_ROOF_MARKET_SNAPSHOT_V2) reasons.push("INVALID_CANONICAL_SNAPSHOT_VERSION");
+  if (!snapshot.snapshotId?.trim()) reasons.push("MISSING_CANONICAL_SNAPSHOT_ID");
+  if (snapshot.symbol !== input.symbol) reasons.push("CANONICAL_SYMBOL_MISMATCH");
+  if (!Number.isFinite(candidateMs)) reasons.push("INVALID_CANDIDATE_TIMESTAMP");
+  if (!Number.isFinite(snapshot.asOfMs) || snapshot.asOfMs !== candidateMs) {
+    reasons.push("CANONICAL_DECISION_TIMESTAMP_MISMATCH");
+  }
+
+  const rebuilt = buildCanonicalOneRoofMarketSnapshot({
+    snapshotId: snapshot.snapshotId,
+    symbol: snapshot.symbol,
+    asOfMs: snapshot.asOfMs,
+    minuteClosed: snapshot.minuteClosed,
+    connectionId: snapshot.connectionId,
+    instrumentMasterVersion: snapshot.instrumentMasterVersion,
+    components: snapshot.components,
+    freshnessBudgetsMs: snapshot.freshnessBudgetsMs,
+    ingestTelemetry: snapshot.ingestTelemetry,
+  });
+
+  if (!rebuilt.readyForStrictFiltering) reasons.push("CANONICAL_NOT_READY_FOR_STRICT_FILTERING");
+  if (rebuilt.qualityState !== "VERIFIED") reasons.push("CANONICAL_QUALITY_NOT_VERIFIED");
+  if (rebuilt.newEntryGate !== "ALLOW_NEW_ENTRIES") reasons.push("CANONICAL_NEW_ENTRY_GATE_BLOCKED");
+  if (rebuilt.internalBlockers.length > 0) reasons.push("CANONICAL_INTERNAL_BLOCKERS_PRESENT");
+
+  return unique(reasons);
+}
+
 function adaptFamily(
   family: GoldEvidenceFamily,
   candidateObservedAt: string,
+  canonicalSnapshotId: string | null,
+  canonicalRootValid: boolean,
   rawSignal: H1GoldExactFamilySignal | undefined,
 ): H1GoldEvidenceFamilyAudit {
   const signal = rawSignal as Partial<H1GoldExactFamilySignal> | undefined;
@@ -103,27 +170,46 @@ function adaptFamily(
   const source = typeof signal?.source === "string" && signal.source.trim().length > 0
     ? signal.source.trim()
     : null;
+  const snapshotId = typeof signal?.snapshotId === "string" && signal.snapshotId.trim().length > 0
+    ? signal.snapshotId.trim()
+    : null;
   const provenance = validProvenance(signal?.provenance) ? signal.provenance : null;
   const observedAt = validIso(signal?.observedAt) ? signal.observedAt : null;
-  const synchronized = signal?.synchronized === true;
   const reasonCodes = normalizeReasonCodes(signal?.reasonCodes);
 
   if (requestedState === "INVALID") reasonCodes.push("INVALID_UPSTREAM_STATE");
   if (!source) reasonCodes.push("MISSING_UPSTREAM_SOURCE");
+  if (!snapshotId) reasonCodes.push("MISSING_UPSTREAM_SNAPSHOT_ID");
   if (!provenance) reasonCodes.push("INVALID_UPSTREAM_PROVENANCE");
+  if (!canonicalRootValid) reasonCodes.push("CANONICAL_ROOT_INVALID");
 
-  const timestampAligned = observedAt !== null && observedAt === candidateObservedAt;
-  const synchronizationAccepted = timestampAligned || synchronized;
-  if (!synchronizationAccepted) {
+  const snapshotAligned = snapshotId !== null
+    && canonicalSnapshotId !== null
+    && snapshotId === canonicalSnapshotId;
+  if (!snapshotAligned) reasonCodes.push("UPSTREAM_SNAPSHOT_ID_MISMATCH");
+
+  const timestampAligned = observedAt !== null
+    && validIso(candidateObservedAt)
+    && Date.parse(observedAt) === Date.parse(candidateObservedAt);
+  if (!timestampAligned) {
     reasonCodes.push(observedAt === null
-      ? "MISSING_UPSTREAM_TIMESTAMP_OR_SYNC_ASSERTION"
-      : "UPSTREAM_TIMESTAMP_NOT_SYNCHRONIZED");
+      ? "MISSING_UPSTREAM_TIMESTAMP"
+      : "UPSTREAM_DECISION_TIMESTAMP_MISMATCH");
   }
 
-  // MISSING is always preserved. PASS/FAIL are trusted only when their exact
-  // source metadata and temporal synchronization are valid. Invalid metadata
-  // can never be rescued by premium strength or another evidence family.
-  const metadataValid = source !== null && provenance !== null && synchronizationAccepted;
+  const futureLeakageBlocked = hasForbiddenDecisionLeakage(source, reasonCodes);
+  if (futureLeakageBlocked) reasonCodes.push("DECISION_TIME_FUTURE_LEAKAGE_BLOCKED");
+
+  // MISSING is always preserved. PASS/FAIL are trusted only when they are bound
+  // to the same canonical snapshot identity and exact decision timestamp. There
+  // is intentionally no free-form synchronized=true escape hatch.
+  const metadataValid = source !== null
+    && provenance !== null
+    && canonicalRootValid
+    && snapshotAligned
+    && timestampAligned
+    && !futureLeakageBlocked;
+
   const adaptedState: GoldEvidenceState = requestedState === "MISSING"
     ? "MISSING"
     : requestedState !== "INVALID" && metadataValid
@@ -139,10 +225,12 @@ function adaptFamily(
     requestedState,
     adaptedState,
     source,
+    snapshotId,
     observedAt,
     provenance,
-    synchronized,
-    reasonCodes: [...new Set(reasonCodes)],
+    canonicalBound: canonicalRootValid && snapshotAligned && timestampAligned,
+    futureLeakageBlocked,
+    reasonCodes: unique(reasonCodes),
   };
 }
 
@@ -150,13 +238,25 @@ function adaptFamily(
  * Maps already-validated exact upstream family verdicts into the research-only
  * Gold eligibility boundary. This adapter deliberately performs no market
  * calculation and owns no PPD/OI/PCR/wall/spread/Z/star thresholds.
+ *
+ * horizonComplete is decision-time evidence only (available history/session
+ * feasibility). Any post-entry MFE/MAE/target/stop/outcome marker is rejected.
  */
 export function adaptH1GoldEvidence(input: H1GoldEvidenceAdapterInput): H1GoldEvidenceAdapterResult {
+  const canonicalRootReasonCodes = validateCanonicalRoot(input);
+  const canonicalRootValid = canonicalRootReasonCodes.length === 0;
+  const canonicalSnapshotId = input?.canonicalSnapshot?.snapshotId?.trim() || null;
   const families = {} as Record<GoldEvidenceFamily, GoldEvidenceState>;
   const familyAudit = {} as Record<GoldEvidenceFamily, H1GoldEvidenceFamilyAudit>;
 
   for (const family of FAMILIES) {
-    const audit = adaptFamily(family, input?.observedAt, input?.[family]);
+    const audit = adaptFamily(
+      family,
+      input?.observedAt,
+      canonicalSnapshotId,
+      canonicalRootValid,
+      input?.[family],
+    );
     familyAudit[family] = audit;
     families[family] = audit.adaptedState;
   }
@@ -166,11 +266,9 @@ export function adaptH1GoldEvidence(input: H1GoldEvidenceAdapterInput): H1GoldEv
     side: input?.side,
     observedAt: input?.observedAt,
     source: H1_GOLD_EVIDENCE_ADAPTER_VERSION,
-    // Gold eligibility itself is still research authority only. Per-family
-    // provenance remains preserved in familyAudit, including live exact input.
     provenance: "RESEARCH_EXACT",
     families,
-    notes: ["Mapped exact upstream family verdicts only; no thresholds calculated by adapter."],
+    notes: ["Mapped canonical-bound exact upstream family verdicts only; no thresholds calculated by adapter."],
   });
 
   return {
@@ -178,6 +276,9 @@ export function adaptH1GoldEvidence(input: H1GoldEvidenceAdapterInput): H1GoldEv
     symbol: input?.symbol,
     side: input?.side,
     observedAt: input?.observedAt,
+    canonicalSnapshotId,
+    canonicalRootValid,
+    canonicalRootReasonCodes,
     families,
     familyAudit,
     eligibility,
@@ -188,6 +289,6 @@ export function adaptH1GoldEvidence(input: H1GoldEvidenceAdapterInput): H1GoldEv
     grantsPromotionAuthority: false,
     calculatesThresholds: false,
     failClosed: true,
-    semantics: "EXACT_EVIDENCE_MAPPING_ONLY_NO_MARKET_INFERENCE",
+    semantics: "CANONICAL_EXACT_EVIDENCE_MAPPING_ONLY_NO_MARKET_INFERENCE",
   };
 }

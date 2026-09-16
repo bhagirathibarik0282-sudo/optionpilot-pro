@@ -9,6 +9,7 @@ import {
   type GoldEvidenceState,
   type H1GoldEligibilityResult,
 } from "./h1-gold-eligibility-v1.js";
+import { auditGoldProducer, type H1GoldProducerApprovalReason } from "./h1-gold-evidence-source-registry-v1.js";
 
 export const H1_GOLD_EVIDENCE_ADAPTER_VERSION = "H1_GOLD_EVIDENCE_ADAPTER_V1" as const;
 
@@ -49,6 +50,9 @@ export interface H1GoldEvidenceFamilyAudit {
   observedAt: string | null;
   provenance: GoldExactProvenance | null;
   canonicalBound: boolean;
+  producerApproved: boolean;
+  producerApprovalReason: H1GoldProducerApprovalReason;
+  producerMatchedFamily: GoldEvidenceFamily | null;
   futureLeakageBlocked: boolean;
   reasonCodes: string[];
 }
@@ -71,7 +75,7 @@ export interface H1GoldEvidenceAdapterResult {
   grantsPromotionAuthority: false;
   calculatesThresholds: false;
   failClosed: true;
-  semantics: "CANONICAL_EXACT_EVIDENCE_MAPPING_ONLY_NO_MARKET_INFERENCE";
+  semantics: "CANONICAL_EXACT_APPROVED_PRODUCER_MAPPING_ONLY_NO_MARKET_INFERENCE";
 }
 
 const FAMILIES: GoldEvidenceFamily[] = [
@@ -200,14 +204,19 @@ function adaptFamily(
   const futureLeakageBlocked = hasForbiddenDecisionLeakage(source, reasonCodes);
   if (futureLeakageBlocked) reasonCodes.push("DECISION_TIME_FUTURE_LEAKAGE_BLOCKED");
 
+  const producerApproval = auditGoldProducer(family, source, provenance);
+  if (!producerApproval.approved) reasonCodes.push(producerApproval.reason);
+
   // MISSING is always preserved. PASS/FAIL are trusted only when they are bound
-  // to the same canonical snapshot identity and exact decision timestamp. There
-  // is intentionally no free-form synchronized=true escape hatch.
+  // to the same canonical snapshot identity, exact decision timestamp, and a
+  // family-specific code-proven producer. There is intentionally no generic
+  // source alias or synchronized=true escape hatch.
   const metadataValid = source !== null
     && provenance !== null
     && canonicalRootValid
     && snapshotAligned
     && timestampAligned
+    && producerApproval.approved
     && !futureLeakageBlocked;
 
   const adaptedState: GoldEvidenceState = requestedState === "MISSING"
@@ -229,6 +238,9 @@ function adaptFamily(
     observedAt,
     provenance,
     canonicalBound: canonicalRootValid && snapshotAligned && timestampAligned,
+    producerApproved: producerApproval.approved,
+    producerApprovalReason: producerApproval.reason,
+    producerMatchedFamily: producerApproval.matchedFamily,
     futureLeakageBlocked,
     reasonCodes: unique(reasonCodes),
   };
@@ -268,7 +280,7 @@ export function adaptH1GoldEvidence(input: H1GoldEvidenceAdapterInput): H1GoldEv
     source: H1_GOLD_EVIDENCE_ADAPTER_VERSION,
     provenance: "RESEARCH_EXACT",
     families,
-    notes: ["Mapped canonical-bound exact upstream family verdicts only; no thresholds calculated by adapter."],
+    notes: ["Mapped canonical-bound, family-approved exact upstream verdicts only; no thresholds calculated by adapter."],
   });
 
   return {
@@ -289,6 +301,6 @@ export function adaptH1GoldEvidence(input: H1GoldEvidenceAdapterInput): H1GoldEv
     grantsPromotionAuthority: false,
     calculatesThresholds: false,
     failClosed: true,
-    semantics: "CANONICAL_EXACT_EVIDENCE_MAPPING_ONLY_NO_MARKET_INFERENCE",
+    semantics: "CANONICAL_EXACT_APPROVED_PRODUCER_MAPPING_ONLY_NO_MARKET_INFERENCE",
   };
 }

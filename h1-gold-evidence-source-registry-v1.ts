@@ -65,6 +65,12 @@ const APPROVED_PRODUCERS: readonly H1GoldApprovedProducer[] = [
     provenance: "LIVE_RUNTIME_EXACT",
     evidenceBasis: "Exact bid/ask, spread, depth, capital and DTE evaluator output",
   },
+  {
+    family: "horizonComplete",
+    source: "H1_GOLD_IMMUTABLE_HORIZON_COMPLETE_V1",
+    provenance: "LIVE_RUNTIME_EXACT",
+    evidenceBasis: "Canonical-T0-bound 3m/6m/15m/30m completeness from append-only formal-close captures that were persisted before decision T0; mutable timeframe_state aliases, partial sampling, stale boundaries, late persistence and future outcomes fail closed",
+  },
 ] as const;
 
 export type H1GoldProducerApprovalReason =

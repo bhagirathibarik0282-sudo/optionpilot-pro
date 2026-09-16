@@ -1,0 +1,44 @@
+name: H1 Gold Chase Calibration Persistence V1 CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'h1-gold-chase-observation-v1.ts'
+      - 'h1-gold-chase-calibration-dataset-v1.ts'
+      - 'h1-gold-chase-calibration-persistence-v1.ts'
+      - 'business-forward-journal-v1.ts'
+      - 'canonical-one-roof-market-snapshot.ts'
+      - 'test/h1-gold-chase-calibration-persistence-v1.postgres.test.ts'
+      - '.github/workflows/h1-gold-chase-calibration-persistence-v1-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-immutable-persistence:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: optionpilot_chase_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d optionpilot_chase_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/optionpilot_chase_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/h1-gold-chase-calibration-persistence-v1.postgres.test.ts

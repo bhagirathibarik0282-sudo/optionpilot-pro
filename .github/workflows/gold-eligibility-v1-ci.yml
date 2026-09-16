@@ -13,6 +13,7 @@ on:
       - 'h1-golden-shadow-telegram-preview-v1.ts'
       - 'test/canonical-one-roof-market-snapshot.test.ts'
       - 'test/h1-gold-eligibility-v1.test.ts'
+      - 'test/h1-gold-evidence-source-registry-v1.test.ts'
       - 'test/h1-gold-evidence-adapter-v1.test.ts'
       - 'test/h1-gold-live-runtime-bridge-v1.test.ts'
       - 'test/h1-golden-shadow-candidate-v1.test.ts'
@@ -32,6 +33,7 @@ on:
       - 'h1-golden-shadow-telegram-preview-v1.ts'
       - 'test/canonical-one-roof-market-snapshot.test.ts'
       - 'test/h1-gold-eligibility-v1.test.ts'
+      - 'test/h1-gold-evidence-source-registry-v1.test.ts'
       - 'test/h1-gold-evidence-adapter-v1.test.ts'
       - 'test/h1-gold-live-runtime-bridge-v1.test.ts'
       - 'test/h1-golden-shadow-candidate-v1.test.ts'
@@ -50,4 +52,4 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: npx --no-install tsx --test test/canonical-one-roof-market-snapshot.test.ts test/h1-gold-eligibility-v1.test.ts test/h1-gold-evidence-adapter-v1.test.ts test/h1-gold-live-runtime-bridge-v1.test.ts test/h1-golden-shadow-candidate-v1.test.ts test/h1-golden-shadow-presentation-v1.test.ts
+      - run: npx --no-install tsx --test test/canonical-one-roof-market-snapshot.test.ts test/h1-gold-eligibility-v1.test.ts test/h1-gold-evidence-source-registry-v1.test.ts test/h1-gold-evidence-adapter-v1.test.ts test/h1-gold-live-runtime-bridge-v1.test.ts test/h1-golden-shadow-candidate-v1.test.ts test/h1-golden-shadow-presentation-v1.test.ts

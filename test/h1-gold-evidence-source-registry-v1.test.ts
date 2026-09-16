@@ -31,7 +31,8 @@ test("approved execution source cannot be swapped into premiumPair", () => {
     "LIVE_RUNTIME_EXACT",
   );
   assert.equal(out.approved, false);
-  assert.equal(out.reason, "NO_APPROVED_GOLD_PRODUCER_FOR_FAMILY");
+  assert.equal(out.reason, "SOURCE_APPROVED_FOR_DIFFERENT_GOLD_FAMILY");
+  assert.equal(out.matchedFamily, "executionQuality");
 });
 
 test("generic exact-looking source is rejected", () => {

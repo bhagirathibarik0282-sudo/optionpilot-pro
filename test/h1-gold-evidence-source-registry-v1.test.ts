@@ -11,6 +11,7 @@ const PREMIUM_PAIR_SOURCE = "H1_LIVE_PPD_3M_6M_15M_CONTROLLED_EXPANSION";
 const SPOT_STRUCTURE_SOURCE = "H1_GOLD_ATTESTED_MARKET_STRUCTURE_BRIDGE_V1";
 const FUTURES_SOURCE = "H1_GOLD_ATTESTED_FUTURES_CONFIRMATION_BRIDGE_V1";
 const LEADER_SOURCE = "H1_GOLD_ATTESTED_HEAVYWEIGHTS_BRIDGE_V1";
+const PEER_SOURCE = "H1_GOLD_EXACT_PEER_CONFLICT_ABSENT_V1";
 const CHAIN_SOURCE = "H1_GOLD_ATTESTED_OI_POSITIONING_BRIDGE_V1";
 const EXECUTION_SOURCE = "H1_LIVE_CAPITAL_LIQUIDITY_DTE_GATES_V1";
 
@@ -22,6 +23,7 @@ test("only code-proven Gold producers are approved", () => {
     ["spotStructure", SPOT_STRUCTURE_SOURCE, "LIVE_RUNTIME_EXACT"],
     ["targetFuturesPositioning", FUTURES_SOURCE, "LIVE_RUNTIME_EXACT"],
     ["leaderPositioning", LEADER_SOURCE, "LIVE_RUNTIME_EXACT"],
+    ["peerConflictAbsent", PEER_SOURCE, "LIVE_RUNTIME_EXACT"],
     ["chainRepositioning", CHAIN_SOURCE, "LIVE_RUNTIME_EXACT"],
     ["executionQuality", EXECUTION_SOURCE, "LIVE_RUNTIME_EXACT"],
   ]);
@@ -56,6 +58,14 @@ test("typed four-family bridges are approved for their exact families", () => {
   }
 });
 
+test("exact peer-conflict producer is accepted only for peerConflictAbsent", () => {
+  const out = auditGoldProducer("peerConflictAbsent", PEER_SOURCE, "LIVE_RUNTIME_EXACT");
+  assert.equal(out.approved, true);
+  assert.equal(out.reason, "APPROVED_GOLD_PRODUCER");
+  assert.equal(out.matchedFamily, "peerConflictAbsent");
+  assert.match(out.registration?.evidenceBasis ?? "", /no consensus vote or new threshold/i);
+});
+
 test("approved execution-quality producer is accepted only for its exact family and provenance", () => {
   const out = auditGoldProducer("executionQuality", EXECUTION_SOURCE, "LIVE_RUNTIME_EXACT");
   assert.equal(out.approved, true);
@@ -77,6 +87,13 @@ test("approved core source cannot be swapped into another core family", () => {
   assert.equal(out.matchedFamily, "targetFuturesPositioning");
 });
 
+test("approved peer source cannot be swapped into another Gold family", () => {
+  const out = auditGoldProducer("chainRepositioning", PEER_SOURCE, "LIVE_RUNTIME_EXACT");
+  assert.equal(out.approved, false);
+  assert.equal(out.reason, "SOURCE_APPROVED_FOR_DIFFERENT_GOLD_FAMILY");
+  assert.equal(out.matchedFamily, "peerConflictAbsent");
+});
+
 test("approved premium-pair source cannot be swapped into executionQuality", () => {
   const out = auditGoldProducer("executionQuality", PREMIUM_PAIR_SOURCE, "LIVE_RUNTIME_EXACT");
   assert.equal(out.approved, false);
@@ -96,12 +113,8 @@ test("same producer with research provenance is rejected", () => {
   assert.equal(out.reason, "UNAPPROVED_GOLD_PROVENANCE");
 });
 
-test("unproven context Gold families remain fail-closed", () => {
-  for (const family of [
-    "peerConflictAbsent",
-    "chasePhase",
-    "horizonComplete",
-  ] as const) {
+test("remaining unproven context Gold families stay fail-closed", () => {
+  for (const family of ["chasePhase", "horizonComplete"] as const) {
     const out = auditGoldProducer(family, `CLAIMED_${family}`, "LIVE_RUNTIME_EXACT");
     assert.equal(out.approved, false);
     assert.equal(out.reason, "NO_APPROVED_GOLD_PRODUCER_FOR_FAMILY");

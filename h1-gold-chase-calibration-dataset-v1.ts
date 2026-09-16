@@ -36,6 +36,9 @@ export interface H1GoldChaseCalibrationSample {
   t0ObservedAtMs: number | null;
   t0Premium: number | null;
   t0Features: H1GoldChaseObservationFeatures | null;
+  t0MarketState: string | null;
+  t0SellerStressState: string | null;
+  t0OpportunityStage: string | null;
   outcomes: ReadonlyArray<Readonly<H1GoldChaseCalibrationOutcome>>;
   completedWindows: ForwardOutcomePoint["window"][];
   missingWindows: ForwardOutcomePoint["window"][];
@@ -108,6 +111,9 @@ function base(
     | "t0ObservedAtMs"
     | "t0Premium"
     | "t0Features"
+    | "t0MarketState"
+    | "t0SellerStressState"
+    | "t0OpportunityStage"
     | "outcomes"
     | "completedWindows"
     | "missingWindows"
@@ -131,6 +137,9 @@ function base(
     t0ObservedAtMs: fields.t0ObservedAtMs ?? null,
     t0Premium: fields.t0Premium ?? null,
     t0Features: fields.t0Features ?? null,
+    t0MarketState: fields.t0MarketState ?? null,
+    t0SellerStressState: fields.t0SellerStressState ?? null,
+    t0OpportunityStage: fields.t0OpportunityStage ?? null,
     outcomes: fields.outcomes ?? Object.freeze([]),
     completedWindows: fields.completedWindows ?? [],
     missingWindows: fields.missingWindows ?? [...WINDOWS],
@@ -197,6 +206,9 @@ export function buildH1GoldChaseCalibrationSample(
     t0ObservedAtMs: t0Ms,
     t0Premium: observation.features.currentPremium,
     t0Features: observation.state === "OBSERVABLE" ? observation.features : null,
+    t0MarketState: journal?.anchor?.marketState?.trim() || null,
+    t0SellerStressState: journal?.anchor?.sellerStressState?.trim() || null,
+    t0OpportunityStage: journal?.anchor?.opportunityStage?.trim() || null,
   };
 
   if (journal) {

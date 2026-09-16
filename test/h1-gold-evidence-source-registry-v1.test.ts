@@ -6,13 +6,23 @@ import {
   listApprovedGoldProducers,
 } from "../h1-gold-evidence-source-registry-v1.js";
 
+const DATA_INTEGRITY_SOURCE = "H1_GOLD_CANONICAL_DATA_INTEGRITY_BRIDGE_V1";
 const PREMIUM_PAIR_SOURCE = "H1_LIVE_PPD_3M_6M_15M_CONTROLLED_EXPANSION";
+const SPOT_STRUCTURE_SOURCE = "H1_GOLD_ATTESTED_MARKET_STRUCTURE_BRIDGE_V1";
+const FUTURES_SOURCE = "H1_GOLD_ATTESTED_FUTURES_CONFIRMATION_BRIDGE_V1";
+const LEADER_SOURCE = "H1_GOLD_ATTESTED_HEAVYWEIGHTS_BRIDGE_V1";
+const CHAIN_SOURCE = "H1_GOLD_ATTESTED_OI_POSITIONING_BRIDGE_V1";
 const EXECUTION_SOURCE = "H1_LIVE_CAPITAL_LIQUIDITY_DTE_GATES_V1";
 
 test("only code-proven Gold producers are approved", () => {
   const all = listApprovedGoldProducers();
   assert.deepEqual(all.map((x) => [x.family, x.source, x.provenance]), [
+    ["dataIntegrity", DATA_INTEGRITY_SOURCE, "LIVE_RUNTIME_EXACT"],
     ["premiumPair", PREMIUM_PAIR_SOURCE, "LIVE_RUNTIME_EXACT"],
+    ["spotStructure", SPOT_STRUCTURE_SOURCE, "LIVE_RUNTIME_EXACT"],
+    ["targetFuturesPositioning", FUTURES_SOURCE, "LIVE_RUNTIME_EXACT"],
+    ["leaderPositioning", LEADER_SOURCE, "LIVE_RUNTIME_EXACT"],
+    ["chainRepositioning", CHAIN_SOURCE, "LIVE_RUNTIME_EXACT"],
     ["executionQuality", EXECUTION_SOURCE, "LIVE_RUNTIME_EXACT"],
   ]);
 });
@@ -23,6 +33,27 @@ test("premium-pair source is accepted only for premiumPair", () => {
   assert.equal(out.reason, "APPROVED_GOLD_PRODUCER");
   assert.equal(out.matchedFamily, "premiumPair");
   assert.match(out.registration?.evidenceBasis ?? "", /supporting-only/i);
+});
+
+test("typed canonical data-integrity producer is accepted only for dataIntegrity", () => {
+  const out = auditGoldProducer("dataIntegrity", DATA_INTEGRITY_SOURCE, "LIVE_RUNTIME_EXACT");
+  assert.equal(out.approved, true);
+  assert.equal(out.reason, "APPROVED_GOLD_PRODUCER");
+  assert.equal(out.matchedFamily, "dataIntegrity");
+});
+
+test("typed four-family bridges are approved for their exact families", () => {
+  for (const [family, source] of [
+    ["spotStructure", SPOT_STRUCTURE_SOURCE],
+    ["targetFuturesPositioning", FUTURES_SOURCE],
+    ["leaderPositioning", LEADER_SOURCE],
+    ["chainRepositioning", CHAIN_SOURCE],
+  ] as const) {
+    const out = auditGoldProducer(family, source, "LIVE_RUNTIME_EXACT");
+    assert.equal(out.approved, true);
+    assert.equal(out.reason, "APPROVED_GOLD_PRODUCER");
+    assert.equal(out.matchedFamily, family);
+  }
 });
 
 test("approved execution-quality producer is accepted only for its exact family and provenance", () => {
@@ -37,6 +68,13 @@ test("approved execution source cannot be swapped into premiumPair", () => {
   assert.equal(out.approved, false);
   assert.equal(out.reason, "SOURCE_APPROVED_FOR_DIFFERENT_GOLD_FAMILY");
   assert.equal(out.matchedFamily, "executionQuality");
+});
+
+test("approved core source cannot be swapped into another core family", () => {
+  const out = auditGoldProducer("leaderPositioning", FUTURES_SOURCE, "LIVE_RUNTIME_EXACT");
+  assert.equal(out.approved, false);
+  assert.equal(out.reason, "SOURCE_APPROVED_FOR_DIFFERENT_GOLD_FAMILY");
+  assert.equal(out.matchedFamily, "targetFuturesPositioning");
 });
 
 test("approved premium-pair source cannot be swapped into executionQuality", () => {
@@ -58,14 +96,9 @@ test("same producer with research provenance is rejected", () => {
   assert.equal(out.reason, "UNAPPROVED_GOLD_PROVENANCE");
 });
 
-test("unproven Gold families remain fail-closed", () => {
+test("unproven context Gold families remain fail-closed", () => {
   for (const family of [
-    "dataIntegrity",
-    "spotStructure",
-    "targetFuturesPositioning",
-    "leaderPositioning",
     "peerConflictAbsent",
-    "chainRepositioning",
     "chasePhase",
     "horizonComplete",
   ] as const) {

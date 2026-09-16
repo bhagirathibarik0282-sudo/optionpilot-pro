@@ -197,8 +197,13 @@ export async function loadH1GoldHorizonCaptureStore(
       blockers.push(`${event.horizon}:CAPTURE_STORE_SYMBOL_MISMATCH`);
       continue;
     }
-    const persistedAt = new Date(row.created_at).toISOString();
-    if (!validIso(persistedAt) || Date.parse(persistedAt) > observedAtMs) {
+    const persistedAtMs = new Date(row.created_at).getTime();
+    if (!Number.isFinite(persistedAtMs)) {
+      blockers.push(`${event.horizon}:INVALID_CAPTURE_STORE_PERSISTED_AT`);
+      continue;
+    }
+    const persistedAt = new Date(persistedAtMs).toISOString();
+    if (persistedAtMs > observedAtMs) {
       blockers.push(`${event.horizon}:CAPTURE_STORE_ROW_AFTER_T0`);
       continue;
     }

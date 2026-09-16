@@ -9,6 +9,7 @@ export interface H1GoldHorizonCapturedWindow {
   blockStart: string;
   blockEnd: string;
   capturedAt: string;
+  persistedAt: string;
   dataQuality: "COMPLETE_1M" | "PARTIAL_SAMPLING" | string;
   stateCode: string;
   source: string;
@@ -49,7 +50,7 @@ export interface H1GoldHorizonProvenanceResult {
   semantics: "IMMUTABLE_FORWARD_ONLY_PRE_T0_CLOSED_HORIZON_PROVENANCE_CONTRACT_NO_GOLD_AUTHORITY";
 }
 
-const REQUIRED_HORIZONS = ["3M", "6M", "15M", "30M"] as const;
+export const H1_GOLD_REQUIRED_HORIZONS = ["3M", "6M", "15M", "30M"] as const;
 const SEMANTICS = "IMMUTABLE_FORWARD_ONLY_PRE_T0_CLOSED_HORIZON_PROVENANCE_CONTRACT_NO_GOLD_AUTHORITY" as const;
 const SOURCE = "market_snapshot_1m";
 const ARCHIVE_SEMANTICS = "RAW_BLOCK_ARCHIVE_ONLY";
@@ -60,7 +61,7 @@ function validIso(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
-function isHorizon(value: unknown): value is H1GoldHorizon {
+export function isH1GoldHorizon(value: unknown): value is H1GoldHorizon {
   return value === "3M" || value === "6M" || value === "15M" || value === "30M";
 }
 
@@ -68,7 +69,7 @@ function unique(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
-function tfMinutes(horizon: H1GoldHorizon): number {
+export function h1GoldHorizonMinutes(horizon: H1GoldHorizon): number {
   return Number.parseInt(horizon, 10);
 }
 
@@ -83,9 +84,9 @@ function marketOpenUtcMsFor(timestampMs: number): number {
   return Date.UTC(get("year"), get("month") - 1, get("day"), 3, 45, 0, 0);
 }
 
-function latestClosedBoundaryMs(observedAtMs: number, horizon: H1GoldHorizon): number | null {
+export function expectedH1GoldClosedBoundaryMs(observedAtMs: number, horizon: H1GoldHorizon): number | null {
   const openMs = marketOpenUtcMsFor(observedAtMs);
-  const tfMs = tfMinutes(horizon) * 60_000;
+  const tfMs = h1GoldHorizonMinutes(horizon) * 60_000;
   const elapsed = observedAtMs - openMs;
   if (!Number.isFinite(elapsed) || elapsed < tfMs) return null;
   return openMs + Math.floor(elapsed / tfMs) * tfMs;
@@ -98,9 +99,9 @@ function validateWindow(
 ): string[] {
   const reasons: string[] = [];
   const prefix = row?.horizon || "UNKNOWN";
-  if (!isHorizon(row?.horizon)) return [`${prefix}:UNSUPPORTED_HORIZON`];
+  if (!isH1GoldHorizon(row?.horizon)) return [`${prefix}:UNSUPPORTED_HORIZON`];
   if (row.symbol !== input.symbol) reasons.push(`${prefix}:SYMBOL_MISMATCH`);
-  if (!validIso(row.blockStart) || !validIso(row.blockEnd) || !validIso(row.capturedAt)) {
+  if (!validIso(row.blockStart) || !validIso(row.blockEnd) || !validIso(row.capturedAt) || !validIso(row.persistedAt)) {
     reasons.push(`${prefix}:INVALID_TIMESTAMP`);
     return reasons;
   }
@@ -108,17 +109,19 @@ function validateWindow(
   const startMs = Date.parse(row.blockStart);
   const endMs = Date.parse(row.blockEnd);
   const capturedAtMs = Date.parse(row.capturedAt);
-  const tfMs = tfMinutes(row.horizon) * 60_000;
-  const latestClosed = latestClosedBoundaryMs(observedAtMs, row.horizon);
+  const persistedAtMs = Date.parse(row.persistedAt);
+  const tfMs = h1GoldHorizonMinutes(row.horizon) * 60_000;
+  const latestClosed = expectedH1GoldClosedBoundaryMs(observedAtMs, row.horizon);
 
   if (endMs > observedAtMs) reasons.push(`${prefix}:FUTURE_BLOCK_END`);
-  if (capturedAtMs > observedAtMs) reasons.push(`${prefix}:CAPTURE_AFTER_DECISION_T0`);
-  if (capturedAtMs !== observedAtMs) reasons.push(`${prefix}:NOT_EXACT_DECISION_CAPTURE`);
+  if (capturedAtMs !== endMs) reasons.push(`${prefix}:CAPTURE_NOT_AT_FORMAL_BLOCK_CLOSE`);
+  if (persistedAtMs < capturedAtMs) reasons.push(`${prefix}:PERSISTED_BEFORE_CAPTURE`);
+  if (persistedAtMs > observedAtMs) reasons.push(`${prefix}:PERSISTED_AFTER_DECISION_T0`);
   if (endMs - startMs !== tfMs) reasons.push(`${prefix}:BLOCK_DURATION_MISMATCH`);
   if (latestClosed == null) reasons.push(`${prefix}:HORIZON_NOT_YET_CLOSABLE_AT_T0`);
   else if (endMs !== latestClosed) reasons.push(`${prefix}:LATEST_CLOSED_BOUNDARY_MISMATCH`);
 
-  const expected = tfMinutes(row.horizon);
+  const expected = h1GoldHorizonMinutes(row.horizon);
   if (row.dataQuality !== "COMPLETE_1M") reasons.push(`${prefix}:DATA_QUALITY_NOT_COMPLETE_1M`);
   if (!Number.isInteger(row.sampleCount) || row.sampleCount !== expected) reasons.push(`${prefix}:SAMPLE_COUNT_NOT_EXACT`);
   if (!Number.isInteger(row.expected1mCount) || row.expected1mCount !== expected) reasons.push(`${prefix}:EXPECTED_COUNT_MISMATCH`);
@@ -133,13 +136,12 @@ function validateWindow(
 }
 
 /**
- * Pure, fail-closed contract for a future exact horizonComplete producer.
+ * Pure, fail-closed contract for an exact horizonComplete producer.
  *
- * IMPORTANT: this does not read timeframe_state, emit a Gold family signal,
- * register a source, or grant any production authority. Existing timeframe_state
- * rows are mutable through ON CONFLICT updates and therefore cannot satisfy the
- * immutable provenance requirement by themselves. Only a forward-only capture
- * made at the exact canonical decision T0 may become structurally valid here.
+ * Existing timeframe_state rows stay ineligible because they are mutable through
+ * ON CONFLICT updates. A qualifying window must instead come from an append-only
+ * close-event that was persisted no later than the canonical decision T0. This
+ * makes late backfills visible as missing evidence instead of future leakage.
  */
 export function validateH1GoldHorizonProvenance(
   input: H1GoldHorizonProvenanceInput,
@@ -156,7 +158,7 @@ export function validateH1GoldHorizonProvenance(
   if (!input?.snapshotId?.trim()) blockers.push("MISSING_SNAPSHOT_ID");
 
   const rows = Array.isArray(input?.windows) ? input.windows : [];
-  for (const horizon of REQUIRED_HORIZONS) {
+  for (const horizon of H1_GOLD_REQUIRED_HORIZONS) {
     const matches = rows.filter((row) => row?.horizon === horizon);
     if (matches.length === 0) {
       blockers.push(`${horizon}:MISSING_REQUIRED_HORIZON`);
@@ -173,12 +175,12 @@ export function validateH1GoldHorizonProvenance(
   }
 
   for (const row of rows) {
-    if (!isHorizon(row?.horizon)) blockers.push(`${row?.horizon || "UNKNOWN"}:UNEXPECTED_HORIZON`);
+    if (!isH1GoldHorizon(row?.horizon)) blockers.push(`${row?.horizon || "UNKNOWN"}:UNEXPECTED_HORIZON`);
   }
-  if (rows.length !== REQUIRED_HORIZONS.length) blockers.push("EXACT_REQUIRED_HORIZON_SET_NOT_SATISFIED");
+  if (rows.length !== H1_GOLD_REQUIRED_HORIZONS.length) blockers.push("EXACT_REQUIRED_HORIZON_SET_NOT_SATISFIED");
 
   const finalBlockers = unique(blockers);
-  const valid = finalBlockers.length === 0 && validatedHorizons.length === REQUIRED_HORIZONS.length;
+  const valid = finalBlockers.length === 0 && validatedHorizons.length === H1_GOLD_REQUIRED_HORIZONS.length;
   return {
     version: H1_GOLD_HORIZON_PROVENANCE_CONTRACT_V1,
     state: valid ? "STRUCTURALLY_VALID" : "BLOCKED",
@@ -186,7 +188,7 @@ export function validateH1GoldHorizonProvenance(
     symbol,
     observedAt,
     snapshotId,
-    requiredHorizons: REQUIRED_HORIZONS,
+    requiredHorizons: H1_GOLD_REQUIRED_HORIZONS,
     validatedHorizons,
     blockers: finalBlockers,
     directMutableTimeframeStateEligible: false,

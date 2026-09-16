@@ -14,6 +14,7 @@ import {
 const T = "2026-09-07T03:51:00.000Z";
 const T_MS = Date.parse(T);
 const SNAPSHOT_ID = "NIFTY-20260907-035100";
+const EXECUTION_SOURCE = "H1_LIVE_CAPITAL_LIQUIDITY_DTE_GATES_V1";
 const canonicalFamilies: CanonicalMarketFamily[] = [
   "MARKET_STRUCTURE",
   "FUTURES_CONFIRMATION",
@@ -93,10 +94,13 @@ function input(): H1GoldEvidenceAdapterInput {
   };
 }
 
-test("all canonical-bound exact PASS families remain Gold eligible research-only", () => {
+test("generic exact-looking PASS sources can no longer manufacture Gold", () => {
   const out = adaptH1GoldEvidence(input());
   assert.equal(out.canonicalRootValid, true);
-  assert.equal(out.eligibility.decision, "GOLD_ELIGIBLE_RESEARCH");
+  assert.equal(out.eligibility.decision, "BLOCKED");
+  assert.equal(out.families.executionQuality, "MISSING");
+  assert.equal(out.familyAudit.executionQuality.producerApproved, false);
+  assert.equal(out.familyAudit.executionQuality.producerApprovalReason, "UNKNOWN_GOLD_EVIDENCE_SOURCE");
   assert.equal(out.productionImpact, "NONE");
   assert.equal(out.affectsSelector, false);
   assert.equal(out.affectsTelegram, false);
@@ -105,45 +109,81 @@ test("all canonical-bound exact PASS families remain Gold eligible research-only
   assert.equal(out.calculatesThresholds, false);
 });
 
-test("PASS with empty source is downgraded to MISSING and blocks", () => {
+test("approved execution-quality producer preserves PASS but cannot rescue missing Gold families", () => {
   const x = input();
-  x.premiumPair = signal({ source: "" });
+  x.executionQuality = signal({ source: EXECUTION_SOURCE, reasonCodes: ["SPREAD_OK", "LIQUIDITY_OK"] });
+  const out = adaptH1GoldEvidence(x);
+  assert.equal(out.families.executionQuality, "PASS");
+  assert.equal(out.familyAudit.executionQuality.producerApproved, true);
+  assert.equal(out.eligibility.decision, "BLOCKED");
+  assert.equal(out.families.targetFuturesPositioning, "MISSING");
+});
+
+test("approved execution source cannot be swapped into premiumPair", () => {
+  const x = input();
+  x.premiumPair = signal({ source: EXECUTION_SOURCE });
   const out = adaptH1GoldEvidence(x);
   assert.equal(out.families.premiumPair, "MISSING");
+  assert.equal(out.familyAudit.premiumPair.producerApproved, false);
+  assert.ok([
+    "SOURCE_APPROVED_FOR_DIFFERENT_GOLD_FAMILY",
+    "NO_APPROVED_GOLD_PRODUCER_FOR_FAMILY",
+  ].includes(out.familyAudit.premiumPair.producerApprovalReason));
   assert.equal(out.eligibility.decision, "BLOCKED");
-  assert.ok(out.familyAudit.premiumPair.reasonCodes.includes("MISSING_UPSTREAM_SOURCE"));
+});
+
+test("family with no confirmed producer remains MISSING even with valid canonical metadata", () => {
+  const x = input();
+  x.leaderPositioning = signal({ source: "CLAIMED_BANKNIFTY_LEADER_ENGINE" });
+  const out = adaptH1GoldEvidence(x);
+  assert.equal(out.families.leaderPositioning, "MISSING");
+  assert.equal(out.familyAudit.leaderPositioning.producerApproved, false);
+  assert.equal(out.familyAudit.leaderPositioning.producerApprovalReason, "NO_APPROVED_GOLD_PRODUCER_FOR_FAMILY");
+});
+
+test("PASS with empty source is downgraded to MISSING and blocks", () => {
+  const x = input();
+  x.executionQuality = signal({ source: "" });
+  const out = adaptH1GoldEvidence(x);
+  assert.equal(out.families.executionQuality, "MISSING");
+  assert.equal(out.eligibility.decision, "BLOCKED");
+  assert.ok(out.familyAudit.executionQuality.reasonCodes.includes("MISSING_UPSTREAM_SOURCE"));
 });
 
 test("invalid runtime provenance is downgraded to MISSING", () => {
   const x = input();
-  x.spotStructure = signal({ provenance: "UNVERIFIED" as H1GoldExactFamilySignal["provenance"] });
+  x.executionQuality = signal({
+    source: EXECUTION_SOURCE,
+    provenance: "UNVERIFIED" as H1GoldExactFamilySignal["provenance"],
+  });
   const out = adaptH1GoldEvidence(x);
-  assert.equal(out.families.spotStructure, "MISSING");
-  assert.ok(out.familyAudit.spotStructure.reasonCodes.includes("INVALID_UPSTREAM_PROVENANCE"));
+  assert.equal(out.families.executionQuality, "MISSING");
+  assert.ok(out.familyAudit.executionQuality.reasonCodes.includes("INVALID_UPSTREAM_PROVENANCE"));
 });
 
-test("timestamp mismatch can no longer be rescued by a synchronization assertion", () => {
+test("timestamp mismatch cannot be rescued by a synchronization assertion", () => {
   const x = input();
-  x.targetFuturesPositioning = {
-    ...signal({ observedAt: "2026-09-07T03:50:55.000Z" }),
+  x.executionQuality = {
+    ...signal({ source: EXECUTION_SOURCE, observedAt: "2026-09-07T03:50:55.000Z" }),
     synchronized: true,
   } as H1GoldExactFamilySignal;
   const out = adaptH1GoldEvidence(x);
-  assert.equal(out.families.targetFuturesPositioning, "MISSING");
-  assert.ok(out.familyAudit.targetFuturesPositioning.reasonCodes.includes("UPSTREAM_DECISION_TIMESTAMP_MISMATCH"));
+  assert.equal(out.families.executionQuality, "MISSING");
+  assert.ok(out.familyAudit.executionQuality.reasonCodes.includes("UPSTREAM_DECISION_TIMESTAMP_MISMATCH"));
 });
 
 test("family from another snapshot id is downgraded and blocks Gold", () => {
   const x = input();
-  x.leaderPositioning = signal({ snapshotId: "NIFTY-OTHER-SNAPSHOT" });
+  x.executionQuality = signal({ source: EXECUTION_SOURCE, snapshotId: "NIFTY-OTHER-SNAPSHOT" });
   const out = adaptH1GoldEvidence(x);
-  assert.equal(out.families.leaderPositioning, "MISSING");
-  assert.equal(out.familyAudit.leaderPositioning.canonicalBound, false);
-  assert.ok(out.familyAudit.leaderPositioning.reasonCodes.includes("UPSTREAM_SNAPSHOT_ID_MISMATCH"));
+  assert.equal(out.families.executionQuality, "MISSING");
+  assert.equal(out.familyAudit.executionQuality.canonicalBound, false);
+  assert.ok(out.familyAudit.executionQuality.reasonCodes.includes("UPSTREAM_SNAPSHOT_ID_MISMATCH"));
 });
 
-test("canonical root that is not strict-filter ready downgrades all asserted PASS evidence", () => {
+test("canonical root that is not strict-filter ready downgrades approved asserted evidence", () => {
   const x = input();
+  x.executionQuality = signal({ source: EXECUTION_SOURCE });
   x.canonicalSnapshot = {
     ...x.canonicalSnapshot,
     ingestTelemetry: {
@@ -154,12 +194,13 @@ test("canonical root that is not strict-filter ready downgrades all asserted PAS
   const out = adaptH1GoldEvidence(x);
   assert.equal(out.canonicalRootValid, false);
   assert.ok(out.canonicalRootReasonCodes.includes("CANONICAL_NOT_READY_FOR_STRICT_FILTERING"));
-  assert.equal(out.families.dataIntegrity, "MISSING");
+  assert.equal(out.families.executionQuality, "MISSING");
   assert.equal(out.eligibility.decision, "BLOCKED");
 });
 
 test("candidate time must equal canonical snapshot decision time", () => {
   const x = input();
+  x.executionQuality = signal({ source: EXECUTION_SOURCE });
   x.observedAt = "2026-09-07T03:51:03.000Z";
   const out = adaptH1GoldEvidence(x);
   assert.equal(out.canonicalRootValid, false);
@@ -180,13 +221,17 @@ test("post-entry outcome or MFE evidence is rejected from decision-time Gold evi
   assert.equal(out.eligibility.decision, "BLOCKED");
 });
 
-test("valid upstream FAIL passes through and blocks Gold", () => {
+test("approved upstream FAIL passes through and blocks Gold", () => {
   const x = input();
-  x.peerConflictAbsent = signal({ state: "FAIL", reasonCodes: ["STRONG_OPPOSITE_PEER"] });
+  x.executionQuality = signal({
+    source: EXECUTION_SOURCE,
+    state: "FAIL",
+    reasonCodes: ["SPREAD_NOT_OK"],
+  });
   const out = adaptH1GoldEvidence(x);
-  assert.equal(out.families.peerConflictAbsent, "FAIL");
+  assert.equal(out.families.executionQuality, "FAIL");
+  assert.equal(out.familyAudit.executionQuality.producerApproved, true);
   assert.equal(out.eligibility.decision, "BLOCKED");
-  assert.ok(out.eligibility.reasonCodes.includes("FAILED_PEER_CONFLICT_ABSENT"));
 });
 
 test("upstream MISSING stays MISSING and blocks Gold", () => {
@@ -198,18 +243,19 @@ test("upstream MISSING stays MISSING and blocks Gold", () => {
   assert.ok(out.eligibility.reasonCodes.includes("MISSING_CHAIN_REPOSITIONING"));
 });
 
-test("source, provenance, snapshot identity and upstream reasons are preserved in family audit", () => {
+test("approved source, provenance, snapshot identity and upstream reasons are preserved", () => {
   const x = input();
   x.executionQuality = signal({
-    source: "H1_EXECUTION_EXACT_V1",
+    source: EXECUTION_SOURCE,
     provenance: "LIVE_RUNTIME_EXACT",
     reasonCodes: ["SPREAD_OK", "QUOTE_FRESH"],
   });
   const out = adaptH1GoldEvidence(x);
   const audit = out.familyAudit.executionQuality;
-  assert.equal(audit.source, "H1_EXECUTION_EXACT_V1");
+  assert.equal(audit.source, EXECUTION_SOURCE);
   assert.equal(audit.provenance, "LIVE_RUNTIME_EXACT");
   assert.equal(audit.snapshotId, SNAPSHOT_ID);
   assert.equal(audit.canonicalBound, true);
+  assert.equal(audit.producerApproved, true);
   assert.deepEqual(audit.reasonCodes, ["SPREAD_OK", "QUOTE_FRESH"]);
 });

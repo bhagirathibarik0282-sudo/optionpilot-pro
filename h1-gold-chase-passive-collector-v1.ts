@@ -119,7 +119,7 @@ function result(
 export function collectH1GoldChasePassiveEvidence(
   input: H1GoldChasePassiveCollectorInput,
 ): H1GoldChasePassiveCollectorResult {
-  const made = createBusinessForwardJournal(input?.anchor);
+  const made = createBusinessForwardJournal(input.anchor);
   if (!made.ready || !made.record) {
     return result("BLOCKED", null, null, made.blockers.map((code) => `T0_JOURNAL_${code}`));
   }
@@ -127,16 +127,12 @@ export function collectH1GoldChasePassiveEvidence(
   let journal = made.record;
 
   // Validate exact T0 binding before accepting any future observation.
-  let sample = buildH1GoldChaseCalibrationSample(input?.observationInput, journal);
+  let sample = buildH1GoldChaseCalibrationSample(input.observationInput, journal);
   if (sample.state === "BLOCKED") {
     return result("BLOCKED", null, sample, sample.blockers.map((code) => `T0_${code}`));
   }
 
-  const points = input?.explicitOutcomes == null ? [] : input.explicitOutcomes;
-  if (!Array.isArray(points)) {
-    return result("BLOCKED", null, sample, ["EXPLICIT_OUTCOMES_ARRAY_REQUIRED"]);
-  }
-
+  const points = input.explicitOutcomes ?? [];
   for (const point of points) {
     const appended = appendForwardOutcome(journal, point);
     if (!appended.ready || !appended.record) {

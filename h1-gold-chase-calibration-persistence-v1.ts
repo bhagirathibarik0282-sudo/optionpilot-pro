@@ -211,13 +211,15 @@ export async function persistH1GoldChaseCalibrationSample(
   if (!p) return result("DB_UNAVAILABLE", sample, sampleKey, payloadDigest, ["DURABLE_POSTGRES_REQUIRED"]);
 
   try {
-    await p.query(
+    const insertResult = await p.query<{ sample_key: string }>(
       `INSERT INTO ${H1_GOLD_CHASE_CALIBRATION_TABLE_V1}
         (sample_key, snapshot_id, decision_id, candidate_key, t0_observed_at_ms, payload_digest, payload)
        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb)
-       ON CONFLICT (sample_key) DO NOTHING`,
+       ON CONFLICT (sample_key) DO NOTHING
+       RETURNING sample_key`,
       [sampleKey, sample.snapshotId, sample.decisionId, sample.candidateKey, sample.t0ObservedAtMs, payloadDigest, JSON.stringify(sample)],
     );
+    const insertedNow = (insertResult.rowCount ?? 0) === 1;
 
     const readback = await p.query<PersistedRow>(
       `SELECT sample_key, snapshot_id, decision_id, candidate_key, t0_observed_at_ms, payload_digest, payload, created_at
@@ -231,11 +233,7 @@ export async function persistH1GoldChaseCalibrationSample(
       return result("CONFLICT", sample, sampleKey, payloadDigest, ["DIVERGENT_DUPLICATE_IMMUTABLE_IDENTITY"]);
     }
 
-    const inserted = readback.rowCount === 1;
-    // PostgreSQL does not expose whether this specific ON CONFLICT call inserted
-    // after the separate readback. A second immutable existence check below
-    // distinguishes exact durable state; exact retries are intentionally safe.
-    return result(inserted ? "PERSISTED" : "EXACT_DUPLICATE", stored.payload, sampleKey, payloadDigest);
+    return result(insertedNow ? "PERSISTED" : "EXACT_DUPLICATE", stored.payload, sampleKey, payloadDigest);
   } catch {
     return result("DB_ERROR", sample, sampleKey, payloadDigest, ["DURABLE_PERSISTENCE_QUERY_FAILED"]);
   }

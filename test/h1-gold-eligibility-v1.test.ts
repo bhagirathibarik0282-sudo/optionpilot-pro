@@ -52,6 +52,23 @@ test("Sep-7 09:21 reference Gold remains research eligible when every family pas
   assert.equal(out.grantsPromotionAuthority, false);
 });
 
+test("SENSEX uses the same Gold evidence-family standard as NIFTY", () => {
+  const x = evidence("2026-09-07T03:51:00.000Z");
+  x.symbol = "SENSEX";
+  x.side = "CE";
+  const out = evaluateH1GoldEligibility(x);
+  assert.equal(out.decision, "GOLD_ELIGIBLE_RESEARCH");
+  assert.deepEqual(out.reasonCodes, ["ALL_GOLD_EVIDENCE_FAMILIES_PASS"]);
+});
+
+test("BANKNIFTY cannot become a Gold trade candidate through this boundary", () => {
+  const x = evidence("2026-09-07T03:51:00.000Z") as H1GoldEligibilityEvidence & { symbol: string };
+  x.symbol = "BANKNIFTY";
+  const out = evaluateH1GoldEligibility(x as H1GoldEligibilityEvidence);
+  assert.equal(out.decision, "BLOCKED");
+  assert.ok(out.reasonCodes.includes("INVALID_GOLD_SYMBOL"));
+});
+
 test("Sep-7 10:18 false PE is blocked by leader positioning regime", () => {
   const out = evaluateH1GoldEligibility(evidence("2026-09-07T04:48:00.000Z", {
     leaderPositioning: "FAIL",

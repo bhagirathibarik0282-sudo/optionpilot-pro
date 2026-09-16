@@ -1,6 +1,7 @@
 import type { H1ExactUnderlyingObservation } from "./h1-kite-exact-price-greek-adapter.js";
 
 export type H1ExactLiveSpotDirection = "UP" | "DOWN";
+export type H1ExactLiveSpotSymbol = "NIFTY" | "SENSEX" | "BANKNIFTY";
 
 export interface H1ExactLiveSpotDirectionPolicy {
   maxObservationGapMs: number;
@@ -10,6 +11,7 @@ export interface H1ExactLiveSpotDirectionPolicy {
 export interface H1ExactLiveSpotDirectionResult {
   version: "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1";
   ready: boolean;
+  symbol: H1ExactLiveSpotSymbol | null;
   direction: H1ExactLiveSpotDirection | null;
   source: "VERIFIED_DETERMINISTIC_RUNTIME";
   sourceId: "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1";
@@ -43,6 +45,16 @@ function validObservation(value: H1ExactUnderlyingObservation | null | undefined
     observedMs != null && receivedMs != null && observedMs <= receivedMs);
 }
 
+function attestedSymbol(
+  previous: H1ExactUnderlyingObservation | null,
+  current: H1ExactUnderlyingObservation | null,
+): H1ExactLiveSpotSymbol | null {
+  if (!previous || !current || previous.symbol !== current.symbol) return null;
+  return previous.symbol === "NIFTY" || previous.symbol === "SENSEX" || previous.symbol === "BANKNIFTY"
+    ? previous.symbol
+    : null;
+}
+
 function result(
   ready: boolean,
   direction: H1ExactLiveSpotDirection | null,
@@ -54,6 +66,7 @@ function result(
   return {
     version: VERSION,
     ready,
+    symbol: attestedSymbol(previous, current),
     direction,
     source: "VERIFIED_DETERMINISTIC_RUNTIME",
     sourceId: VERSION,

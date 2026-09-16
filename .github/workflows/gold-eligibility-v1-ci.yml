@@ -6,6 +6,9 @@ on:
       - 'canonical-one-roof-market-snapshot.ts'
       - 'business-forward-journal-v1.ts'
       - 'business-forward-kpi-v1.ts'
+      - 'h1-exact-live-spot-direction-provider.ts'
+      - 'h1-remaining-family-directional-attestor.ts'
+      - 'h1-gold-peer-conflict-absent-producer-v1.ts'
       - 'h1-gold-eligibility-v1.ts'
       - 'h1-gold-evidence-source-registry-v1.ts'
       - 'h1-gold-evidence-adapter-v1.ts'
@@ -18,6 +21,9 @@ on:
       - 'h1-golden-decision-card-v1.ts'
       - 'h1-golden-decision-telegram-preview-v1.ts'
       - 'test/canonical-one-roof-market-snapshot.test.ts'
+      - 'test/h1-exact-live-spot-direction-provider.test.ts'
+      - 'test/h1-remaining-family-directional-attestor.test.ts'
+      - 'test/h1-gold-peer-conflict-absent-producer-v1.test.ts'
       - 'test/h1-gold-eligibility-v1.test.ts'
       - 'test/h1-gold-evidence-source-registry-v1.test.ts'
       - 'test/h1-gold-evidence-adapter-v1.test.ts'
@@ -38,6 +44,9 @@ on:
       - 'canonical-one-roof-market-snapshot.ts'
       - 'business-forward-journal-v1.ts'
       - 'business-forward-kpi-v1.ts'
+      - 'h1-exact-live-spot-direction-provider.ts'
+      - 'h1-remaining-family-directional-attestor.ts'
+      - 'h1-gold-peer-conflict-absent-producer-v1.ts'
       - 'h1-gold-eligibility-v1.ts'
       - 'h1-gold-evidence-source-registry-v1.ts'
       - 'h1-gold-evidence-adapter-v1.ts'
@@ -50,6 +59,9 @@ on:
       - 'h1-golden-decision-card-v1.ts'
       - 'h1-golden-decision-telegram-preview-v1.ts'
       - 'test/canonical-one-roof-market-snapshot.test.ts'
+      - 'test/h1-exact-live-spot-direction-provider.test.ts'
+      - 'test/h1-remaining-family-directional-attestor.test.ts'
+      - 'test/h1-gold-peer-conflict-absent-producer-v1.test.ts'
       - 'test/h1-gold-eligibility-v1.test.ts'
       - 'test/h1-gold-evidence-source-registry-v1.test.ts'
       - 'test/h1-gold-evidence-adapter-v1.test.ts'
@@ -76,4 +88,4 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: npx --no-install tsx --test test/canonical-one-roof-market-snapshot.test.ts test/h1-gold-eligibility-v1.test.ts test/h1-gold-evidence-source-registry-v1.test.ts test/h1-gold-evidence-adapter-v1.test.ts test/h1-gold-live-runtime-bridge-v1.test.ts test/h1-golden-shadow-candidate-v1.test.ts test/h1-golden-shadow-presentation-v1.test.ts test/h1-golden-shadow-frozen-cases-v1.test.ts test/h1-gold-promotion-firewall-v1.test.ts test/h1-gold-real-registry-firewall-integration-v1.test.ts test/h1-gold-forward-validation-v1.test.ts test/h1-golden-decision-card-v1.test.ts test/h1-golden-decision-telegram-preview-v1.test.ts
+      - run: npx --no-install tsx --test test/canonical-one-roof-market-snapshot.test.ts test/h1-exact-live-spot-direction-provider.test.ts test/h1-remaining-family-directional-attestor.test.ts test/h1-gold-peer-conflict-absent-producer-v1.test.ts test/h1-gold-eligibility-v1.test.ts test/h1-gold-evidence-source-registry-v1.test.ts test/h1-gold-evidence-adapter-v1.test.ts test/h1-gold-live-runtime-bridge-v1.test.ts test/h1-golden-shadow-candidate-v1.test.ts test/h1-golden-shadow-presentation-v1.test.ts test/h1-golden-shadow-frozen-cases-v1.test.ts test/h1-gold-promotion-firewall-v1.test.ts test/h1-gold-real-registry-firewall-integration-v1.test.ts test/h1-gold-forward-validation-v1.test.ts test/h1-golden-decision-card-v1.test.ts test/h1-golden-decision-telegram-preview-v1.test.ts

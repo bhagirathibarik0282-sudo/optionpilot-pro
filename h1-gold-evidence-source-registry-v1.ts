@@ -18,6 +18,12 @@ export interface H1GoldApprovedProducer {
  */
 const APPROVED_PRODUCERS: readonly H1GoldApprovedProducer[] = [
   {
+    family: "premiumPair",
+    source: "H1_LIVE_PPD_3M_6M_15M_CONTROLLED_EXPANSION",
+    provenance: "LIVE_RUNTIME_EXACT",
+    evidenceBasis: "Exact same-strike CE/PE pair history across 3m/6m/15m; supporting-only controlled-expansion evidence, never a standalone trigger",
+  },
+  {
     family: "executionQuality",
     source: "H1_LIVE_CAPITAL_LIQUIDITY_DTE_GATES_V1",
     provenance: "LIVE_RUNTIME_EXACT",

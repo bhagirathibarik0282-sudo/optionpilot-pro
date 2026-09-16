@@ -136,6 +136,7 @@ test("duplicate immutable identity blocks the whole analysis instead of double-w
   assert.equal(out.state, "BLOCKED");
   assert.ok(out.blockers.some((blocker) => blocker.includes("DUPLICATE_IMMUTABLE_IDENTITY")));
   assert.equal(out.cohorts.length, 0);
+  assert.equal(out.overall, null);
 });
 
 test("mixed invalid/valid samples block rather than silently dropping bad rows", () => {
@@ -148,10 +149,22 @@ test("mixed invalid/valid samples block rather than silently dropping bad rows",
   assert.equal(out.rejectedSampleCount, 1);
   assert.ok(out.blockers.some((blocker) => blocker.includes("NOT_COMPLETE")));
   assert.equal(out.cohorts.length, 0);
+  assert.equal(out.overall, null);
+});
+
+test("malformed numeric evidence blocks instead of silently shrinking metric n", () => {
+  const malformed = sample("D8", {
+    t0Features: { ...sample("D8").t0Features!, currentVsFirstPct: null },
+  });
+  const out = analyzeH1GoldChaseDescriptiveCohorts([sample("D9"), malformed]);
+  assert.equal(out.state, "BLOCKED");
+  assert.ok(out.blockers.some((blocker) => blocker.includes("FINITE_T0_METRICS_REQUIRED")));
+  assert.equal(out.overall, null);
+  assert.equal(out.cohorts.length, 0);
 });
 
 test("missing T0 context is explicit UNSPECIFIED, never inferred", () => {
-  const out = analyzeH1GoldChaseDescriptiveCohorts([sample("D8", {
+  const out = analyzeH1GoldChaseDescriptiveCohorts([sample("D10", {
     t0MarketState: null,
     t0OpportunityStage: null,
     t0SellerStressState: null,

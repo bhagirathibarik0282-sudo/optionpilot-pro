@@ -75,10 +75,11 @@ function base(blockers: string[], verifiedFamilyCount = 0): H1RemainingFamilyDir
   };
 }
 
-function validDirectionSource(source: H1ExactLiveSpotDirectionResult): boolean {
+function validDirectionSource(source: H1ExactLiveSpotDirectionResult, expectedSymbol: CanonicalMarketSymbol): boolean {
   return Boolean(
     source
     && source.ready === true
+    && source.symbol === expectedSymbol
     && (source.direction === "UP" || source.direction === "DOWN")
     && source.source === "VERIFIED_DETERMINISTIC_RUNTIME"
     && source.sourceId === "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1"
@@ -114,9 +115,9 @@ export function attestH1RemainingDirectionalFamilies(input: {
   if (!Number.isFinite(input?.nowMs) || input.nowMs <= 0 || !Number.isFinite(maxAgeMs) || maxAgeMs <= 0) {
     blockers.push("INVALID_TIME_POLICY");
   }
-  if (!validDirectionSource(input?.directionSource)) blockers.push("VERIFIED_EXACT_DIRECTION_SOURCE_REQUIRED");
+  if (!validDirectionSource(input?.directionSource, input?.symbol)) blockers.push("VERIFIED_EXACT_DIRECTION_SOURCE_REQUIRED");
 
-  const direction = validDirectionSource(input?.directionSource) ? input.directionSource.direction! : null;
+  const direction = validDirectionSource(input?.directionSource, input?.symbol) ? input.directionSource.direction! : null;
   if (direction && ((direction === "UP" && input.selectedOptionSide !== "CE") || (direction === "DOWN" && input.selectedOptionSide !== "PE"))) {
     blockers.push("SELECTED_OPTION_SIDE_CONFLICTS_WITH_INDEPENDENT_DIRECTION_SOURCE");
   }

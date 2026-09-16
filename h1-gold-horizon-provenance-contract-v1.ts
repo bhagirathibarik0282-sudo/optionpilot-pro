@@ -60,6 +60,10 @@ function validIso(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
+function isHorizon(value: unknown): value is H1GoldHorizon {
+  return value === "3M" || value === "6M" || value === "15M" || value === "30M";
+}
+
 function unique(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
@@ -94,7 +98,7 @@ function validateWindow(
 ): string[] {
   const reasons: string[] = [];
   const prefix = row?.horizon || "UNKNOWN";
-  if (!REQUIRED_HORIZONS.includes(row?.horizon)) return [`${prefix}:UNSUPPORTED_HORIZON`];
+  if (!isHorizon(row?.horizon)) return [`${prefix}:UNSUPPORTED_HORIZON`];
   if (row.symbol !== input.symbol) reasons.push(`${prefix}:SYMBOL_MISMATCH`);
   if (!validIso(row.blockStart) || !validIso(row.blockEnd) || !validIso(row.capturedAt)) {
     reasons.push(`${prefix}:INVALID_TIMESTAMP`);
@@ -169,7 +173,7 @@ export function validateH1GoldHorizonProvenance(
   }
 
   for (const row of rows) {
-    if (!REQUIRED_HORIZONS.includes(row?.horizon)) blockers.push(`${row?.horizon || "UNKNOWN"}:UNEXPECTED_HORIZON`);
+    if (!isHorizon(row?.horizon)) blockers.push(`${row?.horizon || "UNKNOWN"}:UNEXPECTED_HORIZON`);
   }
   if (rows.length !== REQUIRED_HORIZONS.length) blockers.push("EXACT_REQUIRED_HORIZON_SET_NOT_SATISFIED");
 

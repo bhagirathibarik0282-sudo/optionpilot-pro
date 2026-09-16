@@ -48,7 +48,19 @@ export function auditGoldProducer(
   source: string | null,
   provenance: GoldExactProvenance | null,
 ): H1GoldProducerApproval {
+  const normalizedSource = source?.trim() ?? "";
+  const sourceMatches = APPROVED_PRODUCERS.filter((entry) => entry.source === normalizedSource);
   const familyEntries = APPROVED_PRODUCERS.filter((entry) => entry.family === family);
+
+  if (sourceMatches.length > 0 && !sourceMatches.some((entry) => entry.family === family)) {
+    return {
+      approved: false,
+      reason: "SOURCE_APPROVED_FOR_DIFFERENT_GOLD_FAMILY",
+      matchedFamily: sourceMatches[0]?.family ?? null,
+      registration: null,
+    };
+  }
+
   if (familyEntries.length === 0) {
     return {
       approved: false,
@@ -58,8 +70,6 @@ export function auditGoldProducer(
     };
   }
 
-  const normalizedSource = source?.trim() ?? "";
-  const sourceMatches = APPROVED_PRODUCERS.filter((entry) => entry.source === normalizedSource);
   if (sourceMatches.length === 0) {
     return {
       approved: false,
@@ -69,16 +79,7 @@ export function auditGoldProducer(
     };
   }
 
-  const familyMatch = sourceMatches.find((entry) => entry.family === family);
-  if (!familyMatch) {
-    return {
-      approved: false,
-      reason: "SOURCE_APPROVED_FOR_DIFFERENT_GOLD_FAMILY",
-      matchedFamily: sourceMatches[0]?.family ?? null,
-      registration: null,
-    };
-  }
-
+  const familyMatch = sourceMatches.find((entry) => entry.family === family)!;
   if (familyMatch.provenance !== provenance) {
     return {
       approved: false,

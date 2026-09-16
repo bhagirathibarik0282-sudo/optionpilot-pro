@@ -132,13 +132,13 @@ test("approved execution source cannot be swapped into premiumPair", () => {
   assert.equal(out.eligibility.decision, "BLOCKED");
 });
 
-test("family with no confirmed producer remains MISSING even with valid canonical metadata", () => {
+test("registered family still rejects an unapproved claimed producer", () => {
   const x = input();
   x.leaderPositioning = signal({ source: "CLAIMED_BANKNIFTY_LEADER_ENGINE" });
   const out = adaptH1GoldEvidence(x);
   assert.equal(out.families.leaderPositioning, "MISSING");
   assert.equal(out.familyAudit.leaderPositioning.producerApproved, false);
-  assert.equal(out.familyAudit.leaderPositioning.producerApprovalReason, "NO_APPROVED_GOLD_PRODUCER_FOR_FAMILY");
+  assert.equal(out.familyAudit.leaderPositioning.producerApprovalReason, "UNKNOWN_GOLD_EVIDENCE_SOURCE");
 });
 
 test("PASS with empty source is downgraded to MISSING and blocks", () => {

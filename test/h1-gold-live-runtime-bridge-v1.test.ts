@@ -74,6 +74,7 @@ function direction(direction: "UP" | "DOWN" = "UP"): H1ExactLiveSpotDirectionRes
   return {
     version: "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1",
     ready: true,
+    symbol: "NIFTY",
     direction,
     source: "VERIFIED_DETERMINISTIC_RUNTIME",
     sourceId: "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1",
@@ -168,6 +169,22 @@ test("typed bridge maps canonical integrity plus four side-attested exact core f
   assert.equal(out.affectsTelegram, false);
   assert.equal(out.affectsExecution, false);
   assert.equal(out.createsOrders, false);
+});
+
+test("wrong-symbol independent direction cannot attest NIFTY Gold core evidence", () => {
+  const wrong = { ...direction("UP"), symbol: "SENSEX" as const };
+  const out = buildH1GoldLiveRuntimeBridge({
+    symbol: "NIFTY",
+    side: "CE",
+    observedAt: T,
+    canonicalSnapshot: snapshot(),
+    directionSource: wrong,
+    sevenFamilyProducer: producer(),
+    sourceManifestHash: MANIFEST,
+  });
+  assert.equal(out.ready, false);
+  assert.equal(out.spotStructure.state, "MISSING");
+  assert.ok(out.blockers.includes("VERIFIED_EXACT_DIRECTION_SOURCE_REQUIRED"));
 });
 
 test("CE/PE side conflict is killed by the side-aware attestor instead of being inferred", () => {

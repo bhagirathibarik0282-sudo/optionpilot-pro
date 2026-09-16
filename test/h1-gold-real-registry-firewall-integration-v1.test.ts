@@ -12,6 +12,8 @@ import {
 } from "../h1-gold-evidence-adapter-v1.js";
 import { listApprovedGoldProducers } from "../h1-gold-evidence-source-registry-v1.js";
 import { evaluateH1GoldPromotionFirewall } from "../h1-gold-promotion-firewall-v1.js";
+import { deriveH1ExactLiveSpotDirection } from "../h1-exact-live-spot-direction-provider.js";
+import { buildH1GoldPeerConflictAbsent } from "../h1-gold-peer-conflict-absent-producer-v1.js";
 
 const T = "2026-09-16T05:45:00.000Z";
 const T_MS = Date.parse(T);
@@ -76,18 +78,40 @@ function signal(source: string): H1GoldExactFamilySignal {
   };
 }
 
+function exactDirection(symbol: "NIFTY" | "SENSEX" | "BANKNIFTY", direction: "UP" | "DOWN" = "UP") {
+  const base = symbol === "NIFTY" ? 24000 : symbol === "SENSEX" ? 80000 : 57000;
+  const prior = new Date(T_MS - 5_000).toISOString();
+  const current = direction === "UP" ? base * 1.001 : base * 0.999;
+  return deriveH1ExactLiveSpotDirection(
+    { source: "LIVE_RUNTIME_EXACT", symbol, price: base, observedAt: prior, receivedAt: prior },
+    { source: "LIVE_RUNTIME_EXACT", symbol, price: current, observedAt: T, receivedAt: T },
+    { maxObservationGapMs: 10_000, minAbsoluteSpotMovePct: 0.01 },
+  );
+}
+
 function actualRegistryPathInput(): H1GoldEvidenceAdapterInput {
+  const root = canonicalSnapshot();
+  const peer = buildH1GoldPeerConflictAbsent({
+    symbol: "NIFTY",
+    side: "CE",
+    observedAt: T,
+    canonicalSnapshot: root,
+    targetDirectionSource: exactDirection("NIFTY", "UP"),
+    peerDirectionSources: [exactDirection("BANKNIFTY", "UP"), exactDirection("SENSEX", "UP")],
+  });
+  assert.equal(peer.state, "PASS");
+
   return {
     symbol: "NIFTY",
     side: "CE",
     observedAt: T,
-    canonicalSnapshot: canonicalSnapshot(),
+    canonicalSnapshot: root,
     dataIntegrity: signal("H1_GOLD_CANONICAL_DATA_INTEGRITY_BRIDGE_V1"),
     premiumPair: signal("H1_LIVE_PPD_3M_6M_15M_CONTROLLED_EXPANSION"),
     spotStructure: signal("H1_GOLD_ATTESTED_MARKET_STRUCTURE_BRIDGE_V1"),
     targetFuturesPositioning: signal("H1_GOLD_ATTESTED_FUTURES_CONFIRMATION_BRIDGE_V1"),
     leaderPositioning: signal("H1_GOLD_ATTESTED_HEAVYWEIGHTS_BRIDGE_V1"),
-    peerConflictAbsent: signal("CLAIMED_PEER_CONFLICT_PRODUCER"),
+    peerConflictAbsent: peer.signal,
     chainRepositioning: signal("H1_GOLD_ATTESTED_OI_POSITIONING_BRIDGE_V1"),
     executionQuality: signal("H1_LIVE_CAPITAL_LIQUIDITY_DTE_GATES_V1"),
     chasePhase: signal("CLAIMED_CHASE_PHASE_PRODUCER"),
@@ -95,16 +119,16 @@ function actualRegistryPathInput(): H1GoldEvidenceAdapterInput {
   };
 }
 
-test("real registry currently exposes exactly seven approved Gold producer families", () => {
+test("real registry now exposes exactly eight approved Gold producer families", () => {
   const approved = listApprovedGoldProducers();
-  assert.equal(approved.length, 7);
+  assert.equal(approved.length, 8);
   const families = new Set(approved.map((entry) => entry.family));
-  assert.equal(families.has("peerConflictAbsent"), false);
+  assert.equal(families.has("peerConflictAbsent"), true);
   assert.equal(families.has("chasePhase"), false);
   assert.equal(families.has("horizonComplete"), false);
 });
 
-test("actual adapter -> registry -> firewall path cannot manufacture Gold from the three unregistered families", () => {
+test("actual exact peer producer -> adapter -> registry -> firewall path passes peer family but cannot manufacture remaining Gold context", () => {
   const adapted = adaptH1GoldEvidence(actualRegistryPathInput());
 
   assert.equal(adapted.canonicalRootValid, true);
@@ -113,10 +137,13 @@ test("actual adapter -> registry -> firewall path cannot manufacture Gold from t
   assert.equal(adapted.families.spotStructure, "PASS");
   assert.equal(adapted.families.targetFuturesPositioning, "PASS");
   assert.equal(adapted.families.leaderPositioning, "PASS");
+  assert.equal(adapted.families.peerConflictAbsent, "PASS");
+  assert.equal(adapted.familyAudit.peerConflictAbsent.producerApproved, true);
+  assert.equal(adapted.familyAudit.peerConflictAbsent.producerApprovalReason, "APPROVED_GOLD_PRODUCER");
   assert.equal(adapted.families.chainRepositioning, "PASS");
   assert.equal(adapted.families.executionQuality, "PASS");
 
-  for (const family of ["peerConflictAbsent", "chasePhase", "horizonComplete"] as const) {
+  for (const family of ["chasePhase", "horizonComplete"] as const) {
     assert.equal(adapted.families[family], "MISSING");
     assert.equal(adapted.familyAudit[family].producerApproved, false);
     assert.equal(adapted.familyAudit[family].producerApprovalReason, "NO_APPROVED_GOLD_PRODUCER_FOR_FAMILY");
@@ -132,7 +159,7 @@ test("actual adapter -> registry -> firewall path cannot manufacture Gold from t
   assert.equal(firewall.affectsTelegram, false);
   assert.equal(firewall.affectsExecution, false);
   assert.equal(firewall.createsOrders, false);
-  assert.ok(firewall.blockerCodes.includes("FAMILY_NOT_PASS_PEER_CONFLICT_ABSENT"));
+  assert.equal(firewall.blockerCodes.includes("FAMILY_NOT_PASS_PEER_CONFLICT_ABSENT"), false);
   assert.ok(firewall.blockerCodes.includes("FAMILY_NOT_PASS_CHASE_PHASE"));
   assert.ok(firewall.blockerCodes.includes("FAMILY_NOT_PASS_HORIZON_COMPLETE"));
 });

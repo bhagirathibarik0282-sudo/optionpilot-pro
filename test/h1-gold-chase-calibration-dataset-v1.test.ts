@@ -99,6 +99,9 @@ function emptyJournal(overrides: Partial<Parameters<typeof createBusinessForward
       dte: 1,
       premiumLtp: 150,
     }],
+    marketState: "TRENDING_UP",
+    sellerStressState: "CALL_WRITER_STRESS",
+    opportunityStage: "ACCEPTANCE",
     ...overrides,
   });
   assert.equal(made.ready, true);
@@ -130,6 +133,9 @@ test("complete 3/6/15/30 forward path forms one structural calibration sample wi
   assert.equal(out.readyForDataset, true);
   assert.equal(out.snapshotId, SNAPSHOT_ID);
   assert.equal(out.candidateKey, CANDIDATE_KEY);
+  assert.equal(out.t0MarketState, "TRENDING_UP");
+  assert.equal(out.t0SellerStressState, "CALL_WRITER_STRESS");
+  assert.equal(out.t0OpportunityStage, "ACCEPTANCE");
   assert.deepEqual(out.completedWindows, ["T_PLUS_3M", "T_PLUS_6M", "T_PLUS_15M", "T_PLUS_30M"]);
   assert.deepEqual(out.missingWindows, []);
   assert.equal(out.t0Premium, 150);

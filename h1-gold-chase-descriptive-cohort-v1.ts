@@ -17,10 +17,10 @@ export interface H1GoldDescriptiveDistribution {
 }
 
 export interface H1GoldChaseCohortMetrics {
-  t0ReturnFromFirstPct: H1GoldDescriptiveDistribution;
-  t0DistanceFromHighPct: H1GoldDescriptiveDistribution;
-  t0RangePosition: H1GoldDescriptiveDistribution;
-  t0MinutesSinceSessionOpen: H1GoldDescriptiveDistribution;
+  t0CurrentVsFirstPct: H1GoldDescriptiveDistribution;
+  t0CurrentVsSessionHighPct: H1GoldDescriptiveDistribution;
+  t0SessionRangePct: H1GoldDescriptiveDistribution;
+  t0MinutesSinceMarketOpen: H1GoldDescriptiveDistribution;
   t3ReturnPct: H1GoldDescriptiveDistribution;
   t6ReturnPct: H1GoldDescriptiveDistribution;
   t15ReturnPct: H1GoldDescriptiveDistribution;
@@ -144,10 +144,10 @@ function cohortKey(sample: H1GoldChaseCalibrationSample): string {
 
 function metrics(samples: H1GoldChaseCalibrationSample[]): H1GoldChaseCohortMetrics {
   return {
-    t0ReturnFromFirstPct: distribution(samples.map((sample) => sample.t0Features?.returnFromFirstPct)),
-    t0DistanceFromHighPct: distribution(samples.map((sample) => sample.t0Features?.distanceFromHighPct)),
-    t0RangePosition: distribution(samples.map((sample) => sample.t0Features?.rangePosition)),
-    t0MinutesSinceSessionOpen: distribution(samples.map((sample) => sample.t0Features?.minutesSinceSessionOpen)),
+    t0CurrentVsFirstPct: distribution(samples.map((sample) => sample.t0Features?.currentVsFirstPct)),
+    t0CurrentVsSessionHighPct: distribution(samples.map((sample) => sample.t0Features?.currentVsSessionHighPct)),
+    t0SessionRangePct: distribution(samples.map((sample) => sample.t0Features?.sessionRangePct)),
+    t0MinutesSinceMarketOpen: distribution(samples.map((sample) => sample.t0Features?.minutesSinceMarketOpen)),
     t3ReturnPct: distribution(samples.map((sample) => outcome(sample, "T_PLUS_3M"))),
     t6ReturnPct: distribution(samples.map((sample) => outcome(sample, "T_PLUS_6M"))),
     t15ReturnPct: distribution(samples.map((sample) => outcome(sample, "T_PLUS_15M"))),

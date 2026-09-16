@@ -6,7 +6,7 @@ import {
   type H1GoldHorizonCapturedWindow,
 } from "../h1-gold-horizon-provenance-contract-v1.js";
 
-const T = "2026-09-16T06:30:00.000Z"; // 12:00 IST
+const T = "2026-09-16T06:30:05.000Z"; // 12:00:05 IST
 const T_MS = Date.parse(T);
 const HORIZONS: H1GoldHorizon[] = ["3M", "6M", "15M", "30M"];
 
@@ -32,7 +32,8 @@ function window(horizon: H1GoldHorizon, overrides: Partial<H1GoldHorizonCaptured
     symbol: "NIFTY",
     blockStart: new Date(endMs - tfMs).toISOString(),
     blockEnd: new Date(endMs).toISOString(),
-    capturedAt: T,
+    capturedAt: new Date(endMs).toISOString(),
+    persistedAt: new Date(endMs + 1_000).toISOString(),
     dataQuality: "COMPLETE_1M",
     stateCode: "RAW_BLOCK_ARCHIVE_ONLY",
     source: "market_snapshot_1m",
@@ -41,7 +42,7 @@ function window(horizon: H1GoldHorizon, overrides: Partial<H1GoldHorizonCaptured
     sampleCount: minutes,
     expected1mCount: minutes,
     immutable: true,
-    immutableCaptureId: `NIFTY:T0:${horizon}`,
+    immutableCaptureId: `NIFTY:CLOSE:${horizon}:${new Date(endMs).toISOString()}`,
     ...overrides,
   };
 }
@@ -50,12 +51,12 @@ function input(windows = HORIZONS.map((horizon) => window(horizon))) {
   return {
     symbol: "NIFTY" as const,
     observedAt: T,
-    snapshotId: "NIFTY-20260916-063000",
+    snapshotId: "NIFTY-20260916-063005",
     windows,
   };
 }
 
-test("structurally valid requires exactly one immutable complete pre-T0 capture for all 3/6/15/30 horizons", () => {
+test("structurally valid requires one immutable complete capture for all latest 3/6/15/30 horizons persisted before T0", () => {
   const out = validateH1GoldHorizonProvenance(input());
   assert.equal(out.state, "STRUCTURALLY_VALID");
   assert.equal(out.readyForExactProducer, true);
@@ -91,31 +92,43 @@ test("future block end cannot be used at T0", () => {
     ? window(h, {
         blockStart: new Date(T_MS).toISOString(),
         blockEnd: new Date(T_MS + 3 * 60_000).toISOString(),
+        capturedAt: new Date(T_MS + 3 * 60_000).toISOString(),
+        persistedAt: new Date(T_MS + 3 * 60_000 + 1_000).toISOString(),
       })
     : window(h));
   const out = validateH1GoldHorizonProvenance(input(rows));
   assert.equal(out.state, "BLOCKED");
   assert.ok(out.blockers.includes("3M:FUTURE_BLOCK_END"));
+  assert.ok(out.blockers.includes("3M:PERSISTED_AFTER_DECISION_T0"));
   assert.ok(out.blockers.includes("3M:LATEST_CLOSED_BOUNDARY_MISMATCH"));
 });
 
-test("post-T0 provenance capture is rejected even when the market block itself ended pre-T0", () => {
+test("a close event persisted after decision T0 is rejected even if its block ended before T0", () => {
   const rows = HORIZONS.map((h) => h === "30M"
-    ? window(h, { capturedAt: new Date(T_MS + 1_000).toISOString() })
+    ? window(h, { persistedAt: new Date(T_MS + 1_000).toISOString() })
     : window(h));
   const out = validateH1GoldHorizonProvenance(input(rows));
   assert.equal(out.state, "BLOCKED");
-  assert.ok(out.blockers.includes("30M:CAPTURE_AFTER_DECISION_T0"));
-  assert.ok(out.blockers.includes("30M:NOT_EXACT_DECISION_CAPTURE"));
+  assert.ok(out.blockers.includes("30M:PERSISTED_AFTER_DECISION_T0"));
 });
 
-test("a pre-T0 but non-exact capture is not silently treated as the canonical T0 capture", () => {
+test("capture timestamp must equal the formal block close instead of being stamped later at decision time", () => {
   const rows = HORIZONS.map((h) => h === "6M"
     ? window(h, { capturedAt: new Date(T_MS - 1_000).toISOString() })
     : window(h));
   const out = validateH1GoldHorizonProvenance(input(rows));
   assert.equal(out.state, "BLOCKED");
-  assert.ok(out.blockers.includes("6M:NOT_EXACT_DECISION_CAPTURE"));
+  assert.ok(out.blockers.includes("6M:CAPTURE_NOT_AT_FORMAL_BLOCK_CLOSE"));
+});
+
+test("persisted-before-capture chronology is rejected", () => {
+  const current = window("15M");
+  const rows = HORIZONS.map((h) => h === "15M"
+    ? window(h, { persistedAt: new Date(Date.parse(current.capturedAt) - 1).toISOString() })
+    : window(h));
+  const out = validateH1GoldHorizonProvenance(input(rows));
+  assert.equal(out.state, "BLOCKED");
+  assert.ok(out.blockers.includes("15M:PERSISTED_BEFORE_CAPTURE"));
 });
 
 test("wrong symbol, partial sampling and wrong sample count fail closed", () => {
@@ -150,6 +163,8 @@ test("stale closed block cannot masquerade as latest complete horizon", () => {
     ? window(h, {
         blockStart: new Date(oldEnd - 30 * 60_000).toISOString(),
         blockEnd: new Date(oldEnd).toISOString(),
+        capturedAt: new Date(oldEnd).toISOString(),
+        persistedAt: new Date(oldEnd + 1_000).toISOString(),
       })
     : window(h));
   const out = validateH1GoldHorizonProvenance(input(rows));

@@ -1,5 +1,9 @@
-import { dbQuerySafe } from "./db.js";
+import { dbInsert, dbQuerySafe } from "./db.js";
 import type { StorageV3Symbol } from "./storage-v3-writer.js";
+import {
+  buildH1GoldClosedHorizonCapture,
+  H1_GOLD_HORIZON_CAPTURE_LOG_KIND,
+} from "./h1-gold-horizon-closed-block-capture-v1.js";
 
 const TIMEFRAMES = [3, 6, 15, 30, 60] as const;
 type TfMinutes = typeof TIMEFRAMES[number];
@@ -98,5 +102,24 @@ export async function persistClosedTimeframesFromMinute(
       JSON.stringify(summary),
       "STORAGE_V3_TF_PHASE1",
     ]);
+
+    const immutableCapture = buildH1GoldClosedHorizonCapture({
+      symbol,
+      timeframeMinutes: tf,
+      blockStart: block.startIso,
+      blockEnd: block.endIso,
+      dataQuality,
+      stateCode: "RAW_BLOCK_ARCHIVE_ONLY",
+      source: summary.source,
+      semantics: summary.semantics,
+      ruleVersion: "STORAGE_V3_TF_PHASE1",
+      sampleCount,
+      expected1mCount: tf,
+    });
+    if (immutableCapture) {
+      // Append-only audit capture. dbInsert never changes selector/Telegram/execution
+      // behavior and failures degrade to missing Gold horizon evidence later.
+      await dbInsert(H1_GOLD_HORIZON_CAPTURE_LOG_KIND, immutableCapture);
+    }
   }
 }

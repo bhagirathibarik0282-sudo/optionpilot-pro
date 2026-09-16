@@ -70,6 +70,11 @@ export interface H1GoldChaseDescriptiveCohortResult {
 }
 
 const SEMANTICS = "COMPLETE_IMMUTABLE_FORWARD_SAMPLES_GROUPED_BY_EXACT_T0_CONTEXT_WITH_DESCRIPTIVE_DISTRIBUTIONS_ONLY_NO_THRESHOLD_NO_LABEL_NO_PRODUCTION_AUTHORITY" as const;
+const WINDOWS: H1GoldChaseCalibrationOutcome["window"][] = ["T_PLUS_3M", "T_PLUS_6M", "T_PLUS_15M", "T_PLUS_30M"];
+
+function finite(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
 
 function round4(value: number): number {
   return Math.round(value * 10_000) / 10_000;
@@ -86,22 +91,22 @@ function quantile(sorted: number[], q: number): number | null {
   return sorted[lower] * (1 - weight) + sorted[upper] * weight;
 }
 
-function distribution(values: Array<number | null | undefined>): H1GoldDescriptiveDistribution {
-  const valid = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value)).sort((a, b) => a - b);
-  if (valid.length === 0) return { n: 0, min: null, p25: null, median: null, mean: null, p75: null, max: null };
+function distribution(values: number[]): H1GoldDescriptiveDistribution {
+  const sorted = [...values].sort((a, b) => a - b);
+  if (sorted.length === 0) return { n: 0, min: null, p25: null, median: null, mean: null, p75: null, max: null };
   return {
-    n: valid.length,
-    min: round4(valid[0]),
-    p25: round4(quantile(valid, 0.25)!),
-    median: round4(quantile(valid, 0.5)!),
-    mean: round4(valid.reduce((sum, value) => sum + value, 0) / valid.length),
-    p75: round4(quantile(valid, 0.75)!),
-    max: round4(valid[valid.length - 1]),
+    n: sorted.length,
+    min: round4(sorted[0]),
+    p25: round4(quantile(sorted, 0.25)!),
+    median: round4(quantile(sorted, 0.5)!),
+    mean: round4(sorted.reduce((sum, value) => sum + value, 0) / sorted.length),
+    p75: round4(quantile(sorted, 0.75)!),
+    max: round4(sorted[sorted.length - 1]),
   };
 }
 
-function outcome(sample: H1GoldChaseCalibrationSample, window: H1GoldChaseCalibrationOutcome["window"]): number | null {
-  return sample.outcomes.find((row) => row.window === window)?.returnPct ?? null;
+function outcome(sample: H1GoldChaseCalibrationSample, window: H1GoldChaseCalibrationOutcome["window"]): number {
+  return sample.outcomes.find((row) => row.window === window)!.returnPct;
 }
 
 function sampleBlockers(sample: H1GoldChaseCalibrationSample | null | undefined, index: number): string[] {
@@ -113,8 +118,26 @@ function sampleBlockers(sample: H1GoldChaseCalibrationSample | null | undefined,
   if (sample.blockers.length > 0) blockers.push(`${prefix}:HAS_BLOCKERS`);
   if (!sample.snapshotId?.trim() || !sample.decisionId?.trim() || !sample.candidateKey?.trim()) blockers.push(`${prefix}:IDENTITY_REQUIRED`);
   if (!Number.isInteger(sample.dte) || Number(sample.dte) < 0) blockers.push(`${prefix}:VALID_DTE_REQUIRED`);
-  if (!sample.t0Features) blockers.push(`${prefix}:T0_FEATURES_REQUIRED`);
-  if (sample.outcomes.length !== 4 || ["T_PLUS_3M", "T_PLUS_6M", "T_PLUS_15M", "T_PLUS_30M"].some((window) => !sample.outcomes.some((row) => row.window === window))) blockers.push(`${prefix}:ALL_WINDOWS_REQUIRED`);
+  if (!finite(sample.t0ObservedAtMs) || sample.t0ObservedAtMs <= 0) blockers.push(`${prefix}:VALID_T0_TIMESTAMP_REQUIRED`);
+  if (!sample.t0Features) {
+    blockers.push(`${prefix}:T0_FEATURES_REQUIRED`);
+  } else if (
+    !finite(sample.t0Features.currentVsFirstPct) ||
+    !finite(sample.t0Features.currentVsSessionHighPct) ||
+    !finite(sample.t0Features.sessionRangePct) ||
+    !finite(sample.t0Features.minutesSinceMarketOpen)
+  ) {
+    blockers.push(`${prefix}:FINITE_T0_METRICS_REQUIRED`);
+  }
+  if (sample.outcomes.length !== 4 || WINDOWS.some((window) => !sample.outcomes.some((row) => row.window === window))) {
+    blockers.push(`${prefix}:ALL_WINDOWS_REQUIRED`);
+  } else if (WINDOWS.some((window) => {
+    const row = sample.outcomes.find((candidate) => candidate.window === window)!;
+    return !finite(row.returnPct) || !finite(row.premium) || row.premium <= 0 || !finite(row.observedAtMs) || !finite(row.actualLagMinutes);
+  })) {
+    blockers.push(`${prefix}:FINITE_FORWARD_METRICS_REQUIRED`);
+  }
+  if (!finite(sample.mfePct) || !finite(sample.maePct) || !finite(sample.terminal30mReturnPct)) blockers.push(`${prefix}:FINITE_SUMMARY_METRICS_REQUIRED`);
   if (sample.missingWindows.length > 0) blockers.push(`${prefix}:MISSING_WINDOWS_NOT_ALLOWED`);
   if (sample.chaseLabel !== null || sample.outcomeLabel !== null || sample.thresholdPolicy !== null) blockers.push(`${prefix}:LABEL_OR_THRESHOLD_NOT_ALLOWED`);
   if (sample.classificationPolicyDefined || sample.sampleSufficiencyPolicyDefined) blockers.push(`${prefix}:POLICY_MUST_BE_UNDEFINED`);
@@ -144,16 +167,16 @@ function cohortKey(sample: H1GoldChaseCalibrationSample): string {
 
 function metrics(samples: H1GoldChaseCalibrationSample[]): H1GoldChaseCohortMetrics {
   return {
-    t0CurrentVsFirstPct: distribution(samples.map((sample) => sample.t0Features?.currentVsFirstPct)),
-    t0CurrentVsSessionHighPct: distribution(samples.map((sample) => sample.t0Features?.currentVsSessionHighPct)),
-    t0SessionRangePct: distribution(samples.map((sample) => sample.t0Features?.sessionRangePct)),
-    t0MinutesSinceMarketOpen: distribution(samples.map((sample) => sample.t0Features?.minutesSinceMarketOpen)),
+    t0CurrentVsFirstPct: distribution(samples.map((sample) => sample.t0Features!.currentVsFirstPct!)),
+    t0CurrentVsSessionHighPct: distribution(samples.map((sample) => sample.t0Features!.currentVsSessionHighPct!)),
+    t0SessionRangePct: distribution(samples.map((sample) => sample.t0Features!.sessionRangePct!)),
+    t0MinutesSinceMarketOpen: distribution(samples.map((sample) => sample.t0Features!.minutesSinceMarketOpen!)),
     t3ReturnPct: distribution(samples.map((sample) => outcome(sample, "T_PLUS_3M"))),
     t6ReturnPct: distribution(samples.map((sample) => outcome(sample, "T_PLUS_6M"))),
     t15ReturnPct: distribution(samples.map((sample) => outcome(sample, "T_PLUS_15M"))),
     t30ReturnPct: distribution(samples.map((sample) => outcome(sample, "T_PLUS_30M"))),
-    mfePct: distribution(samples.map((sample) => sample.mfePct)),
-    maePct: distribution(samples.map((sample) => sample.maePct)),
+    mfePct: distribution(samples.map((sample) => sample.mfePct!)),
+    maePct: distribution(samples.map((sample) => sample.maePct!)),
   };
 }
 
@@ -171,7 +194,7 @@ function base(
     acceptedSampleCount: accepted.length,
     rejectedSampleCount: inputCount - accepted.length,
     blockers: [...new Set(blockers)],
-    overall: accepted.length > 0 ? metrics(accepted) : null,
+    overall: state === "READY" && accepted.length > 0 ? metrics(accepted) : null,
     cohorts,
     groupingPolicy: "EXACT_SYMBOL_SIDE_DTE_MARKET_STATE_OPPORTUNITY_STAGE_SELLER_STRESS_NO_BUCKET_THRESHOLDS",
     chaseLabel: null,

@@ -48,6 +48,12 @@ const APPROVED_PRODUCERS: readonly H1GoldApprovedProducer[] = [
     evidenceBasis: "Typed bridge re-runs the side-aware seven-family attestor and accepts only exact-timestamp officially weighted HEAVYWEIGHTS BUYER_SUPPORT evidence",
   },
   {
+    family: "peerConflictAbsent",
+    source: "H1_GOLD_EXACT_PEER_CONFLICT_ABSENT_V1",
+    provenance: "LIVE_RUNTIME_EXACT",
+    evidenceBasis: "Exact target plus both other tracked index spot-direction attestations at the canonical decision timestamp; any exact opposite peer FAILs, while missing/stale/duplicate/wrong-symbol evidence remains MISSING; no consensus vote or new threshold",
+  },
+  {
     family: "chainRepositioning",
     source: "H1_GOLD_ATTESTED_OI_POSITIONING_BRIDGE_V1",
     provenance: "LIVE_RUNTIME_EXACT",

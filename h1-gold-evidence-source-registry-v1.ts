@@ -18,10 +18,40 @@ export interface H1GoldApprovedProducer {
  */
 const APPROVED_PRODUCERS: readonly H1GoldApprovedProducer[] = [
   {
+    family: "dataIntegrity",
+    source: "H1_GOLD_CANONICAL_DATA_INTEGRITY_BRIDGE_V1",
+    provenance: "LIVE_RUNTIME_EXACT",
+    evidenceBasis: "Typed bridge rebuilds the canonical one-roof snapshot and requires strict-filter READY, VERIFIED quality, ALLOW_NEW_ENTRIES and zero canonical blockers at the exact decision timestamp",
+  },
+  {
     family: "premiumPair",
     source: "H1_LIVE_PPD_3M_6M_15M_CONTROLLED_EXPANSION",
     provenance: "LIVE_RUNTIME_EXACT",
     evidenceBasis: "Exact same-strike CE/PE pair history across 3m/6m/15m; supporting-only controlled-expansion evidence, never a standalone trigger",
+  },
+  {
+    family: "spotStructure",
+    source: "H1_GOLD_ATTESTED_MARKET_STRUCTURE_BRIDGE_V1",
+    provenance: "LIVE_RUNTIME_EXACT",
+    evidenceBasis: "Typed bridge re-runs the side-aware seven-family attestor and accepts only exact-timestamp MARKET_STRUCTURE BUYER_SUPPORT evidence",
+  },
+  {
+    family: "targetFuturesPositioning",
+    source: "H1_GOLD_ATTESTED_FUTURES_CONFIRMATION_BRIDGE_V1",
+    provenance: "LIVE_RUNTIME_EXACT",
+    evidenceBasis: "Typed bridge re-runs the side-aware seven-family attestor and accepts only exact-timestamp FUTURES_CONFIRMATION BUYER_SUPPORT evidence",
+  },
+  {
+    family: "leaderPositioning",
+    source: "H1_GOLD_ATTESTED_HEAVYWEIGHTS_BRIDGE_V1",
+    provenance: "LIVE_RUNTIME_EXACT",
+    evidenceBasis: "Typed bridge re-runs the side-aware seven-family attestor and accepts only exact-timestamp officially weighted HEAVYWEIGHTS BUYER_SUPPORT evidence",
+  },
+  {
+    family: "chainRepositioning",
+    source: "H1_GOLD_ATTESTED_OI_POSITIONING_BRIDGE_V1",
+    provenance: "LIVE_RUNTIME_EXACT",
+    evidenceBasis: "Typed bridge re-runs the side-aware seven-family attestor and accepts only exact-timestamp OI_POSITIONING BUYER_SUPPORT evidence",
   },
   {
     family: "executionQuality",

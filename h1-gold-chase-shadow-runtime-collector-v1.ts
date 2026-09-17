@@ -266,6 +266,11 @@ export class H1GoldChaseShadowRuntimeCollector {
         events.push(event("WAITING_WINDOW", session, window));
         continue;
       }
+      if (nowMs > expectedAtMs + this.maxWindowLateMs) {
+        this.sessions.delete(session.sessionKey);
+        events.push(event("DROPPED_FAIL_CLOSED", session, window, ["FORWARD_WINDOW_MISSED"]));
+        continue;
+      }
 
       const live = this.collectOutcome({
         journal: session.journal,
@@ -276,8 +281,7 @@ export class H1GoldChaseShadowRuntimeCollector {
       });
 
       if (!live.ready || !live.record) {
-        const tooLate = nowMs > expectedAtMs + this.maxWindowLateMs || live.blockers.includes("FORWARD_WINDOW_CAPTURE_TOO_LATE");
-        if (tooLate) {
+        if (live.blockers.includes("FORWARD_WINDOW_CAPTURE_TOO_LATE")) {
           this.sessions.delete(session.sessionKey);
           events.push(event("DROPPED_FAIL_CLOSED", session, window, ["FORWARD_WINDOW_MISSED", ...live.blockers]));
         } else {

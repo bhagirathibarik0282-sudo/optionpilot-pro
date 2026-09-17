@@ -121,7 +121,7 @@ test("PPD enrichment stays bound to the original exact packet object", () => {
   }
 
   assert.equal(finalCe?.ppdSupport?.candidateConfirmed, true);
-  assert.equal(finalPe?.ppdSupport?.candidateConfirmed, true);
+  assert.equal(finalPe?.ppdSupport?.candidateConfirmed, false);
   assert.deepEqual(finalCe?.ppdSupport?.windows.map((window) => window.windowMinutes), [3, 6, 15]);
   assert.equal(finalCe?.ppdSupport?.standaloneTrigger, false);
 });

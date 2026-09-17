@@ -1,0 +1,39 @@
+name: H1 Gold Chase Research Bootstrap V1 CI
+
+on:
+  pull_request:
+    paths:
+      - 'business-forward-journal-v1.ts'
+      - 'canonical-one-roof-market-snapshot.ts'
+      - 'h1-gold-evidence-adapter-v1.ts'
+      - 'h1-golden-shadow-candidate-v1.ts'
+      - 'h1-gold-chase-observation-v1.ts'
+      - 'h1-gold-chase-research-bootstrap-v1.ts'
+      - 'test/h1-gold-chase-research-bootstrap-v1.test.ts'
+      - '.github/workflows/h1-gold-chase-research-bootstrap-v1-ci.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'business-forward-journal-v1.ts'
+      - 'canonical-one-roof-market-snapshot.ts'
+      - 'h1-gold-evidence-adapter-v1.ts'
+      - 'h1-golden-shadow-candidate-v1.ts'
+      - 'h1-gold-chase-observation-v1.ts'
+      - 'h1-gold-chase-research-bootstrap-v1.ts'
+      - 'test/h1-gold-chase-research-bootstrap-v1.test.ts'
+      - '.github/workflows/h1-gold-chase-research-bootstrap-v1-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  shadow-bootstrap-devil-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install tsx --test test/h1-gold-chase-research-bootstrap-v1.test.ts

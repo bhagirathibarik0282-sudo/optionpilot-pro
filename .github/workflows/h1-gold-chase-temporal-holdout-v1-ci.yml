@@ -1,0 +1,45 @@
+name: H1 Gold Chase Temporal Holdout V1 CI
+
+on:
+  pull_request:
+    paths:
+      - 'business-forward-journal-v1.ts'
+      - 'h1-gold-chase-observation-v1.ts'
+      - 'h1-gold-chase-calibration-dataset-v1.ts'
+      - 'h1-gold-chase-descriptive-cohort-v1.ts'
+      - 'h1-gold-chase-temporal-holdout-v1.ts'
+      - 'h1-gold-chase-passive-collector-v1.ts'
+      - 'test/h1-gold-chase-calibration-dataset-v1.test.ts'
+      - 'test/h1-gold-chase-descriptive-cohort-v1.test.ts'
+      - 'test/h1-gold-chase-temporal-holdout-v1.test.ts'
+      - 'test/h1-gold-chase-passive-collector-v1.test.ts'
+      - '.github/workflows/h1-gold-chase-temporal-holdout-v1-ci.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'business-forward-journal-v1.ts'
+      - 'h1-gold-chase-observation-v1.ts'
+      - 'h1-gold-chase-calibration-dataset-v1.ts'
+      - 'h1-gold-chase-descriptive-cohort-v1.ts'
+      - 'h1-gold-chase-temporal-holdout-v1.ts'
+      - 'h1-gold-chase-passive-collector-v1.ts'
+      - 'test/h1-gold-chase-calibration-dataset-v1.test.ts'
+      - 'test/h1-gold-chase-descriptive-cohort-v1.test.ts'
+      - 'test/h1-gold-chase-temporal-holdout-v1.test.ts'
+      - 'test/h1-gold-chase-passive-collector-v1.test.ts'
+      - '.github/workflows/h1-gold-chase-temporal-holdout-v1-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  chase-temporal-holdout-devil-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install tsx --test test/h1-gold-chase-calibration-dataset-v1.test.ts test/h1-gold-chase-descriptive-cohort-v1.test.ts test/h1-gold-chase-temporal-holdout-v1.test.ts test/h1-gold-chase-passive-collector-v1.test.ts

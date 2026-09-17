@@ -1,3 +1,8 @@
+import type {
+  NseParticipantDerivativeRow,
+  NseParticipantReportKind,
+} from "./fii-dii-store.js";
+
 export interface NseFiiDiiRow {
   category?: string;
   date?: string;
@@ -18,15 +23,41 @@ export interface NormalizedFiiDiiCash {
 
 export const NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact";
 export const NSE_FII_DII_REPORT_URL = "https://www.nseindia.com/reports/fii-dii";
+export const NSE_PARTICIPANT_REPORT_BASE_URL = "https://nsearchives.nseindia.com/content/nsccl";
+export const NSE_DERIVATIVES_REPORT_URL = "https://www.nseindia.com/all-reports-derivatives";
 
 const MONTHS: Record<string, string> = {
   JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06",
   JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12",
 };
 
+const PARTICIPANT_HEADERS = [
+  "client type",
+  "future index long",
+  "future index short",
+  "future stock long",
+  "future stock short",
+  "option index call long",
+  "option index put long",
+  "option index call short",
+  "option index put short",
+  "option stock call long",
+  "option stock put long",
+  "option stock call short",
+  "option stock put short",
+  "total long contracts",
+  "total short contracts",
+] as const;
+
 function finiteNumber(value: unknown, label: string): number {
   const n = typeof value === "number" ? value : Number(String(value ?? "").replace(/,/g, "").trim());
   if (!Number.isFinite(n)) throw new Error(`INVALID_${label}`);
+  return n;
+}
+
+function contractCount(value: unknown, label: string): number {
+  const n = finiteNumber(value, label);
+  if (!Number.isSafeInteger(n) || n < 0) throw new Error(`INVALID_${label}`);
   return n;
 }
 
@@ -105,6 +136,15 @@ function baseHeaders(): Record<string, string> {
   };
 }
 
+function participantHeaders(): Record<string, string> {
+  return {
+    accept: "text/csv,text/plain,*/*",
+    "accept-language": "en-US,en;q=0.9",
+    referer: NSE_DERIVATIVES_REPORT_URL,
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+  };
+}
+
 function cookiesFrom(response: Response): string {
   const headers = response.headers as Headers & { getSetCookie?: () => string[] };
   const setCookies = headers.getSetCookie?.() ?? [];
@@ -134,4 +174,144 @@ export async function fetchNseFiiDii(
   const normalized = parseNseFiiDiiResponse(await response.json());
   if (expectedTradingDate) assertNseFiiDiiFreshness(normalized.date, expectedTradingDate);
   return normalized;
+}
+
+function normalizeCsvHeader(value: string): string {
+  return value.replace(/^\uFEFF/, "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function parseCsvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      quoted = true;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n") {
+      row.push(field.replace(/\r$/, ""));
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += ch;
+    }
+  }
+
+  if (quoted) throw new Error("NSE_PARTICIPANT_CSV_UNTERMINATED_QUOTE");
+  if (field.length > 0 || row.length > 0) {
+    row.push(field.replace(/\r$/, ""));
+    rows.push(row);
+  }
+  return rows.filter((candidate) => candidate.some((cell) => cell.trim() !== ""));
+}
+
+function participantCategory(value: string): NseParticipantDerivativeRow["participant"] | "TOTAL" {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "CLIENT") return "CLIENT";
+  if (normalized === "DII") return "DII";
+  if (normalized === "FII") return "FII";
+  if (normalized === "PRO") return "PRO";
+  if (normalized === "TOTAL") return "TOTAL";
+  throw new Error(`NSE_PARTICIPANT_CATEGORY_UNEXPECTED:${normalized || "EMPTY"}`);
+}
+
+export function nseParticipantReportUrl(reportKind: NseParticipantReportKind, tradeDate: string): string {
+  if (reportKind !== "OI" && reportKind !== "VOLUME") throw new Error("NSE_PARTICIPANT_REPORT_KIND_INVALID");
+  const iso = normalizeNseDate(tradeDate);
+  const compact = `${iso.slice(8, 10)}${iso.slice(5, 7)}${iso.slice(0, 4)}`;
+  const stem = reportKind === "OI" ? "fao_participant_oi" : "fao_participant_vol";
+  return `${NSE_PARTICIPANT_REPORT_BASE_URL}/${stem}_${compact}.csv`;
+}
+
+export function parseNseParticipantDerivativesCsv(
+  csv: string,
+  reportKind: NseParticipantReportKind,
+  tradeDate: string,
+  sourceUrl: string,
+  fetchedAt = new Date().toISOString(),
+): NseParticipantDerivativeRow[] {
+  if (!csv.trim()) throw new Error("NSE_PARTICIPANT_CSV_EMPTY");
+  const rows = parseCsvRows(csv);
+  const headerIndex = rows.findIndex((row) => {
+    const normalized = row.slice(0, PARTICIPANT_HEADERS.length).map(normalizeCsvHeader);
+    return normalized.length === PARTICIPANT_HEADERS.length
+      && PARTICIPANT_HEADERS.every((expected, index) => normalized[index] === expected);
+  });
+  if (headerIndex < 0) throw new Error("NSE_PARTICIPANT_CSV_HEADER_MISMATCH");
+
+  const normalizedDate = normalizeNseDate(tradeDate);
+  const participants = new Map<NseParticipantDerivativeRow["participant"], NseParticipantDerivativeRow>();
+
+  for (const csvRow of rows.slice(headerIndex + 1)) {
+    const first = csvRow[0]?.trim() ?? "";
+    if (!first) continue;
+    const participant = participantCategory(first);
+    if (participant === "TOTAL") continue;
+    if (participants.has(participant)) throw new Error(`NSE_PARTICIPANT_DUPLICATE_CATEGORY:${participant}`);
+    if (csvRow.length < PARTICIPANT_HEADERS.length) throw new Error(`NSE_PARTICIPANT_CSV_ROW_SHORT:${participant}`);
+
+    const count = (index: number, label: string) => contractCount(csvRow[index], `NSE_PARTICIPANT_${label}`);
+    participants.set(participant, {
+      tradeDate: normalizedDate,
+      reportKind,
+      participant,
+      sourceUrl,
+      fetchedAt,
+      futureIndexLong: count(1, "FUTURE_INDEX_LONG"),
+      futureIndexShort: count(2, "FUTURE_INDEX_SHORT"),
+      futureStockLong: count(3, "FUTURE_STOCK_LONG"),
+      futureStockShort: count(4, "FUTURE_STOCK_SHORT"),
+      optionIndexCallLong: count(5, "OPTION_INDEX_CALL_LONG"),
+      optionIndexPutLong: count(6, "OPTION_INDEX_PUT_LONG"),
+      optionIndexCallShort: count(7, "OPTION_INDEX_CALL_SHORT"),
+      optionIndexPutShort: count(8, "OPTION_INDEX_PUT_SHORT"),
+      optionStockCallLong: count(9, "OPTION_STOCK_CALL_LONG"),
+      optionStockPutLong: count(10, "OPTION_STOCK_PUT_LONG"),
+      optionStockCallShort: count(11, "OPTION_STOCK_CALL_SHORT"),
+      optionStockPutShort: count(12, "OPTION_STOCK_PUT_SHORT"),
+      totalLongContracts: count(13, "TOTAL_LONG_CONTRACTS"),
+      totalShortContracts: count(14, "TOTAL_SHORT_CONTRACTS"),
+    });
+  }
+
+  const required: NseParticipantDerivativeRow["participant"][] = ["CLIENT", "DII", "FII", "PRO"];
+  const missing = required.filter((participant) => !participants.has(participant));
+  if (missing.length) throw new Error(`NSE_PARTICIPANT_CATEGORIES_MISSING:${missing.join(",")}`);
+  return required.map((participant) => participants.get(participant)!);
+}
+
+export async function fetchNseParticipantDerivatives(
+  reportKind: NseParticipantReportKind,
+  tradeDate: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<NseParticipantDerivativeRow[]> {
+  const sourceUrl = nseParticipantReportUrl(reportKind, tradeDate);
+  const response = await fetchImpl(sourceUrl, { headers: participantHeaders() });
+  if (!response.ok) throw new Error(`NSE_PARTICIPANT_${reportKind}_HTTP_${response.status}`);
+  const csv = await response.text();
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType.includes("text/html") || /^\s*</.test(csv)) {
+    throw new Error(`NSE_PARTICIPANT_${reportKind}_NON_CSV_RESPONSE`);
+  }
+  return parseNseParticipantDerivativesCsv(csv, reportKind, tradeDate, sourceUrl);
 }

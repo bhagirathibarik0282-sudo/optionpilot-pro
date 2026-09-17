@@ -6,6 +6,7 @@ on:
       - "h1-exact-shadow-live-service.ts"
       - "h1-gold-chase-exact-service-shadow-hook-v1.ts"
       - "h1-gold-chase-readonly-lineage-adapter-v1.ts"
+      - "h1-gold-chase-approved-producer-proof-v1.ts"
       - "h1-gold-chase-exact-lineage-resolver-v1.ts"
       - "h1-gold-chase-exact-lineage-publisher-v1.ts"
       - "h1-gold-chase-exact-premium-path-store-v1.ts"
@@ -13,6 +14,7 @@ on:
       - "test/h1-exact-shadow-live-service.test.ts"
       - "test/h1-gold-chase-exact-service-shadow-hook-v1.test.ts"
       - "test/h1-gold-chase-readonly-lineage-adapter-v1.test.ts"
+      - "test/h1-gold-chase-approved-producer-proof-v1.test.ts"
       - "test/h1-gold-chase-exact-lineage-resolver-v1.test.ts"
       - "test/h1-gold-chase-exact-lineage-publisher-v1.test.ts"
       - "test/h1-gold-chase-exact-premium-path-store-v1.test.ts"
@@ -32,4 +34,4 @@ jobs:
         with:
           node-version: "22"
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: npx --no-install tsx --test test/h1-gold-chase-exact-service-shadow-hook-v1.test.ts test/h1-gold-chase-readonly-lineage-adapter-v1.test.ts test/h1-gold-chase-exact-lineage-resolver-v1.test.ts test/h1-gold-chase-exact-lineage-publisher-v1.test.ts test/h1-gold-chase-exact-premium-path-store-v1.test.ts test/h1-exact-shadow-live-service.test.ts test/h1-gold-chase-same-process-shadow-runtime-v1.test.ts test/h1-live-selector-registry.test.ts
+      - run: npx --no-install tsx --test test/h1-gold-chase-exact-service-shadow-hook-v1.test.ts test/h1-gold-chase-readonly-lineage-adapter-v1.test.ts test/h1-gold-chase-approved-producer-proof-v1.test.ts test/h1-gold-chase-exact-lineage-resolver-v1.test.ts test/h1-gold-chase-exact-lineage-publisher-v1.test.ts test/h1-gold-chase-exact-premium-path-store-v1.test.ts test/h1-exact-shadow-live-service.test.ts test/h1-gold-chase-same-process-shadow-runtime-v1.test.ts test/h1-live-selector-registry.test.ts

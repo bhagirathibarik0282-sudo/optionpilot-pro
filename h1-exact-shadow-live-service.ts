@@ -18,7 +18,14 @@ import {
   type H1GoldChaseExactServiceLineageResolver,
 } from "./h1-gold-chase-exact-service-shadow-hook-v1.js";
 import { H1GoldChaseExactPremiumPathStore } from "./h1-gold-chase-exact-premium-path-store-v1.js";
-import { H1GoldChaseReadOnlyLineageAdapter } from "./h1-gold-chase-readonly-lineage-adapter-v1.js";
+import {
+  H1GoldChaseReadOnlyLineageAdapter,
+  type H1GoldChaseApprovedProducer,
+} from "./h1-gold-chase-readonly-lineage-adapter-v1.js";
+import {
+  buildH1GoldChaseApprovedProducerProof,
+  persistH1GoldChaseApprovedProducerProof,
+} from "./h1-gold-chase-approved-producer-proof-v1.js";
 
 export const H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND = "H1_EXACT_SHADOW_LIVE_STATUS_V1" as const;
 
@@ -198,6 +205,7 @@ export interface H1ExactShadowLiveServiceDeps {
   goldChaseLineageResolver?: H1GoldChaseExactServiceLineageResolver;
   goldChasePremiumPathStore?: Pick<H1GoldChaseExactPremiumPathStore, "record" | "pathFor">;
   goldChaseLineageAdapter?: Pick<H1GoldChaseReadOnlyLineageAdapter, "publish" | "resolver">;
+  goldChaseApprovedProducer?: H1GoldChaseApprovedProducer;
 }
 
 export async function startH1ExactShadowLiveService(
@@ -215,7 +223,12 @@ export async function startH1ExactShadowLiveService(
   }
   if (!cfg.enabled) return recordStatus(buildH1ExactShadowLiveStatus(false, false, "DISABLED", 0));
   if (!cfg.apiKey) return recordStatus(buildH1ExactShadowLiveStatus(true, false, "API_KEY_MISSING", 0));
-  if (cfg.goldChaseShadowEnabled && deps.goldChaseLineageResolver && deps.goldChaseLineageAdapter) {
+  const suppliedLineageDependencies = [
+    deps.goldChaseLineageResolver,
+    deps.goldChaseLineageAdapter,
+    deps.goldChaseApprovedProducer,
+  ].filter(Boolean).length;
+  if (cfg.goldChaseShadowEnabled && suppliedLineageDependencies > 1) {
     return recordStatus(buildH1ExactShadowLiveStatus(
       true, false, "DISABLED", 0, "GOLD_CHASE_LINEAGE_DEPENDENCY_CONFLICT",
     ));
@@ -265,9 +278,13 @@ export async function startH1ExactShadowLiveService(
     },
   });
 
+  const goldChaseLineageAdapter = deps.goldChaseLineageAdapter
+    ?? (deps.goldChaseApprovedProducer
+      ? new H1GoldChaseReadOnlyLineageAdapter(deps.goldChaseApprovedProducer)
+      : null);
   const goldChaseHook = new H1GoldChaseExactServiceShadowHook({
     enabled: cfg.goldChaseShadowEnabled,
-    resolver: deps.goldChaseLineageAdapter?.resolver() ?? deps.goldChaseLineageResolver,
+    resolver: goldChaseLineageAdapter?.resolver() ?? deps.goldChaseLineageResolver,
   });
   const goldChasePremiumPathStore = cfg.goldChaseShadowEnabled
     ? (deps.goldChasePremiumPathStore ?? new H1GoldChaseExactPremiumPathStore())
@@ -311,9 +328,12 @@ export async function startH1ExactShadowLiveService(
         if (exactPacket && goldChasePremiumPathStore) {
           try { goldChasePremiumPathStore.record(exactPacket, receivedAt); } catch { /* shadow-only containment */ }
         }
-        if (exactPacket && deps.goldChaseLineageAdapter) {
+        if (exactPacket && goldChaseLineageAdapter) {
           try {
-            await deps.goldChaseLineageAdapter.publish({ packet: exactPacket, dualPath, observedAt: nowIso });
+            const publication = await goldChaseLineageAdapter.publish({ packet: exactPacket, dualPath, observedAt: nowIso });
+            await persistH1GoldChaseApprovedProducerProof(
+              buildH1GoldChaseApprovedProducerProof(publication, nowIso),
+            );
           } catch { /* shadow-only containment; hook resolution remains fail-closed */ }
         }
         await goldChaseHook.observe(dualPath, nowIso);

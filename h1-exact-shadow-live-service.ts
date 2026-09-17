@@ -293,7 +293,7 @@ export async function startH1ExactShadowLiveService(
       const entry = registry.get(packet?.instrumentToken ?? 0);
       if (entry?.role === "SPOT") directionStore.ingest(packet, receivedAt);
       const dualPath = await rawRuntime.ingestPacket(packet, receivedAt, nowIso);
-      await goldChaseHook.observe(dualPath, nowIso);
+      if (cfg.goldChaseShadowEnabled) await goldChaseHook.observe(dualPath, nowIso);
       return dualPath;
     },
   };

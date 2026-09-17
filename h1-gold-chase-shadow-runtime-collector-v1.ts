@@ -141,6 +141,22 @@ function event(
   };
 }
 
+function tickResult(
+  observedAt: string,
+  activeSessionCount: number,
+  events: H1GoldChaseShadowRuntimeEvent[],
+): H1GoldChaseShadowRuntimeTickResult {
+  return {
+    version: H1_GOLD_CHASE_SHADOW_RUNTIME_COLLECTOR_V1,
+    observedAt,
+    activeSessionCount,
+    events,
+    ...SAFETY,
+    schedulesSampling: true,
+    fixedWindowSequence: WINDOWS,
+  };
+}
+
 function validBootstrap(input: H1GoldChaseResearchBootstrapResult): string[] {
   const blockers: string[] = [];
   if (!input || input.version !== H1_GOLD_CHASE_RESEARCH_BOOTSTRAP_V1) blockers.push("VALID_RESEARCH_BOOTSTRAP_REQUIRED");
@@ -178,6 +194,7 @@ export class H1GoldChaseShadowRuntimeCollector {
   private readonly persist: Persist;
   private readonly maxRegistryAgeMs: number;
   private readonly maxWindowLateMs: number;
+  private tickInFlight = false;
 
   constructor(deps: H1GoldChaseShadowRuntimeCollectorDeps = {}) {
     this.collectOutcome = deps.collectOutcome ?? collectBusinessForwardOutcomeFromH1Registry;
@@ -234,18 +251,22 @@ export class H1GoldChaseShadowRuntimeCollector {
   }
 
   async tick(nowIso: string): Promise<H1GoldChaseShadowRuntimeTickResult> {
+    if (this.tickInFlight) {
+      return tickResult(nowIso, this.sessions.size, [event("REJECTED", null, null, ["CONCURRENT_TICK_BLOCKED"])]);
+    }
+    this.tickInFlight = true;
+    try {
+      return await this.runTick(nowIso);
+    } finally {
+      this.tickInFlight = false;
+    }
+  }
+
+  private async runTick(nowIso: string): Promise<H1GoldChaseShadowRuntimeTickResult> {
     const nowMs = Date.parse(nowIso);
     const events: H1GoldChaseShadowRuntimeEvent[] = [];
     if (!Number.isFinite(nowMs)) {
-      return {
-        version: H1_GOLD_CHASE_SHADOW_RUNTIME_COLLECTOR_V1,
-        observedAt: nowIso,
-        activeSessionCount: this.sessions.size,
-        events: [event("REJECTED", null, null, ["VALID_TICK_TIMESTAMP_REQUIRED"])],
-        ...SAFETY,
-        schedulesSampling: true,
-        fixedWindowSequence: WINDOWS,
-      };
+      return tickResult(nowIso, this.sessions.size, [event("REJECTED", null, null, ["VALID_TICK_TIMESTAMP_REQUIRED"])]);
     }
 
     for (const session of [...this.sessions.values()]) {
@@ -307,14 +328,6 @@ export class H1GoldChaseShadowRuntimeCollector {
       }
     }
 
-    return {
-      version: H1_GOLD_CHASE_SHADOW_RUNTIME_COLLECTOR_V1,
-      observedAt: nowIso,
-      activeSessionCount: this.sessions.size,
-      events,
-      ...SAFETY,
-      schedulesSampling: true,
-      fixedWindowSequence: WINDOWS,
-    };
+    return tickResult(nowIso, this.sessions.size, events);
   }
 }

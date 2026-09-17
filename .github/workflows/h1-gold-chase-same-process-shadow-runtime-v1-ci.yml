@@ -1,0 +1,30 @@
+name: H1 Gold Chase Same-Process Shadow Runtime V1
+
+on:
+  pull_request:
+    paths:
+      - "h1-gold-chase-same-process-shadow-runtime-v1.ts"
+      - "h1-gold-chase-runtime-attachment-gate-v1.ts"
+      - "h1-gold-chase-shadow-runtime-collector-v1.ts"
+      - "test/h1-gold-chase-same-process-shadow-runtime-v1.test.ts"
+      - ".github/workflows/h1-gold-chase-same-process-shadow-runtime-v1-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "h1-gold-chase-same-process-shadow-runtime-v1.ts"
+      - "h1-gold-chase-runtime-attachment-gate-v1.ts"
+      - "h1-gold-chase-shadow-runtime-collector-v1.ts"
+      - "test/h1-gold-chase-same-process-shadow-runtime-v1.test.ts"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: NODE_ENV=test node --import tsx --test test/h1-gold-chase-runtime-attachment-gate-v1.test.ts test/h1-gold-chase-same-process-shadow-runtime-v1.test.ts

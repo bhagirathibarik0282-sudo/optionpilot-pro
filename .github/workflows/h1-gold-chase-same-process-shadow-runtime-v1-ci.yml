@@ -16,6 +16,9 @@ on:
       - "h1-gold-chase-shadow-runtime-collector-v1.ts"
       - "test/h1-gold-chase-same-process-shadow-runtime-v1.test.ts"
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -24,7 +27,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: NODE_ENV=test node --import tsx --test test/h1-gold-chase-runtime-attachment-gate-v1.test.ts test/h1-gold-chase-same-process-shadow-runtime-v1.test.ts
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npx --no-install tsx --test test/h1-gold-chase-runtime-attachment-gate-v1.test.ts test/h1-gold-chase-same-process-shadow-runtime-v1.test.ts

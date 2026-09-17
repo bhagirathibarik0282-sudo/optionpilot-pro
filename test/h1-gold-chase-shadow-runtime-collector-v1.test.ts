@@ -227,7 +227,7 @@ test("temporary exact-live evidence gap retries inside bounded late window", asy
   assert.equal(runtime.activeSessionCount(), 1);
 });
 
-test("missed bounded window drops the research session fail closed", async () => {
+test("missed bounded window drops the research session before stale registry access", async () => {
   const runtime = new H1GoldChaseShadowRuntimeCollector({
     collectOutcome: () => { throw new Error("collector must not run after window is already beyond bounded lateness"); },
     bridge: bridge as any,
@@ -258,6 +258,28 @@ test("durable Postgres outage keeps a completed immutable sample pending for ide
   const retried = await runtime.tick(iso(T0 + 31 * 60_000));
   assert.equal(retried.events[0]?.state, "DURABLE_SAMPLE");
   assert.equal(retried.events[0]?.persistenceState, "EXACT_DUPLICATE");
+  assert.equal(runtime.activeSessionCount(), 0);
+});
+
+test("overlapping runtime tick is blocked while immutable sample persistence is in flight", async () => {
+  let release!: (value: H1GoldChasePersistenceResult) => void;
+  const pendingPersist = new Promise<H1GoldChasePersistenceResult>((resolve) => { release = resolve; });
+  const runtime = new H1GoldChaseShadowRuntimeCollector({
+    collectOutcome: liveResult,
+    bridge: bridge as any,
+    persist: async () => pendingPersist,
+  });
+  runtime.register(bootstrap());
+  for (const minutes of [3, 6, 15]) await runtime.tick(iso(T0 + minutes * 60_000));
+
+  const firstTick = runtime.tick(iso(T0 + 30 * 60_000));
+  const overlapping = await runtime.tick(iso(T0 + 30 * 60_000 + 1_000));
+  assert.equal(overlapping.events[0]?.state, "REJECTED");
+  assert.ok(overlapping.events[0]?.blockers.includes("CONCURRENT_TICK_BLOCKED"));
+
+  release(persisted("PERSISTED"));
+  const completed = await firstTick;
+  assert.equal(completed.events[0]?.state, "DURABLE_SAMPLE");
   assert.equal(runtime.activeSessionCount(), 0);
 });
 

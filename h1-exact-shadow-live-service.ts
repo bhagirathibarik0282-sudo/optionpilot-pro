@@ -14,8 +14,10 @@ import type { RecorderSymbol } from "./option-recorder-shadow.js";
 import { dbInsert, dbLoadRecent } from "./db.js";
 import {
   H1GoldChaseExactServiceShadowHook,
+  exactGoldPacketFromDualPath,
   type H1GoldChaseExactServiceLineageResolver,
 } from "./h1-gold-chase-exact-service-shadow-hook-v1.js";
+import { H1GoldChaseExactPremiumPathStore } from "./h1-gold-chase-exact-premium-path-store-v1.js";
 
 export const H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND = "H1_EXACT_SHADOW_LIVE_STATUS_V1" as const;
 
@@ -193,6 +195,7 @@ export function readH1ExactShadowLiveConfig(env: NodeJS.ProcessEnv = process.env
 
 export interface H1ExactShadowLiveServiceDeps {
   goldChaseLineageResolver?: H1GoldChaseExactServiceLineageResolver;
+  goldChasePremiumPathStore?: Pick<H1GoldChaseExactPremiumPathStore, "record" | "pathFor">;
 }
 
 export async function startH1ExactShadowLiveService(
@@ -259,6 +262,9 @@ export async function startH1ExactShadowLiveService(
     enabled: cfg.goldChaseShadowEnabled,
     resolver: deps.goldChaseLineageResolver,
   });
+  const goldChasePremiumPathStore = cfg.goldChaseShadowEnabled
+    ? (deps.goldChasePremiumPathStore ?? new H1GoldChaseExactPremiumPathStore())
+    : null;
 
   const rawRuntime = createKiteH1ExactDualPathCore({
     registry,
@@ -293,7 +299,13 @@ export async function startH1ExactShadowLiveService(
       const entry = registry.get(packet?.instrumentToken ?? 0);
       if (entry?.role === "SPOT") directionStore.ingest(packet, receivedAt);
       const dualPath = await rawRuntime.ingestPacket(packet, receivedAt, nowIso);
-      if (cfg.goldChaseShadowEnabled) await goldChaseHook.observe(dualPath, nowIso);
+      if (cfg.goldChaseShadowEnabled) {
+        const exactPacket = exactGoldPacketFromDualPath(dualPath);
+        if (exactPacket && goldChasePremiumPathStore) {
+          try { goldChasePremiumPathStore.record(exactPacket, receivedAt); } catch { /* shadow-only containment */ }
+        }
+        await goldChaseHook.observe(dualPath, nowIso);
+      }
       return dualPath;
     },
   };
@@ -304,7 +316,7 @@ export async function startH1ExactShadowLiveService(
   });
   supervisor.start();
   const out = await recordStatus(buildH1ExactShadowLiveStatus(true, true, "STARTED", registry.tokens().length));
-  return { ...out, supervisor, goldChaseHook };
+  return { ...out, supervisor, goldChaseHook, goldChasePremiumPathStore };
 }
 
 export function buildH1ExactShadowLiveStatus(

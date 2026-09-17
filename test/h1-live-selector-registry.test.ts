@@ -5,7 +5,8 @@ import {
   collectH1LiveSelectorDecisions,
   getH1LiveSelectorRegistrySize,
   publishH1LiveGateEvidence,
-} from "../h1-live-selector-registry.js";\nimport type { LiveGateEvidencePacket } from "../h1-live-gate-evidence-assembler.js";
+} from "../h1-live-selector-registry.js";
+import type { LiveGateEvidencePacket } from "../h1-live-gate-evidence-assembler.js";
 
 function gate(value: boolean, observedAt: string) {
   return { value, observedAt, source: "LIVE_TEST", provenance: "LIVE_RUNTIME_EXACT" as const };

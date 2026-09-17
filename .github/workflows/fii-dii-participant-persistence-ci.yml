@@ -32,4 +32,4 @@ jobs:
       - name: Install TypeScript check tooling
         run: npm install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false typescript@5.8.3 @types/node@22 @types/pg@8
       - name: TypeScript noEmit check
-        run: ./node_modules/.bin/tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node --skipLibCheck --esModuleInterop fii-dii-store.ts fii-dii-nse.ts fii-dii-daily-job.ts
+        run: ./node_modules/.bin/tsc --noEmit --allowImportingTsExtensions --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node --skipLibCheck --esModuleInterop fii-dii-store.ts fii-dii-nse.ts fii-dii-daily-job.ts

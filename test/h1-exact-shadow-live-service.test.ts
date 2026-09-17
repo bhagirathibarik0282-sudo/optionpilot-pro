@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildH1ExactShadowLiveStatus, readH1ExactShadowLiveConfig } from "../h1-exact-shadow-live-service.js";
+import {
+  auditH1GoldChaseStartupTopology,
+  buildH1ExactShadowLiveStatus,
+  readH1ExactShadowLiveConfig,
+} from "../h1-exact-shadow-live-service.js";
 
 const registry = [
   { instrumentToken: 256265, symbol: "NIFTY", role: "SPOT", instrumentLabel: "NIFTY 50" },
@@ -145,4 +149,30 @@ test("Gold chase exact-service hook is separately explicit and default off", () 
     readH1ExactShadowLiveConfig(env({ H1_GOLD_CHASE_SHADOW_ENABLED: "true" })).goldChaseShadowEnabled,
     true,
   );
+});
+
+test("Gold shadow startup requires exactly one approved same-process lineage dependency", () => {
+  const absent = auditH1GoldChaseStartupTopology(true);
+  assert.equal(absent.ready, false);
+  assert.deepEqual(absent.blockers, ["APPROVED_GOLD_PRODUCER_REQUIRED"]);
+
+  const producer = auditH1GoldChaseStartupTopology(true, { goldChaseApprovedProducer: async () => null });
+  assert.equal(producer.ready, true);
+  assert.equal(producer.suppliedLineageDependencyCount, 1);
+
+  const conflict = auditH1GoldChaseStartupTopology(true, {
+    goldChaseApprovedProducer: async () => null,
+    goldChaseLineageResolver: async () => null,
+  });
+  assert.equal(conflict.ready, false);
+  assert.deepEqual(conflict.blockers, ["GOLD_CHASE_LINEAGE_DEPENDENCY_CONFLICT"]);
+  assert.equal(conflict.affectsTelegram, false);
+  assert.equal(conflict.affectsExecution, false);
+  assert.equal(conflict.createsOrders, false);
+});
+
+test("disabled Gold shadow does not require a producer", () => {
+  const out = auditH1GoldChaseStartupTopology(false);
+  assert.equal(out.ready, true);
+  assert.deepEqual(out.blockers, []);
 });

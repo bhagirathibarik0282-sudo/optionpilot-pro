@@ -208,6 +208,45 @@ export interface H1ExactShadowLiveServiceDeps {
   goldChaseApprovedProducer?: H1GoldChaseApprovedProducer;
 }
 
+export interface H1GoldChaseStartupTopologyAudit {
+  ready: boolean;
+  suppliedLineageDependencyCount: number;
+  blockers: string[];
+  productionImpact: "NONE";
+  affectsTelegram: false;
+  affectsExecution: false;
+  createsOrders: false;
+  failClosed: true;
+}
+
+export function auditH1GoldChaseStartupTopology(
+  enabled: boolean,
+  deps: H1ExactShadowLiveServiceDeps = {},
+): H1GoldChaseStartupTopologyAudit {
+  const suppliedLineageDependencyCount = [
+    deps.goldChaseLineageResolver,
+    deps.goldChaseLineageAdapter,
+    deps.goldChaseApprovedProducer,
+  ].filter(Boolean).length;
+  const blockers = enabled
+    ? suppliedLineageDependencyCount === 0
+      ? ["APPROVED_GOLD_PRODUCER_REQUIRED"]
+      : suppliedLineageDependencyCount > 1
+        ? ["GOLD_CHASE_LINEAGE_DEPENDENCY_CONFLICT"]
+        : []
+    : [];
+  return {
+    ready: blockers.length === 0,
+    suppliedLineageDependencyCount,
+    blockers,
+    productionImpact: "NONE",
+    affectsTelegram: false,
+    affectsExecution: false,
+    createsOrders: false,
+    failClosed: true,
+  };
+}
+
 export async function startH1ExactShadowLiveService(
   env: NodeJS.ProcessEnv = process.env,
   deps: H1ExactShadowLiveServiceDeps = {},
@@ -223,14 +262,10 @@ export async function startH1ExactShadowLiveService(
   }
   if (!cfg.enabled) return recordStatus(buildH1ExactShadowLiveStatus(false, false, "DISABLED", 0));
   if (!cfg.apiKey) return recordStatus(buildH1ExactShadowLiveStatus(true, false, "API_KEY_MISSING", 0));
-  const suppliedLineageDependencies = [
-    deps.goldChaseLineageResolver,
-    deps.goldChaseLineageAdapter,
-    deps.goldChaseApprovedProducer,
-  ].filter(Boolean).length;
-  if (cfg.goldChaseShadowEnabled && suppliedLineageDependencies > 1) {
+  const topology = auditH1GoldChaseStartupTopology(cfg.goldChaseShadowEnabled, deps);
+  if (!topology.ready) {
     return recordStatus(buildH1ExactShadowLiveStatus(
-      true, false, "DISABLED", 0, "GOLD_CHASE_LINEAGE_DEPENDENCY_CONFLICT",
+      true, false, "DISABLED", 0, topology.blockers[0] ?? "GOLD_CHASE_STARTUP_TOPOLOGY_BLOCKED",
     ));
   }
 

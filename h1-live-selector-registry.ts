@@ -47,7 +47,9 @@ function refreshPpdSupportForPair(packet: LiveGateEvidencePacket): void {
   for (const entry of entries.values()) {
     if (!samePair(entry.packet, packet)) continue;
     const support = buildH1LivePpdSupport(entry.packet.identity);
-    if (support) entry.packet = { ...entry.packet, ppdSupport: support };
+    // Preserve the exact same-ingest packet object so downstream shadow-only
+    // lineage checks can bind PPD evidence without accepting a reconstructed copy.
+    if (support) entry.packet.ppdSupport = support;
   }
 }
 

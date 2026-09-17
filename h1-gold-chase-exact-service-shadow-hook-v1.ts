@@ -82,7 +82,7 @@ function candidateKey(packet: LiveGateEvidencePacket | null): string | null {
   return identity.symbol + "|" + identity.expiryDate + "|" + identity.strike + "|" + identity.side;
 }
 
-function exactPacketFrom(result: KiteH1ExactDualPathResult): LiveGateEvidencePacket | null {
+export function exactGoldPacketFromDualPath(result: KiteH1ExactDualPathResult): LiveGateEvidencePacket | null {
   if (
     result?.version !== "KITE_H1_EXACT_DUAL_PATH_CORE_V1"
     || result.processed !== true
@@ -161,7 +161,7 @@ export class H1GoldChaseExactServiceShadowHook {
       return this.latestStatus();
     }
 
-    const packet = exactPacketFrom(dualPath);
+    const packet = exactGoldPacketFromDualPath(dualPath);
     if (!packet) {
       this.latest = status(
         "BLOCKED", true, observedAt, null, this.runtime.activeSessionCount(), null, null,

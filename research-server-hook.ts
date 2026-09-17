@@ -33,6 +33,10 @@ import {
 import { collectH1LiveSelectorDecisions, collectH1LiveResponseMetrics, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
 import { runH1LiveGateEvidenceHistoryHttp } from "./h1-live-gate-evidence-history-http-v1.js";
 import { H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND, loadLatestH1ExactShadowLiveStatus } from "./h1-exact-shadow-live-service.js";
+import {
+  H1_GOLD_CHASE_APPROVED_PRODUCER_PROOF_PERSIST_KIND,
+  loadLatestH1GoldChaseApprovedProducerProof,
+} from "./h1-gold-chase-approved-producer-proof-v1.js";
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const THEORY_LAB_HREF = "/api/research/h1-theory-dashboard";
@@ -176,6 +180,34 @@ export function mountResearchRoutes(app: Hono): void {
       affectsExecution: false,
       createsOrders: false,
       failClosed: true,
+    });
+  });
+
+  app.get("/api/research/h1-gold-approved-producer-proof", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const latest = await loadLatestH1GoldChaseApprovedProducerProof();
+    return c.json({
+      ok: true,
+      mode: "READ_ONLY_H1_GOLD_APPROVED_PRODUCER_PROOF_V1",
+      productionImpact: "NONE",
+      persistKind: H1_GOLD_CHASE_APPROVED_PRODUCER_PROOF_PERSIST_KIND,
+      proofAvailable: latest != null,
+      published: latest?.state === "PUBLISHED" && latest.ready === true,
+      latest,
+      blocker: latest
+        ? (latest.ready ? null : latest.blockers)
+        : ["NO_PERSISTED_APPROVED_PRODUCER_PROOF"],
+      liveProofOnly: true,
+      acceptsReplay: false,
+      acceptsSynthetic: false,
+      affectsGoldEligibility: false,
+      affectsSelector: false,
+      affectsTelegram: false,
+      affectsExecution: false,
+      grantsPromotionAuthority: false,
+      createsOrders: false,
+      failClosed: true,
+      semantics: "READ_ONLY_DURABLE_APPROVED_PRODUCER_PROOF_NO_MUTATION_NO_AUTHORITY",
     });
   });
 

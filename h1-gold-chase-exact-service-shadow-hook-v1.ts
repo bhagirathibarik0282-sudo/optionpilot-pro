@@ -199,7 +199,16 @@ export class H1GoldChaseExactServiceShadowHook {
       return this.latestStatus();
     }
 
-    const attachment = this.runtime.attach(input);
+    let attachment: H1GoldChaseSameProcessAttachResult;
+    try {
+      attachment = this.runtime.attach(input);
+    } catch {
+      this.latest = status(
+        "BLOCKED", true, observedAt, packet, this.runtime.activeSessionCount(), null, null,
+        ["ATTACHMENT_RUNTIME_EXCEPTION"],
+      );
+      return this.latestStatus();
+    }
     if (!attachment.ready || attachment.state !== "ATTACHED") {
       this.latest = status(
         "BLOCKED", true, observedAt, packet, this.runtime.activeSessionCount(), attachment, null,
@@ -208,7 +217,16 @@ export class H1GoldChaseExactServiceShadowHook {
       return this.latestStatus();
     }
 
-    const tick = await this.runtime.tick(observedAt);
+    let tick: H1GoldChaseShadowRuntimeTickResult;
+    try {
+      tick = await this.runtime.tick(observedAt);
+    } catch {
+      this.latest = status(
+        "BLOCKED", true, observedAt, packet, this.runtime.activeSessionCount(), attachment, null,
+        ["SHADOW_TICK_RUNTIME_EXCEPTION"],
+      );
+      return this.latestStatus();
+    }
     const tickBlocked = tick.events.some((event) =>
       event.state === "REJECTED" || event.state === "DROPPED_FAIL_CLOSED"
     );

@@ -168,3 +168,26 @@ test("verified same-ingest lineage is the only path that can attach and tick", a
   assert.equal(out.affectsSelector, false);
   assert.equal(out.grantsPromotionAuthority, false);
 });
+
+
+test("shadow runtime exceptions are contained and cannot fail the exact ingest path", async () => {
+  const source = packet();
+  let ticked = 0;
+  const hook = new H1GoldChaseExactServiceShadowHook({
+    enabled: true,
+    resolver: ({ packet: exact }) => attachInput(exact),
+    runtime: {
+      attach: () => { throw new Error("shadow attach failure"); },
+      tick: async () => {
+        ticked += 1;
+        throw new Error("must not tick");
+      },
+      activeSessionCount: () => 0,
+    },
+  });
+  const out = await hook.observe(dualPath(source), T);
+  assert.equal(out.state, "BLOCKED");
+  assert.ok(out.blockers.includes("ATTACHMENT_RUNTIME_EXCEPTION"));
+  assert.equal(ticked, 0);
+  assert.equal(out.affectsExecution, false);
+});

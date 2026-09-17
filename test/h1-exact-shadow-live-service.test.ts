@@ -37,6 +37,7 @@ test("disabled exact shadow service is inert", () => {
   const cfg = readH1ExactShadowLiveConfig({ KITE_H1_EXACT_SHADOW_ENABLED: "false" });
   assert.equal(cfg.enabled, false);
   assert.equal(cfg.policy, null);
+  assert.equal(cfg.goldChaseShadowEnabled, false);
   assert.deepEqual(cfg.registryEntries, []);
 });
 
@@ -135,4 +136,13 @@ test("activation fails closed when required different-expiry peers are not confi
   assert.throws(() => readH1ExactShadowLiveConfig(env({
     KITE_H1_EXACT_POLICY_JSON: JSON.stringify(needsTwoPeers),
   })), /INSUFFICIENT_CONFIGURED_PEER_EXPIRIES/);
+});
+
+
+test("Gold chase exact-service hook is separately explicit and default off", () => {
+  assert.equal(readH1ExactShadowLiveConfig(env()).goldChaseShadowEnabled, false);
+  assert.equal(
+    readH1ExactShadowLiveConfig(env({ H1_GOLD_CHASE_SHADOW_ENABLED: "true" })).goldChaseShadowEnabled,
+    true,
+  );
 });

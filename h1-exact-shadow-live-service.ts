@@ -12,6 +12,10 @@ import { H1ExactLiveSpotDirectionStore } from "./h1-exact-live-spot-direction-st
 import type { H1ExactLiveSpotDirectionPolicy } from "./h1-exact-live-spot-direction-provider.js";
 import type { RecorderSymbol } from "./option-recorder-shadow.js";
 import { dbInsert, dbLoadRecent } from "./db.js";
+import {
+  H1GoldChaseExactServiceShadowHook,
+  type H1GoldChaseExactServiceLineageResolver,
+} from "./h1-gold-chase-exact-service-shadow-hook-v1.js";
 
 export const H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND = "H1_EXACT_SHADOW_LIVE_STATUS_V1" as const;
 
@@ -39,6 +43,7 @@ export interface H1ExactShadowLiveConfig {
   apiKey: string | null;
   registryEntries: KiteImmediateTokenEntry[];
   policy: H1ExactShadowPolicy | null;
+  goldChaseShadowEnabled: boolean;
 }
 
 export type H1ExactShadowLiveReason =
@@ -170,8 +175,9 @@ function validateExactPeerCapacity(registryEntries: KiteImmediateTokenEntry[], p
 
 export function readH1ExactShadowLiveConfig(env: NodeJS.ProcessEnv = process.env): H1ExactShadowLiveConfig {
   const enabled = env.KITE_H1_EXACT_SHADOW_ENABLED === "true";
+  const goldChaseShadowEnabled = env.H1_GOLD_CHASE_SHADOW_ENABLED === "true";
   const apiKey = env.KITE_API_KEY?.trim() || null;
-  if (!enabled) return { enabled: false, apiKey, registryEntries: [], policy: null };
+  if (!enabled) return { enabled: false, apiKey, registryEntries: [], policy: null, goldChaseShadowEnabled };
   if (env.KITE_RUNTIME_SHADOW_ENABLED === "true") throw new Error("DUPLICATE_SHADOW_RUNTIME_FORBIDDEN");
 
   const registryRaw = env.KITE_SHADOW_REGISTRY_JSON?.trim();
@@ -182,10 +188,17 @@ export function readH1ExactShadowLiveConfig(env: NodeJS.ProcessEnv = process.env
   if (!Array.isArray(registryEntries) || registryEntries.length === 0) throw new Error("KITE_SHADOW_REGISTRY_JSON_EMPTY");
   const policy = validateH1ExactShadowPolicy(parseJson(policyRaw, "KITE_H1_EXACT_POLICY_JSON_INVALID"));
   validateExactPeerCapacity(registryEntries as KiteImmediateTokenEntry[], policy);
-  return { enabled: true, apiKey, registryEntries: registryEntries as KiteImmediateTokenEntry[], policy };
+  return { enabled: true, apiKey, registryEntries: registryEntries as KiteImmediateTokenEntry[], policy, goldChaseShadowEnabled };
 }
 
-export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = process.env) {
+export interface H1ExactShadowLiveServiceDeps {
+  goldChaseLineageResolver?: H1GoldChaseExactServiceLineageResolver;
+}
+
+export async function startH1ExactShadowLiveService(
+  env: NodeJS.ProcessEnv = process.env,
+  deps: H1ExactShadowLiveServiceDeps = {},
+) {
   let cfg: H1ExactShadowLiveConfig;
   try {
     cfg = readH1ExactShadowLiveConfig(env);
@@ -242,6 +255,11 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
     },
   });
 
+  const goldChaseHook = new H1GoldChaseExactServiceShadowHook({
+    enabled: cfg.goldChaseShadowEnabled,
+    resolver: deps.goldChaseLineageResolver,
+  });
+
   const rawRuntime = createKiteH1ExactDualPathCore({
     registry,
     cluster: { windowMs: 2_000, minDistinctMetrics: 2 },
@@ -274,7 +292,9 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
       currentRuntimeNowIso = nowIso;
       const entry = registry.get(packet?.instrumentToken ?? 0);
       if (entry?.role === "SPOT") directionStore.ingest(packet, receivedAt);
-      return rawRuntime.ingestPacket(packet, receivedAt, nowIso);
+      const dualPath = await rawRuntime.ingestPacket(packet, receivedAt, nowIso);
+      await goldChaseHook.observe(dualPath, nowIso);
+      return dualPath;
     },
   };
 
@@ -284,7 +304,7 @@ export async function startH1ExactShadowLiveService(env: NodeJS.ProcessEnv = pro
   });
   supervisor.start();
   const out = await recordStatus(buildH1ExactShadowLiveStatus(true, true, "STARTED", registry.tokens().length));
-  return { ...out, supervisor };
+  return { ...out, supervisor, goldChaseHook };
 }
 
 export function buildH1ExactShadowLiveStatus(

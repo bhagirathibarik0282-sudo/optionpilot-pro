@@ -1,10 +1,12 @@
 import { fetchOfficialFiiDiiLiveV3 } from "./canonical-fii-dii-live-fetch-v3.js";
 import { normalizedCashFromOfficialRows } from "./canonical-fii-dii-production-row.js";
 import { assertFiiDiiSessionNotBehindMarketSession } from "./canonical-fii-dii-production-readiness.js";
+import { fetchNseParticipantDerivatives } from "./fii-dii-nse.js";
 import {
   ensureFiiDiiSchema,
   latestRecordedMarketSessionDate,
   upsertFiiDiiCashDaily,
+  upsertNseParticipantDerivativesDaily,
   withFiiDiiDb,
 } from "./fii-dii-store.js";
 
@@ -67,6 +69,57 @@ async function main(): Promise<void> {
       throw new Error("FII_DII_DB_READBACK_MISMATCH");
     }
 
+    const participantEnabled = process.env.NSE_PARTICIPANT_DERIVATIVES_ENABLED?.trim() === "1";
+    let participantDerivatives: {
+      enabled: boolean;
+      storedRows: number;
+      dbReadbackVerified: boolean;
+    } = {
+      enabled: participantEnabled,
+      storedRows: 0,
+      dbReadbackVerified: false,
+    };
+
+    if (participantEnabled) {
+      const [oiRows, volumeRows] = await Promise.all([
+        fetchNseParticipantDerivatives("OI", data.date, fetch),
+        fetchNseParticipantDerivatives("VOLUME", data.date, fetch),
+      ]);
+      const participantRows = [...oiRows, ...volumeRows];
+      await upsertNseParticipantDerivativesDaily(pool, participantRows);
+
+      const participantReadback = await pool.query<{
+        report_kind: string;
+        participant: string;
+        source_url: string;
+      }>(`
+        SELECT report_kind, participant, source_url
+        FROM nse_participant_derivatives_daily
+        WHERE trade_date=$1::date
+          AND report_kind IN ('OI','VOLUME')
+        ORDER BY report_kind, participant
+      `, [data.date]);
+
+      if (participantReadback.rows.length !== participantRows.length) {
+        throw new Error(`NSE_PARTICIPANT_DB_READBACK_COUNT_MISMATCH:${participantReadback.rows.length}:EXPECTED:${participantRows.length}`);
+      }
+      const expectedByIdentity = new Map(
+        participantRows.map((row) => [`${row.reportKind}:${row.participant}`, row.sourceUrl]),
+      );
+      for (const row of participantReadback.rows) {
+        const identity = `${row.report_kind}:${row.participant}`;
+        if (expectedByIdentity.get(identity) !== row.source_url) {
+          throw new Error(`NSE_PARTICIPANT_DB_READBACK_MISMATCH:${identity}`);
+        }
+      }
+
+      participantDerivatives = {
+        enabled: true,
+        storedRows: participantRows.length,
+        dbReadbackVerified: true,
+      };
+    }
+
     return {
       storedTradeDate: data.date,
       expectedMarketSessionDate,
@@ -77,6 +130,7 @@ async function main(): Promise<void> {
       fii: data.fii,
       dii: data.dii,
       dbReadbackVerified: true,
+      participantDerivatives,
     };
   });
 

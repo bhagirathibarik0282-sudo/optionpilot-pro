@@ -124,7 +124,7 @@ test("interval weighting prevents many contracts in one market move from inflati
 });
 
 
-test("ignores non-3m market gaps in direction response research", () => {
+test("ignores exact-3m pairs that are off the canonical replay grid", () => {
   const out = buildH1DirectionResponseResearch([{
     tradeDate: "2026-09-15",
     replay: {
@@ -151,6 +151,6 @@ test("ignores non-3m market gaps in direction response research", () => {
       ],
     },
   }]);
-  assert.equal(out.dateSummaries[0].marketPairCount, 1);
-  assert.equal(out.intervalWeighted.intervalCount, 1);
+  assert.equal(out.dateSummaries[0].marketPairCount, 0);
+  assert.equal(out.intervalWeighted.intervalCount, 0);
 });

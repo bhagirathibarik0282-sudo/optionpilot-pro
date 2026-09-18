@@ -123,12 +123,23 @@ def summarize(rows, threshold):
             "meanSideBalancedAgreementShare": None,
             "strictMajorityIntervalRate": None,
         }
+    strict_success = sum(1 for r in selected if r["sideBalancedAgreementShare"] > 0.5)
     return {
         "intervalCount": len(selected),
         "bothSidesPresentIntervalCount": sum(1 for r in selected if r["bothSidesPresent"]),
         "meanSideBalancedAgreementShare": sum(r["sideBalancedAgreementShare"] for r in selected) / len(selected),
-        "strictMajorityIntervalRate": sum(1 for r in selected if r["sideBalancedAgreementShare"] > 0.5) / len(selected),
+        "strictMajoritySuccessCount": strict_success,
+        "strictMajorityIntervalRate": strict_success / len(selected),
     }
+
+def wilson_lower(successes, n, z=1.959963984540054):
+    if n <= 0:
+        return None
+    phat = successes / n
+    denom = 1.0 + (z * z) / n
+    center = phat + (z * z) / (2.0 * n)
+    margin = z * math.sqrt((phat * (1.0 - phat) / n) + (z * z) / (4.0 * n * n))
+    return (center - margin) / denom
 
 cal = []
 for d in CAL_DATES:
@@ -150,12 +161,28 @@ candidates = [
 
 matrix = []
 for label, threshold in candidates:
+    cal_summary = summarize(cal, threshold)
+    oos_summary = summarize(oos, threshold)
+    cal_summary["strictMajorityWilsonLower95"] = wilson_lower(
+        cal_summary.get("strictMajoritySuccessCount", 0),
+        cal_summary.get("intervalCount", 0),
+    )
     matrix.append({
         "label": label,
         "calibrationDerivedThresholdPct": threshold,
-        "calibration": summarize(cal, threshold),
-        "oos": summarize(oos, threshold),
+        "calibration": cal_summary,
+        "oos": oos_summary,
     })
+
+eligible = [x for x in matrix if x["calibration"]["strictMajorityWilsonLower95"] is not None]
+research_candidate = max(
+    eligible,
+    key=lambda x: (
+        x["calibration"]["strictMajorityWilsonLower95"],
+        x["calibration"]["intervalCount"],
+        -x["calibrationDerivedThresholdPct"],
+    ),
+) if eligible else None
 
 result = {
     "mode": "READ_ONLY_DIRECTION_QUANTILE_HOLDOUT_MATRIX_V1",
@@ -170,6 +197,19 @@ result = {
         "oos": len(oos),
     },
     "candidateMatrix": matrix,
+    "researchSelectionRubric": {
+        "name": "MAX_CALIBRATION_STRICT_MAJORITY_WILSON_LOWER_95",
+        "selectionUsesOos": False,
+        "tieBreakers": ["LARGER_CALIBRATION_INTERVAL_COUNT", "LOWER_THRESHOLD"],
+        "purpose": "DIRECTION_SOURCE_VALIDATION_ONLY_NOT_PROFITABILITY",
+    },
+    "researchCandidate": None if research_candidate is None else {
+        "label": research_candidate["label"],
+        "thresholdPct": research_candidate["calibrationDerivedThresholdPct"],
+        "calibration": research_candidate["calibration"],
+        "oos": research_candidate["oos"],
+        "productionAuthority": False,
+    },
     "blockers": [
         "DIRECTION_POLICY_THRESHOLD_NOT_SELECTED",
         "DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED",

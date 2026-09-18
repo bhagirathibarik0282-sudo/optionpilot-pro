@@ -115,7 +115,7 @@ export interface H1DirectionResponseResearchResult {
     readOnly: true;
     thresholdSelected: false;
     thresholdPromoted: false;
-    temporalHoldoutEvaluated: false;
+    temporalHoldoutEvaluated: boolean;
     policySelectionRubricDefined: false;
     affectsSelector: false;
     affectsTelegram: false;
@@ -472,10 +472,13 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
   );
   const combinedIntervalScores = built.flatMap((x) => intervalScores(x.observations));
   const thresholdOos = buildThresholdOosMatrix(usable, built);
+  const temporalHoldoutEvaluated =
+    thresholdOos.temporalCandidateMatrixEvaluated &&
+    thresholdOos.evidenceQuality.allIncludedDatesComplete;
 
   const blockers = [
     "DIRECTION_POLICY_THRESHOLD_NOT_SELECTED",
-    "DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED",
+    ...(temporalHoldoutEvaluated ? [] : ["DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED"]),
     "DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED",
   ];
   if (!thresholdOos.evidenceQuality.allIncludedDatesComplete) {
@@ -510,7 +513,7 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
       readOnly: true,
       thresholdSelected: false,
       thresholdPromoted: false,
-      temporalHoldoutEvaluated: false,
+      temporalHoldoutEvaluated,
       policySelectionRubricDefined: false,
       affectsSelector: false,
       affectsTelegram: false,

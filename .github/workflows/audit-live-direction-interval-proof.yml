@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Mark exact 3m production rerun
-        run: echo "Exact 3m production rerun after PR 551"
+        run: echo "Canonical grid production rerun after PR 552"
 
       - name: Fetch production direction response research
         shell: bash

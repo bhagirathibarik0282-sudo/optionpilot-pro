@@ -75,9 +75,15 @@ async function main(): Promise<void> {
 
     const participantEnabled = process.env.NSE_PARTICIPANT_DERIVATIVES_ENABLED?.trim() === "1";
     const latestParticipant = await pool.query<{ trade_date: string | null }>(`
-      SELECT MAX(trade_date)::text AS trade_date
+      SELECT trade_date::text
       FROM nse_participant_derivatives_daily
       WHERE report_kind IN ('OI','VOLUME')
+      GROUP BY trade_date
+      HAVING COUNT(*) = 8
+         AND COUNT(DISTINCT report_kind) = 2
+         AND COUNT(DISTINCT participant) = 4
+      ORDER BY trade_date DESC
+      LIMIT 1
     `);
     const previousVerifiedTradeDate = latestParticipant.rows[0]?.trade_date ?? null;
 

@@ -312,6 +312,20 @@ export interface NseParticipantRetryOptions {
   baseDelayMs?: number;
 }
 
+export class NseParticipantFetchError extends Error {
+  readonly attempts: number;
+
+  constructor(error: unknown, attempts: number) {
+    super(error instanceof Error ? error.message : String(error));
+    this.name = "NseParticipantFetchError";
+    this.attempts = attempts;
+  }
+}
+
+export function nseParticipantFetchAttempts(error: unknown): number {
+  return error instanceof NseParticipantFetchError ? error.attempts : 0;
+}
+
 export function classifyNseParticipantFetchFailure(error: unknown): NseParticipantFetchStatus {
   const message = error instanceof Error ? error.message : String(error);
   if (/NSE_PARTICIPANT_(OI|VOLUME)_HTTP_404/.test(message)) return "NOT_PUBLISHED_YET";
@@ -321,7 +335,7 @@ export function classifyNseParticipantFetchFailure(error: unknown): NseParticipa
 function shouldRetryParticipantFetch(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   if (/NSE_PARTICIPANT_(OI|VOLUME)_HTTP_404/.test(message)) return false;
-  if (/NSE_PARTICIPANT_(OI|VOLUME)_HTTP_(429|5\d\d)/.test(message)) return true;
+  if (/NSE_PARTICIPANT_(OI|VOLUME)_HTTP_(403|429|5\d\d)/.test(message)) return true;
   if (/NSE_PARTICIPANT_(OI|VOLUME)_NON_CSV_RESPONSE/.test(message)) return true;
   if (/NSE_PARTICIPANT_FETCH_NETWORK_ERROR/.test(message)) return true;
   return false;
@@ -340,7 +354,10 @@ export async function fetchNseParticipantDerivatives(
   const sourceUrl = nseParticipantReportUrl(reportKind, tradeDate);
   let response: Response;
   try {
-    response = await fetchImpl(sourceUrl, { headers: participantHeaders() });
+    response = await fetchImpl(sourceUrl, {
+      headers: participantHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`NSE_PARTICIPANT_FETCH_NETWORK_ERROR:${reportKind}:${detail}`);
@@ -375,7 +392,9 @@ export async function fetchNseParticipantDerivativesWithRetry(
       return { rows, attempts: attempt };
     } catch (error) {
       lastError = error;
-      if (attempt > retryCount || !shouldRetryParticipantFetch(error)) throw error;
+      if (attempt > retryCount || !shouldRetryParticipantFetch(error)) {
+        throw new NseParticipantFetchError(error, attempt);
+      }
       await sleepImpl(baseDelayMs * attempt);
     }
   }

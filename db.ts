@@ -1,4 +1,5 @@
 import pg from "pg";
+import { ensureFiiDiiSchema } from "./fii-dii-store.js";
 
 const { Pool } = pg;
 
@@ -321,6 +322,12 @@ export async function dbInit(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS idx_trade_event_history_plan_time ON trade_event_history (plan_id, event_at DESC);
     `);
+    try {
+      await ensureFiiDiiSchema(p);
+      console.log("[DB] FII/DII schema ready");
+    } catch (err) {
+      console.error("[DB] FII/DII schema init failed -- core persistence remains available:", err instanceof Error ? err.message : err);
+    }
     console.log("[DB] connected, schema ready");
   } catch (err) {
     console.error("[DB] schema init failed -- persistence disabled for this run:", err instanceof Error ? err.message : err);

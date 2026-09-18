@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildH1ReplayContinuity, parseH1ReplayRequest } from "../h1-replay-http.js";
+import { buildH1ReplayContinuity, buildH1ReplayMarkerGapEvidence, parseH1ReplayRequest } from "../h1-replay-http.js";
 
 test("accepts bounded NIFTY full-session replay request", () => {
   const parsed = parseH1ReplayRequest({
@@ -101,4 +101,39 @@ test("continuity coverage counts only expected 3-minute grid buckets", () => {
   assert.equal(out.canonicalArchiveBuckets, 6);
   assert.equal(out.canonicalCoveragePct, 100);
   assert.equal(out.complete, true);
+});
+
+
+test("marker gap evidence reports raw normalized rows without granting authority", () => {
+  const missing = [
+    "2026-09-10T04:27:00.000Z",
+    "2026-09-10T05:09:00.000Z",
+  ];
+  const out = buildH1ReplayMarkerGapEvidence(missing, [
+    { source: "market", minute_bucket: "2026-09-10T04:27:00.000Z", row_count: 1 },
+    { source: "option", minute_bucket: "2026-09-10T04:27:00.000Z", row_count: "12" },
+    { source: "chain", minute_bucket: "2026-09-10T04:27:00.000Z", row_count: 2 },
+    { source: "market", minute_bucket: "2026-09-10T05:09:00.000Z", row_count: 1 },
+  ]);
+
+  assert.equal(out.semantics, "RAW_NORMALIZED_TABLE_PRESENCE_WITHOUT_TRUTH_MARKER_JOIN");
+  assert.equal(out.markerJoinBypassedForInspection, true);
+  assert.deepEqual(out.buckets, [
+    {
+      minuteBucket: "2026-09-10T04:27:00.000Z",
+      marketRows: 1,
+      optionRows: 12,
+      chainRows: 2,
+    },
+    {
+      minuteBucket: "2026-09-10T05:09:00.000Z",
+      marketRows: 1,
+      optionRows: 0,
+      chainRows: 0,
+    },
+  ]);
+  assert.equal(out.writePerformed, false);
+  assert.equal(out.affectsVerdict, false);
+  assert.equal(out.affectsTelegram, false);
+  assert.equal(out.affectsExecution, false);
 });

@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           jq -e '
             .productionImpact == "NONE" and
-            .continuity.missingBuckets | length == 9
+            ((.continuity.missingBuckets | length) == 9)
           ' /tmp/replay.json >/dev/null
           jq -e '
             .markerGapEvidence.markerJoinBypassedForInspection == true and

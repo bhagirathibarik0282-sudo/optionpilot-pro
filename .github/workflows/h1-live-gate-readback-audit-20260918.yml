@@ -82,6 +82,37 @@ jobs:
           },separators=(',',':')))
           PY
 
+      - name: Audit full replay multi-expiry theta iv
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=2026-09-18&from=09%3A15&to=15%3A30&scope=FULL'
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 180 "$URL" -o /tmp/full.json
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/full.json'))
+          rows=p.get('options') or []
+          expiries=sorted(set(str(r.get('expiry')) for r in rows if isinstance(r,dict) and r.get('expiry')))
+          both={}
+          for exp in expiries:
+              subset=[r for r in rows if isinstance(r,dict) and str(r.get('expiry'))==exp]
+              both[exp]={
+                  'rows':len(subset),
+                  'thetaNonNull':sum(1 for r in subset if r.get('theta') is not None),
+                  'ivNonNull':sum(1 for r in subset if r.get('iv') is not None),
+                  'ceRows':sum(1 for r in subset if r.get('option_type')=='CE'),
+                  'peRows':sum(1 for r in subset if r.get('option_type')=='PE'),
+              }
+          print('FULL_MULTIEXPIRY_GREEK_SUMMARY='+json.dumps({
+              'ok':p.get('ok'),
+              'mode':p.get('mode'),
+              'optionRowCount':len(rows),
+              'expiryCount':len(expiries),
+              'expiries':expiries,
+              'perExpiry':both
+          },separators=(',',':')))
+          PY
+
       - name: Fetch pre-policy exact depth history
         shell: bash
         run: |

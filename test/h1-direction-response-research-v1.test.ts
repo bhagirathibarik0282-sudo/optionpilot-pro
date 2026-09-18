@@ -42,6 +42,8 @@ test("summarizes same-contract direction response without selecting a threshold"
   assert.equal(out.intervalWeighted.bothSidesPresentIntervalCount, 2);
   assert.equal(out.intervalWeighted.meanSideBalancedAgreementShare, 1);
   assert.equal(out.intervalWeighted.strictMajorityIntervalRate, 1);
+  assert.equal(out.thresholdOos.selectedCandidate, null);
+  assert.equal(out.thresholdOos.temporalCandidateMatrixEvaluated, false);
   assert.equal(out.evidenceState, "OBSERVATIONS_AVAILABLE_NO_POLICY_PROMOTION");
   assert.ok(out.blockers.includes("DIRECTION_POLICY_THRESHOLD_NOT_SELECTED"));
   assert.ok(out.blockers.includes("DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED"));
@@ -153,4 +155,68 @@ test("ignores exact-3m pairs that are off the canonical replay grid", () => {
   }]);
   assert.equal(out.dateSummaries[0].marketPairCount, 0);
   assert.equal(out.intervalWeighted.intervalCount, 0);
+});
+
+
+function oneIntervalReplay(tradeDate: string, movePct: number): H1ReplayHttpResult {
+  const t0 = `${tradeDate}T03:45:00.000Z`;
+  const t1 = `${tradeDate}T03:48:00.000Z`;
+  const spot0 = 100;
+  const spot1 = spot0 * (1 + movePct / 100);
+  return {
+    ok: true,
+    mode: "READ_ONLY_H1_3M_REPLAY",
+    productionImpact: "NONE",
+    request: {
+      symbol: "NIFTY",
+      tradeDate,
+      fromTime: "09:15",
+      toTime: "09:18",
+      scope: "FULL",
+    },
+    market: [
+      { minute_bucket: t0, spot_ltp: spot0 },
+      { minute_bucket: t1, spot_ltp: spot1 },
+    ],
+    options: [
+      { minute_bucket: t0, expiry: tradeDate, strike: 100, option_type: "CE", ltp: 10 },
+      { minute_bucket: t1, expiry: tradeDate, strike: 100, option_type: "CE", ltp: 11 },
+      { minute_bucket: t0, expiry: tradeDate, strike: 100, option_type: "PE", ltp: 10 },
+      { minute_bucket: t1, expiry: tradeDate, strike: 100, option_type: "PE", ltp: 9 },
+    ],
+  };
+}
+
+test("builds calibration-derived threshold candidates and evaluates them on later OOS dates without selecting one", () => {
+  const days = [
+    ["2026-09-01", 0.01],
+    ["2026-09-02", 0.02],
+    ["2026-09-03", 0.03],
+    ["2026-09-04", 0.04],
+    ["2026-09-07", 0.025],
+    ["2026-09-08", 0.035],
+    ["2026-09-09", 0.05],
+  ] as const;
+  const out = buildH1DirectionResponseResearch(
+    days.map(([tradeDate, movePct]) => ({ tradeDate, replay: oneIntervalReplay(tradeDate, movePct) })),
+  );
+  const matrix = out.thresholdOos;
+  assert.equal(matrix.version, "H1_DIRECTION_THRESHOLD_OOS_MATRIX_V1");
+  assert.deepEqual(matrix.calibrationDates, ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"]);
+  assert.deepEqual(matrix.oosDates, ["2026-09-07", "2026-09-08", "2026-09-09"]);
+  assert.equal(matrix.calibrationIntervalCount, 4);
+  assert.equal(matrix.oosIntervalCount, 3);
+  assert.deepEqual(matrix.candidates.map((x) => x.label), ["P50", "P75", "P90", "P95"]);
+  assert.ok(Math.abs(matrix.candidates[0].thresholdPct - 0.025) < 1e-9);
+  assert.equal(matrix.candidates[0].oos.intervalCount, 3);
+  assert.equal(matrix.candidates[1].oos.intervalCount, 2);
+  assert.equal(matrix.candidates[2].oos.intervalCount, 1);
+  assert.equal(matrix.candidates[3].oos.intervalCount, 1);
+  assert.equal(matrix.temporalCandidateMatrixEvaluated, true);
+  assert.equal(matrix.selectedCandidate, null);
+  assert.equal(matrix.safety.thresholdSelected, false);
+  assert.equal(matrix.safety.thresholdPromoted, false);
+  assert.equal(matrix.safety.affectsSelector, false);
+  assert.equal(matrix.safety.affectsTelegram, false);
+  assert.equal(matrix.safety.affectsExecution, false);
 });

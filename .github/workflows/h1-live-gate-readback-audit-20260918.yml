@@ -124,6 +124,146 @@ jobs:
           },separators=(',',':')))
           PY
 
+      - name: Audit direction response and Greek carry diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://optionpilot-pro-v2-production.up.railway.app/api/research'
+          for D in 2026-09-01 2026-09-08 2026-09-15 2026-09-18; do
+            curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 180 \
+              "$BASE/h1-replay?symbol=NIFTY&date=$D&from=09%3A15&to=15%3A30&scope=FULL" -o "/tmp/$D.json"
+          done
+          python - <<'PY'
+          import json,math,statistics
+          from collections import defaultdict
+          dates=['2026-09-01','2026-09-08','2026-09-15','2026-09-18']
+          def num(x):
+              try:
+                  y=float(x); return y if math.isfinite(y) else None
+              except: return None
+          def iso_ms(x):
+              from datetime import datetime
+              try:
+                  return datetime.fromisoformat(str(x).replace('Z','+00:00')).timestamp()*1000
+              except: return None
+          def q(vals,p):
+              vals=sorted(v for v in vals if v is not None and math.isfinite(v))
+              if not vals:return None
+              pos=(len(vals)-1)*p; lo=int(math.floor(pos)); hi=int(math.ceil(pos))
+              return vals[lo] if lo==hi else vals[lo]+(vals[hi]-vals[lo])*(pos-lo)
+          summaries={}
+          all_moves=[]; all_agreements=[]
+          carry=[]
+          for D in dates:
+              p=json.load(open('/tmp/'+D+'.json'))
+              market=sorted([r for r in (p.get('market') or []) if r.get('minute_bucket')],key=lambda r:str(r.get('minute_bucket')))
+              options=p.get('options') or []
+              moves=[]
+              for a,b in zip(market,market[1:]):
+                  pa=num(a.get('spot_ltp')); pb=num(b.get('spot_ltp'))
+                  ta=iso_ms(a.get('minute_bucket')); tb=iso_ms(b.get('minute_bucket'))
+                  if pa and pb and ta is not None and tb is not None and tb>ta:
+                      moves.append(((pb-pa)/pa*100,(tb-ta)))
+              all_moves += [abs(x[0]) for x in moves]
+              # same-contract premium response for current-expiry rows
+              by_contract=defaultdict(list)
+              for r in options:
+                  exp=str(r.get('expiry') or '')
+                  if not exp: continue
+                  key=(exp,num(r.get('strike')),str(r.get('option_type')))
+                  mb=iso_ms(r.get('minute_bucket')); ltp=num(r.get('ltp'))
+                  if key[1] and key[2] in ('CE','PE') and mb is not None and ltp and ltp>0:
+                      by_contract[key].append((mb,ltp))
+              spot_move_by_to={}
+              for mv,gap in moves:
+                  # map through ordered market index below
+                  pass
+              market_pairs=[]
+              for a,b in zip(market,market[1:]):
+                  pa=num(a.get('spot_ltp')); pb=num(b.get('spot_ltp'))
+                  ta=iso_ms(a.get('minute_bucket')); tb=iso_ms(b.get('minute_bucket'))
+                  if pa and pb and ta is not None and tb is not None and tb>ta:
+                      market_pairs.append((ta,tb,(pb-pa)/pa*100))
+              agreement=[]
+              for (exp,strike,side),arr in by_contract.items():
+                  arr=sorted(arr)
+                  amap={t:v for t,v in arr}
+                  for ta,tb,sm in market_pairs:
+                      if ta not in amap or tb not in amap: continue
+                      pm=(amap[tb]-amap[ta])/amap[ta]*100
+                      if sm==0 or pm==0: continue
+                      expected=1 if side=='CE' else -1
+                      ok=(1 if pm>0 else -1)==((1 if sm>0 else -1)*expected)
+                      agreement.append((abs(sm),ok))
+              all_agreements += agreement
+              # put-call parity adjacent-strike carry estimates per minute+expiry
+              spot_by_min={str(r.get('minute_bucket')):num(r.get('spot_ltp')) for r in market}
+              grouped=defaultdict(dict)
+              for r in options:
+                  mb=str(r.get('minute_bucket') or ''); exp=str(r.get('expiry') or '')
+                  k=num(r.get('strike')); side=str(r.get('option_type'))
+                  bid=num(r.get('bid')); ask=num(r.get('ask')); ltp=num(r.get('ltp'))
+                  px=((bid+ask)/2) if bid and ask and ask>bid else ltp
+                  if mb and exp and k and side in ('CE','PE') and px and px>0:
+                      grouped[(mb,exp,k)][side]=px
+              parity=defaultdict(list)
+              for (mb,exp,k),sides in grouped.items():
+                  if 'CE' in sides and 'PE' in sides:
+                      parity[(mb,exp)].append((k,sides['CE']-sides['PE']))
+              from datetime import datetime,timezone,timedelta
+              for (mb,exp),pts in parity.items():
+                  pts=sorted(pts)
+                  S=spot_by_min.get(mb)
+                  if not S or len(pts)<2: continue
+                  obs=datetime.fromisoformat(mb.replace('Z','+00:00'))
+                  expdate=str(exp)[:10]
+                  try:
+                      close=datetime.fromisoformat(expdate+'T15:30:00+05:30').astimezone(timezone.utc)
+                  except: continue
+                  T=(close-obs).total_seconds()/(365*86400)
+                  if T<=0: continue
+                  for (k1,d1),(k2,d2) in zip(pts,pts[1:]):
+                      if k2<=k1: continue
+                      disc=(d1-d2)/(k2-k1)
+                      if not (disc>0 and math.isfinite(disc)): continue
+                      r=-math.log(disc)/T
+                      # q from average of the two parity equations
+                      vals=[]
+                      for k,dv in ((k1,d1),(k2,d2)):
+                          x=(dv+k*disc)/S
+                          if x>0 and math.isfinite(x):
+                              vals.append(-math.log(x)/T)
+                      if vals:
+                          carry.append((D,r,sum(vals)/len(vals)))
+              summaries[D]={
+                  'ok':p.get('ok'),
+                  'marketRows':len(market),
+                  'optionRows':len(options),
+                  'spotMoveAbsP50':q([abs(x[0]) for x in moves],.5),
+                  'spotMoveAbsP90':q([abs(x[0]) for x in moves],.9),
+                  'spotMoveAbsP95':q([abs(x[0]) for x in moves],.95),
+                  'directionResponseComparableCount':len(agreement),
+                  'directionResponseAgreementRate':(sum(1 for _,ok in agreement if ok)/len(agreement)) if agreement else None
+              }
+          bins=[0.0,0.01,0.02,0.03,0.05,0.1,999]
+          binout=[]
+          for lo,hi in zip(bins,bins[1:]):
+              xs=[ok for mag,ok in all_agreements if mag>=lo and mag<hi]
+              binout.append({'fromPct':lo,'toPct':hi,'n':len(xs),'agreementRate':(sum(xs)/len(xs)) if xs else None})
+          rates=[r for _,r,_ in carry if math.isfinite(r)]
+          yields=[qv for _,_,qv in carry if math.isfinite(qv)]
+          print('DIRECTION_GREEK_RESEARCH_AUDIT='+json.dumps({
+              'mode':'RESEARCH_ONLY_NO_POLICY_PROMOTION',
+              'dates':summaries,
+              'combinedSpotMoveAbs':{'p50':q(all_moves,.5),'p90':q(all_moves,.9),'p95':q(all_moves,.95)},
+              'directionAgreementBySpotMoveBin':binout,
+              'carryObservationCount':len(carry),
+              'impliedRateDescriptive':{'p10':q(rates,.1),'p50':q(rates,.5),'p90':q(rates,.9)},
+              'impliedYieldDescriptive':{'p10':q(yields,.1),'p50':q(yields,.5),'p90':q(yields,.9)},
+              'safety':{'productionImpact':'NONE','thresholdPromoted':False,'affectsSelector':False,'affectsTelegram':False,'affectsExecution':False}
+          },separators=(',',':')))
+          PY
+
       - name: Fetch pre-policy exact depth history
         shell: bash
         run: |

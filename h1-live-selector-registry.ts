@@ -114,6 +114,7 @@ export function publishH1LiveGateEvidence(packet: LiveGateEvidencePacket): { acc
     identity: { ...enrichedPacket.identity },
     gates: Object.fromEntries(Object.entries(enrichedPacket.gates ?? {}).map(([gate, evidence]) => [gate, evidence ? { ...evidence } : evidence])),
     responseMetrics: enrichedPacket.responseMetrics ? { ...enrichedPacket.responseMetrics } : null,
+    capitalLiquidityEvidence: enrichedPacket.capitalLiquidityEvidence ? { ...enrichedPacket.capitalLiquidityEvidence } : null,
     policyDiagnostics: enrichedPacket.policyDiagnostics ? {
       premiumDeltaGamma: {
         ...enrichedPacket.policyDiagnostics.premiumDeltaGamma,
@@ -210,6 +211,7 @@ export function collectH1LiveGateEvidenceAudit(nowIso: string, maxAgeMs = 90_000
       identity: { ...entry.packet.identity },
       gates: gateEvidence,
       responseMetrics: metrics ? { ...metrics } : null,
+      capitalLiquidityEvidence: entry.packet.capitalLiquidityEvidence ? { ...entry.packet.capitalLiquidityEvidence } : null,
       policyDiagnostics: policyDiagnostics ? {
         premiumDeltaGamma: {
           ...policyDiagnostics.premiumDeltaGamma,

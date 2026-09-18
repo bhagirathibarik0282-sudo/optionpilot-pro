@@ -1,0 +1,62 @@
+name: Audit Sep10 Marker Gap Production Proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-sep10-marker-gap-production-proof.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for deployed marker-gap diagnostic and fetch proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=2026-09-10&from=09%3A15&to=15%3A30&scope=FULL'
+          ready=0
+          for attempt in $(seq 1 18); do
+            curl --fail --show-error --silent --location --max-time 180 "$url" -o /tmp/replay.json || true
+            if jq -e '.ok == true and .markerGapEvidence.semantics == "RAW_NORMALIZED_TABLE_PRESENCE_WITHOUT_TRUTH_MARKER_JOIN"' /tmp/replay.json >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" -eq 1
+
+      - name: Fail closed on unsafe diagnostic semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .productionImpact == "NONE" and
+            .continuity.missingBuckets | length == 9
+          ' /tmp/replay.json >/dev/null
+          jq -e '
+            .markerGapEvidence.markerJoinBypassedForInspection == true and
+            .markerGapEvidence.writePerformed == false and
+            .markerGapEvidence.affectsVerdict == false and
+            .markerGapEvidence.affectsTelegram == false and
+            .markerGapEvidence.affectsExecution == false and
+            (.markerGapEvidence.buckets | length) == 9
+          ' /tmp/replay.json >/dev/null
+
+      - name: Print exact Sep10 marker-gap evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{
+            ok,
+            continuity: {
+              missingBuckets: .continuity.missingBuckets,
+              coveragePct: .continuity.coveragePct,
+              complete: .continuity.complete
+            },
+            markerGapEvidence
+          }' /tmp/replay.json

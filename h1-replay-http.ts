@@ -12,6 +12,21 @@ export interface H1ReplayRequest {
   scope: H1ReplayScope;
 }
 
+export interface H1ReplayMarkerGapEvidence {
+  semantics: "RAW_NORMALIZED_TABLE_PRESENCE_WITHOUT_TRUTH_MARKER_JOIN";
+  markerJoinBypassedForInspection: true;
+  buckets: Array<{
+    minuteBucket: string;
+    marketRows: number;
+    optionRows: number;
+    chainRows: number;
+  }>;
+  writePerformed: false;
+  affectsVerdict: false;
+  affectsTelegram: false;
+  affectsExecution: false;
+}
+
 export interface H1ReplayHttpResult {
   ok: boolean;
   mode: "READ_ONLY_H1_3M_REPLAY";
@@ -23,6 +38,7 @@ export interface H1ReplayHttpResult {
   chain?: Record<string, unknown>[];
   canonical?: Record<string, unknown>[];
   continuity?: H1ReplayContinuity;
+  markerGapEvidence?: H1ReplayMarkerGapEvidence;
   reason?: string;
 }
 
@@ -160,6 +176,44 @@ export function buildH1ReplayContinuity(
   };
 }
 
+type RawGapRow = { source: "market" | "option" | "chain"; minute_bucket: unknown; row_count: string | number };
+
+function minuteIso(value: unknown): string | null {
+  const t = Date.parse(String(value ?? ""));
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
+export function buildH1ReplayMarkerGapEvidence(
+  missingBuckets: string[],
+  rawRows: RawGapRow[],
+): H1ReplayMarkerGapEvidence {
+  const byBucket = new Map<string, { marketRows: number; optionRows: number; chainRows: number }>();
+  for (const row of rawRows ?? []) {
+    const minuteBucket = minuteIso(row.minute_bucket);
+    if (!minuteBucket) continue;
+    const item = byBucket.get(minuteBucket) ?? { marketRows: 0, optionRows: 0, chainRows: 0 };
+    const count = Number(row.row_count);
+    const safeCount = Number.isFinite(count) && count > 0 ? count : 0;
+    if (row.source === "market") item.marketRows += safeCount;
+    if (row.source === "option") item.optionRows += safeCount;
+    if (row.source === "chain") item.chainRows += safeCount;
+    byBucket.set(minuteBucket, item);
+  }
+
+  return {
+    semantics: "RAW_NORMALIZED_TABLE_PRESENCE_WITHOUT_TRUTH_MARKER_JOIN",
+    markerJoinBypassedForInspection: true,
+    buckets: (missingBuckets ?? []).map((minuteBucket) => ({
+      minuteBucket,
+      ...(byBucket.get(minuteBucket) ?? { marketRows: 0, optionRows: 0, chainRows: 0 }),
+    })),
+    writePerformed: false,
+    affectsVerdict: false,
+    affectsTelegram: false,
+    affectsExecution: false,
+  };
+}
+
 function markerCte(): string {
   return `WITH markers AS (
     SELECT DISTINCT ON (payload->>'symbol', date_trunc('minute', (payload->>'minuteBucket')::timestamptz))
@@ -193,7 +247,7 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
   const cte = markerCte();
 
   try {
-    const [market, chain, options, markerRows, canonical] = await Promise.all([
+    const [market, chain, options, markerRows, canonical, rawGapRows] = await Promise.all([
       rows(`${cte}
         SELECT
           m.symbol, m.minute_bucket, h.truth_verdict,
@@ -254,9 +308,36 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
           AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
         ORDER BY (payload->>'minuteBucket')::timestamptz ASC
       `, params),
+      rows<RawGapRow>(`
+        SELECT 'market'::text AS source, minute_bucket, COUNT(*)::bigint AS row_count
+        FROM market_snapshot_1m
+        WHERE symbol = $1
+          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
+          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
+          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+        GROUP BY minute_bucket
+        UNION ALL
+        SELECT 'option'::text AS source, minute_bucket, COUNT(*)::bigint AS row_count
+        FROM option_snapshot_1m
+        WHERE symbol = $1
+          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
+          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
+          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+        GROUP BY minute_bucket
+        UNION ALL
+        SELECT 'chain'::text AS source, minute_bucket, COUNT(*)::bigint AS row_count
+        FROM chain_state_1m
+        WHERE symbol = $1
+          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
+          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
+          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+        GROUP BY minute_bucket
+        ORDER BY minute_bucket ASC
+      `, params),
     ]);
 
     const continuity = buildH1ReplayContinuity(request, markerRows, canonical);
+    const markerGapEvidence = buildH1ReplayMarkerGapEvidence(continuity.missingBuckets, rawGapRows);
 
     return {
       ok: true,
@@ -275,6 +356,7 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
       chain,
       canonical,
       continuity,
+      markerGapEvidence,
     };
   } catch (err) {
     return {

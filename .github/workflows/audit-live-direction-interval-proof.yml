@@ -1,0 +1,58 @@
+name: Audit Live Direction Interval Proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-live-direction-interval-proof.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch production direction response research
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 240 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-09-01%2C2026-09-08%2C2026-09-15&from=09%3A15&to=15%3A30&scope=FULL' \
+            -o /tmp/direction-response.json
+
+      - name: Fail closed on unsafe evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .ok == true and
+            .productionImpact == "NONE" and
+            .safety.readOnly == true and
+            .safety.thresholdSelected == false and
+            .safety.thresholdPromoted == false and
+            .safety.affectsSelector == false and
+            .safety.affectsTelegram == false and
+            .safety.affectsExecution == false and
+            .safety.grantsPromotionAuthority == false and
+            .research.intervalWeighted.methodology == "EQUAL_INTERVAL_WEIGHT_EQUAL_SIDE_WEIGHT_WITHIN_INTERVAL"
+          ' /tmp/direction-response.json >/dev/null
+
+      - name: Print interval-weighted evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{
+            ok,
+            request,
+            replaySummaries,
+            research: {
+              combinedComparableCount: .research.combinedComparableCount,
+              combinedAgreementRate: .research.combinedAgreementRate,
+              intervalWeighted: .research.intervalWeighted,
+              blockers: .research.blockers,
+              safety: .research.safety
+            }
+          }' /tmp/direction-response.json

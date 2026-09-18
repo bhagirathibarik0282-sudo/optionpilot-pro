@@ -70,38 +70,33 @@ jobs:
             curl --fail --show-error --silent --location --retry 2 --retry-delay 1 --max-time 180 \
               "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=${d}&from=09%3A15&to=15%3A30&scope=CORE" \
               -o "/tmp/replay-${d}.json"
-            python3 - "${d}" "/tmp/replay-${d}.json" <<'PY'
-import json, sys
-from datetime import datetime, timezone, timedelta
 
-d, path = sys.argv[1], sys.argv[2]
-data = json.load(open(path))
-rows = data.get("market") or []
-times = []
-for row in rows:
-    raw = row.get("minute_bucket")
-    if not raw:
-        continue
-    t = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-    times.append(t)
+            anchor=$(date -u -d "${d}T03:45:00Z" +%s)
+            end=$(date -u -d "${d}T10:00:00Z" +%s)
+            : > "/tmp/epochs-${d}.txt"
 
-anchor = datetime.fromisoformat(d + "T03:45:00+00:00")
-end = datetime.fromisoformat(d + "T10:00:00+00:00")
-off_grid = [t.isoformat() for t in times if int((t-anchor).total_seconds()) % 180 != 0]
-out_session = [t.isoformat() for t in times if t < anchor or t > end]
-dupes = len(times) - len(set(times))
-ordered = sorted(times)
-exact_adjacent = sum(1 for a,b in zip(ordered, ordered[1:]) if (b-a).total_seconds() == 180)
-print(json.dumps({
-    "tradeDate": d,
-    "marketRows": len(times),
-    "uniqueMinuteBuckets": len(set(times)),
-    "duplicateMinuteBuckets": dupes,
-    "offGridCount": len(off_grid),
-    "outOfSessionCount": len(out_session),
-    "exactAdjacent3mPairs": exact_adjacent,
-    "offGridFirst10": off_grid[:10],
-    "outOfSessionFirst10": out_session[:10],
-}))
-PY
+            while IFS= read -r t; do
+              [ -n "${t}" ] || continue
+              e=$(date -u -d "${t}" +%s)
+              echo "${e}" >> "/tmp/epochs-${d}.txt"
+            done < <(jq -r '.market[]?.minute_bucket // empty' "/tmp/replay-${d}.json")
+
+            sort -n "/tmp/epochs-${d}.txt" -o "/tmp/epochs-${d}.txt"
+            total=$(wc -l < "/tmp/epochs-${d}.txt")
+            unique=$(sort -u "/tmp/epochs-${d}.txt" | wc -l)
+            dupes=$((total - unique))
+            offgrid=0
+            outsession=0
+            exact=0
+            prev=""
+
+            while IFS= read -r e; do
+              if (( (e - anchor) % 180 != 0 )); then offgrid=$((offgrid + 1)); fi
+              if (( e < anchor || e > end )); then outsession=$((outsession + 1)); fi
+              if [ -n "${prev}" ] && (( e - prev == 180 )); then exact=$((exact + 1)); fi
+              prev="${e}"
+            done < "/tmp/epochs-${d}.txt"
+
+            printf '{"tradeDate":"%s","marketRows":%d,"uniqueMinuteBuckets":%d,"duplicateMinuteBuckets":%d,"offGridCount":%d,"outOfSessionCount":%d,"exactAdjacent3mPairs":%d}\n' \
+              "${d}" "${total}" "${unique}" "${dupes}" "${offgrid}" "${outsession}" "${exact}"
           done

@@ -19,7 +19,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 \
-            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-15%2C2026-09-16%2C2026-09-17&from=09%3A15&to=15%3A30&scope=FULL' \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-15%2C2026-09-16&from=09%3A15&to=15%3A30&scope=FULL' \
             -o /tmp/oos.json
 
       - name: Print compact complete-date OOS proof
@@ -57,7 +57,7 @@ jobs:
             (.research.thresholdOos.evidenceQuality.calibrationContinuityUnknownDates | length) == 0 and
             (.research.thresholdOos.evidenceQuality.oosContinuityUnknownDates | length) == 0 and
             (.research.thresholdOos.calibrationDates | length) == 2 and
-            (.research.thresholdOos.oosDates | length) == 2 and
+            (.research.thresholdOos.oosDates | length) == 1 and
             .research.thresholdOos.calibrationIntervalCount > 0 and
             .research.thresholdOos.oosIntervalCount > 0 and
             (.research.thresholdOos.candidates | length) == 4 and

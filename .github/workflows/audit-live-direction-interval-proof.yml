@@ -1,4 +1,4 @@
-name: Audit H1 Replay Coverage Proof
+name: Audit Direction Temporal Stability
 
 on:
   push:
@@ -15,14 +15,52 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Verify aligned production replay coverage after PR 553
+      - name: Fetch chronological calibration and OOS direction evidence
         shell: bash
         run: |
           set -euo pipefail
-          for d in 2026-09-07 2026-09-08 2026-09-09 2026-09-10; do
-            curl --fail --show-error --silent --location --retry 2 --retry-delay 1 --max-time 180 \
-              "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=${d}&from=09%3A15&to=15%3A30&scope=CORE" \
-              -o "/tmp/replay-${d}.json"
-            jq -e '.ok == true and (.continuity.coveragePct >= 0) and (.continuity.coveragePct <= 100) and (.continuity.canonicalCoveragePct >= 0) and (.continuity.canonicalCoveragePct <= 100)' "/tmp/replay-${d}.json" >/dev/null
-            jq '{tradeDate:.request.tradeDate, expectedBuckets:.continuity.expectedBuckets, observedMarkerBuckets:.continuity.observedMarkerBuckets, coveragePct:.continuity.coveragePct, canonicalArchiveBuckets:.continuity.canonicalArchiveBuckets, canonicalCoveragePct:.continuity.canonicalCoveragePct, missingBucketCount:(.continuity.missingBuckets|length), complete:.continuity.complete}' "/tmp/replay-${d}.json"
+          base='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&from=09%3A15&to=15%3A30&scope=FULL'
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 240 \
+            "${base}&dates=2026-09-01%2C2026-09-02%2C2026-09-03%2C2026-09-07" \
+            -o /tmp/calibration.json
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 240 \
+            "${base}&dates=2026-09-08%2C2026-09-09%2C2026-09-10" \
+            -o /tmp/oos.json
+
+      - name: Fail closed on authority leakage
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in /tmp/calibration.json /tmp/oos.json; do
+            jq -e '
+              .ok == true and
+              .productionImpact == "NONE" and
+              .safety.readOnly == true and
+              .safety.thresholdSelected == false and
+              .safety.thresholdPromoted == false and
+              .safety.affectsSelector == false and
+              .safety.affectsTelegram == false and
+              .safety.affectsExecution == false and
+              .safety.grantsPromotionAuthority == false
+            ' "${f}" >/dev/null
           done
+
+      - name: Print temporal stability comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --argjson cal "$(jq '{dates:.request.dates,intervalWeighted:.research.intervalWeighted,combinedComparableCount:.research.combinedComparableCount,combinedAgreementRate:.research.combinedAgreementRate,replaySummaries:.replaySummaries}' /tmp/calibration.json)" \
+            --argjson oos "$(jq '{dates:.request.dates,intervalWeighted:.research.intervalWeighted,combinedComparableCount:.research.combinedComparableCount,combinedAgreementRate:.research.combinedAgreementRate,replaySummaries:.replaySummaries}' /tmp/oos.json)" \
+            '{
+              mode:"READ_ONLY_DIRECTION_TEMPORAL_STABILITY_AUDIT",
+              productionImpact:"NONE",
+              split:"CHRONOLOGICAL_EXISTING_70_30_PATTERN_NONZERO_DATES",
+              calibration:$cal,
+              oos:$oos,
+              comparison:{
+                sideBalancedAgreementDifference:($oos.intervalWeighted.meanSideBalancedAgreementShare-$cal.intervalWeighted.meanSideBalancedAgreementShare),
+                strictMajorityDifference:($oos.intervalWeighted.strictMajorityIntervalRate-$cal.intervalWeighted.strictMajorityIntervalRate)
+              },
+              caveat:"DESCRIPTIVE_TIME_STABILITY_ONLY_NOT_THRESHOLD_HOLDOUT_NOT_POLICY_PROMOTION"
+            }'

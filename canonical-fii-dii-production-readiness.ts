@@ -18,6 +18,12 @@ type StoredCashRow = {
   dii_net: number;
 };
 
+type ParticipantDbSnapshot = {
+  latestObservedTradeDate: string | null;
+  latestObservedRowCount: number;
+  latestVerifiedTradeDate: string | null;
+};
+
 export function assertFiiDiiSessionNotBehindMarketSession(officialDate: string, marketSessionDate: string): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(officialDate) || !/^\d{4}-\d{2}-\d{2}$/.test(marketSessionDate)) {
     throw new Error("FII_DII_FRESHNESS_DATE_INVALID");
@@ -51,6 +57,7 @@ function mapStoredHistory(rows: StoredCashRow[]): { history: FiiDiiDailyRow[]; b
 export function evaluateFiiDiiProductionReadiness(input: {
   expectedMarketSessionDate: string;
   storedRows: StoredCashRow[];
+  participantSnapshot?: ParticipantDbSnapshot;
 }) {
   const mapped = mapStoredHistory(input.storedRows);
   const latestStoredSessionDate = input.storedRows.at(-1)?.trade_date ?? null;
@@ -72,6 +79,26 @@ export function evaluateFiiDiiProductionReadiness(input: {
   if (view && !view.ready) blockers.push(...view.blockers);
 
   const ready = blockers.length === 0 && Boolean(view?.ready);
+  const participant = input.participantSnapshot ?? {
+    latestObservedTradeDate: null,
+    latestObservedRowCount: 0,
+    latestVerifiedTradeDate: null,
+  };
+  const participantDbReadback = {
+    latestObservedTradeDate: participant.latestObservedTradeDate,
+    latestObservedRowCount: participant.latestObservedRowCount,
+    expectedRowsPerCompleteSession: 8,
+    latestObservedComplete: participant.latestObservedRowCount === 8 && participant.latestObservedTradeDate != null,
+    latestVerifiedTradeDate: participant.latestVerifiedTradeDate,
+    verifiedCompleteSnapshotAvailable: participant.latestVerifiedTradeDate != null,
+    sourceMode: "PRODUCTION_DB_READBACK" as const,
+    readOnly: true as const,
+    contextOnly: true as const,
+    affectsVerdict: false as const,
+    affectsCandidate: false as const,
+    affectsTelegram: false as const,
+    affectsExecution: false as const,
+  };
   return {
     version: CANONICAL_FII_DII_PRODUCTION_READINESS_V1,
     ready,
@@ -82,6 +109,7 @@ export function evaluateFiiDiiProductionReadiness(input: {
     windows: view?.windows ?? [],
     warnings: view?.warnings ?? [],
     blockers: [...new Set(blockers)],
+    participantDbReadback,
     source: "OFFICIAL_NSE" as const,
     sourceMode: "PRODUCTION_DB_READBACK" as const,
     semantics: "PREVIOUS_SESSION_CONTEXT_ONLY_NO_DIRECTION_TRUTH" as const,
@@ -108,6 +136,38 @@ export async function getFiiDiiProductionReadiness() {
       LIMIT 20
     `);
     const storedRows = [...result.rows].reverse();
-    return evaluateFiiDiiProductionReadiness({ expectedMarketSessionDate, storedRows });
+
+    const latestParticipant = await pool.query<{ trade_date: string; row_count: number }>(`
+      SELECT trade_date::text, COUNT(*)::int AS row_count
+      FROM nse_participant_derivatives_daily
+      WHERE report_kind IN ('OI','VOLUME')
+        AND participant IN ('CLIENT','DII','FII','PRO')
+      GROUP BY trade_date
+      ORDER BY trade_date DESC
+      LIMIT 1
+    `);
+    const latestVerifiedParticipant = await pool.query<{ trade_date: string }>(`
+      SELECT trade_date::text
+      FROM nse_participant_derivatives_daily
+      WHERE report_kind IN ('OI','VOLUME')
+        AND participant IN ('CLIENT','DII','FII','PRO')
+      GROUP BY trade_date
+      HAVING COUNT(*) = 8
+         AND COUNT(DISTINCT report_kind) = 2
+         AND COUNT(DISTINCT participant) = 4
+      ORDER BY trade_date DESC
+      LIMIT 1
+    `);
+
+    const latestObserved = latestParticipant.rows[0];
+    return evaluateFiiDiiProductionReadiness({
+      expectedMarketSessionDate,
+      storedRows,
+      participantSnapshot: {
+        latestObservedTradeDate: latestObserved?.trade_date ?? null,
+        latestObservedRowCount: Number(latestObserved?.row_count ?? 0),
+        latestVerifiedTradeDate: latestVerifiedParticipant.rows[0]?.trade_date ?? null,
+      },
+    });
   });
 }

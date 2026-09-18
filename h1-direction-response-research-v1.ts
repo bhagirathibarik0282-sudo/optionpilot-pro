@@ -45,6 +45,45 @@ export interface H1DirectionResponseIntervalWeightedSummary {
   dateSummaries: H1DirectionResponseIntervalWeightedDateSummary[];
 }
 
+export interface H1DirectionThresholdCandidateWindow {
+  intervalCount: number;
+  retentionRate: number | null;
+  meanSideBalancedAgreementShare: number | null;
+  strictMajorityIntervalRate: number | null;
+}
+
+export interface H1DirectionThresholdCandidateEvaluation {
+  label: "P50" | "P75" | "P90" | "P95";
+  thresholdPct: number;
+  calibration: H1DirectionThresholdCandidateWindow;
+  oos: H1DirectionThresholdCandidateWindow;
+}
+
+export interface H1DirectionThresholdOosMatrix {
+  version: "H1_DIRECTION_THRESHOLD_OOS_MATRIX_V1";
+  semantics: "CALIBRATION_DERIVED_CANDIDATES_OOS_EVALUATION_NO_SELECTION";
+  split: "CHRONOLOGICAL_70_30_NONEMPTY_DATES";
+  calibrationDates: string[];
+  oosDates: string[];
+  calibrationIntervalCount: number;
+  oosIntervalCount: number;
+  candidates: H1DirectionThresholdCandidateEvaluation[];
+  selectedCandidate: null;
+  temporalCandidateMatrixEvaluated: boolean;
+  blockers: string[];
+  safety: {
+    readOnly: true;
+    thresholdSelected: false;
+    thresholdPromoted: false;
+    affectsSelector: false;
+    affectsTelegram: false;
+    affectsVerdict: false;
+    affectsExecution: false;
+    grantsPromotionAuthority: false;
+    failClosed: true;
+  };
+}
+
 export interface H1DirectionResponseResearchResult {
   version: typeof H1_DIRECTION_RESPONSE_RESEARCH_VERSION;
   productionImpact: "NONE";
@@ -60,6 +99,7 @@ export interface H1DirectionResponseResearchResult {
   };
   quantileBuckets: H1DirectionResponseQuantileBucket[];
   intervalWeighted: H1DirectionResponseIntervalWeightedSummary;
+  thresholdOos: H1DirectionThresholdOosMatrix;
   evidenceState: "OBSERVATIONS_AVAILABLE_NO_POLICY_PROMOTION" | "INSUFFICIENT_REPLAY_OBSERVATIONS";
   blockers: string[];
   safety: {
@@ -202,6 +242,7 @@ function agreementRate(rows: Observation[]): number | null {
 }
 
 type IntervalScore = {
+  absSpotMovePct: number;
   bothSidesPresent: boolean;
   sideBalancedAgreementShare: number;
 };
@@ -221,7 +262,10 @@ function intervalScores(rows: Observation[]): IntervalScore[] {
     const pe = agreementRate(item.PE);
     const available = [ce, pe].filter((x): x is number => x != null);
     if (!available.length) continue;
+    const first = item.CE[0] ?? item.PE[0];
+    if (!first) continue;
     out.push({
+      absSpotMovePct: first.absSpotMovePct,
       bothSidesPresent: ce != null && pe != null,
       sideBalancedAgreementShare: available.reduce((sum, x) => sum + x, 0) / available.length,
     });
@@ -231,6 +275,87 @@ function intervalScores(rows: Observation[]): IntervalScore[] {
 
 function mean(values: number[]): number | null {
   return values.length ? values.reduce((sum, x) => sum + x, 0) / values.length : null;
+}
+
+function thresholdWindow(scores: IntervalScore[], thresholdPct: number): H1DirectionThresholdCandidateWindow {
+  const filtered = scores.filter((x) => x.absSpotMovePct >= thresholdPct);
+  return {
+    intervalCount: filtered.length,
+    retentionRate: scores.length ? filtered.length / scores.length : null,
+    meanSideBalancedAgreementShare: mean(filtered.map((x) => x.sideBalancedAgreementShare)),
+    strictMajorityIntervalRate: filtered.length
+      ? filtered.filter((x) => x.sideBalancedAgreementShare > 0.5).length / filtered.length
+      : null,
+  };
+}
+
+function buildThresholdOosMatrix(
+  usable: H1DirectionResponseResearchInput[],
+  built: Array<{ summary: H1DirectionResponseDateSummary; observations: Observation[] }>,
+): H1DirectionThresholdOosMatrix {
+  const days = built
+    .map((x, index) => ({
+      tradeDate: usable[index]?.tradeDate ?? "UNKNOWN",
+      scores: intervalScores(x.observations),
+    }))
+    .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.tradeDate) && x.scores.length > 0)
+    .sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
+
+  const blockers: string[] = ["DIRECTION_THRESHOLD_CANDIDATE_NOT_SELECTED"];
+  if (days.length < 2) blockers.push("DIRECTION_THRESHOLD_OOS_REQUIRES_2_NONEMPTY_DATES");
+
+  const cut = days.length >= 2 ? Math.max(1, Math.floor(days.length * 0.7)) : days.length;
+  const calibrationDays = days.slice(0, cut);
+  const oosDays = days.slice(cut);
+  const calibrationScores = calibrationDays.flatMap((x) => x.scores);
+  const oosScores = oosDays.flatMap((x) => x.scores);
+
+  const specs = [
+    ["P50", 0.5],
+    ["P75", 0.75],
+    ["P90", 0.9],
+    ["P95", 0.95],
+  ] as const;
+
+  const candidates = calibrationScores.length && oosScores.length
+    ? specs.flatMap(([label, q]) => {
+        const thresholdPct = quantile(calibrationScores.map((x) => x.absSpotMovePct), q);
+        if (thresholdPct == null) return [];
+        return [{
+          label,
+          thresholdPct,
+          calibration: thresholdWindow(calibrationScores, thresholdPct),
+          oos: thresholdWindow(oosScores, thresholdPct),
+        }];
+      })
+    : [];
+
+  if (!candidates.length) blockers.push("DIRECTION_THRESHOLD_OOS_CANDIDATES_UNAVAILABLE");
+
+  return {
+    version: "H1_DIRECTION_THRESHOLD_OOS_MATRIX_V1",
+    semantics: "CALIBRATION_DERIVED_CANDIDATES_OOS_EVALUATION_NO_SELECTION",
+    split: "CHRONOLOGICAL_70_30_NONEMPTY_DATES",
+    calibrationDates: calibrationDays.map((x) => x.tradeDate),
+    oosDates: oosDays.map((x) => x.tradeDate),
+    calibrationIntervalCount: calibrationScores.length,
+    oosIntervalCount: oosScores.length,
+    candidates,
+    selectedCandidate: null,
+    temporalCandidateMatrixEvaluated: candidates.length > 0,
+    blockers,
+    safety: {
+      readOnly: true,
+      thresholdSelected: false,
+      thresholdPromoted: false,
+      affectsSelector: false,
+      affectsTelegram: false,
+      affectsVerdict: false,
+      affectsExecution: false,
+      grantsPromotionAuthority: false,
+      failClosed: true,
+    },
+  };
 }
 
 function intervalWeightedDateSummary(
@@ -306,6 +431,7 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
     intervalWeightedDateSummary(usable[index]?.tradeDate ?? "UNKNOWN", x.observations),
   );
   const combinedIntervalScores = built.flatMap((x) => intervalScores(x.observations));
+  const thresholdOos = buildThresholdOosMatrix(usable, built);
 
   const blockers = [
     "DIRECTION_POLICY_THRESHOLD_NOT_SELECTED",
@@ -332,6 +458,7 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
         : null,
       dateSummaries: intervalDateSummaries,
     },
+    thresholdOos,
     evidenceState: combined.length
       ? "OBSERVATIONS_AVAILABLE_NO_POLICY_PROMOTION"
       : "INSUFFICIENT_REPLAY_OBSERVATIONS",

@@ -1,0 +1,43 @@
+name: Audit Incomplete Replay Legacy Recovery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-incomplete-replay-legacy-recovery.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Query read-only PostgreSQL legacy recorder evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > /tmp/summary.ndjson
+          for d in 2026-09-01 2026-09-07 2026-09-08 2026-09-09 2026-09-10 2026-09-11; do
+            curl --fail --show-error --silent --location \
+              --retry 3 --retry-delay 2 --max-time 120 \
+              "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-legacy-recorder-recovery?symbol=NIFTY&date=$d" \
+              -o "/tmp/$d.json"
+            jq -e '.mode == "H1_LEGACY_RECORDER_RECOVERY_V1" and .productionImpact == "NONE"' "/tmp/$d.json" >/dev/null
+            jq -c '{
+              tradeDate: .request.tradeDate,
+              ok,
+              recorderSnapshots: (.counts.recorderSnapshots // 0),
+              symbolSnapshots: (.counts.symbolSnapshots // 0),
+              firstObserved: (.firstObserved // null),
+              lastObserved: (.lastObserved // null),
+              reason: (.reason // null)
+            }' "/tmp/$d.json" >> /tmp/summary.ndjson
+          done
+
+      - name: Print compact recovery inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -s '{dates: .}' /tmp/summary.ndjson

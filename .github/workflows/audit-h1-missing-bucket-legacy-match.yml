@@ -1,0 +1,94 @@
+name: Audit H1 Missing Bucket Legacy Match
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-h1-missing-bucket-legacy-match.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch read-only replay and legacy evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/h1-match
+          for d in 2026-09-01 2026-09-07 2026-09-08 2026-09-09 2026-09-10 2026-09-11; do
+            curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 180 \
+              "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=$d&from=09%3A15&to=15%3A30&scope=FULL" \
+              -o "/tmp/h1-match/replay-$d.json"
+            curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 180 \
+              "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-legacy-recorder-recovery?symbol=NIFTY&date=$d" \
+              -o "/tmp/h1-match/legacy-$d.json"
+            jq -e '.ok == true and .productionImpact == "NONE"' "/tmp/h1-match/replay-$d.json" >/dev/null
+            jq -e '.ok == true and .productionImpact == "NONE"' "/tmp/h1-match/legacy-$d.json" >/dev/null
+          done
+
+      - name: Compare missing H1 buckets with legacy TRUE snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+
+          dates = ["2026-09-01","2026-09-07","2026-09-08","2026-09-09","2026-09-10","2026-09-11"]
+
+          def minute_iso(value):
+              if not isinstance(value, str) or not value.strip():
+                  return None
+              try:
+                  dt = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+              except Exception:
+                  return None
+              return dt.replace(second=0, microsecond=0).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+          rows = []
+          for d in dates:
+              with open(f"/tmp/h1-match/replay-{d}.json") as f:
+                  replay = json.load(f)
+              with open(f"/tmp/h1-match/legacy-{d}.json") as f:
+                  legacy = json.load(f)
+
+              missing = set((replay.get("continuity") or {}).get("missingBuckets") or [])
+              true_backend = set()
+              true_market_timestamp = set()
+              true_nonempty_market = 0
+              market_timestamp_present = 0
+
+              for snap in legacy.get("snapshots") or []:
+                  market = snap.get("market")
+                  if snap.get("truthVerdict") != "TRUE" or not isinstance(market, dict) or not market:
+                      continue
+                  true_nonempty_market += 1
+                  b = minute_iso(snap.get("backendTimestamp"))
+                  if b:
+                      true_backend.add(b)
+                  mt = minute_iso(market.get("timestamp"))
+                  if mt:
+                      market_timestamp_present += 1
+                      true_market_timestamp.add(mt)
+
+              backend_matches = sorted(missing & true_backend)
+              market_ts_matches = sorted(missing & true_market_timestamp)
+              best_matches = sorted(set(backend_matches) | set(market_ts_matches))
+              rows.append({
+                  "tradeDate": d,
+                  "missingBucketCount": len(missing),
+                  "trueNonemptyLegacySnapshots": true_nonempty_market,
+                  "legacyMarketTimestampPresentCount": market_timestamp_present,
+                  "backendMinuteExactMatches": len(backend_matches),
+                  "marketTimestampMinuteExactMatches": len(market_ts_matches),
+                  "unionExactMatches": len(best_matches),
+                  "unmatchedMissingBuckets": sorted(missing - set(best_matches)),
+                  "allMissingBucketsHaveExactLegacyTrueMatch": bool(missing) and missing <= (true_backend | true_market_timestamp),
+              })
+
+          print(json.dumps({"dates": rows}, indent=2))
+          PY

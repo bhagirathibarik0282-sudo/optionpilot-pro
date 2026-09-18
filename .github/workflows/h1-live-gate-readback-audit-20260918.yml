@@ -103,13 +103,24 @@ jobs:
                   'ceRows':sum(1 for r in subset if r.get('option_type')=='CE'),
                   'peRows':sum(1 for r in subset if r.get('option_type')=='PE'),
               }
+          groups={}
+          for r in rows:
+              if not isinstance(r,dict): continue
+              minute=r.get('minute_bucket'); strike=r.get('strike'); side=r.get('option_type'); exp=r.get('expiry')
+              if minute is None or strike is None or side not in ('CE','PE') or exp is None: continue
+              key=(str(minute),str(strike),str(side))
+              groups.setdefault(key,set()).add(str(exp))
+          comparable=[len(v) for v in groups.values() if len(v)>=2]
           print('FULL_MULTIEXPIRY_GREEK_SUMMARY='+json.dumps({
               'ok':p.get('ok'),
               'mode':p.get('mode'),
               'optionRowCount':len(rows),
               'expiryCount':len(expiries),
               'expiries':expiries,
-              'perExpiry':both
+              'perExpiry':both,
+              'comparableGroupCount':len(comparable),
+              'groupsWith3Expiries':sum(1 for n in comparable if n>=3),
+              'maxExpiryCountPerComparableGroup':max(comparable) if comparable else 0
           },separators=(',',':')))
           PY
 

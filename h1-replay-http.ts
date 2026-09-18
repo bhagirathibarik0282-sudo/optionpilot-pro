@@ -140,8 +140,10 @@ export function buildH1ReplayContinuity(
     const k = String(row.truth_verdict ?? "UNKNOWN");
     truthCounts[k] = (truthCounts[k] ?? 0) + 1;
   }
-  const coveragePct = expected.length ? (observed.size / expected.length) * 100 : 0;
-  const canonicalCoveragePct = expected.length ? (canonical.size / expected.length) * 100 : 0;
+  const observedExpectedCount = expected.filter((x) => observed.has(x)).length;
+  const canonicalExpectedCount = expected.filter((x) => canonical.has(x)).length;
+  const coveragePct = expected.length ? (observedExpectedCount / expected.length) * 100 : 0;
+  const canonicalCoveragePct = expected.length ? (canonicalExpectedCount / expected.length) * 100 : 0;
   return {
     cadenceMinutes: 3,
     expectedBuckets: expected.length,

@@ -75,3 +75,30 @@ test("continuity audit exposes missing 3-minute recorder buckets instead of call
   assert.equal(c.canonicalArchiveBuckets, 1);
   assert.equal(c.allParameterArchiveSemantics, "FULL_RUNTIME_INDEX_METRICS_JSONB");
 });
+
+
+test("continuity coverage counts only expected 3-minute grid buckets", () => {
+  const request = {
+    symbol: "NIFTY",
+    tradeDate: "2026-09-07",
+    fromTime: "09:15",
+    toTime: "09:24",
+    scope: "CORE",
+  } as const;
+  const rows = [
+    { minute_bucket: "2026-09-07T03:45:00.000Z", truth_verdict: "TRUE" },
+    { minute_bucket: "2026-09-07T03:46:00.000Z", truth_verdict: "TRUE" },
+    { minute_bucket: "2026-09-07T03:48:00.000Z", truth_verdict: "TRUE" },
+    { minute_bucket: "2026-09-07T03:51:00.000Z", truth_verdict: "TRUE" },
+    { minute_bucket: "2026-09-07T03:52:00.000Z", truth_verdict: "TRUE" },
+    { minute_bucket: "2026-09-07T03:54:00.000Z", truth_verdict: "TRUE" },
+  ];
+  const canonical = rows.map((r) => ({ minute_bucket: r.minute_bucket }));
+  const out = buildH1ReplayContinuity(request, rows, canonical);
+  assert.equal(out.expectedBuckets, 4);
+  assert.equal(out.observedMarkerBuckets, 6);
+  assert.equal(out.coveragePct, 100);
+  assert.equal(out.canonicalArchiveBuckets, 6);
+  assert.equal(out.canonicalCoveragePct, 100);
+  assert.equal(out.complete, true);
+});

@@ -14,13 +14,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Fetch PostgreSQL-backed complete-date direction OOS
+      - name: Fetch deployed clean-date OOS semantics
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 \
-            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-15%2C2026-09-16&from=09%3A15&to=15%3A30&scope=FULL' \
-            -o /tmp/oos.json
+          url='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-15%2C2026-09-16&from=09%3A15&to=15%3A30&scope=FULL'
+          ready=0
+          for attempt in $(seq 1 18); do
+            curl --fail --show-error --silent --location --max-time 300 "$url" -o /tmp/oos.json || true
+            if jq -e '
+              .ok == true and
+              .research.safety.temporalHoldoutEvaluated == true and
+              ((.research.blockers | index("DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED")) == null)
+            ' /tmp/oos.json >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" -eq 1
 
       - name: Print compact complete-date OOS proof
         shell: bash
@@ -66,5 +78,12 @@ jobs:
             .research.thresholdOos.safety.thresholdPromoted == false and
             .research.thresholdOos.safety.affectsSelector == false and
             .research.thresholdOos.safety.affectsTelegram == false and
-            .research.thresholdOos.safety.affectsExecution == false
+            .research.thresholdOos.safety.affectsExecution == false and
+            .research.safety.temporalHoldoutEvaluated == true and
+            .research.safety.thresholdSelected == false and
+            .research.safety.thresholdPromoted == false and
+            .research.safety.policySelectionRubricDefined == false and
+            ((.research.blockers | index("DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED")) == null) and
+            ((.research.blockers | index("DIRECTION_POLICY_THRESHOLD_NOT_SELECTED")) != null) and
+            ((.research.blockers | index("DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED")) != null)
           ' /tmp/oos.json >/dev/null

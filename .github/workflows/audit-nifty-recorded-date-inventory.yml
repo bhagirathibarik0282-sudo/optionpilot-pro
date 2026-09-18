@@ -1,0 +1,51 @@
+name: Audit NIFTY Recorded Date Inventory
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-nifty-recorded-date-inventory.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch PostgreSQL-backed recorded date inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 120 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-theory-dates' \
+            -o /tmp/dates.json
+
+      - name: Fail closed on unavailable evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .ok == true and
+            .mode == "READ_ONLY_H1_RECORDED_DATE_INDEX_V1" and
+            .productionImpact == "NONE" and
+            .affectsVerdict == false and
+            .affectsTelegram == false and
+            .affectsExecution == false and
+            ([.dates[] | select(.symbol == "NIFTY")] | length) >= 3
+          ' /tmp/dates.json >/dev/null
+
+      - name: Print NIFTY recorded dates
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{
+            ok,
+            niftyDates: [
+              .dates[]
+              | select(.symbol == "NIFTY")
+              | {tradeDate, markerCount, firstMinute, lastMinute}
+            ]
+          }' /tmp/dates.json

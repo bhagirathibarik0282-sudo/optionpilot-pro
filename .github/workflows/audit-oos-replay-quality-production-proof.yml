@@ -1,0 +1,63 @@
+name: Audit OOS Replay Quality Production Proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-oos-replay-quality-production-proof.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch deployed PostgreSQL-backed multi-date OOS research
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 300 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-01%2C2026-09-07%2C2026-09-08%2C2026-09-09%2C2026-09-10%2C2026-09-11%2C2026-09-15&from=09%3A15&to=15%3A30&scope=FULL' \
+            -o /tmp/proof.json
+
+      - name: Fail closed unless replay quality blocker is live
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .ok == true and
+            .productionImpact == "NONE" and
+            .research.thresholdOos.selectedCandidate == null and
+            .research.thresholdOos.evidenceQuality.arbitraryCoverageCutoffApplied == false and
+            .research.thresholdOos.evidenceQuality.allIncludedDatesComplete == false and
+            (.research.thresholdOos.evidenceQuality.calibrationIncompleteDates | length) > 0 and
+            (.research.thresholdOos.evidenceQuality.oosIncompleteDates | length) > 0 and
+            (.research.thresholdOos.blockers | index("DIRECTION_THRESHOLD_OOS_INCLUDES_INCOMPLETE_REPLAY_DATES")) != null and
+            (.research.blockers | index("DIRECTION_POLICY_OOS_REPLAY_QUALITY_INCOMPLETE")) != null and
+            .research.thresholdOos.safety.thresholdSelected == false and
+            .research.thresholdOos.safety.thresholdPromoted == false and
+            .research.thresholdOos.safety.affectsSelector == false and
+            .research.thresholdOos.safety.affectsTelegram == false and
+            .research.thresholdOos.safety.affectsExecution == false and
+            .research.thresholdOos.safety.grantsPromotionAuthority == false
+          ' /tmp/proof.json >/dev/null
+
+      - name: Print compact deployed proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{
+            ok,
+            thresholdOos: {
+              calibrationDates: .research.thresholdOos.calibrationDates,
+              oosDates: .research.thresholdOos.oosDates,
+              evidenceQuality: .research.thresholdOos.evidenceQuality,
+              blockers: .research.thresholdOos.blockers,
+              selectedCandidate: .research.thresholdOos.selectedCandidate,
+              safety: .research.thresholdOos.safety
+            },
+            researchBlockers: .research.blockers
+          }' /tmp/proof.json

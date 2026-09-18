@@ -18,7 +18,14 @@ async function main(): Promise<void> {
   const result = await withFiiDiiDb(async (pool) => {
     await ensureFiiDiiSchema(pool);
 
-    const fetched = await fetchOfficialFiiDiiLiveV3({ retryCount: 2 }, fetch);
+    let expectedMarketSessionDate: string | null = null;
+    try {
+      expectedMarketSessionDate = await latestRecordedMarketSessionDate(pool);
+    } catch (err) {
+      console.warn("[FII_DII_DAILY] freshness comparison unavailable", err instanceof Error ? err.message : "FII_DII_FRESHNESS_CHECK_FAILED");
+    }
+
+    const fetched = await fetchOfficialFiiDiiLiveV3({ retryCount: 2, expectedMarketSessionDate }, fetch);
     if (!fetched.ok || !fetched.sourceUrl) {
       throw new Error(fetched.blocker ?? "FII_DII_OFFICIAL_FETCH_FAILED");
     }
@@ -28,9 +35,8 @@ async function main(): Promise<void> {
       sourceUrl: fetched.sourceUrl,
     });
 
-    let expectedMarketSessionDate: string | null = null;
     try {
-      expectedMarketSessionDate = await latestRecordedMarketSessionDate(pool);
+      if (!expectedMarketSessionDate) expectedMarketSessionDate = await latestRecordedMarketSessionDate(pool);
       assertFiiDiiSessionNotBehindMarketSession(data.date, expectedMarketSessionDate);
     } catch (err) {
       const message = err instanceof Error ? err.message : "FII_DII_FRESHNESS_CHECK_FAILED";

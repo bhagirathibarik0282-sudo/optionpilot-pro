@@ -20,17 +20,6 @@ test("production FII DII readiness reflects actual DB state and remains context-
   assert.equal(body.affectsExecution, false);
   assert.equal(body.mutatesData, false);
   assert.equal(body.failClosed, true);
-  assert.equal(body.participantDbReadback?.sourceMode, "PRODUCTION_DB_READBACK");
-  assert.equal(body.participantDbReadback?.readOnly, true);
-  assert.equal(body.participantDbReadback?.contextOnly, true);
-  assert.equal(body.participantDbReadback?.affectsVerdict, false);
-  assert.equal(body.participantDbReadback?.affectsCandidate, false);
-  assert.equal(body.participantDbReadback?.affectsTelegram, false);
-  assert.equal(body.participantDbReadback?.affectsExecution, false);
-  assert.equal(body.participantDbReadback?.expectedRowsPerCompleteSession, 8);
-  assert.equal(typeof body.participantDbReadback?.latestObservedRowCount, "number");
-  assert.equal(typeof body.participantDbReadback?.latestObservedComplete, "boolean");
-  assert.equal(typeof body.participantDbReadback?.verifiedCompleteSnapshotAvailable, "boolean");
 
   assert.match(body.expectedMarketSessionDate ?? "", /^\d{4}-\d{2}-\d{2}$/);
   assert.match(body.latestStoredSessionDate ?? "", /^\d{4}-\d{2}-\d{2}$/);

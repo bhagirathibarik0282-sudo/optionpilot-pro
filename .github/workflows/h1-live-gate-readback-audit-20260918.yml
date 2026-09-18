@@ -1,0 +1,102 @@
+name: H1 Live Gate Readback Audit
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/h1-live-gate-readback-audit-20260918.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-production-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Fetch persisted live gate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://optionpilot-pro-v2-production.up.railway.app/api/research'
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 120             "$BASE/h1-live-gate-evidence-history?limit=20" -o /tmp/gates.json
+          python - <<'PY'
+          import json,re
+          p=json.load(open('/tmp/gates.json'))
+          recs=p.get('records') or []
+          targets=('premium','delta','gamma','theta','iv','dte','bid','ask','qty','depth','spread','peer','expiry')
+          counts={}
+          def walk(x,prefix=''):
+              if isinstance(x,dict):
+                  for k,v in x.items():
+                      path=f'{prefix}.{k}' if prefix else k
+                      lk=k.lower()
+                      if any(t in lk for t in targets):
+                          key=path
+                          c=counts.setdefault(key,{'present':0,'nonnull':0})
+                          c['present']+=1
+                          if v is not None:
+                              c['nonnull']+=1
+                      walk(v,path)
+              elif isinstance(x,list):
+                  for i,v in enumerate(x):
+                      walk(v,prefix+'[]')
+          for r in recs: walk(r)
+          print('LIVE_GATE_SUMMARY='+json.dumps({
+              'ok':p.get('ok'),
+              'mode':p.get('mode'),
+              'persistKind':p.get('persistKind'),
+              'count':p.get('count'),
+              'fieldPresence':counts,
+              'safety':p.get('safety')
+          },separators=(',',':')))
+          PY
+
+      - name: Fetch today NIFTY replay depth readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=2026-09-18&from=09%3A15&to=15%3A30&scope=CORE'
+          status=$(curl --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 2 -sS -o /tmp/replay.json -w '%{http_code}' "$URL")
+          echo "REPLAY_HTTP_STATUS=$status"
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/replay.json'))
+          rows=p.get('options') or []
+          fields=['bid','ask','bid_qty','ask_qty','spread','dte','iv','delta','gamma','theta','expiry','option_type']
+          summary={}
+          for f in fields:
+              summary[f]={
+                  'presentRows':sum(1 for r in rows if isinstance(r,dict) and f in r),
+                  'nonNullRows':sum(1 for r in rows if isinstance(r,dict) and r.get(f) is not None)
+              }
+          buckets=[r.get('minute_bucket') for r in rows if isinstance(r,dict) and r.get('minute_bucket')]
+          print('REPLAY_DEPTH_SUMMARY='+json.dumps({
+              'ok':p.get('ok'),
+              'mode':p.get('mode'),
+              'reason':p.get('reason'),
+              'optionRowCount':len(rows),
+              'firstObserved':min(buckets) if buckets else None,
+              'lastObserved':max(buckets) if buckets else None,
+              'fields':summary
+          },separators=(',',':')))
+          PY
+
+      - name: Fetch live selector registry readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 120             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-selector-decisions' -o /tmp/selector.json
+          python - <<'PY'
+          import json
+          p=json.load(open('/tmp/selector.json'))
+          print('SELECTOR_READBACK_SUMMARY='+json.dumps({
+              'ok':p.get('ok'),
+              'mode':p.get('mode'),
+              'registrySize':p.get('registrySize'),
+              'selectCount':p.get('selectCount'),
+              'blockCount':p.get('blockCount'),
+              'responseMetricCount':len(p.get('responseMetrics') or []),
+              'failClosed':p.get('failClosed')
+          },separators=(',',':')))
+          PY

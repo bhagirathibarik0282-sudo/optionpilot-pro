@@ -4,6 +4,7 @@ import {
   classifyNseParticipantFetchFailure,
   fetchNseParticipantDerivatives,
   fetchNseParticipantDerivativesWithRetry,
+  nseParticipantFetchAttempts,
   nseParticipantReportUrl,
   parseNseParticipantDerivativesCsv,
 } from "../fii-dii-nse.js";
@@ -160,6 +161,7 @@ test("404 is classified as NOT_PUBLISHED_YET and is not retried", async () => {
 
   assert.ok(captured instanceof Error);
   assert.equal(classifyNseParticipantFetchFailure(captured), "NOT_PUBLISHED_YET");
+  assert.equal(nseParticipantFetchAttempts(captured), 1);
   assert.equal(attempts, 1);
 });
 
@@ -232,4 +234,29 @@ test("malformed CSV fails closed without retrying invalid business data", async 
     /NSE_PARTICIPANT_CSV_HEADER_MISMATCH/,
   );
   assert.equal(attempts, 1);
+});
+
+
+test("transient 403 access block is retried before accepting a valid report", async () => {
+  let attempts = 0;
+  const fakeFetch = async () => {
+    attempts += 1;
+    if (attempts === 1) return new Response("blocked", { status: 403 });
+    return new Response(participantCsv(), {
+      status: 200,
+      headers: { "content-type": "text/csv" },
+    });
+  };
+
+  const result = await fetchNseParticipantDerivativesWithRetry(
+    "OI",
+    "2026-09-17",
+    { retryCount: 2, baseDelayMs: 0 },
+    fakeFetch as typeof fetch,
+    async () => {},
+  );
+
+  assert.equal(result.attempts, 2);
+  assert.equal(attempts, 2);
+  assert.equal(result.rows.length, 4);
 });

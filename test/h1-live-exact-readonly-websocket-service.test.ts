@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { H1LiveExactReadOnlyWebSocketService } from "../h1-live-exact-readonly-websocket-service.js";
-import { H1LiveExactRawEvidenceStore } from "../h1-live-exact-raw-evidence-store.js";
+import { H1LiveExactRawEvidenceStore, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, buildH1LiveExactGreekTimingRecord } from "../h1-live-exact-raw-evidence-store.js";
 import { KiteImmediateTokenRegistry } from "../kite-immediate-token-registry.js";
 import type { H1LiveExactMarketWiringReadinessResult } from "../h1-live-exact-market-wiring-readiness.js";
 
@@ -195,4 +195,73 @@ test("selector runtime quarantines shadow-only policy and keeps raw live socket 
   assert.equal(service.status().connected, true);
   assert.deepEqual(JSON.parse(sent[0]), { a: "subscribe", v: [99,3,4] });
   assert.deepEqual(JSON.parse(sent[1]), { a: "mode", v: ["full", [99,3,4]] });
+});
+
+
+test("builds pre-policy Greek timing evidence without censoring stale or skewed observations", () => {
+  const record = buildH1LiveExactGreekTimingRecord({
+    instrumentToken: 3,
+    symbol: "NIFTY",
+    expiry: "2026-09-08",
+    strike: 25050,
+    optionSide: "CE",
+    optionObservedAt: "2026-09-04T08:09:30.000Z",
+    optionReceivedAt: "2026-09-04T08:10:10.000Z",
+    underlyingInstrumentToken: 99,
+    underlyingObservedAt: "2026-09-04T08:09:20.000Z",
+    underlyingReceivedAt: "2026-09-04T08:10:09.000Z",
+  });
+  assert.ok(record);
+  assert.equal(record.version, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND);
+  assert.equal(record.minuteBucket, "2026-09-04T08:10:00.000Z");
+  assert.equal(record.optionAgeMsAtReceive, 40_000);
+  assert.equal(record.underlyingAgeMsAtOptionReceive, 50_000);
+  assert.equal(record.underlyingSkewMs, 10_000);
+  assert.equal(record.thresholdAuthority, "NONE");
+  assert.equal(record.observationalOnly, true);
+  assert.equal(record.affectsSelector, false);
+  assert.equal(record.affectsTelegram, false);
+  assert.equal(record.affectsVerdict, false);
+  assert.equal(record.affectsExecution, false);
+  assert.equal(record.createsOrders, false);
+});
+
+test("persists pre-policy Greek timing once per option token per receive minute", () => {
+  const persisted:any[] = [];
+  const service = new H1LiveExactReadOnlyWebSocketService({
+    readiness: readiness(), apiKey: "key", accessToken: "token",
+    rawGreekTimingPersist: (record) => { persisted.push(record); },
+    selectorPolicyEnv: {},
+  });
+
+  (service as any).latestRawSpotTimingBySymbol.set("NIFTY", {
+    instrumentToken: 99,
+    observedAt: "2026-09-04T08:09:00.000Z",
+    receivedAt: "2026-09-04T08:10:00.500Z",
+  });
+
+  const option = {
+    mode: "full" as const,
+    instrumentToken: 3,
+    lastPrice: 100.5,
+    exchangeTimestamp: "2026-09-04T08:09:30.000Z",
+    isIndex: false,
+  };
+  (service as any).captureRawGreekTimingEvidence(option, "2026-09-04T08:10:01.000Z");
+  (service as any).captureRawGreekTimingEvidence(
+    { ...option, exchangeTimestamp: "2026-09-04T08:09:31.000Z" },
+    "2026-09-04T08:10:20.000Z",
+  );
+  (service as any).captureRawGreekTimingEvidence(
+    { ...option, exchangeTimestamp: "2026-09-04T08:10:30.000Z" },
+    "2026-09-04T08:11:01.000Z",
+  );
+
+  assert.equal(persisted.length, 2);
+  assert.equal(persisted[0].minuteBucket, "2026-09-04T08:10:00.000Z");
+  assert.equal(persisted[0].optionAgeMsAtReceive, 31_000);
+  assert.equal(persisted[0].underlyingAgeMsAtOptionReceive, 61_000);
+  assert.equal(persisted[0].underlyingSkewMs, 30_000);
+  assert.equal(persisted[0].thresholdAuthority, "NONE");
+  assert.equal(persisted[1].minuteBucket, "2026-09-04T08:11:00.000Z");
 });

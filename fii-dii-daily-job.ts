@@ -1,7 +1,11 @@
 import { fetchOfficialFiiDiiLiveV3 } from "./canonical-fii-dii-live-fetch-v3.js";
 import { normalizedCashFromOfficialRows } from "./canonical-fii-dii-production-row.js";
 import { assertFiiDiiSessionNotBehindMarketSession } from "./canonical-fii-dii-production-readiness.js";
-import { fetchNseParticipantDerivatives } from "./fii-dii-nse.js";
+import {
+  classifyNseParticipantFetchFailure,
+  fetchNseParticipantDerivativesWithRetry,
+  nseParticipantFetchAttempts,
+} from "./fii-dii-nse.js";
 import {
   ensureFiiDiiSchema,
   latestRecordedMarketSessionDate,
@@ -70,54 +74,101 @@ async function main(): Promise<void> {
     }
 
     const participantEnabled = process.env.NSE_PARTICIPANT_DERIVATIVES_ENABLED?.trim() === "1";
+    const latestParticipant = await pool.query<{ trade_date: string | null }>(`
+      SELECT trade_date::text
+      FROM nse_participant_derivatives_daily
+      WHERE report_kind IN ('OI','VOLUME')
+      GROUP BY trade_date
+      HAVING COUNT(*) = 8
+         AND COUNT(DISTINCT report_kind) = 2
+         AND COUNT(DISTINCT participant) = 4
+      ORDER BY trade_date DESC
+      LIMIT 1
+    `);
+    const previousVerifiedTradeDate = latestParticipant.rows[0]?.trade_date ?? null;
+
     let participantDerivatives: {
       enabled: boolean;
+      status: "DISABLED" | "VERIFIED" | "NOT_PUBLISHED_YET" | "FETCH_FAILED" | "DB_VERIFY_FAILED";
       storedRows: number;
       dbReadbackVerified: boolean;
+      attempts: number;
+      lastVerifiedTradeDate: string | null;
+      reason: string | null;
     } = {
       enabled: participantEnabled,
+      status: "DISABLED",
       storedRows: 0,
       dbReadbackVerified: false,
+      attempts: 0,
+      lastVerifiedTradeDate: previousVerifiedTradeDate,
+      reason: null,
     };
 
     if (participantEnabled) {
-      const [oiRows, volumeRows] = await Promise.all([
-        fetchNseParticipantDerivatives("OI", data.date, fetch),
-        fetchNseParticipantDerivatives("VOLUME", data.date, fetch),
-      ]);
-      const participantRows = [...oiRows, ...volumeRows];
-      await upsertNseParticipantDerivativesDaily(pool, participantRows);
+      try {
+        const [oiFetch, volumeFetch] = await Promise.all([
+          fetchNseParticipantDerivativesWithRetry("OI", data.date, { retryCount: 2, baseDelayMs: 750 }, fetch),
+          fetchNseParticipantDerivativesWithRetry("VOLUME", data.date, { retryCount: 2, baseDelayMs: 750 }, fetch),
+        ]);
+        const participantRows = [...oiFetch.rows, ...volumeFetch.rows];
+        await upsertNseParticipantDerivativesDaily(pool, participantRows);
 
-      const participantReadback = await pool.query<{
-        report_kind: string;
-        participant: string;
-        source_url: string;
-      }>(`
-        SELECT report_kind, participant, source_url
-        FROM nse_participant_derivatives_daily
-        WHERE trade_date=$1::date
-          AND report_kind IN ('OI','VOLUME')
-        ORDER BY report_kind, participant
-      `, [data.date]);
+        const participantReadback = await pool.query<{
+          report_kind: string;
+          participant: string;
+          source_url: string;
+        }>(`
+          SELECT report_kind, participant, source_url
+          FROM nse_participant_derivatives_daily
+          WHERE trade_date=$1::date
+            AND report_kind IN ('OI','VOLUME')
+          ORDER BY report_kind, participant
+        `, [data.date]);
 
-      if (participantReadback.rows.length !== participantRows.length) {
-        throw new Error(`NSE_PARTICIPANT_DB_READBACK_COUNT_MISMATCH:${participantReadback.rows.length}:EXPECTED:${participantRows.length}`);
-      }
-      const expectedByIdentity = new Map(
-        participantRows.map((row) => [`${row.reportKind}:${row.participant}`, row.sourceUrl]),
-      );
-      for (const row of participantReadback.rows) {
-        const identity = `${row.report_kind}:${row.participant}`;
-        if (expectedByIdentity.get(identity) !== row.source_url) {
-          throw new Error(`NSE_PARTICIPANT_DB_READBACK_MISMATCH:${identity}`);
+        if (participantReadback.rows.length !== participantRows.length) {
+          throw new Error(`NSE_PARTICIPANT_DB_READBACK_COUNT_MISMATCH:${participantReadback.rows.length}:EXPECTED:${participantRows.length}`);
         }
-      }
+        const expectedByIdentity = new Map(
+          participantRows.map((row) => [`${row.reportKind}:${row.participant}`, row.sourceUrl]),
+        );
+        for (const row of participantReadback.rows) {
+          const identity = `${row.report_kind}:${row.participant}`;
+          if (expectedByIdentity.get(identity) !== row.source_url) {
+            throw new Error(`NSE_PARTICIPANT_DB_READBACK_MISMATCH:${identity}`);
+          }
+        }
 
-      participantDerivatives = {
-        enabled: true,
-        storedRows: participantRows.length,
-        dbReadbackVerified: true,
-      };
+        participantDerivatives = {
+          enabled: true,
+          status: "VERIFIED",
+          storedRows: participantRows.length,
+          dbReadbackVerified: true,
+          attempts: oiFetch.attempts + volumeFetch.attempts,
+          lastVerifiedTradeDate: data.date,
+          reason: null,
+        };
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : "NSE_PARTICIPANT_UNKNOWN_FAILURE";
+        const status = reason.startsWith("NSE_PARTICIPANT_DB_")
+          ? "DB_VERIFY_FAILED"
+          : classifyNseParticipantFetchFailure(err);
+        participantDerivatives = {
+          enabled: true,
+          status,
+          storedRows: 0,
+          dbReadbackVerified: false,
+          attempts: nseParticipantFetchAttempts(err),
+          lastVerifiedTradeDate: previousVerifiedTradeDate,
+          reason,
+        };
+        console.warn("[FII_DII_DAILY] participant context unavailable; cash FII/DII preserved", JSON.stringify({
+          status,
+          reason,
+          requestedTradeDate: data.date,
+          lastVerifiedTradeDate: previousVerifiedTradeDate,
+        }));
+      }
     }
 
     return {

@@ -300,13 +300,68 @@ export function parseNseParticipantDerivativesCsv(
   return required.map((participant) => participants.get(participant)!);
 }
 
+export type NseParticipantFetchStatus = "VERIFIED" | "NOT_PUBLISHED_YET" | "FETCH_FAILED";
+
+export interface NseParticipantFetchResult {
+  rows: NseParticipantDerivativeRow[];
+  attempts: number;
+}
+
+export interface NseParticipantRetryOptions {
+  retryCount?: number;
+  baseDelayMs?: number;
+}
+
+export class NseParticipantFetchError extends Error {
+  readonly attempts: number;
+
+  constructor(error: unknown, attempts: number) {
+    super(error instanceof Error ? error.message : String(error));
+    this.name = "NseParticipantFetchError";
+    this.attempts = attempts;
+  }
+}
+
+export function nseParticipantFetchAttempts(error: unknown): number {
+  return error instanceof NseParticipantFetchError ? error.attempts : 0;
+}
+
+export function classifyNseParticipantFetchFailure(error: unknown): NseParticipantFetchStatus {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/NSE_PARTICIPANT_(OI|VOLUME)_HTTP_404/.test(message)) return "NOT_PUBLISHED_YET";
+  return "FETCH_FAILED";
+}
+
+function shouldRetryParticipantFetch(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/NSE_PARTICIPANT_(OI|VOLUME)_HTTP_404/.test(message)) return false;
+  if (/NSE_PARTICIPANT_(OI|VOLUME)_HTTP_(403|429|5\d\d)/.test(message)) return true;
+  if (/NSE_PARTICIPANT_(OI|VOLUME)_NON_CSV_RESPONSE/.test(message)) return true;
+  if (/NSE_PARTICIPANT_FETCH_NETWORK_ERROR/.test(message)) return true;
+  return false;
+}
+
+async function sleepMs(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 export async function fetchNseParticipantDerivatives(
   reportKind: NseParticipantReportKind,
   tradeDate: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<NseParticipantDerivativeRow[]> {
   const sourceUrl = nseParticipantReportUrl(reportKind, tradeDate);
-  const response = await fetchImpl(sourceUrl, { headers: participantHeaders() });
+  let response: Response;
+  try {
+    response = await fetchImpl(sourceUrl, {
+      headers: participantHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`NSE_PARTICIPANT_FETCH_NETWORK_ERROR:${reportKind}:${detail}`);
+  }
   if (!response.ok) throw new Error(`NSE_PARTICIPANT_${reportKind}_HTTP_${response.status}`);
   const csv = await response.text();
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
@@ -314,4 +369,34 @@ export async function fetchNseParticipantDerivatives(
     throw new Error(`NSE_PARTICIPANT_${reportKind}_NON_CSV_RESPONSE`);
   }
   return parseNseParticipantDerivativesCsv(csv, reportKind, tradeDate, sourceUrl);
+}
+
+export async function fetchNseParticipantDerivativesWithRetry(
+  reportKind: NseParticipantReportKind,
+  tradeDate: string,
+  options: NseParticipantRetryOptions = {},
+  fetchImpl: typeof fetch = fetch,
+  sleepImpl: (ms: number) => Promise<void> = sleepMs,
+): Promise<NseParticipantFetchResult> {
+  const retryCount = Number.isSafeInteger(options.retryCount) && Number(options.retryCount) >= 0
+    ? Number(options.retryCount)
+    : 2;
+  const baseDelayMs = Number.isFinite(options.baseDelayMs) && Number(options.baseDelayMs) >= 0
+    ? Number(options.baseDelayMs)
+    : 750;
+
+  let lastError: unknown = new Error(`NSE_PARTICIPANT_${reportKind}_FETCH_FAILED`);
+  for (let attempt = 1; attempt <= retryCount + 1; attempt += 1) {
+    try {
+      const rows = await fetchNseParticipantDerivatives(reportKind, tradeDate, fetchImpl);
+      return { rows, attempts: attempt };
+    } catch (error) {
+      lastError = error;
+      if (attempt > retryCount || !shouldRetryParticipantFetch(error)) {
+        throw new NseParticipantFetchError(error, attempt);
+      }
+      await sleepImpl(baseDelayMs * attempt);
+    }
+  }
+  throw lastError;
 }

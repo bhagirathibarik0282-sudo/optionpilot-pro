@@ -1,8 +1,9 @@
 name: Audit Live Direction Interval Proof
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches:
+      - audit/live-direction-interval-proof-v1
     paths:
       - ".github/workflows/audit-live-direction-interval-proof.yml"
 

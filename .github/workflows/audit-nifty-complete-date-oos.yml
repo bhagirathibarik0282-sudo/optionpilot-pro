@@ -22,6 +22,26 @@ jobs:
             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-15%2C2026-09-16%2C2026-09-17&from=09%3A15&to=15%3A30&scope=FULL' \
             -o /tmp/oos.json
 
+      - name: Print compact complete-date OOS proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{
+            replayContinuity: [
+              .replaySummaries[]
+              | {
+                  tradeDate,
+                  coveragePct: .continuity.coveragePct,
+                  canonicalCoveragePct: .continuity.canonicalCoveragePct,
+                  missingBucketCount: (.continuity.missingBuckets | length),
+                  complete: .continuity.complete
+                }
+            ],
+            thresholdOos: .research.thresholdOos,
+            researchBlockers: .research.blockers,
+            researchSafety: .research.safety
+          }' /tmp/oos.json
+
       - name: Fail closed unless all included replay dates are complete
         shell: bash
         run: |
@@ -48,23 +68,3 @@ jobs:
             .research.thresholdOos.safety.affectsTelegram == false and
             .research.thresholdOos.safety.affectsExecution == false
           ' /tmp/oos.json >/dev/null
-
-      - name: Print compact complete-date OOS proof
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq '{
-            replayContinuity: [
-              .replaySummaries[]
-              | {
-                  tradeDate,
-                  coveragePct: .continuity.coveragePct,
-                  canonicalCoveragePct: .continuity.canonicalCoveragePct,
-                  missingBucketCount: (.continuity.missingBuckets | length),
-                  complete: .continuity.complete
-                }
-            ],
-            thresholdOos: .research.thresholdOos,
-            researchBlockers: .research.blockers,
-            researchSafety: .research.safety
-          }' /tmp/oos.json

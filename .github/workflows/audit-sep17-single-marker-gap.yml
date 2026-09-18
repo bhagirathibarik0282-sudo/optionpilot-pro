@@ -1,0 +1,99 @@
+name: Audit Sep17 Single Marker Gap
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-sep17-single-marker-gap.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch read-only replay and legacy evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 180 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=2026-09-17&from=09%3A15&to=15%3A30&scope=FULL' \
+            -o /tmp/replay.json
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 180 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-legacy-recorder-recovery?symbol=NIFTY&date=2026-09-17' \
+            -o /tmp/legacy.json
+          jq -e '.ok == true and .productionImpact == "NONE"' /tmp/replay.json >/dev/null
+          jq -e '.ok == true and .productionImpact == "NONE"' /tmp/legacy.json >/dev/null
+
+      - name: Build exact single-gap proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+
+          with open('/tmp/replay.json') as f:
+              replay=json.load(f)
+          with open('/tmp/legacy.json') as f:
+              legacy=json.load(f)
+
+          missing=(replay.get('continuity') or {}).get('missingBuckets') or []
+          gap_rows=(replay.get('markerGapEvidence') or {}).get('buckets') or []
+
+          def minute_iso(value):
+              if not isinstance(value,str) or not value.strip():
+                  return None
+              try:
+                  dt=datetime.fromisoformat(value.replace('Z','+00:00')).astimezone(timezone.utc)
+              except Exception:
+                  return None
+              return dt.replace(second=0,microsecond=0).isoformat(timespec='milliseconds').replace('+00:00','Z')
+
+          target=missing[0] if len(missing)==1 else None
+          matches=[]
+          if target:
+              for snap in legacy.get('snapshots') or []:
+                  if snap.get('truthVerdict') != 'TRUE':
+                      continue
+                  if minute_iso(snap.get('backendTimestamp')) != target:
+                      continue
+                  market=snap.get('market')
+                  if not isinstance(market,dict) or not market:
+                      continue
+                  matches.append({
+                      'backendTimestamp': snap.get('backendTimestamp'),
+                      'snapshotStatus': snap.get('snapshotStatus'),
+                      'spotPresent': isinstance(market.get('spot',market.get('current')),(int,float)),
+                      'atmStrikePresent': isinstance(market.get('atmStrike'),(int,float)),
+                  })
+
+          gap=gap_rows[0] if len(gap_rows)==1 else {}
+          out={
+              'tradeDate':'2026-09-17',
+              'missingBuckets':missing,
+              'gapEvidence':gap,
+              'legacyTrueExactMatches':matches,
+              'legacyTrueExactMatchCount':len(matches),
+              'rawMarketPresent':(gap.get('marketRows') or 0)>0,
+              'rawOptionsPresent':(gap.get('optionRows') or 0)>0,
+              'rawChainPresent':(gap.get('chainRows') or 0)>0,
+              'writePerformed':False,
+              'markerRepairPerformed':False,
+          }
+          print(json.dumps(out,indent=2))
+          with open('/tmp/proof.json','w') as f:
+              json.dump(out,f)
+          PY
+
+      - name: Safety assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            (.missingBuckets | length) == 1 and
+            .writePerformed == false and
+            .markerRepairPerformed == false
+          ' /tmp/proof.json >/dev/null

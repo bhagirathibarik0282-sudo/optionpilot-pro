@@ -1,4 +1,4 @@
-name: Audit Direction Temporal Stability
+name: Audit Direction Threshold OOS Matrix
 
 on:
   push:
@@ -15,52 +15,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Fetch chronological calibration and OOS direction evidence
+      - name: Fetch production threshold OOS matrix
         shell: bash
         run: |
           set -euo pipefail
-          base='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&from=09%3A15&to=15%3A30&scope=FULL'
           curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 240 \
-            "${base}&dates=2026-09-01%2C2026-09-02%2C2026-09-03%2C2026-09-07" \
-            -o /tmp/calibration.json
-          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 240 \
-            "${base}&dates=2026-09-08%2C2026-09-09%2C2026-09-10" \
-            -o /tmp/oos.json
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-09-01%2C2026-09-02%2C2026-09-03%2C2026-09-04%2C2026-09-07%2C2026-09-08%2C2026-09-09%2C2026-09-10&from=09%3A15&to=15%3A30&scope=FULL' \
+            -o /tmp/matrix.json
 
-      - name: Fail closed on authority leakage
+      - name: Fail closed on selection or authority leakage
         shell: bash
         run: |
           set -euo pipefail
-          for f in /tmp/calibration.json /tmp/oos.json; do
-            jq -e '
-              .ok == true and
-              .productionImpact == "NONE" and
-              .safety.readOnly == true and
-              .safety.thresholdSelected == false and
-              .safety.thresholdPromoted == false and
-              .safety.affectsSelector == false and
-              .safety.affectsTelegram == false and
-              .safety.affectsExecution == false and
-              .safety.grantsPromotionAuthority == false
-            ' "${f}" >/dev/null
-          done
+          jq -e '
+            .ok == true and
+            .productionImpact == "NONE" and
+            .research.thresholdOos.version == "H1_DIRECTION_THRESHOLD_OOS_MATRIX_V1" and
+            .research.thresholdOos.temporalCandidateMatrixEvaluated == true and
+            .research.thresholdOos.selectedCandidate == null and
+            .research.thresholdOos.safety.thresholdSelected == false and
+            .research.thresholdOos.safety.thresholdPromoted == false and
+            .research.thresholdOos.safety.affectsSelector == false and
+            .research.thresholdOos.safety.affectsTelegram == false and
+            .research.thresholdOos.safety.affectsExecution == false and
+            .research.thresholdOos.safety.grantsPromotionAuthority == false
+          ' /tmp/matrix.json >/dev/null
 
-      - name: Print temporal stability comparison
+      - name: Print threshold candidate matrix
         shell: bash
         run: |
           set -euo pipefail
-          jq -n \
-            --argjson cal "$(jq '{dates:.request.dates,intervalWeighted:.research.intervalWeighted,combinedComparableCount:.research.combinedComparableCount,combinedAgreementRate:.research.combinedAgreementRate,replaySummaries:.replaySummaries}' /tmp/calibration.json)" \
-            --argjson oos "$(jq '{dates:.request.dates,intervalWeighted:.research.intervalWeighted,combinedComparableCount:.research.combinedComparableCount,combinedAgreementRate:.research.combinedAgreementRate,replaySummaries:.replaySummaries}' /tmp/oos.json)" \
-            '{
-              mode:"READ_ONLY_DIRECTION_TEMPORAL_STABILITY_AUDIT",
-              productionImpact:"NONE",
-              split:"CHRONOLOGICAL_EXISTING_70_30_PATTERN_NONZERO_DATES",
-              calibration:$cal,
-              oos:$oos,
-              comparison:{
-                sideBalancedAgreementDifference:($oos.intervalWeighted.meanSideBalancedAgreementShare-$cal.intervalWeighted.meanSideBalancedAgreementShare),
-                strictMajorityDifference:($oos.intervalWeighted.strictMajorityIntervalRate-$cal.intervalWeighted.strictMajorityIntervalRate)
-              },
-              caveat:"DESCRIPTIVE_TIME_STABILITY_ONLY_NOT_THRESHOLD_HOLDOUT_NOT_POLICY_PROMOTION"
-            }'
+          jq '{
+            request:.request,
+            thresholdOos:.research.thresholdOos,
+            policyBlockers:.research.blockers,
+            policySafety:.research.safety
+          }' /tmp/matrix.json

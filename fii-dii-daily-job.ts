@@ -4,6 +4,7 @@ import { assertFiiDiiSessionNotBehindMarketSession } from "./canonical-fii-dii-p
 import {
   classifyNseParticipantFetchFailure,
   fetchNseParticipantDerivativesWithRetry,
+  nseParticipantFetchAttempts,
 } from "./fii-dii-nse.js";
 import {
   ensureFiiDiiSchema,
@@ -151,7 +152,7 @@ async function main(): Promise<void> {
           status,
           storedRows: 0,
           dbReadbackVerified: false,
-          attempts: 0,
+          attempts: nseParticipantFetchAttempts(err),
           lastVerifiedTradeDate: previousVerifiedTradeDate,
           reason,
         };

@@ -70,6 +70,15 @@ export interface H1DirectionThresholdOosMatrix {
   candidates: H1DirectionThresholdCandidateEvaluation[];
   selectedCandidate: null;
   temporalCandidateMatrixEvaluated: boolean;
+  evidenceQuality: {
+    methodology: "REPLAY_CONTINUITY_VISIBILITY_ONLY_NO_ARBITRARY_COVERAGE_CUTOFF";
+    calibrationIncompleteDates: string[];
+    oosIncompleteDates: string[];
+    calibrationContinuityUnknownDates: string[];
+    oosContinuityUnknownDates: string[];
+    allIncludedDatesComplete: boolean;
+    arbitraryCoverageCutoffApplied: false;
+  };
   blockers: string[];
   safety: {
     readOnly: true;
@@ -294,10 +303,15 @@ function buildThresholdOosMatrix(
   built: Array<{ summary: H1DirectionResponseDateSummary; observations: Observation[] }>,
 ): H1DirectionThresholdOosMatrix {
   const days = built
-    .map((x, index) => ({
-      tradeDate: usable[index]?.tradeDate ?? "UNKNOWN",
-      scores: intervalScores(x.observations),
-    }))
+    .map((x, index) => {
+      const replay = usable[index]?.replay;
+      const continuityComplete = replay?.continuity?.complete;
+      return {
+        tradeDate: usable[index]?.tradeDate ?? "UNKNOWN",
+        scores: intervalScores(x.observations),
+        continuityComplete: continuityComplete === true ? true : continuityComplete === false ? false : null,
+      };
+    })
     .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.tradeDate) && x.scores.length > 0)
     .sort((a, b) => a.tradeDate.localeCompare(b.tradeDate));
 
@@ -309,6 +323,23 @@ function buildThresholdOosMatrix(
   const oosDays = days.slice(cut);
   const calibrationScores = calibrationDays.flatMap((x) => x.scores);
   const oosScores = oosDays.flatMap((x) => x.scores);
+  const calibrationIncompleteDates = calibrationDays.filter((x) => x.continuityComplete === false).map((x) => x.tradeDate);
+  const oosIncompleteDates = oosDays.filter((x) => x.continuityComplete === false).map((x) => x.tradeDate);
+  const calibrationContinuityUnknownDates = calibrationDays.filter((x) => x.continuityComplete == null).map((x) => x.tradeDate);
+  const oosContinuityUnknownDates = oosDays.filter((x) => x.continuityComplete == null).map((x) => x.tradeDate);
+  const allIncludedDatesComplete =
+    days.length > 0 &&
+    calibrationIncompleteDates.length === 0 &&
+    oosIncompleteDates.length === 0 &&
+    calibrationContinuityUnknownDates.length === 0 &&
+    oosContinuityUnknownDates.length === 0;
+
+  if (calibrationIncompleteDates.length || oosIncompleteDates.length) {
+    blockers.push("DIRECTION_THRESHOLD_OOS_INCLUDES_INCOMPLETE_REPLAY_DATES");
+  }
+  if (calibrationContinuityUnknownDates.length || oosContinuityUnknownDates.length) {
+    blockers.push("DIRECTION_THRESHOLD_OOS_REPLAY_CONTINUITY_UNAVAILABLE");
+  }
 
   const specs = [
     ["P50", 0.5],
@@ -343,6 +374,15 @@ function buildThresholdOosMatrix(
     candidates,
     selectedCandidate: null,
     temporalCandidateMatrixEvaluated: candidates.length > 0,
+    evidenceQuality: {
+      methodology: "REPLAY_CONTINUITY_VISIBILITY_ONLY_NO_ARBITRARY_COVERAGE_CUTOFF",
+      calibrationIncompleteDates,
+      oosIncompleteDates,
+      calibrationContinuityUnknownDates,
+      oosContinuityUnknownDates,
+      allIncludedDatesComplete,
+      arbitraryCoverageCutoffApplied: false,
+    },
     blockers,
     safety: {
       readOnly: true,
@@ -438,6 +478,9 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
     "DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED",
     "DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED",
   ];
+  if (!thresholdOos.evidenceQuality.allIncludedDatesComplete) {
+    blockers.push("DIRECTION_POLICY_OOS_REPLAY_QUALITY_INCOMPLETE");
+  }
 
   return {
     version: H1_DIRECTION_RESPONSE_RESEARCH_VERSION,

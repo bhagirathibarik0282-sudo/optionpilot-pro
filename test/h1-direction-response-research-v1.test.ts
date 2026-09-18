@@ -174,6 +174,20 @@ function oneIntervalReplay(tradeDate: string, movePct: number): H1ReplayHttpResu
       toTime: "09:18",
       scope: "FULL",
     },
+    continuity: {
+      cadenceMinutes: 3,
+      expectedBuckets: 2,
+      observedMarkerBuckets: 2,
+      missingBuckets: [],
+      firstObserved: t0,
+      lastObserved: t1,
+      coveragePct: 100,
+      complete: true,
+      truthCounts: { TRUE: 2 },
+      canonicalArchiveBuckets: 2,
+      canonicalCoveragePct: 100,
+      allParameterArchiveSemantics: "FULL_RUNTIME_INDEX_METRICS_JSONB",
+    },
     market: [
       { minute_bucket: t0, spot_ltp: spot0 },
       { minute_bucket: t1, spot_ltp: spot1 },
@@ -213,10 +227,37 @@ test("builds calibration-derived threshold candidates and evaluates them on late
   assert.equal(matrix.candidates[2].oos.intervalCount, 1);
   assert.equal(matrix.candidates[3].oos.intervalCount, 1);
   assert.equal(matrix.temporalCandidateMatrixEvaluated, true);
+  assert.equal(matrix.evidenceQuality.allIncludedDatesComplete, true);
+  assert.deepEqual(matrix.evidenceQuality.calibrationIncompleteDates, []);
+  assert.deepEqual(matrix.evidenceQuality.oosIncompleteDates, []);
+  assert.equal(matrix.evidenceQuality.arbitraryCoverageCutoffApplied, false);
   assert.equal(matrix.selectedCandidate, null);
   assert.equal(matrix.safety.thresholdSelected, false);
   assert.equal(matrix.safety.thresholdPromoted, false);
   assert.equal(matrix.safety.affectsSelector, false);
   assert.equal(matrix.safety.affectsTelegram, false);
   assert.equal(matrix.safety.affectsExecution, false);
+});
+
+
+test("blocks promotion when an included OOS matrix date has incomplete replay continuity without inventing a coverage cutoff", () => {
+  const incomplete = oneIntervalReplay("2026-09-01", 0.02);
+  assert.ok(incomplete.continuity);
+  incomplete.continuity.complete = false;
+  incomplete.continuity.missingBuckets = ["2026-09-01T03:48:00.000Z"];
+  incomplete.continuity.coveragePct = 50;
+
+  const out = buildH1DirectionResponseResearch([
+    { tradeDate: "2026-09-01", replay: incomplete },
+    { tradeDate: "2026-09-02", replay: oneIntervalReplay("2026-09-02", 0.03) },
+  ]);
+
+  assert.deepEqual(out.thresholdOos.evidenceQuality.calibrationIncompleteDates, ["2026-09-01"]);
+  assert.deepEqual(out.thresholdOos.evidenceQuality.oosIncompleteDates, []);
+  assert.equal(out.thresholdOos.evidenceQuality.allIncludedDatesComplete, false);
+  assert.equal(out.thresholdOos.evidenceQuality.arbitraryCoverageCutoffApplied, false);
+  assert.ok(out.thresholdOos.blockers.includes("DIRECTION_THRESHOLD_OOS_INCLUDES_INCOMPLETE_REPLAY_DATES"));
+  assert.ok(out.blockers.includes("DIRECTION_POLICY_OOS_REPLAY_QUALITY_INCOMPLETE"));
+  assert.equal(out.thresholdOos.selectedCandidate, null);
+  assert.equal(out.thresholdOos.safety.thresholdPromoted, false);
 });

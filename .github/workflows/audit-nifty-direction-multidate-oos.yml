@@ -1,0 +1,79 @@
+name: Audit NIFTY Multi-Date Direction OOS
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-nifty-direction-multidate-oos.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch PostgreSQL-backed multi-date direction OOS research
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 300 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-01%2C2026-09-07%2C2026-09-08%2C2026-09-09%2C2026-09-10%2C2026-09-11%2C2026-09-15&from=09%3A15&to=15%3A30&scope=FULL' \
+            -o /tmp/oos.json
+
+      - name: Fail closed on unsafe or insufficient OOS evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .ok == true and
+            .productionImpact == "NONE" and
+            .safety.readOnly == true and
+            .safety.thresholdSelected == false and
+            .safety.thresholdPromoted == false and
+            .safety.affectsSelector == false and
+            .safety.affectsTelegram == false and
+            .safety.affectsVerdict == false and
+            .safety.affectsExecution == false and
+            .safety.createsOrders == false and
+            .safety.grantsPromotionAuthority == false and
+            .research.thresholdOos.temporalCandidateMatrixEvaluated == true and
+            (.research.thresholdOos.calibrationDates | length) == 5 and
+            (.research.thresholdOos.oosDates | length) == 3 and
+            .research.thresholdOos.calibrationIntervalCount > 0 and
+            .research.thresholdOos.oosIntervalCount > 0 and
+            (.research.thresholdOos.candidates | length) == 4 and
+            .research.thresholdOos.selectedCandidate == null and
+            .research.thresholdOos.safety.thresholdSelected == false and
+            .research.thresholdOos.safety.thresholdPromoted == false and
+            .research.thresholdOos.safety.affectsSelector == false and
+            .research.thresholdOos.safety.affectsTelegram == false and
+            .research.thresholdOos.safety.affectsExecution == false and
+            .research.thresholdOos.safety.grantsPromotionAuthority == false
+          ' /tmp/oos.json >/dev/null
+
+      - name: Print compact multi-date OOS evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{
+            ok,
+            request,
+            replayContinuity: [
+              .replaySummaries[]
+              | {
+                  tradeDate,
+                  market: .counts.market,
+                  options: .counts.options,
+                  coveragePct: .continuity.coveragePct,
+                  canonicalCoveragePct: .continuity.canonicalCoveragePct,
+                  missingBucketCount: (.continuity.missingBuckets | length),
+                  complete: .continuity.complete
+                }
+            ],
+            thresholdOos: .research.thresholdOos,
+            researchBlockers: .research.blockers,
+            researchSafety: .research.safety
+          }' /tmp/oos.json

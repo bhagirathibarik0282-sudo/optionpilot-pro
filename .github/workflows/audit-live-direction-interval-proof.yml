@@ -1,4 +1,4 @@
-name: Audit Direction Threshold OOS Matrix
+name: Audit Observed Candidate 30m Gross Availability
 
 on:
   push:
@@ -15,39 +15,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Fetch production threshold OOS matrix
+      - name: Read production observed candidate 30m gross evidence
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 240 \
-            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-09-01%2C2026-09-02%2C2026-09-03%2C2026-09-04%2C2026-09-07%2C2026-09-08%2C2026-09-09%2C2026-09-10&from=09%3A15&to=15%3A30&scope=FULL' \
-            -o /tmp/matrix.json
-
-      - name: Fail closed on selection or authority leakage
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq -e '
-            .ok == true and
-            .productionImpact == "NONE" and
-            .research.thresholdOos.version == "H1_DIRECTION_THRESHOLD_OOS_MATRIX_V1" and
-            .research.thresholdOos.temporalCandidateMatrixEvaluated == true and
-            .research.thresholdOos.selectedCandidate == null and
-            .research.thresholdOos.safety.thresholdSelected == false and
-            .research.thresholdOos.safety.thresholdPromoted == false and
-            .research.thresholdOos.safety.affectsSelector == false and
-            .research.thresholdOos.safety.affectsTelegram == false and
-            .research.thresholdOos.safety.affectsExecution == false and
-            .research.thresholdOos.safety.grantsPromotionAuthority == false
-          ' /tmp/matrix.json >/dev/null
-
-      - name: Print threshold candidate matrix
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq '{
-            request:.request,
-            thresholdOos:.research.thresholdOos,
-            policyBlockers:.research.blockers,
-            policySafety:.research.safety
-          }' /tmp/matrix.json
+          total=0
+          for d in 2026-09-01 2026-09-02 2026-09-03 2026-09-04 2026-09-07 2026-09-08 2026-09-09 2026-09-10; do
+            curl --fail --show-error --silent --location --retry 2 --retry-delay 1 --max-time 240 \
+              "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-observed-candidate-30m-gross?symbol=NIFTY&date=${d}&from=09%3A15&to=15%3A30&scope=FULL" \
+              -o "/tmp/gross-${d}.json"
+            n=$(jq -r '.sampleCount // 0' "/tmp/gross-${d}.json")
+            total=$((total+n))
+            jq '{tradeDate:.request.tradeDate,ok,sampleCount,positiveCount,lossCount,positiveRatePct,averageGrossReturnPct,blockers,semantics,pricePolicy,horizonPolicy,affectsVerdict,affectsTelegram,affectsExecution}' "/tmp/gross-${d}.json"
+          done
+          echo "TOTAL_EXACT30M_SAMPLES=${total}"

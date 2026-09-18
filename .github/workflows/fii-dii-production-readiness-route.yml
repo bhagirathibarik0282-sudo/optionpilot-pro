@@ -17,3 +17,4 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: node --import tsx --test test/canonical-fii-dii-production-readiness.test.ts
       - run: node --import tsx --test test/canonical-fii-dii-production-readiness-http.test.ts
+      - run: node --import tsx --test test/fii-dii-cash-repair-job.test.ts

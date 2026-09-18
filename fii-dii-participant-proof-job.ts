@@ -27,7 +27,14 @@ export function participantProofTradeDate(env: NodeJS.ProcessEnv = process.env):
     throw new Error("NSE_PARTICIPANT_PROOF_TRADE_DATE_REQUIRED_ISO");
   }
   const normalized = normalizeNseDate(raw);
-  if (normalized !== raw) throw new Error("NSE_PARTICIPANT_PROOF_TRADE_DATE_INVALID");
+  const parsed = new Date(`${raw}T00:00:00.000Z`);
+  if (
+    normalized !== raw ||
+    !Number.isFinite(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== raw
+  ) {
+    throw new Error("NSE_PARTICIPANT_PROOF_TRADE_DATE_INVALID");
+  }
   return raw;
 }
 

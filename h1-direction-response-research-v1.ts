@@ -114,10 +114,29 @@ type Observation = {
   agreement: boolean;
 };
 
+function expectedGridMs(replay: H1ReplayHttpResult): Set<number> | null {
+  const request = replay.request;
+  if (!request) return null;
+  const start = Date.parse(`${request.tradeDate}T${request.fromTime}:00+05:30`);
+  const end = Date.parse(`${request.tradeDate}T${request.toTime}:00+05:30`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) return null;
+  const out = new Set<number>();
+  for (let t = start; t <= end; t += 3 * 60_000) out.add(t);
+  return out;
+}
+
 function marketMoves(replay: H1ReplayHttpResult): MarketMove[] {
+  const expected = expectedGridMs(replay);
+  if (!expected) return [];
+
   const points: MarketPoint[] = (replay.market ?? [])
     .map((row) => ({ at: isoMs(row.minute_bucket), spot: n(row.spot_ltp) }))
-    .filter((x): x is { at: number; spot: number } => x.at != null && x.spot != null && x.spot > 0)
+    .filter((x): x is { at: number; spot: number } =>
+      x.at != null &&
+      x.spot != null &&
+      x.spot > 0 &&
+      expected.has(x.at),
+    )
     .sort((a, b) => a.at - b.at);
 
   const out: MarketMove[] = [];

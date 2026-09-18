@@ -125,6 +125,7 @@ function marketMoves(replay: H1ReplayHttpResult): MarketMove[] {
     const previous = points[i - 1];
     const current = points[i];
     if (current.at <= previous.at) continue;
+    if (current.at - previous.at !== 180_000) continue;
     const movePct = ((current.spot - previous.spot) / previous.spot) * 100;
     if (!Number.isFinite(movePct)) continue;
     out.push({ from: previous.at, to: current.at, movePct });

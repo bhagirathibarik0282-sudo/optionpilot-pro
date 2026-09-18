@@ -122,3 +122,35 @@ test("interval weighting prevents many contracts in one market move from inflati
   assert.equal(out.intervalWeighted.strictMajorityIntervalRate, 0.5);
   assert.ok(out.blockers.includes("DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED"));
 });
+
+
+test("ignores non-3m market gaps in direction response research", () => {
+  const out = buildH1DirectionResponseResearch([{
+    tradeDate: "2026-09-15",
+    replay: {
+      ok: true,
+      mode: "READ_ONLY_H1_3M_REPLAY",
+      productionImpact: "NONE",
+      request: {
+        symbol: "NIFTY",
+        tradeDate: "2026-09-15",
+        fromTime: "09:15",
+        toTime: "09:21",
+        scope: "FULL",
+      },
+      market: [
+        { minute_bucket: "2026-09-15T03:45:00.000Z", spot_ltp: 100 },
+        { minute_bucket: "2026-09-15T03:46:00.000Z", spot_ltp: 101 },
+        { minute_bucket: "2026-09-15T03:49:00.000Z", spot_ltp: 102 },
+      ],
+      options: [
+        { minute_bucket: "2026-09-15T03:46:00.000Z", expiry: "2026-09-15T00:00:00.000Z", strike: 100, option_type: "CE", ltp: 10 },
+        { minute_bucket: "2026-09-15T03:49:00.000Z", expiry: "2026-09-15T00:00:00.000Z", strike: 100, option_type: "CE", ltp: 11 },
+        { minute_bucket: "2026-09-15T03:46:00.000Z", expiry: "2026-09-15T00:00:00.000Z", strike: 100, option_type: "PE", ltp: 10 },
+        { minute_bucket: "2026-09-15T03:49:00.000Z", expiry: "2026-09-15T00:00:00.000Z", strike: 100, option_type: "PE", ltp: 9 },
+      ],
+    },
+  }]);
+  assert.equal(out.dateSummaries[0].marketPairCount, 1);
+  assert.equal(out.intervalWeighted.intervalCount, 1);
+});

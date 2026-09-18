@@ -1,6 +1,11 @@
 import { validateH1ExactShadowPolicy, type H1ExactShadowPolicy } from "./h1-exact-shadow-live-service.js";
 import { resolveH1SelectorProductionPolicy, type H1SelectorProductionPolicyResult } from "./h1-selector-production-policy.js";
 
+export const H1_SELECTOR_PENDING_VALIDATION_BLOCKERS = [
+  "DIRECTION_POLICY_VALIDATION_REQUIRED",
+  "GREEK_POLICY_VALIDATION_REQUIRED",
+] as const;
+
 export interface H1SelectorCanonicalPolicySourceResult {
   version: "H1_SELECTOR_CANONICAL_POLICY_SOURCE_V1";
   ready: boolean;
@@ -41,13 +46,14 @@ export function readH1SelectorCanonicalPolicySource(env: NodeJS.ProcessEnv = pro
       burdenPolicy: exactPolicy.burdenPolicy,
       capitalLiquidityDtePolicy: exactPolicy.capitalLiquidityDtePolicy,
     });
+    const blockers = [...selectorPolicy.blockers, ...H1_SELECTOR_PENDING_VALIDATION_BLOCKERS];
     return {
       version: "H1_SELECTOR_CANONICAL_POLICY_SOURCE_V1",
-      ready: selectorPolicy.ready,
-      exactPolicy: selectorPolicy.ready ? exactPolicy : null,
+      ready: false,
+      exactPolicy: null,
       selectorPolicy,
-      blockers: [...selectorPolicy.blockers],
-      source: selectorPolicy.ready ? "KITE_H1_EXACT_POLICY_JSON_VALIDATED" : "NONE",
+      blockers,
+      source: "NONE",
       productionImpact: "NONE",
       affectsTelegram: false,
       affectsVerdict: false,

@@ -44,6 +44,25 @@ export interface LiveResponseMetricsEvidence {
   provenance: "LIVE_RUNTIME_EXACT";
 }
 
+export interface LiveCapitalLiquidityEvidenceSnapshot {
+  dte: number;
+  premiumLtp: number;
+  lotQuantity: number;
+  bid: number;
+  ask: number;
+  bidQty: number;
+  askQty: number;
+  capitalRequired: number;
+  relativeSpreadPct: number;
+  bidDepthCoverageMultiple: number;
+  askDepthCoverageMultiple: number;
+  occurredAt: string;
+  receivedAt: string;
+  provenance: "LIVE_RUNTIME_EXACT";
+  thresholdAuthority: "NONE";
+  observationalOnly: true;
+}
+
 export interface LiveGatePolicyDiagnosticsEvidence {
   premiumDeltaGamma: {
     minPremiumMovePct: number;
@@ -79,6 +98,7 @@ export interface LiveGateEvidencePacket {
   identity: LiveCandidateIdentityEvidence;
   gates: Partial<Record<LiveGateName, LiveBooleanGateEvidence>>;
   responseMetrics?: LiveResponseMetricsEvidence;
+  capitalLiquidityEvidence?: LiveCapitalLiquidityEvidenceSnapshot;
   policyDiagnostics?: LiveGatePolicyDiagnosticsEvidence;
   ppdSupport?: LivePpdSupportEvidence;
 }

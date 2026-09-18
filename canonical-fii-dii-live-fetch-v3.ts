@@ -25,15 +25,27 @@ async function parseResponse(response: Response): Promise<FiiDiiDailyRow[] | nul
 
 const baseHeaders = { "user-agent":UA, accept:"application/json,text/plain,*/*", "accept-language":"en-US,en;q=0.9", referer:HOME };
 
-export async function fetchOfficialFiiDiiLiveV3(policy: { retryCount:number }, fetchImpl: typeof fetch = fetch): Promise<{ ok:boolean; rows:FiiDiiDailyRow[]; attempts:number; sourceUrl:string|null; blocker:string|null }> {
-  if (!Number.isInteger(policy?.retryCount) || policy.retryCount < 0 || policy.retryCount > 5) return {ok:false,rows:[],attempts:0,sourceUrl:null,blocker:"FII_DII_FETCH_POLICY_INVALID"};
+export async function fetchOfficialFiiDiiLiveV3(policy: { retryCount:number; expectedMarketSessionDate?:string|null }, fetchImpl: typeof fetch = fetch): Promise<{ ok:boolean; rows:FiiDiiDailyRow[]; attempts:number; sourceUrl:string|null; blocker:string|null }> {
+  if (!Number.isInteger(policy?.retryCount) || policy.retryCount < 0 || policy.retryCount > 5 ||
+      (policy.expectedMarketSessionDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(policy.expectedMarketSessionDate))) {
+    return {ok:false,rows:[],attempts:0,sourceUrl:null,blocker:"FII_DII_FETCH_POLICY_INVALID"};
+  }
   let attempts=0;
+  let staleDate:string|null=null;
+  const acceptFresh = (rows:FiiDiiDailyRow[]):boolean => {
+    const date=rows[0]?.date ?? null;
+    if (policy.expectedMarketSessionDate && date && date < policy.expectedMarketSessionDate) {
+      staleDate=date;
+      return false;
+    }
+    return true;
+  };
   for (; attempts<=policy.retryCount; attempts++) {
     for (const sourceUrl of NSE_FII_DII_OFFICIAL_ENDPOINTS) {
       try {
         const direct = await fetchImpl(sourceUrl,{headers:baseHeaders});
         const rows = await parseResponse(direct);
-        if (rows) return {ok:true,rows,attempts:attempts+1,sourceUrl,blocker:null};
+        if (rows && acceptFresh(rows)) return {ok:true,rows,attempts:attempts+1,sourceUrl,blocker:null};
       } catch { /* continue to session path */ }
     }
     try {
@@ -44,10 +56,13 @@ export async function fetchOfficialFiiDiiLiveV3(policy: { retryCount:number }, f
         try {
           const api=await fetchImpl(sourceUrl,{headers:{...baseHeaders,...(cookie?{cookie}:{})}});
           const rows=await parseResponse(api);
-          if (rows) return {ok:true,rows,attempts:attempts+1,sourceUrl,blocker:null};
+          if (rows && acceptFresh(rows)) return {ok:true,rows,attempts:attempts+1,sourceUrl,blocker:null};
         } catch { /* try next endpoint */ }
       }
     } catch { /* retry full attempt */ }
   }
-  return {ok:false,rows:[],attempts,sourceUrl:null,blocker:"FII_DII_OFFICIAL_ENDPOINTS_UNREACHABLE"};
+  const blocker=staleDate && policy.expectedMarketSessionDate
+    ? `FII_DII_CASH_NOT_PUBLISHED_YET:${staleDate}<${policy.expectedMarketSessionDate}`
+    : "FII_DII_OFFICIAL_ENDPOINTS_UNREACHABLE";
+  return {ok:false,rows:[],attempts,sourceUrl:null,blocker};
 }

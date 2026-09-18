@@ -1,0 +1,65 @@
+name: Audit Live Direction Threshold OOS Proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-live-direction-threshold-oos-proof.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch production PostgreSQL-backed OOS direction research
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 240 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-09-01%2C2026-09-08%2C2026-09-15&from=09%3A15&to=15%3A30&scope=FULL' \
+            -o /tmp/direction-oos.json
+
+      - name: Fail closed on unsafe or unavailable OOS evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .ok == true and
+            .productionImpact == "NONE" and
+            .safety.readOnly == true and
+            .safety.thresholdSelected == false and
+            .safety.thresholdPromoted == false and
+            .safety.affectsSelector == false and
+            .safety.affectsTelegram == false and
+            .safety.affectsVerdict == false and
+            .safety.affectsExecution == false and
+            .safety.createsOrders == false and
+            .safety.grantsPromotionAuthority == false and
+            .safety.failClosed == true and
+            .research.thresholdOos.temporalCandidateMatrixEvaluated == true and
+            .research.thresholdOos.selectedCandidate == null and
+            (.research.thresholdOos.candidates | length) == 4 and
+            .research.thresholdOos.safety.thresholdSelected == false and
+            .research.thresholdOos.safety.thresholdPromoted == false and
+            .research.thresholdOos.safety.affectsSelector == false and
+            .research.thresholdOos.safety.affectsTelegram == false and
+            .research.thresholdOos.safety.affectsExecution == false and
+            .research.thresholdOos.safety.grantsPromotionAuthority == false
+          ' /tmp/direction-oos.json >/dev/null
+
+      - name: Print compact OOS matrix evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{
+            ok,
+            request,
+            replaySummaries,
+            thresholdOos: .research.thresholdOos,
+            researchBlockers: .research.blockers,
+            researchSafety: .research.safety
+          }' /tmp/direction-oos.json

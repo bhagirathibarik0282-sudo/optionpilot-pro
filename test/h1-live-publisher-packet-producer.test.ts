@@ -42,6 +42,24 @@ test("produces one exact weekly packet including fallback approval", () => {
   assert.equal(out.packet!.gates.multiExpiryConflictAbsent?.value, true);
   assert.equal(out.packet!.gates.fallbackDteApproved?.value, true);
   assert.equal(out.packet!.gates.higherDteUsable, undefined);
+  assert.deepEqual(out.packet!.capitalLiquidityEvidence, {
+    dte: 5,
+    premiumLtp: 120,
+    lotQuantity: 150,
+    bid: 119,
+    ask: 120,
+    bidQty: 500,
+    askQty: 500,
+    capitalRequired: 18_000,
+    relativeSpreadPct: (1 / 119.5) * 100,
+    bidDepthCoverageMultiple: 500 / 150,
+    askDepthCoverageMultiple: 500 / 150,
+    occurredAt: "2026-09-03T10:00:10.000Z",
+    receivedAt: "2026-09-03T10:00:11.000Z",
+    provenance: "LIVE_RUNTIME_EXACT",
+    thresholdAuthority: "NONE",
+    observationalOnly: true,
+  });
 });
 
 test("business gate false remains publishable evidence instead of disappearing", () => {

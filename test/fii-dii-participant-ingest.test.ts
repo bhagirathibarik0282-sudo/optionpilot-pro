@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  classifyNseParticipantFetchFailure,
   fetchNseParticipantDerivatives,
+  fetchNseParticipantDerivativesWithRetry,
   nseParticipantReportUrl,
   parseNseParticipantDerivativesCsv,
 } from "../fii-dii-nse.js";
@@ -133,4 +135,101 @@ test("fetch returns four normalized rows from an official CSV response", async (
   assert.equal(rows.length, 4);
   assert.deepEqual(rows.map((row) => row.participant), ["CLIENT", "DII", "FII", "PRO"]);
   assert.ok(rows.every((row) => row.reportKind === "VOLUME"));
+});
+
+
+test("404 is classified as NOT_PUBLISHED_YET and is not retried", async () => {
+  let attempts = 0;
+  const fakeFetch = async () => {
+    attempts += 1;
+    return new Response("missing", { status: 404 });
+  };
+
+  let captured: unknown;
+  try {
+    await fetchNseParticipantDerivativesWithRetry(
+      "OI",
+      "2026-09-17",
+      { retryCount: 3, baseDelayMs: 0 },
+      fakeFetch as typeof fetch,
+      async () => {},
+    );
+  } catch (error) {
+    captured = error;
+  }
+
+  assert.ok(captured instanceof Error);
+  assert.equal(classifyNseParticipantFetchFailure(captured), "NOT_PUBLISHED_YET");
+  assert.equal(attempts, 1);
+});
+
+test("transient 5xx is retried with a bounded attempt count and then succeeds", async () => {
+  let attempts = 0;
+  const fakeFetch = async () => {
+    attempts += 1;
+    if (attempts < 3) return new Response("temporary", { status: 503 });
+    return new Response(participantCsv(), {
+      status: 200,
+      headers: { "content-type": "text/csv" },
+    });
+  };
+
+  const result = await fetchNseParticipantDerivativesWithRetry(
+    "VOLUME",
+    "2026-09-17",
+    { retryCount: 2, baseDelayMs: 0 },
+    fakeFetch as typeof fetch,
+    async () => {},
+  );
+
+  assert.equal(result.attempts, 3);
+  assert.equal(attempts, 3);
+  assert.equal(result.rows.length, 4);
+});
+
+test("network failure is retried and a later valid response is accepted", async () => {
+  let attempts = 0;
+  const fakeFetch = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("socket reset");
+    return new Response(participantCsv(), {
+      status: 200,
+      headers: { "content-type": "text/csv" },
+    });
+  };
+
+  const result = await fetchNseParticipantDerivativesWithRetry(
+    "OI",
+    "2026-09-17",
+    { retryCount: 2, baseDelayMs: 0 },
+    fakeFetch as typeof fetch,
+    async () => {},
+  );
+
+  assert.equal(result.attempts, 2);
+  assert.equal(attempts, 2);
+  assert.deepEqual(result.rows.map((row) => row.participant), ["CLIENT", "DII", "FII", "PRO"]);
+});
+
+test("malformed CSV fails closed without retrying invalid business data", async () => {
+  let attempts = 0;
+  const fakeFetch = async () => {
+    attempts += 1;
+    return new Response("wrong,header\nClient,1,2", {
+      status: 200,
+      headers: { "content-type": "text/csv" },
+    });
+  };
+
+  await assert.rejects(
+    () => fetchNseParticipantDerivativesWithRetry(
+      "OI",
+      "2026-09-17",
+      { retryCount: 3, baseDelayMs: 0 },
+      fakeFetch as typeof fetch,
+      async () => {},
+    ),
+    /NSE_PARTICIPANT_CSV_HEADER_MISMATCH/,
+  );
+  assert.equal(attempts, 1);
 });

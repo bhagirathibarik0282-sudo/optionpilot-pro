@@ -29,6 +29,10 @@ test("participant proof runner requires an explicit ISO trade date", () => {
     () => participantProofTradeDate({}),
     /NSE_PARTICIPANT_PROOF_TRADE_DATE_REQUIRED_ISO/,
   );
+  assert.throws(
+    () => participantProofTradeDate({ NSE_PARTICIPANT_PROOF_TRADE_DATE: "2026-02-31" }),
+    /NSE_PARTICIPANT_PROOF_TRADE_DATE_INVALID/,
+  );
 });
 
 test("participant proof readback requires exactly eight official identities", () => {

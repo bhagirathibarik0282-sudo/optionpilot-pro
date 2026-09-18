@@ -227,6 +227,10 @@ test("builds calibration-derived threshold candidates and evaluates them on late
   assert.equal(matrix.candidates[2].oos.intervalCount, 1);
   assert.equal(matrix.candidates[3].oos.intervalCount, 1);
   assert.equal(matrix.temporalCandidateMatrixEvaluated, true);
+  assert.equal(out.safety.temporalHoldoutEvaluated, true);
+  assert.equal(out.blockers.includes("DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED"), false);
+  assert.ok(out.blockers.includes("DIRECTION_POLICY_THRESHOLD_NOT_SELECTED"));
+  assert.ok(out.blockers.includes("DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED"));
   assert.equal(matrix.evidenceQuality.allIncludedDatesComplete, true);
   assert.deepEqual(matrix.evidenceQuality.calibrationIncompleteDates, []);
   assert.deepEqual(matrix.evidenceQuality.oosIncompleteDates, []);
@@ -258,6 +262,8 @@ test("blocks promotion when an included OOS matrix date has incomplete replay co
   assert.equal(out.thresholdOos.evidenceQuality.arbitraryCoverageCutoffApplied, false);
   assert.ok(out.thresholdOos.blockers.includes("DIRECTION_THRESHOLD_OOS_INCLUDES_INCOMPLETE_REPLAY_DATES"));
   assert.ok(out.blockers.includes("DIRECTION_POLICY_OOS_REPLAY_QUALITY_INCOMPLETE"));
+  assert.equal(out.safety.temporalHoldoutEvaluated, false);
+  assert.ok(out.blockers.includes("DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED"));
   assert.equal(out.thresholdOos.selectedCandidate, null);
   assert.equal(out.thresholdOos.safety.thresholdPromoted, false);
 });

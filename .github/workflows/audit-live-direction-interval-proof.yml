@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Mark exact 3m production rerun
+        run: echo "Exact 3m production rerun after PR 551"
+
       - name: Fetch production direction response research
         shell: bash
         run: |

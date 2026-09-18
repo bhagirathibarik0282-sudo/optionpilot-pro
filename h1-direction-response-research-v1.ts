@@ -28,6 +28,23 @@ export interface H1DirectionResponseQuantileBucket {
   agreementRate: number | null;
 }
 
+export interface H1DirectionResponseIntervalWeightedDateSummary {
+  tradeDate: string;
+  intervalCount: number;
+  bothSidesPresentIntervalCount: number;
+  meanSideBalancedAgreementShare: number | null;
+  strictMajorityIntervalRate: number | null;
+}
+
+export interface H1DirectionResponseIntervalWeightedSummary {
+  methodology: "EQUAL_INTERVAL_WEIGHT_EQUAL_SIDE_WEIGHT_WITHIN_INTERVAL";
+  intervalCount: number;
+  bothSidesPresentIntervalCount: number;
+  meanSideBalancedAgreementShare: number | null;
+  strictMajorityIntervalRate: number | null;
+  dateSummaries: H1DirectionResponseIntervalWeightedDateSummary[];
+}
+
 export interface H1DirectionResponseResearchResult {
   version: typeof H1_DIRECTION_RESPONSE_RESEARCH_VERSION;
   productionImpact: "NONE";
@@ -42,6 +59,7 @@ export interface H1DirectionResponseResearchResult {
     p95: number | null;
   };
   quantileBuckets: H1DirectionResponseQuantileBucket[];
+  intervalWeighted: H1DirectionResponseIntervalWeightedSummary;
   evidenceState: "OBSERVATIONS_AVAILABLE_NO_POLICY_PROMOTION" | "INSUFFICIENT_REPLAY_OBSERVATIONS";
   blockers: string[];
   safety: {
@@ -88,7 +106,13 @@ function quantile(values: number[], p: number): number | null {
 type MarketPoint = { at: number; spot: number };
 type MarketMove = { from: number; to: number; movePct: number };
 type OptionPoint = { at: number; ltp: number };
-type Observation = { absSpotMovePct: number; agreement: boolean };
+type Observation = {
+  from: number;
+  to: number;
+  side: Side;
+  absSpotMovePct: number;
+  agreement: boolean;
+};
 
 function marketMoves(replay: H1ReplayHttpResult): MarketMove[] {
   const points: MarketPoint[] = (replay.market ?? [])
@@ -141,7 +165,13 @@ function observations(replay: H1ReplayHttpResult, moves: MarketMove[]): Observat
       const spotDirection = move.movePct > 0 ? 1 : -1;
       const expectedPremiumDirection = side === "CE" ? spotDirection : -spotDirection;
       const observedPremiumDirection = premiumMovePct > 0 ? 1 : -1;
-      out.push({ absSpotMovePct: Math.abs(move.movePct), agreement: observedPremiumDirection === expectedPremiumDirection });
+      out.push({
+        from: move.from,
+        to: move.to,
+        side,
+        absSpotMovePct: Math.abs(move.movePct),
+        agreement: observedPremiumDirection === expectedPremiumDirection,
+      });
     }
   }
   return out;
@@ -149,6 +179,54 @@ function observations(replay: H1ReplayHttpResult, moves: MarketMove[]): Observat
 
 function agreementRate(rows: Observation[]): number | null {
   return rows.length ? rows.filter((x) => x.agreement).length / rows.length : null;
+}
+
+type IntervalScore = {
+  bothSidesPresent: boolean;
+  sideBalancedAgreementShare: number;
+};
+
+function intervalScores(rows: Observation[]): IntervalScore[] {
+  const grouped = new Map<string, { CE: Observation[]; PE: Observation[] }>();
+  for (const row of rows) {
+    const key = `${row.from}|${row.to}`;
+    const item = grouped.get(key) ?? { CE: [], PE: [] };
+    item[row.side].push(row);
+    grouped.set(key, item);
+  }
+
+  const out: IntervalScore[] = [];
+  for (const item of grouped.values()) {
+    const ce = agreementRate(item.CE);
+    const pe = agreementRate(item.PE);
+    const available = [ce, pe].filter((x): x is number => x != null);
+    if (!available.length) continue;
+    out.push({
+      bothSidesPresent: ce != null && pe != null,
+      sideBalancedAgreementShare: available.reduce((sum, x) => sum + x, 0) / available.length,
+    });
+  }
+  return out;
+}
+
+function mean(values: number[]): number | null {
+  return values.length ? values.reduce((sum, x) => sum + x, 0) / values.length : null;
+}
+
+function intervalWeightedDateSummary(
+  tradeDate: string,
+  rows: Observation[],
+): H1DirectionResponseIntervalWeightedDateSummary {
+  const scores = intervalScores(rows);
+  return {
+    tradeDate,
+    intervalCount: scores.length,
+    bothSidesPresentIntervalCount: scores.filter((x) => x.bothSidesPresent).length,
+    meanSideBalancedAgreementShare: mean(scores.map((x) => x.sideBalancedAgreementShare)),
+    strictMajorityIntervalRate: scores.length
+      ? scores.filter((x) => x.sideBalancedAgreementShare > 0.5).length / scores.length
+      : null,
+  };
 }
 
 function dateSummary(input: H1DirectionResponseResearchInput): { summary: H1DirectionResponseDateSummary; observations: Observation[] } {
@@ -204,9 +282,15 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
     };
   });
 
+  const intervalDateSummaries = built.map((x, index) =>
+    intervalWeightedDateSummary(usable[index]?.tradeDate ?? "UNKNOWN", x.observations),
+  );
+  const combinedIntervalScores = built.flatMap((x) => intervalScores(x.observations));
+
   const blockers = [
     "DIRECTION_POLICY_THRESHOLD_NOT_SELECTED",
     "DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED",
+    "DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED",
   ];
 
   return {
@@ -218,6 +302,16 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
     combinedAgreementRate: agreementRate(combined),
     combinedSpotMoveAbs: { p50, p75, p90, p95 },
     quantileBuckets,
+    intervalWeighted: {
+      methodology: "EQUAL_INTERVAL_WEIGHT_EQUAL_SIDE_WEIGHT_WITHIN_INTERVAL",
+      intervalCount: combinedIntervalScores.length,
+      bothSidesPresentIntervalCount: combinedIntervalScores.filter((x) => x.bothSidesPresent).length,
+      meanSideBalancedAgreementShare: mean(combinedIntervalScores.map((x) => x.sideBalancedAgreementShare)),
+      strictMajorityIntervalRate: combinedIntervalScores.length
+        ? combinedIntervalScores.filter((x) => x.sideBalancedAgreementShare > 0.5).length / combinedIntervalScores.length
+        : null,
+      dateSummaries: intervalDateSummaries,
+    },
     evidenceState: combined.length
       ? "OBSERVATIONS_AVAILABLE_NO_POLICY_PROMOTION"
       : "INSUFFICIENT_REPLAY_OBSERVATIONS",

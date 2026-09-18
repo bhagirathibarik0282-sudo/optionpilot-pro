@@ -1,0 +1,70 @@
+name: Audit NIFTY Complete-Date OOS
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-nifty-complete-date-oos.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch PostgreSQL-backed complete-date direction OOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-15%2C2026-09-16%2C2026-09-17&from=09%3A15&to=15%3A30&scope=FULL' \
+            -o /tmp/oos.json
+
+      - name: Fail closed unless all included replay dates are complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .ok == true and
+            .productionImpact == "NONE" and
+            ([.replaySummaries[].continuity.complete] | all) and
+            .research.thresholdOos.temporalCandidateMatrixEvaluated == true and
+            .research.thresholdOos.evidenceQuality.allIncludedDatesComplete == true and
+            (.research.thresholdOos.evidenceQuality.calibrationIncompleteDates | length) == 0 and
+            (.research.thresholdOos.evidenceQuality.oosIncompleteDates | length) == 0 and
+            (.research.thresholdOos.evidenceQuality.calibrationContinuityUnknownDates | length) == 0 and
+            (.research.thresholdOos.evidenceQuality.oosContinuityUnknownDates | length) == 0 and
+            (.research.thresholdOos.calibrationDates | length) == 2 and
+            (.research.thresholdOos.oosDates | length) == 2 and
+            .research.thresholdOos.calibrationIntervalCount > 0 and
+            .research.thresholdOos.oosIntervalCount > 0 and
+            (.research.thresholdOos.candidates | length) == 4 and
+            .research.thresholdOos.selectedCandidate == null and
+            .research.thresholdOos.safety.thresholdSelected == false and
+            .research.thresholdOos.safety.thresholdPromoted == false and
+            .research.thresholdOos.safety.affectsSelector == false and
+            .research.thresholdOos.safety.affectsTelegram == false and
+            .research.thresholdOos.safety.affectsExecution == false
+          ' /tmp/oos.json >/dev/null
+
+      - name: Print compact complete-date OOS proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{
+            replayContinuity: [
+              .replaySummaries[]
+              | {
+                  tradeDate,
+                  coveragePct: .continuity.coveragePct,
+                  canonicalCoveragePct: .continuity.canonicalCoveragePct,
+                  missingBucketCount: (.continuity.missingBuckets | length),
+                  complete: .continuity.complete
+                }
+            ],
+            thresholdOos: .research.thresholdOos,
+            researchBlockers: .research.blockers,
+            researchSafety: .research.safety
+          }' /tmp/oos.json

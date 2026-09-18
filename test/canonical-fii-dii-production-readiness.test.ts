@@ -70,3 +70,45 @@ test("fails closed on missing history or non-official stored provenance", () => 
   assert.equal(invalid.ready, false);
   assert.ok(invalid.blockers.includes("FII_DII_DB_SOURCE_INVALID:2026-09-04"));
 });
+
+
+test("participant DB readback is exposed as context-only without changing cash readiness", () => {
+  const out = evaluateFiiDiiProductionReadiness({
+    expectedMarketSessionDate: "2026-09-04",
+    storedRows: [row("2026-09-04")],
+    participantSnapshot: {
+      latestObservedTradeDate: "2026-09-04",
+      latestObservedRowCount: 8,
+      latestVerifiedTradeDate: "2026-09-04",
+    },
+  });
+  assert.equal(out.ready, true);
+  assert.equal(out.participantDbReadback.latestObservedTradeDate, "2026-09-04");
+  assert.equal(out.participantDbReadback.latestObservedRowCount, 8);
+  assert.equal(out.participantDbReadback.expectedRowsPerCompleteSession, 8);
+  assert.equal(out.participantDbReadback.latestObservedComplete, true);
+  assert.equal(out.participantDbReadback.latestVerifiedTradeDate, "2026-09-04");
+  assert.equal(out.participantDbReadback.verifiedCompleteSnapshotAvailable, true);
+  assert.equal(out.participantDbReadback.readOnly, true);
+  assert.equal(out.participantDbReadback.contextOnly, true);
+  assert.equal(out.participantDbReadback.affectsCandidate, false);
+  assert.equal(out.participantDbReadback.affectsTelegram, false);
+  assert.equal(out.participantDbReadback.affectsExecution, false);
+});
+
+test("partial participant DB state is visible but does not fabricate a verified snapshot", () => {
+  const out = evaluateFiiDiiProductionReadiness({
+    expectedMarketSessionDate: "2026-09-04",
+    storedRows: [row("2026-09-04")],
+    participantSnapshot: {
+      latestObservedTradeDate: "2026-09-04",
+      latestObservedRowCount: 4,
+      latestVerifiedTradeDate: null,
+    },
+  });
+  assert.equal(out.ready, true);
+  assert.equal(out.participantDbReadback.latestObservedRowCount, 4);
+  assert.equal(out.participantDbReadback.latestObservedComplete, false);
+  assert.equal(out.participantDbReadback.latestVerifiedTradeDate, null);
+  assert.equal(out.participantDbReadback.verifiedCompleteSnapshotAvailable, false);
+});

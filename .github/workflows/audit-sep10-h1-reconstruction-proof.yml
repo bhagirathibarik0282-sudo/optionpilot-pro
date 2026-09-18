@@ -1,0 +1,154 @@
+name: Audit Sep10 H1 Reconstruction Proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/audit-sep10-h1-reconstruction-proof.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch read-only PostgreSQL replay and legacy evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 180 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=2026-09-10&from=09%3A15&to=15%3A30&scope=FULL' \
+            -o /tmp/replay.json
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 180 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-legacy-recorder-recovery?symbol=NIFTY&date=2026-09-10' \
+            -o /tmp/legacy.json
+          jq -e '.ok == true and .productionImpact == "NONE"' /tmp/replay.json >/dev/null
+          jq -e '.ok == true and .productionImpact == "NONE"' /tmp/legacy.json >/dev/null
+
+      - name: Build reconstruction proof without writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+
+          with open('/tmp/replay.json') as f:
+              replay=json.load(f)
+          with open('/tmp/legacy.json') as f:
+              legacy=json.load(f)
+
+          missing=list((replay.get('continuity') or {}).get('missingBuckets') or [])
+
+          def minute_iso(value):
+              if not isinstance(value,str) or not value.strip():
+                  return None
+              try:
+                  dt=datetime.fromisoformat(value.replace('Z','+00:00')).astimezone(timezone.utc)
+              except Exception:
+                  return None
+              return dt.replace(second=0,microsecond=0).isoformat(timespec='milliseconds').replace('+00:00','Z')
+
+          def valid_ts(value):
+              if not isinstance(value,str) or not value.strip():
+                  return False
+              try:
+                  datetime.fromisoformat(value.replace('Z','+00:00'))
+                  return True
+              except Exception:
+                  return False
+
+          market_by={}
+          for row in replay.get('market') or []:
+              b=minute_iso(row.get('minute_bucket'))
+              if b:
+                  market_by.setdefault(b,[]).append(row)
+
+          options_by={}
+          for row in replay.get('options') or []:
+              b=minute_iso(row.get('minute_bucket'))
+              if b:
+                  options_by.setdefault(b,[]).append(row)
+
+          chain_by={}
+          for row in replay.get('chain') or []:
+              b=minute_iso(row.get('minute_bucket'))
+              if b:
+                  chain_by.setdefault(b,[]).append(row)
+
+          legacy_by={}
+          for snap in legacy.get('snapshots') or []:
+              if snap.get('truthVerdict')!='TRUE':
+                  continue
+              m=snap.get('market')
+              if not isinstance(m,dict) or not m:
+                  continue
+              b=minute_iso(snap.get('backendTimestamp'))
+              if b:
+                  legacy_by.setdefault(b,[]).append(snap)
+
+          rows=[]
+          for bucket in missing:
+              snaps=legacy_by.get(bucket,[])
+              # Exactly one is preferred; multiple are visible, never silently selected.
+              normalized=[]
+              for snap in snaps:
+                  m=snap.get('market') or {}
+                  symbol=str(m.get('symbol') or '').strip()
+                  spot=m.get('spot',m.get('current'))
+                  ts=m.get('timestamp') or m.get('exchangeTimestamp')
+                  spot_ok=isinstance(spot,(int,float)) and spot>0
+                  normalized.append({
+                      'symbol': symbol,
+                      'symbolOk': symbol=='NIFTY',
+                      'spotOk': spot_ok,
+                      'timestampSource': 'timestamp' if m.get('timestamp') else ('exchangeTimestamp' if m.get('exchangeTimestamp') else None),
+                      'timestampOk': valid_ts(ts),
+                      'hasAtmStrike': isinstance(m.get('atmStrike'),(int,float)) and m.get('atmStrike')>0,
+                      'expiryCount': len(m.get('expiries') or []) if isinstance(m.get('expiries'),list) else 0,
+                      'futuresCount': len(m.get('futuresContracts') or []) if isinstance(m.get('futuresContracts'),list) else 0,
+                  })
+              rows.append({
+                  'bucket': bucket,
+                  'existingH1MarketRows': len(market_by.get(bucket,[])),
+                  'existingH1OptionRows': len(options_by.get(bucket,[])),
+                  'existingH1ChainRows': len(chain_by.get(bucket,[])),
+                  'legacyTrueSnapshotCount': len(snaps),
+                  'legacyNormalizeChecks': normalized,
+                  'exactlyOneLegacyTrueSnapshot': len(snaps)==1,
+                  'legacySnapshotNormalizable': len(snaps)==1 and normalized[0]['symbolOk'] and normalized[0]['spotOk'] and normalized[0]['timestampOk'],
+              })
+
+          out={
+              'tradeDate':'2026-09-10',
+              'missingBucketCount':len(missing),
+              'buckets':rows,
+              'allMissingHaveExactlyOneLegacyTrueSnapshot': all(r['exactlyOneLegacyTrueSnapshot'] for r in rows),
+              'allLegacySnapshotsNormalizable': all(r['legacySnapshotNormalizable'] for r in rows),
+              'allMissingAlreadyHaveH1MarketRows': all(r['existingH1MarketRows']>0 for r in rows),
+              'allMissingAlreadyHaveH1OptionRows': all(r['existingH1OptionRows']>0 for r in rows),
+              'allMissingAlreadyHaveH1ChainRows': all(r['existingH1ChainRows']>0 for r in rows),
+              'writePerformed':False,
+              'candidateAuthorityChanged':False,
+              'telegramChanged':False,
+              'executionChanged':False,
+          }
+          print(json.dumps(out,indent=2))
+          with open('/tmp/proof.json','w') as f:
+              json.dump(out,f)
+          PY
+
+      - name: Fail closed unless evidence is explicit
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            .missingBucketCount == 9 and
+            .allMissingHaveExactlyOneLegacyTrueSnapshot == true and
+            .writePerformed == false and
+            .candidateAuthorityChanged == false and
+            .telegramChanged == false and
+            .executionChanged == false
+          ' /tmp/proof.json >/dev/null

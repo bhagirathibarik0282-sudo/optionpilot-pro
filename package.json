@@ -13,6 +13,7 @@
     "eod:archive": "tsx eod-archive-job.ts",
     "eod:retention": "tsx eod-retention-job.ts",
     "fii-dii:daily": "tsx fii-dii-daily-job.ts",
+    "fii-dii:participant-proof": "tsx fii-dii-participant-proof-job.ts",
     "h1:pilot:audit": "tsx h1-pilot-audit-job.ts",
     "research:preflight": "tsx scripts/research-preflight.ts",
     "research:populate": "tsx scripts/populate-research-indices.ts",

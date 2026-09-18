@@ -80,7 +80,7 @@ test("raw websocket stays alive while business selector fails closed without exp
   service.stop();
 });
 
-test("business selector attaches only from a validated explicit production policy source", () => {
+test("business selector remains quarantined until direction and Greek validation complete", () => {
   const sent: string[] = [];
   const service = new H1LiveExactReadOnlyWebSocketService({
     readiness: readiness(),
@@ -92,9 +92,10 @@ test("business selector attaches only from a validated explicit production polic
   const status = service.start();
   assert.equal(status.started, true);
   assert.equal(status.connected, true);
-  assert.equal(status.selectorRuntimePolicyReady, true);
-  assert.equal(status.selectorRuntimeAttached, true);
-  assert.deepEqual(status.selectorRuntimeBlockers, []);
+  assert.equal(status.selectorRuntimePolicyReady, false);
+  assert.equal(status.selectorRuntimeAttached, false);
+  assert.ok(status.selectorRuntimeBlockers.includes("DIRECTION_POLICY_VALIDATION_REQUIRED"));
+  assert.ok(status.selectorRuntimeBlockers.includes("GREEK_POLICY_VALIDATION_REQUIRED"));
   assert.equal(sent.length, 2);
   service.stop();
 });

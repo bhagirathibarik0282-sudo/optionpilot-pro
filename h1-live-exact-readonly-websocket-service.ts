@@ -1,5 +1,5 @@
 import type { H1LiveExactMarketWiringReadinessResult } from "./h1-live-exact-market-wiring-readiness.js";
-import { H1LiveExactRawEvidenceStore, H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, buildH1LiveExactRawDepthRecord, type H1LiveExactRawDepthRecord, type H1LiveExactRawEvidenceMissing, type H1LiveExactRawEvidenceRow, type H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
+import { H1LiveExactRawEvidenceStore, H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, buildH1LiveExactRawDepthRecord, buildH1LiveExactGreekTimingRecord, type H1LiveExactRawDepthRecord, type H1LiveExactGreekTimingRecord, type H1LiveExactRawEvidenceMissing, type H1LiveExactRawEvidenceRow, type H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
 import { dbInsert } from "./db.js";
 import { buildNearestValidMonthlyPeerReadiness, type H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
 import { buildH1ReadOnlyEvidenceConsumerBoundary } from "./h1-readonly-evidence-consumer-boundary.js";
@@ -7,6 +7,7 @@ import { deriveH1ExactLiveSpotDirection } from "./h1-exact-live-spot-direction-p
 import { auditH1ExactDirectionSourceReadiness } from "./h1-exact-direction-source-readiness.js";
 import type { H1ExactUnderlyingObservation } from "./h1-kite-exact-price-greek-adapter.js";
 import { KiteWebSocketTransport, type KiteSocketFactory } from "./kite-websocket-transport.js";
+import type { KiteDecodedPacket } from "./kite-websocket-binary-decoder.js";
 import { CanonicalConstituentTickStore, type CanonicalConstituentTickStoreStatus } from "./canonical-constituent-tick-store.js";
 import type { CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
 import type { CanonicalConstituentTokenEntry } from "./canonical-constituent-token-registry.js";
@@ -52,6 +53,7 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   constituentRegistry?: CanonicalConstituentTokenEntry[];
   selectorPolicyEnv?: NodeJS.ProcessEnv;
   rawDepthPersist?: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
+  rawGreekTimingPersist?: (record: H1LiveExactGreekTimingRecord) => void | Promise<void>;
 }
 
 export interface H1LiveExactReadOnlyWebSocketStatus {
@@ -103,7 +105,14 @@ export class H1LiveExactReadOnlyWebSocketService {
   private readonly firstSeenTokens = new Set<number>();
   private readonly rawEvidence: H1LiveExactRawEvidenceStore;
   private readonly rawDepthPersist: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
+  private readonly rawGreekTimingPersist: (record: H1LiveExactGreekTimingRecord) => void | Promise<void>;
   private readonly lastPersistedDepthMinuteByToken = new Map<number, string>();
+  private readonly lastPersistedGreekTimingMinuteByToken = new Map<number, string>();
+  private readonly latestRawSpotTimingBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], {
+    instrumentToken: number;
+    observedAt: string;
+    receivedAt: string;
+  }>();
   private readonly directionBaselineBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], H1ExactUnderlyingObservation>();
   private readonly selectorDirectionBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], "UP" | "DOWN">();
   private selectorCoordinator: H1KiteExactRuntimeCoordinator | null = null;
@@ -127,6 +136,7 @@ export class H1LiveExactReadOnlyWebSocketService {
     this.allowedTokens = new Set([...registryTokens, ...constituentTokens]);
     this.rawEvidence = new H1LiveExactRawEvidenceStore(config.readiness.registry);
     this.rawDepthPersist = config.rawDepthPersist ?? ((record) => dbInsert(H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, record));
+    this.rawGreekTimingPersist = config.rawGreekTimingPersist ?? ((record) => dbInsert(H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, record));
     this.value = {
       version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1", started: false, connected: false, state: "READY",
       subscribedTokenCount: this.allowedTokens.size, receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
@@ -179,6 +189,65 @@ export class H1LiveExactReadOnlyWebSocketService {
       } catch (err) {
         if (process.env.NODE_ENV !== "test") console.error("[H1_LIVE_EXACT_RAW_DEPTH_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
       }
+    }
+  }
+
+  private observeRawSpotTiming(packet: KiteDecodedPacket, receivedAt: string): void {
+    const entry = this.config.readiness.registry?.get(packet?.instrumentToken ?? 0) ?? null;
+    if (!entry || entry.role !== "SPOT" || (entry.symbol !== "NIFTY" && entry.symbol !== "SENSEX" && entry.symbol !== "BANKNIFTY")) return;
+    if (packet.mode !== "full" || packet.isIndex !== true || typeof packet.exchangeTimestamp !== "string") return;
+    const observedMs = Date.parse(packet.exchangeTimestamp);
+    const receivedMs = Date.parse(receivedAt);
+    if (!Number.isFinite(observedMs) || !Number.isFinite(receivedMs)) return;
+
+    const previous = this.latestRawSpotTimingBySymbol.get(entry.symbol);
+    if (previous) {
+      const previousReceivedMs = Date.parse(previous.receivedAt);
+      const previousObservedMs = Date.parse(previous.observedAt);
+      if (Number.isFinite(previousReceivedMs) && receivedMs < previousReceivedMs) return;
+      if (Number.isFinite(previousReceivedMs) && receivedMs === previousReceivedMs &&
+          Number.isFinite(previousObservedMs) && observedMs < previousObservedMs) return;
+    }
+    this.latestRawSpotTimingBySymbol.set(entry.symbol, {
+      instrumentToken: entry.instrumentToken,
+      observedAt: packet.exchangeTimestamp,
+      receivedAt,
+    });
+  }
+
+  private captureRawGreekTimingEvidence(packet: KiteDecodedPacket, receivedAt: string): void {
+    const entry = this.config.readiness.registry?.get(packet?.instrumentToken ?? 0) ?? null;
+    if (!entry || entry.role !== "OPTION" || packet.mode !== "full" || packet.isIndex ||
+        !entry.expiry || !Number.isFinite(entry.strike) || Number(entry.strike) <= 0 ||
+        (entry.optionSide !== "CE" && entry.optionSide !== "PE") ||
+        typeof packet.exchangeTimestamp !== "string") return;
+
+    const underlying = this.latestRawSpotTimingBySymbol.get(entry.symbol as H1ExactUnderlyingObservation["symbol"]);
+    if (!underlying) return;
+    const record = buildH1LiveExactGreekTimingRecord({
+      instrumentToken: entry.instrumentToken,
+      symbol: entry.symbol as H1ExactUnderlyingObservation["symbol"],
+      expiry: entry.expiry,
+      strike: Number(entry.strike),
+      optionSide: entry.optionSide,
+      optionObservedAt: packet.exchangeTimestamp,
+      optionReceivedAt: receivedAt,
+      underlyingInstrumentToken: underlying.instrumentToken,
+      underlyingObservedAt: underlying.observedAt,
+      underlyingReceivedAt: underlying.receivedAt,
+    });
+    if (!record) return;
+    if (this.lastPersistedGreekTimingMinuteByToken.get(record.instrumentToken) === record.minuteBucket) return;
+    this.lastPersistedGreekTimingMinuteByToken.set(record.instrumentToken, record.minuteBucket);
+    try {
+      const pending = this.rawGreekTimingPersist(record);
+      if (pending && typeof (pending as Promise<void>).catch === "function") {
+        void (pending as Promise<void>).catch((err) => {
+          if (process.env.NODE_ENV !== "test") console.error("[H1_LIVE_EXACT_GREEK_TIMING_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
+        });
+      }
+    } catch (err) {
+      if (process.env.NODE_ENV !== "test") console.error("[H1_LIVE_EXACT_GREEK_TIMING_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
     }
   }
 
@@ -239,6 +308,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       reconnect: { enabled: true, delayMs: this.config.reconnectDelayMs ?? 1_000, maxAttempts: this.config.reconnectMaxAttempts ?? 10 },
       onTicks: (ticks, receivedAt) => {
         this.value.lastPacketTimestamp = receivedAt;
+        for (const tick of ticks) this.observeRawSpotTiming(tick, receivedAt);
         for (const tick of ticks) {
           if (!this.allowedTokens.has(tick.instrumentToken)) { this.value.rejectedPacketCount += 1; continue; }
           this.value.receivedPacketCount += 1;
@@ -246,6 +316,7 @@ export class H1LiveExactReadOnlyWebSocketService {
             if (!this.constituentEvidence.ingest(tick, receivedAt)) this.value.rejectedPacketCount += 1;
             continue;
           }
+          this.captureRawGreekTimingEvidence(tick, receivedAt);
           this.rawEvidence.ingest(tick, receivedAt);
           this.selectorCoordinator?.ingest(tick, receivedAt, receivedAt);
           if (!this.firstSeenTokens.has(tick.instrumentToken)) {

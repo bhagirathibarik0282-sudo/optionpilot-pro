@@ -1,0 +1,21 @@
+name: Audit Direction Quantile Holdout
+
+on:
+  push:
+    branches:
+      - audit/live-direction-interval-proof-v1
+    paths:
+      - ".github/workflows/audit-direction-quantile-holdout.yml"
+      - "scripts/audit-direction-quantile-holdout.py"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run read-only quantile holdout matrix
+        run: python3 scripts/audit-direction-quantile-holdout.py

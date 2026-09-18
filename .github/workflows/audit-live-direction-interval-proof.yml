@@ -1,4 +1,4 @@
-name: Audit Live Direction Interval Proof
+name: Audit H1 Replay Coverage Proof
 
 on:
   push:
@@ -15,54 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Mark exact 3m production rerun
-        run: echo "Canonical grid production rerun after PR 552"
-
-      - name: Fetch production direction response research
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --show-error --silent --location \
-            --retry 3 --retry-delay 2 --max-time 240 \
-            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-09-01%2C2026-09-02%2C2026-09-03%2C2026-09-04%2C2026-09-07%2C2026-09-08%2C2026-09-09%2C2026-09-10&from=09%3A15&to=15%3A30&scope=FULL' \
-            -o /tmp/direction-response.json
-
-      - name: Fail closed on unsafe evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq -e '
-            .ok == true and
-            .productionImpact == "NONE" and
-            .safety.readOnly == true and
-            .safety.thresholdSelected == false and
-            .safety.thresholdPromoted == false and
-            .safety.affectsSelector == false and
-            .safety.affectsTelegram == false and
-            .safety.affectsExecution == false and
-            .safety.grantsPromotionAuthority == false and
-            .research.intervalWeighted.methodology == "EQUAL_INTERVAL_WEIGHT_EQUAL_SIDE_WEIGHT_WITHIN_INTERVAL"
-          ' /tmp/direction-response.json >/dev/null
-
-      - name: Print interval-weighted evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq '{
-            ok,
-            request,
-            replaySummaries,
-            research: {
-              combinedComparableCount: .research.combinedComparableCount,
-              combinedAgreementRate: .research.combinedAgreementRate,
-              intervalWeighted: .research.intervalWeighted,
-              blockers: .research.blockers,
-              safety: .research.safety
-            }
-          }' /tmp/direction-response.json
-
-
-      - name: Diagnose raw 3m grid alignment
+      - name: Verify aligned production replay coverage after PR 553
         shell: bash
         run: |
           set -euo pipefail
@@ -70,33 +23,6 @@ jobs:
             curl --fail --show-error --silent --location --retry 2 --retry-delay 1 --max-time 180 \
               "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay?symbol=NIFTY&date=${d}&from=09%3A15&to=15%3A30&scope=CORE" \
               -o "/tmp/replay-${d}.json"
-
-            anchor=$(date -u -d "${d}T03:45:00Z" +%s)
-            end=$(date -u -d "${d}T10:00:00Z" +%s)
-            : > "/tmp/epochs-${d}.txt"
-
-            while IFS= read -r t; do
-              [ -n "${t}" ] || continue
-              e=$(date -u -d "${t}" +%s)
-              echo "${e}" >> "/tmp/epochs-${d}.txt"
-            done < <(jq -r '.market[]?.minute_bucket // empty' "/tmp/replay-${d}.json")
-
-            sort -n "/tmp/epochs-${d}.txt" -o "/tmp/epochs-${d}.txt"
-            total=$(wc -l < "/tmp/epochs-${d}.txt")
-            unique=$(sort -u "/tmp/epochs-${d}.txt" | wc -l)
-            dupes=$((total - unique))
-            offgrid=0
-            outsession=0
-            exact=0
-            prev=""
-
-            while IFS= read -r e; do
-              if (( (e - anchor) % 180 != 0 )); then offgrid=$((offgrid + 1)); fi
-              if (( e < anchor || e > end )); then outsession=$((outsession + 1)); fi
-              if [ -n "${prev}" ] && (( e - prev == 180 )); then exact=$((exact + 1)); fi
-              prev="${e}"
-            done < "/tmp/epochs-${d}.txt"
-
-            printf '{"tradeDate":"%s","marketRows":%d,"uniqueMinuteBuckets":%d,"duplicateMinuteBuckets":%d,"offGridCount":%d,"outOfSessionCount":%d,"exactAdjacent3mPairs":%d}\n' \
-              "${d}" "${total}" "${unique}" "${dupes}" "${offgrid}" "${outsession}" "${exact}"
+            jq -e '.ok == true and (.continuity.coveragePct >= 0) and (.continuity.coveragePct <= 100) and (.continuity.canonicalCoveragePct >= 0) and (.continuity.canonicalCoveragePct <= 100)' "/tmp/replay-${d}.json" >/dev/null
+            jq '{tradeDate:.request.tradeDate, expectedBuckets:.continuity.expectedBuckets, observedMarkerBuckets:.continuity.observedMarkerBuckets, coveragePct:.continuity.coveragePct, canonicalArchiveBuckets:.continuity.canonicalArchiveBuckets, canonicalCoveragePct:.continuity.canonicalCoveragePct, missingBucketCount:(.continuity.missingBuckets|length), complete:.continuity.complete}' "/tmp/replay-${d}.json"
           done

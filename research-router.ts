@@ -19,6 +19,7 @@ import { renderCanonicalIntelligenceDashboardHtml } from "./canonical-intelligen
 import { runFiiDiiProductionReadinessHttp } from "./canonical-fii-dii-production-readiness-http.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
+import { runH1DirectionResponseResearchHttp } from "./h1-direction-response-research-http-v1.js";
 import { compactH1Replay } from "./h1-replay-compact-v1.js";
 import { buildH1Dte0TransitionCalibration } from "./h1-dte0-transition-calibration-v1.js";
 import { runH1ReplayIntelligenceHttp } from "./h1-replay-intelligence.js";
@@ -267,6 +268,25 @@ researchRouter.get("/h1-replay", async (c) => {
     ? compactH1Replay(result)
     : result;
   return c.json(response, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/h1-direction-response-research", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const result = await runH1DirectionResponseResearchHttp({
+    symbol: c.req.query("symbol"),
+    dates: c.req.query("dates"),
+    fromTime: c.req.query("from"),
+    toTime: c.req.query("to"),
+    scope: c.req.query("scope"),
+  });
+  if (result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED") return c.json(result, 200);
+  if (
+    result.reason === "DATES_REQUIRE_1_TO_8" ||
+    result.reason === "DUPLICATE_DATES_NOT_ALLOWED" ||
+    result.reason?.startsWith("INVALID_") ||
+    result.reason === "OUTSIDE_MARKET_SESSION"
+  ) return c.json(result, 400);
+  return c.json(result, 503);
 });
 
 researchRouter.get("/h1-dte0-transition-calibration", async (c) => {

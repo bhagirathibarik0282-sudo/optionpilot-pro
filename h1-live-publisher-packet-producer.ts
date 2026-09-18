@@ -117,6 +117,12 @@ export function produceH1LivePublisherPacket(input: H1LivePublisherPacketProduce
   const thetaPctOfPremium = Math.abs(input.burdenSnapshot.theta) / input.burdenSnapshot.premiumLtp * 100;
   const thetaPass = thetaPctOfPremium <= input.burdenPolicy.maxAbsThetaPctOfPremium;
   const ivPass = input.burdenSnapshot.iv >= input.burdenPolicy.minIv && input.burdenSnapshot.iv <= input.burdenPolicy.maxIv;
+  const capitalEvidence = input.capitalLiquidityDteEvidence;
+  const capitalRequired = capitalEvidence.premiumLtp * capitalEvidence.lotQuantity;
+  const depthMid = (capitalEvidence.bid + capitalEvidence.ask) / 2;
+  const relativeSpreadPct = ((capitalEvidence.ask - capitalEvidence.bid) / depthMid) * 100;
+  const bidDepthCoverageMultiple = capitalEvidence.bidQty / capitalEvidence.lotQuantity;
+  const askDepthCoverageMultiple = capitalEvidence.askQty / capitalEvidence.lotQuantity;
 
   return {
     version: "H1_LIVE_PUBLISHER_PACKET_PRODUCER_V1",
@@ -131,6 +137,24 @@ export function produceH1LivePublisherPacket(input: H1LivePublisherPacketProduce
         observedAt: premiumObservedAt,
         source: premium.version,
         provenance: "LIVE_RUNTIME_EXACT",
+      },
+      capitalLiquidityEvidence: {
+        dte: capitalEvidence.dte,
+        premiumLtp: capitalEvidence.premiumLtp,
+        lotQuantity: capitalEvidence.lotQuantity,
+        bid: capitalEvidence.bid,
+        ask: capitalEvidence.ask,
+        bidQty: capitalEvidence.bidQty,
+        askQty: capitalEvidence.askQty,
+        capitalRequired,
+        relativeSpreadPct,
+        bidDepthCoverageMultiple,
+        askDepthCoverageMultiple,
+        occurredAt: capitalEvidence.occurredAt,
+        receivedAt: capitalEvidence.receivedAt,
+        provenance: "LIVE_RUNTIME_EXACT",
+        thresholdAuthority: "NONE",
+        observationalOnly: true,
       },
       policyDiagnostics: {
         premiumDeltaGamma: {

@@ -1,4 +1,6 @@
 import type { Hono } from "hono";
+import { dbLoadRecent } from "./db.js";
+import { H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, type H1LiveExactRawDepthRecord } from "./h1-live-exact-raw-evidence-store.js";
 import { mountHawkEyeLiveRoute } from "./hawk-eye-live-http-v1.js";
 import { researchRouter } from "./research-router.js";
 import { installTelegramCombinationBridge } from "./telegram-combination-bridge.js";
@@ -235,6 +237,32 @@ export function mountResearchRoutes(app: Hono): void {
   });
 
   app.get("/api/research/h1-live-gate-evidence-history", runH1LiveGateEvidenceHistoryHttp);
+
+  app.get("/api/research/h1-live-exact-depth-history", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const requested = Number(c.req.query("limit") ?? 100);
+    const limit = Number.isInteger(requested) ? Math.min(500, Math.max(1, requested)) : 100;
+    const records = await dbLoadRecent<H1LiveExactRawDepthRecord>(H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, limit);
+    return c.json({
+      ok: true,
+      mode: "READ_ONLY_H1_LIVE_EXACT_DEPTH_HISTORY_V1",
+      productionImpact: "NONE",
+      persistKind: H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND,
+      count: records.length,
+      records,
+      safety: {
+        readOnly: true,
+        policyRequired: false,
+        thresholdAuthority: "NONE",
+        affectsSelector: false,
+        affectsTelegram: false,
+        affectsVerdict: false,
+        affectsExecution: false,
+        createsOrders: false,
+        failClosed: true,
+      },
+    });
+  });
 
   app.get("/api/research/h1-exact-live-contract-discovery", async (c) => {
     c.header("Cache-Control", "no-store");

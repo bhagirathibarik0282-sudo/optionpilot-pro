@@ -1,5 +1,6 @@
 import type { H1LiveExactMarketWiringReadinessResult } from "./h1-live-exact-market-wiring-readiness.js";
-import { H1LiveExactRawEvidenceStore, type H1LiveExactRawEvidenceMissing, type H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
+import { H1LiveExactRawEvidenceStore, H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, buildH1LiveExactRawDepthRecord, type H1LiveExactRawDepthRecord, type H1LiveExactRawEvidenceMissing, type H1LiveExactRawEvidenceRow, type H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
+import { dbInsert } from "./db.js";
 import { buildNearestValidMonthlyPeerReadiness, type H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
 import { buildH1ReadOnlyEvidenceConsumerBoundary } from "./h1-readonly-evidence-consumer-boundary.js";
 import { deriveH1ExactLiveSpotDirection } from "./h1-exact-live-spot-direction-provider.js";
@@ -50,6 +51,7 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   reconnectMaxAttempts?: number;
   constituentRegistry?: CanonicalConstituentTokenEntry[];
   selectorPolicyEnv?: NodeJS.ProcessEnv;
+  rawDepthPersist?: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
 }
 
 export interface H1LiveExactReadOnlyWebSocketStatus {
@@ -100,6 +102,8 @@ export class H1LiveExactReadOnlyWebSocketService {
   private readonly constituentEvidence: CanonicalConstituentTickStore | null;
   private readonly firstSeenTokens = new Set<number>();
   private readonly rawEvidence: H1LiveExactRawEvidenceStore;
+  private readonly rawDepthPersist: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
+  private readonly lastPersistedDepthMinuteByToken = new Map<number, string>();
   private readonly directionBaselineBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], H1ExactUnderlyingObservation>();
   private readonly selectorDirectionBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], "UP" | "DOWN">();
   private selectorCoordinator: H1KiteExactRuntimeCoordinator | null = null;
@@ -122,6 +126,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       : null;
     this.allowedTokens = new Set([...registryTokens, ...constituentTokens]);
     this.rawEvidence = new H1LiveExactRawEvidenceStore(config.readiness.registry);
+    this.rawDepthPersist = config.rawDepthPersist ?? ((record) => dbInsert(H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, record));
     this.value = {
       version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1", started: false, connected: false, state: "READY",
       subscribedTokenCount: this.allowedTokens.size, receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
@@ -156,6 +161,25 @@ export class H1LiveExactReadOnlyWebSocketService {
   }
   hawkEyeSource() {
     return this.constituentEvidence?.hawkEyeSource() ?? null;
+  }
+
+  private persistRawDepthEvidence(rows: H1LiveExactRawEvidenceRow[]): void {
+    for (const row of rows) {
+      const record = buildH1LiveExactRawDepthRecord(row);
+      if (!record) continue;
+      if (this.lastPersistedDepthMinuteByToken.get(record.instrumentToken) === record.minuteBucket) continue;
+      this.lastPersistedDepthMinuteByToken.set(record.instrumentToken, record.minuteBucket);
+      try {
+        const pending = this.rawDepthPersist(record);
+        if (pending && typeof (pending as Promise<void>).catch === "function") {
+          void (pending as Promise<void>).catch((err) => {
+            if (process.env.NODE_ENV !== "test") console.error("[H1_LIVE_EXACT_RAW_DEPTH_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
+          });
+        }
+      } catch (err) {
+        if (process.env.NODE_ENV !== "test") console.error("[H1_LIVE_EXACT_RAW_DEPTH_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
+      }
+    }
   }
 
   start(): H1LiveExactReadOnlyWebSocketStatus {
@@ -231,6 +255,7 @@ export class H1LiveExactReadOnlyWebSocketService {
           }
         }
         const evidence = this.rawEvidence.status(receivedAt);
+        this.persistRawDepthEvidence(evidence.rows);
         this.value.rawEvidenceReady = evidence.ready;
         this.value.rawEvidenceExpectedTokenCount = evidence.expectedTokenCount;
         this.value.rawEvidenceFreshTokenCount = evidence.freshTokenCount;

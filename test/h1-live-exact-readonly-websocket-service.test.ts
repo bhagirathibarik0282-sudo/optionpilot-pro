@@ -149,6 +149,34 @@ test("fails closed when a constituent token overlaps the immediate registry", ()
 });
 
 
+test("persists exact option depth once per token per minute without selector policy authority", () => {
+  const persisted:any[] = [];
+  const service = new H1LiveExactReadOnlyWebSocketService({
+    readiness: readiness(), apiKey: "key", accessToken: "token",
+    rawDepthPersist: (record) => { persisted.push(record); },
+    selectorPolicyEnv: {},
+  });
+  const base = {
+    instrumentToken: 3, symbol: "NIFTY" as const, role: "OPTION" as const, instrumentLabel: "NIFTY08CE",
+    expiry: "2026-09-08", strike: 25050, optionSide: "CE" as const,
+    observedAt: "2026-09-04T08:10:01.000Z", receivedAt: "2026-09-04T08:10:01.100Z",
+    ltp: 100.5, bid: 100, ask: 101, bidQty: 50, askQty: 60,
+  };
+  (service as any).persistRawDepthEvidence([base]);
+  (service as any).persistRawDepthEvidence([{...base, observedAt:"2026-09-04T08:10:20.000Z", receivedAt:"2026-09-04T08:10:20.100Z"}]);
+  (service as any).persistRawDepthEvidence([{...base, observedAt:"2026-09-04T08:11:00.000Z", receivedAt:"2026-09-04T08:11:00.100Z"}]);
+  assert.equal(persisted.length, 2);
+  assert.equal(persisted[0].minuteBucket, "2026-09-04T08:10:00.000Z");
+  assert.equal(persisted[0].bidQty, 50);
+  assert.equal(persisted[0].askQty, 60);
+  assert.equal(persisted[0].thresholdAuthority, "NONE");
+  assert.equal(persisted[0].observationalOnly, true);
+  assert.equal(persisted[0].affectsSelector, false);
+  assert.equal(persisted[0].affectsTelegram, false);
+  assert.equal(persisted[0].affectsExecution, false);
+  assert.equal(persisted[1].minuteBucket, "2026-09-04T08:11:00.000Z");
+});
+
 test("selector runtime quarantines shadow-only policy and keeps raw live socket available", () => {
   const sent:string[] = [];
   const socket = fakeSocket(sent);

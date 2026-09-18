@@ -18,6 +18,34 @@ export interface H1LiveExactRawEvidenceRow {
   askQty: number | null;
 }
 
+export const H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND = "H1_LIVE_EXACT_RAW_DEPTH_1M_V1" as const;
+
+export interface H1LiveExactRawDepthRecord {
+  version: typeof H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND;
+  logicalKey: string;
+  minuteBucket: string;
+  instrumentToken: number;
+  symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
+  expiry: string;
+  strike: number;
+  optionSide: "CE" | "PE";
+  observedAt: string;
+  receivedAt: string;
+  ltp: number;
+  bid: number;
+  ask: number;
+  bidQty: number;
+  askQty: number;
+  source: "KITE_WEBSOCKET_FULL";
+  provenance: "LIVE_RUNTIME_EXACT";
+  thresholdAuthority: "NONE";
+  observationalOnly: true;
+  affectsSelector: false;
+  affectsTelegram: false;
+  affectsExecution: false;
+  createsOrders: false;
+}
+
 export interface H1LiveExactRawEvidenceMissing {
   instrumentToken: number;
   symbol: string;
@@ -67,6 +95,43 @@ function time(value: string | null | undefined): number | null {
   if (typeof value !== "string") return null;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
+}
+
+export function buildH1LiveExactRawDepthRecord(row: H1LiveExactRawEvidenceRow): H1LiveExactRawDepthRecord | null {
+  if (row.role !== "OPTION" || !row.expiry || !Number.isFinite(row.strike) || Number(row.strike) <= 0) return null;
+  if (row.optionSide !== "CE" && row.optionSide !== "PE") return null;
+  if (!Number.isFinite(row.ltp) || row.ltp <= 0 || !Number.isFinite(row.bid) || Number(row.bid) <= 0) return null;
+  if (!Number.isFinite(row.ask) || Number(row.ask) <= Number(row.bid)) return null;
+  if (!Number.isInteger(row.bidQty) || Number(row.bidQty) < 0 || !Number.isInteger(row.askQty) || Number(row.askQty) < 0) return null;
+  const observedMs = time(row.observedAt);
+  const receivedMs = time(row.receivedAt);
+  if (observedMs == null || receivedMs == null || observedMs > receivedMs) return null;
+  const minuteBucket = new Date(Math.floor(observedMs / 60_000) * 60_000).toISOString();
+  return {
+    version: H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND,
+    logicalKey: `${minuteBucket}|${row.instrumentToken}`,
+    minuteBucket,
+    instrumentToken: row.instrumentToken,
+    symbol: row.symbol,
+    expiry: row.expiry,
+    strike: Number(row.strike),
+    optionSide: row.optionSide,
+    observedAt: row.observedAt,
+    receivedAt: row.receivedAt,
+    ltp: row.ltp,
+    bid: Number(row.bid),
+    ask: Number(row.ask),
+    bidQty: Number(row.bidQty),
+    askQty: Number(row.askQty),
+    source: "KITE_WEBSOCKET_FULL",
+    provenance: "LIVE_RUNTIME_EXACT",
+    thresholdAuthority: "NONE",
+    observationalOnly: true,
+    affectsSelector: false,
+    affectsTelegram: false,
+    affectsExecution: false,
+    createsOrders: false,
+  };
 }
 
 export class H1LiveExactRawEvidenceStore {

@@ -11,14 +11,47 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
-      - name: Prove four-date direction OOS readiness
+      - name: Diagnose Sep18 replay quality fail-closed
         shell: bash
         run: |
           set -euo pipefail
           URL='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-15%2C2026-09-16%2C2026-09-18&from=09%3A15&to=15%3A30&scope=FULL'
-          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 "$URL" -o /tmp/direction.json
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 "$URL" -o /tmp/direction4.json
+          jq '{
+            ok,
+            productionImpact,
+            replaySummaries: [.replaySummaries[] | {
+              tradeDate,
+              complete: .continuity.complete,
+              missingBucketCount: (.continuity.missingBuckets | length),
+              missingBuckets: .continuity.missingBuckets
+            }],
+            evidenceQuality: .research.thresholdOos.evidenceQuality,
+            researchBlockers: .research.blockers,
+            researchSafety: .research.safety
+          }' /tmp/direction4.json
+          jq -e '
+            .ok == true and
+            .productionImpact == "NONE" and
+            (.replaySummaries | length) == 4 and
+            (.replaySummaries | map(select(.tradeDate == "2026-09-18" and .complete == false and .missingBucketCount == 8)) | length) == 1 and
+            (.research.thresholdOos.evidenceQuality.oosIncompleteDates | index("2026-09-18")) != null and
+            .research.thresholdOos.evidenceQuality.allIncludedDatesComplete == false and
+            .research.safety.temporalHoldoutEvaluated == false and
+            ((.research.blockers | index("DIRECTION_POLICY_OOS_REPLAY_QUALITY_INCOMPLETE")) != null) and
+            .safety.affectsSelector == false and
+            .safety.affectsTelegram == false and
+            .safety.affectsExecution == false
+          ' /tmp/direction4.json >/dev/null
+
+      - name: Prove clean direction OOS baseline remains valid
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-15%2C2026-09-16&from=09%3A15&to=15%3A30&scope=FULL'
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 "$URL" -o /tmp/direction3.json
           jq '{
             ok,
             productionImpact,
@@ -30,11 +63,11 @@ jobs:
             thresholdOos: .research.thresholdOos,
             researchBlockers: .research.blockers,
             researchSafety: .research.safety
-          }' /tmp/direction.json
+          }' /tmp/direction3.json
           jq -e '
             .ok == true and
             .productionImpact == "NONE" and
-            (.replaySummaries | length) == 4 and
+            (.replaySummaries | length) == 3 and
             ([.replaySummaries[].continuity.complete] | all) and
             .research.thresholdOos.temporalCandidateMatrixEvaluated == true and
             .research.thresholdOos.evidenceQuality.allIncludedDatesComplete == true and
@@ -49,7 +82,7 @@ jobs:
             .safety.affectsSelector == false and
             .safety.affectsTelegram == false and
             .safety.affectsExecution == false
-          ' /tmp/direction.json >/dev/null
+          ' /tmp/direction3.json >/dev/null
 
       - name: Prove Greek timing history endpoint safety
         shell: bash

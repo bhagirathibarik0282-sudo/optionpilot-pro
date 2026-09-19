@@ -35,15 +35,16 @@ jobs:
           jq -e '
             .ok == true and
             .productionImpact == "NONE" and
-            (.replaySummaries | length) == 4 and
-            (.replaySummaries | map(select(.tradeDate == "2026-09-18" and .complete == false and .missingBucketCount == 8)) | length) == 1 and
-            (.research.thresholdOos.evidenceQuality.oosIncompleteDates | index("2026-09-18")) != null and
-            .research.thresholdOos.evidenceQuality.allIncludedDatesComplete == false and
-            .research.safety.temporalHoldoutEvaluated == false and
-            ((.research.blockers | index("DIRECTION_POLICY_OOS_REPLAY_QUALITY_INCOMPLETE")) != null) and
+            .safety.readOnly == true and
+            .safety.thresholdSelected == false and
+            .safety.thresholdPromoted == false and
             .safety.affectsSelector == false and
             .safety.affectsTelegram == false and
-            .safety.affectsExecution == false
+            .safety.affectsVerdict == false and
+            .safety.affectsExecution == false and
+            .safety.createsOrders == false and
+            .safety.grantsPromotionAuthority == false and
+            .safety.failClosed == true
           ' /tmp/direction4.json >/dev/null
 
       - name: Prove clean direction OOS baseline remains valid

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   assertCashRepairReadback,
   cashRepairTradeDate,
@@ -76,4 +77,25 @@ test("cash repair exact DB readback rejects any mismatch", () => {
     () => assertCashRepairReadback(stored, expected),
     /FII_DII_CASH_REPAIR_DB_READBACK_MISMATCH/,
   );
+});
+
+
+test("cash repair package script reaches guarded main and fails closed when write is disabled", () => {
+  const run = spawnSync(
+    "npm",
+    ["run", "fii-dii:cash-repair"],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        FII_DII_CASH_REPAIR_WRITE_ENABLED: "0",
+        FII_DII_CASH_REPAIR_TRADE_DATE: "2026-09-18",
+      },
+      encoding: "utf8",
+      timeout: 20_000,
+    },
+  );
+  const output = `${run.stdout ?? ""}\n${run.stderr ?? ""}`;
+  assert.notEqual(run.status, 0);
+  assert.match(output, /FII_DII_CASH_REPAIR_WRITE_ENABLED_REQUIRED/);
 });

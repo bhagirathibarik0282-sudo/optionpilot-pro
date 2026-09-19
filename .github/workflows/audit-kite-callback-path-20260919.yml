@@ -1,0 +1,50 @@
+name: Audit Kite Callback Path
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/audit-kite-callback-path-20260919.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Verify generated Kite auth wiring without secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/wire-kite-auth-callback-v2.mjs --check
+          node - <<'NODE'
+          const fs=require("fs");
+          const s=fs.readFileSync("server.ts","utf8");
+          const routeRx=/app\.(get|post)\(\s*["'`]([^"'`]*kite[^"'`]*)["'`]/ig;
+          const routes=[];
+          let m;
+          while((m=routeRx.exec(s))) routes.push({method:m[1].toUpperCase(),path:m[2]});
+          const checks={
+            hasCanonicalLoginUrl:s.includes("https://kite.zerodha.com/connect/login?v=3&api_key="),
+            hasCallbackRequestToken:s.includes('c.req.query("request_token")'),
+            hasCallbackDiagnostics:s.includes("requestTokenPresent="),
+            hasTokenExchange:s.includes("generateSession") || s.includes("/session/token") || s.includes("api.kite.trade/session/token"),
+            hasAuthorityPersist:s.includes("persistKiteAuthoritySession"),
+            hasStatusRoute:s.includes('/api/kite/status'),
+            routes,
+          };
+          console.log("KITE_AUTH_PATH_AUDIT="+JSON.stringify(checks));
+          NODE
+      - name: Audit-only guard
+        run: |
+          echo AUDIT_ONLY
+          echo NO_SECRETS_PRINTED
+          echo NO_DATABASE_WRITE
+          echo NO_RAILWAY_MUTATION
+          echo NO_KITE_TOKEN_EXCHANGE

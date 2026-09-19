@@ -9,6 +9,8 @@ import {
   getMeaningfulLiveAcceptanceStatus,
   installMeaningfulLiveAcceptanceMonitor,
 } from "./meaningful-live-acceptance-monitor.js";
+import { runFiiDiiCashCatchupRuntime } from "./fii-dii-cash-catchup-runtime.js";
+import { scheduleFiiDiiCashCatchup } from "./fii-dii-cash-catchup-scheduler.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
 import {
@@ -47,6 +49,33 @@ const MEANINGFUL_ACCEPTANCE_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
 installTelegramCombinationBridge();
 installMeaningfulLiveTelegramBridge();
 installMeaningfulLiveAcceptanceMonitor();
+
+
+function runContainedFiiDiiCashCatchup(trigger: "STARTUP" | "EXISTING_1900_IST_WINDOW"): void {
+  void runFiiDiiCashCatchupRuntime()
+    .then((result) => console.log(`[FII_DII_CASH_CATCHUP] ${JSON.stringify({ trigger, ...result })}`))
+    .catch((err) => console.error(`[FII_DII_CASH_CATCHUP] ${JSON.stringify({
+      trigger,
+      version: "FII_DII_CASH_CATCHUP_RUNTIME_V1",
+      ok: false,
+      status: "FAILED_CLOSED",
+      blocker: err instanceof Error ? err.message : "FII_DII_CASH_CATCHUP_FAILED",
+      productionImpact: "CONTEXT_PERSISTENCE_ONLY",
+      contextOnly: true,
+      grantsDirectionalSupport: false,
+      affectsVerdict: false,
+      affectsCandidate: false,
+      affectsTelegram: false,
+      affectsExecution: false,
+      createsOrders: false,
+      failClosed: true,
+    })}`));
+}
+
+if (process.env.NODE_ENV !== "test" && process.env.DATABASE_URL?.trim()) {
+  runContainedFiiDiiCashCatchup("STARTUP");
+  scheduleFiiDiiCashCatchup(() => runContainedFiiDiiCashCatchup("EXISTING_1900_IST_WINDOW"));
+}
 
 // H1 exact live path remains hard-default OFF. Only the exact env value `true`
 // may start the read-only WebSocket chain. The chain itself has no direction,

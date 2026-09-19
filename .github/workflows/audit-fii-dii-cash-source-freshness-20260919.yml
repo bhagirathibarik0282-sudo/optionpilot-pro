@@ -1,0 +1,67 @@
+name: Audit FII DII Cash Source Freshness
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/audit-fii-dii-cash-source-freshness-20260919.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - name: Probe official NSE cash source without DB writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --import tsx - <<'NODE'
+          import { fetchOfficialFiiDiiLiveV3 } from "./canonical-fii-dii-live-fetch-v3.ts";
+
+          const latest = await fetchOfficialFiiDiiLiveV3({ retryCount: 2 }, fetch);
+          const expected = await fetchOfficialFiiDiiLiveV3({
+            retryCount: 2,
+            expectedMarketSessionDate: "2026-09-18",
+          }, fetch);
+
+          const latestDate = latest.rows?.[0]?.date ?? null;
+          const expectedDate = expected.rows?.[0]?.date ?? null;
+
+          console.log("FII_DII_SOURCE_FRESHNESS="+JSON.stringify({
+            latest: {
+              ok: latest.ok,
+              latestDate,
+              attempts: latest.attempts,
+              sourceUrl: latest.sourceUrl,
+              blocker: latest.blocker,
+            },
+            expectedSep18: {
+              ok: expected.ok,
+              date: expectedDate,
+              attempts: expected.attempts,
+              sourceUrl: expected.sourceUrl,
+              blocker: expected.blocker,
+            },
+            databaseWriteAttempted: false,
+            productionImpact: "NONE",
+          }));
+          NODE
+
+      - name: Guard audit-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'AUDIT_ONLY'
+          echo 'OFFICIAL_NSE_SOURCE_PROBE'
+          echo 'NO_DATABASE_WRITE'
+          echo 'NO_RAILWAY_MUTATION'
+          echo 'NO_CANDIDATE_AUTHORITY'
+          echo 'NO_TELEGRAM_AUTHORITY'
+          echo 'NO_EXECUTION_AUTHORITY'

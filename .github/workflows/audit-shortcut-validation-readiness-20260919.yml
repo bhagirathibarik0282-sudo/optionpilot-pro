@@ -1,0 +1,95 @@
+name: Audit Shortcut Validation Readiness
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/audit-shortcut-validation-readiness-20260919.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Prove four-date direction OOS readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&dates=2026-08-31%2C2026-09-15%2C2026-09-16%2C2026-09-18&from=09%3A15&to=15%3A30&scope=FULL'
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 "$URL" -o /tmp/direction.json
+          jq '{
+            ok,
+            productionImpact,
+            replaySummaries: [.replaySummaries[] | {
+              tradeDate,
+              complete: .continuity.complete,
+              missingBucketCount: (.continuity.missingBuckets | length)
+            }],
+            thresholdOos: .research.thresholdOos,
+            researchBlockers: .research.blockers,
+            researchSafety: .research.safety
+          }' /tmp/direction.json
+          jq -e '
+            .ok == true and
+            .productionImpact == "NONE" and
+            (.replaySummaries | length) == 4 and
+            ([.replaySummaries[].continuity.complete] | all) and
+            .research.thresholdOos.temporalCandidateMatrixEvaluated == true and
+            .research.thresholdOos.evidenceQuality.allIncludedDatesComplete == true and
+            .research.thresholdOos.selectedCandidate == null and
+            .research.thresholdOos.safety.thresholdSelected == false and
+            .research.thresholdOos.safety.thresholdPromoted == false and
+            .research.safety.temporalHoldoutEvaluated == true and
+            .research.safety.policySelectionRubricDefined == false and
+            ((.research.blockers | index("DIRECTION_POLICY_THRESHOLD_NOT_SELECTED")) != null) and
+            ((.research.blockers | index("DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED")) != null) and
+            ((.research.blockers | index("DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED")) == null) and
+            .safety.affectsSelector == false and
+            .safety.affectsTelegram == false and
+            .safety.affectsExecution == false
+          ' /tmp/direction.json >/dev/null
+
+      - name: Prove Greek timing history endpoint safety
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-exact-greek-timing-history?limit=500'
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 120 "$URL" -o /tmp/greek.json
+          jq '{
+            ok,
+            mode,
+            productionImpact,
+            persistKind,
+            count,
+            latestMinute: ([.records[]?.minuteBucket] | max // null),
+            symbols: ([.records[]?.symbol] | unique),
+            safety
+          }' /tmp/greek.json
+          jq -e '
+            .ok == true and
+            .mode == "READ_ONLY_H1_LIVE_EXACT_GREEK_TIMING_HISTORY_V1" and
+            .productionImpact == "NONE" and
+            .persistKind == "H1_LIVE_EXACT_GREEK_TIMING_1M_V1" and
+            .safety.readOnly == true and
+            .safety.prePolicy == true and
+            .safety.thresholdAuthority == "NONE" and
+            .safety.affectsSelector == false and
+            .safety.affectsTelegram == false and
+            .safety.affectsVerdict == false and
+            .safety.affectsExecution == false and
+            .safety.createsOrders == false and
+            .safety.failClosed == true
+          ' /tmp/greek.json >/dev/null
+
+      - name: Guard audit-only boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'AUDIT_ONLY_NO_POLICY_PROMOTION'
+          echo 'NO_DB_MUTATION'
+          echo 'NO_RAILWAY_MUTATION'
+          echo 'NO_SELECTOR_AUTHORITY'
+          echo 'NO_TELEGRAM_AUTHORITY'
+          echo 'NO_KITE_ORDER_AUTHORITY'

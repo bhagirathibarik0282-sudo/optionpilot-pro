@@ -7,11 +7,16 @@ on:
       - 'fii-dii-store.ts'
       - 'fii-dii-nse.ts'
       - 'fii-dii-daily-job.ts'
+      - 'fii-dii-cash-catchup-runtime.ts'
+      - 'fii-dii-cash-catchup-scheduler.ts'
+      - 'research-server-hook.ts'
       - 'canonical-fii-dii-live-fetch-v3.ts'
       - 'test/canonical-fii-dii-live-fetch-v3.test.ts'
       - 'test/fii-dii-participant-store.test.ts'
       - 'test/fii-dii-participant-ingest.test.ts'
       - 'test/fii-dii-nse.test.ts'
+      - 'test/fii-dii-cash-catchup-runtime.test.ts'
+      - 'test/fii-dii-cash-catchup-scheduler.test.ts'
       - '.github/workflows/fii-dii-participant-persistence-ci.yml'
   workflow_dispatch:
 
@@ -30,8 +35,8 @@ jobs:
       - name: Install runtime dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Focused FII/DII participant tests
-        run: NODE_ENV=test node --import tsx --test test/fii-dii-participant-store.test.ts test/fii-dii-participant-ingest.test.ts test/fii-dii-nse.test.ts test/canonical-fii-dii-live-fetch-v3.test.ts
+        run: NODE_ENV=test node --import tsx --test test/fii-dii-participant-store.test.ts test/fii-dii-participant-ingest.test.ts test/fii-dii-nse.test.ts test/canonical-fii-dii-live-fetch-v3.test.ts test/fii-dii-cash-repair-job.test.ts test/fii-dii-cash-catchup-runtime.test.ts test/fii-dii-cash-catchup-scheduler.test.ts
       - name: Install TypeScript check tooling
         run: npm install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false typescript@5.8.3 @types/node@22 @types/pg@8
       - name: TypeScript noEmit check
-        run: ./node_modules/.bin/tsc --noEmit --allowImportingTsExtensions --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node --skipLibCheck --esModuleInterop fii-dii-store.ts fii-dii-nse.ts canonical-fii-dii-live-fetch-v3.ts fii-dii-daily-job.ts
+        run: ./node_modules/.bin/tsc --noEmit --allowImportingTsExtensions --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node --skipLibCheck --esModuleInterop fii-dii-store.ts fii-dii-nse.ts canonical-fii-dii-live-fetch-v3.ts fii-dii-daily-job.ts fii-dii-cash-repair-job.ts fii-dii-cash-catchup-runtime.ts fii-dii-cash-catchup-scheduler.ts

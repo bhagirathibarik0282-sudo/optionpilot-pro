@@ -52,11 +52,42 @@ export interface H1DirectionThresholdCandidateWindow {
   strictMajorityIntervalRate: number | null;
 }
 
+export type H1DirectionThresholdLabel = "P50" | "P75" | "P90" | "P95";
+
 export interface H1DirectionThresholdCandidateEvaluation {
-  label: "P50" | "P75" | "P90" | "P95";
+  label: H1DirectionThresholdLabel;
   thresholdPct: number;
   calibration: H1DirectionThresholdCandidateWindow;
   oos: H1DirectionThresholdCandidateWindow;
+}
+
+export interface H1DirectionSelectionRubric {
+  version: "H1_DIRECTION_SELECTION_RUBRIC_V1";
+  semantics: "CALIBRATION_ONLY_DUAL_RANK_CONSENSUS_NO_PROMOTION";
+  primaryOrder: [
+    "STRICT_MAJORITY_INTERVAL_RATE_DESC",
+    "MEAN_SIDE_BALANCED_AGREEMENT_SHARE_DESC",
+    "RETENTION_RATE_DESC",
+    "LOWER_QUANTILE_LABEL_TIEBREAK"
+  ];
+  secondaryOrder: [
+    "MEAN_SIDE_BALANCED_AGREEMENT_SHARE_DESC",
+    "STRICT_MAJORITY_INTERVAL_RATE_DESC",
+    "RETENTION_RATE_DESC",
+    "LOWER_QUANTILE_LABEL_TIEBREAK"
+  ];
+  requiresConsensus: true;
+  usesOosForSelection: false;
+  thresholdAuthority: "NONE";
+}
+
+export interface H1DirectionSelectionRubricEvaluation {
+  evaluated: boolean;
+  primaryPreferredLabel: H1DirectionThresholdLabel | null;
+  secondaryPreferredLabel: H1DirectionThresholdLabel | null;
+  consensus: boolean;
+  researchPreferredLabel: H1DirectionThresholdLabel | null;
+  blockers: string[];
 }
 
 export interface H1DirectionThresholdOosMatrix {
@@ -109,6 +140,8 @@ export interface H1DirectionResponseResearchResult {
   quantileBuckets: H1DirectionResponseQuantileBucket[];
   intervalWeighted: H1DirectionResponseIntervalWeightedSummary;
   thresholdOos: H1DirectionThresholdOosMatrix;
+  selectionRubric: H1DirectionSelectionRubric;
+  selectionRubricEvaluation: H1DirectionSelectionRubricEvaluation;
   evidenceState: "OBSERVATIONS_AVAILABLE_NO_POLICY_PROMOTION" | "INSUFFICIENT_REPLAY_OBSERVATIONS";
   blockers: string[];
   safety: {
@@ -116,7 +149,7 @@ export interface H1DirectionResponseResearchResult {
     thresholdSelected: false;
     thresholdPromoted: false;
     temporalHoldoutEvaluated: boolean;
-    policySelectionRubricDefined: false;
+    policySelectionRubricDefined: true;
     affectsSelector: false;
     affectsTelegram: false;
     affectsVerdict: false;
@@ -298,6 +331,104 @@ function thresholdWindow(scores: IntervalScore[], thresholdPct: number): H1Direc
   };
 }
 
+const DIRECTION_SELECTION_RUBRIC: H1DirectionSelectionRubric = {
+  version: "H1_DIRECTION_SELECTION_RUBRIC_V1",
+  semantics: "CALIBRATION_ONLY_DUAL_RANK_CONSENSUS_NO_PROMOTION",
+  primaryOrder: [
+    "STRICT_MAJORITY_INTERVAL_RATE_DESC",
+    "MEAN_SIDE_BALANCED_AGREEMENT_SHARE_DESC",
+    "RETENTION_RATE_DESC",
+    "LOWER_QUANTILE_LABEL_TIEBREAK",
+  ],
+  secondaryOrder: [
+    "MEAN_SIDE_BALANCED_AGREEMENT_SHARE_DESC",
+    "STRICT_MAJORITY_INTERVAL_RATE_DESC",
+    "RETENTION_RATE_DESC",
+    "LOWER_QUANTILE_LABEL_TIEBREAK",
+  ],
+  requiresConsensus: true,
+  usesOosForSelection: false,
+  thresholdAuthority: "NONE",
+};
+
+const THRESHOLD_LABEL_ORDER: Record<H1DirectionThresholdLabel, number> = {
+  P50: 0,
+  P75: 1,
+  P90: 2,
+  P95: 3,
+};
+
+type CalibrationMetricKey =
+  | "strictMajorityIntervalRate"
+  | "meanSideBalancedAgreementShare"
+  | "retentionRate";
+
+function metricOrNegativeInfinity(value: number | null): number {
+  return value == null ? Number.NEGATIVE_INFINITY : value;
+}
+
+function calibrationPreferredLabel(
+  candidates: H1DirectionThresholdCandidateEvaluation[],
+  order: CalibrationMetricKey[],
+): H1DirectionThresholdLabel | null {
+  const ranked = [...candidates].sort((a, b) => {
+    for (const metric of order) {
+      const delta =
+        metricOrNegativeInfinity(b.calibration[metric]) -
+        metricOrNegativeInfinity(a.calibration[metric]);
+      if (delta !== 0) return delta;
+    }
+    return THRESHOLD_LABEL_ORDER[a.label] - THRESHOLD_LABEL_ORDER[b.label];
+  });
+  return ranked[0]?.label ?? null;
+}
+
+function evaluateSelectionRubric(
+  candidates: H1DirectionThresholdCandidateEvaluation[],
+  allIncludedDatesComplete: boolean,
+): H1DirectionSelectionRubricEvaluation {
+  const blockers: string[] = [];
+  if (!candidates.length) blockers.push("DIRECTION_SELECTION_RUBRIC_CANDIDATES_UNAVAILABLE");
+  if (!allIncludedDatesComplete) blockers.push("DIRECTION_SELECTION_RUBRIC_REPLAY_QUALITY_INCOMPLETE");
+
+  const evaluated = candidates.length > 0 && allIncludedDatesComplete;
+  if (!evaluated) {
+    return {
+      evaluated: false,
+      primaryPreferredLabel: null,
+      secondaryPreferredLabel: null,
+      consensus: false,
+      researchPreferredLabel: null,
+      blockers,
+    };
+  }
+
+  const primaryPreferredLabel = calibrationPreferredLabel(candidates, [
+    "strictMajorityIntervalRate",
+    "meanSideBalancedAgreementShare",
+    "retentionRate",
+  ]);
+  const secondaryPreferredLabel = calibrationPreferredLabel(candidates, [
+    "meanSideBalancedAgreementShare",
+    "strictMajorityIntervalRate",
+    "retentionRate",
+  ]);
+  const consensus =
+    primaryPreferredLabel != null &&
+    secondaryPreferredLabel != null &&
+    primaryPreferredLabel === secondaryPreferredLabel;
+  if (!consensus) blockers.push("DIRECTION_SELECTION_RUBRIC_DISAGREEMENT");
+
+  return {
+    evaluated: true,
+    primaryPreferredLabel,
+    secondaryPreferredLabel,
+    consensus,
+    researchPreferredLabel: consensus ? primaryPreferredLabel : null,
+    blockers,
+  };
+}
+
 function buildThresholdOosMatrix(
   usable: H1DirectionResponseResearchInput[],
   built: Array<{ summary: H1DirectionResponseDateSummary; observations: Observation[] }>,
@@ -475,11 +606,15 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
   const temporalHoldoutEvaluated =
     thresholdOos.temporalCandidateMatrixEvaluated &&
     thresholdOos.evidenceQuality.allIncludedDatesComplete;
+  const selectionRubricEvaluation = evaluateSelectionRubric(
+    thresholdOos.candidates,
+    thresholdOos.evidenceQuality.allIncludedDatesComplete,
+  );
 
   const blockers = [
     "DIRECTION_POLICY_THRESHOLD_NOT_SELECTED",
     ...(temporalHoldoutEvaluated ? [] : ["DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED"]),
-    "DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED",
+    ...selectionRubricEvaluation.blockers,
   ];
   if (!thresholdOos.evidenceQuality.allIncludedDatesComplete) {
     blockers.push("DIRECTION_POLICY_OOS_REPLAY_QUALITY_INCOMPLETE");
@@ -505,6 +640,8 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
       dateSummaries: intervalDateSummaries,
     },
     thresholdOos,
+    selectionRubric: DIRECTION_SELECTION_RUBRIC,
+    selectionRubricEvaluation,
     evidenceState: combined.length
       ? "OBSERVATIONS_AVAILABLE_NO_POLICY_PROMOTION"
       : "INSUFFICIENT_REPLAY_OBSERVATIONS",
@@ -514,7 +651,7 @@ export function buildH1DirectionResponseResearch(inputs: H1DirectionResponseRese
       thresholdSelected: false,
       thresholdPromoted: false,
       temporalHoldoutEvaluated,
-      policySelectionRubricDefined: false,
+      policySelectionRubricDefined: true,
       affectsSelector: false,
       affectsTelegram: false,
       affectsVerdict: false,

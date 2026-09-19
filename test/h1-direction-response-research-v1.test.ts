@@ -49,6 +49,7 @@ test("summarizes same-contract direction response without selecting a threshold"
   assert.ok(out.blockers.includes("DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED"));
   assert.equal(out.safety.thresholdSelected, false);
   assert.equal(out.safety.thresholdPromoted, false);
+  assert.equal(out.safety.policySelectionRubricDefined, true);
   assert.equal(out.safety.grantsPromotionAuthority, false);
   assert.equal(out.safety.affectsSelector, false);
   assert.equal(out.safety.affectsTelegram, false);
@@ -122,7 +123,10 @@ test("interval weighting prevents many contracts in one market move from inflati
   assert.equal(out.intervalWeighted.bothSidesPresentIntervalCount, 2);
   assert.equal(out.intervalWeighted.meanSideBalancedAgreementShare, 0.5);
   assert.equal(out.intervalWeighted.strictMajorityIntervalRate, 0.5);
-  assert.ok(out.blockers.includes("DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED"));
+  assert.equal(out.safety.policySelectionRubricDefined, true);
+  assert.equal(out.blockers.includes("DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED"), false);
+  assert.equal(out.selectionRubricEvaluation.evaluated, false);
+  assert.equal(out.selectionRubricEvaluation.researchPreferredLabel, null);
 });
 
 
@@ -230,7 +234,16 @@ test("builds calibration-derived threshold candidates and evaluates them on late
   assert.equal(out.safety.temporalHoldoutEvaluated, true);
   assert.equal(out.blockers.includes("DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED"), false);
   assert.ok(out.blockers.includes("DIRECTION_POLICY_THRESHOLD_NOT_SELECTED"));
-  assert.ok(out.blockers.includes("DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED"));
+  assert.equal(out.blockers.includes("DIRECTION_POLICY_SELECTION_RUBRIC_NOT_DEFINED"), false);
+  assert.equal(out.safety.policySelectionRubricDefined, true);
+  assert.equal(out.selectionRubric.version, "H1_DIRECTION_SELECTION_RUBRIC_V1");
+  assert.equal(out.selectionRubric.usesOosForSelection, false);
+  assert.equal(out.selectionRubric.thresholdAuthority, "NONE");
+  assert.equal(out.selectionRubricEvaluation.evaluated, true);
+  assert.equal(out.selectionRubricEvaluation.primaryPreferredLabel, "P50");
+  assert.equal(out.selectionRubricEvaluation.secondaryPreferredLabel, "P50");
+  assert.equal(out.selectionRubricEvaluation.consensus, true);
+  assert.equal(out.selectionRubricEvaluation.researchPreferredLabel, "P50");
   assert.equal(matrix.evidenceQuality.allIncludedDatesComplete, true);
   assert.deepEqual(matrix.evidenceQuality.calibrationIncompleteDates, []);
   assert.deepEqual(matrix.evidenceQuality.oosIncompleteDates, []);
@@ -266,4 +279,7 @@ test("blocks promotion when an included OOS matrix date has incomplete replay co
   assert.ok(out.blockers.includes("DIRECTION_POLICY_TEMPORAL_HOLDOUT_NOT_EVALUATED"));
   assert.equal(out.thresholdOos.selectedCandidate, null);
   assert.equal(out.thresholdOos.safety.thresholdPromoted, false);
+  assert.equal(out.selectionRubricEvaluation.evaluated, false);
+  assert.equal(out.selectionRubricEvaluation.researchPreferredLabel, null);
+  assert.ok(out.selectionRubricEvaluation.blockers.includes("DIRECTION_SELECTION_RUBRIC_REPLAY_QUALITY_INCOMPLETE"));
 });

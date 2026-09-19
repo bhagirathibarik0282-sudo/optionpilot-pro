@@ -1,0 +1,40 @@
+name: Audit FII DII Cash Repair CLI
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/audit-fii-dii-cash-repair-cli-20260919.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - name: Prove package script actually invokes guarded main
+        shell: bash
+        run: |
+          set -u
+          set +e
+          OUTPUT="$(FII_DII_CASH_REPAIR_WRITE_ENABLED=0 FII_DII_CASH_REPAIR_TRADE_DATE=2026-09-18 npm run fii-dii:cash-repair 2>&1)"
+          STATUS=$?
+          set -e
+          printf '%s
+' "$OUTPUT"
+          echo "EXIT_STATUS=$STATUS"
+          test "$STATUS" -ne 0
+          printf '%s
+' "$OUTPUT" | grep -F 'FII_DII_CASH_REPAIR_WRITE_ENABLED_REQUIRED'
+      - name: Guard audit-only boundary
+        run: |
+          echo 'AUDIT_ONLY'
+          echo 'WRITE_GUARD_DISABLED'
+          echo 'NO_DATABASE_WRITE'
+          echo 'NO_RAILWAY_MUTATION'

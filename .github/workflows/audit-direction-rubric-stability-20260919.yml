@@ -1,0 +1,137 @@
+name: Audit Direction Rubric Stability
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/audit-direction-rubric-stability-20260919.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Query clean chronological windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-direction-response-research?symbol=NIFTY&from=09%3A15&to=15%3A30&scope=FULL'
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 "$BASE&dates=2026-08-31%2C2026-09-15" -o /tmp/w1.json
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 "$BASE&dates=2026-09-15%2C2026-09-16" -o /tmp/w2.json
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 "$BASE&dates=2026-08-31%2C2026-09-15%2C2026-09-16" -o /tmp/w3.json
+
+      - name: Verify audit safety and complete replay continuity
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in /tmp/w1.json /tmp/w2.json /tmp/w3.json; do
+            jq -e '
+              .ok == true and
+              .productionImpact == "NONE" and
+              ([.replaySummaries[].continuity.complete] | all) and
+              .research.thresholdOos.temporalCandidateMatrixEvaluated == true and
+              .research.thresholdOos.evidenceQuality.allIncludedDatesComplete == true and
+              .research.thresholdOos.selectedCandidate == null and
+              .research.thresholdOos.safety.thresholdSelected == false and
+              .research.thresholdOos.safety.thresholdPromoted == false and
+              .safety.readOnly == true and
+              .safety.affectsSelector == false and
+              .safety.affectsTelegram == false and
+              .safety.affectsVerdict == false and
+              .safety.affectsExecution == false and
+              .safety.createsOrders == false and
+              .safety.grantsPromotionAuthority == false and
+              .safety.failClosed == true
+            ' "$f" >/dev/null
+          done
+
+      - name: Compare calibration-only deterministic rubrics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+
+          windows = {}
+          for name in ("w1","w2","w3"):
+              with open(f"/tmp/{name}.json") as fh:
+                  windows[name] = json.load(fh)
+
+          order = {"P50":0,"P75":1,"P90":2,"P95":3}
+
+          def num(v):
+              return float(v) if v is not None else float("-inf")
+
+          # Rubric A: interval consistency first, then side-balanced agreement,
+          # then retained coverage, then lower quantile label for more coverage.
+          def key_a(c):
+              x=c["calibration"]
+              return (
+                  num(x["strictMajorityIntervalRate"]),
+                  num(x["meanSideBalancedAgreementShare"]),
+                  num(x["retentionRate"]),
+                  -order[c["label"]],
+              )
+
+          # Rubric B: side-balanced agreement first, then interval consistency,
+          # then retained coverage, then lower quantile label for more coverage.
+          def key_b(c):
+              x=c["calibration"]
+              return (
+                  num(x["meanSideBalancedAgreementShare"]),
+                  num(x["strictMajorityIntervalRate"]),
+                  num(x["retentionRate"]),
+                  -order[c["label"]],
+              )
+
+          summary={}
+          for name,p in windows.items():
+              m=p["research"]["thresholdOos"]
+              cs=m["candidates"]
+              a=max(cs,key=key_a)
+              b=max(cs,key=key_b)
+              summary[name]={
+                  "calibrationDates":m["calibrationDates"],
+                  "oosDates":m["oosDates"],
+                  "rubricA":a["label"],
+                  "rubricB":b["label"],
+                  "rubricsAgree":a["label"]==b["label"],
+                  "calibrationMetrics":{
+                      c["label"]:c["calibration"] for c in cs
+                  },
+                  "postSelectionOosMetrics":{
+                      c["label"]:c["oos"] for c in cs
+                  },
+              }
+
+          labels_a=[x["rubricA"] for x in summary.values()]
+          labels_b=[x["rubricB"] for x in summary.values()]
+          result={
+              "mode":"AUDIT_ONLY_CALIBRATION_ONLY_RUBRIC_STABILITY",
+              "windows":summary,
+              "rubricAStableAcrossWindows":len(set(labels_a))==1,
+              "rubricBStableAcrossWindows":len(set(labels_b))==1,
+              "sameWinnerAllWindowsBothRubrics":
+                  len(set(labels_a+labels_b))==1,
+              "winnerIfFullyStable": labels_a[0] if len(set(labels_a+labels_b))==1 else None,
+              "oosUsedForSelection":False,
+              "thresholdPromoted":False,
+              "productionImpact":"NONE",
+          }
+          print("DIRECTION_RUBRIC_STABILITY="+json.dumps(result,separators=(",",":")))
+          PY
+
+      - name: Guard no-promotion boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'AUDIT_ONLY'
+          echo 'OOS_NOT_USED_FOR_SELECTION'
+          echo 'NO_THRESHOLD_PROMOTION'
+          echo 'NO_DB_MUTATION'
+          echo 'NO_RAILWAY_MUTATION'
+          echo 'NO_SELECTOR_AUTHORITY'
+          echo 'NO_TELEGRAM_AUTHORITY'
+          echo 'NO_KITE_ORDER_AUTHORITY'

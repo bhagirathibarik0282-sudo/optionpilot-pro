@@ -46,6 +46,52 @@ export interface H1LiveExactRawDepthRecord {
   createsOrders: false;
 }
 
+export const H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND = "H1_LIVE_EXACT_GREEK_TIMING_1M_V1" as const;
+
+export interface H1LiveExactGreekTimingInput {
+  instrumentToken: number;
+  symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
+  expiry: string;
+  strike: number;
+  optionSide: "CE" | "PE";
+  optionObservedAt: string;
+  optionReceivedAt: string;
+  underlyingInstrumentToken: number;
+  underlyingObservedAt: string;
+  underlyingReceivedAt: string;
+}
+
+export interface H1LiveExactGreekTimingRecord {
+  version: typeof H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND;
+  logicalKey: string;
+  minuteBucket: string;
+  instrumentToken: number;
+  symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
+  expiry: string;
+  strike: number;
+  optionSide: "CE" | "PE";
+  optionObservedAt: string;
+  optionReceivedAt: string;
+  underlyingInstrumentToken: number;
+  underlyingObservedAt: string;
+  underlyingReceivedAt: string;
+  optionAgeMsAtReceive: number;
+  underlyingAgeMsAtOptionReceive: number;
+  underlyingSkewMs: number;
+  optionFutureAtReceive: boolean;
+  underlyingFutureAtOptionReceive: boolean;
+  underlyingReceivedAfterOptionReceive: boolean;
+  source: "KITE_WEBSOCKET_FULL";
+  provenance: "LIVE_RUNTIME_EXACT";
+  thresholdAuthority: "NONE";
+  observationalOnly: true;
+  affectsSelector: false;
+  affectsTelegram: false;
+  affectsVerdict: false;
+  affectsExecution: false;
+  createsOrders: false;
+}
+
 export interface H1LiveExactRawEvidenceMissing {
   instrumentToken: number;
   symbol: string;
@@ -129,6 +175,52 @@ export function buildH1LiveExactRawDepthRecord(row: H1LiveExactRawEvidenceRow): 
     observationalOnly: true,
     affectsSelector: false,
     affectsTelegram: false,
+    affectsExecution: false,
+    createsOrders: false,
+  };
+}
+
+export function buildH1LiveExactGreekTimingRecord(input: H1LiveExactGreekTimingInput): H1LiveExactGreekTimingRecord | null {
+  if (!Number.isInteger(input.instrumentToken) || input.instrumentToken <= 0 ||
+      !Number.isInteger(input.underlyingInstrumentToken) || input.underlyingInstrumentToken <= 0) return null;
+  if (input.symbol !== "NIFTY" && input.symbol !== "SENSEX" && input.symbol !== "BANKNIFTY") return null;
+  if (!input.expiry || !Number.isFinite(input.strike) || input.strike <= 0) return null;
+  if (input.optionSide !== "CE" && input.optionSide !== "PE") return null;
+
+  const optionObservedMs = time(input.optionObservedAt);
+  const optionReceivedMs = time(input.optionReceivedAt);
+  const underlyingObservedMs = time(input.underlyingObservedAt);
+  const underlyingReceivedMs = time(input.underlyingReceivedAt);
+  if (optionObservedMs == null || optionReceivedMs == null || underlyingObservedMs == null || underlyingReceivedMs == null) return null;
+
+  const minuteBucket = new Date(Math.floor(optionReceivedMs / 60_000) * 60_000).toISOString();
+  return {
+    version: H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND,
+    logicalKey: `${minuteBucket}|${input.instrumentToken}`,
+    minuteBucket,
+    instrumentToken: input.instrumentToken,
+    symbol: input.symbol,
+    expiry: input.expiry,
+    strike: input.strike,
+    optionSide: input.optionSide,
+    optionObservedAt: input.optionObservedAt,
+    optionReceivedAt: input.optionReceivedAt,
+    underlyingInstrumentToken: input.underlyingInstrumentToken,
+    underlyingObservedAt: input.underlyingObservedAt,
+    underlyingReceivedAt: input.underlyingReceivedAt,
+    optionAgeMsAtReceive: optionReceivedMs - optionObservedMs,
+    underlyingAgeMsAtOptionReceive: optionReceivedMs - underlyingObservedMs,
+    underlyingSkewMs: Math.abs(optionObservedMs - underlyingObservedMs),
+    optionFutureAtReceive: optionObservedMs > optionReceivedMs,
+    underlyingFutureAtOptionReceive: underlyingObservedMs > optionReceivedMs,
+    underlyingReceivedAfterOptionReceive: underlyingReceivedMs > optionReceivedMs,
+    source: "KITE_WEBSOCKET_FULL",
+    provenance: "LIVE_RUNTIME_EXACT",
+    thresholdAuthority: "NONE",
+    observationalOnly: true,
+    affectsSelector: false,
+    affectsTelegram: false,
+    affectsVerdict: false,
     affectsExecution: false,
     createsOrders: false,
   };

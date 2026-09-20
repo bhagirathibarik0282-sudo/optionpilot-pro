@@ -49,11 +49,13 @@ const PASSING_EVIDENCE = {
   brokerSessionReady: true,
 };
 
-test("SELECT with complete evidence authorizes simulation only", () => {
+test("SELECT with otherwise complete evidence stays blocked until canonical execution levels are bound", () => {
   const result = bindH1SelectToShadowExecution({ selectorDecision: SELECT, canonicalConsumer: CANONICAL_CONSUMER, authorizationEvidence: PASSING_EVIDENCE });
   assert.equal(result.decisionId, DECISION_ID);
   assert.equal(result.candidateKey, CANONICAL_KEY);
-  assert.equal(result.authorization.decision, "AUTHORIZE_SIMULATION");
+  assert.equal(result.authorization.decision, "BLOCK");
+  assert.ok(result.authorization.reasonCodes.includes("EXECUTION_LEVEL_EVIDENCE_SOURCE_NOT_BOUND"));
+  assert.ok(!result.authorization.reasonCodes.includes("SHADOW_EXECUTION_AUTHORIZED"));
   assert.equal(result.authorization.placesOrder, false);
   assert.equal(result.placesOrder, false);
 });
@@ -77,6 +79,7 @@ test("SELECT fails closed when execution evidence is incomplete", () => {
   });
   assert.equal(result.authorization.decision, "BLOCK");
   assert.ok(result.authorization.reasonCodes.includes("BROKER_SESSION_NOT_READY"));
+  assert.ok(result.authorization.reasonCodes.includes("EXECUTION_LEVEL_EVIDENCE_SOURCE_NOT_BOUND"));
   assert.equal(result.placesOrder, false);
 });
 

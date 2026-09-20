@@ -17,6 +17,12 @@ test("dashboard fails softly to WAIT without inventing a candidate", () => {
   assert.equal(out.affectsTelegram, false);
   assert.equal(out.affectsExecution, false);
   assert.equal(out.createsOrders, false);
+  assert.equal(out.decisionCard.state, "WAIT");
+  assert.equal(out.decisionCard.action, "WAIT");
+  assert.equal(out.decisionCard.authority, "NONE");
+  assert.equal(out.decisionCard.executionPlan.state, "NOT_PUBLISHED");
+  assert.equal(out.decisionCard.executionPlan.entry, null);
+  assert.equal(out.decisionCard.goldResearch.grantsBusinessAuthority, false);
 });
 
 test("dashboard reuses the same canonical business candidate and horizon views", () => {
@@ -39,12 +45,25 @@ test("dashboard reuses the same canonical business candidate and horizon views",
   assert.equal(out.horizons[0].buyerStars, 5);
   assert.equal(out.horizons[2].sellerStars, 4);
   assert.equal(out.sameCanonicalCandidateForDashboardAndTelegram, true);
+  assert.equal(out.decisionCard.state, "CANDIDATE_READY");
+  assert.equal(out.decisionCard.action, "REVIEW_BUYER_CANDIDATE");
+  assert.equal(out.decisionCard.authority, "EXECUTION_CANDIDATE_SELECTOR_V2");
+  assert.equal(out.decisionCard.candidateKey, consumer.candidateKey);
+  assert.deepEqual(out.decisionCard.buyerEdgeHorizons, ["INTRADAY"]);
+  assert.equal(out.decisionCard.telegram.allowed, true);
+  assert.equal(out.decisionCard.executionPlan.entry, null);
   const html = renderBusinessDashboardV1Html(out);
   assert.match(html, /BUSINESS DASHBOARD V1/);
   assert.match(html, /NIFTY CE 23800/);
   assert.match(html, /INTRADAY/);
   assert.match(html, /MULTIDAY/);
   assert.match(html, /EXPIRY/);
+  assert.match(html, /BUSINESS DECISION CARD/);
+  assert.match(html, /REVIEW_BUYER_CANDIDATE/);
+  assert.match(html, /CURRENT PREMIUM/);
+  assert.match(html, /ENTRY \/ SL \/ TARGET/);
+  assert.match(html, /NOT PUBLISHED/);
+  assert.match(html, /Current premium is not an entry trigger/);
   canonicalBusinessRuntimeRegistry.clear();
 });
 

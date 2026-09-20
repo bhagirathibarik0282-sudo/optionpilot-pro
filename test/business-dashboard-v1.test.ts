@@ -21,6 +21,7 @@ test("dashboard fails softly to WAIT without inventing a candidate", () => {
   assert.equal(out.decisionCard.action, "WAIT");
   assert.equal(out.decisionCard.authority, "NONE");
   assert.equal(out.decisionCard.decisionId, null);
+  assert.equal(out.decisionCard.candidateKey, null);
   assert.equal(out.decisionCard.identityLocked, false);
   assert.equal(out.decisionCard.executionPlan.state, "NOT_PUBLISHED");
   assert.equal(out.decisionCard.executionPlan.entry, null);
@@ -32,18 +33,19 @@ test("dashboard reuses the same canonical business candidate and horizon views",
   const now = Date.now();
   const consumer:any = {
     version:"CANONICAL_BUSINESS_CONSUMER_V1",
-    buyerCandidate:{decisionId:"decision-581",candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",role:"OPTION_BUYER",symbol:"NIFTY",optionSide:"CE",strike:23800,expiryDate:"2026-09-08",dte:1,moneyness:"ATM",premiumLtp:120,dteBucket:"CURRENT_OR_NEAR",sourceAuthority:"EXECUTION_CANDIDATE_SELECTOR_V2"},
+    buyerCandidate:{decisionId:"decision-dashboard-1",candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",role:"OPTION_BUYER",symbol:"NIFTY",optionSide:"CE",strike:23800,expiryDate:"2026-09-08",dte:1,moneyness:"ATM",premiumLtp:120,dteBucket:"CURRENT_OR_NEAR",sourceAuthority:"EXECUTION_CANDIDATE_SELECTOR_V2"},
     horizons:[
       {horizon:"INTRADAY",action:"BUYER_EDGE",buyerStars:5,sellerStars:2,headline:"Buyer edge",reasons:[],devilCheck:"PASS"},
       {horizon:"MULTIDAY",action:"WAIT",buyerStars:3,sellerStars:3,headline:"No clear edge — wait",reasons:[],devilCheck:"PASS"},
       {horizon:"EXPIRY",action:"SELLER_EDGE",buyerStars:2,sellerStars:4,headline:"Seller edge",reasons:[],devilCheck:"PASS"},
     ],
-    telegram:{allowed:true,reason:"BUYER_READY"},decisionId:"decision-581",candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",sameCanonicalCandidateForDashboardAndTelegram:true,affectsExecution:false,createsOrders:false,aiMayOverride:false,
+    telegram:{allowed:true,reason:"BUYER_READY"},decisionId:"decision-dashboard-1",candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",sameCanonicalCandidateForDashboardAndTelegram:true,affectsExecution:false,createsOrders:false,aiMayOverride:false,
   };
   assert.equal(canonicalBusinessRuntimeRegistry.publish("NIFTY", consumer, now), true);
   const out = buildBusinessDashboardV1("NIFTY", new Date(now).toISOString());
   assert.equal(out.ready, true);
   assert.equal(out.candidate?.candidateKey, consumer.candidateKey);
+  assert.equal(out.candidate?.decisionId, consumer.decisionId);
   assert.equal(out.horizons[0].buyerStars, 5);
   assert.equal(out.horizons[2].sellerStars, 4);
   assert.equal(out.sameCanonicalCandidateForDashboardAndTelegram, true);

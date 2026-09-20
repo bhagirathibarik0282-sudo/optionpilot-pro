@@ -29,7 +29,9 @@ export interface BusinessDashboardV1Model {
     state: "CANDIDATE_READY" | "WAIT";
     action: "REVIEW_BUYER_CANDIDATE" | "WAIT";
     authority: "EXECUTION_CANDIDATE_SELECTOR_V2" | "NONE";
+    decisionId: string | null;
     candidateKey: string | null;
+    identityLocked: boolean;
     role: "OPTION_BUYER";
     contract: CanonicalBuyerDashboardCandidate | null;
     buyerEdgeHorizons: BusinessHorizonView["horizon"][];
@@ -80,7 +82,21 @@ export function buildBusinessDashboardV1(symbol: BusinessDashboardSymbol, nowIso
       }));
 
   const candidate = consumer?.buyerCandidate ?? null;
-  const ready = Boolean(candidate && consumer?.sameCanonicalCandidateForDashboardAndTelegram === true);
+  const consumerDecisionIdRaw = (consumer as { decisionId?: unknown } | null)?.decisionId;
+  const candidateDecisionIdRaw = (candidate as (CanonicalBuyerDashboardCandidate & { decisionId?: unknown }) | null)?.decisionId;
+  const consumerDecisionId = typeof consumerDecisionIdRaw === "string" && consumerDecisionIdRaw.trim() ? consumerDecisionIdRaw.trim() : null;
+  const candidateDecisionId = typeof candidateDecisionIdRaw === "string" && candidateDecisionIdRaw.trim() ? candidateDecisionIdRaw.trim() : null;
+  const identityLocked = Boolean(
+    candidate &&
+    consumerDecisionId &&
+    candidateDecisionId &&
+    consumerDecisionId === candidateDecisionId &&
+    consumer?.candidateKey &&
+    consumer.candidateKey === candidate.candidateKey &&
+    consumer?.sameCanonicalCandidateForDashboardAndTelegram === true
+  );
+  const ready = identityLocked;
+  const verifiedCandidate = ready ? candidate : null;
   const familyReady = ready && consumer?.horizons?.length === 3 && consumer.horizons.every((h) => h.devilCheck === "PASS");
   const intelligence: BusinessDashboardV1Model["intelligence"] = [
     { key:"SMC_CANDLE", label:"SMC + Candle Context", state:familyReady ? "VERIFIED" : "WAIT", detail:familyReady ? "Interpretation context verified with canonical business evidence" : "Waiting for verified canonical business evidence" },
@@ -101,13 +117,15 @@ export function buildBusinessDashboardV1(symbol: BusinessDashboardSymbol, nowIso
     state: ready ? "CANDIDATE_READY" : "WAIT",
     action: ready ? "REVIEW_BUYER_CANDIDATE" : "WAIT",
     authority: ready ? "EXECUTION_CANDIDATE_SELECTOR_V2" : "NONE",
-    candidateKey: candidate?.candidateKey ?? null,
+    decisionId: ready ? candidateDecisionId : null,
+    candidateKey: ready ? candidate?.candidateKey ?? null : null,
+    identityLocked,
     role: "OPTION_BUYER",
-    contract: candidate,
-    buyerEdgeHorizons,
-    telegram: consumer?.telegram
+    contract: verifiedCandidate,
+    buyerEdgeHorizons: ready ? buyerEdgeHorizons : [],
+    telegram: ready && consumer?.telegram
       ? { allowed: consumer.telegram.allowed, reason: consumer.telegram.reason }
-      : { allowed: false, reason: "CANDIDATE_NOT_READY" },
+      : { allowed: false, reason: identityLocked ? "CANDIDATE_NOT_READY" : "IDENTITY_LOCK_NOT_VERIFIED" },
     executionPlan: {
       state: "NOT_PUBLISHED",
       entry: null,
@@ -128,7 +146,7 @@ export function buildBusinessDashboardV1(symbol: BusinessDashboardSymbol, nowIso
     ready,
     state: ready ? "CANDIDATE_READY" : "WAIT",
     headline: ready ? "Buyer candidate ready" : "Wait — no verified buyer edge yet",
-    candidate,
+    candidate: verifiedCandidate,
     horizons,
     selector: {
       selectCount: selects.length,

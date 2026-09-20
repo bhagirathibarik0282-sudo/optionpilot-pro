@@ -13,7 +13,6 @@ import { runFiiDiiCashCatchupRuntime } from "./fii-dii-cash-catchup-runtime.js";
 import { scheduleFiiDiiCashCatchup } from "./fii-dii-cash-catchup-scheduler.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
-import { buildH1ExecutionInvalidationAuditV1 } from "./h1-execution-invalidation-audit-v1.js";
 import {
   buildH1EodBusinessBacktestSummary,
   parseH1EodBusinessBacktestTop,
@@ -435,28 +434,6 @@ export function mountResearchRoutes(app: Hono): void {
       ...calibrateH1DeltaThreshold(rows),
       dteCalibration:calibrateH1DeltaByDte(rows),
     });
-  });
-
-  app.get("/api/research/h1-execution-invalidation-audit", async (c) => {
-    c.header("Cache-Control", "no-store");
-    const parsed = parseH1ReplayRequest({
-      symbol: c.req.query("symbol"),
-      tradeDate: c.req.query("date"),
-      fromTime: c.req.query("from"),
-      toTime: c.req.query("to"),
-      scope: c.req.query("scope"),
-    });
-    if (!parsed.ok) {
-      return c.json({
-        ok: false,
-        mode: "READ_ONLY_H1_EXECUTION_INVALIDATION_AUDIT_V1",
-        productionImpact: "NONE",
-        reason: parsed.reason,
-      }, 400);
-    }
-    const replay = await runH1ReplayHttp(parsed.value);
-    const result = buildH1ExecutionInvalidationAuditV1(parsed.value, replay);
-    return c.json({ ok: replay.ok, ...result, reason: replay.reason }, replay.ok ? 200 : 503);
   });
 
   app.get("/api/research/h1-candidate-reconstruction-audit", async (c) => {

@@ -36,6 +36,7 @@ const buyerCandidateBase = {
   currentOrNearExpiryUsable: true,
   higherDteUsable: false,
 };
+const decisionId = "decision-canonical-1";
 
 test("clean buyer control is classified", () => {
   assert.equal(classifyBuyerSellerBehaviour({ ...base, buyersInControl: true }).state, "BUYERS_IN_CONTROL");
@@ -101,11 +102,12 @@ test("buyer-only Telegram gate blocks seller leakage and weak buyer candidates",
 });
 
 test("canonical packet preserves hard selector authority and candidate key", () => {
-  const result = buildCanonicalBuyerCandidatePacket(buyerCandidateBase);
+  const result = buildCanonicalBuyerCandidatePacket(buyerCandidateBase, decisionId);
   assert.equal(result.decision, "READY");
   assert.ok(result.packet);
   assert.equal(result.selector.decision, "SELECT");
   assert.equal(result.packet?.candidateKey, result.selector.candidateKey);
+  assert.equal(result.packet?.decisionId, decisionId);
   assert.equal(result.packet?.sourceAuthority, "EXECUTION_CANDIDATE_SELECTOR_V2");
   assert.equal(result.packet?.role, "OPTION_BUYER");
   assert.equal(result.packet?.affectsTelegram, false);
@@ -114,7 +116,7 @@ test("canonical packet preserves hard selector authority and candidate key", () 
 });
 
 test("PE remains an option buyer contract and is never remapped to seller role", () => {
-  const result = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, side: "PE" });
+  const result = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, side: "PE" }, decisionId);
   assert.equal(result.decision, "READY");
   assert.equal(result.packet?.optionSide, "PE");
   assert.equal(result.packet?.role, "OPTION_BUYER");
@@ -122,7 +124,7 @@ test("PE remains an option buyer contract and is never remapped to seller role",
 });
 
 test("hard selector BLOCK cannot create a canonical buyer packet", () => {
-  const result = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, spreadOk: false });
+  const result = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, spreadOk: false }, decisionId);
   assert.equal(result.decision, "BLOCK");
   assert.equal(result.packet, null);
   assert.equal(result.selector.decision, "BLOCK");
@@ -131,7 +133,7 @@ test("hard selector BLOCK cannot create a canonical buyer packet", () => {
 });
 
 test("canonical consumer gives dashboard and Telegram the same candidate", () => {
-  const canonical = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, side: "PE" });
+  const canonical = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, side: "PE" }, decisionId);
   assert.ok(canonical.packet);
   const result = consumeCanonicalBusinessPacket({
     packet: canonical.packet,
@@ -144,6 +146,8 @@ test("canonical consumer gives dashboard and Telegram the same candidate", () =>
   });
   assert.equal(result.buyerCandidate?.candidateKey, canonical.packet?.candidateKey);
   assert.equal(result.candidateKey, canonical.packet?.candidateKey);
+  assert.equal(result.decisionId, decisionId);
+  assert.equal(result.buyerCandidate?.decisionId, decisionId);
   assert.equal(result.buyerCandidate?.optionSide, "PE");
   assert.equal(result.buyerCandidate?.role, "OPTION_BUYER");
   assert.equal(result.telegram.allowed, true);
@@ -166,7 +170,7 @@ test("canonical consumer fails closed when packet is absent", () => {
 });
 
 test("canonical consumer blocks Telegram on quality or devil flags without changing dashboard identity", () => {
-  const canonical = buildCanonicalBuyerCandidatePacket(buyerCandidateBase);
+  const canonical = buildCanonicalBuyerCandidatePacket(buyerCandidateBase, decisionId);
   assert.ok(canonical.packet);
   const weak = consumeCanonicalBusinessPacket({
     packet: canonical.packet,
@@ -186,7 +190,7 @@ test("canonical consumer blocks Telegram on quality or devil flags without chang
 });
 
 test("canonical Telegram transport passes only the exact approved buyer candidate", () => {
-  const canonical = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, side: "PE" });
+  const canonical = buildCanonicalBuyerCandidatePacket({ ...buyerCandidateBase, side: "PE" }, decisionId);
   assert.ok(canonical.packet);
   const consumer = consumeCanonicalBusinessPacket({ packet: canonical.packet, telegramQualityStars: 5, horizons: [] });
   const result = evaluateCanonicalTelegramTransport({ consumer, meaningfulCandidateKey: canonical.packet!.candidateKey });
@@ -194,6 +198,7 @@ test("canonical Telegram transport passes only the exact approved buyer candidat
     allowed: true,
     reason: "CANONICAL_BUYER_TRANSPORT_READY",
     candidateKey: canonical.packet!.candidateKey,
+    decisionId,
     failClosed: true,
   });
 });
@@ -203,7 +208,7 @@ test("canonical Telegram transport fails closed on missing consumer or candidate
   assert.equal(missing.allowed, false);
   assert.equal(missing.reason, "CANONICAL_CONSUMER_MISSING");
 
-  const canonical = buildCanonicalBuyerCandidatePacket(buyerCandidateBase);
+  const canonical = buildCanonicalBuyerCandidatePacket(buyerCandidateBase, decisionId);
   assert.ok(canonical.packet);
   const consumer = consumeCanonicalBusinessPacket({ packet: canonical.packet, telegramQualityStars: 5, horizons: [] });
   const noKey = evaluateCanonicalTelegramTransport({ consumer, meaningfulCandidateKey: null });
@@ -215,7 +220,7 @@ test("canonical Telegram transport fails closed on missing consumer or candidate
 });
 
 test("canonical Telegram transport respects buyer quality and devil gate blocks", () => {
-  const canonical = buildCanonicalBuyerCandidatePacket(buyerCandidateBase);
+  const canonical = buildCanonicalBuyerCandidatePacket(buyerCandidateBase, decisionId);
   assert.ok(canonical.packet);
   const weak = consumeCanonicalBusinessPacket({ packet: canonical.packet, telegramQualityStars: 3, horizons: [] });
   const devil = consumeCanonicalBusinessPacket({ packet: canonical.packet, telegramQualityStars: 5, devilFlags: ["spread shock"], horizons: [] });

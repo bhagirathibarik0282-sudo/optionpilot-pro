@@ -159,6 +159,7 @@ export function promoteCanonicalBusinessCandidate(
     evaluation,
     {
       provenance: "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1",
+      decisionId,
       observedAtMs: input.snapshotAsOfMs,
       telegramQualityStars: telegramView.view.buyerStars,
       horizons: scoring.horizons.map((row) => ({

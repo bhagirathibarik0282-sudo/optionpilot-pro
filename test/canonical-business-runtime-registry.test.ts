@@ -24,7 +24,7 @@ const candidate = {
 };
 
 function buildConsumer() {
-  const packet = buildCanonicalBuyerCandidatePacket(candidate).packet;
+  const packet = buildCanonicalBuyerCandidatePacket(candidate, "decision-registry-1").packet;
   assert.ok(packet);
   return consumeCanonicalBusinessPacket({
     packet,
@@ -64,6 +64,7 @@ test("registry rejects mismatched symbol and candidate identity", () => {
     buyerCandidate: consumer.buyerCandidate ? { ...consumer.buyerCandidate, candidateKey: "BROKEN" } : null,
   };
   assert.equal(registry.publish("NIFTY", broken, now), false);
+  assert.equal(registry.publish("NIFTY", { ...consumer, decisionId: "decision-forged" }, now), false);
 });
 
 test("registry rejects forged authority, role, key shape, and incomplete horizons", () => {

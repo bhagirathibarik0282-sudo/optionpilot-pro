@@ -26,7 +26,7 @@ function consumer() {
     multiExpiryConflictAbsent: true,
     currentOrNearExpiryUsable: true,
     higherDteUsable: false,
-  });
+  }, "decision-telegram-1");
   assert.ok(result.packet);
   return consumeCanonicalBusinessPacket({
     packet: result.packet,
@@ -46,6 +46,7 @@ test("real meaningful-live contract key maps only from the canonical candidate",
   assert.equal(gate.allowed, true);
   assert.equal(gate.reason, "CANONICAL_BUYER_TRANSPORT_READY");
   assert.equal(gate.candidateKey, canonical.candidateKey);
+  assert.equal(gate.decisionId, canonical.decisionId);
 });
 
 test("same symbol with wrong expiry strike or side fails closed", () => {
@@ -69,6 +70,8 @@ test("missing or quality-blocked canonical authority cannot pass transport", () 
   assert.equal(evaluateCanonicalTelegramTransport({ consumer: null, meaningfulCandidateKey }).reason, "CANONICAL_CONSUMER_MISSING");
   const blocked = { ...canonical, telegram: { allowed: false, reason: "DEVIL_CHECK_BLOCKED" as const } };
   assert.equal(evaluateCanonicalTelegramTransport({ consumer: blocked, meaningfulCandidateKey }).reason, "BUYER_TELEGRAM_GATE_BLOCKED");
+  const forged = { ...canonical, decisionId: "decision-forged" };
+  assert.equal(evaluateCanonicalTelegramTransport({ consumer: forged, meaningfulCandidateKey }).reason, "CANONICAL_DECISION_IDENTITY_MISMATCH");
 });
 
 test("owned candidate bridge errors fail closed while unrelated messages remain pass-through", () => {

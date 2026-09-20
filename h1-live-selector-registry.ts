@@ -11,6 +11,7 @@ import {
   getH1ShadowExecutionEvidence,
   type H1ShadowExecutionEvidence,
 } from "./h1-shadow-execution-evidence-registry.js";
+import { canonicalBusinessRuntimeRegistry } from "./canonical-business-runtime-registry.js";
 import { dbInsert } from "./db.js";
 
 export const H1_LIVE_SELECTOR_REGISTRY_VERSION = "H1_LIVE_SELECTOR_REGISTRY_V1" as const;
@@ -53,11 +54,6 @@ function refreshPpdSupportForPair(packet: LiveGateEvidencePacket): void {
   }
 }
 
-function selectorCandidateKey(decision: H1LiveSelectorPipelineResult["decisions"][number]): string | null {
-  if (!decision?.symbol || !decision.expiry || !Number.isFinite(decision.strike) || (decision.side !== "CE" && decision.side !== "PE")) return null;
-  return `${decision.symbol.toUpperCase()}|${decision.expiry}|${decision.strike}|${decision.side}`;
-}
-
 function unavailableExecutionEvidence(): H1ShadowExecutionEvidence {
   return {
     orderBuildDecision: "BLOCK",
@@ -72,10 +68,15 @@ function unavailableExecutionEvidence(): H1ShadowExecutionEvidence {
 
 function auditShadowRuntimeBindings(result: H1LiveSelectorPipelineResult, observedAt: string): void {
   for (const decision of result.decisions) {
-    const candidateKey = selectorCandidateKey(decision);
-    const verifiedEvidence = getH1ShadowExecutionEvidence(candidateKey, observedAt);
+    const canonicalConsumer = canonicalBusinessRuntimeRegistry.read(decision.symbol);
+    const verifiedEvidence = getH1ShadowExecutionEvidence(
+      canonicalConsumer?.decisionId ?? null,
+      canonicalConsumer?.candidateKey ?? null,
+      observedAt,
+    );
     const binding: H1SelectShadowExecutionBindingResult = bindH1SelectToShadowExecution({
       selectorDecision: decision,
+      canonicalConsumer,
       authorizationEvidence: verifiedEvidence ?? unavailableExecutionEvidence(),
     });
 
@@ -83,6 +84,7 @@ function auditShadowRuntimeBindings(result: H1LiveSelectorPipelineResult, observ
       version: H1_SELECT_SHADOW_RUNTIME_AUDIT_KIND,
       observedAt,
       selectorPipelineVersion: result.version,
+      decisionId: binding.decisionId,
       candidateKey: binding.candidateKey,
       selectorDecision: binding.selectorDecision,
       authorizationDecision: binding.authorization.decision,

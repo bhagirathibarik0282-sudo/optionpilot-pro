@@ -15,6 +15,7 @@ export interface CanonicalBusinessConsumerInput {
 }
 
 export interface CanonicalBuyerDashboardCandidate {
+  decisionId: string;
   candidateKey: string;
   role: "OPTION_BUYER";
   symbol: CanonicalBuyerCandidatePacket["symbol"];
@@ -33,6 +34,7 @@ export interface CanonicalBusinessConsumerResult {
   buyerCandidate: CanonicalBuyerDashboardCandidate | null;
   horizons: BusinessHorizonView[];
   telegram: BuyerTelegramGateResult;
+  decisionId: string | null;
   candidateKey: string | null;
   sameCanonicalCandidateForDashboardAndTelegram: true;
   affectsExecution: false;
@@ -54,10 +56,12 @@ export function consumeCanonicalBusinessPacket(
   input: CanonicalBusinessConsumerInput,
 ): CanonicalBusinessConsumerResult {
   const horizons = input.horizons.map(buildBusinessHorizonView);
+  const decisionId = input.packet?.decisionId ?? null;
   const candidateKey = input.packet?.candidateKey ?? null;
 
   const buyerCandidate: CanonicalBuyerDashboardCandidate | null = input.packet
     ? {
+        decisionId: input.packet.decisionId,
         candidateKey: input.packet.candidateKey,
         role: input.packet.role,
         symbol: input.packet.symbol,
@@ -86,6 +90,7 @@ export function consumeCanonicalBusinessPacket(
     buyerCandidate,
     horizons,
     telegram,
+    decisionId,
     candidateKey,
     sameCanonicalCandidateForDashboardAndTelegram: true,
     affectsExecution: false,

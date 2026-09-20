@@ -8,6 +8,7 @@ export interface CanonicalBuyerCandidatePacket {
   version: "CANONICAL_BUYER_CANDIDATE_PACKET_V1";
   role: "OPTION_BUYER";
   status: "READY";
+  decisionId: string;
   candidateKey: string;
   sourceAuthority: "EXECUTION_CANDIDATE_SELECTOR_V2";
   symbol: ExecutionCandidateInput["symbol"];
@@ -45,9 +46,12 @@ function expectedCandidateKey(input: ExecutionCandidateInput): string {
 export function buildCanonicalBuyerCandidatePacketFromSelection(
   input: ExecutionCandidateInput,
   selector: ExecutionCandidateResult,
+  decisionIdInput: string,
 ): CanonicalBuyerCandidatePacketResult {
+  const decisionId = typeof decisionIdInput === "string" ? decisionIdInput.trim() : "";
   const identityMatches = selector.candidateKey === expectedCandidateKey(input);
   if (
+    !decisionId ||
     selector.version !== "EXECUTION_CANDIDATE_SELECTOR_V2" ||
     selector.decision !== "SELECT" ||
     !selector.candidateKey ||
@@ -58,7 +62,11 @@ export function buildCanonicalBuyerCandidatePacketFromSelection(
       decision: "BLOCK",
       packet: null,
       selector,
-      reasonCodes: identityMatches ? selector.reasonCodes : [...selector.reasonCodes, "CANONICAL_SELECTOR_IDENTITY_MISMATCH"],
+      reasonCodes: [
+        ...selector.reasonCodes,
+        ...(!decisionId ? ["CANONICAL_DECISION_ID_REQUIRED"] : []),
+        ...(!identityMatches ? ["CANONICAL_SELECTOR_IDENTITY_MISMATCH"] : []),
+      ],
       failClosed: true,
     };
   }
@@ -67,6 +75,7 @@ export function buildCanonicalBuyerCandidatePacketFromSelection(
     version: "CANONICAL_BUYER_CANDIDATE_PACKET_V1",
     role: "OPTION_BUYER",
     status: "READY",
+    decisionId,
     candidateKey: selector.candidateKey,
     sourceAuthority: "EXECUTION_CANDIDATE_SELECTOR_V2",
     symbol: input.symbol,
@@ -100,7 +109,8 @@ export function buildCanonicalBuyerCandidatePacketFromSelection(
  */
 export function buildCanonicalBuyerCandidatePacket(
   input: ExecutionCandidateInput,
+  decisionId: string,
 ): CanonicalBuyerCandidatePacketResult {
   const selector = selectExecutionCandidate(input);
-  return buildCanonicalBuyerCandidatePacketFromSelection(input, selector);
+  return buildCanonicalBuyerCandidatePacketFromSelection(input, selector, decisionId);
 }

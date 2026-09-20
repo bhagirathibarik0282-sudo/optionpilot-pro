@@ -49,7 +49,7 @@ test("canonical packet consumes authoritative live selector result without re-se
   const result = produceH1LiveSelectorDecisions({ provenance: "LIVE_RUNTIME_EXACT", candidates: [baseCandidate] });
   const evaluation = result.evaluations[0];
   assert.ok(evaluation);
-  const canonical = buildCanonicalBuyerCandidatePacketFromSelection(evaluation.candidate, evaluation.selector);
+  const canonical = buildCanonicalBuyerCandidatePacketFromSelection(evaluation.candidate, evaluation.selector, "decision-live-1");
   assert.equal(canonical.decision, "READY");
   assert.equal(canonical.packet?.candidateKey, evaluation.selector.candidateKey);
   assert.equal(canonical.packet?.sourceAuthority, "EXECUTION_CANDIDATE_SELECTOR_V2");
@@ -61,7 +61,7 @@ test("pre-evaluated canonical handoff fails closed on selector identity mismatch
   const evaluation = result.evaluations[0];
   assert.ok(evaluation);
   const tampered = { ...evaluation.selector, candidateKey: `${evaluation.selector.candidateKey}:TAMPERED` };
-  const canonical = buildCanonicalBuyerCandidatePacketFromSelection(evaluation.candidate, tampered);
+  const canonical = buildCanonicalBuyerCandidatePacketFromSelection(evaluation.candidate, tampered, "decision-live-1");
   assert.equal(canonical.decision, "BLOCK");
   assert.equal(canonical.packet, null);
   assert.ok(canonical.reasonCodes.includes("CANONICAL_SELECTOR_IDENTITY_MISMATCH"));

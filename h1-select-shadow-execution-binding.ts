@@ -1,4 +1,5 @@
 import { authorizeBrokerExecution, type BrokerExecutionAuthorizationInput, type BrokerExecutionAuthorizationResult } from "./broker-execution-authorization.js";
+import { bindCanonicalExecutionLevelPlan } from "./canonical-execution-level-plan-binding.js";
 import type { CanonicalBusinessConsumerResult } from "./canonical-business-consumer.js";
 import type { H1ForwardCandidateDecisionInput } from "./h1-forward-candidate-decision-binding.js";
 
@@ -56,16 +57,38 @@ export function bindH1SelectToShadowExecution(
   }
 
   const evidence = input?.authorizationEvidence;
-  const authorization = boundaryReasons.length === 0 && evidence
+  const baseAuthorization: BrokerExecutionAuthorizationResult = boundaryReasons.length === 0 && evidence
     ? authorizeBrokerExecution({ mode: "SHADOW", ...evidence })
     : {
-        version: "BROKER_EXECUTION_AUTHORIZATION_V1" as const,
-        decision: "BLOCK" as const,
+        version: "BROKER_EXECUTION_AUTHORIZATION_V1",
+        decision: "BLOCK",
         reasonCodes: boundaryReasons.length > 0 ? [...new Set(boundaryReasons)] : ["SHADOW_EXECUTION_EVIDENCE_REQUIRED"],
-        failClosed: true as const,
-        shadowOnly: true as const,
-        placesOrder: false as const,
+        failClosed: true,
+        shadowOnly: true,
+        placesOrder: false,
       };
+
+  // PR #583: the live selector -> shadow path must remain fail-closed until a
+  // canonical, candidate-bound entry + invalidation evidence producer exists.
+  // This makes the level boundary part of the already-active shadow binding
+  // instead of leaving it as a disconnected helper.
+  const levelBoundary = boundaryReasons.length === 0
+    ? bindCanonicalExecutionLevelPlan({ consumer: consumer ?? null })
+    : null;
+
+  const authorization: BrokerExecutionAuthorizationResult = levelBoundary?.decision === "BLOCK"
+    ? {
+        version: "BROKER_EXECUTION_AUTHORIZATION_V1",
+        decision: "BLOCK",
+        reasonCodes: [...new Set([
+          ...(baseAuthorization.decision === "BLOCK" ? baseAuthorization.reasonCodes : []),
+          ...levelBoundary.blockers,
+        ])],
+        failClosed: true,
+        shadowOnly: true,
+        placesOrder: false,
+      }
+    : baseAuthorization;
 
   return {
     version: "H1_SELECT_SHADOW_EXECUTION_BINDING_V1",

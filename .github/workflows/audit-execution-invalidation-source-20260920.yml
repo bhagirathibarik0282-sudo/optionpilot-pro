@@ -1,0 +1,250 @@
+name: Audit Existing Invalidation Source Evidence
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/audit-execution-invalidation-source-20260920.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch existing PostgreSQL-backed replays
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/invalidation-audit
+          BASE='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay'
+          DATES='2026-09-07 2026-09-09 2026-09-10 2026-09-15 2026-09-16 2026-09-18'
+          for SYMBOL in NIFTY SENSEX; do
+            for DATE in $DATES; do
+              OUT="/tmp/invalidation-audit/${SYMBOL}-${DATE}.json"
+              URL="${BASE}?symbol=${SYMBOL}&date=${DATE}&from=09%3A15&to=15%3A30&scope=FULL"
+              if curl --fail --show-error --silent --location --retry 2 --retry-delay 2 --max-time 180 "$URL" -o "$OUT"; then
+                python - "$OUT" "$SYMBOL" "$DATE" <<'PY'
+import json,sys
+p,symbol,date=sys.argv[1:]
+try:
+    d=json.load(open(p))
+    print("REPLAY", symbol, date, "ok=", d.get("ok"), "counts=", d.get("counts"))
+except Exception as e:
+    print("REPLAY", symbol, date, "parse_error=", str(e))
+PY
+              else
+                printf '{"ok":false,"reason":"HTTP_FETCH_FAILED"}\n' > "$OUT"
+                echo "REPLAY $SYMBOL $DATE fetch_failed"
+              fi
+            done
+          done
+
+      - name: Audit existing recorded invalidation levels
+        shell: bash
+        run: |
+          python - <<'PY'
+import json, glob, math, statistics
+from datetime import datetime, timezone
+
+HORIZONS=(15,30,60)
+SOURCES=("OPTION_PDL","OBSERVED_DAY_LOW")
+
+def num(v):
+    try:
+        if v is None or isinstance(v,bool): return None
+        x=float(v)
+        return x if math.isfinite(x) else None
+    except Exception:
+        return None
+
+def positive(v):
+    x=num(v)
+    return x if x is not None and x>0 else None
+
+def truth(v):
+    return str(v or "")=="TRUE"
+
+def is_candidate(v):
+    return v is True or str(v).lower()=="true"
+
+def ms(v):
+    try:
+        return datetime.fromisoformat(str(v).replace("Z","+00:00")).timestamp()*1000
+    except Exception:
+        return None
+
+def contract_key(r):
+    expiry=str(r.get("expiry") or "")
+    strike=positive(r.get("strike"))
+    side=str(r.get("option_type") or "")
+    if not expiry or strike is None or side not in ("CE","PE"): return None
+    return f"{expiry}|{strike:g}|{side}"
+
+def q(values,p):
+    if not values: return None
+    xs=sorted(values)
+    idx=(len(xs)-1)*p
+    lo=int(math.floor(idx)); hi=int(math.ceil(idx))
+    val=xs[lo] if lo==hi else xs[lo]+(xs[hi]-xs[lo])*(idx-lo)
+    return round(val,4)
+
+stats={(src,h):{
+    "source":src,
+    "horizonMinutes":h,
+    "observedCandidateCount":0,
+    "levelAvailableCount":0,
+    "forwardCoveredCount":0,
+    "stopObservedCount":0,
+    "stopNotObservedCount":0,
+    "_dist":[]
+} for src in SOURCES for h in HORIZONS}
+
+usable=[]
+unavailable=[]
+candidate_total=0
+unique=set()
+examples=[]
+
+for path in sorted(glob.glob("/tmp/invalidation-audit/*.json")):
+    name=path.rsplit("/",1)[-1].replace(".json","")
+    symbol,date=name.split("-",1)
+    d=json.load(open(path))
+    if not d.get("ok") or not isinstance(d.get("options"),list):
+        unavailable.append({"symbol":symbol,"date":date,"reason":d.get("reason") or "REPLAY_NOT_OK"})
+        continue
+    rows=d["options"]
+    usable.append({"symbol":symbol,"date":date,"counts":d.get("counts")})
+    by_contract={}
+    for r in rows:
+        k=contract_key(r)
+        if k: by_contract.setdefault(k,[]).append(r)
+    for arr in by_contract.values():
+        arr.sort(key=lambda r: ms(r.get("minute_bucket")) or 0)
+
+    candidates=[
+        r for r in rows
+        if is_candidate(r.get("is_candidate"))
+        and truth(r.get("truth_verdict"))
+        and positive(r.get("ask")) is not None
+        and contract_key(r) is not None
+        and ms(r.get("minute_bucket")) is not None
+    ]
+    candidate_total += len(candidates)
+
+    for r in candidates:
+        k=contract_key(r)
+        unique.add(f"{symbol}|{date}|{k}")
+        entry=positive(r.get("ask"))
+        t0=ms(r.get("minute_bucket"))
+        path_rows=by_contract.get(k,[])
+        for src in SOURCES:
+            level=positive(r.get("pdl") if src=="OPTION_PDL" else r.get("day_low"))
+            valid_level=level is not None and level < entry
+            for h in HORIZONS:
+                st=stats[(src,h)]
+                st["observedCandidateCount"] += 1
+                if not valid_level:
+                    continue
+                st["levelAvailableCount"] += 1
+                dist=((entry-level)/entry)*100
+                st["_dist"].append(dist)
+                end=t0+h*60_000
+                future=[]
+                for fr in path_rows:
+                    ft=ms(fr.get("minute_bucket"))
+                    bid=positive(fr.get("bid"))
+                    if ft is None or ft<=t0 or ft>end or not truth(fr.get("truth_verdict")) or bid is None:
+                        continue
+                    future.append((ft,bid,fr))
+                if not future:
+                    stop=None
+                    first=None
+                else:
+                    st["forwardCoveredCount"] += 1
+                    hit=next(((ft,fr) for ft,bid,fr in future if bid<=level),None)
+                    stop=hit is not None
+                    if stop:
+                        st["stopObservedCount"] += 1
+                        first=hit[1].get("minute_bucket")
+                    else:
+                        st["stopNotObservedCount"] += 1
+                        first=None
+                if len(examples)<40:
+                    examples.append({
+                        "symbol":symbol,"date":date,
+                        "minuteBucket":r.get("minute_bucket"),
+                        "contractKey":k,
+                        "source":src,"horizonMinutes":h,
+                        "entryAsk":entry,"invalidationPremium":level,
+                        "stopDistancePct":round(dist,4),
+                        "forwardBidRowCount":len(future),
+                        "stopObserved":stop,
+                        "firstStopObservedAt":first,
+                    })
+
+summary=[]
+for src in SOURCES:
+    for h in HORIZONS:
+        st=stats[(src,h)]
+        ds=st.pop("_dist")
+        st.update({
+            "minStopDistancePct":q(ds,0),
+            "medianStopDistancePct":q(ds,.5),
+            "p75StopDistancePct":q(ds,.75),
+            "maxStopDistancePct":q(ds,1),
+        })
+        summary.append(st)
+
+result={
+    "version":"AUDIT_EXECUTION_INVALIDATION_SOURCE_20260920_V1",
+    "generatedAt":datetime.now(timezone.utc).isoformat(),
+    "productionImpact":"NONE",
+    "dataSource":"OPTIONPILOT_PRODUCTION_POSTGRES_H1_REPLAY",
+    "usableReplays":usable,
+    "unavailableReplays":unavailable,
+    "observedCandidateCount":candidate_total,
+    "uniqueObservedCandidateContractDates":len(unique),
+    "summaries":summary,
+    "exampleObservations":examples,
+    "safety":{
+        "sourceSelectionDecision":"NOT_SELECTED",
+        "thresholdPromoted":False,
+        "canonicalSelectorQualificationProven":False,
+        "sourcePromotionAllowed":False,
+        "observationIndependenceClaim":False,
+        "candidateMarkerSemantics":"RECORDED_IS_CANDIDATE_OBSERVATION_NOT_CANONICAL_SELECTOR_PROOF",
+        "usesFutureDataForDecision":False,
+        "futureDataUse":"DESCRIPTIVE_AUDIT_ONLY",
+        "affectsSelector":False,
+        "affectsTelegram":False,
+        "affectsExecution":False,
+        "createsOrders":False,
+        "promotionBlockers":[
+            "CANONICAL_SELECTOR_QUALIFICATION_NOT_PROVEN_FROM_H1_REPLAY",
+            "INVALIDATION_POLICY_NOT_VALIDATED"
+        ]
+    }
+}
+json.dump(result,open("/tmp/invalidation-audit-summary.json","w"),indent=2)
+print(json.dumps(result,indent=2))
+
+assert result["productionImpact"]=="NONE"
+assert result["safety"]["sourceSelectionDecision"]=="NOT_SELECTED"
+assert result["safety"]["canonicalSelectorQualificationProven"] is False
+assert result["safety"]["sourcePromotionAllowed"] is False
+assert result["safety"]["affectsExecution"] is False
+assert result["safety"]["createsOrders"] is False
+assert len(usable) >= 1, "no usable production replay was available"
+PY
+
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-invalidation-source-audit-20260920
+          path: /tmp/invalidation-audit-summary.json
+          retention-days: 7

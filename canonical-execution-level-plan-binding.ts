@@ -1,20 +1,23 @@
 import type { CanonicalBusinessConsumerResult } from "./canonical-business-consumer.js";
-import {
-  buildExecutionLevelPlan,
-  type ExecutionLevelPlanInput,
-  type ExecutionLevelPlanResult,
+import type {
+  ExecutionLevelPlanInput,
+  ExecutionLevelPlanResult,
 } from "./execution-level-plan.js";
 
 export const CANONICAL_EXECUTION_LEVEL_PLAN_BINDING_V1 = "CANONICAL_EXECUTION_LEVEL_PLAN_BINDING_V1" as const;
 
 export interface CanonicalExecutionLevelPlanBindingInput {
   consumer: CanonicalBusinessConsumerResult | null;
-  planInput: ExecutionLevelPlanInput;
+  /**
+   * Observation-only until a canonical execution-level evidence producer is
+   * explicitly bound. Raw caller values must never become execution authority.
+   */
+  planInput?: ExecutionLevelPlanInput | null;
 }
 
 export interface CanonicalExecutionLevelPlanBindingResult {
   version: typeof CANONICAL_EXECUTION_LEVEL_PLAN_BINDING_V1;
-  decision: "READY" | "BLOCK";
+  decision: "BLOCK";
   decisionId: string | null;
   candidateKey: string | null;
   identityLocked: boolean;
@@ -28,6 +31,19 @@ export interface CanonicalExecutionLevelPlanBindingResult {
   failClosed: true;
 }
 
+/**
+ * Identity firewall only.
+ *
+ * The repository currently has EXECUTION_LEVEL_PLAN_V1, but no canonical
+ * producer that proves entryPremium + invalidationPremium for the locked
+ * EXECUTION_CANDIDATE_SELECTOR_V2 candidate. Legacy TM_V1 is explicitly
+ * UNCALIBRATED_FORWARD_TEST_ONLY and belongs to a different candidate path.
+ *
+ * Therefore this boundary may prove candidate identity, but it MUST NOT turn
+ * caller-supplied numbers into a READY execution plan. Once an approved,
+ * candidate-bound level-evidence producer exists, this boundary can be
+ * extended to invoke the existing execution-level calculator.
+ */
 export function bindCanonicalExecutionLevelPlan(
   input: CanonicalExecutionLevelPlanBindingInput,
 ): CanonicalExecutionLevelPlanBindingResult {
@@ -48,28 +64,21 @@ export function bindCanonicalExecutionLevelPlan(
   if (consumer?.sameCanonicalCandidateForDashboardAndTelegram !== true) {
     blockers.push("CANONICAL_DASHBOARD_TELEGRAM_IDENTITY_REQUIRED");
   }
-  if (candidate && input?.planInput?.symbol !== candidate.symbol) {
+  if (candidate && input?.planInput?.symbol && input.planInput.symbol !== candidate.symbol) {
     blockers.push("EXECUTION_LEVEL_PLAN_SYMBOL_MISMATCH");
   }
 
   const identityLocked = blockers.length === 0;
-  const plan = identityLocked ? buildExecutionLevelPlan(input.planInput) : null;
-  if (plan?.decision !== "READY") {
-    for (const reason of plan?.reasonCodes ?? []) {
-      if (reason !== "EXECUTION_LEVEL_PLAN_READY") blockers.push(reason);
-    }
-  }
-
-  const ready = identityLocked && plan?.decision === "READY" && blockers.length === 0;
+  if (identityLocked) blockers.push("EXECUTION_LEVEL_EVIDENCE_SOURCE_NOT_BOUND");
 
   return {
     version: CANONICAL_EXECUTION_LEVEL_PLAN_BINDING_V1,
-    decision: ready ? "READY" : "BLOCK",
+    decision: "BLOCK",
     decisionId: identityLocked ? consumer!.decisionId : null,
     candidateKey: identityLocked ? consumer!.candidateKey : null,
     identityLocked,
-    plan,
-    blockers: ready ? [] : [...new Set(blockers)],
+    plan: null,
+    blockers: [...new Set(blockers)],
     readOnly: true,
     affectsCandidateAuthority: false,
     affectsTelegram: false,

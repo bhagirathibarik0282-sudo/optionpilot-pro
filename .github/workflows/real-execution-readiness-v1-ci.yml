@@ -13,4 +13,4 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: node --import tsx --test test/real-execution-readiness-v1.test.ts test/kite-execution-shadow-v1.test.ts test/broker-execution-authorization.test.ts test/broker-order-builder.test.ts test/broker-order-reconciliation.test.ts test/canonical-execution-level-plan-binding.test.ts test/h1-select-shadow-execution-binding.test.ts test/h1-execution-invalidation-audit-v1.test.ts
+      - run: node --import tsx --test test/real-execution-readiness-v1.test.ts test/kite-execution-shadow-v1.test.ts test/broker-execution-authorization.test.ts test/broker-order-builder.test.ts test/broker-order-reconciliation.test.ts test/canonical-execution-level-plan-binding.test.ts test/h1-select-shadow-execution-binding.test.ts

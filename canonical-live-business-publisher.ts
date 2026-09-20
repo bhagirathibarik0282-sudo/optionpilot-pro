@@ -11,6 +11,7 @@ export interface ExactLiveSelectorEvaluation {
 
 export interface VerifiedLiveBusinessInputs {
   provenance: "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1";
+  decisionId: string;
   observedAtMs: number;
   telegramQualityStars: number;
   horizons: BusinessHorizonInput[];
@@ -22,6 +23,7 @@ export interface CanonicalLiveBusinessPublishResult {
   reason:
     | "CANONICAL_LIVE_BUSINESS_PUBLISHED"
     | "INVALID_BUSINESS_PROVENANCE"
+    | "INVALID_DECISION_ID"
     | "INVALID_BUSINESS_TIMESTAMP"
     | "INVALID_TELEGRAM_QUALITY"
     | "MISSING_REQUIRED_HORIZONS"
@@ -45,6 +47,10 @@ export function publishCanonicalLiveBusiness(
   if (business?.provenance !== "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1") {
     return { accepted: false, reason: "INVALID_BUSINESS_PROVENANCE", candidateKey: null, failClosed: true };
   }
+  const decisionId = typeof business.decisionId === "string" ? business.decisionId.trim() : "";
+  if (!decisionId) {
+    return { accepted: false, reason: "INVALID_DECISION_ID", candidateKey: null, failClosed: true };
+  }
   if (!Number.isFinite(business.observedAtMs) || business.observedAtMs <= 0) {
     return { accepted: false, reason: "INVALID_BUSINESS_TIMESTAMP", candidateKey: null, failClosed: true };
   }
@@ -56,7 +62,7 @@ export function publishCanonicalLiveBusiness(
     return { accepted: false, reason: "MISSING_REQUIRED_HORIZONS", candidateKey: null, failClosed: true };
   }
 
-  const canonical = buildCanonicalBuyerCandidatePacketFromSelection(evaluation.candidate, evaluation.selector);
+  const canonical = buildCanonicalBuyerCandidatePacketFromSelection(evaluation.candidate, evaluation.selector, decisionId);
   if (canonical.decision !== "READY" || !canonical.packet) {
     return { accepted: false, reason: "CANONICAL_PACKET_BLOCKED", candidateKey: null, failClosed: true };
   }

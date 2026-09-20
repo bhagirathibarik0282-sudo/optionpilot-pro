@@ -25,6 +25,7 @@ export interface KiteExecutionShadowResult {
   version: typeof KITE_EXECUTION_SHADOW_V1;
   ready: boolean;
   decision: "SHADOW_READY" | "BLOCK";
+  decisionId: string | null;
   candidateKey: string | null;
   symbol: ShadowSymbol | null;
   lots: number | null;
@@ -42,8 +43,15 @@ export interface KiteExecutionShadowResult {
 export function evaluateKiteExecutionShadow(input: KiteExecutionShadowInput): KiteExecutionShadowResult {
   const c = input?.consumer?.buyerCandidate ?? null;
   const blockers: string[] = [];
-  if (!c || input.consumer?.candidateKey !== c.candidateKey || input.consumer?.sameCanonicalCandidateForDashboardAndTelegram !== true) {
+  if (
+    !c
+    || input.consumer.candidateKey !== c.candidateKey
+    || input.consumer.sameCanonicalCandidateForDashboardAndTelegram !== true
+  ) {
     blockers.push("CANONICAL_BUSINESS_CANDIDATE_REQUIRED");
+  }
+  if (c && (!input.consumer?.decisionId || input.consumer.decisionId !== c.decisionId)) {
+    blockers.push("CANONICAL_DECISION_IDENTITY_REQUIRED");
   }
   if (c && c.symbol !== "NIFTY" && c.symbol !== "SENSEX") blockers.push("SHADOW_SYMBOL_NOT_SUPPORTED");
   if (input?.lots !== 2) blockers.push("SCALP_TWO_LOTS_REQUIRED");
@@ -53,7 +61,7 @@ export function evaluateKiteExecutionShadow(input: KiteExecutionShadowInput): Ki
 
   if (blockers.length) {
     return {
-      version:KITE_EXECUTION_SHADOW_V1,ready:false,decision:"BLOCK",candidateKey:c?.candidateKey ?? null,
+      version:KITE_EXECUTION_SHADOW_V1,ready:false,decision:"BLOCK",decisionId:input.consumer?.decisionId ?? null,candidateKey:c?.candidateKey ?? null,
       symbol:c && (c.symbol === "NIFTY" || c.symbol === "SENSEX") ? c.symbol : null,lots:Number.isInteger(input?.lots) ? input.lots : null,
       lifecycle:null,blockers:[...new Set(blockers)],broker:"KITE",mode:"SHADOW_ONLY",sendsBrokerRequest:false,
       createsOrders:false,affectsExecution:false,affectsTelegram:false,failClosed:true,
@@ -71,7 +79,7 @@ export function evaluateKiteExecutionShadow(input: KiteExecutionShadowInput): Ki
     thesisHoldingConfirmed:input.thesisHoldingConfirmed === true,
   });
   return {
-    version:KITE_EXECUTION_SHADOW_V1,ready:true,decision:"SHADOW_READY",candidateKey:c!.candidateKey,symbol:c!.symbol as ShadowSymbol,
+    version:KITE_EXECUTION_SHADOW_V1,ready:true,decision:"SHADOW_READY",decisionId:input.consumer!.decisionId,candidateKey:c!.candidateKey,symbol:c!.symbol as ShadowSymbol,
     lots:2,lifecycle,blockers:[],broker:"KITE",mode:"SHADOW_ONLY",sendsBrokerRequest:false,createsOrders:false,
     affectsExecution:false,affectsTelegram:false,failClosed:true,
   };

@@ -10,11 +10,13 @@ export interface CanonicalTelegramTransportGateResult {
   reason:
     | "CANONICAL_BUYER_TRANSPORT_READY"
     | "CANONICAL_CONSUMER_MISSING"
+    | "CANONICAL_DECISION_IDENTITY_MISMATCH"
     | "BUYER_TELEGRAM_GATE_BLOCKED"
     | "CANONICAL_CANDIDATE_MISSING"
     | "MEANINGFUL_CANDIDATE_MISSING"
     | "CANDIDATE_IDENTITY_MISMATCH";
   candidateKey: string | null;
+  decisionId: string | null;
   failClosed: true;
 }
 
@@ -48,19 +50,23 @@ export function evaluateCanonicalTelegramTransport(
 ): CanonicalTelegramTransportGateResult {
   const consumer = input.consumer;
   if (!consumer) {
-    return { allowed: false, reason: "CANONICAL_CONSUMER_MISSING", candidateKey: null, failClosed: true };
-  }
-
-  if (!consumer.telegram.allowed) {
-    return { allowed: false, reason: "BUYER_TELEGRAM_GATE_BLOCKED", candidateKey: consumer.candidateKey, failClosed: true };
+    return { allowed: false, reason: "CANONICAL_CONSUMER_MISSING", candidateKey: null, decisionId: null, failClosed: true };
   }
 
   if (!consumer.candidateKey || !consumer.buyerCandidate) {
-    return { allowed: false, reason: "CANONICAL_CANDIDATE_MISSING", candidateKey: null, failClosed: true };
+    return { allowed: false, reason: "CANONICAL_CANDIDATE_MISSING", candidateKey: null, decisionId: consumer.decisionId, failClosed: true };
+  }
+
+  if (!consumer.decisionId || consumer.decisionId !== consumer.buyerCandidate.decisionId) {
+    return { allowed: false, reason: "CANONICAL_DECISION_IDENTITY_MISMATCH", candidateKey: consumer.candidateKey, decisionId: null, failClosed: true };
+  }
+
+  if (!consumer.telegram.allowed) {
+    return { allowed: false, reason: "BUYER_TELEGRAM_GATE_BLOCKED", candidateKey: consumer.candidateKey, decisionId: consumer.decisionId, failClosed: true };
   }
 
   if (!input.meaningfulCandidateKey) {
-    return { allowed: false, reason: "MEANINGFUL_CANDIDATE_MISSING", candidateKey: consumer.candidateKey, failClosed: true };
+    return { allowed: false, reason: "MEANINGFUL_CANDIDATE_MISSING", candidateKey: consumer.candidateKey, decisionId: consumer.decisionId, failClosed: true };
   }
 
   const meaningfulContractKey = canonicalMeaningfulContractKey(consumer);
@@ -69,13 +75,14 @@ export function evaluateCanonicalTelegramTransport(
   const exactContractKey = meaningfulContractKey !== null
     && input.meaningfulCandidateKey === meaningfulContractKey;
   if (!exactCanonicalKey && !exactContractKey) {
-    return { allowed: false, reason: "CANDIDATE_IDENTITY_MISMATCH", candidateKey: consumer.candidateKey, failClosed: true };
+    return { allowed: false, reason: "CANDIDATE_IDENTITY_MISMATCH", candidateKey: consumer.candidateKey, decisionId: consumer.decisionId, failClosed: true };
   }
 
   return {
     allowed: true,
     reason: "CANONICAL_BUYER_TRANSPORT_READY",
     candidateKey: consumer.candidateKey,
+    decisionId: consumer.decisionId,
     failClosed: true,
   };
 }

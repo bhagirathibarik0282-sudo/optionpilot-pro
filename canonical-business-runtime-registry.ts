@@ -18,8 +18,10 @@ export class CanonicalBusinessRuntimeRegistry {
     const symbol = this.normalize(symbolInput);
     if (!symbol || !Number.isFinite(updatedAtMs) || updatedAtMs <= 0) return false;
     if (!consumer || consumer.version !== "CANONICAL_BUSINESS_CONSUMER_V1") return false;
+    if (!consumer.decisionId?.trim()) return false;
     if (!consumer.candidateKey || !consumer.buyerCandidate) return false;
     const candidate = consumer.buyerCandidate;
+    if (consumer.decisionId !== candidate.decisionId || !candidate.decisionId.trim()) return false;
     if (consumer.candidateKey !== candidate.candidateKey) return false;
     if (candidate.symbol !== symbol) return false;
     if (candidate.role !== "OPTION_BUYER" || candidate.sourceAuthority !== "EXECUTION_CANDIDATE_SELECTOR_V2") return false;

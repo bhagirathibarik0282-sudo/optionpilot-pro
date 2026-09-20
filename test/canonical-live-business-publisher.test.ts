@@ -27,16 +27,18 @@ const horizons = [
   { horizon: "MULTIDAY" as const, buyerScore: 72, sellerScore: 55, evidenceReady: true },
   { horizon: "EXPIRY" as const, buyerScore: 82, sellerScore: 40, evidenceReady: true },
 ];
+const decisionId = "decision-publisher-1";
 
 test("publishes only exact selector evaluation plus verified live business inputs", () => {
   canonicalBusinessRuntimeRegistry.clear();
   const selector = selectExecutionCandidate(candidate);
   const out = publishCanonicalLiveBusiness(
     { candidate, selector },
-    { provenance: "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1", observedAtMs: Date.now(), telegramQualityStars: 5, horizons },
+    { provenance: "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1", decisionId, observedAtMs: Date.now(), telegramQualityStars: 5, horizons },
   );
   assert.equal(out.accepted, true);
   assert.equal(out.candidateKey, selector.candidateKey);
+  assert.equal(canonicalBusinessRuntimeRegistry.read("NIFTY")?.decisionId, decisionId);
   assert.equal(canonicalBusinessRuntimeRegistry.read("NIFTY")?.candidateKey, selector.candidateKey);
 });
 
@@ -45,7 +47,7 @@ test("historical or unverified business provenance cannot publish", () => {
   const selector = selectExecutionCandidate(candidate);
   const out = publishCanonicalLiveBusiness(
     { candidate, selector },
-    { provenance: "HISTORICAL_RESEARCH_ONLY" as any, observedAtMs: Date.now(), telegramQualityStars: 5, horizons },
+    { provenance: "HISTORICAL_RESEARCH_ONLY" as any, decisionId, observedAtMs: Date.now(), telegramQualityStars: 5, horizons },
   );
   assert.equal(out.accepted, false);
   assert.equal(out.reason, "INVALID_BUSINESS_PROVENANCE");
@@ -57,7 +59,7 @@ test("all three business horizons are required", () => {
   const selector = selectExecutionCandidate(candidate);
   const out = publishCanonicalLiveBusiness(
     { candidate, selector },
-    { provenance: "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1", observedAtMs: Date.now(), telegramQualityStars: 5, horizons: horizons.slice(0, 2) },
+    { provenance: "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1", decisionId, observedAtMs: Date.now(), telegramQualityStars: 5, horizons: horizons.slice(0, 2) },
   );
   assert.equal(out.accepted, false);
   assert.equal(out.reason, "MISSING_REQUIRED_HORIZONS");
@@ -69,10 +71,22 @@ test("hard selector BLOCK cannot reach canonical runtime registry", () => {
   const selector = selectExecutionCandidate(blockedCandidate);
   const out = publishCanonicalLiveBusiness(
     { candidate: blockedCandidate, selector },
-    { provenance: "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1", observedAtMs: Date.now(), telegramQualityStars: 5, horizons },
+    { provenance: "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1", decisionId, observedAtMs: Date.now(), telegramQualityStars: 5, horizons },
   );
   assert.equal(selector.decision, "BLOCK");
   assert.equal(out.accepted, false);
   assert.equal(out.reason, "CANONICAL_PACKET_BLOCKED");
+  assert.equal(canonicalBusinessRuntimeRegistry.read("NIFTY"), null);
+});
+
+test("missing decision identity cannot publish a canonical runtime candidate", () => {
+  canonicalBusinessRuntimeRegistry.clear();
+  const selector = selectExecutionCandidate(candidate);
+  const out = publishCanonicalLiveBusiness(
+    { candidate, selector },
+    { provenance: "LIVE_BUSINESS_EVIDENCE_VERIFIED_V1", decisionId: "", observedAtMs: Date.now(), telegramQualityStars: 5, horizons },
+  );
+  assert.equal(out.accepted, false);
+  assert.equal(out.reason, "INVALID_DECISION_ID");
   assert.equal(canonicalBusinessRuntimeRegistry.read("NIFTY"), null);
 });

@@ -34,7 +34,7 @@
     "forward:test:wire:check": "node scripts/wire-market-forward-test-readiness-runtime.mjs --check",
     "kite:auth:wire:check": "node scripts/wire-kite-auth-callback-v2.mjs --check",
     "kite:runtime:shadow:preflight": "node scripts/kite-runtime-shadow-preflight.mjs",
-    "test:market-refresh-singleflight": "NODE_ENV=test node --import tsx --test test/market-refresh-singleflight.test.ts test/market-session-calendar.test.ts && node scripts/wire-market-session-calendar.mjs --check",
+    "test:market-refresh-singleflight": "NODE_ENV=test node --import tsx --test test/market-refresh-singleflight.test.ts test/market-session-calendar.test.ts test/option-prev-day-db-hydrator.test.ts && node scripts/wire-market-session-calendar.mjs --check",
     "test:telegram-window-summary": "NODE_ENV=test node --import tsx --test test/telegram-window-summary-v1.test.ts test/telegram-window-runtime-contract.test.ts test/telegram-contract-history-bridge-v1.test.ts",
     "test:z-watch": "NODE_ENV=test node --import tsx --test test/telegram-watch-zscore-v1.test.ts test/telegram-z-watch-exact-feed-v1.test.ts test/telegram-z-watch-live-exact-runtime-v1.test.ts",
     "test:gold-eligibility": "NODE_ENV=test node --import tsx --test test/h1-gold-eligibility-v1.test.ts test/h1-gold-evidence-source-registry-v1.test.ts test/h1-gold-evidence-adapter-v1.test.ts",

@@ -102,6 +102,13 @@ export function buildCanonicalBusinessForwardJournal(
     blockers.push("CANONICAL_BUSINESS_CONSUMER_REQUIRED");
   } else {
     if (
+      consumer.affectsExecution !== false
+      || consumer.createsOrders !== false
+      || consumer.aiMayOverride !== false
+    ) {
+      blockers.push("CANONICAL_CONSUMER_AUTHORITY_BOUNDARY_INVALID");
+    }
+    if (
       consumer.decisionId !== candidate.decisionId
       || consumer.candidateKey !== candidate.candidateKey
       || consumer.sameCanonicalCandidateForDashboardAndTelegram !== true

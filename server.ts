@@ -22,6 +22,7 @@ import { revokeKiteAuthoritySession } from "./kite-session-authority-revoke.js";
 import { KeyedSingleFlight, marketAuthorityKey } from "./market-refresh-singleflight.js";
 import { evaluateFuturesVwapAcceptance } from "./futures-vwap-acceptance.js";
 import { shouldRefreshCandidateSnapshot } from "./candidate-snapshot-freshness.js";
+import { loadPreviousDayOptionLevelsFromDb } from "./option-prev-day-db-hydrator.js";
 
 interface Instrument {
   instrument_token: number;
@@ -5708,7 +5709,49 @@ function updateFirst15MinRange(symbol: string, current: number) {
 // that a 6-hour TTL caused mid-session (this was the root cause of the
 // "2-3 minute" delay reported after Kite login).
 const optionPrevDayCache = new Map<number, { pdh: number; pdl: number; tradingDate: string }>();
+const optionPrevDayDbHydrationDone = new Set<string>();
 // (No fixed TTL constant \u2014 see tradingDate-keyed cache note above.)
+
+async function hydrateOptionPrevDayCacheFromDb(
+  symbol: "NIFTY" | "BANKNIFTY" | "SENSEX",
+  previousTradingDate: string | null,
+  expiryDate: string,
+  instruments: Instrument[],
+): Promise<void> {
+  if (!previousTradingDate || instruments.length === 0) return;
+  const hydrationKey = `${symbol}|${previousTradingDate}|${expiryDate}`;
+  if (optionPrevDayDbHydrationDone.has(hydrationKey)) return;
+
+  const loaded = await loadPreviousDayOptionLevelsFromDb({
+    symbol,
+    previousTradingDate,
+    expiryDate,
+    instruments: instruments
+      .filter((inst) => inst.instrument_type === "CE" || inst.instrument_type === "PE")
+      .map((inst) => ({
+        instrumentToken: inst.instrument_token,
+        strike: inst.strike,
+        optionType: inst.instrument_type as "CE" | "PE",
+      })),
+  });
+
+  // null means DB unavailable/query failed: do NOT mark complete, so the next
+  // refresh can retry. Existing Kite historical fetch remains the fallback.
+  if (loaded === null) return;
+  optionPrevDayDbHydrationDone.add(hydrationKey);
+
+  const today = indiaTradingDate();
+  let hydrated = 0;
+  for (const [token, levels] of loaded) {
+    const cached = optionPrevDayCache.get(token);
+    if (cached?.tradingDate === today) continue;
+    optionPrevDayCache.set(token, { ...levels, tradingDate: today });
+    hydrated += 1;
+  }
+  console.log(
+    `[PDH_PDL_DB_HYDRATE] symbol=${symbol} expiry=${expiryDate} previousTradingDate=${previousTradingDate} requested=${instruments.length} hydrated=${hydrated}`
+  );
+}
 
 async function getOptionPrevDayLevelsBatch(
   accessToken: string,
@@ -6590,8 +6633,10 @@ async function fetchIndexData(
       tokenLookup.tradingsymbol,
       tokenLookup.exchange
     );
+    let previousTradingDate: string | null = null;
     if (indexToken) {
       const previousCandle = await fetchPreviousTradingCandle(accessToken, indexToken);
+      previousTradingDate = previousCandle?.date || null;
       const indexPdhPdl = sanitizePdhPdl(previousCandle?.high || 0, previousCandle?.low || 0);
       baseMetrics.pdh = indexPdhPdl.pdh;
       baseMetrics.pdl = indexPdhPdl.pdl;
@@ -6790,6 +6835,12 @@ async function fetchIndexData(
 
         if (optionQuotes) {
           const allOptionInstruments = [...Object.values(ceInstruments), ...Object.values(peInstruments)];
+          await hydrateOptionPrevDayCacheFromDb(
+            symbol,
+            previousTradingDate,
+            expiryDate,
+            allOptionInstruments,
+          );
           const pdhPdlMap = await getOptionPrevDayLevelsBatch(
             accessToken,
             allOptionInstruments.map((inst) => inst.instrument_token)

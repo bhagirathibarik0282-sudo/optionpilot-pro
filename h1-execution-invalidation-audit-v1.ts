@@ -46,6 +46,11 @@ export interface H1ExecutionInvalidationAuditResult {
   blockers: string[];
   sourceSelectionDecision: "NOT_SELECTED";
   thresholdPromoted: false;
+  canonicalSelectorQualificationProven: false;
+  sourcePromotionAllowed: false;
+  observationIndependenceClaim: false;
+  candidateMarkerSemantics: "RECORDED_IS_CANDIDATE_OBSERVATION_NOT_CANONICAL_SELECTOR_PROOF";
+  promotionBlockers: string[];
   usesFutureDataForDecision: false;
   affectsSelector: false;
   affectsTelegram: false;
@@ -276,6 +281,14 @@ export function buildH1ExecutionInvalidationAuditV1(
     blockers: [...new Set(blockers)],
     sourceSelectionDecision: "NOT_SELECTED",
     thresholdPromoted: false,
+    canonicalSelectorQualificationProven: false,
+    sourcePromotionAllowed: false,
+    observationIndependenceClaim: false,
+    candidateMarkerSemantics: "RECORDED_IS_CANDIDATE_OBSERVATION_NOT_CANONICAL_SELECTOR_PROOF",
+    promotionBlockers: [
+      "CANONICAL_SELECTOR_QUALIFICATION_NOT_PROVEN_FROM_H1_REPLAY",
+      "INVALIDATION_POLICY_NOT_VALIDATED",
+    ],
     usesFutureDataForDecision: false,
     affectsSelector: false,
     affectsTelegram: false,

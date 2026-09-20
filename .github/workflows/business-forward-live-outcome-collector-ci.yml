@@ -18,3 +18,4 @@ jobs:
       - run: node --import tsx --test test/business-forward-live-outcome-collector-v1.test.ts
       - run: node --import tsx --test test/business-forward-kpi-v1.test.ts
       - run: node --import tsx --test test/business-forward-journal-v1.test.ts
+      - run: node --import tsx --test test/canonical-business-forward-journal-adapter.test.ts

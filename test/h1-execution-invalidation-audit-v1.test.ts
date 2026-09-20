@@ -57,6 +57,12 @@ test("describes PDL and observed-day-low without selecting either as stop author
   assert.equal(out.uniqueCandidateContractCount, 1);
   assert.equal(out.sourceSelectionDecision, "NOT_SELECTED");
   assert.equal(out.thresholdPromoted, false);
+  assert.equal(out.canonicalSelectorQualificationProven, false);
+  assert.equal(out.sourcePromotionAllowed, false);
+  assert.equal(out.observationIndependenceClaim, false);
+  assert.equal(out.candidateMarkerSemantics, "RECORDED_IS_CANDIDATE_OBSERVATION_NOT_CANONICAL_SELECTOR_PROOF");
+  assert.ok(out.promotionBlockers.includes("CANONICAL_SELECTOR_QUALIFICATION_NOT_PROVEN_FROM_H1_REPLAY"));
+  assert.ok(out.promotionBlockers.includes("INVALIDATION_POLICY_NOT_VALIDATED"));
   assert.equal(out.affectsSelector, false);
   assert.equal(out.affectsTelegram, false);
   assert.equal(out.affectsExecution, false);

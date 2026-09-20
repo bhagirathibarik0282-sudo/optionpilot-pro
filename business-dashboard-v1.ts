@@ -25,6 +25,31 @@ export interface BusinessDashboardV1Model {
     state: "VERIFIED" | "WAIT";
     detail: string;
   }>;
+  decisionCard: {
+    state: "CANDIDATE_READY" | "WAIT";
+    action: "REVIEW_BUYER_CANDIDATE" | "WAIT";
+    authority: "EXECUTION_CANDIDATE_SELECTOR_V2" | "NONE";
+    candidateKey: string | null;
+    role: "OPTION_BUYER";
+    contract: CanonicalBuyerDashboardCandidate | null;
+    buyerEdgeHorizons: BusinessHorizonView["horizon"][];
+    telegram: {
+      allowed: boolean;
+      reason: string;
+    };
+    executionPlan: {
+      state: "NOT_PUBLISHED";
+      entry: null;
+      stopLoss: null;
+      targets: null;
+      reason: "EXECUTION_LEVEL_PLAN_NOT_BOUND_TO_CANONICAL_BUSINESS_PIPELINE";
+    };
+    goldResearch: {
+      state: "SEPARATE_RESEARCH_LAYER";
+      grantsBusinessAuthority: false;
+      detail: "Gold research may validate evidence but cannot upgrade selector authority";
+    };
+  };
   sameCanonicalCandidateForDashboardAndTelegram: true;
   readOnly: true;
   affectsVerdict: false;
@@ -68,6 +93,35 @@ export function buildBusinessDashboardV1(symbol: BusinessDashboardSymbol, nowIso
     { key:"HEAVYWEIGHTS_SECTORS", label:"Heavyweights / Sectors", state:familyReady ? "VERIFIED" : "WAIT", detail:familyReady ? "Heavyweight and sector families included in canonical business evidence" : "Waiting for verified heavyweight/sector evidence" },
     { key:"LIQUIDITY", label:"Liquidity / Executability", state:selects.length > 0 ? "VERIFIED" : "WAIT", detail:selects.length > 0 ? "Live selector passed execution-quality gates" : "No live contract has passed all selector gates yet" },
   ];
+  const buyerEdgeHorizons = horizons
+    .filter((h) => h.action === "BUYER_EDGE" && h.devilCheck === "PASS")
+    .map((h) => h.horizon);
+
+  const decisionCard: BusinessDashboardV1Model["decisionCard"] = {
+    state: ready ? "CANDIDATE_READY" : "WAIT",
+    action: ready ? "REVIEW_BUYER_CANDIDATE" : "WAIT",
+    authority: ready ? "EXECUTION_CANDIDATE_SELECTOR_V2" : "NONE",
+    candidateKey: candidate?.candidateKey ?? null,
+    role: "OPTION_BUYER",
+    contract: candidate,
+    buyerEdgeHorizons,
+    telegram: consumer?.telegram
+      ? { allowed: consumer.telegram.allowed, reason: consumer.telegram.reason }
+      : { allowed: false, reason: "CANDIDATE_NOT_READY" },
+    executionPlan: {
+      state: "NOT_PUBLISHED",
+      entry: null,
+      stopLoss: null,
+      targets: null,
+      reason: "EXECUTION_LEVEL_PLAN_NOT_BOUND_TO_CANONICAL_BUSINESS_PIPELINE",
+    },
+    goldResearch: {
+      state: "SEPARATE_RESEARCH_LAYER",
+      grantsBusinessAuthority: false,
+      detail: "Gold research may validate evidence but cannot upgrade selector authority",
+    },
+  };
+
   return {
     version: BUSINESS_DASHBOARD_V1,
     symbol,
@@ -82,6 +136,7 @@ export function buildBusinessDashboardV1(symbol: BusinessDashboardSymbol, nowIso
       reasonCodes,
     },
     intelligence,
+    decisionCard,
     sameCanonicalCandidateForDashboardAndTelegram: true,
     readOnly: true,
     affectsVerdict: false,

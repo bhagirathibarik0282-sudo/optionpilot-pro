@@ -5714,6 +5714,7 @@ async function getOptionPrevDayLevelsBatch(
   accessToken: string,
   instrumentTokens: number[]
 ): Promise<Map<number, { pdh: number; pdl: number }>> {
+  const latencyStartedAt = Date.now();
   const result = new Map<number, { pdh: number; pdl: number }>();
   const toFetch: number[] = [];
   const today = indiaTradingDate();
@@ -5763,6 +5764,9 @@ async function getOptionPrevDayLevelsBatch(
     });
   }
 
+  console.log(
+    `[LATENCY][OPTION_PDH_PDL] requested=${instrumentTokens.length} cacheHits=${instrumentTokens.length - toFetch.length} fetched=${toFetch.length} ms=${Date.now() - latencyStartedAt}`
+  );
   return result;
 }
 
@@ -6980,6 +6984,7 @@ async function refreshMarketSnapshot(
   if (session.refreshPromise) return session.refreshPromise;
 
   session.refreshPromise = (async () => {
+    const latencyStartedAt = Date.now();
     const sharedResults = await marketRefreshSingleFlight.run(
       marketAuthorityKey(session.accessToken),
       () => Promise.all([
@@ -6989,6 +6994,7 @@ async function refreshMarketSnapshot(
       ]),
       MARKET_REFRESH_REUSE_MS,
     );
+    console.log(`[LATENCY][MARKET_REFRESH_UPSTREAM] ms=${Date.now() - latencyStartedAt}`);
     // Gap-score trend and histories below are session-owned and mutate their
     // snapshot. Keep the upstream fetch shared but give every session its own
     // object graph so one dashboard cannot alter another dashboard's state.
@@ -17482,6 +17488,7 @@ app.get("/api/signal", async (c) => {
 // API endpoint for live Kite data
 app.get("/api/data", async (c) => {
   try {
+    const latencyStartedAt = Date.now();
     const session = getSession(c);
 
     if (!session) {
@@ -17529,6 +17536,9 @@ app.get("/api/data", async (c) => {
     console.log("======================================");
     console.log("    [API] /api/data response ready");
     console.log("======================================\n");
+    console.log(
+      `[LATENCY][API_DATA] cache=${isFresh ? "HIT" : "MISS"} totalMs=${Date.now() - latencyStartedAt}`
+    );
     return c.json({ ...data, _history: session.snapshotHistory || [], _prevStrikeValues: prevStrikeValues });
   } catch (err) {
     console.error("[API] Data fetch error:", err instanceof Error ? err.message : err);

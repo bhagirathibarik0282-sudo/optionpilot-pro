@@ -1,3 +1,4 @@
+// PR584 audit trigger only: no runtime or selector authority change.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { auditCandidateReconstruction } from "../h1-candidate-reconstruction-audit.js";

@@ -100,5 +100,110 @@ jobs:
       - name: Devil check - full regression suite
         run: npm test
 
+      - name: PR584 audit ATM premium-level invalidation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pr584-atm
+          BASE='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay'
+          for SYMBOL in NIFTY SENSEX; do
+            for DATE in 2026-09-07 2026-09-09 2026-09-15 2026-09-18; do
+              OUT="/tmp/pr584-atm/${SYMBOL}-${DATE}.json"
+              URL="${BASE}?symbol=${SYMBOL}&date=${DATE}&from=09%3A15&to=15%3A30&scope=CORE"
+              if ! curl --fail --silent --show-error --location --retry 2 --retry-delay 2 --max-time 180 "$URL" -o "$OUT"; then
+                printf '{"ok":false,"reason":"HTTP_FETCH_FAILED"}\n' > "$OUT"
+              fi
+            done
+          done
+          python <<'PY'
+          import glob,json,math
+          from datetime import datetime
+          H=(15,30,60); SOURCES=("OPTION_PDL","OBSERVED_DAY_LOW")
+          def pos(v):
+              try:
+                  if v is None or isinstance(v,bool): return None
+                  x=float(v); return x if math.isfinite(x) and x>0 else None
+              except: return None
+          def n(v):
+              try:
+                  x=float(v); return x if math.isfinite(x) else None
+              except: return None
+          def tms(v):
+              try:return datetime.fromisoformat(str(v).replace("Z","+00:00")).timestamp()*1000
+              except:return None
+          def truth(r): return str(r.get("truth_verdict") or "")=="TRUE"
+          def key(r):
+              e=str(r.get("expiry") or ""); k=pos(r.get("strike")); side=str(r.get("option_type") or "")
+              return f"{e}|{k:g}|{side}" if e and k and side in ("CE","PE") else None
+          def quant(xs,p):
+              if not xs:return None
+              xs=sorted(xs); z=(len(xs)-1)*p; lo=math.floor(z); hi=math.ceil(z)
+              return round(xs[lo] if lo==hi else xs[lo]+(xs[hi]-xs[lo])*(z-lo),4)
+          def bucket():
+              return {"observationCount":0,"levelAvailableCount":0,"forwardCoveredCount":0,"stopObservedCount":0,"stopNotObservedCount":0,"dist":[]}
+          agg={(sym,src,h):bucket() for sym in ("NIFTY","SENSEX") for src in SOURCES for h in H}
+          usable=[]; unavailable=[]; atm_total={"NIFTY":0,"SENSEX":0}
+          for p in sorted(glob.glob("/tmp/pr584-atm/*.json")):
+              name=p.rsplit("/",1)[-1][:-5]; symbol,date=name.split("-",1); d=json.load(open(p))
+              if not d.get("ok") or not isinstance(d.get("options"),list):
+                  unavailable.append({"symbol":symbol,"date":date,"reason":d.get("reason") or "REPLAY_NOT_OK"}); continue
+              rows=d["options"]; usable.append({"symbol":symbol,"date":date,"counts":d.get("counts")})
+              by={}
+              for r in rows:
+                  k=key(r)
+                  if k: by.setdefault(k,[]).append(r)
+              for arr in by.values(): arr.sort(key=lambda r:tms(r.get("minute_bucket")) or 0)
+              obs=[r for r in rows if truth(r) and n(r.get("atm_offset"))==0 and pos(r.get("ask")) and key(r) and tms(r.get("minute_bucket"))]
+              atm_total[symbol]+=len(obs)
+              for r in obs:
+                  entry=pos(r.get("ask")); t0=tms(r.get("minute_bucket")); k=key(r)
+                  for src in SOURCES:
+                      level=pos(r.get("pdl") if src=="OPTION_PDL" else r.get("day_low"))
+                      valid=level is not None and level<entry
+                      for h in H:
+                          x=agg[(symbol,src,h)]; x["observationCount"]+=1
+                          if not valid: continue
+                          x["levelAvailableCount"]+=1; x["dist"].append((entry-level)/entry*100)
+                          fut=[]
+                          for fr in by.get(k,[]):
+                              ft=tms(fr.get("minute_bucket")); bid=pos(fr.get("bid"))
+                              if ft is not None and t0<ft<=t0+h*60000 and truth(fr) and bid is not None: fut.append(bid)
+                          if fut:
+                              x["forwardCoveredCount"]+=1
+                              if any(bid<=level for bid in fut): x["stopObservedCount"]+=1
+                              else:x["stopNotObservedCount"]+=1
+          summaries=[]
+          for sym in ("NIFTY","SENSEX"):
+              for src in SOURCES:
+                  for h in H:
+                      x=agg[(sym,src,h)]; ds=x.pop("dist")
+                      covered=x["forwardCoveredCount"]; hits=x["stopObservedCount"]
+                      summaries.append({"symbol":sym,"source":src,"horizonMinutes":h,**x,
+                        "levelAvailabilityRate":round(x["levelAvailableCount"]/x["observationCount"],4) if x["observationCount"] else None,
+                        "stopObservedShareOfCovered":round(hits/covered,4) if covered else None,
+                        "minDistancePct":quant(ds,0),"medianDistancePct":quant(ds,.5),"p75DistancePct":quant(ds,.75),"maxDistancePct":quant(ds,1)})
+          out={"version":"PR584_ATM_PREMIUM_LEVEL_AUDIT_V1","productionImpact":"NONE","usableReplays":usable,"unavailableReplays":unavailable,
+               "atmTruthObservationCount":atm_total,"summaries":summaries,
+               "safety":{"population":"ALL_TRUE_ATM_OBSERVATIONS_NOT_CANDIDATE_SET","sourceSelectionDecision":"NOT_SELECTED","thresholdPromoted":False,
+                         "canonicalSelectorQualificationProven":False,"sourcePromotionAllowed":False,"observationIndependenceClaim":False,
+                         "usesFutureDataForDecision":False,"futureDataUse":"DESCRIPTIVE_TOUCH_AUDIT_ONLY",
+                         "affectsSelector":False,"affectsTelegram":False,"affectsExecution":False,"createsOrders":False,
+                         "promotionBlockers":["ATM_POPULATION_NOT_CANONICAL_CANDIDATE_POPULATION","INVALIDATION_POLICY_NOT_VALIDATED"]}}
+          json.dump(out,open("/tmp/pr584-atm/summary.json","w"),indent=2)
+          print("PR584_ATM_AUDIT_JSON="+json.dumps(out,separators=(",",":")))
+          assert usable
+          assert sum(atm_total.values())>0
+          assert out["safety"]["sourceSelectionDecision"]=="NOT_SELECTED"
+          assert out["safety"]["sourcePromotionAllowed"] is False
+          assert out["safety"]["affectsExecution"] is False
+          PY
+
+      - name: Upload PR584 ATM audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr584-atm-premium-level-audit
+          path: /tmp/pr584-atm/summary.json
+          retention-days: 7
+
       - name: Devil Gate PASS
         run: echo "DEVIL_GATE_PASS_RAILWAY_MAY_DEPLOY_IF_WAIT_FOR_CI_ENABLED"

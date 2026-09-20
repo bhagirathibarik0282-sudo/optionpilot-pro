@@ -129,3 +129,15 @@ test("rejects any non-authoritative candidate source", () => {
   assert.equal(out.journal, null);
   assert.ok(out.blockers.includes("AUTHORITATIVE_BUYER_CANDIDATE_REQUIRED"));
 });
+
+
+test("rejects unsafe canonical consumer authority flags", () => {
+  const out = buildCanonicalBusinessForwardJournal({
+    missionInput,
+    missionResult,
+    consumer: { ...consumer, affectsExecution: true },
+  });
+  assert.equal(out.ready, false);
+  assert.equal(out.journal, null);
+  assert.ok(out.blockers.includes("CANONICAL_CONSUMER_AUTHORITY_BOUNDARY_INVALID"));
+});

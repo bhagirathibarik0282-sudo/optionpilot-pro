@@ -5,6 +5,7 @@ export const H1_SHADOW_EXECUTION_EVIDENCE_REGISTRY_VERSION = "H1_SHADOW_EXECUTIO
 export type H1ShadowExecutionEvidence = Omit<BrokerExecutionAuthorizationInput, "mode">;
 
 type EvidenceEntry = {
+  decisionId: string;
   candidateKey: string;
   evidence: H1ShadowExecutionEvidence;
   observedAtMs: number;
@@ -18,11 +19,19 @@ function validIso(value: string): number | null {
 }
 
 function validCandidateKey(candidateKey: string): boolean {
-  const parts = candidateKey.split("|");
-  if (parts.length !== 4) return false;
-  const [symbol, expiry, strikeText, side] = parts;
+  const parts = candidateKey.split(":");
+  if (parts.length !== 6) return false;
+  const [symbol, side, strikeText, expiry, dte, moneyness] = parts;
   const strike = Number(strikeText);
-  return Boolean(symbol && /^\d{4}-\d{2}-\d{2}$/.test(expiry) && Number.isFinite(strike) && strike > 0 && (side === "CE" || side === "PE"));
+  return Boolean(
+    (symbol === "NIFTY" || symbol === "SENSEX")
+    && (side === "CE" || side === "PE")
+    && Number.isFinite(strike)
+    && strike > 0
+    && /^\d{4}-\d{2}-\d{2}$/.test(expiry)
+    && /^DTE\d+$/.test(dte)
+    && moneyness
+  );
 }
 
 function validEvidence(evidence: H1ShadowExecutionEvidence): boolean {
@@ -39,16 +48,19 @@ function validEvidence(evidence: H1ShadowExecutionEvidence): boolean {
 }
 
 export function publishH1ShadowExecutionEvidence(input: {
+  decisionId: string;
   candidateKey: string;
   observedAt: string;
   evidence: H1ShadowExecutionEvidence;
 }): { accepted: boolean; reason: string } {
   const observedAtMs = validIso(input?.observedAt);
-  if (!validCandidateKey(input?.candidateKey ?? "") || observedAtMs === null || !validEvidence(input?.evidence)) {
+  const decisionId = typeof input?.decisionId === "string" ? input.decisionId.trim() : "";
+  if (!decisionId || !validCandidateKey(input?.candidateKey ?? "") || observedAtMs === null || !validEvidence(input?.evidence)) {
     return { accepted: false, reason: "INVALID_H1_SHADOW_EXECUTION_EVIDENCE" };
   }
 
-  evidenceEntries.set(input.candidateKey, {
+  evidenceEntries.set(`${decisionId}|${input.candidateKey}`, {
+    decisionId,
     candidateKey: input.candidateKey,
     observedAtMs,
     evidence: { ...input.evidence },
@@ -57,18 +69,20 @@ export function publishH1ShadowExecutionEvidence(input: {
 }
 
 export function getH1ShadowExecutionEvidence(
+  decisionId: string | null,
   candidateKey: string | null,
   nowIso: string,
   maxAgeMs = 90_000,
 ): H1ShadowExecutionEvidence | null {
-  if (!candidateKey) return null;
+  if (!decisionId?.trim() || !candidateKey) return null;
   const nowMs = validIso(nowIso);
   if (nowMs === null) return null;
-  const entry = evidenceEntries.get(candidateKey);
+  const registryKey = `${decisionId.trim()}|${candidateKey}`;
+  const entry = evidenceEntries.get(registryKey);
   if (!entry) return null;
   const ageMs = nowMs - entry.observedAtMs;
   if (ageMs < 0 || ageMs > maxAgeMs) {
-    evidenceEntries.delete(candidateKey);
+    evidenceEntries.delete(registryKey);
     return null;
   }
   return { ...entry.evidence };

@@ -23,6 +23,7 @@ export interface RealExecutionReadinessResult {
   readyForLiveEnablementReview: boolean;
   decision: "READY_FOR_HUMAN_ENABLEMENT_REVIEW" | "BLOCK";
   blockers: string[];
+  decisionId: string | null;
   candidateKey: string | null;
   orderIntentBuilt: boolean;
   shadowSimulationAuthorized: boolean;
@@ -36,6 +37,7 @@ export interface RealExecutionReadinessResult {
 export function evaluateRealExecutionReadiness(input: RealExecutionReadinessInput): RealExecutionReadinessResult {
   const blockers:string[]=[];
   if (input?.shadow?.decision !== "SHADOW_READY") blockers.push("KITE_SHADOW_NOT_READY");
+  if (!input?.shadow?.decisionId) blockers.push("CANONICAL_DECISION_ID_NOT_BOUND");
   if (!input?.shadow?.candidateKey) blockers.push("CANONICAL_CANDIDATE_NOT_BOUND");
   if (input?.order?.decision !== "BUILD" || !input.order.intent) blockers.push("PROTECTED_ORDER_INTENT_NOT_BUILT");
   if (input?.executionRiskDecision !== "ALLOW") blockers.push("EXECUTION_RISK_NOT_CLEAR");
@@ -53,6 +55,7 @@ export function evaluateRealExecutionReadiness(input: RealExecutionReadinessInpu
   return {
     version:REAL_EXECUTION_READINESS_V1,readyForLiveEnablementReview:ready,
     decision:ready?"READY_FOR_HUMAN_ENABLEMENT_REVIEW":"BLOCK",blockers:[...new Set(blockers)],
+    decisionId:input?.shadow?.decisionId ?? null,
     candidateKey:input?.shadow?.candidateKey ?? null,orderIntentBuilt:input?.order?.decision==="BUILD" && Boolean(input.order.intent),
     shadowSimulationAuthorized:input?.authorization?.decision==="AUTHORIZE_SIMULATION",
     liveExecutionEnabled:false,requiresExplicitHumanApproval:true,placesOrder:false,brokerCallMade:false,failClosed:true,

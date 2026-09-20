@@ -46,9 +46,9 @@ export function renderBusinessDashboardV1Html(model: BusinessDashboardV1Model): 
         <div class="decisioncell"><span>BUYER EDGE HORIZON</span><b>${dcHorizons}</b></div>
         <div class="decisioncell"><span>TELEGRAM</span><b>${dc.telegram.allowed ? "ELIGIBLE" : "BLOCKED"} · ${esc(dc.telegram.reason)}</b></div>
         <div class="decisioncell"><span>ENTRY / SL / TARGET</span><b>NOT PUBLISHED</b></div>
-        <div class="decisioncell"><span>AUTHORITY</span><b>${esc(dc.authority)}</b></div>
+        <div class="decisioncell"><span>AUTHORITY</span><b>${esc(dc.authority)} · ID LOCK ${dc.identityLocked ? "VERIFIED" : "BLOCKED"}</b></div>
       </div>
-      <div class="decisionnote">Current premium is not an entry trigger. Entry/SL/Target stay blank until EXECUTION_LEVEL_PLAN_V1 is explicitly bound to this same canonical candidate. Gold remains a separate research validation layer and cannot upgrade candidate authority.</div>
+      <div class="decisionnote">Current premium is not an entry trigger. Candidate readiness requires the same canonical decisionId + candidateKey used by Dashboard and Telegram. Entry/SL/Target stay blank until EXECUTION_LEVEL_PLAN_V1 is explicitly bound to this same canonical candidate. Gold remains a separate research validation layer and cannot upgrade candidate authority.</div>
     </section>
     <section class="grid">${horizons}</section>
     <section class="card section"><div class="ey">BUSINESS INTELLIGENCE · VERIFIED SOURCE WIRING</div><div class="intelgrid">${intelligence}<div class="intel" data-intel-key="HISTORICAL_EDGE"><span>Historical Edge</span><b class="wait" data-state>WAIT</b><small data-detail>Loading historical evidence coverage</small></div></div></section>

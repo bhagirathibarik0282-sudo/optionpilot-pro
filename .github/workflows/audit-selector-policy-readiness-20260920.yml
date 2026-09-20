@@ -51,36 +51,79 @@ jobs:
             .safety.failClosed == true
           ' /tmp/direction.json >/dev/null
 
-      - name: DTE0 multi-day evidence readiness
+      - name: Discover recorded NIFTY DTE0 dates and evaluate readiness
         shell: bash
         run: |
           set -euo pipefail
           BASE='https://optionpilot-pro-v2-production.up.railway.app/api/research'
-          URL="$BASE/h1-dte0-multiday-oos?symbol=NIFTY&dates=2026-08-25%2C2026-09-01%2C2026-09-08%2C2026-09-15&from=09%3A15&to=15%3A30&scope=FULL"
-          status=$(curl --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 -o /tmp/dte0.json -w '%{http_code}' "$URL")
-          echo "DTE0_HTTP_STATUS=$status"
-          jq '{
-            ok,
-            mode,
-            productionImpact,
-            reason,
-            requestedDayCount,
-            usableDayCount,
-            validationEligibleDayCount,
-            readiness,
-            calibrationDates,
-            oosDates,
-            blockers,
-            safety
-          }' /tmp/dte0.json
-          jq -e '
-            .productionImpact == "NONE" and
-            (.safety.readOnly // true) == true and
-            (.safety.affectsSelector // false) == false and
-            (.safety.affectsTelegram // false) == false and
-            (.safety.affectsExecution // false) == false and
-            (.safety.thresholdPromoted // false) == false
-          ' /tmp/dte0.json >/dev/null
+          curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 120             "$BASE/h1-theory-dates" -o /tmp/dates.json
+
+          mapfile -t dates < <(jq -r '
+            [.dates[]? | select(.symbol=="NIFTY") | .tradeDate] | unique | sort | .[]
+          ' /tmp/dates.json)
+
+          : > /tmp/dte0_dates.txt
+          for D in "${dates[@]}"; do
+            URL="$BASE/h1-replay?symbol=NIFTY&date=$D&from=09%3A15&to=15%3A30&scope=FULL"
+            status=$(curl --show-error --silent --location --retry 2 --retry-delay 1 --max-time 180               -o "/tmp/replay-$D.json" -w '%{http_code}' "$URL")
+            if [ "$status" != "200" ]; then
+              continue
+            fi
+            if jq -e '
+              .ok == true and
+              .continuity.complete == true and
+              ([.options[]? | select((.dte|tonumber?) == 0)] | length) > 0
+            ' "/tmp/replay-$D.json" >/dev/null; then
+              echo "$D" >> /tmp/dte0_dates.txt
+            fi
+          done
+
+          echo "DISCOVERED_DTE0_DATES=$(paste -sd, /tmp/dte0_dates.txt)"
+          count=$(wc -l < /tmp/dte0_dates.txt | tr -d ' ')
+          echo "DISCOVERED_DTE0_COUNT=$count"
+
+          if [ "$count" -ge 4 ]; then
+            dates_csv=$(paste -sd, /tmp/dte0_dates.txt)
+            encoded_dates=$(python -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["DATES"], safe=""))' DATES="$dates_csv")
+            URL="$BASE/h1-dte0-multiday-oos?symbol=NIFTY&dates=$encoded_dates&from=09%3A15&to=15%3A30&scope=FULL"
+            curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 "$URL" -o /tmp/dte0.json
+            jq '{
+              ok,
+              mode,
+              productionImpact,
+              requestedDayCount,
+              usableDayCount,
+              validationEligibleDayCount,
+              readiness,
+              calibrationDates,
+              oosDates,
+              blockers,
+              safety
+            }' /tmp/dte0.json
+            jq -e '
+              .productionImpact == "NONE" and
+              .safety.readOnly == true and
+              .safety.affectsSelector == false and
+              .safety.affectsTelegram == false and
+              .safety.affectsExecution == false and
+              .safety.thresholdPromoted == false
+            ' /tmp/dte0.json >/dev/null
+          else
+            jq -n --argjson count "$count" --rawfile dates /tmp/dte0_dates.txt '{
+              ok:false,
+              mode:"H1_DTE0_DISCOVERY_READINESS_AUDIT_V1",
+              productionImpact:"NONE",
+              discoveredUsableDte0DayCount:$count,
+              minimumRequiredDte0Days:4,
+              missingUsableDte0Days:(4-$count),
+              discoveredDates:($dates | split("\n") | map(select(length>0))),
+              blocker:"INSUFFICIENT_DTE0_DAYS_REQUIRE_4",
+              thresholdPromoted:false,
+              affectsSelector:false,
+              affectsTelegram:false,
+              affectsExecution:false
+            }'
+          fi
 
       - name: Greek timing evidence readiness
         shell: bash
@@ -114,7 +157,7 @@ jobs:
             .mode == "READ_ONLY_H1_LIVE_EXACT_GREEK_TIMING_HISTORY_V1" and
             .productionImpact == "NONE" and
             .safety.readOnly == true and
-            .safety.prePolicy == true and
+            .safety.policyRequired == false and
             .safety.thresholdAuthority == "NONE" and
             .safety.affectsSelector == false and
             .safety.affectsTelegram == false and

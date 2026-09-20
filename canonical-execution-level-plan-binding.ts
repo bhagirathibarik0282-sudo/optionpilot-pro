@@ -65,8 +65,8 @@ export function bindCanonicalExecutionLevelPlan(
   return {
     version: CANONICAL_EXECUTION_LEVEL_PLAN_BINDING_V1,
     decision: ready ? "READY" : "BLOCK",
-    decisionId: ready ? consumer!.decisionId : null,
-    candidateKey: ready ? consumer!.candidateKey : null,
+    decisionId: identityLocked ? consumer!.decisionId : null,
+    candidateKey: identityLocked ? consumer!.candidateKey : null,
     identityLocked,
     plan,
     blockers: ready ? [] : [...new Set(blockers)],

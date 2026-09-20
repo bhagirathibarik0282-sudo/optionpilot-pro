@@ -42,32 +42,31 @@ const planInput:any = {
   lotSize: 65,
 };
 
-test("binds existing execution level plan only to the locked canonical identity", () => {
+test("locks canonical identity but refuses raw caller-supplied execution levels", () => {
   const out = bindCanonicalExecutionLevelPlan({ consumer, planInput });
-  assert.equal(out.decision, "READY");
+  assert.equal(out.decision, "BLOCK");
   assert.equal(out.identityLocked, true);
   assert.equal(out.decisionId, decisionId);
   assert.equal(out.candidateKey, candidateKey);
-  assert.equal(out.plan?.version, "EXECUTION_LEVEL_PLAN_V1");
-  assert.equal(out.plan?.entry, 100);
-  assert.equal(out.plan?.stopLoss, 90);
-  assert.equal(out.plan?.projectedLoss, 1300);
-  assert.equal(out.plan?.t1, 110);
-  assert.equal(out.plan?.t2, 115);
-  assert.equal(out.plan?.t3, 120);
-  assert.deepEqual(out.blockers, []);
+  assert.equal(out.plan, null);
+  assert.ok(out.blockers.includes("EXECUTION_LEVEL_EVIDENCE_SOURCE_NOT_BOUND"));
   assert.equal(out.affectsCandidateAuthority, false);
   assert.equal(out.affectsTelegram, false);
   assert.equal(out.affectsExecution, false);
   assert.equal(out.createsOrders, false);
 });
 
-test("fails closed on canonical decision identity mismatch without building a plan", () => {
+test("also blocks when no level proposal is supplied", () => {
+  const out = bindCanonicalExecutionLevelPlan({ consumer });
+  assert.equal(out.decision, "BLOCK");
+  assert.equal(out.identityLocked, true);
+  assert.equal(out.plan, null);
+  assert.deepEqual(out.blockers, ["EXECUTION_LEVEL_EVIDENCE_SOURCE_NOT_BOUND"]);
+});
+
+test("fails closed on canonical decision identity mismatch", () => {
   const out = bindCanonicalExecutionLevelPlan({
-    consumer: {
-      ...consumer,
-      decisionId: "different-decision",
-    },
+    consumer: { ...consumer, decisionId: "different-decision" },
     planInput,
   });
   assert.equal(out.decision, "BLOCK");
@@ -76,14 +75,12 @@ test("fails closed on canonical decision identity mismatch without building a pl
   assert.equal(out.candidateKey, null);
   assert.equal(out.plan, null);
   assert.ok(out.blockers.includes("CANONICAL_DECISION_IDENTITY_REQUIRED"));
+  assert.equal(out.blockers.includes("EXECUTION_LEVEL_EVIDENCE_SOURCE_NOT_BOUND"), false);
 });
 
-test("fails closed on canonical candidate key mismatch without building a plan", () => {
+test("fails closed on canonical candidate key mismatch", () => {
   const out = bindCanonicalExecutionLevelPlan({
-    consumer: {
-      ...consumer,
-      candidateKey: "different-key",
-    },
+    consumer: { ...consumer, candidateKey: "different-key" },
     planInput,
   });
   assert.equal(out.decision, "BLOCK");
@@ -92,28 +89,15 @@ test("fails closed on canonical candidate key mismatch without building a plan",
   assert.ok(out.blockers.includes("CANONICAL_CANDIDATE_IDENTITY_REQUIRED"));
 });
 
-test("rejects plan symbol drift from the locked candidate", () => {
+test("rejects proposed plan symbol drift from the locked candidate", () => {
   const out = bindCanonicalExecutionLevelPlan({
     consumer,
     planInput: { ...planInput, symbol: "SENSEX" },
   });
   assert.equal(out.decision, "BLOCK");
   assert.equal(out.identityLocked, false);
+  assert.equal(out.decisionId, null);
+  assert.equal(out.candidateKey, null);
   assert.equal(out.plan, null);
   assert.ok(out.blockers.includes("EXECUTION_LEVEL_PLAN_SYMBOL_MISMATCH"));
-});
-
-test("preserves locked identity while propagating an existing execution plan blocker", () => {
-  const out = bindCanonicalExecutionLevelPlan({
-    consumer,
-    planInput: { ...planInput, entryTriggerConfirmed: false },
-  });
-  assert.equal(out.decision, "BLOCK");
-  assert.equal(out.identityLocked, true);
-  assert.equal(out.decisionId, decisionId);
-  assert.equal(out.candidateKey, candidateKey);
-  assert.equal(out.plan?.decision, "BLOCK");
-  assert.ok(out.blockers.includes("ENTRY_TRIGGER_NOT_CONFIRMED"));
-  assert.equal(out.affectsExecution, false);
-  assert.equal(out.createsOrders, false);
 });

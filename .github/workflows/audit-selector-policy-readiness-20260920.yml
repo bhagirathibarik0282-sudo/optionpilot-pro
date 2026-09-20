@@ -84,7 +84,7 @@ jobs:
 
           if [ "$count" -ge 4 ]; then
             dates_csv=$(paste -sd, /tmp/dte0_dates.txt)
-            encoded_dates=$(python -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["DATES"], safe=""))' DATES="$dates_csv")
+            encoded_dates=$(DATES="$dates_csv" python -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["DATES"], safe=""))')
             URL="$BASE/h1-dte0-multiday-oos?symbol=NIFTY&dates=$encoded_dates&from=09%3A15&to=15%3A30&scope=FULL"
             curl --fail --show-error --silent --location --retry 3 --retry-delay 2 --max-time 300 "$URL" -o /tmp/dte0.json
             jq '{
@@ -157,7 +157,7 @@ jobs:
             .mode == "READ_ONLY_H1_LIVE_EXACT_GREEK_TIMING_HISTORY_V1" and
             .productionImpact == "NONE" and
             .safety.readOnly == true and
-            .safety.policyRequired == false and
+            .safety.prePolicy == true and
             .safety.thresholdAuthority == "NONE" and
             .safety.affectsSelector == false and
             .safety.affectsTelegram == false and
@@ -191,7 +191,7 @@ jobs:
             .ok == true and
             .productionImpact == "NONE" and
             .safety.readOnly == true and
-            .safety.prePolicy == true and
+            .safety.policyRequired == false and
             .safety.thresholdAuthority == "NONE" and
             .safety.affectsSelector == false and
             .safety.affectsTelegram == false and

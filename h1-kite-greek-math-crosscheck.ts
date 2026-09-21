@@ -4,6 +4,24 @@ import type { H1ExactUnderlyingObservation, H1KiteGreekModelPolicy } from "./h1-
 const YEAR_MS = 365 * 86_400_000;
 const SQRT_2PI = Math.sqrt(2 * Math.PI);
 
+export const H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND = "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V1" as const;
+
+export interface H1KiteGreekMathCrosscheckPersistRecord {
+  version: typeof H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND;
+  logicalKey: string;
+  minuteBucket: string;
+  instrumentToken: number;
+  evidence: H1KiteGreekMathCrosscheckResult;
+  productionImpact: "NONE";
+  thresholdAuthority: "NONE";
+  affectsSelector: false;
+  affectsBusinessCard: false;
+  affectsTelegram: false;
+  affectsExecution: false;
+  createsOrders: false;
+  failClosed: true;
+}
+
 export interface H1KiteGreekMathCrosscheckResult {
   version: "H1_KITE_GREEK_MATH_CROSSCHECK_V1";
   ready: boolean;
@@ -204,6 +222,32 @@ export function crosscheckH1KiteGreeks(
     independentIvPct: independentIv * 100,
     blockers: [],
     source: "KITE_WEBSOCKET_FULL_PLUS_INTERNAL_MATH_CROSSCHECK",
+    productionImpact: "NONE",
+    thresholdAuthority: "NONE",
+    affectsSelector: false,
+    affectsBusinessCard: false,
+    affectsTelegram: false,
+    affectsExecution: false,
+    createsOrders: false,
+    failClosed: true,
+  };
+}
+
+
+export function buildH1KiteGreekMathCrosscheckPersistRecord(
+  instrumentToken: number,
+  evidence: H1KiteGreekMathCrosscheckResult,
+): H1KiteGreekMathCrosscheckPersistRecord | null {
+  if (!Number.isInteger(instrumentToken) || instrumentToken <= 0 || !evidence?.ready || !evidence.observedAt) return null;
+  const observedMs = Date.parse(evidence.observedAt);
+  if (!Number.isFinite(observedMs)) return null;
+  const minuteBucket = new Date(Math.floor(observedMs / 60_000) * 60_000).toISOString();
+  return {
+    version: H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND,
+    logicalKey: `${minuteBucket}|${instrumentToken}`,
+    minuteBucket,
+    instrumentToken,
+    evidence: structuredClone(evidence),
     productionImpact: "NONE",
     thresholdAuthority: "NONE",
     affectsSelector: false,

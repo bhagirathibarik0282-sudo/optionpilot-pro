@@ -5,7 +5,9 @@ import { buildNearestValidMonthlyPeerReadiness, type H1NearestValidMonthlyPeerRe
 import { buildH1ReadOnlyEvidenceConsumerBoundary } from "./h1-readonly-evidence-consumer-boundary.js";
 import { deriveH1ExactLiveSpotDirection } from "./h1-exact-live-spot-direction-provider.js";
 import { auditH1ExactDirectionSourceReadiness } from "./h1-exact-direction-source-readiness.js";
-import type { H1ExactUnderlyingObservation } from "./h1-kite-exact-price-greek-adapter.js";
+import { mapKiteFullPacketToH1ExactPriceGreek, type H1ExactUnderlyingObservation } from "./h1-kite-exact-price-greek-adapter.js";
+import { crosscheckH1KiteGreeks, buildH1KiteGreekMathCrosscheckPersistRecord, H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND, type H1KiteGreekMathCrosscheckPersistRecord } from "./h1-kite-greek-math-crosscheck.js";
+import { H1_SELECTOR_SHADOW_PROFILE_V1 } from "./h1-selector-shadow-profile.js";
 import { KiteWebSocketTransport, type KiteSocketFactory } from "./kite-websocket-transport.js";
 import type { KiteDecodedPacket } from "./kite-websocket-binary-decoder.js";
 import { CanonicalConstituentTickStore, type CanonicalConstituentTickStoreStatus } from "./canonical-constituent-tick-store.js";
@@ -54,6 +56,7 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   selectorPolicyEnv?: NodeJS.ProcessEnv;
   rawDepthPersist?: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
   rawGreekTimingPersist?: (record: H1LiveExactGreekTimingRecord) => void | Promise<void>;
+  greekMathCrosscheckPersist?: (record: H1KiteGreekMathCrosscheckPersistRecord) => void | Promise<void>;
 }
 
 export interface H1LiveExactReadOnlyWebSocketStatus {
@@ -82,7 +85,12 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   selectorRuntimePolicyReady: boolean;
   selectorRuntimeAttached: boolean;
   selectorRuntimeBlockers: string[];
-  greekEvidenceStatus: "NOT_CONFIGURED";
+  greekEvidenceStatus: "NOT_CONFIGURED" | "KITE_MATH_CROSSCHECK_OBSERVING" | "KITE_MATH_CROSSCHECK_OBSERVATIONS_AVAILABLE";
+  greekCrosscheckObservationCount?: number;
+  greekCrosscheckFailureCount?: number;
+  greekCrosscheckLastObservedAt?: string | null;
+  greekCrosscheckPolicySemantics?: "SHADOW_CALIBRATION_ONLY";
+  greekCrosscheckPolicyAuthority?: "NONE";
   productionImpact: "NONE";
   readOnly: true;
   forwardsDownstream: false;
@@ -106,13 +114,16 @@ export class H1LiveExactReadOnlyWebSocketService {
   private readonly rawEvidence: H1LiveExactRawEvidenceStore;
   private readonly rawDepthPersist: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
   private readonly rawGreekTimingPersist: (record: H1LiveExactGreekTimingRecord) => void | Promise<void>;
+  private readonly greekMathCrosscheckPersist: (record: H1KiteGreekMathCrosscheckPersistRecord) => void | Promise<void>;
   private readonly lastPersistedDepthMinuteByToken = new Map<number, string>();
   private readonly lastPersistedGreekTimingMinuteByToken = new Map<number, string>();
+  private readonly lastPersistedGreekCrosscheckMinuteByToken = new Map<number, string>();
   private readonly latestRawSpotTimingBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], {
     instrumentToken: number;
     observedAt: string;
     receivedAt: string;
   }>();
+  private readonly latestGreekUnderlyingBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], H1ExactUnderlyingObservation>();
   private readonly directionBaselineBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], H1ExactUnderlyingObservation>();
   private readonly selectorDirectionBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], "UP" | "DOWN">();
   private selectorCoordinator: H1KiteExactRuntimeCoordinator | null = null;
@@ -137,6 +148,7 @@ export class H1LiveExactReadOnlyWebSocketService {
     this.rawEvidence = new H1LiveExactRawEvidenceStore(config.readiness.registry);
     this.rawDepthPersist = config.rawDepthPersist ?? ((record) => dbInsert(H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, record));
     this.rawGreekTimingPersist = config.rawGreekTimingPersist ?? ((record) => dbInsert(H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, record));
+    this.greekMathCrosscheckPersist = config.greekMathCrosscheckPersist ?? ((record) => dbInsert(H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND, record));
     this.value = {
       version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1", started: false, connected: false, state: "READY",
       subscribedTokenCount: this.allowedTokens.size, receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
@@ -145,7 +157,10 @@ export class H1LiveExactReadOnlyWebSocketService {
       readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
       readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],
       selectorRuntimePolicyReady: false, selectorRuntimeAttached: false, selectorRuntimeBlockers: [],
-      greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
+      greekEvidenceStatus: "KITE_MATH_CROSSCHECK_OBSERVING",
+      greekCrosscheckObservationCount: 0, greekCrosscheckFailureCount: 0, greekCrosscheckLastObservedAt: null,
+      greekCrosscheckPolicySemantics: "SHADOW_CALIBRATION_ONLY", greekCrosscheckPolicyAuthority: "NONE",
+      productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
       affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
     };
   }
@@ -195,7 +210,8 @@ export class H1LiveExactReadOnlyWebSocketService {
   private observeRawSpotTiming(packet: KiteDecodedPacket, receivedAt: string): void {
     const entry = this.config.readiness.registry?.get(packet?.instrumentToken ?? 0) ?? null;
     if (!entry || entry.role !== "SPOT" || (entry.symbol !== "NIFTY" && entry.symbol !== "SENSEX" && entry.symbol !== "BANKNIFTY")) return;
-    if (packet.mode !== "full" || packet.isIndex !== true || typeof packet.exchangeTimestamp !== "string") return;
+    if (packet.mode !== "full" || packet.isIndex !== true || typeof packet.exchangeTimestamp !== "string" ||
+        !Number.isFinite(packet.lastPrice) || packet.lastPrice <= 0) return;
     const observedMs = Date.parse(packet.exchangeTimestamp);
     const receivedMs = Date.parse(receivedAt);
     if (!Number.isFinite(observedMs) || !Number.isFinite(receivedMs)) return;
@@ -212,6 +228,13 @@ export class H1LiveExactReadOnlyWebSocketService {
       instrumentToken: entry.instrumentToken,
       observedAt: packet.exchangeTimestamp,
       receivedAt,
+    });
+    this.latestGreekUnderlyingBySymbol.set(entry.symbol, {
+      source: "LIVE_RUNTIME_EXACT",
+      symbol: entry.symbol,
+      observedAt: packet.exchangeTimestamp,
+      receivedAt,
+      price: packet.lastPrice,
     });
   }
 
@@ -248,6 +271,55 @@ export class H1LiveExactReadOnlyWebSocketService {
       }
     } catch (err) {
       if (process.env.NODE_ENV !== "test") console.error("[H1_LIVE_EXACT_GREEK_TIMING_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  private captureKiteGreekMathCrosscheckEvidence(packet: KiteDecodedPacket, receivedAt: string): void {
+    const entry = this.config.readiness.registry?.get(packet?.instrumentToken ?? 0) ?? null;
+    if (!entry || entry.role !== "OPTION" || packet.mode !== "full" || packet.isIndex ||
+        !entry.expiry || !Number.isFinite(entry.strike) || Number(entry.strike) <= 0 ||
+        (entry.optionSide !== "CE" && entry.optionSide !== "PE")) return;
+
+    const underlying = this.latestGreekUnderlyingBySymbol.get(entry.symbol as H1ExactUnderlyingObservation["symbol"]);
+    if (!underlying) return;
+
+    const policy = H1_SELECTOR_SHADOW_PROFILE_V1.greekPolicy;
+    const observation = mapKiteFullPacketToH1ExactPriceGreek(
+      packet,
+      this.config.readiness.registry!,
+      underlying,
+      receivedAt,
+      policy,
+    );
+    if (!observation) {
+      this.value.greekCrosscheckFailureCount += 1;
+      return;
+    }
+
+    const evidence = crosscheckH1KiteGreeks(observation, underlying, policy);
+    if (!evidence.ready) {
+      this.value.greekCrosscheckFailureCount += 1;
+      return;
+    }
+
+    this.value.greekCrosscheckObservationCount += 1;
+    this.value.greekCrosscheckLastObservedAt = evidence.observedAt;
+    this.value.greekEvidenceStatus = "KITE_MATH_CROSSCHECK_OBSERVATIONS_AVAILABLE";
+
+    const record = buildH1KiteGreekMathCrosscheckPersistRecord(entry.instrumentToken, evidence);
+    if (!record) return;
+    if (this.lastPersistedGreekCrosscheckMinuteByToken.get(record.instrumentToken) === record.minuteBucket) return;
+    this.lastPersistedGreekCrosscheckMinuteByToken.set(record.instrumentToken, record.minuteBucket);
+
+    try {
+      const pending = this.greekMathCrosscheckPersist(record);
+      if (pending && typeof (pending as Promise<void>).catch === "function") {
+        void (pending as Promise<void>).catch((err) => {
+          if (process.env.NODE_ENV !== "test") console.error("[H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
+        });
+      }
+    } catch (err) {
+      if (process.env.NODE_ENV !== "test") console.error("[H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
     }
   }
 
@@ -317,6 +389,7 @@ export class H1LiveExactReadOnlyWebSocketService {
             continue;
           }
           this.captureRawGreekTimingEvidence(tick, receivedAt);
+          this.captureKiteGreekMathCrosscheckEvidence(tick, receivedAt);
           this.rawEvidence.ingest(tick, receivedAt);
           this.selectorCoordinator?.ingest(tick, receivedAt, receivedAt);
           if (!this.firstSeenTokens.has(tick.instrumentToken)) {
@@ -399,6 +472,7 @@ export class H1LiveExactReadOnlyWebSocketService {
     this.selectorCoordinator?.clear(); this.selectorCoordinator = null;
     this.selectorPeerStore?.clear(); this.selectorPeerStore = null;
     this.selectorDirectionBySymbol.clear();
+    this.latestGreekUnderlyingBySymbol.clear();
     this.transport?.disconnect(); this.transport = null; this.value.started = false; this.value.connected = false; this.value.state = "CLOSED"; return this.status();
   }
 }

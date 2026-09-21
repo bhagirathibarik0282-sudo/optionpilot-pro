@@ -1,0 +1,41 @@
+name: H1 Selector Three Policy Validation CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-selector-three-policy-validation-v1.ts"
+      - "test/h1-selector-three-policy-validation-v1.test.ts"
+      - ".github/workflows/h1-selector-three-policy-validation-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/h1-selector-three-policy-validation-v1.test.ts
+      - name: Authority devil check
+        run: |
+          node <<'NODE'
+          const source = require('fs').readFileSync('h1-selector-three-policy-validation-v1.ts', 'utf8');
+          const required = [
+            'productionImpact: "NONE"',
+            'affectsSelector: false',
+            'affectsBusinessCard: false',
+            'affectsTelegram: false',
+            'affectsExecution: false',
+            'grantsPromotionAuthority: false',
+            'createsOrders: false',
+            'failClosed: true',
+          ];
+          for (const token of required) {
+            if (!source.includes(token)) throw new Error(`missing authority guard: ${token}`);
+          }
+          NODE

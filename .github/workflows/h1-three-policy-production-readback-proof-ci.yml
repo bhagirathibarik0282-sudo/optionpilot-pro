@@ -20,6 +20,12 @@ jobs:
           set -euo pipefail
           curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 120             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-three-policy-descriptive-summary?limit=5000'             -o /tmp/h1-three-policy-summary.json
 
+      - name: Fetch production raw gate history read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 120             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-gate-evidence-history?limit=5000'             -o /tmp/h1-live-gate-history.json
+
       - name: Print sanitized production proof
         shell: bash
         run: |
@@ -55,4 +61,67 @@ jobs:
           assert s.get('affectsExecution') is False
           assert s.get('createsOrders') is False
           print('THREE_POLICY_PRODUCTION_READBACK_SAFETY_PASS')
+          PY
+
+      - name: Print sanitized component breakdown
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, collections
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          assert h.get('ok') is True
+          records=h.get('records') or []
+          gate_names=[
+            'premiumResponseConfirmed','deltaGammaResponseConfirmed',
+            'thetaIvBurdenAcceptable','multiExpiryConflictAbsent',
+            'capitalFit','liquidityOk','spreadOk',
+            'currentOrNearExpiryUsable','higherDteUsable','fallbackDteApproved',
+          ]
+          gate_counts={g:{'true':0,'false':0,'missing':0} for g in gate_names}
+          symbols=collections.defaultdict(lambda:{'rows':0,'premiumDeltaGammaPass':0,'thetaIvMultiExpiryPass':0,'capitalLiquidityDtePass':0})
+          premium_reasons=collections.Counter()
+          theta_reasons=collections.Counter()
+
+          def gate_value(r,name):
+            v=((r.get('gates') or {}).get(name) or {}).get('value')
+            return v if isinstance(v,bool) else None
+
+          for r in records:
+            vals={g:gate_value(r,g) for g in gate_names}
+            for g,v in vals.items():
+              gate_counts[g]['true' if v is True else 'false' if v is False else 'missing'] += 1
+
+            sym=str(((r.get('identity') or {}).get('symbol') or 'UNKNOWN'))
+            s=symbols[sym]
+            s['rows']+=1
+            if vals['premiumResponseConfirmed'] is True and vals['deltaGammaResponseConfirmed'] is True:
+              s['premiumDeltaGammaPass']+=1
+            if vals['thetaIvBurdenAcceptable'] is True and vals['multiExpiryConflictAbsent'] is True:
+              s['thetaIvMultiExpiryPass']+=1
+            dte_ok=(vals['currentOrNearExpiryUsable'] is True or vals['higherDteUsable'] is True or vals['fallbackDteApproved'] is True)
+            if vals['capitalFit'] is True and vals['liquidityOk'] is True and vals['spreadOk'] is True and dte_ok:
+              s['capitalLiquidityDtePass']+=1
+
+            pd=((r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {})
+            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+            for x in pd.get('reasonCodes') or []:
+              premium_reasons[str(x)] += 1
+            for x in td.get('reasonCodes') or []:
+              theta_reasons[str(x)] += 1
+
+          out={
+            'rowCount':len(records),
+            'gateCounts':gate_counts,
+            'bySymbol':dict(symbols),
+            'premiumReasonCodes':dict(premium_reasons.most_common(20)),
+            'thetaReasonCodes':dict(theta_reasons.most_common(20)),
+          }
+          print('THREE_POLICY_COMPONENT_BREAKDOWN', json.dumps(out,separators=(',',':'),sort_keys=True))
+          safety=h.get('safety') or {}
+          assert safety.get('readOnly') is True
+          assert safety.get('affectsSelector') is False
+          assert safety.get('affectsTelegram') is False
+          assert safety.get('affectsVerdict') is False
+          assert safety.get('affectsExecution') is False
+          print('THREE_POLICY_RAW_HISTORY_READBACK_SAFETY_PASS')
           PY

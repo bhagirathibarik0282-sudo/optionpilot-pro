@@ -5,7 +5,8 @@ import { buildNearestValidMonthlyPeerReadiness, type H1NearestValidMonthlyPeerRe
 import { buildH1ReadOnlyEvidenceConsumerBoundary } from "./h1-readonly-evidence-consumer-boundary.js";
 import { deriveH1ExactLiveSpotDirection } from "./h1-exact-live-spot-direction-provider.js";
 import { auditH1ExactDirectionSourceReadiness } from "./h1-exact-direction-source-readiness.js";
-import { mapKiteFullPacketToH1ExactPriceGreek, type H1ExactUnderlyingObservation } from "./h1-kite-exact-price-greek-adapter.js";
+import type { H1ExactUnderlyingObservation } from "./h1-kite-exact-price-greek-adapter.js";
+import { bindKiteOptionPacketToH1ExactSnapshot } from "./h1-kite-exact-option-snapshot-binding.js";
 import { crosscheckH1KiteGreeks, buildH1KiteGreekMathCrosscheckPersistRecord, H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND, type H1KiteGreekMathCrosscheckPersistRecord } from "./h1-kite-greek-math-crosscheck.js";
 import { H1_SELECTOR_SHADOW_PROFILE_V1 } from "./h1-selector-shadow-profile.js";
 import { KiteWebSocketTransport, type KiteSocketFactory } from "./kite-websocket-transport.js";
@@ -284,19 +285,24 @@ export class H1LiveExactReadOnlyWebSocketService {
     if (!underlying) return;
 
     const policy = H1_SELECTOR_SHADOW_PROFILE_V1.greekPolicy;
-    const observation = mapKiteFullPacketToH1ExactPriceGreek(
+    const lotQuantity = this.config.readiness.lotSizeByOptionToken?.[entry.instrumentToken] ?? 0;
+    const snapshot = bindKiteOptionPacketToH1ExactSnapshot({
       packet,
-      this.config.readiness.registry!,
+      registry: this.config.readiness.registry!,
       underlying,
       receivedAt,
-      policy,
-    );
-    if (!observation) {
+      nowIso: receivedAt,
+      orderQuantity: lotQuantity,
+      greekPolicy: policy,
+      maxSnapshotAgeMs: policy.maxAgeMs,
+      maxCrossSourceSkewMs: policy.maxUnderlyingSkewMs,
+    });
+    if (!snapshot.ready || !snapshot.priceGreek) {
       this.value.greekCrosscheckFailureCount += 1;
       return;
     }
 
-    const evidence = crosscheckH1KiteGreeks(observation, underlying, policy);
+    const evidence = crosscheckH1KiteGreeks(snapshot.priceGreek, underlying, policy);
     if (!evidence.ready) {
       this.value.greekCrosscheckFailureCount += 1;
       return;
@@ -306,7 +312,7 @@ export class H1LiveExactReadOnlyWebSocketService {
     this.value.greekCrosscheckLastObservedAt = evidence.observedAt;
     this.value.greekEvidenceStatus = "KITE_MATH_CROSSCHECK_OBSERVATIONS_AVAILABLE";
 
-    const record = buildH1KiteGreekMathCrosscheckPersistRecord(entry.instrumentToken, evidence);
+    const record = buildH1KiteGreekMathCrosscheckPersistRecord(entry.instrumentToken, snapshot, underlying, evidence);
     if (!record) return;
     if (this.lastPersistedGreekCrosscheckMinuteByToken.get(record.instrumentToken) === record.minuteBucket) return;
     this.lastPersistedGreekCrosscheckMinuteByToken.set(record.instrumentToken, record.minuteBucket);

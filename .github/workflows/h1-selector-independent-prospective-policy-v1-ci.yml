@@ -1,0 +1,46 @@
+name: H1 Selector Independent Prospective Policy V1 CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-selector-independent-prospective-policy-v1.ts"
+      - "test/h1-selector-independent-prospective-policy-v1.test.ts"
+      - ".github/workflows/h1-selector-independent-prospective-policy-v1-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frozen-prospective-policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: >-
+          NODE_ENV=test node --import tsx --test
+          test/h1-selector-prospective-validation-protocol.test.ts
+          test/h1-selector-independent-prospective-policy-v1.test.ts
+      - name: No authority or runtime wiring devil check
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const source = fs.readFileSync('h1-selector-independent-prospective-policy-v1.ts', 'utf8');
+          for (const token of [
+            'productionImpact: "NONE"',
+            'affectsSelector: false',
+            'affectsBusinessCard: false',
+            'affectsTelegram: false',
+            'affectsExecution: false',
+            'createsOrders: false',
+            'passingCreatesProductionAuthority: false',
+          ]) if (!source.includes(token)) throw new Error(`missing guard: ${token}`);
+          for (const runtime of ['server.ts', 'h1-selector-canonical-policy-source.ts']) {
+            if (fs.readFileSync(runtime, 'utf8').includes('H1_SELECTOR_INDEPENDENT_PROSPECTIVE_POLICY_V1')) {
+              throw new Error(`premature runtime wiring: ${runtime}`);
+            }
+          }
+          NODE

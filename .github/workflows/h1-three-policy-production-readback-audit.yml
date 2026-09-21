@@ -422,3 +422,50 @@ jobs:
           }
           print('H1_THREE_POLICY_SHADOW_SENSITIVITY', json.dumps(out,separators=(',',':'),sort_keys=True))
           PY
+
+
+      - name: Oracle fixed-gate bottleneck check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from collections import Counter,defaultdict
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          rows=h.get('records') or []
+
+          def gv(gates,name):
+            ev=gates.get(name)
+            return ev.get('value') if isinstance(ev,dict) else None
+
+          out=defaultdict(Counter)
+          for r in rows:
+            ident=r.get('identity') or {}
+            sym=str(ident.get('symbol'))
+            gates=r.get('gates') or {}
+            dte=ident.get('dte')
+            capital=(gv(gates,'capitalFit') is True)
+            liq=(gv(gates,'liquidityOk') is True)
+            spread=(gv(gates,'spreadOk') is True)
+            multi=(gv(gates,'multiExpiryConflictAbsent') is True)
+            if sym=='BANKNIFTY':
+              dte_ok=(gv(gates,'higherDteUsable') is True)
+            else:
+              dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
+                      (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
+
+            checks={
+              'fixedAll': capital and liq and spread and multi and dte_ok,
+              'withoutLiquidity': capital and spread and multi and dte_ok,
+              'withoutSpread': capital and liq and multi and dte_ok,
+              'withoutMultiExpiry': capital and liq and spread and dte_ok,
+              'withoutDte': capital and liq and spread and multi,
+              'capitalLiquiditySpreadDte': capital and liq and spread and dte_ok,
+            }
+            for k,v in checks.items():
+              if v: out[sym][k]+=1
+            for name,val in [('capital',capital),('liquidity',liq),('spread',spread),('multiExpiry',multi),('dte',dte_ok)]:
+              out[sym][name+('_true' if val else '_false')]+=1
+
+          print('H1_FIXED_GATE_ORACLE', json.dumps({s:dict(c) for s,c in out.items()},separators=(',',':'),sort_keys=True))
+          PY

@@ -776,3 +776,43 @@ jobs:
           print('H1_EXISTING_DTE0_OOS_PROOF',json.dumps(out,separators=(',',':'),sort_keys=True))
           PY
           done
+
+
+      - name: Discover older usable DTE0 replay dates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,subprocess,urllib.parse
+
+          base='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay'
+          candidates={
+            'NIFTY':['2026-08-04','2026-08-11','2026-08-18','2026-08-25','2026-09-01','2026-09-08','2026-09-15'],
+            'SENSEX':['2026-08-06','2026-08-13','2026-08-20','2026-08-27','2026-09-03','2026-09-10','2026-09-17'],
+          }
+          out={}
+          for symbol,dates in candidates.items():
+            rows=[]
+            for d in dates:
+              q=urllib.parse.urlencode({'symbol':symbol,'date':d,'from':'09:15','to':'15:30','scope':'CORE'})
+              url=base+'?'+q
+              p=subprocess.run(['curl','--silent','--show-error','--location','--max-time','120',url],capture_output=True,text=True)
+              rec={'date':d,'curlCode':p.returncode,'ok':False,'dte0AtmPoints':0,'firstObserved':None,'lastObserved':None}
+              if p.returncode==0:
+                try:
+                  data=json.loads(p.stdout)
+                  rec['ok']=data.get('ok') is True
+                  cont=data.get('continuity') or {}
+                  rec['firstObserved']=cont.get('firstObserved')
+                  rec['lastObserved']=cont.get('lastObserved')
+                  opts=data.get('options') or []
+                  rec['dte0AtmPoints']=sum(
+                    1 for x in opts
+                    if x.get('dte')==0 and x.get('atm_offset')==0 and x.get('expiry_bucket')=='Current Expiry'
+                  )
+                except Exception as e:
+                  rec['parseError']=str(e)
+              rows.append(rec)
+            out[symbol]=rows
+          print('H1_DTE0_REPLAY_DATE_DISCOVERY',json.dumps(out,separators=(',',':'),sort_keys=True))
+          PY

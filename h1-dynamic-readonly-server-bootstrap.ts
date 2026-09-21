@@ -43,11 +43,11 @@ export interface H1DynamicReadOnlyServerStatus {
   marketWindowContext: H1RegularMarketWindowContext;
   marketOpenReadinessAcceptance: H1MarketOpenReadinessAcceptance;
   greekEvidenceStatus: "NOT_CONFIGURED" | "KITE_MATH_CROSSCHECK_OBSERVING" | "KITE_MATH_CROSSCHECK_OBSERVATIONS_AVAILABLE";
-  greekCrosscheckObservationCount: number;
-  greekCrosscheckFailureCount: number;
-  greekCrosscheckLastObservedAt: string | null;
-  greekCrosscheckPolicySemantics: "SHADOW_CALIBRATION_ONLY";
-  greekCrosscheckPolicyAuthority: "NONE";
+  greekCrosscheckObservationCount?: number;
+  greekCrosscheckFailureCount?: number;
+  greekCrosscheckLastObservedAt?: string | null;
+  greekCrosscheckPolicySemantics?: "SHADOW_CALIBRATION_ONLY";
+  greekCrosscheckPolicyAuthority?: "NONE";
   productionImpact: "NONE";
   readOnly: true;
   forwardsDownstream: false;

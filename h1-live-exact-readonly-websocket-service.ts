@@ -312,7 +312,25 @@ export class H1LiveExactReadOnlyWebSocketService {
     this.value.greekCrosscheckLastObservedAt = evidence.observedAt;
     this.value.greekEvidenceStatus = "KITE_MATH_CROSSCHECK_OBSERVATIONS_AVAILABLE";
 
-    const record = buildH1KiteGreekMathCrosscheckPersistRecord(entry.instrumentToken, snapshot, underlying, evidence);
+    const selectorDirectionAtCapture = this.selectorDirectionBySymbol.get(entry.symbol as H1ExactUnderlyingObservation["symbol"]) ?? null;
+    const expectedPremiumDirectionAtCapture = selectorDirectionAtCapture
+      ? (((selectorDirectionAtCapture === "UP" && entry.optionSide === "CE") ||
+          (selectorDirectionAtCapture === "DOWN" && entry.optionSide === "PE")) ? "UP" : "DOWN")
+      : null;
+    const directionContext = selectorDirectionAtCapture && expectedPremiumDirectionAtCapture
+      ? {
+          selectorDirectionAtCapture,
+          expectedPremiumDirectionAtCapture,
+          directionSourceId: "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1" as const,
+        }
+      : null;
+    const record = buildH1KiteGreekMathCrosscheckPersistRecord(
+      entry.instrumentToken,
+      snapshot,
+      underlying,
+      evidence,
+      directionContext,
+    );
     if (!record) return;
     if (this.lastPersistedGreekCrosscheckMinuteByToken.get(record.instrumentToken) === record.minuteBucket) return;
     this.lastPersistedGreekCrosscheckMinuteByToken.set(record.instrumentToken, record.minuteBucket);

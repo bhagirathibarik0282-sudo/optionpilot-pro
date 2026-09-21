@@ -199,3 +199,74 @@ jobs:
           }
           print('H1_THREE_POLICY_REASON_AUDIT', json.dumps(audit, separators=(',',':'), sort_keys=True))
           PY
+
+
+      - name: Print descriptive metric distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, math
+          from collections import defaultdict
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          rows=h.get('records') or []
+
+          def q(values, p):
+            vals=sorted(float(x) for x in values if isinstance(x,(int,float)) and math.isfinite(float(x)))
+            if not vals:
+              return None
+            if len(vals)==1:
+              return vals[0]
+            pos=(len(vals)-1)*p
+            lo=int(math.floor(pos)); hi=int(math.ceil(pos))
+            if lo==hi: return vals[lo]
+            return vals[lo] + (vals[hi]-vals[lo])*(pos-lo)
+
+          metrics=defaultdict(list)
+          by_symbol=defaultdict(lambda: defaultdict(list))
+          for r in rows:
+            ident=r.get('identity') or {}
+            symbol=str(ident.get('symbol'))
+            rm=r.get('responseMetrics') or {}
+            pd=(r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {}
+            td=(r.get('policyDiagnostics') or {}).get('thetaIv') or {}
+            cap=r.get('capitalLiquidityEvidence') or {}
+            source={
+              'premiumMovePct':rm.get('premiumMovePct'),
+              'absoluteDeltaChange':rm.get('absoluteDeltaChange'),
+              'currentGamma':rm.get('currentGamma'),
+              'thetaPctOfPremium':td.get('thetaPctOfPremium'),
+              'iv':td.get('iv'),
+              'relativeSpreadPct':cap.get('relativeSpreadPct'),
+              'bidDepthCoverageMultiple':cap.get('bidDepthCoverageMultiple'),
+              'askDepthCoverageMultiple':cap.get('askDepthCoverageMultiple'),
+              'capitalRequired':cap.get('capitalRequired'),
+            }
+            for k,v in source.items():
+              if isinstance(v,(int,float)) and math.isfinite(float(v)):
+                metrics[k].append(float(v))
+                by_symbol[symbol][k].append(float(v))
+
+          def summarize(d):
+            out={}
+            for k,vals in d.items():
+              out[k]={
+                'n':len(vals),
+                'min':min(vals) if vals else None,
+                'p10':q(vals,.10),
+                'p25':q(vals,.25),
+                'p50':q(vals,.50),
+                'p75':q(vals,.75),
+                'p90':q(vals,.90),
+                'p95':q(vals,.95),
+                'max':max(vals) if vals else None,
+              }
+            return out
+
+          out={
+            'all':summarize(metrics),
+            'bySymbol':{s:summarize(m) for s,m in by_symbol.items()},
+            'note':'DESCRIPTIVE_ONLY_NO_THRESHOLD_SELECTION_NO_PROMOTION'
+          }
+          print('H1_THREE_POLICY_METRIC_DISTRIBUTIONS', json.dumps(out, separators=(',',':'), sort_keys=True))
+          PY

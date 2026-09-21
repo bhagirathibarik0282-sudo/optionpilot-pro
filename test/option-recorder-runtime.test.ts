@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { processRecorderPayload, selectRecorderPremium, buildTelegramText, type RecorderIngestPayload } from "../option-recorder-runtime.js";
 import { buildRecorderContractKey } from "../option-recorder-shadow.js";
+import { callHaikuProvider, resolveHaikuProvider } from "../haiku-provider.js";
 
 const ts = "2026-08-28T10:00:00.000Z";
 
@@ -48,4 +49,48 @@ test("telegram text stays concise and includes all three modes", () => {
   assert.match(text, /SCALP:/);
   assert.match(text, /TRADER:/);
   assert.match(text, /SWING:/);
+});
+
+
+test("keeps Anthropic as default Haiku provider for backward compatibility", () => {
+  const config = resolveHaikuProvider({ ANTHROPIC_API_KEY: "a", ANTHROPIC_MODEL: "m" });
+  assert.equal(config.provider, "ANTHROPIC");
+  assert.equal(config.configured, true);
+  assert.equal(config.endpoint, "https://api.anthropic.com/v1/messages");
+});
+
+test("OpenRouter stays fail-closed until an explicit model is configured", () => {
+  const config = resolveHaikuProvider({
+    OPTION_RECORDER_AI_PROVIDER: "OPENROUTER",
+    OPENROUTER_API_KEY: "or-key",
+  });
+  assert.equal(config.provider, "OPENROUTER");
+  assert.equal(config.configured, false);
+  assert.equal(config.reason, "OPENROUTER_MODEL_REQUIRED");
+});
+
+test("OpenRouter uses bearer auth and Anthropic-compatible messages endpoint", async () => {
+  const config = resolveHaikuProvider({
+    OPTION_RECORDER_AI_PROVIDER: "OPENROUTER",
+    OPENROUTER_API_KEY: "or-key",
+    OPENROUTER_MODEL: "anthropic/example-model",
+  });
+  let seenUrl = "";
+  let seenInit: RequestInit | undefined;
+  const fakeFetch: typeof fetch = async (input, init) => {
+    seenUrl = String(input);
+    seenInit = init;
+    return new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  const result = await callHaikuProvider(config, { x: 1 }, 512, fakeFetch);
+  assert.equal(result, "ok");
+  assert.equal(seenUrl, "https://openrouter.ai/api/v1/messages");
+  assert.equal((seenInit?.headers as Record<string, string>).authorization, "Bearer or-key");
+  const parsed = JSON.parse(String(seenInit?.body));
+  assert.equal(parsed.model, "anthropic/example-model");
+  assert.equal(parsed.max_tokens, 512);
 });

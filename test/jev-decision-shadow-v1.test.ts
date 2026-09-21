@@ -141,11 +141,23 @@ test("builds pinned Jev request without leaking baseline selector decision into 
   const record = JSON.parse(plan.request.state.records[0].record);
   assert.equal(record.candidate.side, "CE");
   assert.equal(record.evidencePacket.identity.provenance, "LIVE_RUNTIME_EXACT");
+  assert.equal(record.evidencePacket.capitalLiquidityEvidence.receivedAt, undefined);
   assert.equal(record.constraints.futureOutcomeHidden, true);
   assert.equal(record.constraints.baselineSelectorHiddenFromJev, true);
   assert.equal("baselineSelector" in record, false);
   assert.equal(JSON.stringify(record).includes("EXECUTION_CANDIDATE_SELECTED"), false);
   assert.equal(plan.baseline[0].selectorDecision, "SELECT");
+});
+
+test("fails closed when optional Jev evidence is timestamped after the decision anchor", () => {
+  const p = packet();
+  p.responseMetrics = {
+    ...p.responseMetrics!,
+    observedAt: "2026-09-21T10:00:01.000Z",
+  };
+  const made = buildJevDecisionShadowSampleFromLivePacket("nifty-future-metric", p);
+  assert.equal(made.sample, null);
+  assert.ok(made.blockers.includes("JEV_RESPONSE_METRICS_LOOKAHEAD_OR_INVALID"));
 });
 
 test("fails closed when a gate timestamp is from the future relative to the decision anchor", () => {

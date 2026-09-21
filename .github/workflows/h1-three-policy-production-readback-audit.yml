@@ -530,3 +530,134 @@ jobs:
 
           print('H1_ZERO_CANDIDATE_ABLATION', json.dumps({s:dict(c) for s,c in out.items()},separators=(',',':'),sort_keys=True))
           PY
+
+
+      - name: Joint shadow sensitivity including IV and premium
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, math
+          from collections import defaultdict
+          from datetime import datetime
+
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          rows=h.get('records') or []
+
+          CURRENT={'premium':2.0,'delta':0.03,'gamma':0.001,'theta':3.0,'maxIv':30.0}
+
+          def q(vals,p):
+            vals=sorted(vals)
+            if not vals: return None
+            pos=(len(vals)-1)*p
+            lo=int(math.floor(pos)); hi=int(math.ceil(pos))
+            return vals[lo] if lo==hi else vals[lo]+(vals[hi]-vals[lo])*(pos-lo)
+
+          vals=defaultdict(list)
+          for r in rows:
+            rm=r.get('responseMetrics') or {}
+            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+            src={
+              'premium':rm.get('premiumMovePct'),
+              'delta':rm.get('absoluteDeltaChange'),
+              'gamma':rm.get('currentGamma'),
+              'theta':td.get('thetaPctOfPremium'),
+              'iv':td.get('iv'),
+            }
+            for k,v in src.items():
+              if isinstance(v,(int,float)) and math.isfinite(float(v)):
+                vals[k].append(float(v))
+
+          ps=[.10,.25,.50,.75,.90]
+          premium_cands=sorted(set([CURRENT['premium'],0.0]+[max(0.0,q(vals['premium'],p)) for p in ps if q(vals['premium'],p) is not None]))
+          delta_cands=sorted(set([CURRENT['delta']]+[q(vals['delta'],p) for p in ps if q(vals['delta'],p) is not None]))
+          gamma_cands=sorted(set([CURRENT['gamma']]+[q(vals['gamma'],p) for p in ps if q(vals['gamma'],p) is not None]))
+          theta_cands=sorted(set([CURRENT['theta']]+[q(vals['theta'],p) for p in ps if q(vals['theta'],p) is not None]))
+          ivmax_cands=sorted(set([CURRENT['maxIv']]+[q(vals['iv'],p) for p in ps if q(vals['iv'],p) is not None]))
+
+          premium_cands=[x for x in premium_cands if x <= CURRENT['premium']]
+          delta_cands=[x for x in delta_cands if x <= CURRENT['delta']]
+          gamma_cands=[x for x in gamma_cands if x <= CURRENT['gamma']]
+          theta_cands=[x for x in theta_cands if x >= CURRENT['theta']]
+          ivmax_cands=[x for x in ivmax_cands if x >= CURRENT['maxIv']]
+
+          def gv(gates,name):
+            ev=gates.get(name)
+            return ev.get('value') if isinstance(ev,dict) else None
+
+          def iso(v):
+            if not isinstance(v,str): return None
+            try: return datetime.fromisoformat(v.replace('Z','+00:00'))
+            except Exception: return None
+
+          def count_for(p):
+            counts=defaultdict(int)
+            for r in rows:
+              ident=r.get('identity') or {}
+              sym=ident.get('symbol')
+              if sym not in ('NIFTY','SENSEX','BANKNIFTY'): continue
+              gates=r.get('gates') or {}
+              rm=r.get('responseMetrics') or {}
+              td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+              premium=rm.get('premiumMovePct'); delta=rm.get('absoluteDeltaChange')
+              gamma=rm.get('currentGamma'); theta=td.get('thetaPctOfPremium'); iv=td.get('iv')
+              if not all(isinstance(x,(int,float)) for x in [premium,delta,gamma,theta,iv]): continue
+
+              premium_ok=premium >= p['premium']
+              dg=(delta >= p['delta'] and gamma >= p['gamma'])
+              theta_iv=(theta <= p['theta'] and 8 <= iv <= p['maxIv'])
+              capital=(gv(gates,'capitalFit') is True)
+              liq=(gv(gates,'liquidityOk') is True)
+              spread=(gv(gates,'spreadOk') is True)
+              multi=(gv(gates,'multiExpiryConflictAbsent') is True)
+
+              dte=ident.get('dte')
+              if sym=='BANKNIFTY':
+                dte_ok=(gv(gates,'higherDteUsable') is True)
+              else:
+                dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
+                        (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
+
+              ppd_ok=False
+              ppd=r.get('ppdSupport')
+              if isinstance(ppd,dict) and not premium_ok:
+                id_match=(ppd.get('symbol')==ident.get('symbol') and ppd.get('expiryDate')==ident.get('expiryDate') and
+                          ppd.get('strike')==ident.get('strike') and ppd.get('candidateSide')==ident.get('side'))
+                a=iso(ident.get('observedAt')); b=iso(ppd.get('observedAt'))
+                near=bool(a and b and abs((a-b).total_seconds()) <= 90)
+                confirmed=(ppd.get('candidateConfirmed') is True and ppd.get('allRequiredWindowsReady') is True and
+                           ppd.get('supportingOnly') is True and ppd.get('standaloneTrigger') is False)
+                ppd_ok=id_match and near and confirmed and liq and spread and dg and theta_iv and multi
+
+              if capital and liq and spread and (premium_ok or ppd_ok) and dg and theta_iv and multi and dte_ok:
+                counts[sym]+=1
+            return dict(counts)
+
+          results=[]
+          tested=0
+          for premium in premium_cands:
+            for delta in delta_cands:
+              for gamma in gamma_cands:
+                for theta in theta_cands:
+                  for maxIv in ivmax_cands:
+                    tested+=1
+                    p={'premium':premium,'delta':delta,'gamma':gamma,'theta':theta,'maxIv':maxIv}
+                    c=count_for(p)
+                    if c.get('NIFTY',0)>0 and c.get('SENSEX',0)>0:
+                      score=((CURRENT['premium']-premium)/max(CURRENT['premium'],1e-9)+
+                             (CURRENT['delta']-delta)/CURRENT['delta']+
+                             (CURRENT['gamma']-gamma)/CURRENT['gamma']+
+                             (theta-CURRENT['theta'])/CURRENT['theta']+
+                             (maxIv-CURRENT['maxIv'])/CURRENT['maxIv'])
+                      results.append({'policy':p,'counts':c,'relaxationScore':score})
+
+          results.sort(key=lambda x:(x['relaxationScore'],-(x['counts'].get('NIFTY',0)+x['counts'].get('SENSEX',0))))
+          out={
+            'semantics':'SHADOW_ONLY_JOINT_SENSITIVITY_NO_POLICY_PROMOTION',
+            'tested':tested,
+            'currentPolicy':CURRENT,
+            'currentCounts':count_for(CURRENT),
+            'leastRelaxedNonZeroNiftyAndSensex':results[:10],
+          }
+          print('H1_JOINT_SHADOW_SENSITIVITY',json.dumps(out,separators=(',',':'),sort_keys=True))
+          PY

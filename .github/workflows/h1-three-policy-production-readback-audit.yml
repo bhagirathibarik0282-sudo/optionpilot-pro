@@ -469,3 +469,64 @@ jobs:
 
           print('H1_FIXED_GATE_ORACLE', json.dumps({s:dict(c) for s,c in out.items()},separators=(',',':'),sort_keys=True))
           PY
+
+
+      - name: One-shot zero-candidate interaction ablation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from collections import defaultdict, Counter
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          rows=h.get('records') or []
+
+          def gv(gates,name):
+            ev=gates.get(name)
+            return ev.get('value') if isinstance(ev,dict) else None
+
+          out=defaultdict(Counter)
+          for r in rows:
+            ident=r.get('identity') or {}
+            sym=str(ident.get('symbol'))
+            if sym not in ('NIFTY','SENSEX','BANKNIFTY'):
+              continue
+            gates=r.get('gates') or {}
+            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+            rm=r.get('responseMetrics') or {}
+            dte=ident.get('dte')
+
+            premium=isinstance(rm.get('premiumMovePct'),(int,float)) and rm.get('premiumMovePct') >= 2
+            iv=isinstance(td.get('iv'),(int,float)) and 8 <= td.get('iv') <= 30
+            capital=(gv(gates,'capitalFit') is True)
+            liq=(gv(gates,'liquidityOk') is True)
+            spread=(gv(gates,'spreadOk') is True)
+            multi=(gv(gates,'multiExpiryConflictAbsent') is True)
+
+            if sym=='BANKNIFTY':
+              dte_ok=(gv(gates,'higherDteUsable') is True)
+            else:
+              dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
+                      (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
+
+            fixed=capital and liq and spread and multi and dte_ok
+            fixed_no_multi=capital and liq and spread and dte_ok
+            fixed_no_liq=capital and spread and multi and dte_ok
+            fixed_no_dte=capital and liq and spread and multi
+
+            checks={
+              'fixed':fixed,
+              'fixed_plus_premium':fixed and premium,
+              'fixed_plus_iv':fixed and iv,
+              'fixed_plus_premium_plus_iv':fixed and premium and iv,
+              'noMulti_plus_premium_plus_iv':fixed_no_multi and premium and iv,
+              'noLiquidity_plus_premium_plus_iv':fixed_no_liq and premium and iv,
+              'noDte_plus_premium_plus_iv':fixed_no_dte and premium and iv,
+              'premium_true':premium,
+              'iv_true':iv,
+            }
+            for k,v in checks.items():
+              if v: out[sym][k]+=1
+
+          print('H1_ZERO_CANDIDATE_ABLATION', json.dumps({s:dict(c) for s,c in out.items()},separators=(',',':'),sort_keys=True))
+          PY

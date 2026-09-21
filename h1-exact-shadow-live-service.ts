@@ -5,6 +5,11 @@ import { resolveKiteAuthoritySession } from "./kite-session-authority.js";
 import type { H1KiteGreekModelPolicy } from "./h1-kite-exact-price-greek-adapter.js";
 import type { LivePremiumDeltaGammaPolicy } from "./h1-live-premium-delta-gamma-evaluator.js";
 import type { ThetaIvMultiExpiryPolicy } from "./h1-live-theta-iv-multi-expiry-evaluator.js";
+import {
+  parseH1ShadowDteBurdenOverrides,
+  resolveH1ShadowDteBurdenPolicy,
+  type H1ShadowDteBurdenOverrides,
+} from "./h1-shadow-dte-burden-policy-v1.js";
 import type { LiveCapitalLiquidityDtePolicy } from "./h1-live-capital-liquidity-dte-gates.js";
 import { H1ExactPeerRuntimeStore } from "./h1-exact-peer-runtime-store.js";
 import type { H1ExpectedPremiumDirection } from "./h1-exact-peer-directional-state-classifier.js";
@@ -54,6 +59,7 @@ export interface H1ExactShadowLiveConfig {
   registryEntries: KiteImmediateTokenEntry[];
   policy: H1ExactShadowPolicy | null;
   goldChaseShadowEnabled: boolean;
+  dteBurdenOverrides: H1ShadowDteBurdenOverrides;
 }
 
 export type H1ExactShadowLiveReason =
@@ -187,7 +193,7 @@ export function readH1ExactShadowLiveConfig(env: NodeJS.ProcessEnv = process.env
   const enabled = env.KITE_H1_EXACT_SHADOW_ENABLED === "true";
   const goldChaseShadowEnabled = env.H1_GOLD_CHASE_SHADOW_ENABLED === "true";
   const apiKey = env.KITE_API_KEY?.trim() || null;
-  if (!enabled) return { enabled: false, apiKey, registryEntries: [], policy: null, goldChaseShadowEnabled };
+  if (!enabled) return { enabled: false, apiKey, registryEntries: [], policy: null, goldChaseShadowEnabled, dteBurdenOverrides: {} };
   if (env.KITE_RUNTIME_SHADOW_ENABLED === "true") throw new Error("DUPLICATE_SHADOW_RUNTIME_FORBIDDEN");
 
   const registryRaw = env.KITE_SHADOW_REGISTRY_JSON?.trim();
@@ -197,8 +203,12 @@ export function readH1ExactShadowLiveConfig(env: NodeJS.ProcessEnv = process.env
   const registryEntries = parseJson(registryRaw, "KITE_SHADOW_REGISTRY_JSON_INVALID");
   if (!Array.isArray(registryEntries) || registryEntries.length === 0) throw new Error("KITE_SHADOW_REGISTRY_JSON_EMPTY");
   const policy = validateH1ExactShadowPolicy(parseJson(policyRaw, "KITE_H1_EXACT_POLICY_JSON_INVALID"));
+  const dteBurdenOverridesRaw = env.KITE_H1_SHADOW_DTE_BURDEN_OVERRIDES_JSON?.trim();
+  const dteBurdenOverrides = parseH1ShadowDteBurdenOverrides(
+    dteBurdenOverridesRaw ? parseJson(dteBurdenOverridesRaw, "KITE_H1_SHADOW_DTE_BURDEN_OVERRIDES_JSON_INVALID") : {},
+  );
   validateExactPeerCapacity(registryEntries as KiteImmediateTokenEntry[], policy);
-  return { enabled: true, apiKey, registryEntries: registryEntries as KiteImmediateTokenEntry[], policy, goldChaseShadowEnabled };
+  return { enabled: true, apiKey, registryEntries: registryEntries as KiteImmediateTokenEntry[], policy, goldChaseShadowEnabled, dteBurdenOverrides };
 }
 
 export interface H1ExactShadowLiveServiceDeps {
@@ -342,11 +352,16 @@ export async function startH1ExactShadowLiveService(
       const row = contractPolicy.get(entry.instrumentToken);
       if (!row) throw new Error("CONTRACT_POLICY_MISSING");
       const peerResult = peerStore.ingestAndResolve(entry.instrumentToken, previous, current, current.observedAt ?? "");
+      const burden = resolveH1ShadowDteBurdenPolicy(
+        current.identity?.dte ?? Number.NaN,
+        policy.burdenPolicy,
+        cfg.dteBurdenOverrides,
+      );
       return {
         moneyness: row.moneyness,
         multiExpiryPeers: peerResult.ready ? peerResult.resolver!.peers : [],
         premiumPolicy: policy.premiumPolicy,
-        burdenPolicy: policy.burdenPolicy,
+        burdenPolicy: burden.policy,
         capitalLiquidityDtePolicy: policy.capitalLiquidityDtePolicy,
       };
     },

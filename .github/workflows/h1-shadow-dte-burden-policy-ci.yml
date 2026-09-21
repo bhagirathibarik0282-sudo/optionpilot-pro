@@ -1,0 +1,44 @@
+name: H1 Shadow DTE Burden Policy CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-shadow-dte-burden-policy-v1.ts"
+      - "h1-exact-shadow-live-service.ts"
+      - "test/h1-shadow-dte-burden-policy-v1.test.ts"
+      - "test/h1-exact-shadow-live-service.test.ts"
+      - ".github/workflows/h1-shadow-dte-burden-policy-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/h1-shadow-dte-burden-policy-v1.test.ts test/h1-exact-shadow-live-service.test.ts
+      - name: Shadow authority devil check
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const source=fs.readFileSync('h1-shadow-dte-burden-policy-v1.ts','utf8');
+          for (const token of [
+            'productionImpact: "NONE"',
+            'affectsSelector: false',
+            'affectsBusinessCard: false',
+            'affectsTelegram: false',
+            'affectsExecution: false',
+            'failClosed: true',
+          ]) {
+            if(!source.includes(token)) throw new Error('missing guard '+token);
+          }
+          const runtime=fs.readFileSync('h1-exact-shadow-live-service.ts','utf8');
+          if(!runtime.includes('KITE_H1_SHADOW_DTE_BURDEN_OVERRIDES_JSON')) throw new Error('shadow env missing');
+          if(runtime.includes('KITE_H1_EXACT_POLICY_JSON =')) throw new Error('canonical policy mutation detected');
+          NODE

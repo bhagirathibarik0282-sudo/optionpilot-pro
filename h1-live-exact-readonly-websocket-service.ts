@@ -418,3 +418,96 @@ export class H1LiveExactReadOnlyWebSocketService {
         for (const tick of ticks) this.observeRawSpotTiming(tick, receivedAt);
         for (const tick of ticks) {
           if (!this.allowedTokens.has(tick.instrumentToken)) { this.value.rejectedPacketCount += 1; continue; }
+          this.value.receivedPacketCount += 1;
+          if (this.constituentEvidence?.hasToken(tick.instrumentToken)) {
+            if (!this.constituentEvidence.ingest(tick, receivedAt)) this.value.rejectedPacketCount += 1;
+            continue;
+          }
+          this.captureRawGreekTimingEvidence(tick, receivedAt);
+          this.captureKiteGreekMathCrosscheckEvidence(tick, receivedAt);
+          this.rawEvidence.ingest(tick, receivedAt);
+          this.selectorCoordinator?.ingest(tick, receivedAt, receivedAt);
+          if (!this.firstSeenTokens.has(tick.instrumentToken)) {
+            this.firstSeenTokens.add(tick.instrumentToken);
+            const entry = this.config.readiness.registry?.get(tick.instrumentToken) ?? null;
+            if (process.env.NODE_ENV !== "test" && entry) console.log(`[H1_DYNAMIC_READONLY_TOKEN_PACKET] ${JSON.stringify({ instrumentToken: entry.instrumentToken, symbol: entry.symbol, role: entry.role, instrumentLabel: entry.instrumentLabel, expiry: entry.expiry ?? null, strike: entry.strike ?? null, optionSide: entry.optionSide ?? null, receivedAt, readOnly: true, forwardsDownstream: false })}`);
+          }
+        }
+        const evidence = this.rawEvidence.status(receivedAt);
+        this.persistRawDepthEvidence(evidence.rows);
+        this.value.rawEvidenceReady = evidence.ready;
+        this.value.rawEvidenceExpectedTokenCount = evidence.expectedTokenCount;
+        this.value.rawEvidenceFreshTokenCount = evidence.freshTokenCount;
+        this.value.rawEvidenceMissingTokenCount = evidence.missingTokenCount;
+        this.value.rawEvidenceStaleTokenCount = evidence.staleTokenCount;
+        this.value.rawEvidenceMissing = evidence.missing;
+        this.value.rawEvidenceSymbolReadiness = evidence.symbolReadiness;
+        const nearest = buildNearestValidMonthlyPeerReadiness(this.config.readiness.registry!.entries(), evidence).rows;
+        this.value.nearestPeerReadiness = nearest;
+        const consumer = buildH1ReadOnlyEvidenceConsumerBoundary(evidence, nearest);
+        this.value.readOnlyConsumerReadySymbolCount = consumer.readySymbolCount;
+        this.value.readOnlyConsumerObservations = consumer.rows.map((row) => ({
+          symbol: row.symbol, primaryExpiry: row.primaryExpiry, nearestPeerExpiry: row.nearestPeerExpiry,
+          ready: row.ready, evidenceTokenCount: row.evidenceTokenCount, blockers: [...row.blockers],
+        }));
+
+        const directionBySymbol = new Map(this.value.readOnlyDirectionObservations.map((row) => [row.symbol, row]));
+        for (const row of evidence.rows.filter((x) => x.role === "SPOT")) {
+          const current: H1ExactUnderlyingObservation = { source: "LIVE_RUNTIME_EXACT", symbol: row.symbol, observedAt: row.observedAt, receivedAt: row.receivedAt, price: row.ltp };
+          const baseline = this.directionBaselineBySymbol.get(row.symbol);
+          if (!baseline) { this.directionBaselineBySymbol.set(row.symbol, current); continue; }
+          const previousMs = Date.parse(baseline.observedAt);
+          const currentMs = Date.parse(current.observedAt);
+          if (!Number.isFinite(previousMs) || !Number.isFinite(currentMs) || currentMs <= previousMs) continue;
+          const derived = deriveH1ExactLiveSpotDirection(baseline, current, H1_MARKET_OPEN_DIRECTION_POLICY);
+          const source = auditH1ExactDirectionSourceReadiness({
+            source: derived.source, sourceId: derived.sourceId, liveRuntimeExact: derived.liveRuntimeExact,
+            deterministic: derived.deterministic, optionSideInferenceUsed: false, callerStaticDirectionUsed: false,
+          });
+          const selectorDirectionReady = derived.ready && source.ready && Boolean(derived.direction);
+          if (selectorDirectionReady) this.selectorDirectionBySymbol.set(row.symbol, derived.direction!);
+          else this.selectorDirectionBySymbol.delete(row.symbol);
+          directionBySymbol.set(row.symbol, {
+            symbol: row.symbol,
+            ready: selectorDirectionReady,
+            direction: selectorDirectionReady ? derived.direction : null,
+            spotMovePct: derived.spotMovePct,
+            sourceReady: source.ready,
+            sourceId: source.sourceId,
+            blockers: [...new Set([...derived.blockers, ...source.blockers])],
+          });
+          if (derived.ready || derived.blockers.includes("SPOT_OBSERVATION_GAP_EXCEEDED")) this.directionBaselineBySymbol.set(row.symbol, current);
+        }
+        this.value.readOnlyDirectionObservations = [...directionBySymbol.values()];
+        this.value.readOnlyDirectionReadySymbolCount = this.value.readOnlyDirectionObservations.filter((row) => row.ready).length;
+
+        this.value.readOnlyShadowInputObservations = consumer.rows.map((row) => {
+          const direction = directionBySymbol.get(row.symbol);
+          const blockers = [...row.blockers];
+          if (!direction?.ready || !direction.direction) blockers.push(...(direction?.blockers ?? ["VERIFIED_DIRECTION_NOT_READY"]));
+          return {
+            symbol: row.symbol,
+            ready: row.ready && Boolean(direction?.ready && direction.direction),
+            direction: row.ready && direction?.ready ? direction.direction : null,
+            evidenceTokenCount: row.evidenceTokenCount,
+            blockers: [...new Set(blockers)],
+          };
+        });
+        this.value.readOnlyShadowInputReadySymbolCount = this.value.readOnlyShadowInputObservations.filter((row) => row.ready).length;
+      },
+      onTextMessage: () => {},
+      onState: (state) => { this.value.state = state; this.value.connected = state === "OPEN"; },
+    });
+    this.value.started = true;
+    this.transport.connect();
+    return this.status();
+  }
+
+  stop(): H1LiveExactReadOnlyWebSocketStatus {
+    this.selectorCoordinator?.clear(); this.selectorCoordinator = null;
+    this.selectorPeerStore?.clear(); this.selectorPeerStore = null;
+    this.selectorDirectionBySymbol.clear();
+    this.latestGreekUnderlyingBySymbol.clear();
+    this.transport?.disconnect(); this.transport = null; this.value.started = false; this.value.connected = false; this.value.state = "CLOSED"; return this.status();
+  }
+}

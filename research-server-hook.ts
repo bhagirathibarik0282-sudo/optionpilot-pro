@@ -37,6 +37,7 @@ import {
 } from "./h1-dynamic-readonly-server-bootstrap.js";
 import { collectH1LiveSelectorDecisions, collectH1LiveResponseMetrics, getH1LiveSelectorRegistrySize } from "./h1-live-selector-registry.js";
 import { runH1LiveGateEvidenceHistoryHttp } from "./h1-live-gate-evidence-history-http-v1.js";
+import { runH1ThreePolicyDescriptiveSummaryHttp } from "./h1-three-policy-descriptive-summary-http-v1.js";
 import { H1_EXACT_SHADOW_LIVE_STATUS_PERSIST_KIND, loadLatestH1ExactShadowLiveStatus } from "./h1-exact-shadow-live-service.js";
 import {
   H1_GOLD_CHASE_APPROVED_PRODUCER_PROOF_PERSIST_KIND,
@@ -267,6 +268,7 @@ export function mountResearchRoutes(app: Hono): void {
   });
 
   app.get("/api/research/h1-live-gate-evidence-history", runH1LiveGateEvidenceHistoryHttp);
+  app.get("/api/research/h1-three-policy-descriptive-summary", runH1ThreePolicyDescriptiveSummaryHttp);
 
   app.get("/api/research/h1-live-exact-depth-history", async (c) => {
     c.header("Cache-Control", "no-store");

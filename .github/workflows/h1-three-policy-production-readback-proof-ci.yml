@@ -123,5 +123,29 @@ jobs:
           assert safety.get('affectsTelegram') is False
           assert safety.get('affectsVerdict') is False
           assert safety.get('affectsExecution') is False
+          thresholds={'premium':set(),'thetaIv':set()}
+          observed=[]
+          capital_threshold_fields_seen=set()
+          for r in records:
+            if r.get('publishedAt'): observed.append(str(r.get('publishedAt')))
+            pd=((r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {})
+            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+            if pd:
+              thresholds['premium'].add((pd.get('minPremiumMovePct'),pd.get('minAbsoluteDeltaChange'),pd.get('minCurrentGamma')))
+            if td:
+              thresholds['thetaIv'].add((td.get('maxAbsThetaPctOfPremium'),td.get('minIv'),td.get('maxIv')))
+            cap=r.get('capitalLiquidityEvidence') or {}
+            for k in cap:
+              if k.startswith('max') or k.startswith('min') or 'Threshold' in k or 'threshold' in k:
+                capital_threshold_fields_seen.add(k)
+          lineage={
+            'firstPublishedAt':min(observed) if observed else None,
+            'lastPublishedAt':max(observed) if observed else None,
+            'premiumThresholdTuples':[list(x) for x in sorted(thresholds['premium'], key=str)],
+            'thetaIvThresholdTuples':[list(x) for x in sorted(thresholds['thetaIv'], key=str)],
+            'capitalPolicyThresholdFieldsPersisted':sorted(capital_threshold_fields_seen),
+            'policySourceFieldPersisted': any('policySource' in (r.get('policyDiagnostics') or {}) for r in records),
+          }
+          print('THREE_POLICY_POLICY_LINEAGE', json.dumps(lineage,separators=(',',':'),sort_keys=True))
           print('THREE_POLICY_RAW_HISTORY_READBACK_SAFETY_PASS')
           PY

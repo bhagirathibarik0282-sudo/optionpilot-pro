@@ -18,8 +18,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 60             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-three-policy-descriptive-summary?limit=500'             -o /tmp/h1-three-policy-summary.json
-          curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 60             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-gate-evidence-history?limit=500'             -o /tmp/h1-live-gate-history.json
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 60 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-three-policy-descriptive-summary?limit=500' \
+            -o /tmp/h1-three-policy-summary.json
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 60 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-gate-evidence-history?limit=500' \
+            -o /tmp/h1-live-gate-history.json
 
       - name: Verify safety and print exact evidence summary
         shell: bash
@@ -27,7 +33,8 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import json
-          from collections import Counter, defaultdict
+          from collections import Counter
+          from datetime import datetime
 
           d=json.load(open('/tmp/h1-three-policy-summary.json'))
           assert d.get('ok') is True, d
@@ -73,6 +80,22 @@ jobs:
           premium_thresholds=Counter()
           theta_thresholds=Counter()
           metric_missing=Counter()
+          premium_combo=Counter()
+          ppd=Counter()
+          raw_all_gates_pass=0
+          effective_all_gates_pass_ignoring_runtime_freshness=0
+
+          def gv(gates,name):
+            ev=gates.get(name)
+            return ev.get('value') if isinstance(ev,dict) and isinstance(ev.get('value'),bool) else None
+
+          def parse_iso(v):
+            if not isinstance(v,str):
+              return None
+            try:
+              return datetime.fromisoformat(v.replace('Z','+00:00'))
+            except Exception:
+              return None
 
           for r in rows:
             ident=r.get('identity') or {}
@@ -81,9 +104,18 @@ jobs:
             dtes[str(ident.get('dte'))]+=1
             gates=r.get('gates') or {}
             for g in gate_names:
-              ev=gates.get(g)
-              value=ev.get('value') if isinstance(ev,dict) else None
+              value=gv(gates,g)
               gate_counts[g]['true' if value is True else 'false' if value is False else 'missing']+=1
+
+            premium=gv(gates,'premiumResponseConfirmed')
+            dg=gv(gates,'deltaGammaResponseConfirmed')
+            premium_combo[
+              'both_true' if premium is True and dg is True else
+              'premium_only' if premium is True and dg is False else
+              'delta_gamma_only' if premium is False and dg is True else
+              'both_false' if premium is False and dg is False else
+              'missing'
+            ]+=1
 
             pd=(r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {}
             for code in pd.get('reasonCodes') or []:
@@ -110,17 +142,60 @@ jobs:
               if metrics.get(k) is None:
                 metric_missing[k]+=1
 
+            p=r.get('ppdSupport')
+            ppd_present=isinstance(p,dict)
+            ppd['present' if ppd_present else 'missing']+=1
+            ppd_confirmed=bool(ppd_present and p.get('candidateConfirmed') is True and p.get('allRequiredWindowsReady') is True and p.get('supportingOnly') is True and p.get('standaloneTrigger') is False)
+            if ppd_present:
+              ppd['candidate_confirmed' if ppd_confirmed else 'not_candidate_confirmed']+=1
+
+            identity_match=bool(ppd_present and
+              p.get('symbol')==ident.get('symbol') and
+              p.get('expiryDate')==ident.get('expiryDate') and
+              p.get('strike')==ident.get('strike') and
+              p.get('candidateSide')==ident.get('side'))
+            if ppd_present:
+              ppd['identity_match' if identity_match else 'identity_mismatch']+=1
+
+            ident_ts=parse_iso(ident.get('observedAt'))
+            ppd_ts=parse_iso(p.get('observedAt')) if ppd_present else None
+            near_packet_time=bool(ident_ts and ppd_ts and abs((ident_ts-ppd_ts).total_seconds()) <= 90)
+            if ppd_present:
+              ppd['within_90s_of_packet' if near_packet_time else 'outside_90s_or_invalid']+=1
+
+            companion=(gv(gates,'liquidityOk') is True and
+                       gv(gates,'spreadOk') is True and
+                       dg is True and
+                       gv(gates,'thetaIvBurdenAcceptable') is True and
+                       gv(gates,'multiExpiryConflictAbsent') is True)
+            structural_rescue=(premium is False and ppd_confirmed and identity_match and near_packet_time and companion)
+            if structural_rescue:
+              ppd['structural_rescue_possible']+=1
+
+            symbol=ident.get('symbol')
+            dte=ident.get('dte')
+            dte_ok=(gv(gates,'higherDteUsable') is True) if symbol=='BANKNIFTY' else (gv(gates,'currentOrNearExpiryUsable') is True or (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
+            common=(gv(gates,'capitalFit') is True and gv(gates,'liquidityOk') is True and gv(gates,'spreadOk') is True and dg is True and gv(gates,'thetaIvBurdenAcceptable') is True and gv(gates,'multiExpiryConflictAbsent') is True and dte_ok)
+            if common and premium is True:
+              raw_all_gates_pass+=1
+            if common and (premium is True or structural_rescue):
+              effective_all_gates_pass_ignoring_runtime_freshness+=1
+
           audit={
             'recordCount':len(rows),
             'symbols':dict(symbols),
             'sides':dict(sides),
             'dtes':dict(dtes),
             'gateCounts':{g:dict(c) for g,c in gate_counts.items()},
+            'premiumCooccurrence':dict(premium_combo),
             'premiumReasonCodes':dict(premium_reasons),
             'thetaReasonCodes':dict(theta_reasons),
             'premiumThresholdSnapshots':dict(premium_thresholds),
             'thetaThresholdSnapshots':dict(theta_thresholds),
             'responseMetricMissingCounts':dict(metric_missing),
+            'ppdSupportAudit':dict(ppd),
+            'rawAllRequiredGateBundlePassCount':raw_all_gates_pass,
+            'effectiveAllRequiredGateBundlePassIgnoringRuntimeFreshnessCount':effective_all_gates_pass_ignoring_runtime_freshness,
           }
           print('H1_THREE_POLICY_REASON_AUDIT', json.dumps(audit, separators=(',',':'), sort_keys=True))
           PY

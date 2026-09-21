@@ -1,4 +1,4 @@
-import type { H1ExactPriceGreekObservation } from "./h1-live-exact-snapshot-aggregator.js";
+import type { H1ExactPriceGreekObservation, H1ExactSnapshotBundle } from "./h1-live-exact-snapshot-aggregator.js";
 import type { H1ExactUnderlyingObservation, H1KiteGreekModelPolicy } from "./h1-kite-exact-price-greek-adapter.js";
 
 const YEAR_MS = 365 * 86_400_000;
@@ -11,6 +11,8 @@ export interface H1KiteGreekMathCrosscheckPersistRecord {
   logicalKey: string;
   minuteBucket: string;
   instrumentToken: number;
+  snapshot: H1ExactSnapshotBundle;
+  underlying: H1ExactUnderlyingObservation;
   evidence: H1KiteGreekMathCrosscheckResult;
   productionImpact: "NONE";
   thresholdAuthority: "NONE";
@@ -236,9 +238,13 @@ export function crosscheckH1KiteGreeks(
 
 export function buildH1KiteGreekMathCrosscheckPersistRecord(
   instrumentToken: number,
+  snapshot: H1ExactSnapshotBundle,
+  underlying: H1ExactUnderlyingObservation,
   evidence: H1KiteGreekMathCrosscheckResult,
 ): H1KiteGreekMathCrosscheckPersistRecord | null {
-  if (!Number.isInteger(instrumentToken) || instrumentToken <= 0 || !evidence?.ready || !evidence.observedAt) return null;
+  if (!Number.isInteger(instrumentToken) || instrumentToken <= 0 || !snapshot?.ready || !snapshot.priceGreek || !snapshot.depth ||
+      snapshot.semantics !== "SAME_CONTRACT_LIVE_RUNTIME_EXACT_ONLY" || underlying?.source !== "LIVE_RUNTIME_EXACT" ||
+      !evidence?.ready || !evidence.observedAt) return null;
   const observedMs = Date.parse(evidence.observedAt);
   if (!Number.isFinite(observedMs)) return null;
   const minuteBucket = new Date(Math.floor(observedMs / 60_000) * 60_000).toISOString();
@@ -247,6 +253,8 @@ export function buildH1KiteGreekMathCrosscheckPersistRecord(
     logicalKey: `${minuteBucket}|${instrumentToken}`,
     minuteBucket,
     instrumentToken,
+    snapshot: structuredClone(snapshot),
+    underlying: structuredClone(underlying),
     evidence: structuredClone(evidence),
     productionImpact: "NONE",
     thresholdAuthority: "NONE",

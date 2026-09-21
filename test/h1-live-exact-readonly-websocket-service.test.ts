@@ -43,7 +43,7 @@ test("starts only exact readiness tokens in Kite FULL mode and remains non-autho
   const initial = service.start();
   assert.equal(initial.started, true);
   assert.equal(initial.rawEvidenceReady, false);
-  assert.equal(initial.greekEvidenceStatus, "NOT_CONFIGURED");
+  assert.equal(initial.greekEvidenceStatus, "KITE_MATH_CROSSCHECK_OBSERVING");
   socket.fire("open");
   const status = service.status();
   assert.equal(status.connected, true);
@@ -264,4 +264,50 @@ test("persists pre-policy Greek timing once per option token per receive minute"
   assert.equal(persisted[0].underlyingSkewMs, 30_000);
   assert.equal(persisted[0].thresholdAuthority, "NONE");
   assert.equal(persisted[1].minuteBucket, "2026-09-04T08:11:00.000Z");
+});
+
+
+test("wires Kite-only Greek math cross-check into durable read-only evidence without selector authority", () => {
+  const persisted:any[] = [];
+  const service = new H1LiveExactReadOnlyWebSocketService({
+    readiness: readiness(), apiKey: "key", accessToken: "token",
+    greekMathCrosscheckPersist: (record) => { persisted.push(record); },
+    selectorPolicyEnv: {},
+  });
+
+  (service as any).observeRawSpotTiming({
+    mode: "full", instrumentToken: 99, lastPrice: 25050,
+    exchangeTimestamp: "2026-09-04T08:10:00.000Z", isIndex: true,
+  }, "2026-09-04T08:10:00.100Z");
+
+  const option = {
+    mode: "full" as const,
+    instrumentToken: 3,
+    lastPrice: 188.75,
+    exchangeTimestamp: "2026-09-04T08:10:00.000Z",
+    isIndex: false,
+    marketDepth: depth,
+  };
+
+  (service as any).captureKiteGreekMathCrosscheckEvidence(option, "2026-09-04T08:10:00.200Z");
+  const status = service.status();
+  assert.equal(status.greekEvidenceStatus, "KITE_MATH_CROSSCHECK_OBSERVATIONS_AVAILABLE");
+  assert.equal(status.greekCrosscheckObservationCount, 1);
+  assert.equal(status.greekCrosscheckFailureCount, 0);
+  assert.equal(status.greekCrosscheckPolicySemantics, "SHADOW_CALIBRATION_ONLY");
+  assert.equal(status.greekCrosscheckPolicyAuthority, "NONE");
+  assert.equal(status.selectorRuntimeAttached, false);
+  assert.equal(status.affectsVerdict, false);
+  assert.equal(status.affectsTelegram, false);
+  assert.equal(status.affectsExecution, false);
+
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].version, "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V1");
+  assert.equal(persisted[0].instrumentToken, 3);
+  assert.equal(persisted[0].thresholdAuthority, "NONE");
+  assert.equal(persisted[0].affectsSelector, false);
+  assert.equal(persisted[0].affectsBusinessCard, false);
+  assert.equal(persisted[0].affectsTelegram, false);
+  assert.equal(persisted[0].affectsExecution, false);
+  assert.equal(persisted[0].createsOrders, false);
 });

@@ -17,6 +17,15 @@ test("dashboard fails softly to WAIT without inventing a candidate", () => {
   assert.equal(out.affectsTelegram, false);
   assert.equal(out.affectsExecution, false);
   assert.equal(out.createsOrders, false);
+  assert.equal(out.decisionCard.state, "WAIT");
+  assert.equal(out.decisionCard.action, "WAIT");
+  assert.equal(out.decisionCard.authority, "NONE");
+  assert.equal(out.decisionCard.decisionId, null);
+  assert.equal(out.decisionCard.candidateKey, null);
+  assert.equal(out.decisionCard.identityLocked, false);
+  assert.equal(out.decisionCard.executionPlan.state, "NOT_PUBLISHED");
+  assert.equal(out.decisionCard.executionPlan.entry, null);
+  assert.equal(out.decisionCard.goldResearch.grantsBusinessAuthority, false);
 });
 
 test("dashboard reuses the same canonical business candidate and horizon views", () => {
@@ -40,12 +49,63 @@ test("dashboard reuses the same canonical business candidate and horizon views",
   assert.equal(out.horizons[0].buyerStars, 5);
   assert.equal(out.horizons[2].sellerStars, 4);
   assert.equal(out.sameCanonicalCandidateForDashboardAndTelegram, true);
+  assert.equal(out.decisionCard.state, "CANDIDATE_READY");
+  assert.equal(out.decisionCard.action, "REVIEW_BUYER_CANDIDATE");
+  assert.equal(out.decisionCard.authority, "EXECUTION_CANDIDATE_SELECTOR_V2");
+  assert.equal(out.decisionCard.decisionId, consumer.decisionId);
+  assert.equal(out.decisionCard.candidateKey, consumer.candidateKey);
+  assert.equal(out.decisionCard.identityLocked, true);
+  assert.deepEqual(out.decisionCard.buyerEdgeHorizons, ["INTRADAY"]);
+  assert.equal(out.decisionCard.telegram.allowed, true);
+  assert.equal(out.decisionCard.executionPlan.entry, null);
   const html = renderBusinessDashboardV1Html(out);
   assert.match(html, /BUSINESS DASHBOARD V1/);
   assert.match(html, /NIFTY CE 23800/);
   assert.match(html, /INTRADAY/);
   assert.match(html, /MULTIDAY/);
   assert.match(html, /EXPIRY/);
+  assert.match(html, /BUSINESS DECISION CARD/);
+  assert.match(html, /REVIEW_BUYER_CANDIDATE/);
+  assert.match(html, /CURRENT PREMIUM/);
+  assert.match(html, /ENTRY \/ SL \/ TARGET/);
+  assert.match(html, /NOT PUBLISHED/);
+  assert.match(html, /ID LOCK VERIFIED/);
+  assert.match(html, /decisionId \+ candidateKey/);
+  assert.match(html, /Current premium is not an entry trigger/);
+  canonicalBusinessRuntimeRegistry.clear();
+});
+
+test("business card fails closed when canonical decision identity drifts", () => {
+  canonicalBusinessRuntimeRegistry.clear();
+  const now = Date.now();
+  const consumer:any = {
+    version:"CANONICAL_BUSINESS_CONSUMER_V1",
+    buyerCandidate:{decisionId:"candidate-decision",candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",role:"OPTION_BUYER",symbol:"NIFTY",optionSide:"CE",strike:23800,expiryDate:"2026-09-08",dte:1,moneyness:"ATM",premiumLtp:120,dteBucket:"CURRENT_OR_NEAR",sourceAuthority:"EXECUTION_CANDIDATE_SELECTOR_V2"},
+    horizons:[
+      {horizon:"INTRADAY",action:"BUYER_EDGE",buyerStars:5,sellerStars:2,headline:"Buyer edge",reasons:[],devilCheck:"PASS"},
+      {horizon:"MULTIDAY",action:"WAIT",buyerStars:3,sellerStars:3,headline:"No clear edge — wait",reasons:[],devilCheck:"PASS"},
+      {horizon:"EXPIRY",action:"WAIT",buyerStars:3,sellerStars:3,headline:"No clear edge — wait",reasons:[],devilCheck:"PASS"},
+    ],
+    telegram:{allowed:true,reason:"BUYER_READY"},
+    decisionId:"consumer-decision",
+    candidateKey:"NIFTY:CE:23800:2026-09-08:DTE1:ATM",
+    sameCanonicalCandidateForDashboardAndTelegram:true,
+    affectsExecution:false,
+    createsOrders:false,
+    aiMayOverride:false,
+  };
+  canonicalBusinessRuntimeRegistry.publish("NIFTY", consumer, now);
+  const out = buildBusinessDashboardV1("NIFTY", new Date(now).toISOString());
+  assert.equal(out.ready, false);
+  assert.equal(out.state, "WAIT");
+  assert.equal(out.candidate, null);
+  assert.equal(out.decisionCard.state, "WAIT");
+  assert.equal(out.decisionCard.authority, "NONE");
+  assert.equal(out.decisionCard.identityLocked, false);
+  assert.equal(out.decisionCard.decisionId, null);
+  assert.equal(out.decisionCard.candidateKey, null);
+  assert.equal(out.decisionCard.telegram.allowed, false);
+  assert.equal(out.decisionCard.telegram.reason, "IDENTITY_LOCK_NOT_VERIFIED");
   canonicalBusinessRuntimeRegistry.clear();
 });
 

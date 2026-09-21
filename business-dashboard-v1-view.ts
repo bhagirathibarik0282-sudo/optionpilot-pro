@@ -20,18 +20,36 @@ export function renderBusinessDashboardV1Html(model: BusinessDashboardV1Model): 
     </article>`).join("");
   const reasons = model.selector.reasonCodes.slice(0,6).map((x)=>`<span class="pill">${esc(x.replaceAll("_"," "))}</span>`).join("");
   const intelligence = model.intelligence.map((x)=>`<div class="intel" data-intel-key="${esc(x.key)}"><span>${esc(x.label)}</span><b class="wait" data-state>${esc(x.state)}</b><small data-detail>${esc(x.detail)}</small></div>`).join("");
+  const dc = model.decisionCard;
+  const dcContract = dc.contract
+    ? `${esc(dc.contract.symbol)} ${esc(dc.contract.optionSide)} ${esc(dc.contract.strike)} · ${esc(dc.contract.expiryDate)} · DTE ${esc(dc.contract.dte)} · ${esc(dc.contract.moneyness)}`
+    : "No canonical buyer candidate";
+  const dcHorizons = dc.buyerEdgeHorizons.length ? dc.buyerEdgeHorizons.map(esc).join(" · ") : "None";
+  const dcPremium = dc.contract ? `₹${esc(dc.contract.premiumLtp)}` : "—";
 
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>OptionPilot Pro · Business Dashboard</title><style>
   :root{color-scheme:dark;--bg:#050914;--p:#0b1526;--l:#1d3556;--t:#eef7ff;--m:#8fa4c3;--g:#63f5b5;--c:#4de6ff;--r:#ff7f92;--a:#ffd166}
   *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--t);font-family:Inter,system-ui,sans-serif}.wrap{max-width:980px;margin:auto;padding:14px}
   .hero,.card,.horizon{background:var(--p);border:1px solid var(--l);border-radius:18px;padding:15px}.hero{margin-bottom:10px}.ey{font-size:10px;color:var(--c);font-weight:900;letter-spacing:.12em}.title{font-size:25px;font-weight:900;margin-top:5px}.sub{font-size:12px;color:var(--m);margin-top:6px}
-  .candidate{font-size:18px;font-weight:900;margin-top:10px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.hz{font-size:10px;color:var(--m);font-weight:900}.action{font-size:17px;font-weight:900;margin:7px 0 12px}.buy{color:var(--g)!important}.sell{color:var(--a)!important}.wait{color:var(--m)!important}.bad{color:var(--r)!important}
+  .candidate{font-size:18px;font-weight:900;margin-top:10px}.decision{margin-bottom:10px;border:1px solid #2b5d67;background:linear-gradient(160deg,#0c1b27,#08131f)}.decisiontop{display:flex;justify-content:space-between;gap:10px;align-items:center}.decisionstate{font-size:12px;font-weight:900;border:1px solid var(--l);border-radius:999px;padding:6px 9px}.decisiongrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.decisioncell{background:#07111d;border:1px solid #162a43;border-radius:12px;padding:10px}.decisioncell span{display:block;font-size:9px;color:var(--m);font-weight:900}.decisioncell b{display:block;margin-top:5px;font-size:13px}.decisionnote{font-size:10px;color:var(--m);margin-top:10px;line-height:1.45}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.hz{font-size:10px;color:var(--m);font-weight:900}.action{font-size:17px;font-weight:900;margin:7px 0 12px}.buy{color:var(--g)!important}.sell{color:var(--a)!important}.wait{color:var(--m)!important}.bad{color:var(--r)!important}
   .pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pair div{background:#08111f;border-radius:12px;padding:10px}.pair span{display:block;font-size:9px;color:var(--m);font-weight:900}.pair b{display:block;margin-top:5px;font-size:15px;letter-spacing:1px}
   .section{margin-top:10px}.row{display:flex;gap:8px;flex-wrap:wrap}.intelgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.intel{background:#08111f;border-radius:12px;padding:10px}.intel span,.intel b,.intel small{display:block}.intel span{font-size:10px;font-weight:900}.intel b{font-size:10px;margin-top:5px}.intel small{font-size:10px;color:var(--m);margin-top:5px;line-height:1.4}.pill{font-size:9px;border:1px solid var(--l);border-radius:999px;padding:5px 8px;color:var(--m)}.meta{font-size:11px;color:var(--m);line-height:1.5}.truth{margin-top:8px;font-size:10px;color:var(--m)}
-  @media(max-width:720px){.grid,.intelgrid{grid-template-columns:1fr}.title{font-size:21px}}
+  @media(max-width:720px){.grid,.intelgrid,.decisiongrid{grid-template-columns:1fr}.title{font-size:21px}}
   </style></head><body><main class="wrap">
     <section class="hero"><div class="ey">BUSINESS DASHBOARD V1 · ${esc(model.symbol)}</div><div class="title">${esc(model.headline)}</div><div class="candidate">${candidate}</div><div class="sub">Buyer/Seller · Intraday / Multiday / Expiry · same canonical buyer candidate as Telegram.</div><div class="truth" id="truth-status">Refreshing verified business sources…</div></section>
+    <section class="card decision" id="business-decision-card">
+      <div class="decisiontop"><div><div class="ey">BUSINESS DECISION CARD</div><div class="candidate">${dcContract}</div></div><div class="decisionstate ${dc.state === "CANDIDATE_READY" ? "buy" : "wait"}">${esc(dc.state)}</div></div>
+      <div class="decisiongrid">
+        <div class="decisioncell"><span>ACTION</span><b>${esc(dc.action)}</b></div>
+        <div class="decisioncell"><span>CURRENT PREMIUM</span><b>${dcPremium}</b></div>
+        <div class="decisioncell"><span>BUYER EDGE HORIZON</span><b>${dcHorizons}</b></div>
+        <div class="decisioncell"><span>TELEGRAM</span><b>${dc.telegram.allowed ? "ELIGIBLE" : "BLOCKED"} · ${esc(dc.telegram.reason)}</b></div>
+        <div class="decisioncell"><span>ENTRY / SL / TARGET</span><b>NOT PUBLISHED</b></div>
+        <div class="decisioncell"><span>AUTHORITY</span><b>${esc(dc.authority)} · ID LOCK ${dc.identityLocked ? "VERIFIED" : "BLOCKED"}</b></div>
+      </div>
+      <div class="decisionnote">Current premium is not an entry trigger. Candidate readiness requires the same canonical decisionId + candidateKey used by Dashboard and Telegram. Entry/SL/Target stay blank until EXECUTION_LEVEL_PLAN_V1 is explicitly bound to this same canonical candidate. Gold remains a separate research validation layer and cannot upgrade candidate authority.</div>
+    </section>
     <section class="grid">${horizons}</section>
     <section class="card section"><div class="ey">BUSINESS INTELLIGENCE · VERIFIED SOURCE WIRING</div><div class="intelgrid">${intelligence}<div class="intel" data-intel-key="HISTORICAL_EDGE"><span>Historical Edge</span><b class="wait" data-state>WAIT</b><small data-detail>Loading historical evidence coverage</small></div></div></section>
     <section class="card section"><div class="ey">LIVE SELECTOR</div><div class="meta">SELECT ${model.selector.selectCount} · BLOCK ${model.selector.blockCount}</div><div class="row" style="margin-top:8px">${reasons || '<span class="pill">NO BLOCK REASONS</span>'}</div></section>

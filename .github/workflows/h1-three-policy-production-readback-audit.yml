@@ -14,11 +14,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Fetch production descriptive summary read-only
+      - name: Fetch production evidence read-only
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 60             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-three-policy-descriptive-summary?limit=500'             -o /tmp/h1-three-policy-summary.json
+          curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 60             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-gate-evidence-history?limit=500'             -o /tmp/h1-live-gate-history.json
 
       - name: Verify safety and print exact evidence summary
         shell: bash
@@ -26,6 +27,8 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import json
+          from collections import Counter, defaultdict
+
           d=json.load(open('/tmp/h1-three-policy-summary.json'))
           assert d.get('ok') is True, d
           assert d.get('mode') == 'READ_ONLY_H1_THREE_POLICY_DESCRIPTIVE_SUMMARY_V1', d.get('mode')
@@ -50,4 +53,74 @@ jobs:
             'productionPromotionEligible': d.get('productionPromotionEligible'),
           }
           print('H1_THREE_POLICY_PRODUCTION_SUMMARY', json.dumps(out, separators=(',',':'), sort_keys=True))
+
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          assert h.get('ok') is True, h
+          assert h.get('mode') == 'READ_ONLY_H1_LIVE_GATE_EVIDENCE_HISTORY_V1', h.get('mode')
+          rows=h.get('records') or []
+          gate_names=[
+            'premiumResponseConfirmed','deltaGammaResponseConfirmed',
+            'thetaIvBurdenAcceptable','multiExpiryConflictAbsent',
+            'capitalFit','liquidityOk','spreadOk',
+            'currentOrNearExpiryUsable','higherDteUsable','fallbackDteApproved'
+          ]
+          gate_counts={g:Counter() for g in gate_names}
+          symbols=Counter()
+          sides=Counter()
+          dtes=Counter()
+          premium_reasons=Counter()
+          theta_reasons=Counter()
+          premium_thresholds=Counter()
+          theta_thresholds=Counter()
+          metric_missing=Counter()
+
+          for r in rows:
+            ident=r.get('identity') or {}
+            symbols[str(ident.get('symbol'))]+=1
+            sides[str(ident.get('side'))]+=1
+            dtes[str(ident.get('dte'))]+=1
+            gates=r.get('gates') or {}
+            for g in gate_names:
+              ev=gates.get(g)
+              value=ev.get('value') if isinstance(ev,dict) else None
+              gate_counts[g]['true' if value is True else 'false' if value is False else 'missing']+=1
+
+            pd=(r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {}
+            for code in pd.get('reasonCodes') or []:
+              premium_reasons[str(code)]+=1
+            if pd:
+              premium_thresholds[json.dumps({
+                'minPremiumMovePct':pd.get('minPremiumMovePct'),
+                'minAbsoluteDeltaChange':pd.get('minAbsoluteDeltaChange'),
+                'minCurrentGamma':pd.get('minCurrentGamma')
+              },sort_keys=True,separators=(',',':'))]+=1
+
+            td=(r.get('policyDiagnostics') or {}).get('thetaIv') or {}
+            for code in td.get('reasonCodes') or []:
+              theta_reasons[str(code)]+=1
+            if td:
+              theta_thresholds[json.dumps({
+                'maxAbsThetaPctOfPremium':td.get('maxAbsThetaPctOfPremium'),
+                'minIv':td.get('minIv'),
+                'maxIv':td.get('maxIv')
+              },sort_keys=True,separators=(',',':'))]+=1
+
+            metrics=r.get('responseMetrics') or {}
+            for k in ('premiumMovePct','absoluteDeltaChange','currentGamma'):
+              if metrics.get(k) is None:
+                metric_missing[k]+=1
+
+          audit={
+            'recordCount':len(rows),
+            'symbols':dict(symbols),
+            'sides':dict(sides),
+            'dtes':dict(dtes),
+            'gateCounts':{g:dict(c) for g,c in gate_counts.items()},
+            'premiumReasonCodes':dict(premium_reasons),
+            'thetaReasonCodes':dict(theta_reasons),
+            'premiumThresholdSnapshots':dict(premium_thresholds),
+            'thetaThresholdSnapshots':dict(theta_thresholds),
+            'responseMetricMissingCounts':dict(metric_missing),
+          }
+          print('H1_THREE_POLICY_REASON_AUDIT', json.dumps(audit, separators=(',',':'), sort_keys=True))
           PY

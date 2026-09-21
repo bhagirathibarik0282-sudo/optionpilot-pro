@@ -1,0 +1,40 @@
+name: H1 Three Policy Validation Protocol CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-three-policy-validation-protocol-v1.ts"
+      - "test/h1-three-policy-validation-protocol-v1.test.ts"
+      - ".github/workflows/h1-three-policy-validation-protocol-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  protocol:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/h1-three-policy-validation-protocol-v1.test.ts
+      - name: Authority devil check
+        run: |
+          node <<'NODE'
+          const source = require('fs').readFileSync('h1-three-policy-validation-protocol-v1.ts', 'utf8');
+          const required = [
+            'productionPromotionEligible: false',
+            'affectsSelector: false',
+            'affectsBusinessCard: false',
+            'affectsTelegram: false',
+            'affectsExecution: false',
+            'createsOrders: false',
+            'failClosed: true',
+          ];
+          for (const token of required) {
+            if (!source.includes(token)) throw new Error(`missing authority guard: ${token}`);
+          }
+          NODE

@@ -35,6 +35,12 @@ import { buildBusinessDashboardV1, type BusinessDashboardSymbol } from "./busine
 import { renderBusinessDashboardV1Html } from "./business-dashboard-v1-view.js";
 import { evaluateH1DteAwareShadowThreshold } from "./h1-dte-aware-shadow-threshold-v1.js";
 import { buildH1LiveDteShadowComparison } from "./h1-live-dte-shadow-comparison-v1.js";
+import {
+  runJevDecisionShadowFromExactHistory,
+  JEV_DECISION_SHADOW_RESULT_PERSIST_KIND,
+} from "./jev-decision-shadow-runner-v1.js";
+import { JEV_PINNED_MODEL } from "./jev-decision-shadow-v1.js";
+import { H1_LIVE_GATE_EVIDENCE_PERSIST_KIND } from "./h1-live-selector-registry.js";
 
 export const researchRouter = new Hono();
 
@@ -165,6 +171,64 @@ researchRouter.get("/fii-dii/production-readiness", async (c) => {
 
 researchRouter.get("/engine-chain/status", (c) => {
   return c.json(researchEngineChainRuntimeStatus());
+});
+
+researchRouter.get("/jev-decision-shadow/status", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.json({
+    ok: true,
+    version: "JEV_DECISION_SHADOW_V1",
+    mode: "RESEARCH_SHADOW_ONLY",
+    model: JEV_PINNED_MODEL,
+    sourceKind: H1_LIVE_GATE_EVIDENCE_PERSIST_KIND,
+    resultPersistKind: JEV_DECISION_SHADOW_RESULT_PERSIST_KIND,
+    openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
+    protectedRunPath: "/api/research/jev-decision-shadow/run",
+    safety: {
+      affectsVerdict: false,
+      affectsCandidate: false,
+      affectsTelegram: false,
+      affectsExecution: false,
+      createsOrders: false,
+      aiMayOverride: false,
+    },
+  });
+});
+
+researchRouter.post("/jev-decision-shadow/run", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const denied = authorizeResearchMutation(c);
+  if (denied) return denied;
+
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}));
+  const rawSymbol = typeof body.symbol === "string" ? body.symbol.trim().toUpperCase() : "";
+  if (rawSymbol && rawSymbol !== "NIFTY" && rawSymbol !== "SENSEX" && rawSymbol !== "BANKNIFTY") {
+    return c.json({
+      ok: false,
+      version: "JEV_DECISION_SHADOW_V1",
+      mode: "RESEARCH_SHADOW_ONLY",
+      productionImpact: "NONE",
+      blocker: "JEV_SYMBOL_INVALID",
+    }, 400);
+  }
+
+  const rawLimit = body.limit;
+  const limit = rawLimit === undefined ? undefined : Number(rawLimit);
+  const result = await runJevDecisionShadowFromExactHistory({
+    limit,
+    symbol: rawSymbol ? rawSymbol as "NIFTY" | "SENSEX" | "BANKNIFTY" : null,
+  });
+
+  const status = result.ok
+    ? 200
+    : result.blocker === "JEV_LIMIT_REQUIRES_1_TO_20" || result.blocker === "JEV_SYMBOL_INVALID"
+      ? 400
+      : result.blocker === "NO_PERSISTED_EXACT_GATE_PACKETS" || result.blocker === "NO_USABLE_EXACT_GATE_PACKETS"
+        ? 409
+        : result.blocker?.startsWith("JEV_DECISIONS_HTTP_")
+          ? 502
+          : 503;
+  return c.json(result, status);
 });
 
 researchRouter.post("/engine-chain/evaluate", async (c) => {

@@ -96,6 +96,66 @@ function validSampleId(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value);
 }
 
+function timestampAtOrBefore(value: string | null | undefined, decisionMs: number): boolean {
+  if (!value) return false;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) && ms <= decisionMs;
+}
+
+function validateOptionalDecisionTimeEvidence(packet: LiveGateEvidencePacket, decisionAt: string): string[] {
+  const blockers: string[] = [];
+  const decisionMs = Date.parse(decisionAt);
+  if (!Number.isFinite(decisionMs)) return ["JEV_DECISION_TIME_INVALID"];
+
+  if (packet.responseMetrics) {
+    if (packet.responseMetrics.provenance !== "LIVE_RUNTIME_EXACT") blockers.push("JEV_RESPONSE_METRICS_PROVENANCE_INVALID");
+    if (!timestampAtOrBefore(packet.responseMetrics.observedAt, decisionMs)) blockers.push("JEV_RESPONSE_METRICS_LOOKAHEAD_OR_INVALID");
+  }
+
+  if (packet.capitalLiquidityEvidence) {
+    const evidence = packet.capitalLiquidityEvidence;
+    if (evidence.provenance !== "LIVE_RUNTIME_EXACT" || evidence.observationalOnly !== true || evidence.thresholdAuthority !== "NONE") {
+      blockers.push("JEV_CAPITAL_LIQUIDITY_PROVENANCE_INVALID");
+    }
+    if (!timestampAtOrBefore(evidence.occurredAt, decisionMs)) blockers.push("JEV_CAPITAL_LIQUIDITY_LOOKAHEAD_OR_INVALID");
+  }
+
+  if (packet.policyDiagnostics) {
+    if (packet.policyDiagnostics.provenance !== "LIVE_RUNTIME_EXACT") blockers.push("JEV_POLICY_DIAGNOSTICS_PROVENANCE_INVALID");
+    if (!timestampAtOrBefore(packet.policyDiagnostics.observedAt, decisionMs)) blockers.push("JEV_POLICY_DIAGNOSTICS_LOOKAHEAD_OR_INVALID");
+  }
+
+  if (packet.ppdSupport) {
+    const ppd = packet.ppdSupport;
+    if (
+      ppd.provenance !== "LIVE_RUNTIME_EXACT"
+      || ppd.supportingOnly !== true
+      || ppd.standaloneTrigger !== false
+    ) blockers.push("JEV_PPD_PROVENANCE_OR_AUTHORITY_INVALID");
+    if (!timestampAtOrBefore(ppd.observedAt, decisionMs)) blockers.push("JEV_PPD_LOOKAHEAD_OR_INVALID");
+    for (const window of ppd.windows) {
+      if (!timestampAtOrBefore(window.to, decisionMs)) blockers.push(`JEV_PPD_WINDOW_TO_LOOKAHEAD_OR_INVALID:${window.windowMinutes}`);
+      if (window.from && !timestampAtOrBefore(window.from, decisionMs)) blockers.push(`JEV_PPD_WINDOW_FROM_LOOKAHEAD_OR_INVALID:${window.windowMinutes}`);
+    }
+  }
+
+  return blockers;
+}
+
+function jevEvidencePacket(packet: LiveGateEvidencePacket) {
+  const capital = packet.capitalLiquidityEvidence
+    ? (({ receivedAt: _receivedAt, ...decisionTimeEvidence }) => decisionTimeEvidence)(packet.capitalLiquidityEvidence)
+    : undefined;
+  return {
+    identity: packet.identity,
+    gates: packet.gates,
+    responseMetrics: packet.responseMetrics,
+    capitalLiquidityEvidence: capital,
+    policyDiagnostics: packet.policyDiagnostics,
+    ppdSupport: packet.ppdSupport,
+  };
+}
+
 function exactCandidateKey(candidate: ExecutionCandidateInput): string {
   return `${candidate.symbol}:${candidate.side}:${candidate.strike}:${candidate.expiryDate}:DTE${candidate.dte}:${candidate.moneyness}`;
 }
@@ -139,6 +199,9 @@ export function buildJevDecisionShadowSampleFromLivePacket(
     return { sample: null, blockers };
   }
 
+  blockers.push(...validateOptionalDecisionTimeEvidence(packet, decisionAt));
+  if (blockers.length > 0) return { sample: null, blockers };
+
   const assembled = assembleLiveExecutionCandidateInput(packet, decisionAt);
   if (!assembled.ready || !assembled.candidate) {
     blockers.push(...assembled.blockers.map((x) => `JEV_EXACT_GATE_PACKET_BLOCKED:${x}`));
@@ -168,6 +231,7 @@ function validateSample(sample: JevDecisionShadowSample, seen: Set<string>): str
   if (!decisionAt || !Number.isFinite(Date.parse(decisionAt))) {
     blockers.push(`JEV_DECISION_TIME_INVALID:${id || "UNKNOWN"}`);
   } else {
+    blockers.push(...validateOptionalDecisionTimeEvidence(sample.evidencePacket, decisionAt).map((x) => `${x}:${id || "UNKNOWN"}`));
     const assembled = assembleLiveExecutionCandidateInput(sample.evidencePacket, decisionAt);
     if (!assembled.ready || !assembled.candidate) {
       blockers.push(...assembled.blockers.map((x) => `JEV_EXACT_GATE_PACKET_BLOCKED:${id || "UNKNOWN"}:${x}`));
@@ -209,7 +273,7 @@ function recordFor(sample: JevDecisionShadowSample): string {
     sampleId: sample.sampleId,
     decisionTimestamp: sample.evidencePacket.identity.observedAt,
     candidate: sample.candidate,
-    evidencePacket: sample.evidencePacket,
+    evidencePacket: jevEvidencePacket(sample.evidencePacket),
     constraints: {
       optionBuyerOnly: true,
       exactLiveGatePacketOnly: true,

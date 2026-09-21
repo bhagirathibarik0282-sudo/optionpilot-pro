@@ -280,6 +280,8 @@ test("wires Kite-only Greek math cross-check into durable read-only evidence wit
     exchangeTimestamp: "2026-09-04T08:10:00.000Z", isIndex: true,
   }, "2026-09-04T08:10:00.100Z");
 
+  (service as any).selectorDirectionBySymbol.set("NIFTY", "UP");
+
   const option = {
     mode: "full" as const,
     instrumentToken: 3,
@@ -312,6 +314,9 @@ test("wires Kite-only Greek math cross-check into durable read-only evidence wit
   assert.equal(persisted[0].snapshot.depth?.bidQty, 50);
   assert.equal(persisted[0].snapshot.depth?.askQty, 60);
   assert.equal(persisted[0].underlying.price, 25050);
+  assert.equal(persisted[0].selectorDirectionAtCapture, "UP");
+  assert.equal(persisted[0].expectedPremiumDirectionAtCapture, "UP");
+  assert.equal(persisted[0].directionSourceId, "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1");
   assert.equal(persisted[0].thresholdAuthority, "NONE");
   assert.equal(persisted[0].affectsSelector, false);
   assert.equal(persisted[0].affectsBusinessCard, false);

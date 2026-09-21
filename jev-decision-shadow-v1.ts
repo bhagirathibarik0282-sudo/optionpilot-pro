@@ -58,6 +58,14 @@ export interface JevDecisionShadowPlan {
   request: JevDecisionShadowRequest;
   baseline: Array<{
     sampleId: string;
+    decisionTimestamp: string;
+    symbol: ExecutionCandidateInput["symbol"];
+    side: ExecutionCandidateInput["side"];
+    strike: number;
+    expiryDate: string;
+    dte: number;
+    moneyness: ExecutionCandidateInput["moneyness"];
+    premiumLtp: number;
     selectorDecision: ExecutionCandidateResult["decision"];
     selectorCandidateKey: string | null;
     selectorReasonCodes: readonly string[];
@@ -274,6 +282,14 @@ export function buildJevDecisionShadowPlan(samples: JevDecisionShadowSample[]): 
     },
     baseline: safeSamples.map((sample) => ({
       sampleId: sample.sampleId,
+      decisionTimestamp: sample.evidencePacket.identity.observedAt,
+      symbol: sample.candidate.symbol,
+      side: sample.candidate.side,
+      strike: sample.candidate.strike,
+      expiryDate: sample.candidate.expiryDate,
+      dte: sample.candidate.dte,
+      moneyness: sample.candidate.moneyness,
+      premiumLtp: sample.candidate.premiumLtp,
       selectorDecision: sample.baselineSelector.decision,
       selectorCandidateKey: sample.baselineSelector.candidateKey,
       selectorReasonCodes: sample.baselineSelector.reasonCodes,

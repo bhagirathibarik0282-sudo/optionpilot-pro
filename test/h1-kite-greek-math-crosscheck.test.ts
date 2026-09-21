@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { crosscheckH1KiteGreeks } from "../h1-kite-greek-math-crosscheck.js";
+import { buildH1KiteGreekMathCrosscheckPersistRecord, crosscheckH1KiteGreeks } from "../h1-kite-greek-math-crosscheck.js";
 import { mapKiteFullPacketToH1ExactPriceGreek } from "../h1-kite-exact-price-greek-adapter.js";
 import { KiteImmediateTokenRegistry } from "../kite-immediate-token-registry.js";
 import type { KiteDecodedPacket } from "../kite-websocket-binary-decoder.js";
@@ -60,4 +60,43 @@ test("does not invent validation thresholds or promotion authority", () => {
   assert.equal("pass" in out, false);
   assert.equal("promotionEligible" in out, false);
   assert.equal(out.thresholdAuthority, "NONE");
+});
+
+
+test("persists the complete exact snapshot needed for later selector-policy validation without granting authority", () => {
+  const primary = mapKiteFullPacketToH1ExactPriceGreek(packet, registry, underlying, "2026-09-03T10:00:00.500Z", policy);
+  assert.ok(primary);
+  const evidence = crosscheckH1KiteGreeks(primary, underlying, policy);
+  assert.equal(evidence.ready, true);
+
+  const snapshot = {
+    version: "H1_LIVE_EXACT_SNAPSHOT_AGGREGATOR_V1" as const,
+    ready: true,
+    identity: { symbol: primary.symbol, expiryDate: primary.expiryDate, strike: primary.strike, side: primary.side, dte: primary.dte },
+    observedAt: primary.observedAt,
+    priceGreek: primary,
+    depth: {
+      symbol: primary.symbol, expiryDate: primary.expiryDate, strike: primary.strike, side: primary.side, dte: primary.dte,
+      source: "LIVE_RUNTIME_EXACT" as const, observedAt: primary.observedAt, receivedAt: "2026-09-03T10:00:00.500Z",
+      bid: 10.4, ask: 10.5, bidQty: 100, askQty: 120, lotQuantity: 50,
+    },
+    blockers: [],
+    failClosed: true as const,
+    semantics: "SAME_CONTRACT_LIVE_RUNTIME_EXACT_ONLY" as const,
+  };
+
+  const record = buildH1KiteGreekMathCrosscheckPersistRecord(111, snapshot, underlying, evidence);
+  assert.ok(record);
+  assert.equal(record.snapshot.priceGreek?.ltp, primary.ltp);
+  assert.equal(record.snapshot.priceGreek?.theta, primary.theta);
+  assert.equal(record.snapshot.priceGreek?.iv, primary.iv);
+  assert.equal(record.snapshot.depth?.lotQuantity, 50);
+  assert.equal(record.snapshot.depth?.bidQty, 100);
+  assert.equal(record.underlying.price, 100);
+  assert.equal(record.thresholdAuthority, "NONE");
+  assert.equal(record.affectsSelector, false);
+  assert.equal(record.affectsBusinessCard, false);
+  assert.equal(record.affectsTelegram, false);
+  assert.equal(record.affectsExecution, false);
+  assert.equal(record.createsOrders, false);
 });

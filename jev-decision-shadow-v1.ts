@@ -144,8 +144,9 @@ function validateOptionalDecisionTimeEvidence(packet: LiveGateEvidencePacket, de
 
 function jevEvidencePacket(packet: LiveGateEvidencePacket) {
   const capital = packet.capitalLiquidityEvidence
-    ? (({ receivedAt: _receivedAt, ...decisionTimeEvidence }) => decisionTimeEvidence)(packet.capitalLiquidityEvidence)
+    ? { ...packet.capitalLiquidityEvidence } as Record<string, unknown>
     : undefined;
+  if (capital) delete capital.receivedAt;
   return {
     identity: packet.identity,
     gates: packet.gates,

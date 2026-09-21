@@ -37,13 +37,26 @@ Optional manual ingest protection:
 
 ## Haiku variables
 
-Enable only after real shadow source verification:
+Enable only after real shadow source verification.
+
+Default direct Anthropic path (backward compatible):
 
 - `OPTION_RECORDER_HAIKU_ENABLED=true`
+- `OPTION_RECORDER_AI_PROVIDER=ANTHROPIC` (optional; this is the default)
 - `ANTHROPIC_API_KEY=<secret>`
 - `ANTHROPIC_MODEL=<exact current model id selected by the user>`
 - optional `ANTHROPIC_VERSION`
-- optional `OPTION_RECORDER_HAIKU_MAX_TOKENS`
+
+OpenRouter path (explicit opt-in, fail-closed):
+
+- `OPTION_RECORDER_HAIKU_ENABLED=true`
+- `OPTION_RECORDER_AI_PROVIDER=OPENROUTER`
+- `OPENROUTER_API_KEY=<secret>`
+- `OPENROUTER_MODEL=<exact OpenRouter model id selected by the user>`
+- optional `OPENROUTER_HTTP_REFERER`
+- optional `OPENROUTER_APP_TITLE`
+
+Both paths may use optional `OPTION_RECORDER_HAIKU_MAX_TOKENS`. Merely adding an OpenRouter key does not switch providers or grant AI any verdict, candidate, Telegram-eligibility, or execution authority.
 
 ## Telegram variables
 

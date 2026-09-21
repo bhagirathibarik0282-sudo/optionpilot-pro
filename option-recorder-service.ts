@@ -14,6 +14,7 @@ import type { ImmediateVerifiedEvent } from "./immediate-expansion-chain.js";
 import { ImmediateMetricIngestBridge } from "./immediate-metric-ingest-bridge.js";
 import type { ImmediateMetricSample } from "./immediate-abnormal-change-detector.js";
 import { fetchSourcePayloads } from "./option-recorder-source-adapter.js";
+import { callHaikuProvider, resolveHaikuProvider } from "./haiku-provider.js";
 
 const app = new Hono();
 const PORT = Number(process.env.PORT || 8080);
@@ -24,9 +25,7 @@ const SOURCE_TOKEN = process.env.OPTION_RECORDER_SOURCE_TOKEN || "";
 const SOURCE_POLL_MS = Math.max(30_000, Number(process.env.OPTION_RECORDER_POLL_MS || 60_000));
 
 const HAIKU_ENABLED = process.env.OPTION_RECORDER_HAIKU_ENABLED === "true";
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "";
-const ANTHROPIC_VERSION = process.env.ANTHROPIC_VERSION || "2023-06-01";
+const HAIKU_PROVIDER = resolveHaikuProvider(process.env);
 const HAIKU_MAX_TOKENS = Math.max(512, Number(process.env.OPTION_RECORDER_HAIKU_MAX_TOKENS || 4096));
 
 const TELEGRAM_ENABLED = process.env.OPTION_RECORDER_TELEGRAM_ENABLED === "true";
@@ -37,7 +36,7 @@ const immediateTruthRecorder = new ImmediateEventTruthRecorder();
 const immediateMetricBridge = new ImmediateMetricIngestBridge(immediateTruthRecorder);
 
 let lastState: (RecorderProcessedState & {
-  haiku: { enabled: boolean; configured: boolean; result: string | null; error: string | null };
+  haiku: { enabled: boolean; configured: boolean; provider: "ANTHROPIC" | "OPENROUTER"; reason: string; result: string | null; error: string | null };
   telegram: { enabled: boolean; sent: boolean; reason: string };
   immediateTelegram: {
     enabled: boolean;
@@ -65,29 +64,7 @@ function recorderSymbol(value: string): RecorderSymbol | null {
 }
 
 async function callHaiku(body: unknown): Promise<string> {
-  if (!ANTHROPIC_API_KEY || !ANTHROPIC_MODEL) throw new Error("HAIKU_NOT_CONFIGURED");
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": ANTHROPIC_VERSION,
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: HAIKU_MAX_TOKENS,
-      messages: [{ role: "user", content: JSON.stringify(body) }],
-    }),
-  });
-
-  if (!response.ok) throw new Error(`HAIKU_HTTP_${response.status}`);
-
-  const data = await response.json() as { content?: Array<{ type?: string; text?: string }> };
-  return (data.content || [])
-    .map((x) => typeof x.text === "string" ? x.text : "")
-    .filter(Boolean)
-    .join("\n");
+  return callHaikuProvider(HAIKU_PROVIDER, body, HAIKU_MAX_TOKENS);
 }
 
 async function runHaikuMultiPass(input: unknown): Promise<string> {
@@ -164,7 +141,9 @@ async function processOne(payload: RecorderIngestPayload) {
     ...state,
     haiku: {
       enabled: HAIKU_ENABLED,
-      configured: Boolean(ANTHROPIC_API_KEY && ANTHROPIC_MODEL),
+      configured: HAIKU_PROVIDER.configured,
+      provider: HAIKU_PROVIDER.provider,
+      reason: HAIKU_PROVIDER.reason,
       result: haikuResult,
       error: haikuError,
     },
@@ -212,7 +191,9 @@ app.get("/health", (c) => c.json({
   lastSourcePollAt,
   lastSourceError,
   haikuEnabled: HAIKU_ENABLED,
-  haikuConfigured: Boolean(ANTHROPIC_API_KEY && ANTHROPIC_MODEL),
+  haikuConfigured: HAIKU_PROVIDER.configured,
+  haikuProvider: HAIKU_PROVIDER.provider,
+  haikuProviderReason: HAIKU_PROVIDER.reason,
   telegramEnabled: TELEGRAM_ENABLED,
   immediateTelegramEnabled: TELEGRAM_ENABLED && IMMEDIATE_TELEGRAM_ENABLED,
   telegramBotConfigured: Boolean(TELEGRAM_BOT_TOKEN),

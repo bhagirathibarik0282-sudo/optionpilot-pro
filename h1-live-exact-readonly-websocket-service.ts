@@ -86,11 +86,11 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   selectorRuntimeAttached: boolean;
   selectorRuntimeBlockers: string[];
   greekEvidenceStatus: "NOT_CONFIGURED" | "KITE_MATH_CROSSCHECK_OBSERVING" | "KITE_MATH_CROSSCHECK_OBSERVATIONS_AVAILABLE";
-  greekCrosscheckObservationCount: number;
-  greekCrosscheckFailureCount: number;
-  greekCrosscheckLastObservedAt: string | null;
-  greekCrosscheckPolicySemantics: "SHADOW_CALIBRATION_ONLY";
-  greekCrosscheckPolicyAuthority: "NONE";
+  greekCrosscheckObservationCount?: number;
+  greekCrosscheckFailureCount?: number;
+  greekCrosscheckLastObservedAt?: string | null;
+  greekCrosscheckPolicySemantics?: "SHADOW_CALIBRATION_ONLY";
+  greekCrosscheckPolicyAuthority?: "NONE";
   productionImpact: "NONE";
   readOnly: true;
   forwardsDownstream: false;

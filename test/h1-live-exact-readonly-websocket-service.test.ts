@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { H1LiveExactReadOnlyWebSocketService } from "../h1-live-exact-readonly-websocket-service.js";
+import { deriveExpectedPremiumDirectionAtCapture, H1LiveExactReadOnlyWebSocketService } from "../h1-live-exact-readonly-websocket-service.js";
 import { H1LiveExactRawEvidenceStore, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, buildH1LiveExactGreekTimingRecord } from "../h1-live-exact-raw-evidence-store.js";
 import { KiteImmediateTokenRegistry } from "../kite-immediate-token-registry.js";
 import type { H1LiveExactMarketWiringReadinessResult } from "../h1-live-exact-market-wiring-readiness.js";
@@ -33,6 +33,15 @@ function fakeSocket(sent: string[]) {
 }
 
 const depth = { buy:[{price:100,quantity:50,orders:2}], sell:[{price:101,quantity:60,orders:3}] };
+
+test("maps capture-time spot direction to CE and PE premium direction exhaustively", () => {
+  assert.equal(deriveExpectedPremiumDirectionAtCapture("UP", "CE"), "UP");
+  assert.equal(deriveExpectedPremiumDirectionAtCapture("UP", "PE"), "DOWN");
+  assert.equal(deriveExpectedPremiumDirectionAtCapture("DOWN", "CE"), "DOWN");
+  assert.equal(deriveExpectedPremiumDirectionAtCapture("DOWN", "PE"), "UP");
+  assert.equal(deriveExpectedPremiumDirectionAtCapture(null, "CE"), null);
+  assert.equal(deriveExpectedPremiumDirectionAtCapture(null, "PE"), null);
+});
 
 test("starts only exact readiness tokens in Kite FULL mode and remains non-authoritative", () => {
   const sent:string[] = [];

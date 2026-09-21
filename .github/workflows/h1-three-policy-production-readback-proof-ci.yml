@@ -1,0 +1,58 @@
+name: H1 Three Policy Production Readback Proof CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/h1-three-policy-production-readback-proof-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch production three-policy descriptive summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 120             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-three-policy-descriptive-summary?limit=5000'             -o /tmp/h1-three-policy-summary.json
+
+      - name: Print sanitized production proof
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/h1-three-policy-summary.json'))
+          out={
+            'ok': d.get('ok'),
+            'mode': d.get('mode'),
+            'rowCount': d.get('rowCount'),
+            'premiumDeltaGamma': d.get('premiumDeltaGamma'),
+            'thetaIvMultiExpiry': d.get('thetaIvMultiExpiry'),
+            'capitalLiquidityDte': d.get('capitalLiquidityDte'),
+            'validationDecision': d.get('validationDecision'),
+            'acceptanceCriteriaApplied': d.get('acceptanceCriteriaApplied'),
+            'productionPromotionEligible': d.get('productionPromotionEligible'),
+            'safety': d.get('safety'),
+          }
+          print('THREE_POLICY_PRODUCTION_SUMMARY', json.dumps(out, separators=(',',':'), sort_keys=True))
+          assert d.get('ok') is True
+          assert d.get('mode') == 'READ_ONLY_H1_THREE_POLICY_DESCRIPTIVE_SUMMARY_V1'
+          assert d.get('validationDecision') is None
+          assert d.get('acceptanceCriteriaApplied') is False
+          assert d.get('productionPromotionEligible') is False
+          s=d.get('safety') or {}
+          assert s.get('readOnly') is True
+          assert s.get('rawRecordsReturned') is False
+          assert s.get('thresholdsInvented') is False
+          assert s.get('validationDecisionMade') is False
+          assert s.get('affectsSelector') is False
+          assert s.get('affectsBusinessCard') is False
+          assert s.get('affectsTelegram') is False
+          assert s.get('affectsExecution') is False
+          assert s.get('createsOrders') is False
+          print('THREE_POLICY_PRODUCTION_READBACK_SAFETY_PASS')
+          PY

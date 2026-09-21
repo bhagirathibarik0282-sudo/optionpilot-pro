@@ -1,5 +1,12 @@
-import type { CanonicalEvidenceEnvelope } from "./canonical-evidence-envelope.js";
-import type { ExecutionCandidateInput, ExecutionCandidateResult } from "./execution-candidate-selector.js";
+import {
+  assembleLiveExecutionCandidateInput,
+  type LiveGateEvidencePacket,
+} from "./h1-live-gate-evidence-assembler.js";
+import {
+  selectExecutionCandidate,
+  type ExecutionCandidateInput,
+  type ExecutionCandidateResult,
+} from "./execution-candidate-selector.js";
 
 export const JEV_DECISION_SHADOW_VERSION = "JEV_DECISION_SHADOW_V1" as const;
 export const JEV_PINNED_MODEL = "typesafe/jev-1.13" as const;
@@ -26,8 +33,13 @@ export type JevShadowQuestion =
 export interface JevDecisionShadowSample {
   sampleId: string;
   candidate: ExecutionCandidateInput;
-  envelope: CanonicalEvidenceEnvelope;
+  evidencePacket: LiveGateEvidencePacket;
   baselineSelector: ExecutionCandidateResult;
+}
+
+export interface JevDecisionShadowSampleBuildResult {
+  sample: JevDecisionShadowSample | null;
+  blockers: string[];
 }
 
 export interface JevDecisionShadowRequest {
@@ -42,6 +54,7 @@ export interface JevDecisionShadowRequest {
 export interface JevDecisionShadowPlan {
   version: typeof JEV_DECISION_SHADOW_VERSION;
   semantics: "RESEARCH_SHADOW_ONLY";
+  sourcePolicy: "PERSISTED_OR_LIVE_H1_EXACT_GATE_PACKET_ONLY";
   request: JevDecisionShadowRequest;
   baseline: Array<{
     sampleId: string;
@@ -71,37 +84,109 @@ export interface JevDecisionShadowApiResponse {
   provider?: string;
 }
 
+function validSampleId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value);
+}
+
 function exactCandidateKey(candidate: ExecutionCandidateInput): string {
   return `${candidate.symbol}:${candidate.side}:${candidate.strike}:${candidate.expiryDate}:DTE${candidate.dte}:${candidate.moneyness}`;
+}
+
+function sameCandidate(a: ExecutionCandidateInput, b: ExecutionCandidateInput): boolean {
+  return a.symbol === b.symbol
+    && a.side === b.side
+    && a.strike === b.strike
+    && a.expiryDate === b.expiryDate
+    && a.dte === b.dte
+    && a.moneyness === b.moneyness
+    && a.premiumLtp === b.premiumLtp
+    && a.capitalFit === b.capitalFit
+    && a.liquidityOk === b.liquidityOk
+    && a.spreadOk === b.spreadOk
+    && a.premiumResponseConfirmed === b.premiumResponseConfirmed
+    && a.deltaGammaResponseConfirmed === b.deltaGammaResponseConfirmed
+    && a.thetaIvBurdenAcceptable === b.thetaIvBurdenAcceptable
+    && a.multiExpiryConflictAbsent === b.multiExpiryConflictAbsent
+    && a.currentOrNearExpiryUsable === b.currentOrNearExpiryUsable
+    && a.higherDteUsable === b.higherDteUsable
+    && (a.fallbackDteApproved ?? null) === (b.fallbackDteApproved ?? null);
+}
+
+/**
+ * Rebuilds the candidate from the exact live gate packet at that packet's own
+ * decision-time anchor. This allows persisted exact packets to be replayed
+ * without judging their freshness against today's wall clock and without
+ * reconstructing missing historical selector gates.
+ */
+export function buildJevDecisionShadowSampleFromLivePacket(
+  sampleId: string,
+  packet: LiveGateEvidencePacket,
+): JevDecisionShadowSampleBuildResult {
+  const blockers: string[] = [];
+  if (!validSampleId(sampleId)) blockers.push("JEV_SAMPLE_ID_INVALID");
+
+  const decisionAt = packet?.identity?.observedAt;
+  if (!decisionAt || !Number.isFinite(Date.parse(decisionAt))) {
+    blockers.push("JEV_DECISION_TIME_INVALID");
+    return { sample: null, blockers };
+  }
+
+  const assembled = assembleLiveExecutionCandidateInput(packet, decisionAt);
+  if (!assembled.ready || !assembled.candidate) {
+    blockers.push(...assembled.blockers.map((x) => `JEV_EXACT_GATE_PACKET_BLOCKED:${x}`));
+    return { sample: null, blockers };
+  }
+
+  const baselineSelector = selectExecutionCandidate(assembled.candidate);
+  return {
+    sample: blockers.length === 0 ? {
+      sampleId,
+      candidate: assembled.candidate,
+      evidencePacket: packet,
+      baselineSelector,
+    } : null,
+    blockers,
+  };
 }
 
 function validateSample(sample: JevDecisionShadowSample, seen: Set<string>): string[] {
   const blockers: string[] = [];
   const id = sample.sampleId?.trim();
-  if (!id) blockers.push("JEV_SAMPLE_ID_REQUIRED");
+  if (!validSampleId(id)) blockers.push("JEV_SAMPLE_ID_INVALID");
   else if (seen.has(id)) blockers.push(`JEV_DUPLICATE_SAMPLE_ID:${id}`);
   else seen.add(id);
 
-  if (sample.envelope?.ruleVersion !== "CANONICAL_EVIDENCE_ENVELOPE_V1") {
-    blockers.push(`JEV_CANONICAL_ENVELOPE_REQUIRED:${id || "UNKNOWN"}`);
+  const decisionAt = sample.evidencePacket?.identity?.observedAt;
+  if (!decisionAt || !Number.isFinite(Date.parse(decisionAt))) {
+    blockers.push(`JEV_DECISION_TIME_INVALID:${id || "UNKNOWN"}`);
+  } else {
+    const assembled = assembleLiveExecutionCandidateInput(sample.evidencePacket, decisionAt);
+    if (!assembled.ready || !assembled.candidate) {
+      blockers.push(...assembled.blockers.map((x) => `JEV_EXACT_GATE_PACKET_BLOCKED:${id || "UNKNOWN"}:${x}`));
+    } else if (!sameCandidate(assembled.candidate, sample.candidate)) {
+      blockers.push(`JEV_CANDIDATE_NOT_EXACT_PACKET_DERIVED:${id || "UNKNOWN"}`);
+    }
   }
-  if (sample.envelope?.semantics !== "RESEARCH_SHADOW_ONLY") {
-    blockers.push(`JEV_ENVELOPE_NOT_RESEARCH_SHADOW:${id || "UNKNOWN"}`);
+
+  if (sample.evidencePacket?.identity?.provenance !== "LIVE_RUNTIME_EXACT") {
+    blockers.push(`JEV_EXACT_LIVE_PROVENANCE_REQUIRED:${id || "UNKNOWN"}`);
   }
-  if (
-    sample.envelope?.affectsVerdict !== false ||
-    sample.envelope?.affectsTelegram !== false ||
-    sample.envelope?.affectsExecution !== false ||
-    sample.envelope?.aiMayOverride !== false
-  ) {
-    blockers.push(`JEV_ENVELOPE_AUTHORITY_BOUNDARY_INVALID:${id || "UNKNOWN"}`);
-  }
-  if (sample.envelope?.symbol !== sample.candidate?.symbol) {
+  if (sample.evidencePacket?.identity?.symbol !== sample.candidate?.symbol) {
     blockers.push(`JEV_SYMBOL_MISMATCH:${id || "UNKNOWN"}`);
   }
   if (sample.baselineSelector?.version !== "EXECUTION_CANDIDATE_SELECTOR_V2") {
     blockers.push(`JEV_BASELINE_SELECTOR_VERSION_INVALID:${id || "UNKNOWN"}`);
+  } else {
+    const expectedSelector = selectExecutionCandidate(sample.candidate);
+    if (
+      sample.baselineSelector.decision !== expectedSelector.decision
+      || sample.baselineSelector.candidateKey !== expectedSelector.candidateKey
+      || JSON.stringify(sample.baselineSelector.reasonCodes) !== JSON.stringify(expectedSelector.reasonCodes)
+    ) {
+      blockers.push(`JEV_BASELINE_SELECTOR_NOT_EXACT_REEVALUATION:${id || "UNKNOWN"}`);
+    }
   }
+
   if (sample.baselineSelector?.decision === "SELECT") {
     const expected = exactCandidateKey(sample.candidate);
     if (sample.baselineSelector.candidateKey !== expected) {
@@ -114,22 +199,24 @@ function validateSample(sample: JevDecisionShadowSample, seen: Set<string>): str
 function recordFor(sample: JevDecisionShadowSample): string {
   return JSON.stringify({
     sampleId: sample.sampleId,
+    decisionTimestamp: sample.evidencePacket.identity.observedAt,
     candidate: sample.candidate,
-    evidence: sample.envelope,
+    evidencePacket: sample.evidencePacket,
     constraints: {
       optionBuyerOnly: true,
-      useOnlySuppliedEvidence: true,
+      exactLiveGatePacketOnly: true,
+      useOnlySuppliedDecisionTimeEvidence: true,
       doNotInferMissingMarketData: true,
       futureOutcomeHidden: true,
+      baselineSelectorHiddenFromJev: true,
       decisionIsResearchShadowOnly: true,
     },
   });
 }
 
 function questionsFor(sampleId: string): Record<string, JevShadowQuestion> {
-  const prefix = sampleId.replace(/[^A-Za-z0-9_-]/g, "_");
   return {
-    [`${prefix}__action`]: {
+    [`${sampleId}__action`]: {
       type: "choice",
       instructions: `For record "${sampleId}", decide whether the exact supplied option-buying candidate should be TAKEN or rejected as NO_TRADE using only the supplied decision-time evidence. Do not invent missing data and do not use future outcomes.`,
       criteria: {
@@ -137,7 +224,7 @@ function questionsFor(sampleId: string): Record<string, JevShadowQuestion> {
         NO_TRADE: "The exact candidate is not sufficiently supported because evidence is stale, missing, conflicting, weak, or the supplied option-buying constraints are not satisfied.",
       },
     },
-    [`${prefix}__evidence_consistent`]: {
+    [`${sampleId}__evidence_consistent`]: {
       type: "noul",
       instructions: `For record "${sampleId}", is the supplied decision-time evidence internally consistent for this exact candidate?`,
       criteria: {
@@ -145,7 +232,7 @@ function questionsFor(sampleId: string): Record<string, JevShadowQuestion> {
         false: "The supplied evidence is materially contradictory, incomplete, stale, or insufficient.",
       },
     },
-    [`${prefix}__material_conflict`]: {
+    [`${sampleId}__material_conflict`]: {
       type: "noul",
       instructions: `For record "${sampleId}", is there a material conflict that should stop an option buyer from taking this exact candidate?`,
       criteria: {
@@ -153,7 +240,7 @@ function questionsFor(sampleId: string): Record<string, JevShadowQuestion> {
         false: "No material conflict or missing requirement is evident in the supplied evidence.",
       },
     },
-    [`${prefix}__quality`]: {
+    [`${sampleId}__quality`]: {
       type: "score",
       instructions: `For record "${sampleId}", rate the overall quality of the exact option-buying candidate from the supplied evidence only.`,
       criteria: ["VERY_LOW", "LOW", "MEDIUM", "HIGH", "VERY_HIGH"],
@@ -176,10 +263,11 @@ export function buildJevDecisionShadowPlan(samples: JevDecisionShadowSample[]): 
   return {
     version: JEV_DECISION_SHADOW_VERSION,
     semantics: "RESEARCH_SHADOW_ONLY",
+    sourcePolicy: "PERSISTED_OR_LIVE_H1_EXACT_GATE_PACKET_ONLY",
     request: {
       model: JEV_PINNED_MODEL,
       state: {
-        description: "OptionPilot decision-time option-buying candidate evidence. Each record is independent. Future outcomes are intentionally hidden.",
+        description: "OptionPilot exact live gate packet evidence captured at decision time. Each record is independent. Baseline selector decisions and future outcomes are intentionally hidden from Jev.",
         records,
       },
       questions,

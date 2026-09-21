@@ -82,3 +82,19 @@ Compare at least:
 Do not call Jev confidence a market win probability until calibration against untouched outcomes demonstrates that relationship.
 
 Promotion requires evidence that the Jev policy improves business metrics on OOS/live-forward samples, including net expectancy and false-entry control, without unacceptable trade suppression or DTE/regime instability.
+
+
+## Protected runtime experiment
+
+The existing research router exposes:
+
+- `GET /api/research/jev-decision-shadow/status` — configuration/safety status only; never exposes the OpenRouter secret.
+- `POST /api/research/jev-decision-shadow/run` — runs a batch of 1–20 exact persisted gate packets through Jev.
+
+The POST route uses the existing `RESEARCH_ADMIN_TOKEN` mutation guard. It reads `OPENROUTER_API_KEY` only inside the server process and never returns it.
+
+A successful run is durably appended to PostgreSQL under:
+
+- `JEV_DECISION_SHADOW_RESULT_V1`
+
+The stored research result includes the pinned model, exact contract/time baseline identity, canonical selector baseline kept outside Jev input, Jev answers, usage metadata when supplied, and hard safety flags. If durable persistence cannot be verified, the run fails closed instead of claiming success.

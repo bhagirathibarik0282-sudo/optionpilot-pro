@@ -42,7 +42,12 @@ export interface H1DynamicReadOnlyServerStatus {
   selectorRuntimeBlockers: string[];
   marketWindowContext: H1RegularMarketWindowContext;
   marketOpenReadinessAcceptance: H1MarketOpenReadinessAcceptance;
-  greekEvidenceStatus: "NOT_CONFIGURED";
+  greekEvidenceStatus: "NOT_CONFIGURED" | "KITE_MATH_CROSSCHECK_OBSERVING" | "KITE_MATH_CROSSCHECK_OBSERVATIONS_AVAILABLE";
+  greekCrosscheckObservationCount: number;
+  greekCrosscheckFailureCount: number;
+  greekCrosscheckLastObservedAt: string | null;
+  greekCrosscheckPolicySemantics: "SHADOW_CALIBRATION_ONLY";
+  greekCrosscheckPolicyAuthority: "NONE";
   productionImpact: "NONE";
   readOnly: true;
   forwardsDownstream: false;
@@ -89,7 +94,10 @@ function status(enabled: boolean, attempted: boolean, started: boolean, reason: 
     readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],
     selectorRuntimePolicyReady: false, selectorRuntimeAttached: false, selectorRuntimeBlockers: [],
     marketWindowContext: getH1RegularMarketWindowContext(),
-    greekEvidenceStatus: "NOT_CONFIGURED", productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
+    greekEvidenceStatus: "NOT_CONFIGURED",
+    greekCrosscheckObservationCount: 0, greekCrosscheckFailureCount: 0, greekCrosscheckLastObservedAt: null,
+    greekCrosscheckPolicySemantics: "SHADOW_CALIBRATION_ONLY", greekCrosscheckPolicyAuthority: "NONE",
+    productionImpact: "NONE", readOnly: true, forwardsDownstream: false,
     affectsDirection: false, affectsVerdict: false, affectsExecution: false, affectsTelegram: false, failClosed: true,
   };
   return withAcceptance(base);
@@ -142,7 +150,13 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
     selectorRuntimePolicyReady: live.selectorRuntimePolicyReady ?? false,
     selectorRuntimeAttached: live.selectorRuntimeAttached ?? false,
     selectorRuntimeBlockers: [...(live.selectorRuntimeBlockers ?? [])],
-    greekEvidenceStatus: live.greekEvidenceStatus, forwardsDownstream: false,
+    greekEvidenceStatus: live.greekEvidenceStatus,
+    greekCrosscheckObservationCount: live.greekCrosscheckObservationCount ?? 0,
+    greekCrosscheckFailureCount: live.greekCrosscheckFailureCount ?? 0,
+    greekCrosscheckLastObservedAt: live.greekCrosscheckLastObservedAt ?? null,
+    greekCrosscheckPolicySemantics: live.greekCrosscheckPolicySemantics ?? "SHADOW_CALIBRATION_ONLY",
+    greekCrosscheckPolicyAuthority: live.greekCrosscheckPolicyAuthority ?? "NONE",
+    forwardsDownstream: false,
   };
   return withAcceptance(base);
 }

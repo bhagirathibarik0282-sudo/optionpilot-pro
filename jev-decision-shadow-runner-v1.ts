@@ -229,7 +229,7 @@ export async function runJevDecisionShadowFromExactHistory(
 
     return {
       ...common,
-      ok: true,
+      ok: persisted,
       sampleCount: samples.length,
       baseline: plan.baseline,
       answers: response.answers,

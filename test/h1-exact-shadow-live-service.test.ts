@@ -176,3 +176,30 @@ test("disabled Gold shadow does not require a producer", () => {
   assert.equal(out.ready, true);
   assert.deepEqual(out.blockers, []);
 });
+
+
+test("DTE burden overrides are separate shadow-only config", () => {
+  const cfg = readH1ExactShadowLiveConfig(env({
+    KITE_H1_SHADOW_DTE_BURDEN_OVERRIDES_JSON: JSON.stringify({
+      EXPIRY_0_1: {
+        maxAbsThetaPctOfPremium: 500,
+        minIv: 8,
+        maxIv: 45,
+      },
+    }),
+  }));
+  assert.equal(cfg.dteBurdenOverrides.EXPIRY_0_1?.maxAbsThetaPctOfPremium, 500);
+  assert.equal(cfg.policy?.burdenPolicy.maxAbsThetaPctOfPremium, 1000);
+});
+
+test("invalid DTE burden override config fails closed", () => {
+  assert.throws(() => readH1ExactShadowLiveConfig(env({
+    KITE_H1_SHADOW_DTE_BURDEN_OVERRIDES_JSON: JSON.stringify({
+      EXPIRY_0_1: {
+        maxAbsThetaPctOfPremium: 500,
+        minIv: 50,
+        maxIv: 20,
+      },
+    }),
+  })), /DTE_BURDEN_OVERRIDE_INVALID/);
+});

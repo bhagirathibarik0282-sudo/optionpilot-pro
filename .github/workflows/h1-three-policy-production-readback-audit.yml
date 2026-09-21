@@ -661,3 +661,82 @@ jobs:
           }
           print('H1_JOINT_SHADOW_SENSITIVITY',json.dumps(out,separators=(',',':'),sort_keys=True))
           PY
+
+
+      - name: Exact fixed-row relaxation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, math
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          rows=h.get('records') or []
+          CURRENT={'premium':2.0,'delta':0.03,'gamma':0.001,'theta':3.0,'maxIv':30.0}
+
+          def gv(gates,name):
+            ev=gates.get(name)
+            return ev.get('value') if isinstance(ev,dict) else None
+
+          out={'NIFTY':[],'SENSEX':[]}
+          for r in rows:
+            ident=r.get('identity') or {}
+            sym=ident.get('symbol')
+            if sym not in out: continue
+            gates=r.get('gates') or {}
+            dte=ident.get('dte')
+            capital=(gv(gates,'capitalFit') is True)
+            liq=(gv(gates,'liquidityOk') is True)
+            spread=(gv(gates,'spreadOk') is True)
+            multi=(gv(gates,'multiExpiryConflictAbsent') is True)
+            dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
+                    (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
+            if not (capital and liq and spread and multi and dte_ok):
+              continue
+
+            rm=r.get('responseMetrics') or {}
+            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+            vals={
+              'premium':rm.get('premiumMovePct'),
+              'delta':rm.get('absoluteDeltaChange'),
+              'gamma':rm.get('currentGamma'),
+              'theta':td.get('thetaPctOfPremium'),
+              'iv':td.get('iv'),
+            }
+            if not all(isinstance(v,(int,float)) and math.isfinite(float(v)) for v in vals.values()):
+              continue
+
+            req={
+              'maxPremiumFloor':float(vals['premium']),
+              'maxDeltaFloor':float(vals['delta']),
+              'maxGammaFloor':float(vals['gamma']),
+              'minThetaCeiling':float(vals['theta']),
+              'minIvCeiling':max(30.0,float(vals['iv'])),
+            }
+            relax={
+              'premium':max(0,(CURRENT['premium']-vals['premium'])/CURRENT['premium']),
+              'delta':max(0,(CURRENT['delta']-vals['delta'])/CURRENT['delta']),
+              'gamma':max(0,(CURRENT['gamma']-vals['gamma'])/CURRENT['gamma']),
+              'theta':max(0,(vals['theta']-CURRENT['theta'])/CURRENT['theta']),
+              'iv':max(0,(vals['iv']-CURRENT['maxIv'])/CURRENT['maxIv']),
+            }
+            score=sum(relax.values())
+            out[sym].append({
+              'side':ident.get('side'),
+              'strike':ident.get('strike'),
+              'dte':dte,
+              'observedAt':ident.get('observedAt'),
+              'metrics':vals,
+              'requiredBoundary':req,
+              'relaxationScore':score,
+            })
+
+          for sym in out:
+            out[sym].sort(key=lambda x:x['relaxationScore'])
+            out[sym]=out[sym][:6]
+
+          print('H1_FIXED_ROW_RELAXATION_BOUNDARY',json.dumps({
+            'semantics':'SHADOW_ONLY_ROW_BOUNDARY_NO_POLICY_PROMOTION',
+            'currentPolicy':CURRENT,
+            'rows':out,
+          },separators=(',',':'),sort_keys=True))
+          PY

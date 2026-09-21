@@ -210,3 +210,100 @@ jobs:
           assert s.get('affectsExecution') is False
           print('THREE_POLICY_RAW_RECONSTRUCTION_READBACK_SAFETY_PASS')
           PY
+
+      - name: Print threshold-free raw distributions
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, math, collections
+          d=json.load(open('/tmp/h1-greek-crosscheck-history.json'))
+          records=d.get('records') or []
+
+          def q(vals, p):
+            vals=sorted(v for v in vals if isinstance(v,(int,float)) and math.isfinite(v))
+            if not vals: return None
+            if len(vals)==1: return vals[0]
+            pos=(len(vals)-1)*p
+            lo=math.floor(pos); hi=math.ceil(pos)
+            if lo==hi: return vals[lo]
+            return vals[lo]+(vals[hi]-vals[lo])*(pos-lo)
+
+          def stats(vals, ps=(0.05,0.25,0.5,0.75,0.9,0.95)):
+            clean=[v for v in vals if isinstance(v,(int,float)) and math.isfinite(v)]
+            return {'count':len(clean), **{f'p{int(p*100):02d}':q(clean,p) for p in ps}}
+
+          snaps=[]
+          for r in records:
+            s=r.get('snapshot') or {}
+            if s.get('ready') is not True: continue
+            ident=s.get('identity') or {}
+            pg=s.get('priceGreek') or {}
+            depth=s.get('depth') or {}
+            if not all(k in pg for k in ['ltp','delta','gamma','theta','iv']): continue
+            if not all(k in depth for k in ['bid','ask','bidQty','askQty','lotQuantity']): continue
+            row={
+              'minute':r.get('minuteBucket'),
+              'key':(ident.get('symbol'),ident.get('expiryDate'),ident.get('strike'),ident.get('side')),
+              'symbol':ident.get('symbol'),
+              'dte':ident.get('dte'),
+              'ltp':pg.get('ltp'),'delta':pg.get('delta'),'gamma':pg.get('gamma'),'theta':pg.get('theta'),'iv':pg.get('iv'),
+              'bid':depth.get('bid'),'ask':depth.get('ask'),'bidQty':depth.get('bidQty'),'askQty':depth.get('askQty'),'lot':depth.get('lotQuantity'),
+              'expected':r.get('expectedPremiumDirectionAtCapture'),
+            }
+            snaps.append(row)
+
+          gamma=[]; theta_pct=[]; iv=[]; spread=[]; bid_cov=[]; ask_cov=[]; capital=[]; dtes=[]
+          for x in snaps:
+            gamma.append(abs(x['gamma']))
+            theta_pct.append(abs(x['theta'])/x['ltp']*100 if x['ltp'] else None)
+            iv.append(x['iv'])
+            mid=(x['bid']+x['ask'])/2 if x['bid'] and x['ask'] else None
+            spread.append((x['ask']-x['bid'])/mid*100 if mid else None)
+            bid_cov.append(x['bidQty']/x['lot'] if x['lot'] else None)
+            ask_cov.append(x['askQty']/x['lot'] if x['lot'] else None)
+            capital.append(x['ltp']*x['lot'] if x['lot'] else None)
+            dtes.append(x['dte'])
+
+          bykey=collections.defaultdict(list)
+          for x in snaps: bykey[x['key']].append(x)
+          premium_move=[]; abs_premium_move=[]; abs_delta_change=[]; expected_up_move=[]
+          pair_count=0; expected_up_pair_count=0
+          for arr in bykey.values():
+            arr.sort(key=lambda x:str(x['minute']))
+            for a,b in zip(arr,arr[1:]):
+              try:
+                import datetime
+                ta=datetime.datetime.fromisoformat(str(a['minute']).replace('Z','+00:00'))
+                tb=datetime.datetime.fromisoformat(str(b['minute']).replace('Z','+00:00'))
+                gap=(tb-ta).total_seconds()
+              except Exception:
+                continue
+              if gap<=0 or gap>180: continue
+              if not a['ltp'] or not b['ltp']: continue
+              move=(b['ltp']-a['ltp'])/a['ltp']*100
+              premium_move.append(move); abs_premium_move.append(abs(move))
+              abs_delta_change.append(abs(b['delta']-a['delta']))
+              pair_count+=1
+              if b['expected']=='UP':
+                expected_up_move.append(move); expected_up_pair_count+=1
+
+          out={
+            'snapshotCount':len(snaps),
+            'sameContractPairCountWithin180s':pair_count,
+            'expectedUpPairCount':expected_up_pair_count,
+            'premiumMovePctSigned':stats(premium_move),
+            'premiumMovePctAbsolute':stats(abs_premium_move),
+            'absoluteDeltaChange':stats(abs_delta_change),
+            'currentGamma':stats(gamma),
+            'thetaPctOfPremium':stats(theta_pct),
+            'ivPct':stats(iv),
+            'relativeSpreadPct':stats(spread),
+            'bidDepthCoverageMultiple':stats(bid_cov),
+            'askDepthCoverageMultiple':stats(ask_cov),
+            'capitalRequired':stats(capital),
+            'dteCounts':dict(collections.Counter(str(x) for x in dtes)),
+            'expectedUpPremiumMovePct':stats(expected_up_move),
+            'semantics':'DESCRIPTIVE_ONLY_NO_THRESHOLD_NO_PROMOTION',
+          }
+          print('THREE_POLICY_THRESHOLD_FREE_DISTRIBUTIONS', json.dumps(out,separators=(',',':'),sort_keys=True))
+          PY

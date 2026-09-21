@@ -270,3 +270,33 @@ jobs:
           }
           print('H1_THREE_POLICY_METRIC_DISTRIBUTIONS', json.dumps(out, separators=(',',':'), sort_keys=True))
           PY
+
+
+      - name: Print exact subgate choke counts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from collections import defaultdict, Counter
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          rows=h.get('records') or []
+          out=defaultdict(lambda: defaultdict(Counter))
+          for r in rows:
+            symbol=str((r.get('identity') or {}).get('symbol'))
+            pd=((r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {})
+            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+            vals={
+              'premiumPass':pd.get('premiumPass'),
+              'deltaPass':pd.get('deltaPass'),
+              'gammaPass':pd.get('gammaPass'),
+              'deltaGammaPass':pd.get('deltaGammaPass'),
+              'thetaPass':td.get('thetaPass'),
+              'ivPass':td.get('ivPass'),
+              'thetaIvPass':td.get('thetaIvPass'),
+            }
+            for k,v in vals.items():
+              out[symbol][k]['true' if v is True else 'false' if v is False else 'missing']+=1
+          serial={s:{k:dict(c) for k,c in m.items()} for s,m in out.items()}
+          print('H1_THREE_POLICY_SUBGATE_CHOKE', json.dumps(serial,separators=(',',':'),sort_keys=True))
+          PY

@@ -1,0 +1,34 @@
+name: H1 Kite Greek Math Crosscheck CI
+
+on:
+  pull_request:
+    paths:
+      - "h1-kite-greek-math-crosscheck.ts"
+      - "test/h1-kite-greek-math-crosscheck.test.ts"
+      - ".github/workflows/h1-kite-greek-math-crosscheck-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  crosscheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/h1-kite-greek-math-crosscheck.test.ts
+      - name: Kite-only authority guard
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const source = fs.readFileSync('h1-kite-greek-math-crosscheck.ts','utf8');
+          for (const forbidden of ['DHAN', 'affectsSelector: true', 'affectsTelegram: true', 'affectsExecution: true']) {
+            if (source.includes(forbidden)) throw new Error('forbidden token: ' + forbidden);
+          }
+          for (const required of ['thresholdAuthority: "NONE"', 'productionImpact: "NONE"', 'createsOrders: false']) {
+            if (!source.includes(required)) throw new Error('missing guard: ' + required);
+          }
+          NODE

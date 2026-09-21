@@ -740,3 +740,39 @@ jobs:
             'rows':out,
           },separators=(',',':'),sort_keys=True))
           PY
+
+
+      - name: Existing DTE0 multiday OOS proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          for spec in             "NIFTY|2026-08-25,2026-09-01,2026-09-08,2026-09-15"             "SENSEX|2026-08-27,2026-09-03,2026-09-10,2026-09-17"
+          do
+            symbol="${spec%%|*}"
+            dates="${spec#*|}"
+            url="https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-dte0-multiday-oos?symbol=${symbol}&dates=${dates}&from=09%3A15&to=15%3A30&scope=CORE"
+            code=$(curl --silent --show-error --location --max-time 180 -w '%{http_code}' -o "/tmp/${symbol}-dte0-oos.json" "$url")
+            echo "H1_DTE0_OOS_HTTP ${symbol} ${code}"
+            python - "${symbol}" "/tmp/${symbol}-dte0-oos.json" <<'PY'
+          import json,sys
+          symbol=sys.argv[1]
+          path=sys.argv[2]
+          d=json.load(open(path))
+          out={
+            'symbol':symbol,
+            'ok':d.get('ok'),
+            'mode':d.get('mode'),
+            'readiness':d.get('readiness'),
+            'calibrationDates':d.get('calibrationDates'),
+            'oosDates':d.get('oosDates'),
+            'candidateDeltaP95':d.get('candidateDeltaP95'),
+            'calibration':d.get('calibration'),
+            'oos':d.get('oos'),
+            'oosDeltaPassRateAtCandidate':d.get('oosDeltaPassRateAtCandidate'),
+            'blockers':d.get('blockers'),
+            'reason':d.get('reason'),
+            'tradeDate':d.get('tradeDate'),
+          }
+          print('H1_EXISTING_DTE0_OOS_PROOF',json.dumps(out,separators=(',',':'),sort_keys=True))
+          PY
+          done

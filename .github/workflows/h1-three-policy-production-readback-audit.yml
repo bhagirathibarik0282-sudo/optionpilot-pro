@@ -1,0 +1,53 @@
+name: H1 Three Policy Production Readback Audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/h1-three-policy-production-readback-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fetch production descriptive summary read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 60             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-three-policy-descriptive-summary?limit=500'             -o /tmp/h1-three-policy-summary.json
+
+      - name: Verify safety and print exact evidence summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/h1-three-policy-summary.json'))
+          assert d.get('ok') is True, d
+          assert d.get('mode') == 'READ_ONLY_H1_THREE_POLICY_DESCRIPTIVE_SUMMARY_V1', d.get('mode')
+          s=d.get('safety') or {}
+          assert s.get('readOnly') is True
+          assert s.get('rawRecordsReturned') is False
+          assert s.get('thresholdsInvented') is False
+          assert s.get('acceptanceCriteriaApplied') is False
+          assert s.get('validationDecisionMade') is False
+          assert s.get('affectsSelector') is False
+          assert s.get('affectsBusinessCard') is False
+          assert s.get('affectsTelegram') is False
+          assert s.get('affectsExecution') is False
+          assert s.get('createsOrders') is False
+          out={
+            'rowCount': d.get('rowCount'),
+            'premiumDeltaGamma': d.get('premiumDeltaGamma'),
+            'thetaIvMultiExpiry': d.get('thetaIvMultiExpiry'),
+            'capitalLiquidityDte': d.get('capitalLiquidityDte'),
+            'validationDecision': d.get('validationDecision'),
+            'acceptanceCriteriaApplied': d.get('acceptanceCriteriaApplied'),
+            'productionPromotionEligible': d.get('productionPromotionEligible'),
+          }
+          print('H1_THREE_POLICY_PRODUCTION_SUMMARY', json.dumps(out, separators=(',',':'), sort_keys=True))
+          PY

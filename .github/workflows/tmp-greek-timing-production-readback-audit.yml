@@ -1,0 +1,65 @@
+name: Temporary Greek Timing Production Readback Audit
+
+on:
+  push:
+    branches:
+      - "audit/greek-timing-readback-20260921"
+
+permissions:
+  contents: read
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read production Greek timing history
+        run: |
+          node <<'NODE'
+          const url = "https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-exact-greek-timing-history?limit=500";
+          const response = await fetch(url, { headers: { "user-agent": "optionpilot-greek-readback-audit" } });
+          if (!response.ok) throw new Error(`HTTP_${response.status}`);
+          const body = await response.json();
+          const records = Array.isArray(body.records) ? body.records : [];
+
+          const bySymbol = {};
+          for (const row of records) bySymbol[row.symbol] = (bySymbol[row.symbol] || 0) + 1;
+
+          const badTiming = records.filter((row) =>
+            row.optionFutureAtReceive === true ||
+            row.underlyingFutureAtOptionReceive === true ||
+            row.underlyingReceivedAfterOptionReceive === true
+          ).length;
+
+          function stats(key) {
+            const values = records
+              .map((row) => Number(row[key]))
+              .filter(Number.isFinite)
+              .sort((a,b) => a-b);
+            if (!values.length) return { count: 0, max: null, p95: null };
+            const index = Math.min(values.length - 1, Math.ceil(values.length * 0.95) - 1);
+            return { count: values.length, max: values.at(-1), p95: values[index] };
+          }
+
+          const buckets = records.map((row) => row.minuteBucket).filter(Boolean).sort();
+          const sampleKeys = records.length ? Object.keys(records.at(-1)).sort() : [];
+          const lowerKeys = sampleKeys.map((x) => x.toLowerCase());
+
+          const summary = {
+            endpointMode: body.mode ?? null,
+            reportedCount: body.count ?? null,
+            recordsLength: records.length,
+            minMinuteBucket: buckets.at(0) ?? null,
+            maxMinuteBucket: buckets.at(-1) ?? null,
+            bySymbol,
+            badTimingFlagCount: badTiming,
+            optionAgeMsAtReceive: stats("optionAgeMsAtReceive"),
+            underlyingAgeMsAtOptionReceive: stats("underlyingAgeMsAtOptionReceive"),
+            underlyingSkewMs: stats("underlyingSkewMs"),
+            sampleKeys,
+            containsDeltaReference: lowerKeys.some((k) => k.includes("delta")),
+            containsGammaReference: lowerKeys.some((k) => k.includes("gamma")),
+            containsIvReference: lowerKeys.some((k) => k === "iv" || k.includes("implied")),
+          };
+          console.log("GREEK_HISTORY_AUDIT=" + JSON.stringify(summary));
+          NODE

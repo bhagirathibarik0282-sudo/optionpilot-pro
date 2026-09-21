@@ -13,6 +13,9 @@ export interface H1KiteGreekMathCrosscheckPersistRecord {
   instrumentToken: number;
   snapshot: H1ExactSnapshotBundle;
   underlying: H1ExactUnderlyingObservation;
+  selectorDirectionAtCapture: "UP" | "DOWN" | null;
+  expectedPremiumDirectionAtCapture: "UP" | "DOWN" | null;
+  directionSourceId: "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1" | null;
   evidence: H1KiteGreekMathCrosscheckResult;
   productionImpact: "NONE";
   thresholdAuthority: "NONE";
@@ -241,6 +244,11 @@ export function buildH1KiteGreekMathCrosscheckPersistRecord(
   snapshot: H1ExactSnapshotBundle,
   underlying: H1ExactUnderlyingObservation,
   evidence: H1KiteGreekMathCrosscheckResult,
+  directionContext: {
+    selectorDirectionAtCapture: "UP" | "DOWN";
+    expectedPremiumDirectionAtCapture: "UP" | "DOWN";
+    directionSourceId: "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1";
+  } | null = null,
 ): H1KiteGreekMathCrosscheckPersistRecord | null {
   if (!Number.isInteger(instrumentToken) || instrumentToken <= 0 || !snapshot?.ready || !snapshot.priceGreek || !snapshot.depth ||
       snapshot.semantics !== "SAME_CONTRACT_LIVE_RUNTIME_EXACT_ONLY" || underlying?.source !== "LIVE_RUNTIME_EXACT" ||
@@ -255,6 +263,9 @@ export function buildH1KiteGreekMathCrosscheckPersistRecord(
     instrumentToken,
     snapshot: structuredClone(snapshot),
     underlying: structuredClone(underlying),
+    selectorDirectionAtCapture: directionContext?.selectorDirectionAtCapture ?? null,
+    expectedPremiumDirectionAtCapture: directionContext?.expectedPremiumDirectionAtCapture ?? null,
+    directionSourceId: directionContext?.directionSourceId ?? null,
     evidence: structuredClone(evidence),
     productionImpact: "NONE",
     thresholdAuthority: "NONE",

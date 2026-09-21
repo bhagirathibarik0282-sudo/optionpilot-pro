@@ -1,9 +1,8 @@
 name: Temporary Greek Timing Production Readback Audit
 
 on:
-  push:
-    branches:
-      - "audit/greek-timing-readback-20260921"
+  pull_request:
+    branches: [ main ]
 
 permissions:
   contents: read

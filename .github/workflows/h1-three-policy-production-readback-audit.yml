@@ -300,3 +300,125 @@ jobs:
           serial={s:{k:dict(c) for k,c in m.items()} for s,m in out.items()}
           print('H1_THREE_POLICY_SUBGATE_CHOKE', json.dumps(serial,separators=(',',':'),sort_keys=True))
           PY
+
+
+      - name: Shadow-only threshold sensitivity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, math
+          from datetime import datetime
+
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          rows=h.get('records') or []
+          CURRENT={'delta':0.03,'gamma':0.001,'theta':3.0}
+
+          def q(vals,p):
+            vals=sorted(vals)
+            if not vals: return None
+            pos=(len(vals)-1)*p
+            lo=int(math.floor(pos)); hi=int(math.ceil(pos))
+            return vals[lo] if lo==hi else vals[lo]+(vals[hi]-vals[lo])*(pos-lo)
+
+          vals={'delta':[],'gamma':[],'theta':[]}
+          for r in rows:
+            rm=r.get('responseMetrics') or {}
+            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+            for k,v in [('delta',rm.get('absoluteDeltaChange')),('gamma',rm.get('currentGamma')),('theta',td.get('thetaPctOfPremium'))]:
+              if isinstance(v,(int,float)) and math.isfinite(float(v)):
+                vals[k].append(float(v))
+
+          ps=[.10,.25,.50,.75,.90]
+          delta_candidates=sorted(set([CURRENT['delta']]+[q(vals['delta'],p) for p in ps if q(vals['delta'],p) is not None]))
+          gamma_candidates=sorted(set([CURRENT['gamma']]+[q(vals['gamma'],p) for p in ps if q(vals['gamma'],p) is not None]))
+          theta_candidates=sorted(set([CURRENT['theta']]+[q(vals['theta'],p) for p in ps if q(vals['theta'],p) is not None]))
+
+          delta_candidates=[x for x in delta_candidates if x <= CURRENT['delta']]
+          gamma_candidates=[x for x in gamma_candidates if x <= CURRENT['gamma']]
+          theta_candidates=[x for x in theta_candidates if x >= CURRENT['theta']]
+
+          def gv(gates,name):
+            ev=gates.get(name)
+            return ev.get('value') if isinstance(ev,dict) else None
+
+          def iso(v):
+            if not isinstance(v,str): return None
+            try: return datetime.fromisoformat(v.replace('Z','+00:00'))
+            except Exception: return None
+
+          def count_for(policy):
+            counts={'NIFTY':0,'SENSEX':0,'BANKNIFTY':0}
+            for r in rows:
+              ident=r.get('identity') or {}
+              sym=ident.get('symbol')
+              if sym not in counts: continue
+              gates=r.get('gates') or {}
+              rm=r.get('responseMetrics') or {}
+              td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+              premium=rm.get('premiumMovePct')
+              delta=rm.get('absoluteDeltaChange')
+              gamma=rm.get('currentGamma')
+              theta=td.get('thetaPctOfPremium')
+              iv=td.get('iv')
+              if not all(isinstance(x,(int,float)) for x in [premium,delta,gamma,theta,iv]):
+                continue
+
+              dg=(delta >= policy['delta'] and gamma >= policy['gamma'])
+              theta_iv=(theta <= policy['theta'] and 8 <= iv <= 30)
+              multi=(gv(gates,'multiExpiryConflictAbsent') is True)
+              capital=(gv(gates,'capitalFit') is True)
+              liq=(gv(gates,'liquidityOk') is True)
+              spread=(gv(gates,'spreadOk') is True)
+
+              dte=ident.get('dte')
+              if sym=='BANKNIFTY':
+                dte_ok=(gv(gates,'higherDteUsable') is True)
+              else:
+                dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
+                        (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
+
+              raw_premium=(premium >= 2)
+              p=r.get('ppdSupport')
+              ppd_ok=False
+              if isinstance(p,dict):
+                id_match=(p.get('symbol')==ident.get('symbol') and p.get('expiryDate')==ident.get('expiryDate') and
+                          p.get('strike')==ident.get('strike') and p.get('candidateSide')==ident.get('side'))
+                a=iso(ident.get('observedAt')); b=iso(p.get('observedAt'))
+                near=bool(a and b and abs((a-b).total_seconds()) <= 90)
+                confirmed=(p.get('candidateConfirmed') is True and p.get('allRequiredWindowsReady') is True and
+                           p.get('supportingOnly') is True and p.get('standaloneTrigger') is False)
+                ppd_ok=(not raw_premium and id_match and near and confirmed and liq and spread and dg and theta_iv and multi)
+
+              effective_premium=raw_premium or ppd_ok
+              if capital and liq and spread and effective_premium and dg and theta_iv and multi and dte_ok:
+                counts[sym]+=1
+            return counts
+
+          results=[]
+          for d in delta_candidates:
+            for g in gamma_candidates:
+              for t in theta_candidates:
+                policy={'delta':d,'gamma':g,'theta':t}
+                counts=count_for(policy)
+                if counts['NIFTY']>0 and counts['SENSEX']>0:
+                  relax=((CURRENT['delta']-d)/CURRENT['delta']+
+                         (CURRENT['gamma']-g)/CURRENT['gamma']+
+                         (t-CURRENT['theta'])/CURRENT['theta'])
+                  results.append({'policy':policy,'counts':counts,'relaxationScore':relax})
+
+          results.sort(key=lambda x:(x['relaxationScore'], -(x['counts']['NIFTY']+x['counts']['SENSEX'])))
+          out={
+            'semantics':'SHADOW_ONLY_EMPIRICAL_SENSITIVITY_NO_POLICY_PROMOTION',
+            'candidateSetsTested':len(delta_candidates)*len(gamma_candidates)*len(theta_candidates),
+            'currentPolicy':CURRENT,
+            'derivedCandidates':{
+              'delta':delta_candidates,
+              'gamma':gamma_candidates,
+              'theta':theta_candidates,
+            },
+            'currentCounts':count_for(CURRENT),
+            'leastRelaxedNonZeroNiftyAndSensex':results[:10],
+          }
+          print('H1_THREE_POLICY_SHADOW_SENSITIVITY', json.dumps(out,separators=(',',':'),sort_keys=True))
+          PY

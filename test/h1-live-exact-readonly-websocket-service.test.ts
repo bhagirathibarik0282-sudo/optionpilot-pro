@@ -304,6 +304,14 @@ test("wires Kite-only Greek math cross-check into durable read-only evidence wit
   assert.equal(persisted.length, 1);
   assert.equal(persisted[0].version, "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V1");
   assert.equal(persisted[0].instrumentToken, 3);
+  assert.equal(persisted[0].snapshot.ready, true);
+  assert.equal(persisted[0].snapshot.priceGreek?.ltp, option.lastPrice);
+  assert.equal(Number.isFinite(persisted[0].snapshot.priceGreek?.theta), true);
+  assert.equal(Number.isFinite(persisted[0].snapshot.priceGreek?.iv), true);
+  assert.equal(persisted[0].snapshot.depth?.lotQuantity, 50);
+  assert.equal(persisted[0].snapshot.depth?.bidQty, 50);
+  assert.equal(persisted[0].snapshot.depth?.askQty, 60);
+  assert.equal(persisted[0].underlying.price, 25050);
   assert.equal(persisted[0].thresholdAuthority, "NONE");
   assert.equal(persisted[0].affectsSelector, false);
   assert.equal(persisted[0].affectsBusinessCard, false);

@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { dbLoadRecent } from "./db.js";
 import { H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, type H1LiveExactRawDepthRecord, type H1LiveExactGreekTimingRecord } from "./h1-live-exact-raw-evidence-store.js";
+import { H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND, type H1KiteGreekMathCrosscheckPersistRecord } from "./h1-kite-greek-math-crosscheck.js";
 import { mountHawkEyeLiveRoute } from "./hawk-eye-live-http-v1.js";
 import { researchRouter } from "./research-router.js";
 import { installTelegramCombinationBridge } from "./telegram-combination-bridge.js";
@@ -310,6 +311,33 @@ export function mountResearchRoutes(app: Hono): void {
         prePolicy: true,
         thresholdAuthority: "NONE",
         affectsSelector: false,
+        affectsTelegram: false,
+        affectsVerdict: false,
+        affectsExecution: false,
+        createsOrders: false,
+        failClosed: true,
+      },
+    });
+  });
+
+  app.get("/api/research/h1-kite-greek-math-crosscheck-history", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const requested = Number(c.req.query("limit") ?? 100);
+    const limit = Number.isInteger(requested) ? Math.min(500, Math.max(1, requested)) : 100;
+    const records = await dbLoadRecent<H1KiteGreekMathCrosscheckPersistRecord>(H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND, limit);
+    return c.json({
+      ok: true,
+      mode: "READ_ONLY_H1_KITE_GREEK_MATH_CROSSCHECK_HISTORY_V1",
+      productionImpact: "NONE",
+      persistKind: H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND,
+      count: records.length,
+      records,
+      safety: {
+        readOnly: true,
+        policySemantics: "SHADOW_CALIBRATION_ONLY",
+        thresholdAuthority: "NONE",
+        affectsSelector: false,
+        affectsBusinessCard: false,
         affectsTelegram: false,
         affectsVerdict: false,
         affectsExecution: false,

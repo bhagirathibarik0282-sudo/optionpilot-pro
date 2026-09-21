@@ -26,6 +26,15 @@ jobs:
           set -euo pipefail
           curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 120             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-gate-evidence-history?limit=5000'             -o /tmp/h1-live-gate-history.json
 
+      - name: Fetch exact Greek crosscheck history read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 120 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-kite-greek-math-crosscheck-history?limit=500' \
+            -o /tmp/h1-greek-crosscheck-history.json
+
       - name: Print sanitized production proof
         shell: bash
         run: |
@@ -148,4 +157,56 @@ jobs:
           }
           print('THREE_POLICY_POLICY_LINEAGE', json.dumps(lineage,separators=(',',':'),sort_keys=True))
           print('THREE_POLICY_RAW_HISTORY_READBACK_SAFETY_PASS')
+          PY
+
+      - name: Print exact raw reconstruction readiness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, collections, datetime
+          d=json.load(open('/tmp/h1-greek-crosscheck-history.json'))
+          assert d.get('ok') is True
+          records=d.get('records') or []
+          dates=set()
+          symbols=collections.Counter()
+          complete=0
+          direction_bound=0
+          minutes=[]
+          for r in records:
+            mb=r.get('minuteBucket')
+            if isinstance(mb,str):
+              minutes.append(mb)
+              try:
+                dt=datetime.datetime.fromisoformat(mb.replace('Z','+00:00'))+datetime.timedelta(hours=5,minutes=30)
+                dates.add(dt.date().isoformat())
+              except Exception:
+                pass
+            snap=r.get('snapshot') or {}
+            ident=snap.get('identity') or {}
+            if ident.get('symbol'): symbols[str(ident.get('symbol'))]+=1
+            pg=snap.get('priceGreek') or {}
+            depth=snap.get('depth') or {}
+            if snap.get('ready') is True and all(k in pg for k in ['ltp','delta','gamma','theta','iv']) and all(k in depth for k in ['bid','ask','bidQty','askQty','lotQuantity']):
+              complete+=1
+            if r.get('selectorDirectionAtCapture') in ['UP','DOWN'] and r.get('expectedPremiumDirectionAtCapture') in ['UP','DOWN']:
+              direction_bound+=1
+          out={
+            'count':len(records),
+            'firstMinute':min(minutes) if minutes else None,
+            'lastMinute':max(minutes) if minutes else None,
+            'uniqueTradingDatesIST':sorted(dates),
+            'symbols':dict(symbols),
+            'completeSnapshotCount':complete,
+            'directionBoundCount':direction_bound,
+            'reconstructPremiumDeltaGamma':complete>=2,
+            'reconstructThetaIv':complete>=1,
+            'reconstructCapitalLiquidityDte':complete>=1,
+          }
+          print('THREE_POLICY_RAW_RECONSTRUCTION_READINESS', json.dumps(out,separators=(',',':'),sort_keys=True))
+          s=d.get('safety') or {}
+          assert s.get('readOnly') is True
+          assert s.get('affectsBusinessCard') is False
+          assert s.get('affectsTelegram') is False
+          assert s.get('affectsExecution') is False
+          print('THREE_POLICY_RAW_RECONSTRUCTION_READBACK_SAFETY_PASS')
           PY

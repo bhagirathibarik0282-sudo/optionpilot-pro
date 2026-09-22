@@ -60,6 +60,8 @@ jobs:
               'strike':ident.get('strike'),
               'side':ident.get('side'),
               'ltp':pg.get('ltp'),
+              'iv':pg.get('iv'),
+              'underlyingPrice':(r.get('underlying') or {}).get('price'),
               'analyticalGamma':pg.get('gamma'),
               'numericalGamma':e.get('numericalGamma'),
               'absoluteGammaError':err,

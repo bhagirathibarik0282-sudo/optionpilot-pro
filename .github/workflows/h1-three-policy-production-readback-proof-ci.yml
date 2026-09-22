@@ -186,6 +186,7 @@ jobs:
               'policyIdentifiedCrosscheckCount':greeks.get('policyIdentifiedCrosscheckCount'),
               'legacyOrUnidentifiedCrosscheckCount':greeks.get('legacyOrUnidentifiedCrosscheckCount'),
               'uniqueGreekPolicyCount':greeks.get('uniqueGreekPolicyCount'),
+              'worstGammaObservation':greeks.get('worstGammaObservation'),
               'blockers':greeks.get('blockers'),
               'evidence':greeks.get('evidence'),
             },

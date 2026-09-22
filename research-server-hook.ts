@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { dbLoadRecent } from "./db.js";
 import { H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, type H1LiveExactRawDepthRecord, type H1LiveExactGreekTimingRecord } from "./h1-live-exact-raw-evidence-store.js";
 import { H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND, type H1KiteGreekMathCrosscheckPersistRecord } from "./h1-kite-greek-math-crosscheck.js";
+import { runH1SelectorProspectiveEvidenceReadbackV1 } from "./h1-selector-prospective-evidence-readback-v1.js";
 import { mountHawkEyeLiveRoute } from "./hawk-eye-live-http-v1.js";
 import { researchRouter } from "./research-router.js";
 import { installTelegramCombinationBridge } from "./telegram-combination-bridge.js";
@@ -347,6 +348,12 @@ export function mountResearchRoutes(app: Hono): void {
         failClosed: true,
       },
     });
+  });
+
+  app.get("/api/research/h1-selector-prospective-evidence-v1", async (c) => {
+    c.header("Cache-Control", "no-store");
+    const result = await runH1SelectorProspectiveEvidenceReadbackV1();
+    return c.json(result, result.ok ? 200 : 503);
   });
 
   app.get("/api/research/h1-exact-live-contract-discovery", async (c) => {

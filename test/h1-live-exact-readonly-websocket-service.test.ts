@@ -316,7 +316,7 @@ test("wires Kite-only Greek math cross-check into durable read-only evidence wit
   assert.equal(status.affectsExecution, false);
 
   assert.equal(persisted.length, 1);
-  assert.equal(persisted[0].version, "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V1");
+  assert.equal(persisted[0].version, "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V2");
   assert.equal(persisted[0].instrumentToken, 3);
   assert.equal(persisted[0].snapshot.ready, true);
   assert.equal(persisted[0].snapshot.priceGreek?.ltp, option.lastPrice);
@@ -341,6 +341,7 @@ test("wires Kite-only Greek math cross-check into durable read-only evidence wit
     minAbsoluteSpotMovePct: 0,
   });
   assert.equal(persisted[0].policyIdentity.directionSourcePolicySemantics, "MARKET_OPEN_CONTEXT_ONLY");
+  assert.equal(persisted[0].policyIdentity.referenceImplementationVersion, "H1_KITE_GREEK_MATH_CROSSCHECK_V2");
   assert.equal(persisted[0].policyIdentity.prospectiveP75Bound, false);
   assert.equal(persisted[0].policyIdentity.productionPolicyBound, false);
   assert.equal(persisted[0].thresholdAuthority, "NONE");

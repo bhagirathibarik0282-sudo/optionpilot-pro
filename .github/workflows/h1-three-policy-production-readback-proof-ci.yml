@@ -109,6 +109,61 @@ jobs:
           print('DTE0_EXISTING_MULTIDAY_OOS_SAFETY_PASS')
           PY
 
+      - name: Fetch prospective Direction and Greek evidence read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 240 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-selector-prospective-evidence-v1' \
+            -o /tmp/h1-selector-prospective-evidence.json
+
+      - name: Print sanitized prospective evidence proof
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/h1-selector-prospective-evidence.json'))
+          direction=d.get('direction') or {}
+          greeks=d.get('greeks') or {}
+          evaluation=d.get('evaluation')
+          out={
+            'ok':d.get('ok'),
+            'mode':d.get('mode'),
+            'evidenceWindowStartsAt':d.get('evidenceWindowStartsAt'),
+            'evidenceWindowEndsAt':d.get('evidenceWindowEndsAt'),
+            'direction':{
+              'recordedDates':direction.get('recordedDates'),
+              'completeTradingDates':direction.get('completeTradingDates'),
+              'incompleteTradingDates':direction.get('incompleteTradingDates'),
+              'p75ThresholdPct':direction.get('p75ThresholdPct'),
+              'blockers':direction.get('blockers'),
+              'evidence':direction.get('evidence'),
+            },
+            'greeks':{
+              'timingRowCount':greeks.get('timingRowCount'),
+              'policyIdentifiedCrosscheckCount':greeks.get('policyIdentifiedCrosscheckCount'),
+              'legacyOrUnidentifiedCrosscheckCount':greeks.get('legacyOrUnidentifiedCrosscheckCount'),
+              'uniqueGreekPolicyCount':greeks.get('uniqueGreekPolicyCount'),
+              'blockers':greeks.get('blockers'),
+              'evidence':greeks.get('evidence'),
+            },
+            'evaluation':evaluation,
+            'blockers':d.get('blockers'),
+            'safety':d.get('safety'),
+          }
+          print('SELECTOR_PROSPECTIVE_EVIDENCE_PROOF', json.dumps(out,separators=(',',':'),sort_keys=True))
+          s=d.get('safety') or {}
+          assert s.get('readOnly') is True
+          assert s.get('productionPromotionEligible') is False
+          assert s.get('affectsSelector') is False
+          assert s.get('affectsBusinessCard') is False
+          assert s.get('affectsTelegram') is False
+          assert s.get('affectsExecution') is False
+          assert s.get('createsOrders') is False
+          print('SELECTOR_PROSPECTIVE_EVIDENCE_SAFETY_PASS')
+          PY
+
       - name: Print sanitized production proof
         shell: bash
         run: |

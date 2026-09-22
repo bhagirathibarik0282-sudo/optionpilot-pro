@@ -8,8 +8,13 @@ const SQRT_2PI = Math.sqrt(2 * Math.PI);
 // sensitivity of the CDF approximation. Durable live evidence showed larger
 // spot-scaled steps can create false second-derivative Gamma spikes.
 const MAX_NUMERICAL_SPOT_STEP = 0.1;
+// The Abramowitz-Stegun erf approximation used by normalCdf has a ~1e-9
+// residual at x=0. That tiny sign discontinuity is harmless for prices but
+// explodes under a second finite difference (Gamma) when d1/d2 crosses zero.
+// Remove the approximation's exact zero bias so the CDF is continuous there.
+const ERF_APPROX_ZERO_BIAS = 9.999999717180685e-10;
 
-export const H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND = "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V2" as const;
+export const H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND = "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V3" as const;
 
 export interface H1KiteGreekMathCrosscheckPersistRecord {
   version: typeof H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND;
@@ -39,7 +44,7 @@ export interface H1KiteGreekEvidencePolicyIdentity {
   directionSourcePolicy: H1ExactLiveSpotDirectionPolicy | null;
   greekPolicySemantics: "SHADOW_CALIBRATION_ONLY";
   directionSourcePolicySemantics: "MARKET_OPEN_CONTEXT_ONLY" | null;
-  referenceImplementationVersion: "H1_KITE_GREEK_MATH_CROSSCHECK_V2";
+  referenceImplementationVersion: "H1_KITE_GREEK_MATH_CROSSCHECK_V3";
   prospectiveP75Bound: false;
   productionPolicyBound: false;
 }
@@ -50,7 +55,7 @@ export interface H1KiteGreekEvidencePolicyContext {
 }
 
 export interface H1KiteGreekMathCrosscheckResult {
-  version: "H1_KITE_GREEK_MATH_CROSSCHECK_V2";
+  version: "H1_KITE_GREEK_MATH_CROSSCHECK_V3";
   ready: boolean;
   symbol: H1ExactPriceGreekObservation["symbol"] | null;
   expiryDate: string | null;
@@ -91,7 +96,8 @@ function normalCdf(x: number): number {
   const sign = x < 0 ? -1 : 1;
   const z = Math.abs(x) / Math.sqrt(2);
   const t = 1 / (1 + 0.3275911 * z);
-  const erf = sign * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z));
+  const erfMagnitude = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z);
+  const erf = sign * (erfMagnitude - ERF_APPROX_ZERO_BIAS);
   return 0.5 * (1 + erf);
 }
 
@@ -146,7 +152,7 @@ function independentIvNewton(
 
 function invalidResult(blockers: string[]): H1KiteGreekMathCrosscheckResult {
   return {
-    version: "H1_KITE_GREEK_MATH_CROSSCHECK_V2",
+    version: "H1_KITE_GREEK_MATH_CROSSCHECK_V3",
     ready: false,
     symbol: null,
     expiryDate: null,
@@ -232,7 +238,7 @@ export function crosscheckH1KiteGreeks(
   if (independentIv == null || !Number.isFinite(independentIv)) return invalidResult(["INDEPENDENT_IV_CROSSCHECK_FAILED"]);
 
   return {
-    version: "H1_KITE_GREEK_MATH_CROSSCHECK_V2",
+    version: "H1_KITE_GREEK_MATH_CROSSCHECK_V3",
     ready: true,
     symbol: observation.symbol,
     expiryDate: observation.expiryDate,
@@ -307,7 +313,7 @@ export function buildH1KiteGreekMathCrosscheckPersistRecord(
       directionSourcePolicy: directionSourcePolicy ? structuredClone(directionSourcePolicy) : null,
       greekPolicySemantics: "SHADOW_CALIBRATION_ONLY",
       directionSourcePolicySemantics: directionContext ? "MARKET_OPEN_CONTEXT_ONLY" : null,
-      referenceImplementationVersion: "H1_KITE_GREEK_MATH_CROSSCHECK_V2",
+      referenceImplementationVersion: "H1_KITE_GREEK_MATH_CROSSCHECK_V3",
       prospectiveP75Bound: false,
       productionPolicyBound: false,
     },

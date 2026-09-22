@@ -47,7 +47,6 @@ export async function listH1TheoryRecordedDates(): Promise<H1TheoryDateIndexResu
     WHERE kind = 'H1_TRUTH_MARKER'
       AND payload->>'symbol' IN ('NIFTY', 'SENSEX', 'BANKNIFTY')
       AND payload->>'minuteBucket' IS NOT NULL
-      AND payload->>'truthVerdict' = 'TRUE'
     GROUP BY trade_date, payload->>'symbol'
     ORDER BY trade_date DESC,
       CASE payload->>'symbol' WHEN 'NIFTY' THEN 1 WHEN 'SENSEX' THEN 2 ELSE 3 END

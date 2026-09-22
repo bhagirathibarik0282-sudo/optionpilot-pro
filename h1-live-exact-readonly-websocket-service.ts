@@ -15,7 +15,7 @@ import { CanonicalConstituentTickStore, type CanonicalConstituentTickStoreStatus
 import type { CanonicalConstituentTick } from "./canonical-constituent-live-component.js";
 import type { CanonicalConstituentTokenEntry } from "./canonical-constituent-token-registry.js";
 import type { CanonicalMarketSymbol } from "./canonical-one-roof-market-snapshot.js";
-import { readH1SelectorCanonicalPolicySource } from "./h1-selector-canonical-policy-source.js";
+import { readH1SelectorCanonicalPolicySource, type H1SelectorCanonicalValidationProof } from "./h1-selector-canonical-policy-source.js";
 import { H1KiteExactRuntimeCoordinator } from "./h1-kite-exact-runtime-coordinator.js";
 import { H1ExactPeerRuntimeStore } from "./h1-exact-peer-runtime-store.js";
 import { persistH1LiveGateEvidenceCalibrationOnly, type H1LiveGateEvidencePublisher } from "./h1-live-selector-registry.js";
@@ -67,6 +67,7 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   reconnectMaxAttempts?: number;
   constituentRegistry?: CanonicalConstituentTokenEntry[];
   selectorPolicyEnv?: NodeJS.ProcessEnv;
+  selectorPolicyValidation?: H1SelectorCanonicalValidationProof;
   rawDepthPersist?: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
   rawGreekTimingPersist?: (record: H1LiveExactGreekTimingRecord) => void | Promise<void>;
   greekMathCrosscheckPersist?: (record: H1KiteGreekMathCrosscheckPersistRecord) => void | Promise<void>;
@@ -373,7 +374,7 @@ export class H1LiveExactReadOnlyWebSocketService {
 
   start(): H1LiveExactReadOnlyWebSocketStatus {
     if (this.transport) throw new Error("H1_LIVE_EXACT_READONLY_ALREADY_STARTED");
-    const selectorPolicySource = readH1SelectorCanonicalPolicySource(this.config.selectorPolicyEnv ?? process.env);
+    const selectorPolicySource = readH1SelectorCanonicalPolicySource(this.config.selectorPolicyEnv ?? process.env, this.config.selectorPolicyValidation);
     const selectorRegistry = this.config.readiness.registry!;
     const lotSizeByToken = this.config.readiness.lotSizeByOptionToken ?? {};
     const optionEntries = selectorRegistry.entries().filter((entry) => entry.role === "OPTION");

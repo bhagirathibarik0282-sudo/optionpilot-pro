@@ -35,6 +35,47 @@ jobs:
             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-kite-greek-math-crosscheck-history?limit=500' \
             -o /tmp/h1-greek-crosscheck-history.json
 
+      - name: Print latest Greek Gamma outlier identities
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, math
+          d=json.load(open('/tmp/h1-greek-crosscheck-history.json'))
+          rows=[]
+          for r in d.get('records') or []:
+            e=r.get('evidence') or {}
+            err=e.get('absoluteGammaError')
+            if not isinstance(err,(int,float)) or not math.isfinite(err):
+              continue
+            snap=r.get('snapshot') or {}
+            ident=snap.get('identity') or {}
+            pg=snap.get('priceGreek') or {}
+            policy=r.get('policyIdentity') or {}
+            rows.append({
+              'minuteBucket':r.get('minuteBucket'),
+              'instrumentToken':r.get('instrumentToken'),
+              'symbol':ident.get('symbol'),
+              'expiryDate':ident.get('expiryDate'),
+              'dte':ident.get('dte'),
+              'strike':ident.get('strike'),
+              'side':ident.get('side'),
+              'ltp':pg.get('ltp'),
+              'analyticalGamma':pg.get('gamma'),
+              'numericalGamma':e.get('numericalGamma'),
+              'absoluteGammaError':err,
+              'absoluteDeltaError':e.get('absoluteDeltaError'),
+              'underlyingSkewMs':e.get('underlyingSkewMs'),
+              'referenceImplementationVersion':policy.get('referenceImplementationVersion'),
+            })
+          rows.sort(key=lambda x:x['absoluteGammaError'], reverse=True)
+          print('GREEK_GAMMA_TOP_OUTLIERS', json.dumps({
+            'recordCount':len(rows),
+            'top':rows[:10],
+            'criterionForContextOnly':0.0005,
+            'semantics':'READ_ONLY_DIAGNOSTIC_NO_CRITERION_CHANGE'
+          }, separators=(',',':'),sort_keys=True))
+          PY
+
       - name: Fetch recorded NIFTY dates and existing DTE0 multi-day OOS
         shell: bash
         run: |

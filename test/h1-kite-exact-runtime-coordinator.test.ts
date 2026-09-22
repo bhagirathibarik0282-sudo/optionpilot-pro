@@ -25,11 +25,12 @@ function optionPacket(at: string, ltp: number): KiteDecodedPacket {
   };
 }
 
-function coordinator(onPublisherResolve?: () => void) {
+function coordinator(onPublisherResolve?: () => void, publishGateEvidence?: (packet:any) => { accepted:boolean; reason:string }) {
   return new H1KiteExactRuntimeCoordinator({
     registry,
     orderQuantityFor: () => 150,
     greekPolicy: { annualRiskFreeRate: 0.05, annualDividendYield: 0, maxAgeMs: 5_000, maxUnderlyingSkewMs: 2_000 },
+    publishGateEvidence,
     publisherFor: (_entry, _previous, current) => {
       onPublisherResolve?.();
       return {
@@ -83,6 +84,23 @@ test("two forward exact option packets progress baseline then publish", () => {
   assert.equal(second.ready, true);
   assert.equal(second.bridge?.publication?.reason, "LIVE_GATE_PACKET_ACCEPTED");
   assert.equal(getH1LiveSelectorRegistrySize(), 1);
+});
+
+test("injected calibration publisher receives exact packet without populating live registry", () => {
+  clearH1LiveSelectorRegistry();
+  const packets:any[] = [];
+  const runtime = coordinator(undefined, (packet) => {
+    packets.push(packet);
+    return { accepted: true, reason: "LIVE_GATE_PACKET_PERSISTED_CALIBRATION_ONLY" };
+  });
+  runtime.ingest(indexPacket("2026-09-03T10:00:00.000Z"), "2026-09-03T10:00:00.500Z");
+  runtime.ingest(optionPacket("2026-09-03T10:00:00.000Z", 1.05), "2026-09-03T10:00:00.500Z");
+  runtime.ingest(indexPacket("2026-09-03T10:00:05.000Z"), "2026-09-03T10:00:05.500Z");
+  const out = runtime.ingest(optionPacket("2026-09-03T10:00:05.000Z", 1.20), "2026-09-03T10:00:05.500Z");
+  assert.equal(out.ready, true);
+  assert.equal(out.bridge?.publication?.reason, "LIVE_GATE_PACKET_PERSISTED_CALIBRATION_ONLY");
+  assert.equal(packets.length, 1);
+  assert.equal(getH1LiveSelectorRegistrySize(), 0);
 });
 
 test("reverse SPOT chronology cannot replace the cached underlying", () => {

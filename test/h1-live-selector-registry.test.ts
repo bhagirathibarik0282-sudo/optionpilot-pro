@@ -5,6 +5,7 @@ import {
   collectH1LiveSelectorDecisions,
   getH1LiveSelectorRegistrySize,
   publishH1LiveGateEvidence,
+  persistH1LiveGateEvidenceCalibrationOnly,
 } from "../h1-live-selector-registry.js";
 import type { LiveGateEvidencePacket } from "../h1-live-gate-evidence-assembler.js";
 
@@ -55,6 +56,16 @@ test("exact live packet is accepted and produces selector decision", () => {
   assert.equal(out.eligibleForLiveH1Marking, true);
   assert.equal(out.decisions.length, 1);
   assert.equal(out.decisions[0].decision, "SELECT");
+});
+
+test("calibration-only persistence never enters the live selector registry", () => {
+  clearH1LiveSelectorRegistry();
+  const ts = "2026-09-03T09:30:00.000Z";
+  const out = persistH1LiveGateEvidenceCalibrationOnly(packet(ts));
+  assert.equal(out.accepted, true);
+  assert.equal(out.reason, "LIVE_GATE_PACKET_PERSISTED_CALIBRATION_ONLY");
+  assert.equal(getH1LiveSelectorRegistrySize(), 0);
+  assert.equal(collectH1LiveSelectorDecisions(ts).decisions.length, 0);
 });
 
 test("stale packet is evicted and cannot mark candidate", () => {

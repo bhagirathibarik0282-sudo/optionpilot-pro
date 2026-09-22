@@ -172,9 +172,9 @@ export function buildH1ProspectiveGreekEvidenceV1(
   });
 
   const crosscheckRows = allWindowCrosschecks.filter((row) =>
-    row.version === "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V2" &&
+    row.version === "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V3" &&
     row.policyIdentity?.version === "H1_KITE_GREEK_EVIDENCE_POLICY_IDENTITY_V1" &&
-    row.policyIdentity.referenceImplementationVersion === "H1_KITE_GREEK_MATH_CROSSCHECK_V2" &&
+    row.policyIdentity.referenceImplementationVersion === "H1_KITE_GREEK_MATH_CROSSCHECK_V3" &&
     row.policyIdentity.greekPolicySemantics === "SHADOW_CALIBRATION_ONLY" &&
     row.policyIdentity.productionPolicyBound === false &&
     row.evidence?.ready === true,

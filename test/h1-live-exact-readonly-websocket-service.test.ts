@@ -198,6 +198,9 @@ test("selector runtime quarantines shadow-only policy and keeps raw live socket 
   assert.equal(out.selectorRuntimePolicyReady, false);
   assert.equal(out.selectorRuntimeAttached, false);
   assert.ok(out.selectorRuntimeBlockers.includes("KITE_H1_EXACT_POLICY_JSON_REQUIRED"));
+  assert.equal(out.validationEvidenceCollectorAttached, true);
+  assert.deepEqual(out.validationEvidenceCollectorBlockers, []);
+  assert.equal(out.validationEvidenceSemantics, "SHADOW_CALIBRATION_ONLY");
   assert.equal(out.affectsTelegram, false);
   assert.equal(out.affectsExecution, false);
   socket.fire("open");

@@ -326,6 +326,20 @@ test("wires Kite-only Greek math cross-check into durable read-only evidence wit
   assert.equal(persisted[0].selectorDirectionAtCapture, "UP");
   assert.equal(persisted[0].expectedPremiumDirectionAtCapture, "UP");
   assert.equal(persisted[0].directionSourceId, "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1");
+  assert.equal(persisted[0].policyIdentity.version, "H1_KITE_GREEK_EVIDENCE_POLICY_IDENTITY_V1");
+  assert.deepEqual(persisted[0].policyIdentity.greekPolicy, {
+    annualRiskFreeRate: 0.05,
+    annualDividendYield: 0,
+    maxAgeMs: 5_000,
+    maxUnderlyingSkewMs: 2_000,
+  });
+  assert.deepEqual(persisted[0].policyIdentity.directionSourcePolicy, {
+    maxObservationGapMs: 180_000,
+    minAbsoluteSpotMovePct: 0,
+  });
+  assert.equal(persisted[0].policyIdentity.directionSourcePolicySemantics, "MARKET_OPEN_CONTEXT_ONLY");
+  assert.equal(persisted[0].policyIdentity.prospectiveP75Bound, false);
+  assert.equal(persisted[0].policyIdentity.productionPolicyBound, false);
   assert.equal(persisted[0].thresholdAuthority, "NONE");
   assert.equal(persisted[0].affectsSelector, false);
   assert.equal(persisted[0].affectsBusinessCard, false);

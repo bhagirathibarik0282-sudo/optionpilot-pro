@@ -57,7 +57,7 @@ function crosscheck(
   maxAgeMs = 5_000,
 ): H1KiteGreekMathCrosscheckPersistRecord {
   return {
-    version: "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V2",
+    version: "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V3",
     logicalKey: `${minute}|${token}`,
     minuteBucket: minute,
     instrumentToken: token,
@@ -77,12 +77,12 @@ function crosscheck(
       directionSourcePolicy: null,
       greekPolicySemantics: "SHADOW_CALIBRATION_ONLY",
       directionSourcePolicySemantics: null,
-      referenceImplementationVersion: "H1_KITE_GREEK_MATH_CROSSCHECK_V2",
+      referenceImplementationVersion: "H1_KITE_GREEK_MATH_CROSSCHECK_V3",
       prospectiveP75Bound: false,
       productionPolicyBound: false,
     },
     evidence: {
-      version: "H1_KITE_GREEK_MATH_CROSSCHECK_V2",
+      version: "H1_KITE_GREEK_MATH_CROSSCHECK_V3",
       ready: true,
       symbol: "NIFTY",
       expiryDate: "2026-09-22",
@@ -186,7 +186,7 @@ test("assembles raw timing and policy-identified Greek math as separate untouche
   assert.equal(out.worstGammaObservation.instrumentToken, 2);
   assert.equal(out.worstGammaObservation.minuteBucket, "2026-09-22T06:32:00.000Z");
   assert.equal(out.worstGammaObservation.absoluteGammaError, 0.0002);
-  assert.equal(out.worstGammaObservation.referenceImplementationVersion, "H1_KITE_GREEK_MATH_CROSSCHECK_V2");
+  assert.equal(out.worstGammaObservation.referenceImplementationVersion, "H1_KITE_GREEK_MATH_CROSSCHECK_V3");
 });
 
 test("fails closed on mixed Greek policy identity", () => {

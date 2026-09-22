@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "h1-selector-independent-prospective-policy-v1.ts"
+      - "h1-selector-prospective-evidence-readback-v1.ts"
+      - "research-server-hook.ts"
+      - "test/h1-selector-prospective-evidence-readback-v1.test.ts"
       - "test/h1-selector-independent-prospective-policy-v1.test.ts"
       - ".github/workflows/h1-selector-independent-prospective-policy-v1-ci.yml"
   workflow_dispatch:
@@ -24,6 +27,7 @@ jobs:
           NODE_ENV=test node --import tsx --test
           test/h1-selector-prospective-validation-protocol.test.ts
           test/h1-selector-independent-prospective-policy-v1.test.ts
+          test/h1-selector-prospective-evidence-readback-v1.test.ts
       - name: No authority or runtime wiring devil check
         run: |
           node <<'NODE'
@@ -38,6 +42,16 @@ jobs:
             'createsOrders: false',
             'passingCreatesProductionAuthority: false',
           ]) if (!source.includes(token)) throw new Error(`missing guard: ${token}`);
+          const adapter = fs.readFileSync('h1-selector-prospective-evidence-readback-v1.ts', 'utf8');
+          for (const token of [
+            'productionImpact: "NONE"',
+            'productionPromotionEligible: false',
+            'affectsSelector: false',
+            'affectsBusinessCard: false',
+            'affectsTelegram: false',
+            'affectsExecution: false',
+            'createsOrders: false',
+          ]) if (!adapter.includes(token)) throw new Error(`adapter missing guard: ${token}`);
           for (const runtime of ['server.ts', 'h1-selector-canonical-policy-source.ts']) {
             if (fs.readFileSync(runtime, 'utf8').includes('H1_SELECTOR_INDEPENDENT_PROSPECTIVE_POLICY_V1')) {
               throw new Error(`premature runtime wiring: ${runtime}`);

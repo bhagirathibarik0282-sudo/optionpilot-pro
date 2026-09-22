@@ -1,5 +1,6 @@
 import type { H1ExactPriceGreekObservation, H1ExactSnapshotBundle } from "./h1-live-exact-snapshot-aggregator.js";
 import type { H1ExactUnderlyingObservation, H1KiteGreekModelPolicy } from "./h1-kite-exact-price-greek-adapter.js";
+import type { H1ExactLiveSpotDirectionPolicy } from "./h1-exact-live-spot-direction-provider.js";
 
 const YEAR_MS = 365 * 86_400_000;
 const SQRT_2PI = Math.sqrt(2 * Math.PI);
@@ -16,6 +17,7 @@ export interface H1KiteGreekMathCrosscheckPersistRecord {
   selectorDirectionAtCapture: "UP" | "DOWN" | null;
   expectedPremiumDirectionAtCapture: "UP" | "DOWN" | null;
   directionSourceId: "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1" | null;
+  policyIdentity: H1KiteGreekEvidencePolicyIdentity;
   evidence: H1KiteGreekMathCrosscheckResult;
   productionImpact: "NONE";
   thresholdAuthority: "NONE";
@@ -25,6 +27,21 @@ export interface H1KiteGreekMathCrosscheckPersistRecord {
   affectsExecution: false;
   createsOrders: false;
   failClosed: true;
+}
+
+export interface H1KiteGreekEvidencePolicyIdentity {
+  version: "H1_KITE_GREEK_EVIDENCE_POLICY_IDENTITY_V1";
+  greekPolicy: H1KiteGreekModelPolicy;
+  directionSourcePolicy: H1ExactLiveSpotDirectionPolicy | null;
+  greekPolicySemantics: "SHADOW_CALIBRATION_ONLY";
+  directionSourcePolicySemantics: "MARKET_OPEN_CONTEXT_ONLY" | null;
+  prospectiveP75Bound: false;
+  productionPolicyBound: false;
+}
+
+export interface H1KiteGreekEvidencePolicyContext {
+  greekPolicy: H1KiteGreekModelPolicy;
+  directionSourcePolicy: H1ExactLiveSpotDirectionPolicy | null;
 }
 
 export interface H1KiteGreekMathCrosscheckResult {
@@ -248,11 +265,24 @@ export function buildH1KiteGreekMathCrosscheckPersistRecord(
     selectorDirectionAtCapture: "UP" | "DOWN";
     expectedPremiumDirectionAtCapture: "UP" | "DOWN";
     directionSourceId: "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1";
-  } | null = null,
+  } | null,
+  policyContext: H1KiteGreekEvidencePolicyContext,
 ): H1KiteGreekMathCrosscheckPersistRecord | null {
+  const greekPolicy = policyContext?.greekPolicy;
+  const directionSourcePolicy = policyContext?.directionSourcePolicy ?? null;
+  const validGreekPolicy = !!greekPolicy &&
+    Number.isFinite(greekPolicy.annualRiskFreeRate) &&
+    Number.isFinite(greekPolicy.annualDividendYield) &&
+    Number.isFinite(greekPolicy.maxAgeMs) && greekPolicy.maxAgeMs > 0 &&
+    Number.isFinite(greekPolicy.maxUnderlyingSkewMs) && greekPolicy.maxUnderlyingSkewMs > 0;
+  const validDirectionPolicy = directionContext == null
+    ? directionSourcePolicy == null
+    : !!directionSourcePolicy &&
+      Number.isFinite(directionSourcePolicy.maxObservationGapMs) && directionSourcePolicy.maxObservationGapMs > 0 &&
+      Number.isFinite(directionSourcePolicy.minAbsoluteSpotMovePct) && directionSourcePolicy.minAbsoluteSpotMovePct >= 0;
   if (!Number.isInteger(instrumentToken) || instrumentToken <= 0 || !snapshot?.ready || !snapshot.priceGreek || !snapshot.depth ||
       snapshot.semantics !== "SAME_CONTRACT_LIVE_RUNTIME_EXACT_ONLY" || underlying?.source !== "LIVE_RUNTIME_EXACT" ||
-      !evidence?.ready || !evidence.observedAt) return null;
+      !evidence?.ready || !evidence.observedAt || !validGreekPolicy || !validDirectionPolicy) return null;
   const observedMs = Date.parse(evidence.observedAt);
   if (!Number.isFinite(observedMs)) return null;
   const minuteBucket = new Date(Math.floor(observedMs / 60_000) * 60_000).toISOString();
@@ -266,6 +296,15 @@ export function buildH1KiteGreekMathCrosscheckPersistRecord(
     selectorDirectionAtCapture: directionContext?.selectorDirectionAtCapture ?? null,
     expectedPremiumDirectionAtCapture: directionContext?.expectedPremiumDirectionAtCapture ?? null,
     directionSourceId: directionContext?.directionSourceId ?? null,
+    policyIdentity: {
+      version: "H1_KITE_GREEK_EVIDENCE_POLICY_IDENTITY_V1",
+      greekPolicy: structuredClone(greekPolicy!),
+      directionSourcePolicy: directionSourcePolicy ? structuredClone(directionSourcePolicy) : null,
+      greekPolicySemantics: "SHADOW_CALIBRATION_ONLY",
+      directionSourcePolicySemantics: directionContext ? "MARKET_OPEN_CONTEXT_ONLY" : null,
+      prospectiveP75Bound: false,
+      productionPolicyBound: false,
+    },
     evidence: structuredClone(evidence),
     productionImpact: "NONE",
     thresholdAuthority: "NONE",

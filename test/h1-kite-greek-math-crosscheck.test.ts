@@ -100,6 +100,38 @@ test("keeps numerical Gamma stable for exact near-ATM NIFTY and SENSEX live edge
   }
 });
 
+test("keeps numerical Gamma positive across the exact live d2 zero-crossing regression", () => {
+  const observation = {
+    source: "LIVE_RUNTIME_EXACT" as const,
+    symbol: "NIFTY" as const,
+    expiryDate: "2026-09-29",
+    strike: 23350,
+    side: "PE" as const,
+    dte: 7,
+    observedAt: "2026-09-22T10:10:00.000Z",
+    ltp: 102.85,
+    delta: -0.4956942670420633,
+    gamma: 0.001537189823416483,
+    theta: -10,
+    iv: 8.036632131952793,
+  };
+  const exactUnderlying = {
+    source: "LIVE_RUNTIME_EXACT" as const,
+    symbol: "NIFTY" as const,
+    observedAt: "2026-09-22T10:10:00.000Z",
+    receivedAt: "2026-09-22T10:10:00.000Z",
+    price: 23329,
+  };
+
+  const out = crosscheckH1KiteGreeks(observation, exactUnderlying, policy);
+  assert.equal(out.ready, true);
+  assert.equal(out.version, "H1_KITE_GREEK_MATH_CROSSCHECK_V3");
+  assert.ok((out.numericalGamma ?? -1) > 0);
+  assert.ok((out.absoluteGammaError ?? 1) < 0.0005);
+  assert.ok((out.absoluteDeltaError ?? 1) < 0.02);
+  assert.ok((out.absoluteIvErrorPctPoints ?? 1) < 1);
+});
+
 test("fails closed on mismatched symbol or non-exact source", () => {
   const primary = mapKiteFullPacketToH1ExactPriceGreek(packet, registry, underlying, "2026-09-03T10:00:00.500Z", policy);
   assert.ok(primary);
@@ -163,7 +195,7 @@ test("persists the complete exact snapshot needed for later selector-policy vali
   assert.equal(record.policyIdentity.directionSourcePolicy, null);
   assert.equal(record.policyIdentity.greekPolicySemantics, "SHADOW_CALIBRATION_ONLY");
   assert.equal(record.policyIdentity.directionSourcePolicySemantics, null);
-  assert.equal(record.policyIdentity.referenceImplementationVersion, "H1_KITE_GREEK_MATH_CROSSCHECK_V2");
+  assert.equal(record.policyIdentity.referenceImplementationVersion, "H1_KITE_GREEK_MATH_CROSSCHECK_V3");
   assert.equal(record.policyIdentity.prospectiveP75Bound, false);
   assert.equal(record.policyIdentity.productionPolicyBound, false);
   assert.equal(record.thresholdAuthority, "NONE");

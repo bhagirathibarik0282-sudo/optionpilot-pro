@@ -173,6 +173,12 @@ test("assembles raw timing and policy-identified Greek math as separate untouche
   assert.equal(out.timingRowCount, 2);
   assert.equal(out.policyIdentifiedCrosscheckCount, 2);
   assert.equal(out.legacyOrUnidentifiedCrosscheckCount, 1);
+  assert.deepEqual(out.policySnapshot, {
+    annualRiskFreeRate: 0.05,
+    annualDividendYield: 0,
+    maxAgeMs: 5_000,
+    maxUnderlyingSkewMs: 2_000,
+  });
   assert.equal(out.evidence.untouchedContractObservations, 2);
   assert.equal(out.evidence.timingPassRate, 0.5);
   assert.equal(out.evidence.underlyingSkewPassRate, 0.5);
@@ -198,4 +204,5 @@ test("fails closed on mixed Greek policy identity", () => {
   const out = buildH1ProspectiveGreekEvidenceV1(rows, cross, START);
   assert.ok(out.blockers.includes("MIXED_GREEK_POLICY_IDENTITY_FORBIDDEN"));
   assert.ok(out.blockers.includes("GREEK_POLICY_TIMING_LIMIT_IDENTITY_MISMATCH"));
+  assert.equal(out.policySnapshot, null);
 });

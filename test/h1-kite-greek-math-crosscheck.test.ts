@@ -163,6 +163,7 @@ test("persists the complete exact snapshot needed for later selector-policy vali
   assert.equal(record.policyIdentity.directionSourcePolicy, null);
   assert.equal(record.policyIdentity.greekPolicySemantics, "SHADOW_CALIBRATION_ONLY");
   assert.equal(record.policyIdentity.directionSourcePolicySemantics, null);
+  assert.equal(record.policyIdentity.referenceImplementationVersion, "H1_KITE_GREEK_MATH_CROSSCHECK_V2");
   assert.equal(record.policyIdentity.prospectiveP75Bound, false);
   assert.equal(record.policyIdentity.productionPolicyBound, false);
   assert.equal(record.thresholdAuthority, "NONE");

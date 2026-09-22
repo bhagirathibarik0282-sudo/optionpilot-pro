@@ -18,6 +18,7 @@ import type { CanonicalMarketSymbol } from "./canonical-one-roof-market-snapshot
 import { readH1SelectorCanonicalPolicySource } from "./h1-selector-canonical-policy-source.js";
 import { H1KiteExactRuntimeCoordinator } from "./h1-kite-exact-runtime-coordinator.js";
 import { H1ExactPeerRuntimeStore } from "./h1-exact-peer-runtime-store.js";
+import { persistH1LiveGateEvidenceCalibrationOnly, type H1LiveGateEvidencePublisher } from "./h1-live-selector-registry.js";
 
 export interface H1LiveExactReadOnlyConsumerObservation {
   symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
@@ -69,6 +70,7 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   rawDepthPersist?: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
   rawGreekTimingPersist?: (record: H1LiveExactGreekTimingRecord) => void | Promise<void>;
   greekMathCrosscheckPersist?: (record: H1KiteGreekMathCrosscheckPersistRecord) => void | Promise<void>;
+  validationEvidencePublish?: H1LiveGateEvidencePublisher;
 }
 
 export interface H1LiveExactReadOnlyWebSocketStatus {
@@ -97,6 +99,9 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   selectorRuntimePolicyReady: boolean;
   selectorRuntimeAttached: boolean;
   selectorRuntimeBlockers: string[];
+  validationEvidenceCollectorAttached: boolean;
+  validationEvidenceCollectorBlockers: string[];
+  validationEvidenceSemantics: "SHADOW_CALIBRATION_ONLY";
   greekEvidenceStatus: "NOT_CONFIGURED" | "KITE_MATH_CROSSCHECK_OBSERVING" | "KITE_MATH_CROSSCHECK_OBSERVATIONS_AVAILABLE";
   greekCrosscheckObservationCount?: number;
   greekCrosscheckFailureCount?: number;
@@ -140,6 +145,8 @@ export class H1LiveExactReadOnlyWebSocketService {
   private readonly selectorDirectionBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], "UP" | "DOWN">();
   private selectorCoordinator: H1KiteExactRuntimeCoordinator | null = null;
   private selectorPeerStore: H1ExactPeerRuntimeStore | null = null;
+  private validationEvidenceCoordinator: H1KiteExactRuntimeCoordinator | null = null;
+  private validationEvidencePeerStore: H1ExactPeerRuntimeStore | null = null;
   private value: H1LiveExactReadOnlyWebSocketStatus;
 
   constructor(private readonly config: H1LiveExactReadOnlyWebSocketServiceConfig) {
@@ -169,6 +176,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
       readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],
       selectorRuntimePolicyReady: false, selectorRuntimeAttached: false, selectorRuntimeBlockers: [],
+      validationEvidenceCollectorAttached: false, validationEvidenceCollectorBlockers: [], validationEvidenceSemantics: "SHADOW_CALIBRATION_ONLY",
       greekEvidenceStatus: "KITE_MATH_CROSSCHECK_OBSERVING",
       greekCrosscheckObservationCount: 0, greekCrosscheckFailureCount: 0, greekCrosscheckLastObservedAt: null,
       greekCrosscheckPolicySemantics: "SHADOW_CALIBRATION_ONLY", greekCrosscheckPolicyAuthority: "NONE",
@@ -185,6 +193,7 @@ export class H1LiveExactReadOnlyWebSocketService {
       nearestPeerReadiness: this.value.nearestPeerReadiness.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyConsumerObservations: this.value.readOnlyConsumerObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyDirectionObservations: this.value.readOnlyDirectionObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
+      validationEvidenceCollectorBlockers: [...this.value.validationEvidenceCollectorBlockers],
       readOnlyShadowInputObservations: this.value.readOnlyShadowInputObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
       selectorRuntimeBlockers: [...this.value.selectorRuntimeBlockers],
     };
@@ -414,6 +423,52 @@ export class H1LiveExactReadOnlyWebSocketService {
       this.value.selectorRuntimeAttached = true;
       this.value.selectorRuntimeBlockers = [];
     }
+
+    if (!this.selectorCoordinator && quantityMissing.length === 0) {
+      const calibrationProfile = H1_SELECTOR_SHADOW_PROFILE_V1;
+      this.validationEvidencePeerStore = new H1ExactPeerRuntimeStore({
+        registryEntries: selectorRegistry.entries(),
+        classifierPolicy: {
+          maxObservationGapMs: calibrationProfile.premiumPolicy.maxObservationGapMs,
+          minAbsolutePremiumMovePct: calibrationProfile.premiumPolicy.minPremiumMovePct,
+        },
+        maxObservationAgeMs: calibrationProfile.burdenPolicy.maxObservationAgeMs,
+        requiredPeerCount: calibrationProfile.burdenPolicy.requiredPeerCount,
+        expectedDirectionFor: (entry) => {
+          const direction = this.selectorDirectionBySymbol.get(entry.symbol);
+          if (!direction || (entry.optionSide !== "CE" && entry.optionSide !== "PE")) throw new Error("CALIBRATION_LIVE_DIRECTION_UNAVAILABLE");
+          const optionShouldRise = (direction === "UP" && entry.optionSide === "CE") || (direction === "DOWN" && entry.optionSide === "PE");
+          return optionShouldRise ? "UP" : "DOWN";
+        },
+      });
+      this.validationEvidenceCoordinator = new H1KiteExactRuntimeCoordinator({
+        registry: selectorRegistry,
+        orderQuantityFor: (entry) => lotSizeByToken[entry.instrumentToken] ?? 0,
+        greekPolicy: calibrationProfile.greekPolicy,
+        maxUnderlyingAgeMs: calibrationProfile.greekPolicy.maxAgeMs,
+        maxSnapshotAgeMs: calibrationProfile.greekPolicy.maxAgeMs,
+        maxCrossSourceSkewMs: calibrationProfile.greekPolicy.maxUnderlyingSkewMs,
+        publishGateEvidence: this.config.validationEvidencePublish ?? persistH1LiveGateEvidenceCalibrationOnly,
+        publisherFor: (entry, previous, current) => {
+          const peer = this.validationEvidencePeerStore!.ingestAndResolve(entry.instrumentToken, previous, current, current.observedAt ?? "");
+          return {
+            moneyness: "ATM",
+            multiExpiryPeers: peer.ready ? peer.resolver!.peers : [],
+            premiumPolicy: calibrationProfile.premiumPolicy,
+            burdenPolicy: calibrationProfile.burdenPolicy,
+            capitalLiquidityDtePolicy: calibrationProfile.capitalLiquidityDtePolicy,
+          };
+        },
+      });
+      this.value.validationEvidenceCollectorAttached = true;
+      this.value.validationEvidenceCollectorBlockers = [];
+    } else {
+      this.value.validationEvidenceCollectorAttached = false;
+      this.value.validationEvidenceCollectorBlockers = quantityMissing.length > 0
+        ? quantityMissing.map((entry) => `VERIFIED_LOT_SIZE_REQUIRED:${entry.instrumentToken}`)
+        : ["CANONICAL_SELECTOR_RUNTIME_ALREADY_ATTACHED"];
+    }
+
     this.transport = new KiteWebSocketTransport({
       apiKey: this.config.apiKey, accessToken: this.config.accessToken, instrumentTokens: [...this.allowedTokens], mode: "full", socketFactory: this.config.socketFactory,
       reconnect: { enabled: true, delayMs: this.config.reconnectDelayMs ?? 1_000, maxAttempts: this.config.reconnectMaxAttempts ?? 10 },
@@ -430,6 +485,7 @@ export class H1LiveExactReadOnlyWebSocketService {
           this.captureRawGreekTimingEvidence(tick, receivedAt);
           this.captureKiteGreekMathCrosscheckEvidence(tick, receivedAt);
           this.rawEvidence.ingest(tick, receivedAt);
+          this.validationEvidenceCoordinator?.ingest(tick, receivedAt, receivedAt);
           this.selectorCoordinator?.ingest(tick, receivedAt, receivedAt);
           if (!this.firstSeenTokens.has(tick.instrumentToken)) {
             this.firstSeenTokens.add(tick.instrumentToken);
@@ -510,6 +566,8 @@ export class H1LiveExactReadOnlyWebSocketService {
   stop(): H1LiveExactReadOnlyWebSocketStatus {
     this.selectorCoordinator?.clear(); this.selectorCoordinator = null;
     this.selectorPeerStore?.clear(); this.selectorPeerStore = null;
+    this.validationEvidenceCoordinator?.clear(); this.validationEvidenceCoordinator = null;
+    this.validationEvidencePeerStore?.clear(); this.validationEvidencePeerStore = null;
     this.selectorDirectionBySymbol.clear();
     this.latestGreekUnderlyingBySymbol.clear();
     this.transport?.disconnect(); this.transport = null; this.value.started = false; this.value.connected = false; this.value.state = "CLOSED"; return this.status();

@@ -85,7 +85,14 @@ test("persists the complete exact snapshot needed for later selector-policy vali
     semantics: "SAME_CONTRACT_LIVE_RUNTIME_EXACT_ONLY" as const,
   };
 
-  const record = buildH1KiteGreekMathCrosscheckPersistRecord(111, snapshot, underlying, evidence);
+  const record = buildH1KiteGreekMathCrosscheckPersistRecord(
+    111,
+    snapshot,
+    underlying,
+    evidence,
+    null,
+    { greekPolicy: policy, directionSourcePolicy: null },
+  );
   assert.ok(record);
   assert.equal(record.snapshot.priceGreek?.ltp, primary.ltp);
   assert.equal(record.snapshot.priceGreek?.theta, primary.theta);
@@ -93,10 +100,41 @@ test("persists the complete exact snapshot needed for later selector-policy vali
   assert.equal(record.snapshot.depth?.lotQuantity, 50);
   assert.equal(record.snapshot.depth?.bidQty, 100);
   assert.equal(record.underlying.price, 100);
+  assert.equal(record.policyIdentity.version, "H1_KITE_GREEK_EVIDENCE_POLICY_IDENTITY_V1");
+  assert.deepEqual(record.policyIdentity.greekPolicy, policy);
+  assert.equal(record.policyIdentity.directionSourcePolicy, null);
+  assert.equal(record.policyIdentity.greekPolicySemantics, "SHADOW_CALIBRATION_ONLY");
+  assert.equal(record.policyIdentity.directionSourcePolicySemantics, null);
+  assert.equal(record.policyIdentity.prospectiveP75Bound, false);
+  assert.equal(record.policyIdentity.productionPolicyBound, false);
   assert.equal(record.thresholdAuthority, "NONE");
   assert.equal(record.affectsSelector, false);
   assert.equal(record.affectsBusinessCard, false);
   assert.equal(record.affectsTelegram, false);
   assert.equal(record.affectsExecution, false);
   assert.equal(record.createsOrders, false);
+});
+
+
+test("refuses durable Greek evidence when policy identity is missing", () => {
+  const primary = mapKiteFullPacketToH1ExactPriceGreek(packet, registry, underlying, "2026-09-03T10:00:00.500Z", policy);
+  assert.ok(primary);
+  const evidence = crosscheckH1KiteGreeks(primary, underlying, policy);
+  const snapshot = {
+    version: "H1_LIVE_EXACT_SNAPSHOT_AGGREGATOR_V1" as const,
+    ready: true,
+    identity: { symbol: primary.symbol, expiryDate: primary.expiryDate, strike: primary.strike, side: primary.side, dte: primary.dte },
+    observedAt: primary.observedAt,
+    priceGreek: primary,
+    depth: {
+      symbol: primary.symbol, expiryDate: primary.expiryDate, strike: primary.strike, side: primary.side, dte: primary.dte,
+      source: "LIVE_RUNTIME_EXACT" as const, observedAt: primary.observedAt, receivedAt: "2026-09-03T10:00:00.500Z",
+      bid: 10.4, ask: 10.5, bidQty: 100, askQty: 120, lotQuantity: 50,
+    },
+    blockers: [],
+    failClosed: true as const,
+    semantics: "SAME_CONTRACT_LIVE_RUNTIME_EXACT_ONLY" as const,
+  };
+  const record = buildH1KiteGreekMathCrosscheckPersistRecord(111, snapshot, underlying, evidence, null, undefined as any);
+  assert.equal(record, null);
 });

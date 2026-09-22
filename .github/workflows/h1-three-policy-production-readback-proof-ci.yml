@@ -35,6 +35,80 @@ jobs:
             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-kite-greek-math-crosscheck-history?limit=500' \
             -o /tmp/h1-greek-crosscheck-history.json
 
+      - name: Fetch recorded NIFTY dates and existing DTE0 multi-day OOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 120 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-theory-dates' \
+            -o /tmp/h1-theory-dates.json
+
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/h1-theory-dates.json'))
+          assert d.get('ok') is True
+          rows=d.get('dates') or []
+          dates=sorted({
+            str(r.get('tradeDate')) for r in rows
+            if r.get('symbol') == 'NIFTY' and r.get('tradeDate')
+          }, reverse=True)[:20]
+          assert len(dates) >= 4, f'need at least 4 recorded NIFTY dates, got {len(dates)}'
+          print('NIFTY_RECORDED_DATE_INDEX', json.dumps({
+            'count':len(dates),
+            'dates':dates,
+            'semantics':'RECORDED_MARKER_PRESENCE_ONLY_DOWNSTREAM_FULL_REPLAY_STILL_FAILS_CLOSED'
+          }, separators=(',',':'), sort_keys=True))
+          open('/tmp/nifty-dates.txt','w').write(','.join(dates))
+          PY
+
+          DATES="$(cat /tmp/nifty-dates.txt)"
+          curl --fail --show-error --silent --location --get \
+            --retry 3 --retry-delay 2 --max-time 240 \
+            --data-urlencode 'symbol=NIFTY' \
+            --data-urlencode "dates=${DATES}" \
+            --data-urlencode 'from=09:15' \
+            --data-urlencode 'to=15:30' \
+            --data-urlencode 'scope=FULL' \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-dte0-multiday-oos' \
+            -o /tmp/h1-dte0-multiday-oos.json
+
+      - name: Print sanitized existing DTE0 OOS proof
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/h1-dte0-multiday-oos.json'))
+          out={
+            'ok':d.get('ok'),
+            'mode':d.get('mode'),
+            'requestedDayCount':d.get('requestedDayCount'),
+            'usableDayCount':d.get('usableDayCount'),
+            'validationEligibleDayCount':d.get('validationEligibleDayCount'),
+            'readiness':d.get('readiness'),
+            'calibrationDates':d.get('calibrationDates'),
+            'oosDates':d.get('oosDates'),
+            'candidateDeltaP95':d.get('candidateDeltaP95'),
+            'calibration':d.get('calibration'),
+            'oos':d.get('oos'),
+            'oosDeltaPassRateAtCandidate':d.get('oosDeltaPassRateAtCandidate'),
+            'blockers':d.get('blockers'),
+            'safety':d.get('safety'),
+          }
+          print('DTE0_EXISTING_MULTIDAY_OOS_PROOF', json.dumps(out,separators=(',',':'),sort_keys=True))
+          assert d.get('mode') == 'H1_DTE0_MULTIDAY_OOS_V1'
+          s=d.get('safety') or {}
+          assert s.get('readOnly') is True
+          assert s.get('affectsSelector') is False
+          assert s.get('affectsTelegram') is False
+          assert s.get('affectsVerdict') is False
+          assert s.get('affectsExecution') is False
+          assert s.get('thresholdPromoted') is False
+          assert s.get('dte0ThresholdInvented') is False
+          assert s.get('incompleteSessionPromoted') is False
+          print('DTE0_EXISTING_MULTIDAY_OOS_SAFETY_PASS')
+          PY
+
       - name: Print sanitized production proof
         shell: bash
         run: |

@@ -341,6 +341,10 @@ export class H1LiveExactReadOnlyWebSocketService {
       underlying,
       evidence,
       directionContext,
+      {
+        greekPolicy: policy,
+        directionSourcePolicy: directionContext ? H1_MARKET_OPEN_DIRECTION_POLICY : null,
+      },
     );
     if (!record) return;
     if (this.lastPersistedGreekCrosscheckMinuteByToken.get(record.instrumentToken) === record.minuteBucket) return;

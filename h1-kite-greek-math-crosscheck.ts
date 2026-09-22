@@ -9,7 +9,7 @@ const SQRT_2PI = Math.sqrt(2 * Math.PI);
 // spot-scaled steps can create false second-derivative Gamma spikes.
 const MAX_NUMERICAL_SPOT_STEP = 0.1;
 
-export const H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND = "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V1" as const;
+export const H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND = "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V2" as const;
 
 export interface H1KiteGreekMathCrosscheckPersistRecord {
   version: typeof H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND;
@@ -39,6 +39,7 @@ export interface H1KiteGreekEvidencePolicyIdentity {
   directionSourcePolicy: H1ExactLiveSpotDirectionPolicy | null;
   greekPolicySemantics: "SHADOW_CALIBRATION_ONLY";
   directionSourcePolicySemantics: "MARKET_OPEN_CONTEXT_ONLY" | null;
+  referenceImplementationVersion: "H1_KITE_GREEK_MATH_CROSSCHECK_V2";
   prospectiveP75Bound: false;
   productionPolicyBound: false;
 }
@@ -49,7 +50,7 @@ export interface H1KiteGreekEvidencePolicyContext {
 }
 
 export interface H1KiteGreekMathCrosscheckResult {
-  version: "H1_KITE_GREEK_MATH_CROSSCHECK_V1";
+  version: "H1_KITE_GREEK_MATH_CROSSCHECK_V2";
   ready: boolean;
   symbol: H1ExactPriceGreekObservation["symbol"] | null;
   expiryDate: string | null;
@@ -145,7 +146,7 @@ function independentIvNewton(
 
 function invalidResult(blockers: string[]): H1KiteGreekMathCrosscheckResult {
   return {
-    version: "H1_KITE_GREEK_MATH_CROSSCHECK_V1",
+    version: "H1_KITE_GREEK_MATH_CROSSCHECK_V2",
     ready: false,
     symbol: null,
     expiryDate: null,
@@ -231,7 +232,7 @@ export function crosscheckH1KiteGreeks(
   if (independentIv == null || !Number.isFinite(independentIv)) return invalidResult(["INDEPENDENT_IV_CROSSCHECK_FAILED"]);
 
   return {
-    version: "H1_KITE_GREEK_MATH_CROSSCHECK_V1",
+    version: "H1_KITE_GREEK_MATH_CROSSCHECK_V2",
     ready: true,
     symbol: observation.symbol,
     expiryDate: observation.expiryDate,
@@ -306,6 +307,7 @@ export function buildH1KiteGreekMathCrosscheckPersistRecord(
       directionSourcePolicy: directionSourcePolicy ? structuredClone(directionSourcePolicy) : null,
       greekPolicySemantics: "SHADOW_CALIBRATION_ONLY",
       directionSourcePolicySemantics: directionContext ? "MARKET_OPEN_CONTEXT_ONLY" : null,
+      referenceImplementationVersion: "H1_KITE_GREEK_MATH_CROSSCHECK_V2",
       prospectiveP75Bound: false,
       productionPolicyBound: false,
     },

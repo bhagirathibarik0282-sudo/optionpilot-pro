@@ -182,6 +182,11 @@ test("assembles raw timing and policy-identified Greek math as separate untouche
   assert.equal(out.evidence.maximumAbsoluteDeltaErrorObserved, 0.015);
   assert.equal(out.evidence.maximumAbsoluteGammaErrorObserved, 0.0002);
   assert.equal(out.evidence.maximumAbsoluteIvErrorObserved, 0.75);
+  assert.ok(out.worstGammaObservation);
+  assert.equal(out.worstGammaObservation.instrumentToken, 2);
+  assert.equal(out.worstGammaObservation.minuteBucket, "2026-09-22T06:32:00.000Z");
+  assert.equal(out.worstGammaObservation.absoluteGammaError, 0.0002);
+  assert.equal(out.worstGammaObservation.referenceImplementationVersion, "H1_KITE_GREEK_MATH_CROSSCHECK_V2");
 });
 
 test("fails closed on mixed Greek policy identity", () => {

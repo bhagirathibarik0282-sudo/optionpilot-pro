@@ -60,6 +60,47 @@ export interface H1ProspectiveEvidenceBuild<T> {
   blockers: string[];
 }
 
+export interface H1GreekWorstGammaDiagnostic {
+  minuteBucket: string;
+  instrumentToken: number;
+  symbol: H1KiteGreekMathCrosscheckPersistRecord["evidence"]["symbol"];
+  expiryDate: string | null;
+  strike: number | null;
+  side: H1KiteGreekMathCrosscheckPersistRecord["evidence"]["side"];
+  observedAt: string | null;
+  absoluteGammaError: number;
+  numericalGamma: number | null;
+  referenceImplementationVersion: string;
+}
+
+function buildWorstGammaDiagnostic(
+  rows: H1KiteGreekMathCrosscheckPersistRecord[],
+): H1GreekWorstGammaDiagnostic | null {
+  let worst: H1KiteGreekMathCrosscheckPersistRecord | null = null;
+  let worstError = -Infinity;
+  for (const row of rows) {
+    const error = row.evidence?.absoluteGammaError;
+    if (typeof error !== "number" || !Number.isFinite(error)) continue;
+    if (error > worstError) {
+      worst = row;
+      worstError = error;
+    }
+  }
+  if (!worst || !Number.isFinite(worstError)) return null;
+  return {
+    minuteBucket: worst.minuteBucket,
+    instrumentToken: worst.instrumentToken,
+    symbol: worst.evidence.symbol,
+    expiryDate: worst.evidence.expiryDate,
+    strike: worst.evidence.strike,
+    side: worst.evidence.side,
+    observedAt: worst.evidence.observedAt,
+    absoluteGammaError: worstError,
+    numericalGamma: worst.evidence.numericalGamma,
+    referenceImplementationVersion: worst.policyIdentity.referenceImplementationVersion,
+  };
+}
+
 export function buildH1ProspectiveDirectionEvidenceV1(input: {
   untouchedTradingDates: number;
   candidateLabel: string | null;
@@ -104,6 +145,7 @@ export function buildH1ProspectiveGreekEvidenceV1(
   policyIdentifiedCrosscheckCount: number;
   legacyOrUnidentifiedCrosscheckCount: number;
   uniqueGreekPolicyCount: number;
+  worstGammaObservation: H1GreekWorstGammaDiagnostic | null;
 } {
   const start = ms(evidenceWindowStartsAt);
   const blockers: string[] = [];
@@ -115,6 +157,7 @@ export function buildH1ProspectiveGreekEvidenceV1(
       policyIdentifiedCrosscheckCount: 0,
       legacyOrUnidentifiedCrosscheckCount: 0,
       uniqueGreekPolicyCount: 0,
+      worstGammaObservation: null,
     };
   }
 
@@ -139,6 +182,7 @@ export function buildH1ProspectiveGreekEvidenceV1(
 
   const legacyOrUnidentifiedCrosscheckCount = allWindowCrosschecks.length - crosscheckRows.length;
   const uniqueGreekPolicies = new Set(crosscheckRows.map((row) => JSON.stringify(row.policyIdentity.greekPolicy)));
+  const worstGammaObservation = buildWorstGammaDiagnostic(crosscheckRows);
 
   if (!timingRows.length) blockers.push("GREEK_TIMING_EVIDENCE_UNAVAILABLE");
   if (!crosscheckRows.length) blockers.push("POLICY_IDENTIFIED_GREEK_CROSSCHECK_EVIDENCE_UNAVAILABLE");
@@ -212,6 +256,7 @@ export function buildH1ProspectiveGreekEvidenceV1(
       policyIdentifiedCrosscheckCount: crosscheckRows.length,
       legacyOrUnidentifiedCrosscheckCount,
       uniqueGreekPolicyCount: uniqueGreekPolicies.size,
+      worstGammaObservation,
     };
   }
 
@@ -232,6 +277,7 @@ export function buildH1ProspectiveGreekEvidenceV1(
     policyIdentifiedCrosscheckCount: crosscheckRows.length,
     legacyOrUnidentifiedCrosscheckCount,
     uniqueGreekPolicyCount: uniqueGreekPolicies.size,
+    worstGammaObservation,
   };
 }
 
@@ -268,6 +314,7 @@ export async function runH1SelectorProspectiveEvidenceReadbackV1(): Promise<{
     policyIdentifiedCrosscheckCount: number;
     legacyOrUnidentifiedCrosscheckCount: number;
     uniqueGreekPolicyCount: number;
+    worstGammaObservation: H1GreekWorstGammaDiagnostic | null;
     evidence: H1GreekProspectiveEvidence | null;
     blockers: string[];
   };
@@ -299,6 +346,7 @@ export async function runH1SelectorProspectiveEvidenceReadbackV1(): Promise<{
     policyIdentifiedCrosscheckCount: 0,
     legacyOrUnidentifiedCrosscheckCount: 0,
     uniqueGreekPolicyCount: 0,
+    worstGammaObservation: null,
     evidence: null,
     blockers: [] as string[],
   };
@@ -421,6 +469,7 @@ export async function runH1SelectorProspectiveEvidenceReadbackV1(): Promise<{
     policyIdentifiedCrosscheckCount: greekBuild.policyIdentifiedCrosscheckCount,
     legacyOrUnidentifiedCrosscheckCount: greekBuild.legacyOrUnidentifiedCrosscheckCount,
     uniqueGreekPolicyCount: greekBuild.uniqueGreekPolicyCount,
+    worstGammaObservation: greekBuild.worstGammaObservation,
     evidence: greekBuild.evidence,
     blockers: [...new Set(greekBlockers)],
   };

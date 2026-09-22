@@ -1,4 +1,4 @@
-name: H1 Three Policy Production Readback Audit
+name: H1 Untouched Capture Production Readback Audit
 
 on:
   pull_request:
@@ -12,807 +12,125 @@ permissions:
 jobs:
   readback:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 8
     steps:
-      - name: Fetch production evidence read-only
+      - name: Fetch production read-only evidence
         shell: bash
         run: |
           set -euo pipefail
+          BASE='https://optionpilot-pro-v2-production.up.railway.app'
           curl --fail --show-error --silent --location \
             --retry 3 --retry-delay 2 --max-time 60 \
-            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-three-policy-descriptive-summary?limit=500' \
-            -o /tmp/h1-three-policy-summary.json
+            "$BASE/api/research/h1-kite-greek-math-crosscheck-history?limit=500" \
+            -o /tmp/greek-history.json
           curl --fail --show-error --silent --location \
             --retry 3 --retry-delay 2 --max-time 60 \
-            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-gate-evidence-history?limit=500' \
-            -o /tmp/h1-live-gate-history.json
+            "$BASE/api/storage/health" \
+            -o /tmp/storage-health.json
 
-      - name: Verify safety and print exact evidence summary
+      - name: Verify authority boundaries and print exact capture proof
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
           from collections import Counter
-          from datetime import datetime
+          from datetime import datetime, timezone
 
-          d=json.load(open('/tmp/h1-three-policy-summary.json'))
-          assert d.get('ok') is True, d
-          assert d.get('mode') == 'READ_ONLY_H1_THREE_POLICY_DESCRIPTIVE_SUMMARY_V1', d.get('mode')
-          s=d.get('safety') or {}
-          assert s.get('readOnly') is True
-          assert s.get('rawRecordsReturned') is False
-          assert s.get('thresholdsInvented') is False
-          assert s.get('acceptanceCriteriaApplied') is False
-          assert s.get('validationDecisionMade') is False
-          assert s.get('affectsSelector') is False
-          assert s.get('affectsBusinessCard') is False
-          assert s.get('affectsTelegram') is False
-          assert s.get('affectsExecution') is False
-          assert s.get('createsOrders') is False
-          out={
-            'rowCount': d.get('rowCount'),
-            'premiumDeltaGamma': d.get('premiumDeltaGamma'),
-            'thetaIvMultiExpiry': d.get('thetaIvMultiExpiry'),
-            'capitalLiquidityDte': d.get('capitalLiquidityDte'),
-            'validationDecision': d.get('validationDecision'),
-            'acceptanceCriteriaApplied': d.get('acceptanceCriteriaApplied'),
-            'productionPromotionEligible': d.get('productionPromotionEligible'),
+          FREEZE = datetime.fromisoformat("2026-09-22T03:45:00+00:00")
+
+          def dt(value):
+              if not isinstance(value, str):
+                  return None
+              try:
+                  return datetime.fromisoformat(value.replace("Z", "+00:00"))
+              except Exception:
+                  return None
+
+          h = json.load(open("/tmp/greek-history.json"))
+          assert h.get("ok") is True, h
+          assert h.get("mode") == "READ_ONLY_H1_KITE_GREEK_MATH_CROSSCHECK_HISTORY_V1"
+          assert h.get("persistKind") == "H1_KITE_GREEK_MATH_CROSSCHECK_1M_V1"
+          assert h.get("productionImpact") == "NONE"
+          s = h.get("safety") or {}
+          assert s.get("readOnly") is True
+          assert s.get("policySemantics") == "SHADOW_CALIBRATION_ONLY"
+          assert s.get("thresholdAuthority") == "NONE"
+          for key in ("affectsSelector","affectsBusinessCard","affectsTelegram","affectsVerdict","affectsExecution","createsOrders"):
+              assert s.get(key) is False, (key, s.get(key))
+
+          rows = h.get("records") or []
+          post = []
+          for r in rows:
+              bucket = dt(r.get("minuteBucket"))
+              if bucket is not None and bucket >= FREEZE:
+                  post.append(r)
+
+          symbols = Counter()
+          tokens = set()
+          with_direction = 0
+          ready = 0
+          buckets = []
+          for r in post:
+              token = r.get("instrumentToken")
+              if isinstance(token, int):
+                  tokens.add(token)
+              ev = r.get("evidence") or {}
+              symbol = ev.get("symbol")
+              if isinstance(symbol, str):
+                  symbols[symbol] += 1
+              if ev.get("ready") is True:
+                  ready += 1
+              if (
+                  r.get("directionSourceId") == "H1_EXACT_LIVE_SPOT_DIRECTION_PROVIDER_V1"
+                  and r.get("selectorDirectionAtCapture") in ("UP","DOWN")
+                  and r.get("expectedPremiumDirectionAtCapture") in ("UP","DOWN")
+              ):
+                  with_direction += 1
+              b = dt(r.get("minuteBucket"))
+              if b is not None:
+                  buckets.append(b)
+
+          capture = {
+              "state": "CAPTURE_PRESENT" if post else "NO_POST_FREEZE_ROWS_IN_LAST_500",
+              "apiReturnedRows": len(rows),
+              "postFreezeRowsInReturnedWindow": len(post),
+              "readyRows": ready,
+              "directionLinkedRows": with_direction,
+              "uniqueOptionTokens": len(tokens),
+              "bySymbol": dict(symbols),
+              "earliestPostFreezeMinuteBucket": min(buckets).isoformat() if buckets else None,
+              "latestPostFreezeMinuteBucket": max(buckets).isoformat() if buckets else None,
+              "freezeAt": FREEZE.isoformat(),
           }
-          print('H1_THREE_POLICY_PRODUCTION_SUMMARY', json.dumps(out, separators=(',',':'), sort_keys=True))
+          print("UNTOUCHED_CAPTURE_PROOF="+json.dumps(capture, separators=(",",":"), sort_keys=True))
 
-          h=json.load(open('/tmp/h1-live-gate-history.json'))
-          assert h.get('ok') is True, h
-          assert h.get('mode') == 'READ_ONLY_H1_LIVE_GATE_EVIDENCE_HISTORY_V1', h.get('mode')
-          rows=h.get('records') or []
-          gate_names=[
-            'premiumResponseConfirmed','deltaGammaResponseConfirmed',
-            'thetaIvBurdenAcceptable','multiExpiryConflictAbsent',
-            'capitalFit','liquidityOk','spreadOk',
-            'currentOrNearExpiryUsable','higherDteUsable','fallbackDteApproved'
-          ]
-          gate_counts={g:Counter() for g in gate_names}
-          symbols=Counter()
-          sides=Counter()
-          dtes=Counter()
-          premium_reasons=Counter()
-          theta_reasons=Counter()
-          premium_thresholds=Counter()
-          theta_thresholds=Counter()
-          metric_missing=Counter()
-          premium_combo=Counter()
-          ppd=Counter()
-          raw_all_gates_pass=0
-          effective_all_gates_pass_ignoring_runtime_freshness=0
-
-          def gv(gates,name):
-            ev=gates.get(name)
-            return ev.get('value') if isinstance(ev,dict) and isinstance(ev.get('value'),bool) else None
-
-          def parse_iso(v):
-            if not isinstance(v,str):
-              return None
-            try:
-              return datetime.fromisoformat(v.replace('Z','+00:00'))
-            except Exception:
-              return None
-
-          for r in rows:
-            ident=r.get('identity') or {}
-            symbols[str(ident.get('symbol'))]+=1
-            sides[str(ident.get('side'))]+=1
-            dtes[str(ident.get('dte'))]+=1
-            gates=r.get('gates') or {}
-            for g in gate_names:
-              value=gv(gates,g)
-              gate_counts[g]['true' if value is True else 'false' if value is False else 'missing']+=1
-
-            premium=gv(gates,'premiumResponseConfirmed')
-            dg=gv(gates,'deltaGammaResponseConfirmed')
-            premium_combo[
-              'both_true' if premium is True and dg is True else
-              'premium_only' if premium is True and dg is False else
-              'delta_gamma_only' if premium is False and dg is True else
-              'both_false' if premium is False and dg is False else
-              'missing'
-            ]+=1
-
-            pd=(r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {}
-            for code in pd.get('reasonCodes') or []:
-              premium_reasons[str(code)]+=1
-            if pd:
-              premium_thresholds[json.dumps({
-                'minPremiumMovePct':pd.get('minPremiumMovePct'),
-                'minAbsoluteDeltaChange':pd.get('minAbsoluteDeltaChange'),
-                'minCurrentGamma':pd.get('minCurrentGamma')
-              },sort_keys=True,separators=(',',':'))]+=1
-
-            td=(r.get('policyDiagnostics') or {}).get('thetaIv') or {}
-            for code in td.get('reasonCodes') or []:
-              theta_reasons[str(code)]+=1
-            if td:
-              theta_thresholds[json.dumps({
-                'maxAbsThetaPctOfPremium':td.get('maxAbsThetaPctOfPremium'),
-                'minIv':td.get('minIv'),
-                'maxIv':td.get('maxIv')
-              },sort_keys=True,separators=(',',':'))]+=1
-
-            metrics=r.get('responseMetrics') or {}
-            for k in ('premiumMovePct','absoluteDeltaChange','currentGamma'):
-              if metrics.get(k) is None:
-                metric_missing[k]+=1
-
-            p=r.get('ppdSupport')
-            ppd_present=isinstance(p,dict)
-            ppd['present' if ppd_present else 'missing']+=1
-            ppd_confirmed=bool(ppd_present and p.get('candidateConfirmed') is True and p.get('allRequiredWindowsReady') is True and p.get('supportingOnly') is True and p.get('standaloneTrigger') is False)
-            if ppd_present:
-              ppd['candidate_confirmed' if ppd_confirmed else 'not_candidate_confirmed']+=1
-
-            identity_match=bool(ppd_present and
-              p.get('symbol')==ident.get('symbol') and
-              p.get('expiryDate')==ident.get('expiryDate') and
-              p.get('strike')==ident.get('strike') and
-              p.get('candidateSide')==ident.get('side'))
-            if ppd_present:
-              ppd['identity_match' if identity_match else 'identity_mismatch']+=1
-
-            ident_ts=parse_iso(ident.get('observedAt'))
-            ppd_ts=parse_iso(p.get('observedAt')) if ppd_present else None
-            near_packet_time=bool(ident_ts and ppd_ts and abs((ident_ts-ppd_ts).total_seconds()) <= 90)
-            if ppd_present:
-              ppd['within_90s_of_packet' if near_packet_time else 'outside_90s_or_invalid']+=1
-
-            companion=(gv(gates,'liquidityOk') is True and
-                       gv(gates,'spreadOk') is True and
-                       dg is True and
-                       gv(gates,'thetaIvBurdenAcceptable') is True and
-                       gv(gates,'multiExpiryConflictAbsent') is True)
-            structural_rescue=(premium is False and ppd_confirmed and identity_match and near_packet_time and companion)
-            if structural_rescue:
-              ppd['structural_rescue_possible']+=1
-
-            symbol=ident.get('symbol')
-            dte=ident.get('dte')
-            dte_ok=(gv(gates,'higherDteUsable') is True) if symbol=='BANKNIFTY' else (gv(gates,'currentOrNearExpiryUsable') is True or (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
-            common=(gv(gates,'capitalFit') is True and gv(gates,'liquidityOk') is True and gv(gates,'spreadOk') is True and dg is True and gv(gates,'thetaIvBurdenAcceptable') is True and gv(gates,'multiExpiryConflictAbsent') is True and dte_ok)
-            if common and premium is True:
-              raw_all_gates_pass+=1
-            if common and (premium is True or structural_rescue):
-              effective_all_gates_pass_ignoring_runtime_freshness+=1
-
-          audit={
-            'recordCount':len(rows),
-            'symbols':dict(symbols),
-            'sides':dict(sides),
-            'dtes':dict(dtes),
-            'gateCounts':{g:dict(c) for g,c in gate_counts.items()},
-            'premiumCooccurrence':dict(premium_combo),
-            'premiumReasonCodes':dict(premium_reasons),
-            'thetaReasonCodes':dict(theta_reasons),
-            'premiumThresholdSnapshots':dict(premium_thresholds),
-            'thetaThresholdSnapshots':dict(theta_thresholds),
-            'responseMetricMissingCounts':dict(metric_missing),
-            'ppdSupportAudit':dict(ppd),
-            'rawAllRequiredGateBundlePassCount':raw_all_gates_pass,
-            'effectiveAllRequiredGateBundlePassIgnoringRuntimeFreshnessCount':effective_all_gates_pass_ignoring_runtime_freshness,
+          st = json.load(open("/tmp/storage-health.json"))
+          assert st.get("dbConnected") is True, st
+          assert st.get("readOnly") is True
+          assert st.get("affectsVerdict") is False
+          assert st.get("affectsTelegram") is False
+          assert st.get("affectsExecution") is False
+          storage = {
+              "status": st.get("status"),
+              "generatedAt": st.get("generatedAt"),
+              "counts": st.get("counts"),
+              "latest": st.get("latest"),
+              "latestAgeMinutes": st.get("latestAgeMinutes"),
           }
-          print('H1_THREE_POLICY_REASON_AUDIT', json.dumps(audit, separators=(',',':'), sort_keys=True))
+          print("STORAGE_V3_PROOF="+json.dumps(storage, separators=(",",":"), sort_keys=True))
           PY
 
-
-      - name: Print descriptive metric distributions
+      - name: Guard audit-only boundary
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json, math
-          from collections import defaultdict
-          h=json.load(open('/tmp/h1-live-gate-history.json'))
-          rows=h.get('records') or []
-
-          def q(values, p):
-            vals=sorted(float(x) for x in values if isinstance(x,(int,float)) and math.isfinite(float(x)))
-            if not vals:
-              return None
-            if len(vals)==1:
-              return vals[0]
-            pos=(len(vals)-1)*p
-            lo=int(math.floor(pos)); hi=int(math.ceil(pos))
-            if lo==hi: return vals[lo]
-            return vals[lo] + (vals[hi]-vals[lo])*(pos-lo)
-
-          metrics=defaultdict(list)
-          by_symbol=defaultdict(lambda: defaultdict(list))
-          for r in rows:
-            ident=r.get('identity') or {}
-            symbol=str(ident.get('symbol'))
-            rm=r.get('responseMetrics') or {}
-            pd=(r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {}
-            td=(r.get('policyDiagnostics') or {}).get('thetaIv') or {}
-            cap=r.get('capitalLiquidityEvidence') or {}
-            source={
-              'premiumMovePct':rm.get('premiumMovePct'),
-              'absoluteDeltaChange':rm.get('absoluteDeltaChange'),
-              'currentGamma':rm.get('currentGamma'),
-              'thetaPctOfPremium':td.get('thetaPctOfPremium'),
-              'iv':td.get('iv'),
-              'relativeSpreadPct':cap.get('relativeSpreadPct'),
-              'bidDepthCoverageMultiple':cap.get('bidDepthCoverageMultiple'),
-              'askDepthCoverageMultiple':cap.get('askDepthCoverageMultiple'),
-              'capitalRequired':cap.get('capitalRequired'),
-            }
-            for k,v in source.items():
-              if isinstance(v,(int,float)) and math.isfinite(float(v)):
-                metrics[k].append(float(v))
-                by_symbol[symbol][k].append(float(v))
-
-          def summarize(d):
-            out={}
-            for k,vals in d.items():
-              out[k]={
-                'n':len(vals),
-                'min':min(vals) if vals else None,
-                'p10':q(vals,.10),
-                'p25':q(vals,.25),
-                'p50':q(vals,.50),
-                'p75':q(vals,.75),
-                'p90':q(vals,.90),
-                'p95':q(vals,.95),
-                'max':max(vals) if vals else None,
-              }
-            return out
-
-          out={
-            'all':summarize(metrics),
-            'bySymbol':{s:summarize(m) for s,m in by_symbol.items()},
-            'note':'DESCRIPTIVE_ONLY_NO_THRESHOLD_SELECTION_NO_PROMOTION'
-          }
-          print('H1_THREE_POLICY_METRIC_DISTRIBUTIONS', json.dumps(out, separators=(',',':'), sort_keys=True))
-          PY
-
-
-      - name: Print exact subgate choke counts
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json
-          from collections import defaultdict, Counter
-          h=json.load(open('/tmp/h1-live-gate-history.json'))
-          rows=h.get('records') or []
-          out=defaultdict(lambda: defaultdict(Counter))
-          for r in rows:
-            symbol=str((r.get('identity') or {}).get('symbol'))
-            pd=((r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {})
-            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
-            vals={
-              'premiumPass':pd.get('premiumPass'),
-              'deltaPass':pd.get('deltaPass'),
-              'gammaPass':pd.get('gammaPass'),
-              'deltaGammaPass':pd.get('deltaGammaPass'),
-              'thetaPass':td.get('thetaPass'),
-              'ivPass':td.get('ivPass'),
-              'thetaIvPass':td.get('thetaIvPass'),
-            }
-            for k,v in vals.items():
-              out[symbol][k]['true' if v is True else 'false' if v is False else 'missing']+=1
-          serial={s:{k:dict(c) for k,c in m.items()} for s,m in out.items()}
-          print('H1_THREE_POLICY_SUBGATE_CHOKE', json.dumps(serial,separators=(',',':'),sort_keys=True))
-          PY
-
-
-      - name: Shadow-only threshold sensitivity
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, math
-          from datetime import datetime
-
-          h=json.load(open('/tmp/h1-live-gate-history.json'))
-          rows=h.get('records') or []
-          CURRENT={'delta':0.03,'gamma':0.001,'theta':3.0}
-
-          def q(vals,p):
-            vals=sorted(vals)
-            if not vals: return None
-            pos=(len(vals)-1)*p
-            lo=int(math.floor(pos)); hi=int(math.ceil(pos))
-            return vals[lo] if lo==hi else vals[lo]+(vals[hi]-vals[lo])*(pos-lo)
-
-          vals={'delta':[],'gamma':[],'theta':[]}
-          for r in rows:
-            rm=r.get('responseMetrics') or {}
-            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
-            for k,v in [('delta',rm.get('absoluteDeltaChange')),('gamma',rm.get('currentGamma')),('theta',td.get('thetaPctOfPremium'))]:
-              if isinstance(v,(int,float)) and math.isfinite(float(v)):
-                vals[k].append(float(v))
-
-          ps=[.10,.25,.50,.75,.90]
-          delta_candidates=sorted(set([CURRENT['delta']]+[q(vals['delta'],p) for p in ps if q(vals['delta'],p) is not None]))
-          gamma_candidates=sorted(set([CURRENT['gamma']]+[q(vals['gamma'],p) for p in ps if q(vals['gamma'],p) is not None]))
-          theta_candidates=sorted(set([CURRENT['theta']]+[q(vals['theta'],p) for p in ps if q(vals['theta'],p) is not None]))
-
-          delta_candidates=[x for x in delta_candidates if x <= CURRENT['delta']]
-          gamma_candidates=[x for x in gamma_candidates if x <= CURRENT['gamma']]
-          theta_candidates=[x for x in theta_candidates if x >= CURRENT['theta']]
-
-          def gv(gates,name):
-            ev=gates.get(name)
-            return ev.get('value') if isinstance(ev,dict) else None
-
-          def iso(v):
-            if not isinstance(v,str): return None
-            try: return datetime.fromisoformat(v.replace('Z','+00:00'))
-            except Exception: return None
-
-          def count_for(policy):
-            counts={'NIFTY':0,'SENSEX':0,'BANKNIFTY':0}
-            for r in rows:
-              ident=r.get('identity') or {}
-              sym=ident.get('symbol')
-              if sym not in counts: continue
-              gates=r.get('gates') or {}
-              rm=r.get('responseMetrics') or {}
-              td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
-              premium=rm.get('premiumMovePct')
-              delta=rm.get('absoluteDeltaChange')
-              gamma=rm.get('currentGamma')
-              theta=td.get('thetaPctOfPremium')
-              iv=td.get('iv')
-              if not all(isinstance(x,(int,float)) for x in [premium,delta,gamma,theta,iv]):
-                continue
-
-              dg=(delta >= policy['delta'] and gamma >= policy['gamma'])
-              theta_iv=(theta <= policy['theta'] and 8 <= iv <= 30)
-              multi=(gv(gates,'multiExpiryConflictAbsent') is True)
-              capital=(gv(gates,'capitalFit') is True)
-              liq=(gv(gates,'liquidityOk') is True)
-              spread=(gv(gates,'spreadOk') is True)
-
-              dte=ident.get('dte')
-              if sym=='BANKNIFTY':
-                dte_ok=(gv(gates,'higherDteUsable') is True)
-              else:
-                dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
-                        (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
-
-              raw_premium=(premium >= 2)
-              p=r.get('ppdSupport')
-              ppd_ok=False
-              if isinstance(p,dict):
-                id_match=(p.get('symbol')==ident.get('symbol') and p.get('expiryDate')==ident.get('expiryDate') and
-                          p.get('strike')==ident.get('strike') and p.get('candidateSide')==ident.get('side'))
-                a=iso(ident.get('observedAt')); b=iso(p.get('observedAt'))
-                near=bool(a and b and abs((a-b).total_seconds()) <= 90)
-                confirmed=(p.get('candidateConfirmed') is True and p.get('allRequiredWindowsReady') is True and
-                           p.get('supportingOnly') is True and p.get('standaloneTrigger') is False)
-                ppd_ok=(not raw_premium and id_match and near and confirmed and liq and spread and dg and theta_iv and multi)
-
-              effective_premium=raw_premium or ppd_ok
-              if capital and liq and spread and effective_premium and dg and theta_iv and multi and dte_ok:
-                counts[sym]+=1
-            return counts
-
-          results=[]
-          for d in delta_candidates:
-            for g in gamma_candidates:
-              for t in theta_candidates:
-                policy={'delta':d,'gamma':g,'theta':t}
-                counts=count_for(policy)
-                if counts['NIFTY']>0 and counts['SENSEX']>0:
-                  relax=((CURRENT['delta']-d)/CURRENT['delta']+
-                         (CURRENT['gamma']-g)/CURRENT['gamma']+
-                         (t-CURRENT['theta'])/CURRENT['theta'])
-                  results.append({'policy':policy,'counts':counts,'relaxationScore':relax})
-
-          results.sort(key=lambda x:(x['relaxationScore'], -(x['counts']['NIFTY']+x['counts']['SENSEX'])))
-          out={
-            'semantics':'SHADOW_ONLY_EMPIRICAL_SENSITIVITY_NO_POLICY_PROMOTION',
-            'candidateSetsTested':len(delta_candidates)*len(gamma_candidates)*len(theta_candidates),
-            'currentPolicy':CURRENT,
-            'derivedCandidates':{
-              'delta':delta_candidates,
-              'gamma':gamma_candidates,
-              'theta':theta_candidates,
-            },
-            'currentCounts':count_for(CURRENT),
-            'leastRelaxedNonZeroNiftyAndSensex':results[:10],
-          }
-          print('H1_THREE_POLICY_SHADOW_SENSITIVITY', json.dumps(out,separators=(',',':'),sort_keys=True))
-          PY
-
-
-      - name: Oracle fixed-gate bottleneck check
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json
-          from collections import Counter,defaultdict
-          h=json.load(open('/tmp/h1-live-gate-history.json'))
-          rows=h.get('records') or []
-
-          def gv(gates,name):
-            ev=gates.get(name)
-            return ev.get('value') if isinstance(ev,dict) else None
-
-          out=defaultdict(Counter)
-          for r in rows:
-            ident=r.get('identity') or {}
-            sym=str(ident.get('symbol'))
-            gates=r.get('gates') or {}
-            dte=ident.get('dte')
-            capital=(gv(gates,'capitalFit') is True)
-            liq=(gv(gates,'liquidityOk') is True)
-            spread=(gv(gates,'spreadOk') is True)
-            multi=(gv(gates,'multiExpiryConflictAbsent') is True)
-            if sym=='BANKNIFTY':
-              dte_ok=(gv(gates,'higherDteUsable') is True)
-            else:
-              dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
-                      (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
-
-            checks={
-              'fixedAll': capital and liq and spread and multi and dte_ok,
-              'withoutLiquidity': capital and spread and multi and dte_ok,
-              'withoutSpread': capital and liq and multi and dte_ok,
-              'withoutMultiExpiry': capital and liq and spread and dte_ok,
-              'withoutDte': capital and liq and spread and multi,
-              'capitalLiquiditySpreadDte': capital and liq and spread and dte_ok,
-            }
-            for k,v in checks.items():
-              if v: out[sym][k]+=1
-            for name,val in [('capital',capital),('liquidity',liq),('spread',spread),('multiExpiry',multi),('dte',dte_ok)]:
-              out[sym][name+('_true' if val else '_false')]+=1
-
-          print('H1_FIXED_GATE_ORACLE', json.dumps({s:dict(c) for s,c in out.items()},separators=(',',':'),sort_keys=True))
-          PY
-
-
-      - name: One-shot zero-candidate interaction ablation
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json
-          from collections import defaultdict, Counter
-          h=json.load(open('/tmp/h1-live-gate-history.json'))
-          rows=h.get('records') or []
-
-          def gv(gates,name):
-            ev=gates.get(name)
-            return ev.get('value') if isinstance(ev,dict) else None
-
-          out=defaultdict(Counter)
-          for r in rows:
-            ident=r.get('identity') or {}
-            sym=str(ident.get('symbol'))
-            if sym not in ('NIFTY','SENSEX','BANKNIFTY'):
-              continue
-            gates=r.get('gates') or {}
-            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
-            rm=r.get('responseMetrics') or {}
-            dte=ident.get('dte')
-
-            premium=isinstance(rm.get('premiumMovePct'),(int,float)) and rm.get('premiumMovePct') >= 2
-            iv=isinstance(td.get('iv'),(int,float)) and 8 <= td.get('iv') <= 30
-            capital=(gv(gates,'capitalFit') is True)
-            liq=(gv(gates,'liquidityOk') is True)
-            spread=(gv(gates,'spreadOk') is True)
-            multi=(gv(gates,'multiExpiryConflictAbsent') is True)
-
-            if sym=='BANKNIFTY':
-              dte_ok=(gv(gates,'higherDteUsable') is True)
-            else:
-              dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
-                      (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
-
-            fixed=capital and liq and spread and multi and dte_ok
-            fixed_no_multi=capital and liq and spread and dte_ok
-            fixed_no_liq=capital and spread and multi and dte_ok
-            fixed_no_dte=capital and liq and spread and multi
-
-            checks={
-              'fixed':fixed,
-              'fixed_plus_premium':fixed and premium,
-              'fixed_plus_iv':fixed and iv,
-              'fixed_plus_premium_plus_iv':fixed and premium and iv,
-              'noMulti_plus_premium_plus_iv':fixed_no_multi and premium and iv,
-              'noLiquidity_plus_premium_plus_iv':fixed_no_liq and premium and iv,
-              'noDte_plus_premium_plus_iv':fixed_no_dte and premium and iv,
-              'premium_true':premium,
-              'iv_true':iv,
-            }
-            for k,v in checks.items():
-              if v: out[sym][k]+=1
-
-          print('H1_ZERO_CANDIDATE_ABLATION', json.dumps({s:dict(c) for s,c in out.items()},separators=(',',':'),sort_keys=True))
-          PY
-
-
-      - name: Joint shadow sensitivity including IV and premium
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, math
-          from collections import defaultdict
-          from datetime import datetime
-
-          h=json.load(open('/tmp/h1-live-gate-history.json'))
-          rows=h.get('records') or []
-
-          CURRENT={'premium':2.0,'delta':0.03,'gamma':0.001,'theta':3.0,'maxIv':30.0}
-
-          def q(vals,p):
-            vals=sorted(vals)
-            if not vals: return None
-            pos=(len(vals)-1)*p
-            lo=int(math.floor(pos)); hi=int(math.ceil(pos))
-            return vals[lo] if lo==hi else vals[lo]+(vals[hi]-vals[lo])*(pos-lo)
-
-          vals=defaultdict(list)
-          for r in rows:
-            rm=r.get('responseMetrics') or {}
-            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
-            src={
-              'premium':rm.get('premiumMovePct'),
-              'delta':rm.get('absoluteDeltaChange'),
-              'gamma':rm.get('currentGamma'),
-              'theta':td.get('thetaPctOfPremium'),
-              'iv':td.get('iv'),
-            }
-            for k,v in src.items():
-              if isinstance(v,(int,float)) and math.isfinite(float(v)):
-                vals[k].append(float(v))
-
-          ps=[.10,.25,.50,.75,.90]
-          premium_cands=sorted(set([CURRENT['premium'],0.0]+[max(0.0,q(vals['premium'],p)) for p in ps if q(vals['premium'],p) is not None]))
-          delta_cands=sorted(set([CURRENT['delta']]+[q(vals['delta'],p) for p in ps if q(vals['delta'],p) is not None]))
-          gamma_cands=sorted(set([CURRENT['gamma']]+[q(vals['gamma'],p) for p in ps if q(vals['gamma'],p) is not None]))
-          theta_cands=sorted(set([CURRENT['theta']]+[q(vals['theta'],p) for p in ps if q(vals['theta'],p) is not None]))
-          ivmax_cands=sorted(set([CURRENT['maxIv']]+[q(vals['iv'],p) for p in ps if q(vals['iv'],p) is not None]))
-
-          premium_cands=[x for x in premium_cands if x <= CURRENT['premium']]
-          delta_cands=[x for x in delta_cands if x <= CURRENT['delta']]
-          gamma_cands=[x for x in gamma_cands if x <= CURRENT['gamma']]
-          theta_cands=[x for x in theta_cands if x >= CURRENT['theta']]
-          ivmax_cands=[x for x in ivmax_cands if x >= CURRENT['maxIv']]
-
-          def gv(gates,name):
-            ev=gates.get(name)
-            return ev.get('value') if isinstance(ev,dict) else None
-
-          def iso(v):
-            if not isinstance(v,str): return None
-            try: return datetime.fromisoformat(v.replace('Z','+00:00'))
-            except Exception: return None
-
-          def count_for(p):
-            counts=defaultdict(int)
-            for r in rows:
-              ident=r.get('identity') or {}
-              sym=ident.get('symbol')
-              if sym not in ('NIFTY','SENSEX','BANKNIFTY'): continue
-              gates=r.get('gates') or {}
-              rm=r.get('responseMetrics') or {}
-              td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
-              premium=rm.get('premiumMovePct'); delta=rm.get('absoluteDeltaChange')
-              gamma=rm.get('currentGamma'); theta=td.get('thetaPctOfPremium'); iv=td.get('iv')
-              if not all(isinstance(x,(int,float)) for x in [premium,delta,gamma,theta,iv]): continue
-
-              premium_ok=premium >= p['premium']
-              dg=(delta >= p['delta'] and gamma >= p['gamma'])
-              theta_iv=(theta <= p['theta'] and 8 <= iv <= p['maxIv'])
-              capital=(gv(gates,'capitalFit') is True)
-              liq=(gv(gates,'liquidityOk') is True)
-              spread=(gv(gates,'spreadOk') is True)
-              multi=(gv(gates,'multiExpiryConflictAbsent') is True)
-
-              dte=ident.get('dte')
-              if sym=='BANKNIFTY':
-                dte_ok=(gv(gates,'higherDteUsable') is True)
-              else:
-                dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
-                        (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
-
-              ppd_ok=False
-              ppd=r.get('ppdSupport')
-              if isinstance(ppd,dict) and not premium_ok:
-                id_match=(ppd.get('symbol')==ident.get('symbol') and ppd.get('expiryDate')==ident.get('expiryDate') and
-                          ppd.get('strike')==ident.get('strike') and ppd.get('candidateSide')==ident.get('side'))
-                a=iso(ident.get('observedAt')); b=iso(ppd.get('observedAt'))
-                near=bool(a and b and abs((a-b).total_seconds()) <= 90)
-                confirmed=(ppd.get('candidateConfirmed') is True and ppd.get('allRequiredWindowsReady') is True and
-                           ppd.get('supportingOnly') is True and ppd.get('standaloneTrigger') is False)
-                ppd_ok=id_match and near and confirmed and liq and spread and dg and theta_iv and multi
-
-              if capital and liq and spread and (premium_ok or ppd_ok) and dg and theta_iv and multi and dte_ok:
-                counts[sym]+=1
-            return dict(counts)
-
-          results=[]
-          tested=0
-          for premium in premium_cands:
-            for delta in delta_cands:
-              for gamma in gamma_cands:
-                for theta in theta_cands:
-                  for maxIv in ivmax_cands:
-                    tested+=1
-                    p={'premium':premium,'delta':delta,'gamma':gamma,'theta':theta,'maxIv':maxIv}
-                    c=count_for(p)
-                    if c.get('NIFTY',0)>0 and c.get('SENSEX',0)>0:
-                      score=((CURRENT['premium']-premium)/max(CURRENT['premium'],1e-9)+
-                             (CURRENT['delta']-delta)/CURRENT['delta']+
-                             (CURRENT['gamma']-gamma)/CURRENT['gamma']+
-                             (theta-CURRENT['theta'])/CURRENT['theta']+
-                             (maxIv-CURRENT['maxIv'])/CURRENT['maxIv'])
-                      results.append({'policy':p,'counts':c,'relaxationScore':score})
-
-          results.sort(key=lambda x:(x['relaxationScore'],-(x['counts'].get('NIFTY',0)+x['counts'].get('SENSEX',0))))
-          out={
-            'semantics':'SHADOW_ONLY_JOINT_SENSITIVITY_NO_POLICY_PROMOTION',
-            'tested':tested,
-            'currentPolicy':CURRENT,
-            'currentCounts':count_for(CURRENT),
-            'leastRelaxedNonZeroNiftyAndSensex':results[:10],
-          }
-          print('H1_JOINT_SHADOW_SENSITIVITY',json.dumps(out,separators=(',',':'),sort_keys=True))
-          PY
-
-
-      - name: Exact fixed-row relaxation boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, math
-          h=json.load(open('/tmp/h1-live-gate-history.json'))
-          rows=h.get('records') or []
-          CURRENT={'premium':2.0,'delta':0.03,'gamma':0.001,'theta':3.0,'maxIv':30.0}
-
-          def gv(gates,name):
-            ev=gates.get(name)
-            return ev.get('value') if isinstance(ev,dict) else None
-
-          out={'NIFTY':[],'SENSEX':[]}
-          for r in rows:
-            ident=r.get('identity') or {}
-            sym=ident.get('symbol')
-            if sym not in out: continue
-            gates=r.get('gates') or {}
-            dte=ident.get('dte')
-            capital=(gv(gates,'capitalFit') is True)
-            liq=(gv(gates,'liquidityOk') is True)
-            spread=(gv(gates,'spreadOk') is True)
-            multi=(gv(gates,'multiExpiryConflictAbsent') is True)
-            dte_ok=(gv(gates,'currentOrNearExpiryUsable') is True or
-                    (isinstance(dte,int) and 5 <= dte <= 7 and gv(gates,'fallbackDteApproved') is True))
-            if not (capital and liq and spread and multi and dte_ok):
-              continue
-
-            rm=r.get('responseMetrics') or {}
-            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
-            vals={
-              'premium':rm.get('premiumMovePct'),
-              'delta':rm.get('absoluteDeltaChange'),
-              'gamma':rm.get('currentGamma'),
-              'theta':td.get('thetaPctOfPremium'),
-              'iv':td.get('iv'),
-            }
-            if not all(isinstance(v,(int,float)) and math.isfinite(float(v)) for v in vals.values()):
-              continue
-
-            req={
-              'maxPremiumFloor':float(vals['premium']),
-              'maxDeltaFloor':float(vals['delta']),
-              'maxGammaFloor':float(vals['gamma']),
-              'minThetaCeiling':float(vals['theta']),
-              'minIvCeiling':max(30.0,float(vals['iv'])),
-            }
-            relax={
-              'premium':max(0,(CURRENT['premium']-vals['premium'])/CURRENT['premium']),
-              'delta':max(0,(CURRENT['delta']-vals['delta'])/CURRENT['delta']),
-              'gamma':max(0,(CURRENT['gamma']-vals['gamma'])/CURRENT['gamma']),
-              'theta':max(0,(vals['theta']-CURRENT['theta'])/CURRENT['theta']),
-              'iv':max(0,(vals['iv']-CURRENT['maxIv'])/CURRENT['maxIv']),
-            }
-            score=sum(relax.values())
-            out[sym].append({
-              'side':ident.get('side'),
-              'strike':ident.get('strike'),
-              'dte':dte,
-              'observedAt':ident.get('observedAt'),
-              'metrics':vals,
-              'requiredBoundary':req,
-              'relaxationScore':score,
-            })
-
-          for sym in out:
-            out[sym].sort(key=lambda x:x['relaxationScore'])
-            out[sym]=out[sym][:6]
-
-          print('H1_FIXED_ROW_RELAXATION_BOUNDARY',json.dumps({
-            'semantics':'SHADOW_ONLY_ROW_BOUNDARY_NO_POLICY_PROMOTION',
-            'currentPolicy':CURRENT,
-            'rows':out,
-          },separators=(',',':'),sort_keys=True))
-          PY
-
-
-      - name: Existing DTE0 multiday OOS proof
-        shell: bash
-        run: |
-          set -euo pipefail
-          for spec in             "NIFTY|2026-08-25,2026-09-01,2026-09-08,2026-09-15"             "SENSEX|2026-08-27,2026-09-03,2026-09-10,2026-09-17"
-          do
-            symbol="${spec%%|*}"
-            dates="${spec#*|}"
-            url="https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-dte0-multiday-oos?symbol=${symbol}&dates=${dates}&from=09%3A15&to=15%3A30&scope=CORE"
-            code=$(curl --silent --show-error --location --max-time 180 -w '%{http_code}' -o "/tmp/${symbol}-dte0-oos.json" "$url")
-            echo "H1_DTE0_OOS_HTTP ${symbol} ${code}"
-            python - "${symbol}" "/tmp/${symbol}-dte0-oos.json" <<'PY'
-          import json,sys
-          symbol=sys.argv[1]
-          path=sys.argv[2]
-          d=json.load(open(path))
-          out={
-            'symbol':symbol,
-            'ok':d.get('ok'),
-            'mode':d.get('mode'),
-            'readiness':d.get('readiness'),
-            'calibrationDates':d.get('calibrationDates'),
-            'oosDates':d.get('oosDates'),
-            'candidateDeltaP95':d.get('candidateDeltaP95'),
-            'calibration':d.get('calibration'),
-            'oos':d.get('oos'),
-            'oosDeltaPassRateAtCandidate':d.get('oosDeltaPassRateAtCandidate'),
-            'blockers':d.get('blockers'),
-            'reason':d.get('reason'),
-            'tradeDate':d.get('tradeDate'),
-          }
-          print('H1_EXISTING_DTE0_OOS_PROOF',json.dumps(out,separators=(',',':'),sort_keys=True))
-          PY
-          done
-
-
-      - name: Discover older usable DTE0 replay dates
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json,subprocess,urllib.parse
-
-          base='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay'
-          candidates={
-            'NIFTY':['2026-08-04','2026-08-11','2026-08-18','2026-08-25','2026-09-01','2026-09-08','2026-09-15'],
-            'SENSEX':['2026-08-06','2026-08-13','2026-08-20','2026-08-27','2026-09-03','2026-09-10','2026-09-17'],
-          }
-          out={}
-          for symbol,dates in candidates.items():
-            rows=[]
-            for d in dates:
-              q=urllib.parse.urlencode({'symbol':symbol,'date':d,'from':'09:15','to':'15:30','scope':'CORE'})
-              url=base+'?'+q
-              p=subprocess.run(['curl','--silent','--show-error','--location','--max-time','120',url],capture_output=True,text=True)
-              rec={'date':d,'curlCode':p.returncode,'ok':False,'dte0AtmPoints':0,'firstObserved':None,'lastObserved':None}
-              if p.returncode==0:
-                try:
-                  data=json.loads(p.stdout)
-                  rec['ok']=data.get('ok') is True
-                  cont=data.get('continuity') or {}
-                  rec['firstObserved']=cont.get('firstObserved')
-                  rec['lastObserved']=cont.get('lastObserved')
-                  opts=data.get('options') or []
-                  rec['dte0AtmPoints']=sum(
-                    1 for x in opts
-                    if x.get('dte')==0 and x.get('atm_offset')==0 and x.get('expiry_bucket')=='Current Expiry'
-                  )
-                except Exception as e:
-                  rec['parseError']=str(e)
-              rows.append(rec)
-            out[symbol]=rows
-          print('H1_DTE0_REPLAY_DATE_DISCOVERY',json.dumps(out,separators=(',',':'),sort_keys=True))
-          PY
+          echo AUDIT_ONLY
+          echo NO_THRESHOLD_SELECTION
+          echo NO_POLICY_PROMOTION
+          echo NO_DB_WRITE
+          echo NO_RAILWAY_MUTATION
+          echo NO_SELECTOR_MUTATION
+          echo NO_BUSINESS_CARD_MUTATION
+          echo NO_TELEGRAM_MUTATION
+          echo NO_EXECUTION_OR_ORDER_MUTATION

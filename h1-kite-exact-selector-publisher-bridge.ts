@@ -8,7 +8,7 @@ import {
   type H1LiveSnapshotPublisherBindingInput,
   type H1LiveSnapshotPublisherBindingResult,
 } from "./h1-live-snapshot-publisher-binding.js";
-import { publishH1LiveGateEvidence } from "./h1-live-selector-registry.js";
+import { publishH1LiveGateEvidence, type H1LiveGateEvidencePublisher } from "./h1-live-selector-registry.js";
 
 export type H1KiteExactPublisherContext = Omit<H1LiveSnapshotPublisherBindingInput, "previous" | "current" | "nowIso">;
 
@@ -66,6 +66,8 @@ function result(
 export class H1KiteExactSelectorPublisherBridge {
   private readonly latestByContract = new Map<string, H1ExactSnapshotBundle>();
 
+  constructor(private readonly publishGateEvidence: H1LiveGateEvidencePublisher = publishH1LiveGateEvidence) {}
+
   ingest(input: H1KiteExactSelectorPublisherBridgeInput): H1KiteExactSelectorPublisherBridgeResult {
     const snapshot = bindKiteOptionPacketToH1ExactSnapshot(input.snapshot);
     const key = contractKey(snapshot);
@@ -117,7 +119,7 @@ export class H1KiteExactSelectorPublisherBridge {
       return result(snapshot, publisher, null, publisher.blockers.map((x) => `PUBLISHER_${x}`));
     }
 
-    const publication = publishH1LiveGateEvidence(publisher.producer.packet);
+    const publication = this.publishGateEvidence(publisher.producer.packet);
     if (!publication.accepted) {
       return result(snapshot, publisher, publication, [`REGISTRY_${publication.reason}`]);
     }

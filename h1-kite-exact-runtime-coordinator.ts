@@ -5,6 +5,7 @@ import {
   type H1KiteExactSelectorPublisherBridgeResult,
   type H1KiteExactPublisherContext,
 } from "./h1-kite-exact-selector-publisher-bridge.js";
+import type { H1LiveGateEvidencePublisher } from "./h1-live-selector-registry.js";
 import type { H1ExactSnapshotBundle } from "./h1-live-exact-snapshot-aggregator.js";
 import { KiteImmediateTokenRegistry, type KiteImmediateTokenEntry } from "./kite-immediate-token-registry.js";
 import type { KiteDecodedPacket } from "./kite-websocket-binary-decoder.js";
@@ -22,6 +23,7 @@ export interface H1KiteExactRuntimeCoordinatorConfig {
   maxUnderlyingAgeMs?: number;
   maxSnapshotAgeMs?: number;
   maxCrossSourceSkewMs?: number;
+  publishGateEvidence?: H1LiveGateEvidencePublisher;
 }
 
 export interface H1KiteExactRuntimeCoordinatorResult {
@@ -52,9 +54,11 @@ function validTime(value: string | null | undefined): number | null {
  */
 export class H1KiteExactRuntimeCoordinator {
   private readonly underlyingBySymbol = new Map<RecorderSymbol, H1ExactUnderlyingObservation>();
-  private readonly bridge = new H1KiteExactSelectorPublisherBridge();
+  private readonly bridge: H1KiteExactSelectorPublisherBridge;
 
-  constructor(private readonly config: H1KiteExactRuntimeCoordinatorConfig) {}
+  constructor(private readonly config: H1KiteExactRuntimeCoordinatorConfig) {
+    this.bridge = new H1KiteExactSelectorPublisherBridge(config.publishGateEvidence);
+  }
 
   ingest(
     packet: KiteDecodedPacket,

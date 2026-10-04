@@ -30,6 +30,11 @@ export interface H1DynamicReadOnlyServerStatus {
   rawEvidenceStaleTokenCount: number;
   rawEvidenceMissing: H1LiveExactRawEvidenceMissing[];
   rawEvidenceSymbolReadiness: H1LiveExactRawEvidenceSymbolReadiness[];
+  fixedContractWatchlistReady: boolean;
+  fixedContractWatchlistTokenCount: number;
+  fixedContractWatchlistFreshTokenCount: number;
+  fixedContractWatchlistMissingTokenCount: number;
+  fixedContractWatchlistBlockers: string[];
   nearestPeerReadiness: H1NearestValidMonthlyPeerReadinessRow[];
   readOnlyConsumerReadySymbolCount: number;
   readOnlyConsumerObservations: H1LiveExactReadOnlyConsumerObservation[];
@@ -90,6 +95,8 @@ function status(enabled: boolean, attempted: boolean, started: boolean, reason: 
     connected: false, socketState: "UNAVAILABLE", receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
     rawEvidenceReady: false, rawEvidenceExpectedTokenCount: subscribedTokenCount, rawEvidenceFreshTokenCount: 0,
     rawEvidenceMissingTokenCount: subscribedTokenCount, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
+    fixedContractWatchlistReady: false, fixedContractWatchlistTokenCount: 0, fixedContractWatchlistFreshTokenCount: 0,
+    fixedContractWatchlistMissingTokenCount: 0, fixedContractWatchlistBlockers: [],
     readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
     readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],
     selectorRuntimePolicyReady: false, selectorRuntimeAttached: false, selectorRuntimeBlockers: [],
@@ -125,6 +132,7 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
       readOnlyDirectionObservations: statusValue.readOnlyDirectionObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
       readOnlyShadowInputObservations: statusValue.readOnlyShadowInputObservations.map((x) => ({ ...x, blockers: [...x.blockers] })),
       selectorRuntimeBlockers: [...statusValue.selectorRuntimeBlockers],
+      fixedContractWatchlistBlockers: [...statusValue.fixedContractWatchlistBlockers],
     };
     return withAcceptance(base);
   }
@@ -140,6 +148,10 @@ export function getH1DynamicReadOnlyServerStatus(): H1DynamicReadOnlyServerStatu
     rawEvidenceStaleTokenCount: live.rawEvidenceStaleTokenCount,
     rawEvidenceMissing: (live.rawEvidenceMissing ?? []).map((x) => ({ ...x })),
     rawEvidenceSymbolReadiness: (live.rawEvidenceSymbolReadiness ?? []).map((x) => ({ ...x, blockers: [...x.blockers] })),
+    fixedContractWatchlistTokenCount: live.fixedContractWatchlistTokenCount ?? stored.fixedContractWatchlistTokenCount,
+    fixedContractWatchlistFreshTokenCount: live.fixedContractWatchlistFreshTokenCount ?? 0,
+    fixedContractWatchlistMissingTokenCount: live.fixedContractWatchlistMissingTokenCount ?? stored.fixedContractWatchlistTokenCount,
+    fixedContractWatchlistBlockers: [...stored.fixedContractWatchlistBlockers],
     nearestPeerReadiness: (live.nearestPeerReadiness ?? []).map((x) => ({ ...x, blockers: [...x.blockers] })),
     readOnlyConsumerReadySymbolCount: live.readOnlyConsumerReadySymbolCount ?? 0,
     readOnlyConsumerObservations: (live.readOnlyConsumerObservations ?? []).map((x) => ({ ...x, blockers: [...x.blockers] })),
@@ -273,7 +285,13 @@ export async function startH1DynamicReadOnlyLiveFromServerEnv(env: NodeJS.Proces
     try {
       const live = await startFn(asOfDate, true);
       liveService = live.service;
-      statusValue = status(true, true, live.started, live.reason, asOfDate, live.subscribedTokenCount);
+      statusValue = {
+        ...status(true, true, live.started, live.reason, asOfDate, live.subscribedTokenCount),
+        fixedContractWatchlistReady: live.fixedContractWatchlistReady,
+        fixedContractWatchlistTokenCount: live.fixedContractWatchlistTokenCount,
+        fixedContractWatchlistMissingTokenCount: live.fixedContractWatchlistTokenCount,
+        fixedContractWatchlistBlockers: [...live.fixedContractWatchlistBlockers],
+      };
       if (live.started && liveService) scheduleDelayedLiveProofLog();
     } catch {
       liveService = null;

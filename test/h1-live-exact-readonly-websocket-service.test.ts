@@ -152,13 +152,15 @@ test("subscribes bounded fixed contracts on the same socket but outside selector
   const sent:string[] = [];
   const socket = fakeSocket(sent);
   const persisted:any[] = [];
+  const normalized:any[] = [];
   const service = new H1LiveExactReadOnlyWebSocketService({
     readiness: readiness(), apiKey: "key", accessToken: "token", socketFactory: () => socket,
     selectorPolicyEnv: {},
     fixedContractWatchlistRegistry: [
-      { instrumentToken: 55, symbol: "NIFTY", role: "OPTION", instrumentLabel: "NIFTY10CE", expiry: "2026-09-10", strike: 25500, optionSide: "CE" },
+      { instrumentToken: 55, symbol: "NIFTY", role: "OPTION", instrumentLabel: "NIFTY08CE", expiry: "2026-09-08", strike: 25500, optionSide: "CE" },
     ],
     rawDepthPersist: (record) => { persisted.push(record); },
+    fixedContractOptionSnapshotPersist: (row) => { normalized.push(row); },
   });
   const initial = service.start();
   assert.equal(initial.subscribedTokenCount, 4);
@@ -173,6 +175,7 @@ test("subscribes bounded fixed contracts on the same socket but outside selector
   const receivedAt = "2026-09-04T08:10:00.100Z";
   (service as any).transport.config.onTicks([{
     mode: "full", instrumentToken: 55, lastPrice: 90,
+    volume: 1234, oi: 5678, high: 110, low: 80,
     exchangeTimestamp: "2026-09-04T08:10:00.000Z", isIndex: false, marketDepth: depth,
   }], receivedAt);
   const evidence = service.fixedContractWatchlistEvidenceStatus(receivedAt);
@@ -184,6 +187,17 @@ test("subscribes bounded fixed contracts on the same socket but outside selector
   assert.equal(persisted[0].affectsSelector, false);
   assert.equal(persisted[0].affectsTelegram, false);
   assert.equal(persisted[0].affectsExecution, false);
+  assert.equal(persisted[0].volume, 1234);
+  assert.equal(persisted[0].oi, 5678);
+  assert.equal(persisted[0].dayHigh, 110);
+  assert.equal(persisted[0].dayLow, 80);
+  assert.equal(normalized.length, 1);
+  assert.equal(normalized[0].instrumentToken, undefined);
+  assert.equal(normalized[0].symbol, "NIFTY");
+  assert.equal(normalized[0].strike, 25500);
+  assert.equal(normalized[0].isCandidate, false);
+  assert.equal(normalized[0].isWall, false);
+  assert.match(normalized[0].validationStatus, /^OBSERVATIONAL_/);
 });
 
 test("fails closed when a constituent token overlaps the immediate registry", () => {

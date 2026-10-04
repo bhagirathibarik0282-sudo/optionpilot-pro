@@ -21,6 +21,9 @@ function liveResult(started = true, service: H1LiveExactReadOnlyWebSocketService
     constituentRegistryReady: false,
     constituentTokenCount: 0,
     constituentBlockers: [],
+    fixedContractWatchlistReady: started,
+    fixedContractWatchlistTokenCount: started ? 2 : 0,
+    fixedContractWatchlistBlockers: started ? [] : ["WATCHLIST_BLOCKED"],
     productionImpact: "NONE",
     readOnly: true,
     affectsDirection: false,
@@ -50,6 +53,9 @@ function fakeLifecycleService(state: "OPEN" | "ERROR" | "CLOSED" = "OPEN", onSto
       rawEvidenceStaleTokenCount: 0,
       rawEvidenceMissing: [],
       rawEvidenceSymbolReadiness: [],
+      fixedContractWatchlistTokenCount: 2,
+      fixedContractWatchlistFreshTokenCount: state === "OPEN" ? 2 : 0,
+      fixedContractWatchlistMissingTokenCount: state === "OPEN" ? 0 : 2,
       nearestPeerReadiness: [],
       readOnlyConsumerReadySymbolCount: 0,
       readOnlyConsumerObservations: [],
@@ -142,6 +148,11 @@ test("public status reflects ongoing read-only socket packet counters without ex
   assert.equal(out.rejectedPacketCount, 0);
   assert.equal(out.selectorRuntimePolicyReady, true);
   assert.equal(out.selectorRuntimeAttached, true);
+  assert.equal(out.fixedContractWatchlistReady, true);
+  assert.equal(out.fixedContractWatchlistTokenCount, 2);
+  assert.equal(out.fixedContractWatchlistFreshTokenCount, 2);
+  assert.equal(out.fixedContractWatchlistMissingTokenCount, 0);
+  assert.deepEqual(out.fixedContractWatchlistBlockers, []);
   assert.deepEqual(out.selectorRuntimeBlockers, []);
   assert.equal(out.forwardsDownstream, false);
   assert.equal(out.affectsDirection, false);

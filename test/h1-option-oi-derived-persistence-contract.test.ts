@@ -8,9 +8,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const dbSource = readFileSync(resolve(here, "../db.ts"), "utf8");
 const replaySource = readFileSync(resolve(here, "../h1-replay-http.ts"), "utf8");
 
-function optionUpsertBody(): string {
-  const start = dbSource.indexOf("export async function dbUpsertOptionSnapshot1m");
-  const end = dbSource.indexOf("export async function dbUpsertChainState1m", start);
+function optionUpsertBody(functionName = "dbUpsertOptionSnapshot1m"): string {
+  const signature = `export async function ${functionName}(`;
+  const start = dbSource.indexOf(signature);
+  const end = dbSource.indexOf("export async function ", start + signature.length);
   assert.notEqual(start, -1, "option upsert function must exist");
   assert.notEqual(end, -1, "option upsert function boundary must exist");
   return dbSource.slice(start, end);
@@ -46,8 +47,10 @@ test("first observation fails closed and later observations record delta provena
 });
 
 test("option persistence remains one SQL statement per upsert", () => {
-  const body = optionUpsertBody();
-  assert.equal((body.match(/await p\.query\(/g) ?? []).length, 1);
+  for (const functionName of ["dbUpsertOptionSnapshot1m", "dbUpsertOptionSnapshot1mObservationalFill"]) {
+    const body = optionUpsertBody(functionName);
+    assert.equal((body.match(/await p\.query\(/g) ?? []).length, 1, functionName);
+  }
 });
 
 test("read-only H1 replay exposes all derived OI truth fields", () => {

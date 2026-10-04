@@ -455,6 +455,80 @@ export async function dbUpsertOptionSnapshot1m(row: OptionSnapshot1mRow): Promis
   }
 }
 
+/**
+ * Inserts exact observational watchlist evidence into the existing option table.
+ * On identity/minute collision it fills null gaps only, so the richer canonical
+ * recorder row can never be downgraded or lose candidate/wall identity.
+ */
+export async function dbUpsertOptionSnapshot1mObservationalFill(row: OptionSnapshot1mRow): Promise<void> {
+  const p = getPool();
+  if (!p) return;
+  try {
+    await p.query(`
+      WITH prior AS (
+        SELECT oi, minute_bucket
+        FROM option_snapshot_1m
+        WHERE symbol = $1 AND expiry = $4::date AND strike = $7 AND option_type = $8
+          AND minute_bucket < $2::timestamptz
+          AND (minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = ($2::timestamptz AT TIME ZONE 'Asia/Kolkata')::date
+          AND oi IS NOT NULL
+        ORDER BY minute_bucket DESC LIMIT 1
+      ), derived AS (
+        SELECT
+          CASE WHEN p.oi IS NOT NULL AND $17::bigint IS NOT NULL THEN $17::bigint - p.oi ELSE NULL END AS oi_delta,
+          CASE WHEN p.oi IS NOT NULL AND $17::bigint IS NOT NULL THEN 'DERIVED_PREVIOUS_PERSISTED_SNAPSHOT'::text ELSE NULL END AS oi_delta_source,
+          CASE WHEN p.minute_bucket IS NOT NULL AND $17::bigint IS NOT NULL
+            THEN EXTRACT(EPOCH FROM ($2::timestamptz - p.minute_bucket))::integer ELSE NULL END AS oi_delta_gap_seconds
+        FROM (SELECT 1) seed LEFT JOIN prior p ON TRUE
+      )
+      INSERT INTO option_snapshot_1m (
+        symbol, minute_bucket, snapshot_id, expiry, expiry_bucket, dte, strike, option_type, atm_offset,
+        is_candidate, is_wall, ltp, bid, ask, spread, volume, oi, oi_change,
+        derived_oi_change, derived_oi_change_source, derived_oi_change_gap_seconds,
+        iv, delta, gamma, vega, theta, intrinsic, extrinsic, day_high, day_low, pdh, pdl,
+        quote_timestamp, quote_age_seconds, liquidity_status, validation_status, calculation_version
+      ) SELECT
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+        derived.oi_delta,derived.oi_delta_source,derived.oi_delta_gap_seconds,
+        $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34
+      FROM derived
+      ON CONFLICT (symbol, minute_bucket, expiry, strike, option_type) DO UPDATE SET
+        snapshot_id=COALESCE(option_snapshot_1m.snapshot_id, EXCLUDED.snapshot_id),
+        expiry_bucket=COALESCE(option_snapshot_1m.expiry_bucket, EXCLUDED.expiry_bucket),
+        dte=COALESCE(option_snapshot_1m.dte, EXCLUDED.dte),
+        atm_offset=COALESCE(option_snapshot_1m.atm_offset, EXCLUDED.atm_offset),
+        is_candidate=option_snapshot_1m.is_candidate OR EXCLUDED.is_candidate,
+        is_wall=option_snapshot_1m.is_wall OR EXCLUDED.is_wall,
+        ltp=COALESCE(option_snapshot_1m.ltp, EXCLUDED.ltp), bid=COALESCE(option_snapshot_1m.bid, EXCLUDED.bid),
+        ask=COALESCE(option_snapshot_1m.ask, EXCLUDED.ask), spread=COALESCE(option_snapshot_1m.spread, EXCLUDED.spread),
+        volume=COALESCE(option_snapshot_1m.volume, EXCLUDED.volume), oi=COALESCE(option_snapshot_1m.oi, EXCLUDED.oi),
+        oi_change=COALESCE(option_snapshot_1m.oi_change, EXCLUDED.oi_change),
+        derived_oi_change=COALESCE(option_snapshot_1m.derived_oi_change, EXCLUDED.derived_oi_change),
+        derived_oi_change_source=COALESCE(option_snapshot_1m.derived_oi_change_source, EXCLUDED.derived_oi_change_source),
+        derived_oi_change_gap_seconds=COALESCE(option_snapshot_1m.derived_oi_change_gap_seconds, EXCLUDED.derived_oi_change_gap_seconds),
+        iv=COALESCE(option_snapshot_1m.iv, EXCLUDED.iv), delta=COALESCE(option_snapshot_1m.delta, EXCLUDED.delta),
+        gamma=COALESCE(option_snapshot_1m.gamma, EXCLUDED.gamma), vega=COALESCE(option_snapshot_1m.vega, EXCLUDED.vega),
+        theta=COALESCE(option_snapshot_1m.theta, EXCLUDED.theta), intrinsic=COALESCE(option_snapshot_1m.intrinsic, EXCLUDED.intrinsic),
+        extrinsic=COALESCE(option_snapshot_1m.extrinsic, EXCLUDED.extrinsic), day_high=COALESCE(option_snapshot_1m.day_high, EXCLUDED.day_high),
+        day_low=COALESCE(option_snapshot_1m.day_low, EXCLUDED.day_low), pdh=COALESCE(option_snapshot_1m.pdh, EXCLUDED.pdh),
+        pdl=COALESCE(option_snapshot_1m.pdl, EXCLUDED.pdl), quote_timestamp=COALESCE(option_snapshot_1m.quote_timestamp, EXCLUDED.quote_timestamp),
+        quote_age_seconds=COALESCE(option_snapshot_1m.quote_age_seconds, EXCLUDED.quote_age_seconds),
+        liquidity_status=COALESCE(option_snapshot_1m.liquidity_status, EXCLUDED.liquidity_status),
+        validation_status=COALESCE(option_snapshot_1m.validation_status, EXCLUDED.validation_status),
+        calculation_version=CASE
+          WHEN option_snapshot_1m.calculation_version IS NULL AND option_snapshot_1m.validation_status IS NULL THEN EXCLUDED.calculation_version
+          ELSE option_snapshot_1m.calculation_version END
+    `, [
+      row.symbol,row.minuteBucket,row.snapshotId ?? null,row.expiry,row.expiryBucket ?? null,row.dte ?? null,row.strike,row.optionType,row.atmOffset ?? null,
+      row.isCandidate ?? false,row.isWall ?? false,row.ltp ?? null,row.bid ?? null,row.ask ?? null,row.spread ?? null,row.volume ?? null,row.oi ?? null,row.oiChange ?? null,
+      row.iv ?? null,row.delta ?? null,row.gamma ?? null,row.vega ?? null,row.theta ?? null,row.intrinsic ?? null,row.extrinsic ?? null,row.dayHigh ?? null,row.dayLow ?? null,
+      row.pdh ?? null,row.pdl ?? null,row.quoteTimestamp ?? null,row.quoteAgeSeconds ?? null,row.liquidityStatus ?? null,row.validationStatus ?? null,row.calculationVersion ?? null,
+    ]);
+  } catch (err) {
+    console.error("[DB] observational option_snapshot_1m fill failed:", err instanceof Error ? err.message : err);
+  }
+}
+
 export async function dbUpsertChainState1m(row: ChainState1mRow): Promise<void> {
   const p = getPool();
   if (!p) return;

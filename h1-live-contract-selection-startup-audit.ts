@@ -3,11 +3,13 @@ import { fetchH1KiteLiveInstrumentMaster } from "./h1-kite-live-instrument-maste
 import { fetchH1LiveSelectionSpots, type H1LiveSelectionSpotResult } from "./h1-live-selection-spot-rest.js";
 import { selectH1LiveContracts, type H1LiveContractSelectionResult } from "./h1-live-contract-selection.js";
 import { prepareCanonicalConstituentStartup, type CanonicalConstituentStartupResult } from "./canonical-constituent-startup-adapter.js";
+import { prepareH1FixedContractWatchlistStartup, type H1FixedContractWatchlistStartupResult } from "./h1-fixed-contract-watchlist-startup-adapter.js";
 
 export interface H1LiveContractSelectionStartupEvidence {
   selection: H1LiveContractSelectionResult;
   spots: H1LiveSelectionSpotResult;
   constituents: CanonicalConstituentStartupResult;
+  fixedContractWatchlist: H1FixedContractWatchlistStartupResult;
   productionImpact: "NONE";
   affectsVerdict: false;
   affectsExecution: false;
@@ -36,7 +38,8 @@ export async function runH1LiveContractSelectionStartupEvidence(asOfDate:string)
   }
   const selection=selectH1LiveContracts(master.rows,spots.rows,asOfDate);
   const constituents=prepareCanonicalConstituentStartup(master.rows,process.env.CANONICAL_CONSTITUENT_REQUESTS_JSON);
-  return {selection,spots,constituents,productionImpact:"NONE",affectsVerdict:false,affectsExecution:false,affectsTelegram:false,failClosed:true};
+  const fixedContractWatchlist=prepareH1FixedContractWatchlistStartup(master.rows,asOfDate,process.env.H1_FIXED_CONTRACT_WATCHLIST_JSON);
+  return {selection,spots,constituents,fixedContractWatchlist,productionImpact:"NONE",affectsVerdict:false,affectsExecution:false,affectsTelegram:false,failClosed:true};
 }
 
 export async function runH1LiveContractSelectionStartupAudit(asOfDate:string){

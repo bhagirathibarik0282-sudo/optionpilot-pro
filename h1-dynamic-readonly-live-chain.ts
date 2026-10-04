@@ -14,6 +14,9 @@ export interface H1DynamicReadOnlyLiveStartResult {
   constituentRegistryReady: boolean;
   constituentTokenCount: number;
   constituentBlockers: string[];
+  fixedContractWatchlistReady: boolean;
+  fixedContractWatchlistTokenCount: number;
+  fixedContractWatchlistBlockers: string[];
   productionImpact: "NONE";
   readOnly: true;
   affectsDirection: false;
@@ -24,8 +27,8 @@ export interface H1DynamicReadOnlyLiveStartResult {
   service: H1LiveExactReadOnlyWebSocketService | null;
 }
 
-function result(started:boolean,reason:H1DynamicReadOnlyLiveStartResult["reason"],subscribedTokenCount=0,service:H1LiveExactReadOnlyWebSocketService|null=null,constituentRegistryReady=false,constituentTokenCount=0,constituentBlockers:string[]=[]): H1DynamicReadOnlyLiveStartResult {
-  return {version:"H1_DYNAMIC_READONLY_LIVE_CHAIN_V1",started,reason,subscribedTokenCount,constituentRegistryReady,constituentTokenCount,constituentBlockers:[...constituentBlockers],productionImpact:"NONE",readOnly:true,affectsDirection:false,affectsVerdict:false,affectsExecution:false,affectsTelegram:false,failClosed:true,service};
+function result(started:boolean,reason:H1DynamicReadOnlyLiveStartResult["reason"],subscribedTokenCount=0,service:H1LiveExactReadOnlyWebSocketService|null=null,constituentRegistryReady=false,constituentTokenCount=0,constituentBlockers:string[]=[],fixedContractWatchlistReady=false,fixedContractWatchlistTokenCount=0,fixedContractWatchlistBlockers:string[]=[]): H1DynamicReadOnlyLiveStartResult {
+  return {version:"H1_DYNAMIC_READONLY_LIVE_CHAIN_V1",started,reason,subscribedTokenCount,constituentRegistryReady,constituentTokenCount,constituentBlockers:[...constituentBlockers],fixedContractWatchlistReady,fixedContractWatchlistTokenCount,fixedContractWatchlistBlockers:[...fixedContractWatchlistBlockers],productionImpact:"NONE",readOnly:true,affectsDirection:false,affectsVerdict:false,affectsExecution:false,affectsTelegram:false,failClosed:true,service};
 }
 
 export async function startH1DynamicReadOnlyLiveChain(asOfDate:string, enabled:boolean): Promise<H1DynamicReadOnlyLiveStartResult> {
@@ -43,9 +46,9 @@ export async function startH1DynamicReadOnlyLiveChain(asOfDate:string, enabled:b
     const authority=await resolveKiteAuthoritySession();
     if(!apiKey||!authority.session||!authority.status.active) return result(false,"AUTHORITY_UNAVAILABLE");
     installSweetSpotLiveObserver(readiness.registry.entries());
-    const service=new H1LiveExactReadOnlyWebSocketService({readiness,apiKey,accessToken:authority.session.accessToken,constituentRegistry:evidence.constituents.ready ? evidence.constituents.registry : undefined});
+    const service=new H1LiveExactReadOnlyWebSocketService({readiness,apiKey,accessToken:authority.session.accessToken,constituentRegistry:evidence.constituents.ready ? evidence.constituents.registry : undefined,fixedContractWatchlistRegistry:evidence.fixedContractWatchlist.ready ? evidence.fixedContractWatchlist.registry : undefined});
     const status=service.start();
-    return result(true,"STARTED",status.subscribedTokenCount,service,evidence.constituents.ready,evidence.constituents.registry.length,evidence.constituents.blockers);
+    return result(true,"STARTED",status.subscribedTokenCount,service,evidence.constituents.ready,evidence.constituents.registry.length,evidence.constituents.blockers,evidence.fixedContractWatchlist.ready,evidence.fixedContractWatchlist.registry.length,evidence.fixedContractWatchlist.blockers);
   } catch (err) {
     console.warn(`[TELEGRAM_SWEET_SPOT] ${JSON.stringify({state:"ARM_FAILED",error:err instanceof Error?err.message:String(err),createsOrders:false})}`);
     return result(false,"PREPARATION_BLOCKED");

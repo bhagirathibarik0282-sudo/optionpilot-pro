@@ -148,6 +148,44 @@ test("subscribes exact constituent tokens on the same read-only socket without g
   assert.deepEqual(service.constituentTicks("NIFTY"), []);
 });
 
+test("subscribes bounded fixed contracts on the same socket but outside selector authority", () => {
+  const sent:string[] = [];
+  const socket = fakeSocket(sent);
+  const persisted:any[] = [];
+  const service = new H1LiveExactReadOnlyWebSocketService({
+    readiness: readiness(), apiKey: "key", accessToken: "token", socketFactory: () => socket,
+    selectorPolicyEnv: {},
+    fixedContractWatchlistRegistry: [
+      { instrumentToken: 55, symbol: "NIFTY", role: "OPTION", instrumentLabel: "NIFTY10CE", expiry: "2026-09-10", strike: 25500, optionSide: "CE" },
+    ],
+    rawDepthPersist: (record) => { persisted.push(record); },
+  });
+  const initial = service.start();
+  assert.equal(initial.subscribedTokenCount, 4);
+  assert.equal(initial.fixedContractWatchlistTokenCount, 1);
+  assert.equal(initial.fixedContractWatchlistFreshTokenCount, 0);
+  assert.equal(initial.fixedContractWatchlistMissingTokenCount, 1);
+  socket.fire("open");
+  assert.deepEqual(JSON.parse(sent[0]), { a: "subscribe", v: [99,3,4,55] });
+  assert.deepEqual(JSON.parse(sent[1]), { a: "mode", v: ["full", [99,3,4,55]] });
+  assert.equal((service as any).selectorCoordinator?.registry?.get?.(55) ?? null, null);
+
+  const receivedAt = "2026-09-04T08:10:00.100Z";
+  (service as any).transport.config.onTicks([{
+    mode: "full", instrumentToken: 55, lastPrice: 90,
+    exchangeTimestamp: "2026-09-04T08:10:00.000Z", isIndex: false, marketDepth: depth,
+  }], receivedAt);
+  const evidence = service.fixedContractWatchlistEvidenceStatus(receivedAt);
+  assert.equal(evidence?.freshTokenCount, 1);
+  assert.equal(service.status().fixedContractWatchlistFreshTokenCount, 1);
+  assert.equal(service.status().fixedContractWatchlistMissingTokenCount, 0);
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].instrumentToken, 55);
+  assert.equal(persisted[0].affectsSelector, false);
+  assert.equal(persisted[0].affectsTelegram, false);
+  assert.equal(persisted[0].affectsExecution, false);
+});
+
 test("fails closed when a constituent token overlaps the immediate registry", () => {
   assert.throws(() => new H1LiveExactReadOnlyWebSocketService({
     readiness: readiness(), apiKey: "key", accessToken: "token",
@@ -155,6 +193,29 @@ test("fails closed when a constituent token overlaps the immediate registry", ()
       { instrumentToken: 99, parentSymbol: "NIFTY", role: "HEAVYWEIGHT", tradingsymbol: "HDFCBANK", sector: "BANK", weight: 12, source: "KITE_INSTRUMENT_MASTER" },
     ],
   }), /CONSTITUENT_TOKEN_OVERLAP/);
+});
+
+test("deduplicates an identical selector/watchlist contract and rejects identity conflicts", () => {
+  const sent:string[] = [];
+  const socket = fakeSocket(sent);
+  const service = new H1LiveExactReadOnlyWebSocketService({
+    readiness: readiness(), apiKey: "key", accessToken: "token", socketFactory: () => socket,
+    fixedContractWatchlistRegistry: [
+      { instrumentToken: 3, symbol: "NIFTY", role: "OPTION", instrumentLabel: "NIFTY08CE", expiry: "2026-09-08", strike: 25050, optionSide: "CE" },
+    ],
+  });
+  const initial = service.start();
+  assert.equal(initial.subscribedTokenCount, 3);
+  assert.equal(initial.fixedContractWatchlistTokenCount, 1);
+  socket.fire("open");
+  assert.deepEqual(JSON.parse(sent[0]), { a: "subscribe", v: [99,3,4] });
+
+  assert.throws(() => new H1LiveExactReadOnlyWebSocketService({
+    readiness: readiness(), apiKey: "key", accessToken: "token",
+    fixedContractWatchlistRegistry: [
+      { instrumentToken: 3, symbol: "NIFTY", role: "OPTION", instrumentLabel: "WRONG", expiry: "2026-09-08", strike: 25100, optionSide: "CE" },
+    ],
+  }), /SELECTOR_IDENTITY_CONFLICT:3/);
 });
 
 

@@ -163,6 +163,44 @@ function band7<T extends H1PremiumInput>(legs: T[], atmStrike: number): T[] {
   return ordered.slice(Math.max(0, atmIndex - 7), Math.min(ordered.length, atmIndex + 8));
 }
 
+/**
+ * Keep the ordinary rolling ATM band while retaining any exact contract that
+ * already carries canonical candidate/wall identity in the current source
+ * snapshot. This prevents a tracked contract from disappearing merely because
+ * spot moved and the contract drifted outside ATM ±7.
+ *
+ * This helper does not invent or fetch a contract that is absent from the live
+ * expiry arrays. A later watchlist/subscription layer is still required for
+ * arbitrary user-selected contracts outside the source snapshot coverage.
+ */
+export function selectH1TrackedLegs(
+  expiry: H1ExpiryInput,
+  symbol: string,
+  expiryDate: string,
+  atmStrike: number,
+  candidateKeys?: ReadonlySet<string>,
+  wallKeys?: ReadonlySet<string>,
+): H1PremiumInput[] {
+  const selected = new Map<string, H1PremiumInput>();
+  const keep = (leg: H1PremiumInput) => {
+    const side = leg.optionType;
+    if (side !== "CE" && side !== "PE") return;
+    selected.set(optionKey(symbol, expiryDate, leg.strike, side), leg);
+  };
+
+  band7(expiry.ceStrikes, atmStrike).forEach(keep);
+  band7(expiry.peStrikes, atmStrike).forEach(keep);
+
+  for (const leg of [...expiry.ceStrikes, ...expiry.peStrikes]) {
+    const side = leg.optionType;
+    if (side !== "CE" && side !== "PE") continue;
+    const key = optionKey(symbol, expiryDate, leg.strike, side);
+    if (candidateKeys?.has(key) || wallKeys?.has(key)) keep(leg);
+  }
+
+  return [...selected.values()];
+}
+
 function atmOffset(expiry: H1ExpiryInput, strike: number, atmStrike: number): number | null {
   const strikes = [...new Set([...expiry.ceStrikes, ...expiry.peStrikes].map((x) => x.strike))].sort((a, b) => a - b);
   if (strikes.length === 0) return null;
@@ -273,10 +311,14 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
         continue;
       }
 
-      const selectedLegs = [
-        ...band7(expiry.ceStrikes, market.atmStrike),
-        ...band7(expiry.peStrikes, market.atmStrike),
-      ];
+      const selectedLegs = selectH1TrackedLegs(
+        expiry,
+        market.symbol,
+        expiryDate,
+        market.atmStrike,
+        request.candidateKeys,
+        request.wallKeys,
+      );
 
       for (const leg of selectedLegs) {
         const side = leg.optionType;

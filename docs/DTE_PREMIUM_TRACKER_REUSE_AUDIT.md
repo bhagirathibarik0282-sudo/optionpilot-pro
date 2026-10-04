@@ -48,3 +48,16 @@ candidate authority, Greeks engine, PCR engine, or parallel history store.
 4. Dashboard journey and DTE comparison panels.
 5. Multi-expiry migration, IV/OI change, compression, and synthesis using the
    same stored history.
+
+## Current chain checkpoint
+
+- Step 1: implemented by the H1 recorder continuity patch.
+- Step 2: implemented as read-only `GET /api/research/h1-fixed-contract-journey`.
+  It requires exact `symbol`, `expiry`, `strike`, `optionType`, `fromDate`, and
+  optional `toDate`, `from`, and `to` parameters. The response reports exact
+  stored rows, marker-bucket coverage, missing contract buckets, and unmarked
+  contract buckets. The date range is capped at 45 days.
+- Step 3 onward: not implemented by this patch.
+
+The Step 2 endpoint performs no writes and cannot affect selector, Telegram, or
+execution authority.

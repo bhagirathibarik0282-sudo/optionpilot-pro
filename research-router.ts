@@ -19,6 +19,10 @@ import { renderCanonicalIntelligenceDashboardHtml } from "./canonical-intelligen
 import { runFiiDiiProductionReadinessHttp } from "./canonical-fii-dii-production-readiness-http.js";
 import { runH1PilotHttpAudit } from "./h1-pilot-audit-http.js";
 import { parseH1ReplayRequest, runH1ReplayHttp } from "./h1-replay-http.js";
+import {
+  parseH1FixedContractJourneyRequest,
+  runH1FixedContractJourneyHttp,
+} from "./h1-fixed-contract-journey-http.js";
 import { runH1DirectionResponseResearchHttp } from "./h1-direction-response-research-http-v1.js";
 import { compactH1Replay } from "./h1-replay-compact-v1.js";
 import { buildH1Dte0TransitionCalibration } from "./h1-dte0-transition-calibration-v1.js";
@@ -332,6 +336,39 @@ researchRouter.get("/h1-replay", async (c) => {
     ? compactH1Replay(result)
     : result;
   return c.json(response, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/h1-fixed-contract-journey", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const parsed = parseH1FixedContractJourneyRequest({
+    symbol: c.req.query("symbol"),
+    expiry: c.req.query("expiry"),
+    strike: c.req.query("strike"),
+    optionType: c.req.query("optionType"),
+    fromDate: c.req.query("fromDate"),
+    toDate: c.req.query("toDate"),
+    fromTime: c.req.query("from"),
+    toTime: c.req.query("to"),
+  });
+  if (!parsed.ok) {
+    return c.json({
+      ok: false,
+      available: false,
+      mode: "READ_ONLY_FIXED_CONTRACT_JOURNEY_V1",
+      productionImpact: "NONE",
+      request: null,
+      reason: parsed.reason,
+      safety: {
+        readOnly: true,
+        writesPerformed: false,
+        affectsSelector: false,
+        affectsTelegram: false,
+        affectsExecution: false,
+      },
+    }, 400);
+  }
+  const result = await runH1FixedContractJourneyHttp(parsed.value);
+  return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
 });
 
 researchRouter.get("/h1-direction-response-research", async (c) => {

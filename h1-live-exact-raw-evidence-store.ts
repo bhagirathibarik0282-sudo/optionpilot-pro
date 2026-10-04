@@ -16,6 +16,10 @@ export interface H1LiveExactRawEvidenceRow {
   ask: number | null;
   bidQty: number | null;
   askQty: number | null;
+  volume?: number | null;
+  oi?: number | null;
+  dayHigh?: number | null;
+  dayLow?: number | null;
 }
 
 export const H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND = "H1_LIVE_EXACT_RAW_DEPTH_1M_V1" as const;
@@ -36,6 +40,10 @@ export interface H1LiveExactRawDepthRecord {
   ask: number;
   bidQty: number;
   askQty: number;
+  volume: number | null;
+  oi: number | null;
+  dayHigh: number | null;
+  dayLow: number | null;
   source: "KITE_WEBSOCKET_FULL";
   provenance: "LIVE_RUNTIME_EXACT";
   thresholdAuthority: "NONE";
@@ -169,6 +177,10 @@ export function buildH1LiveExactRawDepthRecord(row: H1LiveExactRawEvidenceRow): 
     ask: Number(row.ask),
     bidQty: Number(row.bidQty),
     askQty: Number(row.askQty),
+    volume: Number.isSafeInteger(row.volume) && Number(row.volume) >= 0 ? Number(row.volume) : null,
+    oi: Number.isSafeInteger(row.oi) && Number(row.oi) >= 0 ? Number(row.oi) : null,
+    dayHigh: Number.isFinite(row.dayHigh) && Number(row.dayHigh) > 0 ? Number(row.dayHigh) : null,
+    dayLow: Number.isFinite(row.dayLow) && Number(row.dayLow) > 0 ? Number(row.dayLow) : null,
     source: "KITE_WEBSOCKET_FULL",
     provenance: "LIVE_RUNTIME_EXACT",
     thresholdAuthority: "NONE",
@@ -297,6 +309,10 @@ export class H1LiveExactRawEvidenceStore {
       ask,
       bidQty,
       askQty,
+      volume: Number.isSafeInteger(packet.volume) && Number(packet.volume) >= 0 ? Number(packet.volume) : null,
+      oi: Number.isSafeInteger(packet.oi) && Number(packet.oi) >= 0 ? Number(packet.oi) : null,
+      dayHigh: Number.isFinite(packet.high) && Number(packet.high) > 0 ? Number(packet.high) : null,
+      dayLow: Number.isFinite(packet.low) && Number(packet.low) > 0 ? Number(packet.low) : null,
     });
     this.lastRejectByToken.delete(entry.instrumentToken);
     return true;

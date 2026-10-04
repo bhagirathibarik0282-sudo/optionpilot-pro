@@ -1,6 +1,6 @@
 import type { H1LiveExactMarketWiringReadinessResult } from "./h1-live-exact-market-wiring-readiness.js";
 import { H1LiveExactRawEvidenceStore, H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, buildH1LiveExactRawDepthRecord, buildH1LiveExactGreekTimingRecord, type H1LiveExactRawDepthRecord, type H1LiveExactGreekTimingRecord, type H1LiveExactRawEvidenceMissing, type H1LiveExactRawEvidenceRow, type H1LiveExactRawEvidenceSymbolReadiness } from "./h1-live-exact-raw-evidence-store.js";
-import { dbInsert } from "./db.js";
+import { dbInsert, dbUpsertOptionSnapshot1mObservationalFill, type OptionSnapshot1mRow } from "./db.js";
 import { buildNearestValidMonthlyPeerReadiness, type H1NearestValidMonthlyPeerReadinessRow } from "./h1-nearest-valid-monthly-peer-readiness.js";
 import { buildH1ReadOnlyEvidenceConsumerBoundary } from "./h1-readonly-evidence-consumer-boundary.js";
 import { deriveH1ExactLiveSpotDirection } from "./h1-exact-live-spot-direction-provider.js";
@@ -19,6 +19,8 @@ import { readH1SelectorCanonicalPolicySource, type H1SelectorCanonicalValidation
 import { H1KiteExactRuntimeCoordinator } from "./h1-kite-exact-runtime-coordinator.js";
 import { H1ExactPeerRuntimeStore } from "./h1-exact-peer-runtime-store.js";
 import { persistH1LiveGateEvidenceCalibrationOnly, type H1LiveGateEvidencePublisher } from "./h1-live-selector-registry.js";
+import { KiteImmediateTokenRegistry, type KiteImmediateTokenEntry } from "./kite-immediate-token-registry.js";
+import { buildH1FixedContractOptionSnapshotRow } from "./h1-fixed-contract-option-snapshot-bridge.js";
 
 export interface H1LiveExactReadOnlyConsumerObservation {
   symbol: "NIFTY" | "SENSEX" | "BANKNIFTY";
@@ -66,11 +68,13 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   reconnectDelayMs?: number;
   reconnectMaxAttempts?: number;
   constituentRegistry?: CanonicalConstituentTokenEntry[];
+  fixedContractWatchlistRegistry?: KiteImmediateTokenEntry[];
   selectorPolicyEnv?: NodeJS.ProcessEnv;
   selectorPolicyValidation?: H1SelectorCanonicalValidationProof;
   rawDepthPersist?: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
   rawGreekTimingPersist?: (record: H1LiveExactGreekTimingRecord) => void | Promise<void>;
   greekMathCrosscheckPersist?: (record: H1KiteGreekMathCrosscheckPersistRecord) => void | Promise<void>;
+  fixedContractOptionSnapshotPersist?: (row: OptionSnapshot1mRow) => void | Promise<void>;
   validationEvidencePublish?: H1LiveGateEvidencePublisher;
 }
 
@@ -90,6 +94,9 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
   rawEvidenceStaleTokenCount: number;
   rawEvidenceMissing: H1LiveExactRawEvidenceMissing[];
   rawEvidenceSymbolReadiness: H1LiveExactRawEvidenceSymbolReadiness[];
+  fixedContractWatchlistTokenCount: number;
+  fixedContractWatchlistFreshTokenCount: number;
+  fixedContractWatchlistMissingTokenCount: number;
   nearestPeerReadiness: H1NearestValidMonthlyPeerReadinessRow[];
   readOnlyConsumerReadySymbolCount: number;
   readOnlyConsumerObservations: H1LiveExactReadOnlyConsumerObservation[];
@@ -130,12 +137,17 @@ export class H1LiveExactReadOnlyWebSocketService {
   private readonly constituentEvidence: CanonicalConstituentTickStore | null;
   private readonly firstSeenTokens = new Set<number>();
   private readonly rawEvidence: H1LiveExactRawEvidenceStore;
+  private readonly fixedContractWatchlistRegistry: KiteImmediateTokenRegistry | null;
+  private readonly fixedContractWatchlistEvidence: H1LiveExactRawEvidenceStore | null;
+  private readonly fixedContractWatchlistSelectorOverlapTokens: Set<number>;
   private readonly rawDepthPersist: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
   private readonly rawGreekTimingPersist: (record: H1LiveExactGreekTimingRecord) => void | Promise<void>;
   private readonly greekMathCrosscheckPersist: (record: H1KiteGreekMathCrosscheckPersistRecord) => void | Promise<void>;
+  private readonly fixedContractOptionSnapshotPersist: (row: OptionSnapshot1mRow) => void | Promise<void>;
   private readonly lastPersistedDepthMinuteByToken = new Map<number, string>();
   private readonly lastPersistedGreekTimingMinuteByToken = new Map<number, string>();
   private readonly lastPersistedGreekCrosscheckMinuteByToken = new Map<number, string>();
+  private readonly lastPersistedFixedContractSnapshotMinuteByToken = new Map<number, string>();
   private readonly latestRawSpotTimingBySymbol = new Map<H1ExactUnderlyingObservation["symbol"], {
     instrumentToken: number;
     observedAt: string;
@@ -161,19 +173,38 @@ export class H1LiveExactReadOnlyWebSocketService {
     if (constituentTokens.some((token) => registryTokens.includes(token))) {
       throw new Error("H1_LIVE_EXACT_CONSTITUENT_TOKEN_OVERLAP");
     }
+    const configuredWatchlist = config.fixedContractWatchlistRegistry ?? [];
+    if (configuredWatchlist.some((entry) => entry.role !== "OPTION")) throw new Error("H1_FIXED_CONTRACT_WATCHLIST_OPTION_ONLY");
+    if (configuredWatchlist.some((entry) => constituentTokens.includes(entry.instrumentToken))) throw new Error("H1_FIXED_CONTRACT_WATCHLIST_CONSTITUENT_OVERLAP");
+    if (new Set(configuredWatchlist.map((entry) => entry.instrumentToken)).size !== configuredWatchlist.length) throw new Error("H1_FIXED_CONTRACT_WATCHLIST_DUPLICATE_TOKEN");
+    for (const entry of configuredWatchlist) {
+      const selectorEntry = config.readiness.registry.get(entry.instrumentToken);
+      if (!selectorEntry) continue;
+      if (selectorEntry.role !== "OPTION" || selectorEntry.symbol !== entry.symbol || selectorEntry.expiry !== entry.expiry ||
+          Number(selectorEntry.strike) !== Number(entry.strike) || selectorEntry.optionSide !== entry.optionSide) {
+        throw new Error(`H1_FIXED_CONTRACT_WATCHLIST_SELECTOR_IDENTITY_CONFLICT:${entry.instrumentToken}`);
+      }
+    }
+    const uniqueWatchlist = configuredWatchlist.filter((entry) => !registryTokens.includes(entry.instrumentToken));
     this.constituentEvidence = constituentEntries.length > 0
       ? new CanonicalConstituentTickStore(constituentEntries)
       : null;
-    this.allowedTokens = new Set([...registryTokens, ...constituentTokens]);
+    this.fixedContractWatchlistRegistry = uniqueWatchlist.length > 0 ? new KiteImmediateTokenRegistry(uniqueWatchlist) : null;
+    this.fixedContractWatchlistEvidence = this.fixedContractWatchlistRegistry ? new H1LiveExactRawEvidenceStore(this.fixedContractWatchlistRegistry) : null;
+    this.fixedContractWatchlistSelectorOverlapTokens = new Set(configuredWatchlist.filter((entry) => registryTokens.includes(entry.instrumentToken)).map((entry) => entry.instrumentToken));
+    this.allowedTokens = new Set([...registryTokens, ...constituentTokens, ...uniqueWatchlist.map((entry) => entry.instrumentToken)]);
     this.rawEvidence = new H1LiveExactRawEvidenceStore(config.readiness.registry);
     this.rawDepthPersist = config.rawDepthPersist ?? ((record) => dbInsert(H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, record));
     this.rawGreekTimingPersist = config.rawGreekTimingPersist ?? ((record) => dbInsert(H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, record));
     this.greekMathCrosscheckPersist = config.greekMathCrosscheckPersist ?? ((record) => dbInsert(H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND, record));
+    this.fixedContractOptionSnapshotPersist = config.fixedContractOptionSnapshotPersist ?? dbUpsertOptionSnapshot1mObservationalFill;
     this.value = {
       version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1", started: false, connected: false, state: "READY",
       subscribedTokenCount: this.allowedTokens.size, receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
       rawEvidenceReady: false, rawEvidenceExpectedTokenCount: registryTokens.length, rawEvidenceFreshTokenCount: 0,
       rawEvidenceMissingTokenCount: registryTokens.length, rawEvidenceStaleTokenCount: 0, rawEvidenceMissing: [], rawEvidenceSymbolReadiness: [], nearestPeerReadiness: [],
+      fixedContractWatchlistTokenCount: configuredWatchlist.length, fixedContractWatchlistFreshTokenCount: 0,
+      fixedContractWatchlistMissingTokenCount: configuredWatchlist.length,
       readOnlyConsumerReadySymbolCount: 0, readOnlyConsumerObservations: [], readOnlyDirectionReadySymbolCount: 0, readOnlyDirectionObservations: [],
       readOnlyShadowInputReadySymbolCount: 0, readOnlyShadowInputObservations: [],
       selectorRuntimePolicyReady: false, selectorRuntimeAttached: false, selectorRuntimeBlockers: [],
@@ -200,6 +231,7 @@ export class H1LiveExactReadOnlyWebSocketService {
     };
   }
   rawEvidenceStatus(nowIso: string) { return this.rawEvidence.status(nowIso); }
+  fixedContractWatchlistEvidenceStatus(nowIso: string) { return this.fixedContractWatchlistEvidence?.status(nowIso) ?? null; }
   constituentTicks(parentSymbol?: CanonicalMarketSymbol): CanonicalConstituentTick[] {
     return this.constituentEvidence?.ticks(parentSymbol) ?? [];
   }
@@ -258,6 +290,32 @@ export class H1LiveExactReadOnlyWebSocketService {
       receivedAt,
       price: packet.lastPrice,
     });
+  }
+
+  private persistFixedContractOptionSnapshot(packet: KiteDecodedPacket, receivedAt: string): void {
+    if (!this.fixedContractWatchlistRegistry) return;
+    const entry = this.fixedContractWatchlistRegistry.get(packet.instrumentToken);
+    if (!entry || entry.role !== "OPTION" || (entry.symbol !== "NIFTY" && entry.symbol !== "SENSEX" && entry.symbol !== "BANKNIFTY")) return;
+    const row = buildH1FixedContractOptionSnapshotRow({
+      packet,
+      registry: this.fixedContractWatchlistRegistry,
+      underlying: this.latestGreekUnderlyingBySymbol.get(entry.symbol) ?? null,
+      receivedAt,
+      greekPolicy: H1_SELECTOR_SHADOW_PROFILE_V1.greekPolicy,
+    });
+    if (!row) return;
+    if (this.lastPersistedFixedContractSnapshotMinuteByToken.get(packet.instrumentToken) === row.minuteBucket) return;
+    this.lastPersistedFixedContractSnapshotMinuteByToken.set(packet.instrumentToken, row.minuteBucket);
+    try {
+      const pending = this.fixedContractOptionSnapshotPersist(row);
+      if (pending && typeof (pending as Promise<void>).catch === "function") {
+        void (pending as Promise<void>).catch((err) => {
+          if (process.env.NODE_ENV !== "test") console.error("[H1_FIXED_CONTRACT_OPTION_SNAPSHOT_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
+        });
+      }
+    } catch (err) {
+      if (process.env.NODE_ENV !== "test") console.error("[H1_FIXED_CONTRACT_OPTION_SNAPSHOT_PERSIST] write failed without affecting live feed:", err instanceof Error ? err.message : err);
+    }
   }
 
   private captureRawGreekTimingEvidence(packet: KiteDecodedPacket, receivedAt: string): void {
@@ -483,6 +541,11 @@ export class H1LiveExactReadOnlyWebSocketService {
             if (!this.constituentEvidence.ingest(tick, receivedAt)) this.value.rejectedPacketCount += 1;
             continue;
           }
+          if (this.fixedContractWatchlistRegistry?.get(tick.instrumentToken)) {
+            if (!this.fixedContractWatchlistEvidence!.ingest(tick, receivedAt)) this.value.rejectedPacketCount += 1;
+            else this.persistFixedContractOptionSnapshot(tick, receivedAt);
+            continue;
+          }
           this.captureRawGreekTimingEvidence(tick, receivedAt);
           this.captureKiteGreekMathCrosscheckEvidence(tick, receivedAt);
           this.rawEvidence.ingest(tick, receivedAt);
@@ -496,6 +559,11 @@ export class H1LiveExactReadOnlyWebSocketService {
         }
         const evidence = this.rawEvidence.status(receivedAt);
         this.persistRawDepthEvidence(evidence.rows);
+        const watchlistEvidence = this.fixedContractWatchlistEvidence?.status(receivedAt) ?? null;
+        if (watchlistEvidence) this.persistRawDepthEvidence(watchlistEvidence.rows);
+        const coveredBySelectorCount = evidence.rows.filter((row) => this.fixedContractWatchlistSelectorOverlapTokens.has(row.instrumentToken)).length;
+        this.value.fixedContractWatchlistFreshTokenCount = coveredBySelectorCount + (watchlistEvidence?.freshTokenCount ?? 0);
+        this.value.fixedContractWatchlistMissingTokenCount = this.value.fixedContractWatchlistTokenCount - this.value.fixedContractWatchlistFreshTokenCount;
         this.value.rawEvidenceReady = evidence.ready;
         this.value.rawEvidenceExpectedTokenCount = evidence.expectedTokenCount;
         this.value.rawEvidenceFreshTokenCount = evidence.freshTokenCount;

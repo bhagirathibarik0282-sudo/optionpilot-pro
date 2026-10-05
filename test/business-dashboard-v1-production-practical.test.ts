@@ -23,16 +23,19 @@ for (const symbol of ["NIFTY","SENSEX"] as const) {
   });
 }
 
-test("production Business Dashboard V1 HTML view is mobile-readable and business-focused", async () => {
+test("production Business Dashboard V1 HTML view exposes a supported read-only dashboard during rollout", async () => {
   const response = await fetch(`${BASE}/view?symbol=NIFTY`, { headers:{ accept:"text/html" } });
   assert.equal(response.ok, true, `HTTP_${response.status}`);
   const html = await response.text();
-  assert.match(html, /BUSINESS DASHBOARD V1/);
-  assert.match(html, /BUYER/);
-  assert.match(html, /SELLER/);
-  assert.match(html, /INTRADAY/);
-  assert.match(html, /MULTIDAY/);
-  assert.match(html, /EXPIRY/);
   assert.match(html, /viewport/);
-  assert.match(html, /READ ONLY/);
+  // Production may still serve the previous release while this PR is checked.
+  if (html.includes('Market observations')) {
+    assert.match(html, /DATA ONLY/);
+    assert.match(html, /Premium PDH \/ PDL breaks/);
+    assert.match(html, /full_chain_oi_pcr/);
+    assert.doesNotMatch(html, /id="business-decision-card"/);
+  } else {
+    assert.match(html, /BUSINESS DASHBOARD V1/);
+    assert.match(html, /READ ONLY/);
+  }
 });

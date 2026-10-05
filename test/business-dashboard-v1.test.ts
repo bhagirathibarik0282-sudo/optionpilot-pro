@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { canonicalBusinessRuntimeRegistry } from "../canonical-business-runtime-registry.js";
 import { buildBusinessDashboardV1 } from "../business-dashboard-v1.js";
-import { renderBusinessDashboardV1Html } from "../business-dashboard-v1-view.js";
+import { deriveObservationData, renderBusinessDashboardV1Html } from "../business-dashboard-v1-view.js";
 import { readFileSync } from "node:fs";
 
 test("dashboard fails softly to WAIT without inventing a candidate", () => {
@@ -59,19 +59,8 @@ test("dashboard reuses the same canonical business candidate and horizon views",
   assert.equal(out.decisionCard.telegram.allowed, true);
   assert.equal(out.decisionCard.executionPlan.entry, null);
   const html = renderBusinessDashboardV1Html(out);
-  assert.match(html, /BUSINESS DASHBOARD V1/);
-  assert.match(html, /NIFTY CE 23800/);
-  assert.match(html, /INTRADAY/);
-  assert.match(html, /MULTIDAY/);
-  assert.match(html, /EXPIRY/);
-  assert.match(html, /BUSINESS DECISION CARD/);
-  assert.match(html, /REVIEW_BUYER_CANDIDATE/);
-  assert.match(html, /CURRENT PREMIUM/);
-  assert.match(html, /ENTRY \/ SL \/ TARGET/);
-  assert.match(html, /NOT PUBLISHED/);
-  assert.match(html, /ID LOCK VERIFIED/);
-  assert.match(html, /decisionId \+ candidateKey/);
-  assert.match(html, /Current premium is not an entry trigger/);
+  assert.match(html, /DATA ONLY/);
+  assert.doesNotMatch(html, /NIFTY CE 23800|BUSINESS DECISION CARD|REVIEW_BUYER_CANDIDATE/);
   canonicalBusinessRuntimeRegistry.clear();
 });
 
@@ -124,33 +113,42 @@ test("dashboard intelligence remains low-noise and fail-closed without verified 
   assert.ok(out.intelligence.every((x) => x.state === "WAIT"));
   assert.equal(out.intelligence.find((x) => x.key === "MARKET_DNA")?.detail, "Context-only layer; never counted as an extra vote");
   const html = renderBusinessDashboardV1Html(out);
-  assert.match(html, /SMC \+ Candle Context/);
-  assert.match(html, /Futures/);
-  assert.match(html, /CE\/PE Premium Reality/);
-  assert.match(html, /OI \/ PCR \/ Wall Migration/);
-  assert.match(html, /Multi-DTE/);
-  assert.match(html, /IV \/ Skew/);
-  assert.match(html, /Market DNA/);
-  assert.match(html, /Heavyweights \/ Sectors/);
-  assert.match(html, /Liquidity \/ Executability/);
+  assert.match(html, /Premium PDH \/ PDL breaks/);
+  assert.match(html, /DATA ONLY/);
+  assert.doesNotMatch(html, /id="candidate-state"|id="business-decision-card"/);
 });
 
-test("dashboard view wires every business intelligence card only to read-only verified sources", () => {
-  canonicalBusinessRuntimeRegistry.clear();
-  const html = renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY", new Date().toISOString()));
-  assert.match(html, /\/api\/research\/h1-live-selector-decisions/);
-  assert.match(html, /\/api\/research\/positioning-pair-diagnostic/);
-  assert.match(html, /\/api\/research\/h1-replay\?/);
-  assert.match(html, /\/api\/research\/h1-replay-intelligence/);
-  assert.match(html, /\/api\/research\/broad-market-size\/dashboard/);
-  for (const key of ["SMC_CANDLE","FUTURES","PREMIUM_REALITY","OI_PCR_WALLS","MULTI_DTE","IV_SKEW","MARKET_DNA","HEAVYWEIGHTS_SECTORS","LIQUIDITY","HISTORICAL_EDGE"]) assert.match(html, new RegExp(`data-intel-key="${key}"`));
-  assert.match(html, /Theta\/IV burden pass/);
-  assert.match(html, /conflict-clear/);
-  assert.match(html, /exact skew not exposed; no skew fabricated/);
-  assert.match(html, /pattern labels only when separately verified/);
-  assert.match(html, /constituent-level heavyweight\/sector detail remains fail-closed until verified/);
-  assert.match(html, /coverage only, not a claimed trade edge/);
-  assert.doesNotMatch(html, /notWired\(/);
+test("data dashboard uses existing read-only observation sources", () => {
+  const html = renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY"));
+  for (const path of ["/api/research/h1-replay?", "/api/research/h1-theory-dates", "/api/index-stocks?symbol=", "/api/sector-heatmap"]) assert.ok(html.includes(path));
+  assert.doesNotMatch(html, /h1-live-selector-decisions|candidate-state|business-decision-card/);
   assert.doesNotMatch(html, /fetch\([^)]*method\s*:\s*["']POST/i);
-  assert.doesNotMatch(html, /createsOrders\s*=\s*true/i);
+  assert.match(html, /full_chain_oi_pcr/);
+});
+
+const obs = (minute: number, ltp: number | null, pdh: number | null = 100) => ({symbol:'NIFTY',expiry:'2026-09-22',strike:23350,option_type:'CE',minute_bucket:`2026-09-22T04:${String(minute).padStart(2,'0')}:00Z`,ltp,pdh,pdl:50});
+test('premium crossing preserves exact contract, interval gaps and missing levels', () => {
+ const d=deriveObservationData({options:[obs(0,90),obs(3,110),obs(6,120),obs(12,40),{...obs(15,120),pdh:null,pdl:null}]});
+ assert.equal(d.breaks.length,2);
+ assert.equal(d.breaks.find(r=>r.event==='ABOVE PDH').previous,90);
+ assert.equal(d.breaks.find(r=>r.event==='BELOW PDL').gapMinutes,6);
+ const first=deriveObservationData({options:[obs(0,110)]});
+ assert.equal(first.breaks[0].kind,'First observed outside level');
+ assert.equal(deriveObservationData({options:[obs(0,90),obs(3,110,105)]}).breaks[0].kind,'First observed outside level');
+});
+test('PCR never falls back to band PCR, wall migration stays expiry-specific', () => {
+ const c=(m:number,e:string,p:any,w:number)=>({...obs(m,1),expiry:e,full_chain_oi_pcr:p,band7_oi_pcr:9,call_wall_strike:w,call_wall_oi:100,put_wall_strike:23000});
+ const d=deriveObservationData({chain:[c(0,'2026-09-22',1,23300),c(3,'2026-09-22',1.2,23400),c(0,'2026-09-29',null,24000),c(3,'2026-09-29',null,24000)]},{chain:[c(0,'2026-09-22',.8,23200)]});
+ assert.ok(Math.abs(d.walls[0].pcrImmediate-.2)<1e-10);
+ assert.ok(Math.abs(d.walls[0].pcrSwing-.4)<1e-10);
+ assert.equal(d.walls[1].pcrImmediate,null);
+ assert.equal(d.wallEvents.length,1);
+ assert.equal(d.wallEvents[0].migration,100);
+});
+test('swing premium requires same exact contract; null and zero bases stay unavailable',()=>{
+ const a=obs(0,100),b=obs(3,120);
+ const d=deriveObservationData({options:[a,b]},{options:[{...a,ltp:60},{...a,strike:23400,ltp:10}]});
+ assert.equal(d.contracts[0].swingPct,100);
+ assert.equal(deriveObservationData({options:[a]},{options:[{...a,strike:23400,ltp:10}]}).contracts[0].swingPct,null);
+ assert.equal(deriveObservationData({options:[a]},{options:[{...a,ltp:0}]}).contracts[0].swingPct,null);
 });

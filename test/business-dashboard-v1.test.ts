@@ -126,6 +126,20 @@ test("data dashboard uses existing read-only observation sources", () => {
   assert.match(html, /full_chain_oi_pcr/);
 });
 
+test("observation terminal exposes compact views, bounded replay loading and explicit source states", () => {
+  const html = renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY"));
+  for (const label of ["Overview", "Premium ladder", "PCR + Spot", "OI changes", "Day memory", "Sectors"]) assert.ok(html.includes(label));
+  for (const state of ["LIVE", "DELAYED", "RECORDED", "RETAINED", "UNAVAILABLE"]) assert.ok(html.includes(state));
+  assert.match(html, /function replayWindows\(from,to,size=60\)/);
+  assert.match(html, /function mergeReplayParts\(/);
+  assert.match(html, /function replayFreshness\(/);
+  assert.match(html, /getReplay\(s\+' session'/);
+  assert.match(html, /sameScope&&oldData\[s\]/);
+  assert.match(html, /CORE covers recorded ATM ±7/);
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
 const obs = (minute: number, ltp: number | null, pdh: number | null = 100) => ({symbol:'NIFTY',expiry:'2026-09-22',strike:23350,option_type:'CE',minute_bucket:`2026-09-22T04:${String(minute).padStart(2,'0')}:00Z`,ltp,pdh,pdl:50});
 test('premium crossing preserves exact contract, interval gaps and missing levels', () => {
  const d=deriveObservationData({options:[obs(0,90),obs(3,110),obs(6,120),obs(12,40),{...obs(15,120),pdh:null,pdl:null}]});

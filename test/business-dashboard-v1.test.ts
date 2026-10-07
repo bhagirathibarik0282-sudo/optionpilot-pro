@@ -133,6 +133,8 @@ test("observation terminal exposes compact views, bounded replay loading and exp
   assert.match(html, /function replayWindows\(from,to,size=60\)/);
   assert.match(html, /function mergeReplayParts\(/);
   assert.match(html, /function replayFreshness\(/);
+  assert.match(html, /const populated=values\.filter/);
+  assert.match(html, /requestedToTime:to/);
   assert.match(html, /getReplay\(s\+' session'/);
   assert.match(html, /sameScope&&oldData\[s\]/);
   assert.match(html, /CORE covers recorded ATM ±7/);

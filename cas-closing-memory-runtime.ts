@@ -1,4 +1,4 @@
-import { initializeIntradayObservationRuntime } from "./intraday-observation-memory-runtime.js";
+import { initializeIntradayObservationRuntime, captureIntradayObservationMemory } from "./intraday-observation-memory-runtime.js";
 import { dbIsConfigured, dbQuerySafe, dbSaveCasMemoryOnce } from './db.js';
 import { listH1TheoryRecordedDates } from './h1-theory-history.js';
 import { runH1ReplayHttp } from './h1-replay-http.js';
@@ -67,7 +67,7 @@ export function startCasClosingMemoryRuntime() {
       now.getTime() < Date.parse(indianTradingDateAt(now) + 'T20:20:00+05:30');
     const target = retry ? new Date(now.getTime() + 5 * 60000) : next;
     runtime.nextRunAt = target?.toISOString() ?? null;
-    if (target) setTimeout(() => { void runCasClosingMemoryCapture().finally(() => schedule(retry ? attempt + 1 : 0)); }, target.getTime() - now.getTime()).unref();
+    if (target) setTimeout(() => { void runCasClosingMemoryCapture().then(() => captureIntradayObservationMemory(new Date(), true)).finally(() => schedule(retry ? attempt + 1 : 0)); }, target.getTime() - now.getTime()).unref();
   };
   // This begins only after DB initialization and HTTP listening; it never blocks boot.
   void runCasClosingMemoryCapture().finally(() => schedule());

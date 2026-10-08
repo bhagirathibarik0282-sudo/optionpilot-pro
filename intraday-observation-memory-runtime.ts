@@ -105,7 +105,7 @@ export function initializeIntradayObservationRuntime() {
     }
   })().catch(() => { status.lastError='INTRADAY_MEMORY_STARTUP_RECOVERY_FAILED'; });
 }
-export function intradayMemoryRuntimeStatus() { return { ...status, recurringCapture: 'EXISTING_3_MINUTE_RECORDER_ONLY', additionalBrokerRequests: false,
+export function intradayMemoryRuntimeStatus() { return { ...status, recurringCapture: 'EXISTING_3_MINUTE_RECORDER_ONLY', closingFinalization: 'EXISTING_15:35_CAS_CYCLE', additionalBrokerRequests: false,
   responseWindowsMinutes: [3, 15, 30], notableRule: 'Existing PDH/PDL crossings, wall migration, earlier-change percentile >=75% with at least 8 comparable prior samples',
   routinePremiumOiScope: 'Current recorded ATM per expiry; PDH/PDL crossings cover fresh CORE strikes', futuresContinuity: 'UNVERIFIED', iv: 'RECORDED_CONTEXT_ONLY' }; }
 export async function getIntradayObservationMemory(requestedDate?: string, symbol?: H1ReplaySymbol) {

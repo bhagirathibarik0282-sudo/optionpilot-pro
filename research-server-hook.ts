@@ -47,6 +47,7 @@ import {
 
 const INTELLIGENCE_LAYER_HREF = "/api/research/broad-market-size/view";
 const THEORY_LAB_HREF = "/api/research/h1-theory-dashboard";
+const BUSINESS_DATA_HREF = "/api/research/business-dashboard/view?symbol=NIFTY";
 const MEANINGFUL_ACCEPTANCE_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
 
 installTelegramCombinationBridge();
@@ -129,6 +130,67 @@ export function mountResearchRoutes(app: Hono): void {
     if (!html.includes("</body>") || html.includes("data-optionpilot-intelligence-shortcut")) return;
 
     const shortcut = `
+      <!-- OPTIONPILOT_DATA_ANNEX_V1: same-page shell; reuses the existing read-only observation terminal. -->
+      <button
+        type="button"
+        data-optionpilot-data-annex="true"
+        id="optionpilot-data-annex-open"
+        aria-controls="optionpilot-data-annex-shell"
+        aria-expanded="false"
+        style="position:fixed;right:12px;bottom:154px;z-index:9999;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;border:1px solid rgba(255,225,118,.72);border-radius:999px;background:rgba(8,18,24,.96);color:#ffe176;font:800 12px/1.1 system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:.04em;box-shadow:0 0 18px rgba(255,225,118,.2);backdrop-filter:blur(8px);cursor:pointer">
+        <span aria-hidden="true">▦</span>
+        <span>DATA</span>
+      </button>
+      <section
+        id="optionpilot-data-annex-shell"
+        hidden
+        aria-label="OptionPilot data observation terminal"
+        style="position:fixed;inset:0;z-index:10000;background:#050914;color:#eef2ff">
+        <div style="height:52px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;border-bottom:1px solid rgba(255,225,118,.35);background:#08162f;font:700 13px/1.2 system-ui,-apple-system,Segoe UI,sans-serif">
+          <span style="color:#ffe176">OPTIONPILOT · DATA</span>
+          <button
+            type="button"
+            id="optionpilot-data-annex-close"
+            style="min-height:36px;padding:8px 12px;border:1px solid rgba(255,225,118,.55);border-radius:9px;background:#111f39;color:#ffe176;font:700 12px system-ui,-apple-system,Segoe UI,sans-serif;cursor:pointer">
+            ← Dashboard
+          </button>
+        </div>
+        <iframe
+          id="optionpilot-data-annex-frame"
+          title="OptionPilot market observations"
+          src="${BUSINESS_DATA_HREF}"
+          loading="lazy"
+          style="display:block;width:100%;height:calc(100dvh - 52px);border:0;background:#060f23"
+        ></iframe>
+      </section>
+      <script>
+        (() => {
+          const open = document.getElementById("optionpilot-data-annex-open");
+          const shell = document.getElementById("optionpilot-data-annex-shell");
+          const close = document.getElementById("optionpilot-data-annex-close");
+          if (!open || !shell || !close) return;
+          let previousOverflow = "";
+          const setOpen = (show) => {
+            if (show) {
+              previousOverflow = document.body.style.overflow;
+              shell.hidden = false;
+              document.body.style.overflow = "hidden";
+              open.setAttribute("aria-expanded", "true");
+              close.focus();
+            } else {
+              shell.hidden = true;
+              document.body.style.overflow = previousOverflow;
+              open.setAttribute("aria-expanded", "false");
+              open.focus();
+            }
+          };
+          open.addEventListener("click", () => setOpen(true));
+          close.addEventListener("click", () => setOpen(false));
+          document.addEventListener("keydown", (event) => {
+            if (event.key === "Escape" && !shell.hidden) setOpen(false);
+          });
+        })();
+      </script>
       <a
         data-optionpilot-theory-lab-shortcut="true"
         href="${THEORY_LAB_HREF}"

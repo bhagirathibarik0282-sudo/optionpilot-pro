@@ -35,6 +35,8 @@ import { businessShadowRegistryRuntimeStatus, evaluateBusinessShadowRegistryHttp
 import { businessForwardProofRuntimeStatus, evaluateBusinessForwardProofHttp } from "./business-forward-proof-http-v1.js";
 import { listH1TheoryRecordedDates, runH1TheoryDateAnalysis } from "./h1-theory-history.js";
 import { renderH1TheoryDashboardHtml } from "./h1-theory-dashboard-view.js";
+import { getCasClosingMemoryView } from "./cas-closing-memory-runtime.js";
+import { renderCasClosingMemoryHtml } from "./cas-closing-memory-view.js";
 import { buildBusinessDashboardV1, type BusinessDashboardSymbol } from "./business-dashboard-v1.js";
 import { renderBusinessDashboardV1Html } from "./business-dashboard-v1-view.js";
 import { evaluateH1DteAwareShadowThreshold } from "./h1-dte-aware-shadow-threshold-v1.js";
@@ -442,6 +444,16 @@ researchRouter.get("/h1-replay-intelligence", async (c) => {
   }
   const result = await runH1ReplayIntelligenceHttp(parsed.value);
   return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/cas-closing-memory", async (c) => {
+  c.header("Cache-Control", "no-store");
+  try { return c.json(await getCasClosingMemoryView()); }
+  catch { return c.json({ ok: false, reason: "CAS_MEMORY_DATABASE_UNAVAILABLE", affectsVerdict: false, affectsTelegram: false, affectsExecution: false }, 503); }
+});
+researchRouter.get("/cas-closing-memory/view", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.html(renderCasClosingMemoryHtml());
 });
 
 researchRouter.get("/h1-theory-dates", async (c) => {

@@ -14,6 +14,7 @@ import { buildObe3VolatilityPurchaseCondition } from "./obe-volatility.js";
 // hard rules (never decides, only formats already-computed fields).
 import { buildTelegramTradeCard, TradeCardInput, TradeCardTmPlan, TradeCardAdvancedGreeks } from "./telegram-trade-card.js";
 import { dbInit, dbInsert, dbLoadRecent, dbIsConfigured } from "./db.js";
+import { startCasClosingMemoryRuntime } from "./cas-closing-memory-runtime.js";
 import { ensureH1DerivedSchema } from "./h1-derived-db.js";
 import { recordH1FromRuntimeSnapshot } from "./h1-runtime-bridge.js";
 import { collectH1LiveSelectorDecisions } from "./h1-live-selector-registry.js";
@@ -35719,6 +35720,7 @@ if (process.env.NODE_ENV !== "test") {
   void restorePersistedState().finally(() => {
     serve({ fetch: app.fetch, port: PORT }, (info) => {
       console.log(`[SERVER] OptionPilot Pro listening on port ${info.port}`);
+      startCasClosingMemoryRuntime();
     });
   });
 

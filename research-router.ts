@@ -37,6 +37,8 @@ import { listH1TheoryRecordedDates, runH1TheoryDateAnalysis } from "./h1-theory-
 import { renderH1TheoryDashboardHtml } from "./h1-theory-dashboard-view.js";
 import { getCasClosingMemoryView } from "./cas-closing-memory-runtime.js";
 import { renderCasClosingMemoryHtml } from "./cas-closing-memory-view.js";
+import { getIntradayObservationMemory } from "./intraday-observation-memory-runtime.js";
+import { renderIntradayObservationMemoryHtml } from "./intraday-observation-memory-view.js";
 import { buildBusinessDashboardV1, type BusinessDashboardSymbol } from "./business-dashboard-v1.js";
 import { renderBusinessDashboardV1Html } from "./business-dashboard-v1-view.js";
 import { evaluateH1DteAwareShadowThreshold } from "./h1-dte-aware-shadow-threshold-v1.js";
@@ -444,6 +446,18 @@ researchRouter.get("/h1-replay-intelligence", async (c) => {
   }
   const result = await runH1ReplayIntelligenceHttp(parsed.value);
   return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+});
+
+researchRouter.get("/intraday-memory", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const date = c.req.query("date"), symbol = c.req.query("symbol");
+  if (date && !parseH1ReplayRequest({ tradeDate: date }).ok || symbol && !["NIFTY","SENSEX","BANKNIFTY"].includes(symbol)) return c.json({ok:false,reason:"INVALID_MEMORY_REQUEST"},400);
+  try { return c.json(await getIntradayObservationMemory(date, symbol as "NIFTY"|"SENSEX"|"BANKNIFTY"|undefined)); }
+  catch { return c.json({ok:false,reason:"MEMORY_DATABASE_UNAVAILABLE",affectsVerdict:false,affectsTelegram:false,affectsExecution:false},503); }
+});
+researchRouter.get("/intraday-memory/view", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.html(renderIntradayObservationMemoryHtml());
 });
 
 researchRouter.get("/cas-closing-memory", async (c) => {

@@ -1,3 +1,4 @@
+import { initializeIntradayObservationRuntime } from "./intraday-observation-memory-runtime.js";
 import { dbIsConfigured, dbQuerySafe, dbSaveCasMemoryOnce } from './db.js';
 import { listH1TheoryRecordedDates } from './h1-theory-history.js';
 import { runH1ReplayHttp } from './h1-replay-http.js';
@@ -58,6 +59,7 @@ export function casClosingMemoryRuntimeStatus() { return { ...runtime, schedule:
 export function startCasClosingMemoryRuntime() {
   if (runtime.started || process.env.NODE_ENV === 'test') return;
   runtime.started = true;
+  initializeIntradayObservationRuntime();
   const schedule = (attempt = 0) => {
     const now = new Date(), next = nextCasRunAt(now);
     const retry = runtime.lastError && attempt < 2 && isCasTradingDate(indianTradingDateAt(now)) &&

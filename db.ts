@@ -592,8 +592,8 @@ export function dbIsConfigured(): boolean {
  * Separate statements after the advisory lock ensure a concurrent writer's
  * committed row is visible under READ COMMITTED. Errors never claim persistence.
  */
-export async function dbSaveCasMemoryOnce(payload: { memoryKey: string; version: string }): Promise<boolean> {
-  if (payload.version !== 'CAS_CLOSING_FIXED_CONTRACT_MEMORY_V1') throw new Error('CAS_MEMORY_VERSION_INVALID');
+export async function dbSaveResearchMemoryOnce(payload: { memoryKey: string; version: string }): Promise<boolean> {
+  if (!['CAS_CLOSING_FIXED_CONTRACT_MEMORY_V1','INTRADAY_NOTABLE_EVENT_V1','INTRADAY_PREMIUM_RESPONSE_V1','INTRADAY_MEMORY_SESSION_RECEIPT_V1'].includes(payload.version)) throw new Error('RESEARCH_MEMORY_VERSION_INVALID');
   const p = getPool();
   if (!p) throw new Error('CAS_MEMORY_DATABASE_UNAVAILABLE');
   const client = await p.connect();
@@ -610,4 +610,9 @@ export async function dbSaveCasMemoryOnce(payload: { memoryKey: string; version:
     await client.query('ROLLBACK').catch(() => {});
     throw error;
   } finally { client.release(); }
+}
+
+export async function dbSaveCasMemoryOnce(payload: { memoryKey: string; version: string }): Promise<boolean> {
+  if (payload.version !== 'CAS_CLOSING_FIXED_CONTRACT_MEMORY_V1') throw new Error('CAS_MEMORY_VERSION_INVALID');
+  return dbSaveResearchMemoryOnce(payload);
 }

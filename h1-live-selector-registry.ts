@@ -13,6 +13,7 @@ import {
 } from "./h1-shadow-execution-evidence-registry.js";
 import { canonicalBusinessRuntimeRegistry } from "./canonical-business-runtime-registry.js";
 import { dbInsert } from "./db.js";
+import { H1DiagnosticLogCadence, diagnosticSamplingMetadata } from "./h1-diagnostic-log-cadence.js";
 
 export const H1_LIVE_SELECTOR_REGISTRY_VERSION = "H1_LIVE_SELECTOR_REGISTRY_V1" as const;
 export const H1_LIVE_GATE_EVIDENCE_PERSIST_KIND = "H1_LIVE_GATE_EVIDENCE_PACKET_V1" as const;
@@ -25,6 +26,7 @@ type RegistryEntry = {
 };
 
 const entries = new Map<string, RegistryEntry>();
+const diagnosticLogCadence = new H1DiagnosticLogCadence();
 
 function validIso(value: string): number | null {
   const ms = Date.parse(value);
@@ -80,6 +82,12 @@ function auditShadowRuntimeBindings(result: H1LiveSelectorPipelineResult, observ
       authorizationEvidence: verifiedEvidence ?? unavailableExecutionEvidence(),
     });
 
+    // Selected decisions retain their existing audit path. Repeated blocked
+    // shadow diagnostics do not need a row for every consumer poll.
+    const sample = binding.selectorDecision === "SELECT" ? null : diagnosticLogCadence.admit(
+      `blocked-shadow|${decision.symbol}|${decision.expiry}|${decision.strike}|${decision.side}`,
+    );
+    if (sample && !sample.accepted) continue;
     void dbInsert(H1_SELECT_SHADOW_RUNTIME_AUDIT_KIND, {
       version: H1_SELECT_SHADOW_RUNTIME_AUDIT_KIND,
       observedAt,
@@ -94,6 +102,8 @@ function auditShadowRuntimeBindings(result: H1LiveSelectorPipelineResult, observ
       shadowOnly: true,
       placesOrder: false,
       productionImpact: "NONE",
+      ...(sample?.windowStartMs !== null && sample?.windowStartMs !== undefined
+        ? { diagnosticSampling: diagnosticSamplingMetadata(sample.windowStartMs) } : {}),
     });
   }
 }
@@ -105,7 +115,11 @@ function persistGateEvidencePacket(
   key: string,
   selectorSupportingEvidence: boolean,
   calibrationOnly: boolean,
-): void {
+): boolean {
+  // Only the calibration-only diagnostic copy is sampled. Selector-path
+  // evidence and the latest in-memory packet still receive every exact ingest.
+  const sample = calibrationOnly ? diagnosticLogCadence.admit(`calibration|${key}`) : null;
+  if (sample && !sample.accepted) return false;
   void dbInsert(H1_LIVE_GATE_EVIDENCE_PERSIST_KIND, {
     version: H1_LIVE_GATE_EVIDENCE_PERSIST_KIND,
     key,
@@ -140,15 +154,20 @@ function persistGateEvidencePacket(
     affectsVerdict: false,
     affectsExecution: false,
     ppdStandaloneTrigger: false,
+    ...(sample?.windowStartMs !== null && sample?.windowStartMs !== undefined
+      ? { diagnosticSampling: diagnosticSamplingMetadata(sample.windowStartMs) } : {}),
   });
+  return true;
 }
 
 export const persistH1LiveGateEvidenceCalibrationOnly: H1LiveGateEvidencePublisher = (packet) => {
   const key = packetKey(packet);
   const publishedAtMs = validIso(packet?.identity?.observedAt);
   if (!key || publishedAtMs === null) return { accepted: false, reason: "INVALID_LIVE_GATE_PACKET" };
-  persistGateEvidencePacket(packet, key, false, true);
-  return { accepted: true, reason: "LIVE_GATE_PACKET_PERSISTED_CALIBRATION_ONLY" };
+  const attempted = persistGateEvidencePacket(packet, key, false, true);
+  return { accepted: true, reason: attempted
+    ? "LIVE_GATE_PACKET_PERSISTED_CALIBRATION_ONLY"
+    : "LIVE_GATE_PACKET_CALIBRATION_ONLY_DIAGNOSTIC_SAMPLE_SKIPPED" };
 };
 
 export function publishH1LiveGateEvidence(packet: LiveGateEvidencePacket): { accepted: boolean; reason: string } {
@@ -259,8 +278,13 @@ export function collectH1LiveGateEvidenceAudit(nowIso: string, maxAgeMs = 90_000
 
 export function clearH1LiveSelectorRegistry(): void {
   entries.clear();
+  diagnosticLogCadence.clear();
   clearH1LivePpdHistory();
   clearH1ShadowExecutionEvidenceRegistry();
+}
+
+export function getH1DiagnosticPersistenceStats() {
+  return diagnosticLogCadence.stats();
 }
 
 export function getH1LiveSelectorRegistrySize(): number {

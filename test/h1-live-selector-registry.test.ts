@@ -6,8 +6,11 @@ import {
   getH1LiveSelectorRegistrySize,
   publishH1LiveGateEvidence,
   persistH1LiveGateEvidenceCalibrationOnly,
+  getH1DiagnosticPersistenceStats,
+  collectH1LiveGateEvidenceAudit,
 } from "../h1-live-selector-registry.js";
 import type { LiveGateEvidencePacket } from "../h1-live-gate-evidence-assembler.js";
+import { H1DiagnosticLogCadence, H1_DIAGNOSTIC_LOG_MAX_KEYS, diagnosticSamplingMetadata } from "../h1-diagnostic-log-cadence.js";
 
 function gate(value: boolean, observedAt: string) {
   return { value, observedAt, source: "LIVE_TEST", provenance: "LIVE_RUNTIME_EXACT" as const };
@@ -135,4 +138,74 @@ test("PPD enrichment stays bound to the original exact packet object", () => {
   assert.equal(finalPe?.ppdSupport?.candidateConfirmed, false);
   assert.deepEqual(finalCe?.ppdSupport?.windows.map((window) => window.windowMinutes), [3, 6, 15]);
   assert.equal(finalCe?.ppdSupport?.standaloneTrigger, false);
+});
+
+test("dense diagnostic ticks admit one sample per contract per write minute", () => {
+  const cadence = new H1DiagnosticLogCadence();
+  const results = Array.from({ length: 10_000 }, (_, i) => cadence.admit("NIFTY|CE", i));
+  assert.equal(results.filter((row) => row.accepted).length, 1);
+  assert.equal(cadence.admit("NIFTY|PE", 10_000).accepted, true);
+  assert.equal(cadence.admit("SENSEX|CE", 10_000).accepted, true);
+  assert.equal(cadence.admit("NIFTY|CE", 60_000).accepted, true);
+  assert.deepEqual(diagnosticSamplingMetadata(60_000), {
+    mode: "FIRST_PER_CONTRACT_WRITE_MINUTE", intervalMs: 60_000,
+    windowBasis: "PROCESS_WRITE_TIME", windowStart: "1970-01-01T00:01:00.000Z",
+    completeTickHistory: false,
+  });
+});
+
+test("rollback and malformed clocks cannot reopen diagnostic windows", () => {
+  const cadence = new H1DiagnosticLogCadence();
+  assert.equal(cadence.admit("CE", 120_000).accepted, true);
+  for (const now of [60_000, NaN, Infinity, -1]) assert.equal(cadence.admit("PE", now).accepted, false);
+  assert.equal(cadence.admit("", 120_000).accepted, false);
+  assert.equal(cadence.admit("CE", 120_001).accepted, false);
+  assert.equal(cadence.admit("CE", 180_000).accepted, true);
+});
+
+test("diagnostic key memory stays bounded without evicting and rewriting a sampled key", () => {
+  const cadence = new H1DiagnosticLogCadence();
+  for (let i = 0; i < H1_DIAGNOSTIC_LOG_MAX_KEYS; i++) assert.equal(cadence.admit(String(i), 0).accepted, true);
+  assert.equal(cadence.admit("overflow", 0).accepted, false);
+  assert.equal(cadence.admit("0", 0).accepted, false);
+  assert.equal(cadence.stats().trackedKeys, H1_DIAGNOSTIC_LOG_MAX_KEYS);
+  assert.equal(cadence.admit("overflow", 60_000).accepted, true);
+  assert.equal(cadence.stats().trackedKeys, 1);
+});
+
+test("calibration sampling never throttles latest live packet or selector-path evidence", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-09-03T09:30:00Z") });
+  clearH1LiveSelectorRegistry();
+  const first = packet("2026-09-03T09:30:00.000Z");
+  const latest = packet("2026-09-03T09:30:01.000Z");
+  latest.identity.premiumLtp = 123;
+  latest.gates.spreadOk = gate(false, latest.identity.observedAt);
+  assert.equal(persistH1LiveGateEvidenceCalibrationOnly(first).reason, "LIVE_GATE_PACKET_PERSISTED_CALIBRATION_ONLY");
+  assert.equal(persistH1LiveGateEvidenceCalibrationOnly(latest).reason, "LIVE_GATE_PACKET_CALIBRATION_ONLY_DIAGNOSTIC_SAMPLE_SKIPPED");
+  assert.equal(getH1LiveSelectorRegistrySize(), 0);
+  assert.deepEqual([getH1DiagnosticPersistenceStats().admitted, getH1DiagnosticPersistenceStats().skipped], [1, 1]);
+  assert.equal(publishH1LiveGateEvidence(first).accepted, true);
+  assert.equal(publishH1LiveGateEvidence(latest).accepted, true);
+  assert.equal(getH1DiagnosticPersistenceStats().skipped, 1);
+  const audit = collectH1LiveGateEvidenceAudit(latest.identity.observedAt);
+  assert.equal(audit[0].identity.premiumLtp, 123);
+  assert.equal(collectH1LiveSelectorDecisions(latest.identity.observedAt).decisions[0].decision, "BLOCK");
+  for (let i = 0; i < 100; i++) {
+    assert.equal(collectH1LiveSelectorDecisions(latest.identity.observedAt).decisions[0].decision, "BLOCK");
+  }
+  assert.equal(getH1DiagnosticPersistenceStats().admitted, 2);
+  assert.equal(getH1DiagnosticPersistenceStats().skipped, 101);
+  t.mock.timers.tick(60_000);
+  assert.equal(persistH1LiveGateEvidenceCalibrationOnly(latest).reason, "LIVE_GATE_PACKET_PERSISTED_CALIBRATION_ONLY");
+  assert.equal(getH1DiagnosticPersistenceStats().admitted, 3);
+});
+
+test("selected decision audits bypass the blocked diagnostic sampler", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-09-03T09:30:00Z") });
+  clearH1LiveSelectorRegistry();
+  const ts = "2026-09-03T09:30:00.000Z";
+  publishH1LiveGateEvidence(packet(ts));
+  for (let i = 0; i < 100; i++) assert.equal(collectH1LiveSelectorDecisions(ts).decisions[0].decision, "SELECT");
+  assert.equal(getH1DiagnosticPersistenceStats().admitted, 0);
+  assert.equal(getH1DiagnosticPersistenceStats().skipped, 0);
 });

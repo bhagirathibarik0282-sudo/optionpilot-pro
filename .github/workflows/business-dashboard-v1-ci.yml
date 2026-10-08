@@ -15,4 +15,4 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: node --import tsx --test test/business-dashboard-v1.test.ts
+      - run: node --import tsx --test test/business-dashboard-v1.test.ts test/data-three-modes.test.ts test/dashboard-refresh-mobile.test.ts test/dashboard-data-annex.test.ts

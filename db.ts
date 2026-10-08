@@ -587,3 +587,27 @@ export async function dbQuerySafe<T = Record<string, unknown>>(
 export function dbIsConfigured(): boolean {
   return !!process.env.DATABASE_URL?.trim();
 }
+
+/** One compact immutable CAS summary per index/day/version in the existing log.
+ * Separate statements after the advisory lock ensure a concurrent writer's
+ * committed row is visible under READ COMMITTED. Errors never claim persistence.
+ */
+export async function dbSaveCasMemoryOnce(payload: { memoryKey: string; version: string }): Promise<boolean> {
+  if (payload.version !== 'CAS_CLOSING_FIXED_CONTRACT_MEMORY_V1') throw new Error('CAS_MEMORY_VERSION_INVALID');
+  const p = getPool();
+  if (!p) throw new Error('CAS_MEMORY_DATABASE_UNAVAILABLE');
+  const client = await p.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL statement_timeout = '15s'");
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [payload.version, payload.memoryKey]);
+    const prior = await client.query("SELECT id FROM app_state_log WHERE kind=$1 AND payload->>'memoryKey'=$2 LIMIT 1", [payload.version, payload.memoryKey]);
+    if (prior.rows.length) { await client.query('COMMIT'); return false; }
+    await client.query('INSERT INTO app_state_log (kind,payload) VALUES ($1,$2::jsonb)', [payload.version, JSON.stringify(payload)]);
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally { client.release(); }
+}

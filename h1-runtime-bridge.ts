@@ -1,3 +1,4 @@
+import { queueIntradayMemoryCycle } from "./intraday-observation-memory-runtime.js";
 import { recordH1Snapshot, type H1IndexInput, type H1TruthVerdict } from "./h1-recorder-adapter.js";
 import { dbInsert } from "./db.js";
 import { bindH1ForwardCandidateDecisions } from "./h1-forward-candidate-decision-binding.js";
@@ -273,5 +274,6 @@ export async function recordH1FromRuntimeSnapshot(
     });
   }
 
+  queueIntradayMemoryCycle();
   return { attempted, skipped };
 }

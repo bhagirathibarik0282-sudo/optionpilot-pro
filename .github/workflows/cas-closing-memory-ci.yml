@@ -1,10 +1,10 @@
-name: CAS Closing Memory CI
+name: Recorded Observation Memory CI
 on:
   pull_request:
-    paths: ['cas-closing-memory*.ts', 'db.ts', 'research-router.ts', 'server.ts', 'business-dashboard-v1-view.ts', 'test/cas-closing-memory*.ts', '.github/workflows/cas-closing-memory-ci.yml']
+    paths: ['intraday-observation-memory*.ts', 'h1-runtime-bridge.ts', 'test/intraday-observation-memory.test.ts', 'cas-closing-memory*.ts', 'db.ts', 'research-router.ts', 'server.ts', 'business-dashboard-v1-view.ts', 'test/cas-closing-memory*.ts', '.github/workflows/cas-closing-memory-ci.yml']
   push:
     branches: [main]
-    paths: ['cas-closing-memory*.ts', 'db.ts', 'research-router.ts', 'server.ts', 'business-dashboard-v1-view.ts', 'test/cas-closing-memory*.ts', '.github/workflows/cas-closing-memory-ci.yml']
+    paths: ['intraday-observation-memory*.ts', 'h1-runtime-bridge.ts', 'test/intraday-observation-memory.test.ts', 'cas-closing-memory*.ts', 'db.ts', 'research-router.ts', 'server.ts', 'business-dashboard-v1-view.ts', 'test/cas-closing-memory*.ts', '.github/workflows/cas-closing-memory-ci.yml']
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/cas-closing-memory.test.ts test/cas-closing-memory-persistence.test.ts test/h1-cas-proxy.test.ts test/research-router-auth.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/intraday-observation-memory.test.ts test/cas-closing-memory.test.ts test/cas-closing-memory-persistence.test.ts test/h1-cas-proxy.test.ts test/research-router-auth.test.ts
         env:
           CAS_MEMORY_TEST_DATABASE_URL: postgres://cas_test:cas_test@127.0.0.1:5432/cas_test
       - run: node scripts/optionpilot-guardrail-check.mjs

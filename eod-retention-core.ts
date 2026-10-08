@@ -43,3 +43,12 @@ export function indiaDateFromIso(nowIso: string): string {
 export function resolveRetentionMode(env: NodeJS.ProcessEnv = process.env): "DRY_RUN" | "APPLY" {
   return env.EOD_RETENTION_APPLY?.trim().toLowerCase() === "true" ? "APPLY" : "DRY_RUN";
 }
+
+// A historical DRIVE_VERIFIED flag does not prove that today's deletion set
+// is covered by a recoverable archive. Keep destructive retention disabled
+// until that coverage is verified against the exact rows being removed.
+export function assertRetentionDeletionDisabled(mode: "DRY_RUN" | "APPLY"): void {
+  if (mode === "APPLY") {
+    throw new Error("EOD_RETENTION_APPLY_BLOCKED_UNVERIFIED_ARCHIVE_COVERAGE");
+  }
+}

@@ -1,5 +1,5 @@
 import pg, { type PoolClient } from "pg";
-import { indiaDateFromIso, resolveRetentionDays, resolveRetentionMode, retentionCutoffDate } from "./eod-retention-core.js";
+import { assertRetentionDeletionDisabled, indiaDateFromIso, resolveRetentionDays, resolveRetentionMode, retentionCutoffDate } from "./eod-retention-core.js";
 
 const { Pool } = pg;
 const MEANINGFUL_NARRATIVE_KIND = "meaningful_narrative_event";
@@ -55,10 +55,11 @@ async function deleteTarget(client: PoolClient, target: RetentionTarget, cutoffD
 }
 
 export async function runEodRetention(nowIso = new Date().toISOString()) {
+  const mode = resolveRetentionMode();
+  assertRetentionDeletionDisabled(mode);
   const retentionDays = resolveRetentionDays(process.env.EOD_RETENTION_DAYS);
   const today = indiaDateFromIso(nowIso);
   const cutoffDate = retentionCutoffDate(today, retentionDays);
-  const mode = resolveRetentionMode();
 
   const pool = getPool();
   const client = await pool.connect();
@@ -103,7 +104,7 @@ export async function runEodRetention(nowIso = new Date().toISOString()) {
       report,
       safety: {
         defaultMode: "DRY_RUN",
-        applyRequires: "EOD_RETENTION_APPLY=true",
+        applyRequires: "DISABLED_PENDING_EXACT_ARCHIVE_COVERAGE_VERIFICATION",
         auditTablePreserved: "eod_archive_runs",
         appStateScope: MEANINGFUL_NARRATIVE_KIND,
       },

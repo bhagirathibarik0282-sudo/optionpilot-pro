@@ -4,12 +4,35 @@ import { readFileSync } from "node:fs";
 import { Hono } from "hono";
 import {
   DEFAULT_EOD_RETENTION_DAYS,
+  assertRetentionDeletionDisabled,
   indiaDateFromIso,
   resolveRetentionDays,
   resolveRetentionMode,
   retentionCutoffDate,
 } from "../eod-retention-core.js";
 import { mountStorageHealthRoutes } from "../storage-health.js";
+import { runEodRetention } from "../eod-retention-job.js";
+
+test("dry-run remains allowed while destructive retention fails closed", () => {
+  assert.doesNotThrow(() => assertRetentionDeletionDisabled("DRY_RUN"));
+  assert.throws(() => assertRetentionDeletionDisabled("APPLY"),
+    /EOD_RETENTION_APPLY_BLOCKED_UNVERIFIED_ARCHIVE_COVERAGE/);
+});
+
+test("apply is blocked before opening a database connection or validating a cutoff", async () => {
+  const previous = { db: process.env.DATABASE_URL, apply: process.env.EOD_RETENTION_APPLY, days: process.env.EOD_RETENTION_DAYS };
+  delete process.env.DATABASE_URL;
+  process.env.EOD_RETENTION_APPLY = " true ";
+  process.env.EOD_RETENTION_DAYS = "invalid";
+  try {
+    await assert.rejects(runEodRetention(), /EOD_RETENTION_APPLY_BLOCKED_UNVERIFIED_ARCHIVE_COVERAGE/);
+  } finally {
+    for (const [key, value] of Object.entries({ DATABASE_URL: previous.db, EOD_RETENTION_APPLY: previous.apply, EOD_RETENTION_DAYS: previous.days })) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
 
 test("defaults to 60 days", () => {
   assert.equal(resolveRetentionDays(undefined), DEFAULT_EOD_RETENTION_DAYS);

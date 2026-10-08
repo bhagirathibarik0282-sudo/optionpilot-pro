@@ -4,6 +4,8 @@ import { uploadEodArchiveToDrive } from "./eod-drive-upload.js";
 
 const { Pool } = pg;
 const MEANINGFUL_NARRATIVE_KIND = "meaningful_narrative_event";
+// Recovered records are attributed to their observed session, not insertion day.
+const RESEARCH_MEMORY_KINDS = ["CAS_CLOSING_FIXED_CONTRACT_MEMORY_V1", "INTRADAY_NOTABLE_EVENT_V1", "INTRADAY_PREMIUM_RESPONSE_V1", "INTRADAY_MEMORY_SESSION_RECEIPT_V1"];
 
 function getPool() {
   const url = process.env.DATABASE_URL?.trim();
@@ -41,7 +43,7 @@ async function ensureSchema(client: PoolClient) {
   `);
 }
 
-async function sourceCounts(client: PoolClient, tradingDate: string) {
+export async function sourceCounts(client: PoolClient, tradingDate: string) {
   const q = await client.query(`
     SELECT
       (SELECT count(*) FROM market_snapshot_1m WHERE (minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS market_count,
@@ -51,23 +53,24 @@ async function sourceCounts(client: PoolClient, tradingDate: string) {
       (SELECT count(*) FROM candidate_history WHERE (observed_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS candidate_count,
       (SELECT count(*) FROM trade_plan_history WHERE (created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS trade_plan_count,
       (SELECT count(*) FROM trade_event_history WHERE (event_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS trade_event_count,
-      (SELECT count(*) FROM app_state_log WHERE kind=$2 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS narrative_event_count
-  `, [tradingDate, MEANINGFUL_NARRATIVE_KIND]);
+      (SELECT count(*) FROM app_state_log WHERE kind=$2 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS narrative_event_count,
+      (SELECT count(*) FROM app_state_log WHERE kind=ANY($3::text[]) AND payload->>'tradeDate'=$1::text) AS research_memory_count
+  `, [tradingDate, MEANINGFUL_NARRATIVE_KIND, RESEARCH_MEMORY_KINDS]);
   const row = q.rows[0] || {};
   const counts = Object.fromEntries(Object.entries(row).map(([k, v]) => [k, Number(v || 0)]));
   const total = Object.values(counts).reduce((a, b) => a + Number(b || 0), 0);
   return { counts, total };
 }
 
-async function alreadyDriveVerified(client: PoolClient, tradingDate: string) {
-  const q = await client.query("SELECT status FROM eod_archive_runs WHERE trading_date=$1::date", [tradingDate]);
-  return q.rows[0]?.status === "DRIVE_VERIFIED";
+export async function alreadyDriveVerified(client: PoolClient, tradingDate: string) {
+  const q = await client.query("SELECT r.status, p.payload->>'schemaVersion' AS version FROM eod_archive_runs r LEFT JOIN eod_archive_payloads p USING (trading_date) WHERE r.trading_date=$1::date", [tradingDate]);
+  return q.rows[0]?.status === "DRIVE_VERIFIED" && q.rows[0]?.version === "EOD_ARCHIVE_V2";
 }
 
-async function buildPayload(client: PoolClient, tradingDate: string) {
+export async function buildPayload(client: PoolClient, tradingDate: string) {
   const result = await client.query(`
     SELECT jsonb_build_object(
-      'schemaVersion','EOD_ARCHIVE_V1',
+      'schemaVersion','EOD_ARCHIVE_V2',
       'tradingDate',$1::text,
       'marketSnapshots',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY minute_bucket), '[]'::jsonb) FROM market_snapshot_1m t WHERE (minute_bucket AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
       'optionSnapshots',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY minute_bucket, expiry, strike, option_type), '[]'::jsonb) FROM option_snapshot_1m t WHERE (minute_bucket AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
@@ -76,9 +79,10 @@ async function buildPayload(client: PoolClient, tradingDate: string) {
       'candidates',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY observed_at), '[]'::jsonb) FROM candidate_history t WHERE (observed_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
       'tradePlans',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY created_at), '[]'::jsonb) FROM trade_plan_history t WHERE (created_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
       'tradeEvents',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY event_at), '[]'::jsonb) FROM trade_event_history t WHERE (event_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
-      'meaningfulNarrativeEvents',(SELECT COALESCE(jsonb_agg(payload ORDER BY created_at), '[]'::jsonb) FROM app_state_log WHERE kind=$2 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date)
+      'meaningfulNarrativeEvents',(SELECT COALESCE(jsonb_agg(payload ORDER BY created_at), '[]'::jsonb) FROM app_state_log WHERE kind=$2 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
+      'researchMemories',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY kind, payload->>'memoryKey', id), '[]'::jsonb) FROM app_state_log t WHERE kind=ANY($3::text[]) AND payload->>'tradeDate'=$1::text)
     ) AS payload
-  `, [tradingDate, MEANINGFUL_NARRATIVE_KIND]);
+  `, [tradingDate, MEANINGFUL_NARRATIVE_KIND, RESEARCH_MEMORY_KINDS]);
   return result.rows[0]?.payload || null;
 }
 
@@ -113,7 +117,6 @@ export async function runEodArchive(nowIso = new Date().toISOString()) {
         archive_key=EXCLUDED.archive_key, started_at=now(), completed_at=NULL, status='STARTED',
         record_count=EXCLUDED.record_count, archive_destination=EXCLUDED.archive_destination, error=NULL,
         cleanup_allowed=false, updated_at=now()
-      WHERE eod_archive_runs.status <> 'DRIVE_VERIFIED'
     `, [tradingDate, key, total]);
 
     try {

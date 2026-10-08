@@ -129,6 +129,14 @@ async function verifyDriveFile(token: string, fileId: string, fileName: string, 
   if (!checked.parents?.includes(folderId)) throw new Error("DRIVE_VERIFY_WRONG_FOLDER");
   if (checked.appProperties?.checksumSha256 !== checksumSha256) throw new Error("DRIVE_VERIFY_CHECKSUM_TAG_MISMATCH");
   if (!checked.md5Checksum || checked.md5Checksum !== checksumMd5) throw new Error("DRIVE_VERIFY_CONTENT_CHECKSUM_MISMATCH");
+  // Read the actual bytes: metadata tags alone are not a restore proof.
+  const download = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!download.ok) throw new Error(`DRIVE_READBACK_FAILED:${download.status}`);
+  const bytes = Buffer.from(await download.arrayBuffer());
+  if (createHash("sha256").update(bytes).digest("hex") !== checksumSha256) throw new Error("DRIVE_READBACK_SHA256_MISMATCH");
+  if (checked.size !== undefined && Number(checked.size) !== bytes.length) throw new Error("DRIVE_READBACK_SIZE_MISMATCH");
   return checked;
 }
 
@@ -162,7 +170,7 @@ export async function uploadEodArchiveToDrive(tradingDate: string, payloadJson: 
   const metadata = JSON.stringify({
     name: fileName,
     parents: [folderId],
-    appProperties: { tradingDate, checksumSha256, schemaVersion: "EOD_ARCHIVE_V1" },
+    appProperties: { tradingDate, checksumSha256, schemaVersion: JSON.parse(payloadJson).schemaVersion || "EOD_ARCHIVE_V1" },
   });
   const multipart = [
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`,

@@ -8,6 +8,8 @@ on:
       - 'eod-drive-upload.ts'
       - 'eod-archive-core.ts'
       - 'test/eod-archive-core.test.ts'
+      - 'test/eod-drive-readback.test.ts'
+      - 'test/eod-archive-memory-persistence.test.ts'
       - 'package.json'
       - '.github/workflows/item6-eod-ci.yml'
   workflow_dispatch:
@@ -16,6 +18,17 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: eod_test
+          POSTGRES_PASSWORD: eod_test
+          POSTGRES_DB: eod_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,7 +36,9 @@ jobs:
           node-version: '22'
       - run: npm install --no-audit --no-fund
       - name: EOD core tests
-        run: NODE_ENV=test node --import tsx --test test/eod-archive-core.test.ts
+        run: NODE_ENV=test node --import tsx --test test/eod-archive-core.test.ts test/eod-drive-readback.test.ts test/eod-archive-memory-persistence.test.ts
+        env:
+          EOD_ARCHIVE_TEST_DATABASE_URL: postgres://eod_test:eod_test@127.0.0.1:5432/eod_test
       - name: Import Drive uploader
         run: node --import tsx -e "import('./eod-drive-upload.ts').then(() => console.log('DRIVE_UPLOADER_IMPORT_OK'))"
       - name: Import EOD archive job

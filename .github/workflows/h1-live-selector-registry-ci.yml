@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "h1-live-selector-registry.ts"
+      - "h1-diagnostic-log-cadence.ts"
       - "h1-shadow-execution-evidence-registry.ts"
       - "test/h1-live-selector-registry.test.ts"
       - "test/h1-shadow-execution-evidence-registry.test.ts"
@@ -22,4 +23,4 @@ jobs:
         with:
           node-version: "22"
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/h1-live-selector-registry.test.ts test/h1-shadow-execution-evidence-registry.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/h1-live-selector-registry.test.ts test/h1-shadow-execution-evidence-registry.test.ts test/h1-live-selector-authority-quarantine.test.ts test/h1-live-exact-readonly-websocket-service.test.ts test/h1-kite-exact-selector-publisher-bridge.test.ts

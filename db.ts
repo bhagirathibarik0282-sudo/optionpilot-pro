@@ -533,6 +533,10 @@ export async function dbUpsertChainState1m(row: ChainState1mRow): Promise<void> 
   const p = getPool();
   if (!p) return;
   try {
+    // Both recorders share this exact symbol/expiry/minute identity. H1 lacks
+    // walls and uses an aggregate PCR; it must not replace a normalized Storage
+    // V3 row. Choose one whole source row, rather than mixing fields/provenance.
+    // Storage V3 may still replace its own row with nulls when data is missing.
     await p.query(`
       INSERT INTO chain_state_1m (
         symbol, minute_bucket, expiry, expiry_bucket, atm_strike, full_chain_oi_pcr, band7_oi_pcr,
@@ -552,6 +556,8 @@ export async function dbUpsertChainState1m(row: ChainState1mRow): Promise<void> 
         put_wall_distance=EXCLUDED.put_wall_distance, put_wall_migration=EXCLUDED.put_wall_migration,
         atm_iv=EXCLUDED.atm_iv, straddle_ltp=EXCLUDED.straddle_ltp, straddle_change=EXCLUDED.straddle_change,
         validation_status=EXCLUDED.validation_status, calculation_version=EXCLUDED.calculation_version
+      WHERE EXCLUDED.calculation_version IS DISTINCT FROM 'H1_RUNTIME_BRIDGE_V1'
+         OR chain_state_1m.calculation_version IS DISTINCT FROM 'STORAGE_V3_PHASE1'
     `, [
       row.symbol,row.minuteBucket,row.expiry,row.expiryBucket ?? null,row.atmStrike ?? null,row.fullChainOiPcr ?? null,row.band7OiPcr ?? null,
       row.volumePcr ?? null,row.maxPain ?? null,row.callWallStrike ?? null,row.callWallOi ?? null,row.callWallStrength ?? null,row.callWallDistance ?? null,

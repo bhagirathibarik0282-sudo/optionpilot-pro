@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { persistConnectedDriveSession } from "./drive-connected-session.js";
 import { mountResearchRoutes } from "./research-server-hook.js";
 import { serve } from "@hono/node-server";
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
@@ -22637,6 +22638,9 @@ function persistDriveSession(): void {
       connectedAt: driveSession.connectedAt,
     };
     writeFileSync(driveAuthFilePath(), JSON.stringify(payload), { mode: 0o600 });
+    void persistConnectedDriveSession(driveSession.refreshTokenEncrypted, driveSession.connectedAt)
+      .then(ok => console.log(`[DRIVE-AUTH] shared encrypted session readback=${ok}`))
+      .catch(() => console.error("[DRIVE-AUTH] shared session persistence unavailable"));
   } catch (err) {
     console.error("[DRIVE-AUTH] Failed to persist session to disk:", err instanceof Error ? err.message : err);
   }
@@ -35644,6 +35648,13 @@ app.get("/api/tradelab", async (c) => {
 // db.ts's own comment for the matching hard safety rule on that side.
 async function restorePersistedState(): Promise<void> {
   await dbInit();
+  // Bootstrap the user's existing volume session for the separate EOD cron.
+  // No token is returned by any API or written into environment variables.
+  if (driveSession.refreshTokenEncrypted) {
+    await persistConnectedDriveSession(driveSession.refreshTokenEncrypted, driveSession.connectedAt)
+      .then(ok => console.log(`[DRIVE-AUTH] startup shared session readback=${ok}`))
+      .catch(() => console.error("[DRIVE-AUTH] startup shared session persistence unavailable"));
+  }
   void ensureH1DerivedSchema().catch((err) => console.error("[H1] derived schema init failed (live path unaffected):", err instanceof Error ? err.message : err));
   if (!dbIsConfigured()) return;
   try {

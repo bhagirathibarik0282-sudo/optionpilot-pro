@@ -1,4 +1,5 @@
 import { createHash, createSign } from "node:crypto";
+import { loadConnectedDriveRefreshToken } from "./drive-connected-session.js";
 
 export interface DriveUploadResult {
   fileId: string;
@@ -30,7 +31,7 @@ function firstEnv(...names: string[]): string | null {
 async function getOAuthAccessToken(): Promise<string> {
   const clientId = firstEnv("GOOGLE_CLIENT_ID", "GOOGLE_DRIVE_CLIENT_ID");
   const clientSecret = firstEnv("GOOGLE_CLIENT_SECRET", "GOOGLE_DRIVE_CLIENT_SECRET");
-  const refreshToken = firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN");
+  const refreshToken = clientId && clientSecret ? await loadConnectedDriveRefreshToken(clientId, clientSecret) ?? firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN") : null;
   if (!clientId || !clientSecret || !refreshToken) throw new Error("GOOGLE_DRIVE_OAUTH_NOT_CONFIGURED");
 
   const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -88,7 +89,7 @@ async function getDriveAccessToken(): Promise<string> {
   const hasOAuth = Boolean(
     firstEnv("GOOGLE_CLIENT_ID", "GOOGLE_DRIVE_CLIENT_ID") &&
     firstEnv("GOOGLE_CLIENT_SECRET", "GOOGLE_DRIVE_CLIENT_SECRET") &&
-    firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN")
+    (firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN") || process.env.DATABASE_URL?.trim())
   );
   if (hasOAuth) return getOAuthAccessToken();
 

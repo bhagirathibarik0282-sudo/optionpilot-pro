@@ -77,3 +77,13 @@ The Spot + full PCR chapter starts with a compact three-index table, then shows 
 The optional stacked chart retains a shared time axis and separate units. Choose one spot layer: price only, PDH/PDL (default), or first-15-minute sampled high/low. Hidden levels do not enter the scale. Spot-minus-level distances remain visible in a separate table; invalid/zero/missing levels remain unavailable. Previous-session/source details, exact intraday intervals and the latest six paired records are expandable and preserve open state across render. Intraday interval tables are explicitly labelled separately from swing comparisons.
 
 Validation: 67 dashboard/model/serialized-browser tests pass. Coverage checks selected-index isolation, layer persistence, removal of hidden chart levels, missing source data and mismatched timestamps. Existing calculations, refresh and background recording are reused unchanged.
+
+## Three-index overlay, sampled turns and full chart
+
+The primary Spot/PCR layout now shows all three indices together in a horizontally scrollable comparison row. Actual Spot/PCR values and selected-window changes remain visible above each chart. Choose percentage overlay (default) or actual-unit stacked charts; normalized charts share an exact baseline, endpoint, time axis and percentage scale across eligible indices. Missing/mismatched/zero baselines exclude that index's overlay. Percentage intersections are movement crossovers, never raw price/ratio crossovers. Recorded-session range (intraday default) and selected-window range reuse the same baseline; changing range does not change reported window deltas.
+
+Latest SH/SL markers for Spot and full PCR require a strict local reversal across three adjacent valid recorded samples. Intraday adjacency requires exact three-minute intervals within one session. Daily views require adjacent known recorded-session endpoints. Missing samples, plateaus, gaps and final endpoints cannot fabricate a turn. Values, turn time and later confirmation time are expandable per index. Marker visibility is shared between comparison and full chart.
+
+The full-chart dialog retains all three indices and updates from existing state. Its mode/range controls reuse the same calculations. ★ means matching exact endpoints with nonzero Spot/PCR changes in the same direction; ☆ means opposite direction or a flat series; unverified pairs remain unavailable. This is a descriptive alignment mark, with no strength/probability/trade authority.
+
+Validation: 70 dashboard/model/serialized-browser tests pass, including three-index overlay exclusion, chart/dialog controls, sample-turn confirmation, gaps, missing daily sessions and identity-specific raw chart markers.

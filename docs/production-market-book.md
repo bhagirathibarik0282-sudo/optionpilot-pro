@@ -12,6 +12,12 @@ Green requires positive spot and CE changes plus a negative PE change at identic
 
 PDH is bright cyan and PDL bright pink. R3–S3 Fibonacci pivot values are labelled inside charts: P=(H+L+C)/3; offsets are 0.382, 0.618 and 1.0 times the range. Prior H/L and the exact 15:30 sampled endpoint must exist; the endpoint is not represented as an official exchange close. Intrinsic/extrinsic values require the exact same-time recorded underlying. Negative extrinsic values are withheld; implied volatility is labelled separately.
 
+## Sectors and key-stock chapter
+
+The participation chapter shows three index-specific returned key-stock subsets side by side. Each card exposes usable coverage, unweighted up/down/flat/missing counts, strongest positive and negative returned quotes, sorted percentages, prices when available, and bars around a shared zero centre within that card. All/Up/Down/Missing filters survive refresh. Only finite numeric source values enter the counts; null, malformed and absent quotes remain missing.
+
+Sector quotes are grouped into financials/PSU Bank, industry sectors, and broader-market Smallcap/Midcap index proxies; additional returned names stay visible. Response timestamps and a selected-replay date mismatch are explicit. These are percentages versus previous close, not selected-window changes, weighted index contribution, full-constituent breadth or verified exchange-fresh data. Intraday/swing historical stock/sector baselines remain unavailable.
+
 ## Source limitations
 
 - Five-minute changes are normally unavailable with a three-minute recorder.

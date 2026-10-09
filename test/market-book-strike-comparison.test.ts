@@ -58,7 +58,7 @@ test('chapter controls compare, preserve selection on refresh, and reset across 
  nodes.get('mb-pinned-compare').value='22100';nodes.get('mb-pinned-compare').onchange();
  state.current.NIFTY=fixture();vm.runInContext('installed.render()',ctx);
  assert(page.innerHTML.includes('value="22100" selected'));assert.equal(requests,0);
- page.onclick({target:{closest:()=>({})}});assert.equal(nodes.get('mb-strike').value,22100);
+ page.onclick({target:{closest:(s:string)=>s==='#mb-nearest-strike'?{}:null}});assert.equal(nodes.get('mb-strike').value,22100);
  assert(!page.innerHTML.includes('Strike A vs B'));
  page.onchange({target:{id:'mb-premium-view',value:'EXPIRY'}});
  assert(page.innerHTML.includes('Fourth expiry unavailable'));assert(page.innerHTML.includes('data-expand-chart="NIFTY|'+expiry+'|22100|CE"'));

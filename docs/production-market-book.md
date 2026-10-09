@@ -69,3 +69,11 @@ Separate CE and PE tables expose exact identities, DTE, premium, recorded-window
 Optional movement charts compare selected A/B on one ₹ or baseline-% scale. They require two different exact contracts and synchronized endpoints. Missing points and gaps over three minutes remain disconnected. Individual level charts remain optional and retain layer controls and full-screen access. This is a client-side view of existing recorded state, with no additional fetches, timers, recording authority, or order behavior.
 
 Validation: 66 dashboard/model/serialized-browser tests pass, including identity isolation, absent baselines/sides, invalid levels, normalized baselines, mismatched timestamps and tied expiry changes.
+
+## Structured spot and full PCR
+
+The Spot + full PCR chapter starts with a compact three-index table, then shows detail for the pinned Index and CE expiry selection. Spot and full PCR expose independent values, selected-window deltas, baselines and recording timestamps; paired movement is described only when the existing exact endpoint checks pass. Other index rows retain their own recorded expiry. PE expiry and strike do not scope full-chain PCR.
+
+The optional stacked chart retains a shared time axis and separate units. Choose one spot layer: price only, PDH/PDL (default), or first-15-minute sampled high/low. Hidden levels do not enter the scale. Spot-minus-level distances remain visible in a separate table; invalid/zero/missing levels remain unavailable. Previous-session/source details, exact intraday intervals and the latest six paired records are expandable and preserve open state across render. Intraday interval tables are explicitly labelled separately from swing comparisons.
+
+Validation: 67 dashboard/model/serialized-browser tests pass. Coverage checks selected-index isolation, layer persistence, removal of hidden chart levels, missing source data and mismatched timestamps. Existing calculations, refresh and background recording are reused unchanged.

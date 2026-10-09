@@ -41,6 +41,8 @@ import { getIntradayObservationMemory } from "./intraday-observation-memory-runt
 import { renderIntradayObservationMemoryHtml } from "./intraday-observation-memory-view.js";
 import { buildBusinessDashboardV1, type BusinessDashboardSymbol } from "./business-dashboard-v1.js";
 import { renderBusinessDashboardV1Html } from "./business-dashboard-v1-view.js";
+import { readDashboardBackgroundQuotes } from './dashboard-background-quotes-runtime.js';
+import { KEY_STOCKS } from './dashboard-background-quotes.js';
 import { evaluateH1DteAwareShadowThreshold } from "./h1-dte-aware-shadow-threshold-v1.js";
 import { buildH1LiveDteShadowComparison } from "./h1-live-dte-shadow-comparison-v1.js";
 import {
@@ -51,6 +53,18 @@ import { JEV_PINNED_MODEL } from "./jev-decision-shadow-v1.js";
 import { H1_LIVE_GATE_EVIDENCE_PERSIST_KIND } from "./h1-live-selector-registry.js";
 
 export const researchRouter = new Hono();
+
+researchRouter.get('/background-quotes', async (c) => {
+  const data = await readDashboardBackgroundQuotes();
+  const symbol = c.req.query('symbol');
+  if (symbol && !Object.hasOwn(KEY_STOCKS, symbol)) return c.json({ error: 'Unsupported index' }, 400);
+  if (!data.snapshot) return c.json({ error: 'Background quotes unavailable: ' + data.status, ...data }, 503);
+  if (data.freshness !== 'RECENT_RECEIPT') return c.json({ error: 'Background quotes are stale. Last collection: ' + data.snapshot.timestamp + ' · ' + data.status,
+    timestamp: data.snapshot.timestamp, status: data.status, freshness: data.freshness }, 503);
+  const { snapshot, ...status } = data;
+  return c.json({ ...status, source: snapshot.source, timestamp: snapshot.timestamp,
+    ...(symbol ? { stocks: snapshot.stocks[symbol] } : { sectors: snapshot.sectors }) });
+});
 
 function authorizeResearchMutation(c: Parameters<(typeof researchRouter)["post"]>[1] extends (arg: infer C) => unknown ? C : never) {
   const configured = process.env.RESEARCH_ADMIN_TOKEN?.trim();

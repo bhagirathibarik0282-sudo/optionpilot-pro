@@ -120,7 +120,8 @@ test("dashboard intelligence remains low-noise and fail-closed without verified 
 
 test("data dashboard uses existing read-only observation sources", () => {
   const html = renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY"));
-  for (const path of ["/api/research/h1-replay?", "/api/research/h1-theory-dates", "/api/index-stocks?symbol=", "/api/sector-heatmap"]) assert.ok(html.includes(path));
+  for (const path of ["/api/research/h1-replay?", "/api/research/h1-theory-dates", "/api/research/background-quotes?symbol=", "/api/research/background-quotes"]) assert.ok(html.includes(path));
+  assert.doesNotMatch(html, /\/api\/index-stocks|\/api\/sector-heatmap/);
   assert.doesNotMatch(html, /h1-live-selector-decisions|candidate-state|business-decision-card/);
   assert.doesNotMatch(html, /fetch\([^)]*method\s*:\s*["']POST/i);
   assert.match(html, /full_chain_oi_pcr/);

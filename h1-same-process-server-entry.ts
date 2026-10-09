@@ -15,3 +15,11 @@ try {
 }
 
 await import("./server.js");
+// Independent of dashboard tabs and browser sessions. Startup is contained so
+// quote recording cannot prevent the HTTP server from serving existing data.
+try {
+  const { startDashboardBackgroundQuotes } = await import('./dashboard-background-quotes-runtime.js');
+  startDashboardBackgroundQuotes();
+} catch {
+  console.error('[DASHBOARD_BACKGROUND_QUOTES] startup unavailable');
+}

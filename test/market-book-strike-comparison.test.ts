@@ -33,7 +33,7 @@ test('strike choices include both independently chosen expiries with missing opp
 });
 test('chapter controls compare, preserve selection on refresh, and reset across index/date changes',()=>{
  const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1];
- const nodes=new Map<string,any>();for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const nodes=new Map<string,any>();for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0,open:false,showModal(){this.open=true;},close(){this.open=false;this.onclose?.();}});
  const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
  const state:any={date,recordedDates:[date],current:{NIFTY:fixture()},history:{},baseline:{},health:{},stocks:{},sectors:null};
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{}};
@@ -43,6 +43,19 @@ test('chapter controls compare, preserve selection on refresh, and reset across 
  page.onchange({target:{id:'mb-compare-strike',value:'22100'}});
  assert(page.innerHTML.includes('Strike A vs B'));assert(page.innerHTML.includes('B · 22100 CE'));
  assert(page.innerHTML.includes('Strike B · 22100 · show CE / PE charts'));
+ assert(html.includes('position:sticky;top:var(--mb-header-offset'));assert(html.includes('aria-labelledby="mb-chart-title"'));assert(page.innerHTML.includes('Pivots · OFF'));assert(page.innerHTML.includes('15m H / L · OFF'));assert(!page.innerHTML.includes('>15m H* '));
+ const chartClick=(dataset:any)=>page.onclick({target:{closest:(selector:string)=>selector==='[data-level-toggle]'&&dataset.levelToggle||selector==='[data-expand-chart]'&&dataset.expandChart?{dataset}:null}});
+ chartClick({levelToggle:'opening'});assert(page.innerHTML.includes('15m H / L · ON'));
+ const identity='NIFTY|'+expiry+'|22000|CE';chartClick({expandChart:identity});
+ const dialog=nodes.get('mb-chart-dialog');assert.equal(dialog.open,true);assert(nodes.get('mb-chart-title').textContent.includes('22000 CE'));
+ assert(nodes.get('mb-chart-body').innerHTML.includes('PDH / PDL · ON'));
+ dialog.onclick({target:{closest:(selector:string)=>selector==='[data-level-toggle]'?{dataset:{levelToggle:'levels'}}:null}});
+ assert(nodes.get('mb-chart-body').innerHTML.includes('PDH / PDL · OFF'));
+ state.current.NIFTY=fixture();state.current.NIFTY.options.find((r:any)=>r.strike===22000&&r.option_type==='CE'&&r.minute_bucket.endsWith('03:00.000Z'))!.ltp=123;vm.runInContext('installed.render()',ctx);assert.equal(dialog.open,true);assert(nodes.get('mb-chart-body').innerHTML.includes('123'));
+ nodes.get('mb-chart-close').onclick();assert.equal(dialog.open,false);
+ assert.equal(nodes.get('mb-pinned-compare').value,'22100');
+ nodes.get('mb-pinned-compare').value='';nodes.get('mb-pinned-compare').onchange();assert(!page.innerHTML.includes('Strike A vs B'));
+ nodes.get('mb-pinned-compare').value='22100';nodes.get('mb-pinned-compare').onchange();
  state.current.NIFTY=fixture();vm.runInContext('installed.render()',ctx);
  assert(page.innerHTML.includes('value="22100" selected'));assert.equal(requests,0);
  page.onclick({target:{closest:()=>({})}});assert.equal(nodes.get('mb-strike').value,22100);

@@ -49,3 +49,20 @@ test('participation snapshots keep missing quotes separate, rank actual percenta
  vm.runInContext('installed.render()',ctx);assert(nodes.get('mb-page').innerHTML.includes('value="MISSING" selected'));
  state.stocks={};state.sectors=null;state.quoteStatus={NIFTY:'Authentication required; open the app and check your session.',sectors:'Timed out after retry'};vm.runInContext('installed.render()',ctx);page=nodes.get('mb-page').innerHTML;assert(page.includes('Unavailable · no quote observations returned.'));assert(!page.includes('<strong>0</strong>'));assert(!page.includes('0/0 returned quotes'));assert(!page.includes('undefined'));assert(!page.includes('NaN'));assert(page.includes('Authentication required'));assert(page.includes('Timed out after retry'));state.stocks={NIFTY:{stocks:[{name:'No change',change:0,price:100}]}};nodes.get('mb-page').onchange({target:{id:'mb-participation-filter',value:'ALL'}});page=nodes.get('mb-page').innerHTML;assert(page.includes('<strong>1</strong>Flat'));assert(page.includes('class="mb-value ">0%</strong>'));state.stocks.NIFTY.stocks=[{name:'Missing quote',change:null}];vm.runInContext('installed.render()',ctx);page=nodes.get('mb-page').innerHTML;assert(page.includes('<strong>—</strong>Up'));assert(page.includes('<strong>1</strong>Missing'));assert(!page.includes('<strong>0</strong>'));
 });
+
+test('structured spot-PCR view isolates selected detail, chart layers and timestamp mismatch',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1];
+ const nodes=new Map<string,any>();for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
+ const state:any={date:tradeDate,recordedDates,current:{NIFTY:fixture()},history:{},baseline:{},health:{}};let requests=0;
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{}};
+ vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'9'}})}});
+ const page=nodes.get('mb-page'),svg=()=>page.innerHTML.match(/<svg class="mb-chart" viewBox="0 0 480 390"[\s\S]*?<\/svg>/)![0];
+ assert(page.innerHTML.includes('Three-index snapshot'));assert.equal((page.innerHTML.match(/selected detail<\/h3>/g)||[]).length,1);
+ assert(page.innerHTML.includes('Exact pair aligned'));assert(page.innerHTML.includes('Spot level distances'));assert(svg().includes('PDH 22,015'));assert(!svg().includes('15m H'));
+ page.onchange({target:{id:'mb-spot-levels',value:'NONE'}});assert(!svg().includes('PDH'));assert(!svg().includes('15m H'));assert(page.innerHTML.includes('value="NONE" selected'));
+ vm.runInContext('installed.render()',ctx);assert(page.innerHTML.includes('value="NONE" selected'));
+ page.onchange({target:{id:'mb-spot-levels',value:'OPEN'}});assert(svg().includes('15m H'));assert(!svg().includes('PDH'));
+ state.current.NIFTY.chain.pop();vm.runInContext('installed.render()',ctx);assert(page.innerHTML.includes('Pair unverified: compare each series timestamp'));assert(!page.innerHTML.includes('Exact pair aligned'));
+ nodes.get('mb-index').value='SENSEX';nodes.get('mb-index').onchange();assert(page.innerHTML.includes('SENSEX · selected detail'));assert(!page.innerHTML.includes('NIFTY · selected detail'));assert(page.innerHTML.includes('Spot / full PCR observations unavailable'));assert(!page.innerHTML.includes('undefined'));assert.equal(requests,0);
+});

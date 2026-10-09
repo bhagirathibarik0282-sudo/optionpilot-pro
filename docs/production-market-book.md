@@ -51,3 +51,7 @@ Kite session. Missing and stale observations fail explicitly; a response older
 than six minutes or from another trading date is not displayed as current.
 Receipt timestamps do not prove exchange freshness. Daily Kite token expiry
 still requires reconnection. Existing index/options recording stays unchanged.
+
+## Strike comparison
+
+CE ↔ PE exposes Strike A and optional Compare strike B beside the premium cards. Both use the same index, selected window and independently selected CE / PE expiries. Choices are the union of actual recorded strikes in those expiries. A missing side or exact baseline stays unavailable; neither another strike nor another expiry substitutes. The compact comparison table exposes price, ₹/% movement, OI change, PDH/PDL and both endpoint timestamps. Strike B charts are expandable; selection survives same-session refresh and resets on index/date changes. The nearest-strike button uses recorded spot and the available strike list, not an inferred full-chain ATM contract.

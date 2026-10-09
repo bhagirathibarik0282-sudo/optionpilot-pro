@@ -63,3 +63,45 @@ test('chapter controls compare, preserve selection on refresh, and reset across 
  nodes.get('mb-index').value='SENSEX';nodes.get('mb-index').onchange();
  assert(!page.innerHTML.includes('Strike A vs B'));assert(!page.innerHTML.includes('undefined'));
 });
+
+
+test('unified strike rows use one expiry for both sides and exact level distances',()=>{
+ const c=fixture();c.options.push(...c.options.map(r=>({...r,expiry:other,ltp:999})));
+ const m=derive(c,{comparisonView:'STRIKE',oppositeExpiry:other});
+ assert.equal(m.comparisonRows.length,4);assert(m.comparisonRows.every(r=>r.p.expiry===expiry));
+ const a=m.comparisonRows[0];assert.equal(a.distance.pdhDelta,-40);assert.equal(a.distance.pdlDelta,85);
+ assert(Math.abs(a.distance.pdhPercent!-(-40/150*100))<1e-9);assert(Math.abs(a.distance.pdlPercent!-340)<1e-9);
+ assert.equal(m.graphPairs.CE.aligned,true);assert.equal(m.graphPairs.PE.aligned,true);
+ assert(m.graphPairs.PE.series.every(s=>s.label.includes(expiry)));
+});
+test('expiry scope compares actual identities, preserves missing sides and ties',()=>{
+ const c=fixture();c.options.push(...c.options.map(r=>({...r,expiry:other})));
+ const m=derive(c,{comparisonView:'EXPIRY',oppositeExpiry:other,expiryScope:'PAIR'});
+ assert.equal(m.comparisonRows.length,4);assert.deepEqual(m.comparisonRows.map(r=>r.p.expiry),[expiry,expiry,other,other]);
+ assert(m.observedChanges.every(o=>o.aligned&&o.leaders.length===2));
+ assert.equal(m.graphPairs.CE.aligned,true);assert.notEqual(m.graphPairs.CE.series[0].identity,m.graphPairs.CE.series[1].identity);
+ c.options=c.options.filter(r=>!(r.expiry===other&&r.option_type==='PE'));
+ const missing=derive(c,{comparisonView:'EXPIRY',oppositeExpiry:other});
+ assert.equal(missing.comparisonRows.find(r=>r.p.expiry===other&&r.p.type==='PE')!.p.value,null);
+ assert.equal(missing.graphPairs.PE.aligned,false);assert.equal(missing.observedChanges[1].aligned,false);
+});
+test('shared graph percentages start at exact baseline and never substitute absent B',()=>{
+ const m=derive(fixture(),{comparisonView:'STRIKE'});
+ assert.deepEqual(m.graphPairs.CE.series.map(s=>s.points[0].percent),[0,0]);
+ assert.deepEqual(m.graphPairs.CE.series.map(s=>s.points.at(-1)!.rupees),[110,60]);
+ assert.equal(derive(fixture(),{comparisonView:'STRIKE',compareStrike:null}).graphPairs.PE.aligned,false);
+ const c=fixture();c.options=c.options.filter(r=>!(r.strike===22100&&r.minute_bucket===c.market[0].minute_bucket));
+ assert.equal(derive(c,{comparisonView:'STRIKE'}).graphPairs.CE.aligned,false);
+ assert.equal(derive(c,{comparisonView:'STRIKE'}).observedChanges[0].aligned,false);
+});
+test('invalid levels and zero baseline cannot fabricate distances or normalized movements',()=>{
+ const c=fixture();c.options.forEach(r=>{r.pdh=0;r.pdl=null as any;if(r.minute_bucket===c.market[0].minute_bucket)r.ltp=0;});
+ const m=derive(c,{comparisonView:'STRIKE'});
+ assert(m.comparisonRows.every(r=>r.distance.pdhDelta===null&&r.distance.pdlDelta===null&&r.distance.state==='Levels unavailable'));
+ assert.equal(m.graphPairs.CE.aligned,false);assert.equal(m.observedChanges[0].aligned,false);
+});
+test('same-identity expiry A/B graph and mismatched endpoint comparisons stay unavailable',()=>{
+ const c=fixture();c.options.push(...c.options.map(r=>({...r,expiry:other,minute_bucket:new Date(Date.parse(r.minute_bucket)+60000).toISOString()})));
+ assert.equal(derive(c,{comparisonView:'EXPIRY',oppositeExpiry:expiry}).graphPairs.CE.aligned,false);
+ assert.equal(derive(c,{comparisonView:'EXPIRY',oppositeExpiry:other}).graphPairs.CE.aligned,false);
+});

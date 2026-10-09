@@ -1,6 +1,6 @@
 # Production market book
 
-The book is the first surface at `/api/research/business-dashboard/view`. It uses the existing browser session, CORE replay API, saved prior-session recordings, stock/sector quote snapshots and FII/DII readiness route. No added routes, tables, services, candidate votes, execution or Telegram operations.
+The book is the first surface at `/api/research/business-dashboard/view`. It uses the CORE replay API, saved prior-session recordings, server-recorded stock/sector quotes and FII/DII readiness route. The background quote read route is described below; candidate votes, execution and Telegram operations are unchanged.
 
 Thirteen chapters share 3/5/15/30/60-minute or 1/3/5/9-prior-session comparisons. Dates, strike, and CE/PE expiries are selectable. The existing single-flight 60-second refresh and three-minute recording cadence remain the update limit. Chapters refresh from shared state, with page-turn animation respecting reduced-motion preferences.
 
@@ -26,7 +26,7 @@ Sector quotes are grouped into financials/PSU Bank, industry sectors, and broade
 - Contract-specific futures PDH/PDL and previous H/L/close are absent: those levels are unavailable.
 - Up to four actually returned option expiries appear. A missing fourth NIFTY/SENSEX expiry stays missing. BANKNIFTY is monthly/longer-dated observation. Relative source buckets such as Current/Next/Monthly must not be mistaken for contract frequency or used to discard current monthly contracts.
 - Full PCR needs the existing resolved provenance. Band PCR never replaces it.
-- Stocks/sectors are independent quote snapshots versus previous close, with response timestamps and no exposed exchange freshness or selected-window historical baseline. Individual PSU-bank stock coverage is absent in the existing stock endpoint. Smallcap 100, Midcap 100 and PSU Bank sector quotes use the existing sector endpoint.
+- Stocks/sectors are independent quote snapshots versus previous close, with response timestamps and no exposed exchange freshness or selected-window historical baseline. Individual PSU-bank stock coverage is absent in the existing stock endpoint. Smallcap 100, Midcap 100 and PSU Bank sector quotes use the background quote read endpoint.
 - FII/DII is dated end-of-day context, not intraday flow. Its independently verified session may differ from the selected replay date.
 - No faster quote feed or new historical source has been introduced.
 
@@ -35,3 +35,19 @@ Sector quotes are grouped into financials/PSU Bank, industry sectors, and broade
 `NODE_ENV=test node --import tsx --test test/market-book.test.ts test/business-dashboard-v1.test.ts test/data-three-modes.test.ts test/data-reading-checklist.test.ts test/dashboard-refresh-mobile.test.ts test/dashboard-data-annex.test.ts`
 
 This checks identity, provenance, exact/missing interval behaviour, direction colours, prior-session pivots, sampled opening range coverage, futures rollover exclusions, and serialized browser chapter rendering. Existing production proof checks still verify read-only authority.
+
+## Background quote collection
+
+The production entrypoint starts the stock/sector collector independently of
+browser tabs. It resolves the encrypted shared Kite authority on every attempt,
+fetches one deduplicated quote batch every three minutes during equity market
+hours, and retries failures after one minute. Calls cannot overlap. Recorded
+public market observations are persisted in `app_state_log` with kind
+`DASHBOARD_BACKGROUND_QUOTES_V1`; credentials are never included.
+
+The DATA dashboard reads `/api/research/background-quotes` (with `symbol` for
+key stocks). Reads never trigger a broker call or require the viewer's browser
+Kite session. Missing and stale observations fail explicitly; a response older
+than six minutes or from another trading date is not displayed as current.
+Receipt timestamps do not prove exchange freshness. Daily Kite token expiry
+still requires reconnection. Existing index/options recording stays unchanged.

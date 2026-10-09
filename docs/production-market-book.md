@@ -59,3 +59,13 @@ CE ↔ PE exposes Strike A and optional Compare strike B beside the premium card
 ## Premium chart clarity
 
 Premium charts default to premium + PDH/PDL. Shared buttons toggle PDH/PDL, Fibonacci pivots and the sampled opening 15m H/L; hidden levels are excluded from scale. These preferences survive refresh. Full screen opens a native modal with exact index/expiry/strike identity, source timestamps, the same toggles and an explicit Close button; Escape closes it. Same-contract refresh updates the open chart and a missing identity closes it. The index/expiry/Strike A/B strip sticks below the measured header and scrolls horizontally on small screens. Existing chart trace gaps and level colours remain unchanged.
+
+## Unified premium comparison
+
+The Premium comparison chapter replaces the separate CE/PE and four-expiry navigation entries. It offers CE ↔ PE with independent expiries, Strike A/B with one shared expiry, and same-strike expiry comparison across the first four actual recorded dates or selected A/B. Internal chapter indices remain stable for existing links.
+
+Separate CE and PE tables expose exact identities, DTE, premium, recorded-window ₹/% movement, OI movement, premium-minus-PDH/PDL distances and endpoint timestamps. Missing or zero levels remain unavailable. Largest recorded percentage changes are described only when every compared side has matching exact endpoint/baseline timestamps and positive baselines; ties remain explicit.
+
+Optional movement charts compare selected A/B on one ₹ or baseline-% scale. They require two different exact contracts and synchronized endpoints. Missing points and gaps over three minutes remain disconnected. Individual level charts remain optional and retain layer controls and full-screen access. This is a client-side view of existing recorded state, with no additional fetches, timers, recording authority, or order behavior.
+
+Validation: 66 dashboard/model/serialized-browser tests pass, including identity isolation, absent baselines/sides, invalid levels, normalized baselines, mismatched timestamps and tied expiry changes.

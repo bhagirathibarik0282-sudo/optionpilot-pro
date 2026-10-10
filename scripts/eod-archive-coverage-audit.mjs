@@ -63,7 +63,7 @@ const RECEIPT_SQL = "SELECT COALESCE(r.trading_date,p.trading_date)::text AS tra
 const url = process.env.DATABASE_URL?.trim();
 if (!url) { console.error("EOD_COVERAGE_DATABASE_URL_NOT_SET"); process.exitCode=2; }
 else {
-  const isLocal = /localhost|127\\.0\\.0\\.1/.test(url);
+  const isLocal = /localhost|127\.0\.0\.1/.test(url);
   const pool = new Pool({ connectionString: url, max: 1, ssl: isLocal ? undefined : { rejectUnauthorized: false } });
   let client;
   try {

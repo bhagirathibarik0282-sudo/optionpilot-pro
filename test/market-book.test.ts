@@ -105,3 +105,5 @@ test('six-minute PCR comparisons require exact endpoints; T0 never uses missing 
  c.chain[0].full_pcr_source='Unverified';m=run(c);assert.equal(m.spotPcr.session.fromAt,at(3));
  assert.equal(m.pcr.verification.coverage,null);assert.equal(m.pcr.verification.difference,null);assert.equal(m.pcr.sourceAt,null);
 });
+
+test('day change is independent of interval baseline and missing previous close fails closed',()=>{const c=fixture();c.market.forEach(r=>(r as any).spot_prev_close=22100);const m=run(c);assert.equal(m.spot.delta,3);assert.equal(m.spot.day.delta,-82);assert.equal(m.spot.day.from,22100);assert.equal(run(fixture()).spot.day.delta,null);(c.market.at(-1) as any).spot_prev_close=0;assert.equal(run(c).spot.day.percent,null);});

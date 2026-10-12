@@ -1,3 +1,4 @@
+import { withDashboardReading } from './dashboard-reading-layout.js';
 import type { Hono } from "hono";
 import { dbLoadRecent } from "./db.js";
 import { H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, type H1LiveExactRawDepthRecord, type H1LiveExactGreekTimingRecord } from "./h1-live-exact-raw-evidence-store.js";
@@ -118,6 +119,14 @@ h1StartupAuditTimer.unref?.();
 
 export function mountResearchRoutes(app: Hono): void {
   mountHawkEyeLiveRoute(app, getHawkEyeLiveSource);
+  app.use('*', async (c, next) => {
+    await next();
+    if (c.req.method !== 'GET' || !(c.res.headers.get('content-type') || '').includes('text/html')) return;
+    const response = c.res, html = await response.clone().text();
+    if (html.includes('id="op-reading-tools"') || !html.includes('</body>')) return;
+    const headers = new Headers(response.headers); headers.delete('content-length');
+    c.res = new Response(withDashboardReading(html), {status:response.status, statusText:response.statusText, headers});
+  });
   app.use("/", async (c, next) => {
     await next();
 

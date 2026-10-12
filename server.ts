@@ -8614,7 +8614,9 @@ app.get("/", (c) => {
     async function loadNews() {
       try {
         const response = await fetch('/api/news');
-        newsData = await response.json();
+        const payload = await response.json();
+        if (!response.ok || !Array.isArray(payload)) throw new Error('SOURCE_ARRAY_UNAVAILABLE');
+        newsData = payload;
         updateUI();
       } catch (err) {
         console.error('Failed to load news:', err);
@@ -8624,7 +8626,9 @@ app.get("/", (c) => {
     async function loadHolidays() {
       try {
         const response = await fetch('/api/holidays');
-        holidaysData = await response.json();
+        const payload = await response.json();
+        if (!response.ok || !Array.isArray(payload)) throw new Error('SOURCE_ARRAY_UNAVAILABLE');
+        holidaysData = payload;
         updateUI();
       } catch (err) {
         console.error('Failed to load holidays:', err);

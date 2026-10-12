@@ -88,6 +88,24 @@ export function deriveMarketBook(input: any) {
  chain.forEach((r,i)=>{const before=chain[i-1];if(!before)return;const gap=(Date.parse(r.minute_bucket)-Date.parse(before.minute_bucket))/60000;if(gap<=0||gap>3)return;for(const side of ['call','put']){const f=side+'_wall_strike',a=num(r[f]),b=num(before[f]);if(a!==null&&b!==null&&a!==b)events.push({symbol,expiry,side:side.toUpperCase(),minute_bucket:r.minute_bucket,previousAt:before.minute_bucket,from:b,to:a,oldOi:num(before[side+'_wall_oi']),newOi:num(r[side+'_wall_oi']),gapMinutes:gap});}});
  events.sort((a,b)=>Date.parse(b.minute_bucket)-Date.parse(a.minute_bucket));
  const allExpiryPairs=buckets.map(e=>({expiry:e,ce:premium(e,strike,'CE'),pe:premium(e,strike,'PE')}));
+ // Month inventory comes from this index's actual recorded contracts, without a four-expiry cap.
+ const boardMonths=[...new Set(buckets.filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e)).map(e=>e.slice(0,7)))];
+ const boardMonth=input.boardMonth||tradeDate.slice(0,7);
+ const boardExpiries=buckets.filter(e=>e.slice(0,7)===boardMonth);
+ const boardStrikes=[...new Set(options.filter(r=>boardExpiries.includes(String(r.expiry).slice(0,10))).map(r=>Number(r.strike)).filter(k=>Number.isFinite(k)&&k>0))].sort((a,b)=>a-b);
+ const boardNearest=num(m?.spot_ltp)===null?null:boardStrikes.reduce<number|null>((best,k)=>best===null||Math.abs(k-Number(m.spot_ltp))<Math.abs(best-Number(m.spot_ltp))?k:best,null);
+ const boardStrike=num(input.boardStrike)!==null&&Number(input.boardStrike)>0?Number(input.boardStrike):boardNearest;
+ const boardRows=boardExpiries.flatMap(ex=>['CE','PE'].map(type=>{
+  const p=premium(ex,boardStrike as number,type),rs=optionGroups.get(p.identity)||[];
+  const opening=rs.filter(r=>[555,558,561,564,567].includes(minute(r.minute_bucket))&&num(r.ltp)!==null&&Number(r.ltp)>0);
+  const openingComplete=!!p.at&&minute(p.at)>=570&&[555,558,561,564,567].every(t=>opening.some(r=>minute(r.minute_bucket)===t));
+  const pivot=p.pivot&&Object.entries(p.pivot).filter(([k])=>/^(P|R[123]|S[123])$/.test(k)).every(([,v])=>num(v)!==null&&Number(v)>0)?p.pivot:null;
+  const fresh=!!p.at&&p.at===spot.at&&p.value!==null&&p.value>0;
+  const refs={PDH:p.pdh!==null&&p.pdh>0?p.pdh:null,PDL:p.pdl!==null&&p.pdl>0?p.pdl:null,H15:openingComplete?Math.max(...opening.map(r=>Number(r.ltp))):null,L15:openingComplete?Math.min(...opening.map(r=>Number(r.ltp))):null,P:pivot?.P??null,R1:pivot?.R1??null,R2:pivot?.R2??null,R3:pivot?.R3??null,S1:pivot?.S1??null,S2:pivot?.S2??null,S3:pivot?.S3??null};
+  if(refs.PDH!==null&&refs.PDL!==null&&refs.PDH<=refs.PDL){refs.PDH=null;refs.PDL=null;}
+  return {premium:p,fresh,refs,openingSamples:opening.length,pivotAt:pivot?.at||null};
+ }));
+ const monthlyPremiumBoard={month:boardMonth,months:boardMonths,expiries:boardExpiries,strikes:boardStrikes,strike:boardStrike,nearest:boardNearest,rows:boardRows,at:spot.at};
  const expiryPairs=allExpiryPairs.slice(0,4);
  const levelDistance=(p:any)=>{const valid=(v:any)=>num(v)!==null&&Number(v)>0;return {pdhDelta:valid(p.pdh)?delta(p.value,p.pdh):null,pdhPercent:valid(p.pdh)?pct(p.value,p.pdh):null,pdlDelta:valid(p.pdl)?delta(p.value,p.pdl):null,pdlPercent:valid(p.pdl)?pct(p.value,p.pdl):null,state:p.value===null?'Premium unavailable':!valid(p.pdh)||!valid(p.pdl)?'Levels unavailable':p.value>p.pdh?'Above PDH':p.value<p.pdl?'Below PDL':p.value===p.pdh?'At PDH':p.value===p.pdl?'At PDL':'Between PDH / PDL'};};
  const view=input.comparisonView||'PAIR',scope=input.expiryScope||'ALL';
@@ -130,5 +148,5 @@ export function deriveMarketBook(input: any) {
  const session={fromAt:firstPair?.at||null,at:spot.at===pcr.at?spot.at:null,spotDelta:spot.at===pcr.at?delta(spot.value,firstPair?.spot):null,pcrDelta:spot.at===pcr.at?delta(pcr.value,firstPair?.pcr):null};
  const spotPcr={alignment,turns:{spot:sampledTurns(spot),pcr:sampledTurns(pcr)},ready:pairReady,state:pairReady?pairDirection(spot.delta,pcr.delta):'Unverified: matching exact endpoints unavailable',at:spot.at===pcr.at?spot.at:null,fromAt:pairReady?spot.fromAt:null,windows:pairWindows,timeline:pairTimeline,session,spotSourceAt:m?.exchange_timestamp||null,scope:'Same recorded expiry and exact recording buckets; source timestamps and chain completeness require separate verification. Arrows describe changes only',priorPcr:{value:num(priorPcr?.full_chain_oi_pcr),at:priorPcr?.minute_bucket||null}};
  const positioning={at:positionAt,spotMetric:metrics(market.filter(r=>positionAt&&Date.parse(r.minute_bucket)<=Date.parse(positionAt)),'spot_ltp','market'),spot:num(positionSpot?.spot_ltp),spotAt:positionSpot?.minute_bucket||null,pdh:num(positionSpot?.pdh),pdl:num(positionSpot?.pdl),changes,topCalls:top('CE'),topPuts:top('PE'),callPersistence:persistence('call'),putPersistence:persistence('put'),samples:coverageRows.length,gaps,sessionGaps,baselineAvailable:!!oldChain,timeline,expiryContext,scope:'Rank and share use returned recorded strikes only; full-chain concentration is unavailable.'};
- return {symbol,tradeDate,priorDate,baselineDate,window,minutes,sessions,expiry,oppositeExpiry,expiries:buckets,strike,strikes,comparison,spot,future,ce,pe,pcr,callWall:wall('call'),putWall:wall('put'),bias,synced,expiryPairs,allExpiryPairs,comparisonRows,observedChanges,graphPairs,behaviour,events,positioning,notableGroups,premiumOverview,spotPcr,vix:metrics(market,'india_vix','market'),truth:'TRUE recorded rows only',historyDates:[...new Set(historyRows('market').map(r=>date(r.minute_bucket)))].sort(),fourthExpiryMissing:buckets.length<4};
+ return {symbol,tradeDate,priorDate,baselineDate,window,minutes,sessions,expiry,oppositeExpiry,expiries:buckets,strike,strikes,comparison,spot,future,ce,pe,pcr,callWall:wall('call'),putWall:wall('put'),bias,synced,expiryPairs,allExpiryPairs,monthlyPremiumBoard,comparisonRows,observedChanges,graphPairs,behaviour,events,positioning,notableGroups,premiumOverview,spotPcr,vix:metrics(market,'india_vix','market'),truth:'TRUE recorded rows only',historyDates:[...new Set(historyRows('market').map(r=>date(r.minute_bucket)))].sort(),fourthExpiryMissing:buckets.length<4};
 }

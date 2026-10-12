@@ -7,6 +7,36 @@ const symbol='NIFTY',expiry='2026-10-13',tradeDate='2026-10-08',recordedDates=['
 const at=(min:number,day=tradeDate)=>new Date(Date.parse(day+'T03:45:00Z')+min*60000).toISOString();
 function fixture(){const market=[0,3,6,9,12,15,18].map(min=>({symbol,minute_bucket:at(min),truth_verdict:'TRUE',spot_ltp:22000+min,spot_high:22050,spot_low:21950,pdh:22015,pdl:21980,future_ltp:22010+min,india_vix:15+min/100}));const options=market.flatMap(m=>['CE','PE'].map(type=>({symbol,expiry,expiry_bucket:'CURRENT',strike:22000,option_type:type,truth_verdict:'TRUE',minute_bucket:m.minute_bucket,ltp:type==='CE'?100+(m.spot_ltp-22000):100-(m.spot_ltp-22000),iv:18,oi:1000+(m.spot_ltp-22000)*10,pdh:110,pdl:90,day_high:125,day_low:75})));const chain=market.map(m=>({symbol,expiry,minute_bucket:m.minute_bucket,truth_verdict:'TRUE',full_chain_oi_pcr:1.1,full_pcr_source:'Exact archived full-chain source',call_wall_strike:22100,call_wall_oi:1000,put_wall_strike:21900,put_wall_oi:1200}));return {market,options,chain};}
 const run=(current=fixture(),extra:any={})=>book({current,symbol,tradeDate,recordedDates,window:'3m',...extra});
+test('monthly premium board uses every recorded month expiry and preserves exact missing contracts',()=>{
+ const c=fixture();const base=[...c.options];for(const expiry of ['2026-10-14','2026-10-15','2026-10-19','2026-10-27','2026-11-24'])c.options.push(...base.map(r=>({...r,expiry})));
+ const b=run(c,{boardMonth:'2026-10',boardStrike:22000}).monthlyPremiumBoard;assert.equal(b.expiries.length,5);assert.equal(b.rows.length,10);assert(b.rows.every(r=>r.premium.expiry.startsWith('2026-10')));
+ const missing=run(c,{boardMonth:'2026-10',boardStrike:22100}).monthlyPremiumBoard;assert.equal(missing.strike,22100);assert(missing.rows.every(r=>r.premium.value===null&&!r.fresh));
+ assert.equal(run(c,{boardMonth:'2026-12'}).monthlyPremiumBoard.rows.length,0);
+});
+test('monthly board keeps stale contracts neutral and requires each exact opening sample',()=>{
+ const c=fixture();c.options=c.options.filter(r=>!(r.option_type==='CE'&&r.minute_bucket===at(6)));c.options.push({...c.options[0],minute_bucket:at(7)});
+ let b=run(c).monthlyPremiumBoard;assert.equal(b.rows.find(r=>r.premium.type==='CE')!.refs.H15,null);assert.equal(b.rows.find(r=>r.premium.type==='PE')!.refs.H15,100);
+ c.options=c.options.filter(r=>!(r.option_type==='PE'&&r.minute_bucket===at(18)));b=run(c).monthlyPremiumBoard;assert.equal(b.rows.find(r=>r.premium.type==='PE')!.fresh,false);
+ c.options.forEach(r=>{r.pdh=0;r.pdl=-1;});b=run(c).monthlyPremiumBoard;assert(b.rows.every(r=>r.refs.PDH===null&&r.refs.PDL===null));
+});
+test('monthly board Fibonacci uses only exact previous-session same-contract close',()=>{
+ const prior=fixture();prior.options=[{...prior.options[0],minute_bucket:'2026-10-07T10:00:00Z',day_high:120,day_low:80,ltp:100}];
+ let b=run(fixture(),{history:[prior]}).monthlyPremiumBoard;assert.equal(b.rows[0].refs.P,100);assert.equal(b.rows[0].refs.R1,115.28);assert.equal(b.rows[1].refs.P,null);
+ prior.options[0].expiry='2026-10-19';b=run(fixture(),{history:[prior]}).monthlyPremiumBoard;assert.equal(b.rows[0].refs.P,null);
+});
+test('monthly board index strikes, month and Fibonacci selection survive rerenders without new requests',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1],nodes=new Map<string,any>();
+ for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
+ const bank=fixture();for(const kind of ['market','options','chain'] as const)bank[kind].forEach(r=>r.symbol='BANKNIFTY');
+ const state={date:tradeDate,recordedDates,current:{NIFTY:fixture(),BANKNIFTY:bank},history:{},baseline:{},health:{}};ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state};vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);
+ const page=nodes.get('mb-page');nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'7'}})}});assert(page.innerHTML.includes('Month-wise premium references'));
+ page.onchange({target:{id:'mb-board-strike',value:'22100'}});ctx.installed.render();assert(page.innerHTML.includes('22100 CE'));assert(page.innerHTML.includes('Unavailable / older recording'));
+ page.onclick({target:{closest:(s:string)=>s==='[data-board-index]'?{dataset:{boardIndex:'BANKNIFTY'}}:null}});assert(page.innerHTML.includes('monthly observation only'));assert(page.innerHTML.includes('22000 CE'));
+ page.onclick({target:{closest:(s:string)=>s==='[data-board-index]'?{dataset:{boardIndex:'NIFTY'}}:null}});assert(page.innerHTML.includes('22100 CE'));
+ page.onclick({target:{closest:(s:string)=>s==='#mb-board-fib'?{}:null}});ctx.installed.render();assert(page.innerHTML.includes('Hide Fibonacci R3–S3'));assert(page.innerHTML.includes('<th>R3 ₹</th>'));
+ page.onchange({target:{id:'mb-board-month',value:'2026-11'}});ctx.installed.render();assert(page.innerHTML.includes('No recorded expiry contracts in this month'));
+});
 test('premium behaviour rejects zero levels and uses the common positioning timestamp',()=>{const c=fixture();c.options.forEach(r=>{r.pdh=0;r.pdl=0;});c.options.push({...c.options[0],strike:22200,minute_bucket:at(15),ltp:9999});const p=run(c).premiumOverview;assert.equal(p.total,2);assert.equal(p.missingLevels,2);assert.equal(p.above,0);assert.equal(p.below,0);assert.equal(p.at,at(18));assert.equal(p.rows[0].range.complete,true);});
 test('notable PCR and selected-pair OI changes require verified adjacent exact records',()=>{const c=fixture();c.chain.forEach((r,i)=>r.full_chain_oi_pcr=1+i/100);const m=run(c);assert.equal(m.notableGroups.find(g=>g.category==='PCR')!.count,6);assert.equal(m.notableGroups.find(g=>g.category==='OI')!.count,12);c.chain.forEach(r=>r.full_pcr_source='Unverified');c.options=c.options.filter(r=>r.minute_bucket!==at(9));const gap=run(c);assert.equal(gap.notableGroups.find(g=>g.category==='PCR')!.count,0);assert.equal(gap.notableGroups.find(g=>g.category==='OI')!.count,8);});
 test('premium notable response retains the event strike instead of the selected strike',()=>{const c=fixture();c.options.push(...c.options.filter(r=>r.option_type==='CE').map(r=>({...r,strike:22100,ltp:r.ltp+20,pdh:130})));const e=run(c).notableGroups.find(g=>g.category==='PREMIUM')!.events.find(e=>e.strike===22100&&e.kind==='Observed crossing interval');assert(e);assert.equal(e.responseStrike,22100);assert.equal(e.responses[0].sides[0].from,132);assert.equal(e.responses[0].sides[0].value,135);assert.match(e.responses[0].sides[1].state,/event premium missing/);});

@@ -8346,6 +8346,7 @@ app.get("/", (c) => {
     async function checkKiteStatus() {
       if (kiteStatusInFlight) return kiteStatusInFlight;
       kiteStatusInFlight = (async () => {
+        const previousSessionState = kiteSessionState;
         try {
           const response = await fetch('/api/kite/status', { cache: 'no-store', credentials: 'same-origin' });
           if (!response.ok) throw new Error('Session status unavailable');
@@ -8361,7 +8362,7 @@ app.get("/", (c) => {
           kiteSessionState = 'UNKNOWN';
         }
         updateStatusUI();
-        updateUI();
+        if (previousSessionState !== kiteSessionState) updateUI();
         return kiteSessionState === 'CONNECTED';
       })();
       try { return await kiteStatusInFlight; }

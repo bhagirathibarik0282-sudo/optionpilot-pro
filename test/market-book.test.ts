@@ -86,6 +86,8 @@ test('three-index percentage overlay, actual units, swing toggles and full chart
  const current:any={};for(const [s,factor] of [['NIFTY',1],['SENSEX',3],['BANKNIFTY',2]] as const){const c=fixture();for(const kind of ['market','options','chain'] as const)c[kind].forEach(r=>r.symbol=s);c.market.forEach((r,i)=>r.spot_ltp=[22000,22006,22002,22008,22004,22010,22006][i]*factor);c.chain.forEach((r,i)=>r.full_chain_oi_pcr=[1,1.2,1.1,1.3,1.2,1.4,1.3][i]);current[s]=c;}
  const state:any={date:tradeDate,recordedDates,current,history:{},baseline:{},health:{}};let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{}};
  vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'9'}})}});const page=nodes.get('mb-page');
+ assert.equal((page.innerHTML.match(/independent left PCR and right spot axes/g)||[]).length,3);assert(page.innerHTML.includes('UNPROVEN: full-chain strike inventory'));assert(page.innerHTML.includes('3/3 same direction'));assert(page.innerHTML.includes('T+18m'));assert(page.innerHTML.includes('6m'));
+ page.onchange({target:{id:'mb-spot-compare-mode',value:'NORMALIZED'}});
  assert.equal((page.innerHTML.match(/percentage overlay/g)||[]).length,3);assert(page.innerHTML.includes('3 / 3 indices share exact baseline'));assert(page.innerHTML.includes('★ Same-direction change'));assert(page.innerHTML.includes('>SH</text>'));assert(page.innerHTML.includes('>SL</text>'));
  page.onchange({target:{id:'mb-spot-compare-span',value:'WINDOW'}});assert(!page.innerHTML.split('Selected index ·')[0].includes('>SL</text>'));
  page.onchange({target:{id:'mb-spot-compare-span',value:'SESSION'}});
@@ -93,5 +95,13 @@ test('three-index percentage overlay, actual units, swing toggles and full chart
  dialog.onchange({target:{id:'mb-modal-spot-mode',value:'RECORDED'}});assert.equal((nodes.get('mb-chart-body').innerHTML.match(/viewBox="0 0 480 390"/g)||[]).length,3);assert(nodes.get('mb-chart-body').innerHTML.includes('66,030'));assert(nodes.get('mb-chart-body').innerHTML.includes('44,020'));
  dialog.onclick({target:{closest:(s:string)=>s==='[data-spot-turns]'?{}:null}});assert(!nodes.get('mb-chart-body').innerHTML.includes('>SH</text>'));assert(nodes.get('mb-chart-body').innerHTML.includes('Swing SH / SL · OFF'));
  nodes.get('mb-chart-close').onclick();assert(!dialog.open);
- page.onchange({target:{id:'mb-spot-compare-mode',value:'NORMALIZED'}});current.SENSEX.chain.pop();vm.runInContext('installed.render()',ctx);assert.equal((page.innerHTML.match(/percentage overlay/g)||[]).length,2);assert(page.innerHTML.includes('Overlay unavailable'));assert.equal(requests,0);
+ page.onchange({target:{id:'mb-spot-compare-mode',value:'NORMALIZED'}});current.SENSEX.chain.pop();vm.runInContext('installed.render()',ctx);assert.equal((page.innerHTML.match(/percentage overlay/g)||[]).length,2);assert(page.innerHTML.includes('Overlay unavailable'));assert(page.innerHTML.includes('UNSYNCED / MISSING'));assert.equal(requests,0);
+});
+
+test('six-minute PCR comparisons require exact endpoints; T0 never uses missing provenance',()=>{
+ const c=fixture();c.chain.forEach((r,i)=>r.full_chain_oi_pcr=1+i/10);
+ let m=run(c);assert(Math.abs(m.spotPcr.windows.find(r=>r.minutes===6)!.pcrDelta!-.2)<1e-10);
+ c.chain=c.chain.filter(r=>r.minute_bucket!==at(12));m=run(c);assert.equal(m.spotPcr.windows.find(r=>r.minutes===6)!.pcrDelta,null);
+ c.chain[0].full_pcr_source='Unverified';m=run(c);assert.equal(m.spotPcr.session.fromAt,at(3));
+ assert.equal(m.pcr.verification.coverage,null);assert.equal(m.pcr.verification.difference,null);assert.equal(m.pcr.sourceAt,null);
 });

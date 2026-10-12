@@ -8219,6 +8219,9 @@ app.get("/", (c) => {
     let autoRefreshInterval = null;
     let kiteConnected = false;
     let currentUser = null;
+    let kiteSessionState = 'UNKNOWN';
+    let kiteStatusInFlight = null;
+    let kiteResumeInFlight = null;
     let newsData = [];
     let holidaysData = [];
 
@@ -8341,17 +8344,29 @@ app.get("/", (c) => {
     }
 
     async function checkKiteStatus() {
-      try {
-        const response = await fetch('/api/kite/status');
-        const result = await response.json();
-        kiteConnected = result.connected;
-        currentUser = result.user;
+      if (kiteStatusInFlight) return kiteStatusInFlight;
+      kiteStatusInFlight = (async () => {
+        const previousSessionState = kiteSessionState;
+        try {
+          const response = await fetch('/api/kite/status', { cache: 'no-store', credentials: 'same-origin' });
+          if (!response.ok) throw new Error('Session status unavailable');
+          const result = await response.json();
+          if (typeof result?.connected !== 'boolean' || result.connected && (!result.user || typeof result.user.userId !== 'string')) throw new Error('Invalid session status');
+          kiteConnected = result.connected;
+          currentUser = result.connected ? result.user : null;
+          kiteSessionState = result.connected ? 'CONNECTED' : 'DISCONNECTED';
+        } catch (err) {
+          console.error('Status check unavailable:', err);
+          // A failed request does not prove logout. Preserve the last known session,
+          // but fail closed on live presentation until another successful readback.
+          kiteSessionState = 'UNKNOWN';
+        }
         updateStatusUI();
-      } catch (err) {
-        console.error('Status check failed:', err);
-        kiteConnected = false;
-        updateStatusUI();
-      }
+        if (previousSessionState !== kiteSessionState) updateUI();
+        return kiteSessionState === 'CONNECTED';
+      })();
+      try { return await kiteStatusInFlight; }
+      finally { kiteStatusInFlight = null; }
     }
 
     function updateStatusUI() {
@@ -8360,7 +8375,13 @@ app.get("/", (c) => {
       const user = document.getElementById('statusUser');
       const btn = document.getElementById('kiteConnectBtn');
       
-      if (kiteConnected && currentUser) {
+      if (kiteSessionState === 'UNKNOWN') {
+        dot.classList.remove('connected');
+        text.textContent = 'Reconnecting · session not verified';
+        user.textContent = '';
+        btn.textContent = 'Checking connection…';
+        btn.disabled = true;
+      } else if (kiteConnected && currentUser) {
         dot.classList.add('connected');
         text.textContent = 'Connected';
         user.textContent = '(' + currentUser.email + ')';
@@ -8376,6 +8397,7 @@ app.get("/", (c) => {
     }
 
     function connectKite() {
+      if (kiteSessionState !== 'DISCONNECTED') return;
       window.location.href = '/api/kite/login';
     }
 
@@ -8388,6 +8410,7 @@ app.get("/", (c) => {
     let lastSuccessfulFetchTime = null;
 
     function computeConnectionState() {
+      if (kiteSessionState !== 'CONNECTED') return 'DISCONNECTED';
       if (!kiteConnected) return 'DISCONNECTED';
       if (consecutiveFetchFailures >= 3) return 'DISCONNECTED';
       if (consecutiveFetchFailures >= 2) return 'DELAYED';
@@ -8539,7 +8562,7 @@ app.get("/", (c) => {
     }
 
     async function fetchData(isRetry) {
-      if (!kiteConnected) return;
+      if (!kiteConnected || kiteSessionState !== 'CONNECTED') return;
       try {
         const response = await fetch('/api/data');
         const json = await response.json();
@@ -17048,7 +17071,7 @@ app.get("/", (c) => {
     }
 
     async function refreshData() {
-      if (!kiteConnected) return;
+      if (!kiteConnected || kiteSessionState !== 'CONNECTED') return;
       document.getElementById('manualRefresh').disabled = true;
       const refreshTasks = [fetchData(), loadCommodities(), loadSectorHeatmap()];
       if (isTradeLabTabActive()) refreshTasks.push(loadTradeLab());
@@ -17138,7 +17161,7 @@ app.get("/", (c) => {
         ['NIFTY', 'BANKNIFTY', 'SENSEX', 'COMMODITIES', 'VIXCORR', 'VERDICT', 'CONTEXT']
           .forEach((id) => {
             document.getElementById(id).innerHTML =
-              '<div class="loading">Connect Kite to load verified live market data.</div>';
+              '<div class="loading">' + (kiteSessionState === 'UNKNOWN' ? 'Reconnecting · session not verified. Recorded data remains available in DATA.' : 'Connect Kite to load verified live market data.') + '</div>';
           });
         updateUI();
       }
@@ -17151,9 +17174,18 @@ app.get("/", (c) => {
     setInterval(loadNews, 20 * 60 * 1000);
     setInterval(loadCommodities, 3 * 60 * 1000);
 
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && kiteConnected) checkBackendRuntimeAndResync();
-    });
+    async function resumeVerifiedKiteSession() {
+      if (document.visibilityState !== 'visible') return;
+      if (kiteResumeInFlight) return kiteResumeInFlight;
+      kiteResumeInFlight = (async () => {
+        if (await checkKiteStatus()) await checkBackendRuntimeAndResync();
+      })();
+      try { await kiteResumeInFlight; }
+      finally { kiteResumeInFlight = null; }
+    }
+    document.addEventListener('visibilitychange', resumeVerifiedKiteSession);
+    window.addEventListener('online', resumeVerifiedKiteSession);
+    window.addEventListener('pageshow', (event) => { if (event.persisted) resumeVerifiedKiteSession(); });
 
     // MOBILE RESYNC — PHASE 3: visibility-resume check (additive)
     // Purpose: before repainting with possibly-stale in-memory data

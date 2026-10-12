@@ -1,7 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {readFileSync} from 'node:fs';
 import {deriveSessionBrief as brief,renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
+function kiteSessionHarness(fetchImpl:any){
+ const src=readFileSync(new URL('../server.ts',import.meta.url),'utf8');
+ const status=src.slice(src.indexOf('    async function checkKiteStatus()'),src.indexOf('    // Rule 2: single shared connection state'));
+ const gate=src.slice(src.indexOf('    function computeConnectionState()'),src.indexOf('    // Step 5: Haiku explanation state'));
+ const resume=src.slice(src.indexOf('    async function resumeVerifiedKiteSession()'),src.indexOf('    // MOBILE RESYNC — PHASE 3:'));
+ const els=new Map<string,any>();['statusDot','statusText','statusUser','kiteConnectBtn'].forEach(id=>els.set(id,{textContent:'',disabled:false,classList:{add(){},remove(){}}}));
+ const listeners:any={},ctx:any={console:{error(){}},Date,fetch:fetchImpl,document:{visibilityState:'visible',getElementById:(id:string)=>els.get(id),addEventListener:(e:string,fn:any)=>listeners[e]=fn},window:{location:{href:''},addEventListener:(e:string,fn:any)=>listeners[e]=fn},refreshes:0};
+ vm.createContext(ctx);vm.runInContext("let kiteConnected=false,currentUser=null,kiteSessionState='UNKNOWN',kiteStatusInFlight=null,kiteResumeInFlight=null,consecutiveFetchFailures=0,lastSuccessfulFetchTime=Date.now();function updateUI(){};async function checkBackendRuntimeAndResync(){refreshes++;}"+status+gate+resume+"globalThis.readState=()=>({connected:kiteConnected,user:currentUser,state:kiteSessionState,live:computeConnectionState()});",ctx);
+ return {ctx,els,listeners};
+}
+test('Kite session transport failure does not claim logout or expose stale live state',async()=>{
+ let mode='connected';const h=kiteSessionHarness(async()=>{if(mode==='network')throw Error('offline');return {ok:mode!=='http',json:async()=>mode==='malformed'?{}:{connected:mode!=='missing',user:{userId:'test-user',email:'test@example.test'}}};});
+ await h.ctx.checkKiteStatus();assert.equal(h.ctx.readState().live,'LIVE');
+ for(const failure of ['network','http','malformed']){mode=failure;await h.ctx.checkKiteStatus();assert.equal(h.ctx.readState().state,'UNKNOWN');assert.equal(h.ctx.readState().connected,true);assert.equal(h.ctx.readState().live,'DISCONNECTED');assert.equal(h.els.get('kiteConnectBtn').disabled,true);assert.match(h.els.get('statusText').textContent,/Reconnecting/);h.ctx.connectKite();assert.equal(h.ctx.window.location.href,'');}
+ mode='connected';await h.ctx.checkKiteStatus();assert.equal(h.ctx.readState().state,'CONNECTED');assert.equal(h.ctx.readState().live,'LIVE');
+ mode='missing';await h.ctx.checkKiteStatus();assert.equal(h.ctx.readState().connected,false);assert.equal(h.ctx.readState().user,null);assert.equal(h.els.get('kiteConnectBtn').disabled,false);h.ctx.connectKite();assert.equal(h.ctx.window.location.href,'/api/kite/login');
+});
+test('app-return events share one session check and refresh only after verified connection',async()=>{
+ let requests=0,release:any;const h=kiteSessionHarness(()=>{requests++;return new Promise(resolve=>release=resolve);});
+ const a=h.listeners.visibilitychange(),b=h.listeners.online(),c=h.ctx.checkKiteStatus();assert.equal(requests,1);assert.equal(h.ctx.refreshes,0);
+ release({ok:true,json:async()=>({connected:true,user:{userId:'test-user',email:'test@example.test'}})});await Promise.all([a,b,c]);assert.equal(h.ctx.refreshes,1);
+ h.ctx.document.visibilityState='hidden';await h.listeners.visibilitychange();assert.equal(requests,1);
+ h.ctx.document.visibilityState='visible';const missing=h.ctx.resumeVerifiedKiteSession();release({ok:true,json:async()=>({connected:false,user:null})});await missing;assert.equal(h.ctx.refreshes,1);
+});
 test('refresh reliability, incremental merge and freshness isolation', async () => {
 const symbol='NIFTY',expiry='2026-10-13',key='NIFTY|2026-10-13|24000|CE';
 const prior={market:[{symbol,minute_bucket:'2026-10-05T09:55:00Z',spot_ltp:24000,spot_high:24100,spot_low:23900,india_vix:12}],options:[{symbol,expiry,strike:24000,option_type:'CE',minute_bucket:'2026-10-05T09:55:00Z',ltp:100,oi:1000,day_high:120,day_low:80}],chain:[{symbol,expiry,minute_bucket:'2026-10-05T09:55:00Z',full_chain_oi_pcr:1.1,call_wall_strike:24200,put_wall_strike:23900}]};

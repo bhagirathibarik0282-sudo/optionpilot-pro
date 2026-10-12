@@ -15,7 +15,7 @@ export function resolveRecordedFullPcr(input: any): any[] {
     const expiries=Array.isArray(c?.market?.expiries)?c.market.expiries.filter((e:any)=>/current/i.test(String(e.expiry||''))):[];
     const raw=c?.market?.gapScore?.fullChainPcr;
     const valid=expiries.length===1&&/^\d{4}-\d{2}-\d{2}$/.test(day(r.expiry))&&day(expiries[0].expiryDate)===day(r.expiry)&&typeof raw==='number'&&Number.isFinite(raw)&&raw>=0;
-    return {...r,full_chain_oi_pcr:valid?Number(raw):null,full_pcr_source:valid?'Exact archived full-chain source':'Full-chain provenance unavailable; legacy band value excluded'};
+    return {...r,full_chain_oi_pcr:valid?Number(raw):null,full_pcr_source:valid?'Exact archived full-chain source':'Full-chain provenance unavailable; legacy band value excluded',full_pcr_source_timestamp:valid?c?.source_timestamp||null:null};
   });
 }
 

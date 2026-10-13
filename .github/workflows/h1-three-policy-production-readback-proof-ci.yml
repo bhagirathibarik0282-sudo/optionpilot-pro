@@ -1,0 +1,482 @@
+name: H1 Three Policy Production Readback Proof CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/h1-three-policy-production-readback-proof-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch production three-policy descriptive summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 120             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-three-policy-descriptive-summary?limit=5000'             -o /tmp/h1-three-policy-summary.json
+
+      - name: Fetch production raw gate history read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location             --retry 3 --retry-delay 2 --max-time 120             'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-live-gate-evidence-history?limit=5000'             -o /tmp/h1-live-gate-history.json
+
+      - name: Fetch exact Greek crosscheck history read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 120 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-kite-greek-math-crosscheck-history?limit=500' \
+            -o /tmp/h1-greek-crosscheck-history.json
+
+      - name: Print latest Greek Gamma outlier identities
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, math
+          d=json.load(open('/tmp/h1-greek-crosscheck-history.json'))
+          rows=[]
+          for r in d.get('records') or []:
+            e=r.get('evidence') or {}
+            err=e.get('absoluteGammaError')
+            if not isinstance(err,(int,float)) or not math.isfinite(err):
+              continue
+            snap=r.get('snapshot') or {}
+            ident=snap.get('identity') or {}
+            pg=snap.get('priceGreek') or {}
+            policy=r.get('policyIdentity') or {}
+            rows.append({
+              'minuteBucket':r.get('minuteBucket'),
+              'instrumentToken':r.get('instrumentToken'),
+              'symbol':ident.get('symbol'),
+              'expiryDate':ident.get('expiryDate'),
+              'dte':ident.get('dte'),
+              'strike':ident.get('strike'),
+              'side':ident.get('side'),
+              'ltp':pg.get('ltp'),
+              'iv':pg.get('iv'),
+              'underlyingPrice':(r.get('underlying') or {}).get('price'),
+              'analyticalGamma':pg.get('gamma'),
+              'numericalGamma':e.get('numericalGamma'),
+              'absoluteGammaError':err,
+              'absoluteDeltaError':e.get('absoluteDeltaError'),
+              'underlyingSkewMs':e.get('underlyingSkewMs'),
+              'referenceImplementationVersion':policy.get('referenceImplementationVersion'),
+            })
+          rows.sort(key=lambda x:x['absoluteGammaError'], reverse=True)
+          print('GREEK_GAMMA_TOP_OUTLIERS', json.dumps({
+            'recordCount':len(rows),
+            'top':rows[:10],
+            'criterionForContextOnly':0.0005,
+            'semantics':'READ_ONLY_DIAGNOSTIC_NO_CRITERION_CHANGE'
+          }, separators=(',',':'),sort_keys=True))
+          PY
+
+      - name: Fetch recorded NIFTY dates and existing DTE0 multi-day OOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 120 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-theory-dates' \
+            -o /tmp/h1-theory-dates.json
+
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/h1-theory-dates.json'))
+          assert d.get('ok') is True
+          rows=d.get('dates') or []
+          dates=sorted({
+            str(r.get('tradeDate')) for r in rows
+            if r.get('symbol') == 'NIFTY' and r.get('tradeDate')
+          }, reverse=True)[:20]
+          assert len(dates) >= 4, f'need at least 4 recorded NIFTY dates, got {len(dates)}'
+          print('NIFTY_RECORDED_DATE_INDEX', json.dumps({
+            'count':len(dates),
+            'dates':dates,
+            'semantics':'RECORDED_MARKER_PRESENCE_ONLY_DOWNSTREAM_FULL_REPLAY_STILL_FAILS_CLOSED'
+          }, separators=(',',':'), sort_keys=True))
+          open('/tmp/nifty-dates.txt','w').write(','.join(dates))
+          PY
+
+          DATES="$(cat /tmp/nifty-dates.txt)"
+          curl --fail --show-error --silent --location --get \
+            --retry 3 --retry-delay 2 --max-time 240 \
+            --data-urlencode 'symbol=NIFTY' \
+            --data-urlencode "dates=${DATES}" \
+            --data-urlencode 'from=09:15' \
+            --data-urlencode 'to=15:30' \
+            --data-urlencode 'scope=FULL' \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-dte0-multiday-oos' \
+            -o /tmp/h1-dte0-multiday-oos.json
+
+      - name: Print sanitized existing DTE0 OOS proof
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/h1-dte0-multiday-oos.json'))
+          out={
+            'ok':d.get('ok'),
+            'mode':d.get('mode'),
+            'requestedDayCount':d.get('requestedDayCount'),
+            'usableDayCount':d.get('usableDayCount'),
+            'validationEligibleDayCount':d.get('validationEligibleDayCount'),
+            'readiness':d.get('readiness'),
+            'calibrationDates':d.get('calibrationDates'),
+            'oosDates':d.get('oosDates'),
+            'candidateDeltaP95':d.get('candidateDeltaP95'),
+            'calibration':d.get('calibration'),
+            'oos':d.get('oos'),
+            'oosDeltaPassRateAtCandidate':d.get('oosDeltaPassRateAtCandidate'),
+            'blockers':d.get('blockers'),
+            'safety':d.get('safety'),
+          }
+          print('DTE0_EXISTING_MULTIDAY_OOS_PROOF', json.dumps(out,separators=(',',':'),sort_keys=True))
+          assert d.get('mode') == 'H1_DTE0_MULTIDAY_OOS_V1'
+          s=d.get('safety') or {}
+          assert s.get('readOnly') is True
+          assert s.get('affectsSelector') is False
+          assert s.get('affectsTelegram') is False
+          assert s.get('affectsVerdict') is False
+          assert s.get('affectsExecution') is False
+          assert s.get('thresholdPromoted') is False
+          assert s.get('dte0ThresholdInvented') is False
+          assert s.get('incompleteSessionPromoted') is False
+          print('DTE0_EXISTING_MULTIDAY_OOS_SAFETY_PASS')
+          PY
+
+      - name: Fetch prospective Direction and Greek evidence read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location \
+            --retry 3 --retry-delay 2 --max-time 240 \
+            'https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-selector-prospective-evidence-v1' \
+            -o /tmp/h1-selector-prospective-evidence.json
+
+      - name: Print sanitized prospective evidence proof
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/h1-selector-prospective-evidence.json'))
+          direction=d.get('direction') or {}
+          greeks=d.get('greeks') or {}
+          evaluation=d.get('evaluation')
+          out={
+            'ok':d.get('ok'),
+            'mode':d.get('mode'),
+            'evidenceWindowStartsAt':d.get('evidenceWindowStartsAt'),
+            'evidenceWindowEndsAt':d.get('evidenceWindowEndsAt'),
+            'direction':{
+              'recordedDates':direction.get('recordedDates'),
+              'completeTradingDates':direction.get('completeTradingDates'),
+              'incompleteTradingDates':direction.get('incompleteTradingDates'),
+              'p75ThresholdPct':direction.get('p75ThresholdPct'),
+              'blockers':direction.get('blockers'),
+              'evidence':direction.get('evidence'),
+            },
+            'greeks':{
+              'timingRowCount':greeks.get('timingRowCount'),
+              'policyIdentifiedCrosscheckCount':greeks.get('policyIdentifiedCrosscheckCount'),
+              'legacyOrUnidentifiedCrosscheckCount':greeks.get('legacyOrUnidentifiedCrosscheckCount'),
+              'uniqueGreekPolicyCount':greeks.get('uniqueGreekPolicyCount'),
+              'worstGammaObservation':greeks.get('worstGammaObservation'),
+              'blockers':greeks.get('blockers'),
+              'evidence':greeks.get('evidence'),
+            },
+            'evaluation':evaluation,
+            'blockers':d.get('blockers'),
+            'safety':d.get('safety'),
+          }
+          print('SELECTOR_PROSPECTIVE_EVIDENCE_PROOF', json.dumps(out,separators=(',',':'),sort_keys=True))
+          s=d.get('safety') or {}
+          assert s.get('readOnly') is True
+          assert s.get('productionPromotionEligible') is False
+          assert s.get('affectsSelector') is False
+          assert s.get('affectsBusinessCard') is False
+          assert s.get('affectsTelegram') is False
+          assert s.get('affectsExecution') is False
+          assert s.get('createsOrders') is False
+          print('SELECTOR_PROSPECTIVE_EVIDENCE_SAFETY_PASS')
+          PY
+
+      - name: Print sanitized production proof
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/h1-three-policy-summary.json'))
+          out={
+            'ok': d.get('ok'),
+            'mode': d.get('mode'),
+            'rowCount': d.get('rowCount'),
+            'premiumDeltaGamma': d.get('premiumDeltaGamma'),
+            'thetaIvMultiExpiry': d.get('thetaIvMultiExpiry'),
+            'capitalLiquidityDte': d.get('capitalLiquidityDte'),
+            'validationDecision': d.get('validationDecision'),
+            'acceptanceCriteriaApplied': d.get('acceptanceCriteriaApplied'),
+            'productionPromotionEligible': d.get('productionPromotionEligible'),
+            'safety': d.get('safety'),
+          }
+          print('THREE_POLICY_PRODUCTION_SUMMARY', json.dumps(out, separators=(',',':'), sort_keys=True))
+          assert d.get('ok') is True
+          assert d.get('mode') == 'READ_ONLY_H1_THREE_POLICY_DESCRIPTIVE_SUMMARY_V1'
+          assert d.get('validationDecision') is None
+          assert d.get('acceptanceCriteriaApplied') is False
+          assert d.get('productionPromotionEligible') is False
+          s=d.get('safety') or {}
+          assert s.get('readOnly') is True
+          assert s.get('rawRecordsReturned') is False
+          assert s.get('thresholdsInvented') is False
+          assert s.get('validationDecisionMade') is False
+          assert s.get('affectsSelector') is False
+          assert s.get('affectsBusinessCard') is False
+          assert s.get('affectsTelegram') is False
+          assert s.get('affectsExecution') is False
+          assert s.get('createsOrders') is False
+          print('THREE_POLICY_PRODUCTION_READBACK_SAFETY_PASS')
+          PY
+
+      - name: Print sanitized component breakdown
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, collections
+          h=json.load(open('/tmp/h1-live-gate-history.json'))
+          assert h.get('ok') is True
+          records=h.get('records') or []
+          gate_names=[
+            'premiumResponseConfirmed','deltaGammaResponseConfirmed',
+            'thetaIvBurdenAcceptable','multiExpiryConflictAbsent',
+            'capitalFit','liquidityOk','spreadOk',
+            'currentOrNearExpiryUsable','higherDteUsable','fallbackDteApproved',
+          ]
+          gate_counts={g:{'true':0,'false':0,'missing':0} for g in gate_names}
+          symbols=collections.defaultdict(lambda:{'rows':0,'premiumDeltaGammaPass':0,'thetaIvMultiExpiryPass':0,'capitalLiquidityDtePass':0})
+          premium_reasons=collections.Counter()
+          theta_reasons=collections.Counter()
+
+          def gate_value(r,name):
+            v=((r.get('gates') or {}).get(name) or {}).get('value')
+            return v if isinstance(v,bool) else None
+
+          for r in records:
+            vals={g:gate_value(r,g) for g in gate_names}
+            for g,v in vals.items():
+              gate_counts[g]['true' if v is True else 'false' if v is False else 'missing'] += 1
+
+            sym=str(((r.get('identity') or {}).get('symbol') or 'UNKNOWN'))
+            s=symbols[sym]
+            s['rows']+=1
+            if vals['premiumResponseConfirmed'] is True and vals['deltaGammaResponseConfirmed'] is True:
+              s['premiumDeltaGammaPass']+=1
+            if vals['thetaIvBurdenAcceptable'] is True and vals['multiExpiryConflictAbsent'] is True:
+              s['thetaIvMultiExpiryPass']+=1
+            dte_ok=(vals['currentOrNearExpiryUsable'] is True or vals['higherDteUsable'] is True or vals['fallbackDteApproved'] is True)
+            if vals['capitalFit'] is True and vals['liquidityOk'] is True and vals['spreadOk'] is True and dte_ok:
+              s['capitalLiquidityDtePass']+=1
+
+            pd=((r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {})
+            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+            for x in pd.get('reasonCodes') or []:
+              premium_reasons[str(x)] += 1
+            for x in td.get('reasonCodes') or []:
+              theta_reasons[str(x)] += 1
+
+          out={
+            'rowCount':len(records),
+            'gateCounts':gate_counts,
+            'bySymbol':dict(symbols),
+            'premiumReasonCodes':dict(premium_reasons.most_common(20)),
+            'thetaReasonCodes':dict(theta_reasons.most_common(20)),
+          }
+          print('THREE_POLICY_COMPONENT_BREAKDOWN', json.dumps(out,separators=(',',':'),sort_keys=True))
+          safety=h.get('safety') or {}
+          assert safety.get('readOnly') is True
+          assert safety.get('affectsSelector') is False
+          assert safety.get('affectsTelegram') is False
+          assert safety.get('affectsVerdict') is False
+          assert safety.get('affectsExecution') is False
+          thresholds={'premium':set(),'thetaIv':set()}
+          observed=[]
+          capital_threshold_fields_seen=set()
+          for r in records:
+            if r.get('publishedAt'): observed.append(str(r.get('publishedAt')))
+            pd=((r.get('policyDiagnostics') or {}).get('premiumDeltaGamma') or {})
+            td=((r.get('policyDiagnostics') or {}).get('thetaIv') or {})
+            if pd:
+              thresholds['premium'].add((pd.get('minPremiumMovePct'),pd.get('minAbsoluteDeltaChange'),pd.get('minCurrentGamma')))
+            if td:
+              thresholds['thetaIv'].add((td.get('maxAbsThetaPctOfPremium'),td.get('minIv'),td.get('maxIv')))
+            cap=r.get('capitalLiquidityEvidence') or {}
+            for k in cap:
+              if k.startswith('max') or k.startswith('min') or 'Threshold' in k or 'threshold' in k:
+                capital_threshold_fields_seen.add(k)
+          lineage={
+            'firstPublishedAt':min(observed) if observed else None,
+            'lastPublishedAt':max(observed) if observed else None,
+            'premiumThresholdTuples':[list(x) for x in sorted(thresholds['premium'], key=str)],
+            'thetaIvThresholdTuples':[list(x) for x in sorted(thresholds['thetaIv'], key=str)],
+            'capitalPolicyThresholdFieldsPersisted':sorted(capital_threshold_fields_seen),
+            'policySourceFieldPersisted': any('policySource' in (r.get('policyDiagnostics') or {}) for r in records),
+          }
+          print('THREE_POLICY_POLICY_LINEAGE', json.dumps(lineage,separators=(',',':'),sort_keys=True))
+          print('THREE_POLICY_RAW_HISTORY_READBACK_SAFETY_PASS')
+          PY
+
+      - name: Print exact raw reconstruction readiness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, collections, datetime
+          d=json.load(open('/tmp/h1-greek-crosscheck-history.json'))
+          assert d.get('ok') is True
+          records=d.get('records') or []
+          dates=set()
+          symbols=collections.Counter()
+          complete=0
+          direction_bound=0
+          minutes=[]
+          for r in records:
+            mb=r.get('minuteBucket')
+            if isinstance(mb,str):
+              minutes.append(mb)
+              try:
+                dt=datetime.datetime.fromisoformat(mb.replace('Z','+00:00'))+datetime.timedelta(hours=5,minutes=30)
+                dates.add(dt.date().isoformat())
+              except Exception:
+                pass
+            snap=r.get('snapshot') or {}
+            ident=snap.get('identity') or {}
+            if ident.get('symbol'): symbols[str(ident.get('symbol'))]+=1
+            pg=snap.get('priceGreek') or {}
+            depth=snap.get('depth') or {}
+            if snap.get('ready') is True and all(k in pg for k in ['ltp','delta','gamma','theta','iv']) and all(k in depth for k in ['bid','ask','bidQty','askQty','lotQuantity']):
+              complete+=1
+            if r.get('selectorDirectionAtCapture') in ['UP','DOWN'] and r.get('expectedPremiumDirectionAtCapture') in ['UP','DOWN']:
+              direction_bound+=1
+          out={
+            'count':len(records),
+            'firstMinute':min(minutes) if minutes else None,
+            'lastMinute':max(minutes) if minutes else None,
+            'uniqueTradingDatesIST':sorted(dates),
+            'symbols':dict(symbols),
+            'completeSnapshotCount':complete,
+            'directionBoundCount':direction_bound,
+            'reconstructPremiumDeltaGamma':complete>=2,
+            'reconstructThetaIv':complete>=1,
+            'reconstructCapitalLiquidityDte':complete>=1,
+          }
+          print('THREE_POLICY_RAW_RECONSTRUCTION_READINESS', json.dumps(out,separators=(',',':'),sort_keys=True))
+          s=d.get('safety') or {}
+          assert s.get('readOnly') is True
+          assert s.get('affectsBusinessCard') is False
+          assert s.get('affectsTelegram') is False
+          assert s.get('affectsExecution') is False
+          print('THREE_POLICY_RAW_RECONSTRUCTION_READBACK_SAFETY_PASS')
+          PY
+
+      - name: Print threshold-free raw distributions
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, math, collections
+          d=json.load(open('/tmp/h1-greek-crosscheck-history.json'))
+          records=d.get('records') or []
+
+          def q(vals, p):
+            vals=sorted(v for v in vals if isinstance(v,(int,float)) and math.isfinite(v))
+            if not vals: return None
+            if len(vals)==1: return vals[0]
+            pos=(len(vals)-1)*p
+            lo=math.floor(pos); hi=math.ceil(pos)
+            if lo==hi: return vals[lo]
+            return vals[lo]+(vals[hi]-vals[lo])*(pos-lo)
+
+          def stats(vals, ps=(0.05,0.25,0.5,0.75,0.9,0.95)):
+            clean=[v for v in vals if isinstance(v,(int,float)) and math.isfinite(v)]
+            return {'count':len(clean), **{f'p{int(p*100):02d}':q(clean,p) for p in ps}}
+
+          snaps=[]
+          for r in records:
+            s=r.get('snapshot') or {}
+            if s.get('ready') is not True: continue
+            ident=s.get('identity') or {}
+            pg=s.get('priceGreek') or {}
+            depth=s.get('depth') or {}
+            if not all(k in pg for k in ['ltp','delta','gamma','theta','iv']): continue
+            if not all(k in depth for k in ['bid','ask','bidQty','askQty','lotQuantity']): continue
+            row={
+              'minute':r.get('minuteBucket'),
+              'key':(ident.get('symbol'),ident.get('expiryDate'),ident.get('strike'),ident.get('side')),
+              'symbol':ident.get('symbol'),
+              'dte':ident.get('dte'),
+              'ltp':pg.get('ltp'),'delta':pg.get('delta'),'gamma':pg.get('gamma'),'theta':pg.get('theta'),'iv':pg.get('iv'),
+              'bid':depth.get('bid'),'ask':depth.get('ask'),'bidQty':depth.get('bidQty'),'askQty':depth.get('askQty'),'lot':depth.get('lotQuantity'),
+              'expected':r.get('expectedPremiumDirectionAtCapture'),
+            }
+            snaps.append(row)
+
+          gamma=[]; theta_pct=[]; iv=[]; spread=[]; bid_cov=[]; ask_cov=[]; capital=[]; dtes=[]
+          for x in snaps:
+            gamma.append(abs(x['gamma']))
+            theta_pct.append(abs(x['theta'])/x['ltp']*100 if x['ltp'] else None)
+            iv.append(x['iv'])
+            mid=(x['bid']+x['ask'])/2 if x['bid'] and x['ask'] else None
+            spread.append((x['ask']-x['bid'])/mid*100 if mid else None)
+            bid_cov.append(x['bidQty']/x['lot'] if x['lot'] else None)
+            ask_cov.append(x['askQty']/x['lot'] if x['lot'] else None)
+            capital.append(x['ltp']*x['lot'] if x['lot'] else None)
+            dtes.append(x['dte'])
+
+          bykey=collections.defaultdict(list)
+          for x in snaps: bykey[x['key']].append(x)
+          premium_move=[]; abs_premium_move=[]; abs_delta_change=[]; expected_up_move=[]
+          pair_count=0; expected_up_pair_count=0
+          for arr in bykey.values():
+            arr.sort(key=lambda x:str(x['minute']))
+            for a,b in zip(arr,arr[1:]):
+              try:
+                import datetime
+                ta=datetime.datetime.fromisoformat(str(a['minute']).replace('Z','+00:00'))
+                tb=datetime.datetime.fromisoformat(str(b['minute']).replace('Z','+00:00'))
+                gap=(tb-ta).total_seconds()
+              except Exception:
+                continue
+              if gap<=0 or gap>180: continue
+              if not a['ltp'] or not b['ltp']: continue
+              move=(b['ltp']-a['ltp'])/a['ltp']*100
+              premium_move.append(move); abs_premium_move.append(abs(move))
+              abs_delta_change.append(abs(b['delta']-a['delta']))
+              pair_count+=1
+              if b['expected']=='UP':
+                expected_up_move.append(move); expected_up_pair_count+=1
+
+          out={
+            'snapshotCount':len(snaps),
+            'sameContractPairCountWithin180s':pair_count,
+            'expectedUpPairCount':expected_up_pair_count,
+            'premiumMovePctSigned':stats(premium_move),
+            'premiumMovePctAbsolute':stats(abs_premium_move),
+            'absoluteDeltaChange':stats(abs_delta_change),
+            'currentGamma':stats(gamma),
+            'thetaPctOfPremium':stats(theta_pct),
+            'ivPct':stats(iv),
+            'relativeSpreadPct':stats(spread),
+            'bidDepthCoverageMultiple':stats(bid_cov),
+            'askDepthCoverageMultiple':stats(ask_cov),
+            'capitalRequired':stats(capital),
+            'dteCounts':dict(collections.Counter(str(x) for x in dtes)),
+            'expectedUpPremiumMovePct':stats(expected_up_move),
+            'semantics':'DESCRIPTIVE_ONLY_NO_THRESHOLD_NO_PROMOTION',
+          }
+          print('THREE_POLICY_THRESHOLD_FREE_DISTRIBUTIONS', json.dumps(out,separators=(',',':'),sort_keys=True))
+          PY

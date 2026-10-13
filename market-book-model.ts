@@ -98,7 +98,17 @@ export function deriveMarketBook(input: any) {
    const adjacent=levels&&previous&&Date.parse(last.minute_bucket)-Date.parse(previous.minute_bucket)===180000&&num(previous.ltp)!==null&&Number(previous.ltp)>0&&num(previous.pdh)===p.pdh&&num(previous.pdl)===p.pdl;
    const crossing=adjacent&&previous.ltp<=p.pdh&&p.value>p.pdh?'PDH BREAK ↑':adjacent&&previous.ltp>=p.pdl&&p.value<p.pdl?'PDL BREAK ↓':null;
    const breakEvent=crossing?{label:crossing,level:crossing.startsWith('PDH')?p.pdh:p.pdl,fromAt:previous.minute_bucket,at:p.at,previous:Number(previous.ltp),value:p.value}:null;
-   return {premium:p,usable,breakEvent,levelState:!usable?'Current recording unavailable':!levels?'Levels unavailable':p.value>p.pdh?'Above PDH':p.value<p.pdl?'Below PDL':p.value===p.pdh?'At PDH':p.value===p.pdl?'At PDL':'Inside PDH / PDL',tone:levels?p.levelBehaviour.tone:'NEUTRAL',behaviour:levels?p.levelBehaviour.state:'Unverified'};
+   const levelTimeline:any[]=[];
+   const comparable=(a:any,b:any)=>a&&b&&Date.parse(b.minute_bucket)-Date.parse(a.minute_bucket)===180000&&num(a.ltp)!==null&&Number(a.ltp)>0&&num(b.ltp)!==null&&Number(b.ltp)>0&&num(a.pdh)!==null&&num(a.pdl)!==null&&Number(a.pdh)>Number(a.pdl)&&Number(a.pdl)>0&&num(a.pdh)===num(b.pdh)&&num(a.pdl)===num(b.pdl);
+   rs.forEach((now,i)=>{const prev=rs[i-1];if(!comparable(prev,now))return;
+    const event=(label:string,level:number,fromAt=prev.minute_bucket,previous=Number(prev.ltp))=>levelTimeline.push({label,level,fromAt,at:now.minute_bucket,previous,value:Number(now.ltp)});
+    if(prev.ltp<=now.pdh&&now.ltp>now.pdh)event('PDH BREAK ↑',Number(now.pdh));
+    if(prev.ltp>=now.pdl&&now.ltp<now.pdl)event('PDL BREAK ↓',Number(now.pdl));
+    if(prev.ltp<now.pdl&&now.ltp>=now.pdl)event('PDL RECOVERY ↑',Number(now.pdl));
+    if(prev.ltp>=now.pdh&&now.ltp<now.pdh)event('PDH LOST ↓',Number(now.pdh));
+    const before=rs[i-2];if(comparable(before,prev)&&before.ltp>=now.pdh&&prev.ltp<now.pdh&&now.ltp<prev.ltp)event('PDH REJECTION · 2 lower samples',Number(now.pdh),before.minute_bucket,Number(before.ltp));
+   });
+   return {premium:p,usable,breakEvent,levelTimeline:levelTimeline.slice(-3).reverse(),levelState:!usable?'Current recording unavailable':!levels?'Levels unavailable':p.value>p.pdh?'Above PDH':p.value<p.pdl?'Below PDL':p.value===p.pdh?'At PDH':p.value===p.pdl?'At PDL':'Inside PDH / PDL',tone:levels?p.levelBehaviour.tone:'NEUTRAL',behaviour:levels?p.levelBehaviour.state:'Unverified'};
   };
   return {expiry:pair.expiry,ce:side(ce),pe:side(pe),aligned,state,at:aligned?ce.at:null,fromAt:aligned?ce.fromAt:null};
  });

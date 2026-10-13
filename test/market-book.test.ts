@@ -153,7 +153,7 @@ test('simple behaviour serializes in production chapter and follows selected ind
  for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
  const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
  const c=fixture();c.options.forEach(r=>{r.pdh=116;r.pdl=84;});c.options.push(...c.options.map(r=>({...r,expiry:'2026-10-19'})));let fetches=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({date:tradeDate,recordedDates,current:{NIFTY:c},history:{},baseline:{},health:{}}),refresh(){fetches++;}};vm.runInContext('installMarketBook(api)',ctx);
- nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'7'}})}});const page=nodes.get('mb-page');assert(page.innerHTML.includes('Premium behaviour · NIFTY · strike 22'));assert(page.innerHTML.includes('2 recorded expiries'));assert(page.innerHTML.includes('Aligned expiries · 2026-10-13 / 2026-10-19'));assert(page.innerHTML.includes('PDH BREAK ↑'));assert(page.innerHTML.includes('PDL BREAK ↓'));assert(page.innerHTML.includes('mb-premium-flash mb-up'));assert(page.innerHTML.includes('CE rising · PE falling'));assert(page.innerHTML.includes('Detailed month board, all strikes &amp; history'));assert(!page.innerHTML.includes('undefined'));
+ nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'7'}})}});const page=nodes.get('mb-page');assert(page.innerHTML.includes('Premium behaviour · NIFTY · strike 22'));assert(page.innerHTML.includes('2 recorded expiries'));assert(page.innerHTML.includes('Aligned expiries · 2026-10-13 / 2026-10-19'));assert(page.innerHTML.includes('PDH BREAK ↑'));assert(page.innerHTML.includes('PDL BREAK ↓'));assert(page.innerHTML.includes('mb-premium-flash mb-up'));assert(page.innerHTML.includes('Latest event · PDH BREAK ↑'));assert(page.innerHTML.includes('Recent PDH / PDL event times'));assert(page.innerHTML.includes('Recorded session 2026-10-08'));assert(page.innerHTML.includes('CE rising · PE falling'));assert(page.innerHTML.includes('Detailed month board, all strikes &amp; history'));assert(!page.innerHTML.includes('undefined'));
  nodes.get('mb-index').value='SENSEX';nodes.get('mb-index').onchange();assert(page.innerHTML.includes('Premium behaviour · SENSEX'));assert(page.innerHTML.includes('No recorded expiry contracts.'));assert.equal(fetches,0);
 });
 
@@ -175,4 +175,10 @@ test('expiry alignment lists every matching expiry and excludes opposite, flat, 
  c.options=c.options.filter(r=>!(r.expiry==='2026-10-30'&&r.minute_bucket===at(18)));m=run(c);assert.equal(m.premiumExpiryAlignment[0].expiries.length,3);assert(!m.premiumExpiryAlignment[0].expiries.includes('2026-10-30'));
  c.options.filter(r=>r.expiry==='2026-10-26').forEach(r=>r.ltp=200-r.ltp);m=run(c);assert.deepEqual(m.premiumExpiryAlignment[0].expiries,[expiry,'2026-10-19']);assert.equal(m.premiumExpiryAlignment.length,1);
  assert.equal(run(c,{window:'5m'}).premiumExpiryAlignment.length,0);
+});
+
+test('timestamped own-level timeline preserves break/recovery/rejection intervals after the event',()=>{
+ const c=fixture();const prices=[100,89,92,110,108,105,104];c.options.filter(r=>r.option_type==='CE').forEach((r,i)=>r.ltp=prices[i]);const side=run(c).premiumBehaviourRows[0].ce;
+ assert.deepEqual(side.levelTimeline.map(e=>e.label),['PDH REJECTION · 2 lower samples','PDH LOST ↓','PDL RECOVERY ↑']);assert.equal(side.levelTimeline[0].fromAt,at(9));assert.equal(side.levelTimeline[0].at,at(15));assert.equal(side.levelTimeline[2].at,at(6));assert.equal(side.breakEvent,null);
+ const gap=fixture();gap.options=gap.options.filter(r=>r.minute_bucket!==at(3));gap.options.filter(r=>r.option_type==='CE').forEach((r,i)=>r.ltp=i===0?89:92);assert.equal(run(gap).premiumBehaviourRows[0].ce.levelTimeline.length,0);
 });

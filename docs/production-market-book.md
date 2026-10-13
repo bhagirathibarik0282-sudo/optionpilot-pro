@@ -101,3 +101,9 @@ New PDH-up / PDL-down breaks flash only for the latest exact adjacent three-minu
 Gold pulsing alignment groups list at least two expiries with the same opposite CE/PE movement and identical exact current/baseline endpoints. Conflicting, stale, missing or flat peers cannot join; separate opposite groups remain distinct. Both animations honor reduced motion. No probability, trade or exchange-freshness authority is implied.
 
 Updated validation: 62 focused tests pass, including break reset, gaps, changed levels, stale sides and four-expiry group coverage.
+
+The compact card now retains the latest three timestamped own-level transitions per side: PDH break/loss, PDL break/recovery and PDH rejection confirmed by two lower adjacent samples. It exposes the latest event time directly and the recorded interval, prices and level in expandable history. Gaps, missing/nonpositive prices and changed/invalid references cannot establish transitions. Historical events remain visible after price moves away; only a new latest-interval break flashes.
+
+The card labels its selected recording session. Existing dashboard startup selects today's IST date after market open and reads the existing CORE archive, including completed-session records after close; it does not substitute an older date if today's data is absent. Before release, the 2026-10-13 date index showed 127 markers for each of the three indices, ending at 15:30 IST. A NIFTY 15:24–15:30 CORE read returned 270 option rows and three actual recorded expiries (13, 19 and 27 October). This inventory is not all exchange expiries; an absent fourth expiry remains absent.
+
+Validation: 73 focused model/UI/refresh/replay tests pass, including timeline history, event confirmation intervals, missing data and serialization.

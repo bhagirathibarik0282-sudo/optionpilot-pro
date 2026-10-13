@@ -152,7 +152,27 @@ test('simple behaviour serializes in production chapter and follows selected ind
  const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1],nodes=new Map<string,any>();
  for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
  const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
- const c=fixture();c.options.push(...c.options.map(r=>({...r,expiry:'2026-10-19'})));let fetches=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({date:tradeDate,recordedDates,current:{NIFTY:c},history:{},baseline:{},health:{}}),refresh(){fetches++;}};vm.runInContext('installMarketBook(api)',ctx);
- nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'7'}})}});const page=nodes.get('mb-page');assert(page.innerHTML.includes('Premium behaviour · NIFTY · strike 22'));assert(page.innerHTML.includes('2 recorded expiries'));assert(page.innerHTML.includes('CE rising · PE falling'));assert(page.innerHTML.includes('Detailed month board, all strikes &amp; history'));assert(!page.innerHTML.includes('undefined'));
+ const c=fixture();c.options.forEach(r=>{r.pdh=116;r.pdl=84;});c.options.push(...c.options.map(r=>({...r,expiry:'2026-10-19'})));let fetches=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({date:tradeDate,recordedDates,current:{NIFTY:c},history:{},baseline:{},health:{}}),refresh(){fetches++;}};vm.runInContext('installMarketBook(api)',ctx);
+ nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'7'}})}});const page=nodes.get('mb-page');assert(page.innerHTML.includes('Premium behaviour · NIFTY · strike 22'));assert(page.innerHTML.includes('2 recorded expiries'));assert(page.innerHTML.includes('Aligned expiries · 2026-10-13 / 2026-10-19'));assert(page.innerHTML.includes('PDH BREAK ↑'));assert(page.innerHTML.includes('PDL BREAK ↓'));assert(page.innerHTML.includes('mb-premium-flash mb-up'));assert(page.innerHTML.includes('CE rising · PE falling'));assert(page.innerHTML.includes('Detailed month board, all strikes &amp; history'));assert(!page.innerHTML.includes('undefined'));
  nodes.get('mb-index').value='SENSEX';nodes.get('mb-index').onchange();assert(page.innerHTML.includes('Premium behaviour · SENSEX'));assert(page.innerHTML.includes('No recorded expiry contracts.'));assert.equal(fetches,0);
+});
+
+test('premium break badges require an exact new own-level crossing and reset after the next recording',()=>{
+ const c=fixture();c.options.forEach(r=>{r.pdh=116;r.pdl=84;});let r=run(c).premiumBehaviourRows[0];assert.equal(r.ce.breakEvent?.label,'PDH BREAK ↑');assert.equal(r.pe.breakEvent?.label,'PDL BREAK ↓');assert.equal(r.ce.breakEvent?.fromAt,at(15));assert.equal(r.ce.breakEvent?.at,at(18));
+ assert.equal(run(fixture()).premiumBehaviourRows[0].ce.breakEvent,null);
+ c.options.push(...c.options.filter(r=>r.minute_bucket===at(18)).map(r=>({...r,minute_bucket:at(21),ltp:r.option_type==='CE'?121:79})));c.market.push({...c.market.at(-1)!,minute_bucket:at(21),spot_ltp:22021});r=run(c).premiumBehaviourRows[0];assert.equal(r.ce.breakEvent,null);assert.equal(r.pe.breakEvent,null);
+});
+test('break alerts reject missing adjacent data, reference changes and stale sides',()=>{
+ for(const mutate of [
+  (c:any)=>{c.options=c.options.filter((r:any)=>r.minute_bucket!==at(15));},
+  (c:any)=>{c.options.filter((r:any)=>r.minute_bucket===at(15)).forEach((r:any)=>r.pdh=117);},
+  (c:any)=>{c.options=c.options.filter((r:any)=>r.minute_bucket!==at(18));}
+ ]){const c=fixture();c.options.forEach(r=>{r.pdh=116;r.pdl=84;});mutate(c);const r=run(c).premiumBehaviourRows[0];assert.equal(r.ce.breakEvent,null);assert.equal(r.pe.breakEvent,null);}
+});
+test('expiry alignment lists every matching expiry and excludes opposite, flat, stale or unsynchronized peers',()=>{
+ const c=fixture(),base=[...c.options];for(const ex of ['2026-10-19','2026-10-26','2026-10-30'])c.options.push(...base.map(r=>({...r,expiry:ex})));
+ let m=run(c);assert.equal(m.premiumExpiryAlignment[0].expiries.length,4);
+ c.options=c.options.filter(r=>!(r.expiry==='2026-10-30'&&r.minute_bucket===at(18)));m=run(c);assert.equal(m.premiumExpiryAlignment[0].expiries.length,3);assert(!m.premiumExpiryAlignment[0].expiries.includes('2026-10-30'));
+ c.options.filter(r=>r.expiry==='2026-10-26').forEach(r=>r.ltp=200-r.ltp);m=run(c);assert.deepEqual(m.premiumExpiryAlignment[0].expiries,[expiry,'2026-10-19']);assert.equal(m.premiumExpiryAlignment.length,1);
+ assert.equal(run(c,{window:'5m'}).premiumExpiryAlignment.length,0);
 });

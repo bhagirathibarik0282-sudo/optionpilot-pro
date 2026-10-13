@@ -95,3 +95,9 @@ The Premium behaviour chapter begins with a compact card for the selected index 
 Paired descriptions (CE rising / PE falling, reverse, both rising/falling, flat/mixed) require positive same-contract baselines, identical baseline/current timestamps and a current recording matching the index context. Missing sides, stale recordings or absent exact baselines withhold paired descriptions. Level colour requires positive ordered own-contract PDH/PDL and the current context timestamp. This card reuses the existing shared refresh; it adds no calls, timers, storage, candidate or order authority. Recording-time alignment is not proof of exchange quote freshness.
 
 Validation: 59 market-book, strike-comparison and dashboard tests pass, including serialized production rendering, selected-index isolation, missing sides/baselines and invalid levels.
+
+New PDH-up / PDL-down breaks flash only for the latest exact adjacent three-minute same-contract crossing. Positive unchanged ordered references, positive prices and a current context-matching timestamp are mandatory. Every badge retains expiry, strike, side, level, prices and interval timestamps. A subsequent outside-level sample becomes static.
+
+Gold pulsing alignment groups list at least two expiries with the same opposite CE/PE movement and identical exact current/baseline endpoints. Conflicting, stale, missing or flat peers cannot join; separate opposite groups remain distinct. Both animations honor reduced motion. No probability, trade or exchange-freshness authority is implied.
+
+Updated validation: 62 focused tests pass, including break reset, gaps, changed levels, stale sides and four-expiry group coverage.

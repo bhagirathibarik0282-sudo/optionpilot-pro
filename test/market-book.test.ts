@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {deriveMarketBook as book} from '../market-book-model.js';
+import {deriveMarketBook as book,derivePremiumBreakConsensus as consensus} from '../market-book-model.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 const symbol='NIFTY',expiry='2026-10-13',tradeDate='2026-10-08',recordedDates=['2026-10-05','2026-10-06','2026-10-07','2026-10-08'];
 const at=(min:number,day=tradeDate)=>new Date(Date.parse(day+'T03:45:00Z')+min*60000).toISOString();
@@ -182,3 +182,27 @@ test('timestamped own-level timeline preserves break/recovery/rejection interval
  assert.deepEqual(side.levelTimeline.map(e=>e.label),['PDH REJECTION · 2 lower samples','PDH LOST ↓','PDL RECOVERY ↑']);assert.equal(side.levelTimeline[0].fromAt,at(9));assert.equal(side.levelTimeline[0].at,at(15));assert.equal(side.levelTimeline[2].at,at(6));assert.equal(side.breakEvent,null);
  const gap=fixture();gap.options=gap.options.filter(r=>r.minute_bucket!==at(3));gap.options.filter(r=>r.option_type==='CE').forEach((r,i)=>r.ltp=i===0?89:92);assert.equal(run(gap).premiumBehaviourRows[0].ce.levelTimeline.length,0);
 });
+
+function consensusFixture(){const models:any={};for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){const c=fixture();for(const k of ['market','options','chain'] as const)c[k].forEach(r=>r.symbol=symbol);c.options.forEach(r=>{r.pdh=116;r.pdl=84;});c.options.push(...c.options.map(r=>({...r,expiry:'2026-10-27'})));c.chain.push(...c.chain.map(r=>({...r,expiry:'2026-10-27'})));models[symbol]=run(c,{symbol});}return models;}
+test('independent behaviour strikes retain exact side identity without substituting absent expiry contracts',()=>{const c=fixture();c.options.push(...c.options.filter(r=>r.option_type==='PE').map(r=>({...r,strike:22100,ltp:r.ltp+5})));const m=run(c,{behaviourCEStrike:22000,behaviourPEStrike:22100});assert.equal(m.premiumBehaviourRows[0].ce.premium.strike,22000);assert.equal(m.premiumBehaviourRows[0].pe.premium.strike,22100);assert.equal(m.premiumBehaviourRows[0].pe.premium.value,87);assert.equal(run(c,{behaviourPEStrike:22200}).premiumBehaviourRows[0].pe.premium.value,null);});
+test('three-index agreement freezes VIX and expiry-specific full PCR at the exact event interval',()=>{const ms=consensusFixture(),c=consensus(ms);assert.equal(c.events.length,2);const ce=c.events.find(e=>e.side==='CE');assert.equal(ce.label,'PDH BREAK ↑');assert.equal(ce.groups.length,3);assert.equal(ce.at,at(18));assert.equal(ce.fromAt,at(15));assert(ce.contextComplete);assert.equal(ce.groups[0].vix.value,15.18);assert(ce.groups.every(g=>g.contracts.length===2));assert(ce.groups.every(g=>g.pcr.length===2&&g.pcr.every(p=>p.value===1.1)));});
+test('consensus cannot promote partial expiry inventory, different side/level/timestamps or conflicting session',()=>{for(const mutate of [
+ (m:any)=>{m.SENSEX.premiumBreakGroups=[];},
+ (m:any)=>{m.BANKNIFTY.premiumBreakGroups.forEach(g=>g.at=at(15));},
+ (m:any)=>{m.SENSEX.premiumBreakGroups.forEach(g=>g.contracts.pop());},
+ (m:any)=>{m.SENSEX.tradeDate='2026-10-07';}
+]){const m=consensusFixture();mutate(m);assert.equal(consensus(m).events.length,0);}
+ const m=consensusFixture();m.SENSEX.premiumBreakGroups.forEach(g=>g.pcr.forEach(p=>{p.value=null;p.delta=null;}));assert(consensus(m).events.every(e=>!e.contextComplete));
+});
+
+test('serialized premium selectors preserve independent strikes across index switches and refresh',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1],nodes=new Map<string,any>();for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);const current:any={};for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){const c=fixture();for(const k of ['market','options','chain'] as const)c[k].forEach(r=>r.symbol=symbol);c.options.forEach(r=>{r.pdh=116;r.pdl=84;});c.options.push(...c.options.map(r=>({...r,expiry:'2026-10-27'})));c.chain.push(...c.chain.map(r=>({...r,expiry:'2026-10-27'})));if(symbol==='NIFTY')c.options.push(...c.options.filter(r=>r.option_type==='CE').map(r=>({...r,strike:22100,ltp:r.ltp+20,pdh:r.pdh+20,pdl:r.pdl+20})));current[symbol]=c;}
+ let fetches=0;const state:any={date:tradeDate,recordedDates,current,history:{},baseline:{},health:{}};ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){fetches++;}};vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'7'}})}});const page=nodes.get('mb-page');assert(page.innerHTML.includes('🚨 🚦🚦🚦 CE'));assert(page.innerHTML.includes('Premium index'));assert(page.innerHTML.includes('CE strike'));assert(page.innerHTML.includes('PE strike'));
+ page.onchange({target:{id:'mb-behaviour-ce',value:'22100'}});assert(page.innerHTML.includes('strike 22100 CE / 22000 PE'));ctx.installed.render();assert(page.innerHTML.includes('strike 22100 CE / 22000 PE'));
+ page.onchange({target:{id:'mb-behaviour-index',value:'SENSEX'}});assert(page.innerHTML.includes('Premium behaviour · SENSEX'));
+ page.onchange({target:{id:'mb-behaviour-index',value:'NIFTY'}});assert(page.innerHTML.includes('strike 22100 CE / 22000 PE'));assert.equal(fetches,0);
+ state.date='2026-10-09';ctx.installed.render();assert(!page.innerHTML.includes('strike 22100 CE / 22000 PE'));
+});
+
+test('historical consensus uses event-time context and cannot borrow later VIX or unverified full PCR',()=>{const models:any={};for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){const c=fixture();for(const k of ['market','options','chain'] as const)c[k].forEach(r=>r.symbol=symbol);c.options.forEach(r=>{r.pdh=114;r.pdl=84;});c.options.push(...c.options.map(r=>({...r,expiry:'2026-10-27'})));c.chain.push(...c.chain.map(r=>({...r,expiry:'2026-10-27'})));c.market.at(-1)!.india_vix=99;if(symbol==='SENSEX')c.chain.filter(r=>r.expiry==='2026-10-27').forEach(r=>r.full_pcr_source='Unverified');models[symbol]=run(c,{symbol});}const e=consensus(models).events.find(e=>e.side==='CE');assert(e);assert.equal(e.at,at(15));assert.equal(e.groups[0].vix.value,15.15);assert.equal(e.latest,false);assert.equal(e.contextComplete,false);assert.equal(e.groups[1].pcr.find(p=>p.expiry==='2026-10-27').value,null);});

@@ -67,11 +67,14 @@ export function installDashboardReading() {
       if(headers.length>=7)table.setAttribute('data-op-wide','true');
       rows.forEach(row=>Array.from(row.children).forEach((cell,i)=>cell.setAttribute('data-op-label',headers[i])));
     }
+    const small:Element[]=[];
     for (const el of root.querySelectorAll('p,small,label,button,th,td,span,div')) {
-      if (el.closest('#op-reading-tools,svg,script,style') || !Array.from(el.childNodes).some(n=>n.nodeType===3 && n.textContent?.trim())) continue;
+      if (el.getAttribute('data-op-small')==='true' || el.closest('#op-reading-tools,svg,script,style') || !Array.from(el.childNodes).some(n=>n.nodeType===3 && n.textContent?.trim())) continue;
       const font = Number.parseFloat(window.getComputedStyle(el).fontSize);
-      if (font > 0 && font < 16) el.setAttribute('data-op-small','true');
+      if (font > 0 && font < 16) small.push(el);
     }
+    // Measure first, then write: avoid forcing layout after each marked element.
+    small.forEach(el=>el.setAttribute('data-op-small','true'));
   };
   decorate(body);
   if (typeof MutationObserver !== 'undefined') {
@@ -79,7 +82,7 @@ export function installDashboardReading() {
     const observer = new MutationObserver(records=>{
       records.forEach(r=>{if(r.target instanceof Element)pending.add(r.target);});
       if(scheduled)return;scheduled=true;
-      window.requestAnimationFrame(()=>{scheduled=false;for(const root of pending)if(root.isConnected)decorate(root);pending.clear();});
+      window.requestAnimationFrame(()=>{scheduled=false;const roots=[...pending].filter(root=>root.isConnected);pending.clear();for(const root of roots)if(!roots.some(parent=>parent!==root&&parent.contains(root)))decorate(root);});
     });
     observer.observe(body,{childList:true,subtree:true});
   }

@@ -123,3 +123,9 @@ An unchanged ten-second health tick updates the health text without replacing th
 Reading decoration measures all unmarked text first and applies font attributes in a separate write phase, avoiding a read/layout/write cycle per element. Already marked text skips repeated measurement; overlapping mutation targets are decorated once. Existing values, selector events, refresh cadence and data/trade authority are preserved. Validation covers unchanged-refresh DOM preservation, real index/data updates and read-before-write font batching.
 
 Health ticks also avoid rebuilding unchanged detailed annex panels. A change in source freshness state still updates those panels, while recording and selection updates continue through the existing render paths. This prevents background detailed-panel regeneration from occupying the browser while a native premium selector is open.
+
+## Completed-session replay scheduling
+
+Automatic refresh stops replay/quote/context requests for a completed loaded window only after all three indices have TRUE market, option and chain recordings within the final three-minute bucket of the requested end. Incomplete or failed loads continue recovery; live windows retain the existing sixty-second refresh. Health labels still update, and manual Refresh always rechecks the recording. This avoids downloading and recalculating full historical sessions every minute after close.
+
+The book view defers hidden annex multi-session preload. Previous-session baseline reads remain, and the existing Load earlier sessions control explicitly loads additional history. Detailed terminal history behavior stays available. No recorder, database, archive, signal or order behavior changes.

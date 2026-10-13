@@ -87,3 +87,23 @@ Latest SH/SL markers for Spot and full PCR require a strict local reversal acros
 The full-chart dialog retains all three indices and updates from existing state. Its mode/range controls reuse the same calculations. ★ means matching exact endpoints with nonzero Spot/PCR changes in the same direction; ☆ means opposite direction or a flat series; unverified pairs remain unavailable. This is a descriptive alignment mark, with no strength/probability/trade authority.
 
 Validation: 70 dashboard/model/serialized-browser tests pass, including three-index overlay exclusion, chart/dialog controls, sample-turn confirmation, gaps, missing daily sessions and identity-specific raw chart markers.
+
+## Simple premium behaviour card
+
+The Premium behaviour chapter begins with a compact card for the selected index and locked strike across every actually recorded expiry. Each expiry shows CE and PE premium, selected-window rupee/percentage change, DTE, its own PDH/PDL position, existing level-behaviour description and baseline/current recording timestamps. The month board and all-strike history remain expandable. The same card is available in the expiry-comparison view.
+
+Paired descriptions (CE rising / PE falling, reverse, both rising/falling, flat/mixed) require positive same-contract baselines, identical baseline/current timestamps and a current recording matching the index context. Missing sides, stale recordings or absent exact baselines withhold paired descriptions. Level colour requires positive ordered own-contract PDH/PDL and the current context timestamp. This card reuses the existing shared refresh; it adds no calls, timers, storage, candidate or order authority. Recording-time alignment is not proof of exchange quote freshness.
+
+Validation: 59 market-book, strike-comparison and dashboard tests pass, including serialized production rendering, selected-index isolation, missing sides/baselines and invalid levels.
+
+New PDH-up / PDL-down breaks flash only for the latest exact adjacent three-minute same-contract crossing. Positive unchanged ordered references, positive prices and a current context-matching timestamp are mandatory. Every badge retains expiry, strike, side, level, prices and interval timestamps. A subsequent outside-level sample becomes static.
+
+Gold pulsing alignment groups list at least two expiries with the same opposite CE/PE movement and identical exact current/baseline endpoints. Conflicting, stale, missing or flat peers cannot join; separate opposite groups remain distinct. Both animations honor reduced motion. No probability, trade or exchange-freshness authority is implied.
+
+Updated validation: 62 focused tests pass, including break reset, gaps, changed levels, stale sides and four-expiry group coverage.
+
+The compact card now retains the latest three timestamped own-level transitions per side: PDH break/loss, PDL break/recovery and PDH rejection confirmed by two lower adjacent samples. It exposes the latest event time directly and the recorded interval, prices and level in expandable history. Gaps, missing/nonpositive prices and changed/invalid references cannot establish transitions. Historical events remain visible after price moves away; only a new latest-interval break flashes.
+
+The card labels its selected recording session. Existing dashboard startup selects today's IST date after market open and reads the existing CORE archive, including completed-session records after close; it does not substitute an older date if today's data is absent. Before release, the 2026-10-13 date index showed 127 markers for each of the three indices, ending at 15:30 IST. A NIFTY 15:24–15:30 CORE read returned 270 option rows and three actual recorded expiries (13, 19 and 27 October). This inventory is not all exchange expiries; an absent fourth expiry remains absent.
+
+Validation: 73 focused model/UI/refresh/replay tests pass, including timeline history, event confirmation intervals, missing data and serialization.

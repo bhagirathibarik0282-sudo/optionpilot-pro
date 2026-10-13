@@ -137,3 +137,48 @@ test('six-minute PCR comparisons require exact endpoints; T0 never uses missing 
 });
 
 test('day change is independent of interval baseline and missing previous close fails closed',()=>{const c=fixture();c.market.forEach(r=>(r as any).spot_prev_close=22100);const m=run(c);assert.equal(m.spot.delta,3);assert.equal(m.spot.day.delta,-82);assert.equal(m.spot.day.from,22100);assert.equal(run(fixture()).spot.day.delta,null);(c.market.at(-1) as any).spot_prev_close=0;assert.equal(run(c).spot.day.percent,null);});
+
+test('simple multi-expiry behaviour preserves locked strike and independent expiry states',()=>{
+ const c=fixture(),base=[...c.options];c.options.push(...base.map(r=>({...r,expiry:'2026-10-19',ltp:r.option_type==='CE'?200-r.ltp:200-r.ltp})));
+ const rows=run(c).premiumBehaviourRows;assert.equal(rows.length,2);assert.equal(rows[0].state,'CE rising · PE falling');assert.equal(rows[1].state,'PE rising · CE falling');assert(rows.every(r=>r.ce.premium.strike===22000&&r.pe.premium.strike===22000));assert.equal(rows[0].ce.levelState,'Above PDH');assert.equal(rows[0].pe.levelState,'Below PDL');
+});
+test('simple behaviour withholds stale pairs, missing exact baselines and invalid own levels',()=>{
+ const c=fixture();c.options=c.options.filter(r=>!(r.option_type==='PE'&&r.minute_bucket===at(18)));let r=run(c).premiumBehaviourRows[0];assert.equal(r.state,'Comparison unavailable');assert.equal(r.pe.usable,false);assert.equal(r.pe.tone,'NEUTRAL');
+ r=run(fixture(),{window:'5m'}).premiumBehaviourRows[0];assert.equal(r.aligned,false);assert.equal(r.state,'Comparison unavailable');
+ const invalid=fixture();invalid.options.forEach(r=>{r.pdh=80;r.pdl=90;});r=run(invalid).premiumBehaviourRows[0];assert.equal(r.ce.levelState,'Levels unavailable');assert.equal(r.ce.tone,'NEUTRAL');
+ const missing=fixture();missing.options=missing.options.filter(r=>r.option_type==='CE');assert.equal(run(missing).premiumBehaviourRows[0].pe.usable,false);
+});
+test('simple behaviour serializes in production chapter and follows selected index without new fetches',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1],nodes=new Map<string,any>();
+ for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
+ const c=fixture();c.options.forEach(r=>{r.pdh=116;r.pdl=84;});c.options.push(...c.options.map(r=>({...r,expiry:'2026-10-19'})));let fetches=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({date:tradeDate,recordedDates,current:{NIFTY:c},history:{},baseline:{},health:{}}),refresh(){fetches++;}};vm.runInContext('installMarketBook(api)',ctx);
+ nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'7'}})}});const page=nodes.get('mb-page');assert(page.innerHTML.includes('Premium behaviour · NIFTY · strike 22'));assert(page.innerHTML.includes('2 recorded expiries'));assert(page.innerHTML.includes('Aligned expiries · 2026-10-13 / 2026-10-19'));assert(page.innerHTML.includes('PDH BREAK ↑'));assert(page.innerHTML.includes('PDL BREAK ↓'));assert(page.innerHTML.includes('mb-premium-flash mb-up'));assert(page.innerHTML.includes('Latest event · PDH BREAK ↑'));assert(page.innerHTML.includes('Recent PDH / PDL event times'));assert(page.innerHTML.includes('Recorded session 2026-10-08'));assert(page.innerHTML.includes('CE rising · PE falling'));assert(page.innerHTML.includes('Detailed month board, all strikes &amp; history'));assert(!page.innerHTML.includes('undefined'));
+ nodes.get('mb-index').value='SENSEX';nodes.get('mb-index').onchange();assert(page.innerHTML.includes('Premium behaviour · SENSEX'));assert(page.innerHTML.includes('No recorded expiry contracts.'));assert.equal(fetches,0);
+});
+
+test('premium break badges require an exact new own-level crossing and reset after the next recording',()=>{
+ const c=fixture();c.options.forEach(r=>{r.pdh=116;r.pdl=84;});let r=run(c).premiumBehaviourRows[0];assert.equal(r.ce.breakEvent?.label,'PDH BREAK ↑');assert.equal(r.pe.breakEvent?.label,'PDL BREAK ↓');assert.equal(r.ce.breakEvent?.fromAt,at(15));assert.equal(r.ce.breakEvent?.at,at(18));
+ assert.equal(run(fixture()).premiumBehaviourRows[0].ce.breakEvent,null);
+ c.options.push(...c.options.filter(r=>r.minute_bucket===at(18)).map(r=>({...r,minute_bucket:at(21),ltp:r.option_type==='CE'?121:79})));c.market.push({...c.market.at(-1)!,minute_bucket:at(21),spot_ltp:22021});r=run(c).premiumBehaviourRows[0];assert.equal(r.ce.breakEvent,null);assert.equal(r.pe.breakEvent,null);
+});
+test('break alerts reject missing adjacent data, reference changes and stale sides',()=>{
+ for(const mutate of [
+  (c:any)=>{c.options=c.options.filter((r:any)=>r.minute_bucket!==at(15));},
+  (c:any)=>{c.options.filter((r:any)=>r.minute_bucket===at(15)).forEach((r:any)=>r.pdh=117);},
+  (c:any)=>{c.options=c.options.filter((r:any)=>r.minute_bucket!==at(18));}
+ ]){const c=fixture();c.options.forEach(r=>{r.pdh=116;r.pdl=84;});mutate(c);const r=run(c).premiumBehaviourRows[0];assert.equal(r.ce.breakEvent,null);assert.equal(r.pe.breakEvent,null);}
+});
+test('expiry alignment lists every matching expiry and excludes opposite, flat, stale or unsynchronized peers',()=>{
+ const c=fixture(),base=[...c.options];for(const ex of ['2026-10-19','2026-10-26','2026-10-30'])c.options.push(...base.map(r=>({...r,expiry:ex})));
+ let m=run(c);assert.equal(m.premiumExpiryAlignment[0].expiries.length,4);
+ c.options=c.options.filter(r=>!(r.expiry==='2026-10-30'&&r.minute_bucket===at(18)));m=run(c);assert.equal(m.premiumExpiryAlignment[0].expiries.length,3);assert(!m.premiumExpiryAlignment[0].expiries.includes('2026-10-30'));
+ c.options.filter(r=>r.expiry==='2026-10-26').forEach(r=>r.ltp=200-r.ltp);m=run(c);assert.deepEqual(m.premiumExpiryAlignment[0].expiries,[expiry,'2026-10-19']);assert.equal(m.premiumExpiryAlignment.length,1);
+ assert.equal(run(c,{window:'5m'}).premiumExpiryAlignment.length,0);
+});
+
+test('timestamped own-level timeline preserves break/recovery/rejection intervals after the event',()=>{
+ const c=fixture();const prices=[100,89,92,110,108,105,104];c.options.filter(r=>r.option_type==='CE').forEach((r,i)=>r.ltp=prices[i]);const side=run(c).premiumBehaviourRows[0].ce;
+ assert.deepEqual(side.levelTimeline.map(e=>e.label),['PDH REJECTION · 2 lower samples','PDH LOST ↓','PDL RECOVERY ↑']);assert.equal(side.levelTimeline[0].fromAt,at(9));assert.equal(side.levelTimeline[0].at,at(15));assert.equal(side.levelTimeline[2].at,at(6));assert.equal(side.breakEvent,null);
+ const gap=fixture();gap.options=gap.options.filter(r=>r.minute_bucket!==at(3));gap.options.filter(r=>r.option_type==='CE').forEach((r,i)=>r.ltp=i===0?89:92);assert.equal(run(gap).premiumBehaviourRows[0].ce.levelTimeline.length,0);
+});

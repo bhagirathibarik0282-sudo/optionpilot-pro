@@ -88,6 +88,34 @@ export function deriveMarketBook(input: any) {
  chain.forEach((r,i)=>{const before=chain[i-1];if(!before)return;const gap=(Date.parse(r.minute_bucket)-Date.parse(before.minute_bucket))/60000;if(gap<=0||gap>3)return;for(const side of ['call','put']){const f=side+'_wall_strike',a=num(r[f]),b=num(before[f]);if(a!==null&&b!==null&&a!==b)events.push({symbol,expiry,side:side.toUpperCase(),minute_bucket:r.minute_bucket,previousAt:before.minute_bucket,from:b,to:a,oldOi:num(before[side+'_wall_oi']),newOi:num(r[side+'_wall_oi']),gapMinutes:gap});}});
  events.sort((a,b)=>Date.parse(b.minute_bucket)-Date.parse(a.minute_bucket));
  const allExpiryPairs=buckets.map(e=>({expiry:e,ce:premium(e,strike,'CE'),pe:premium(e,strike,'PE')}));
+ const premiumBehaviourRows=allExpiryPairs.map(pair=>{
+  const {ce,pe}=pair;
+  const current=!!spot.at&&ce.at===spot.at&&pe.at===spot.at&&ce.value!==null&&ce.value>0&&pe.value!==null&&pe.value>0;
+  const aligned=current&&!!ce.fromAt&&ce.fromAt===pe.fromAt&&ce.from!==null&&ce.from>0&&pe.from!==null&&pe.from>0&&ce.delta!==null&&pe.delta!==null;
+  const state=!aligned?'Comparison unavailable':ce.delta>0&&pe.delta<0?'CE rising · PE falling':ce.delta<0&&pe.delta>0?'PE rising · CE falling':ce.delta>0&&pe.delta>0?'Both rising':ce.delta<0&&pe.delta<0?'Both falling':'Flat / mixed';
+  const side=(p:any)=>{const usable=!!spot.at&&p.at===spot.at&&p.value!==null&&p.value>0,levels=usable&&p.pdh!==null&&p.pdl!==null&&p.pdh>p.pdl&&p.pdl>0;
+   const rs=optionGroups.get(p.identity)||[],last=rs.at(-1),previous=rs.at(-2);
+   const adjacent=levels&&previous&&Date.parse(last.minute_bucket)-Date.parse(previous.minute_bucket)===180000&&num(previous.ltp)!==null&&Number(previous.ltp)>0&&num(previous.pdh)===p.pdh&&num(previous.pdl)===p.pdl;
+   const crossing=adjacent&&previous.ltp<=p.pdh&&p.value>p.pdh?'PDH BREAK ↑':adjacent&&previous.ltp>=p.pdl&&p.value<p.pdl?'PDL BREAK ↓':null;
+   const breakEvent=crossing?{label:crossing,level:crossing.startsWith('PDH')?p.pdh:p.pdl,fromAt:previous.minute_bucket,at:p.at,previous:Number(previous.ltp),value:p.value}:null;
+   const levelTimeline:any[]=[];
+   const comparable=(a:any,b:any)=>a&&b&&Date.parse(b.minute_bucket)-Date.parse(a.minute_bucket)===180000&&num(a.ltp)!==null&&Number(a.ltp)>0&&num(b.ltp)!==null&&Number(b.ltp)>0&&num(a.pdh)!==null&&num(a.pdl)!==null&&Number(a.pdh)>Number(a.pdl)&&Number(a.pdl)>0&&num(a.pdh)===num(b.pdh)&&num(a.pdl)===num(b.pdl);
+   rs.forEach((now,i)=>{const prev=rs[i-1];if(!comparable(prev,now))return;
+    const event=(label:string,level:number,fromAt=prev.minute_bucket,previous=Number(prev.ltp))=>levelTimeline.push({label,level,fromAt,at:now.minute_bucket,previous,value:Number(now.ltp)});
+    if(prev.ltp<=now.pdh&&now.ltp>now.pdh)event('PDH BREAK ↑',Number(now.pdh));
+    if(prev.ltp>=now.pdl&&now.ltp<now.pdl)event('PDL BREAK ↓',Number(now.pdl));
+    if(prev.ltp<now.pdl&&now.ltp>=now.pdl)event('PDL RECOVERY ↑',Number(now.pdl));
+    if(prev.ltp>=now.pdh&&now.ltp<now.pdh)event('PDH LOST ↓',Number(now.pdh));
+    const before=rs[i-2];if(comparable(before,prev)&&before.ltp>=now.pdh&&prev.ltp<now.pdh&&now.ltp<prev.ltp)event('PDH REJECTION · 2 lower samples',Number(now.pdh),before.minute_bucket,Number(before.ltp));
+   });
+   return {premium:p,usable,breakEvent,levelTimeline:levelTimeline.slice(-3).reverse(),levelState:!usable?'Current recording unavailable':!levels?'Levels unavailable':p.value>p.pdh?'Above PDH':p.value<p.pdl?'Below PDL':p.value===p.pdh?'At PDH':p.value===p.pdl?'At PDL':'Inside PDH / PDL',tone:levels?p.levelBehaviour.tone:'NEUTRAL',behaviour:levels?p.levelBehaviour.state:'Unverified'};
+  };
+  return {expiry:pair.expiry,ce:side(ce),pe:side(pe),aligned,state,at:aligned?ce.at:null,fromAt:aligned?ce.fromAt:null};
+ });
+ const premiumExpiryAlignment=['CE rising · PE falling','PE rising · CE falling'].flatMap(state=>{
+  const groups=new Map<string,any[]>();premiumBehaviourRows.filter(r=>r.aligned&&r.state===state).forEach(r=>{const key=r.fromAt+'|'+r.at;groups.set(key,[...(groups.get(key)||[]),r]);});
+  return [...groups.values()].filter(rows=>rows.length>=2).map(rows=>({state,expiries:rows.map(r=>r.expiry),fromAt:rows[0].fromAt,at:rows[0].at}));
+ });
  // Month inventory comes from this index's actual recorded contracts, without a four-expiry cap.
  const boardMonths=[...new Set(buckets.filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e)).map(e=>e.slice(0,7)))];
  const boardMonth=input.boardMonth||tradeDate.slice(0,7);
@@ -148,5 +176,5 @@ export function deriveMarketBook(input: any) {
  const session={fromAt:firstPair?.at||null,at:spot.at===pcr.at?spot.at:null,spotDelta:spot.at===pcr.at?delta(spot.value,firstPair?.spot):null,pcrDelta:spot.at===pcr.at?delta(pcr.value,firstPair?.pcr):null};
  const spotPcr={alignment,turns:{spot:sampledTurns(spot),pcr:sampledTurns(pcr)},ready:pairReady,state:pairReady?pairDirection(spot.delta,pcr.delta):'Unverified: matching exact endpoints unavailable',at:spot.at===pcr.at?spot.at:null,fromAt:pairReady?spot.fromAt:null,windows:pairWindows,timeline:pairTimeline,session,spotSourceAt:m?.exchange_timestamp||null,scope:'Same recorded expiry and exact recording buckets; source timestamps and chain completeness require separate verification. Arrows describe changes only',priorPcr:{value:num(priorPcr?.full_chain_oi_pcr),at:priorPcr?.minute_bucket||null}};
  const positioning={at:positionAt,spotMetric:metrics(market.filter(r=>positionAt&&Date.parse(r.minute_bucket)<=Date.parse(positionAt)),'spot_ltp','market'),spot:num(positionSpot?.spot_ltp),spotAt:positionSpot?.minute_bucket||null,pdh:num(positionSpot?.pdh),pdl:num(positionSpot?.pdl),changes,topCalls:top('CE'),topPuts:top('PE'),callPersistence:persistence('call'),putPersistence:persistence('put'),samples:coverageRows.length,gaps,sessionGaps,baselineAvailable:!!oldChain,timeline,expiryContext,scope:'Rank and share use returned recorded strikes only; full-chain concentration is unavailable.'};
- return {symbol,tradeDate,priorDate,baselineDate,window,minutes,sessions,expiry,oppositeExpiry,expiries:buckets,strike,strikes,comparison,spot,future,ce,pe,pcr,callWall:wall('call'),putWall:wall('put'),bias,synced,expiryPairs,allExpiryPairs,monthlyPremiumBoard,comparisonRows,observedChanges,graphPairs,behaviour,events,positioning,notableGroups,premiumOverview,spotPcr,vix:metrics(market,'india_vix','market'),truth:'TRUE recorded rows only',historyDates:[...new Set(historyRows('market').map(r=>date(r.minute_bucket)))].sort(),fourthExpiryMissing:buckets.length<4};
+ return {symbol,tradeDate,priorDate,baselineDate,window,minutes,sessions,expiry,oppositeExpiry,expiries:buckets,strike,strikes,comparison,spot,future,ce,pe,pcr,callWall:wall('call'),putWall:wall('put'),bias,synced,expiryPairs,allExpiryPairs,premiumBehaviourRows,premiumExpiryAlignment,monthlyPremiumBoard,comparisonRows,observedChanges,graphPairs,behaviour,events,positioning,notableGroups,premiumOverview,spotPcr,vix:metrics(market,'india_vix','market'),truth:'TRUE recorded rows only',historyDates:[...new Set(historyRows('market').map(r=>date(r.minute_bucket)))].sort(),fourthExpiryMissing:buckets.length<4};
 }

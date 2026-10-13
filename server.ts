@@ -4505,6 +4505,9 @@ setInterval(() => {
   const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
   const ist = new Date(istString);
   const minutesSinceMidnight = ist.getHours() * 60 + ist.getMinutes();
+  // A deployment can start between grid minutes; wait for the next actual
+  // grid minute instead of capturing the floor slot with an off-grid timestamp.
+  if (minutesSinceMidnight % 3 !== 0) return;
   const slot = Math.floor(minutesSinceMidnight / 3); // one slot per 3-minute window
   if (slot === lastRecorderSlot) return; // already captured this slot
   lastRecorderSlot = slot;

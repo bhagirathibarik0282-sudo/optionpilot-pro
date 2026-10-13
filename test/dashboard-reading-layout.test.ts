@@ -23,3 +23,9 @@ test('failed news/holiday HTTP responses cannot replace lists with error objects
   good=true;await ctx.run();assert.equal(ctx.read().length,0);assert.equal(updates,1);
  }
 });
+
+test('reading font decoration measures all unmarked text before writing style attributes',()=>{
+ const log:string[]=[],attrs=new Map();const elements=[0,1,2].map(i=>({i,childNodes:[{nodeType:3,textContent:'Text'}],closest:()=>null,getAttribute:(name:string)=>attrs.get(i+name),setAttribute:(name:string,value:string)=>{log.push('write'+i);attrs.set(i+name,value);}}));
+ const size:any={value:'comfortable'},tables:any={value:'cards'},body:any={dataset:{},closest:()=>null,querySelectorAll:(selector:string)=>selector==='table'?[]:elements};const ctx:any={document:{body,querySelectorAll:()=>[],getElementById:(id:string)=>id==='op-reading-size'?size:tables},window:{localStorage:{getItem:()=>null,setItem(){}},getComputedStyle:(el:any)=>{log.push('read'+el.i);return {fontSize:'12px'};}}};vm.createContext(ctx);const script=[...withDashboardReading('<html><head></head><body></body></html>').matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)![1];vm.runInContext(script,ctx);assert.deepEqual(log,['read0','read1','read2','write0','write1','write2']);
+ log.length=0;vm.runInContext(script,ctx);assert.deepEqual(log,[],'already marked text needs no repeated font read/write');
+});

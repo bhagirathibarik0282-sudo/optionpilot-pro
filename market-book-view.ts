@@ -46,11 +46,12 @@ body{font-size:18px}main,#observations-view{width:100%;max-width:none;margin:0;p
 
 export function installMarketBook(api:any) {
  const $=(id:string)=>document.getElementById(id) as any,root=$('market-book');if(!root)return null;
+ const emptyHistory:any[]=[];let lastRenderKey:any[]|null=null;
  const chapters=['Overview','Spot + pivots','Premium comparison','Four expiries','Futures','OI + walls','Notable changes','Premium behaviour','Sectors + stocks','Spot + full PCR','FII / DII','India VIX','Combined context'];
  let spotLevels='DAY',spotCompareMode='DUAL',spotCompareSpan='SESSION',showSpotTurns=true;
  let premiumView='PAIR',expiryScope='ALL',graphSide='CE',graphMetric='PERCENT';
  let behaviourStrikes:any={};
- let boardMonth='',boardIndex='NIFTY',boardFib=false,boardStrikesByIndex:any={};
+ let boardMonth='',boardIndex='NIFTY',boardFib=false,boardStrikesByIndex:any={},boardCache:any={};
  let page=0,win='3m',symbol='NIFTY',expiry='',opposite='',strike:number|undefined,compareStrike:number|null=null,legacy=false,notableFilter='ALL',behaviourFilter='ALL',participationFilter='ALL',models:any={},cache:any={},chartRecords=new Map<string,any>(),expandedChart:string|null=null,showPivots=false,showOpening=false,showPremiumLevels=true,date='';
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const n=(v:any)=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v);
@@ -229,7 +230,7 @@ export function installMarketBook(api:any) {
  }
  function monthlyBoard(state:any){
   const names=['NIFTY','BANKNIFTY','SENSEX'],month=boardMonth||state.date?.slice(0,7)||'';
-  const boards=names.map(s=>api.derive({symbol:s,tradeDate:state.date,recordedDates:state.recordedDates,current:state.current[s],history:[state.baseline[s]||{},...(state.history[s]||[])],window:win,boardMonth:month,boardStrike:boardStrikesByIndex[s]}));
+  const boards=names.map(s=>{const h=state.history[s]||emptyHistory,key=[state.date,state.recordedDates,state.current[s],state.baseline[s],h,win,month,boardStrikesByIndex[s]],cached=boardCache[s];if(!cached||key.some((v,i)=>v!==cached.key[i]))boardCache[s]={key,model:api.derive({symbol:s,tradeDate:state.date,recordedDates:state.recordedDates,current:state.current[s],history:[state.baseline[s]||{},...h],window:win,boardMonth:month,boardStrike:boardStrikesByIndex[s]})};return boardCache[s].model;});
   const a=boards.find(a=>a.symbol===boardIndex),b=a.monthlyPremiumBoard;
   if(boardStrikesByIndex[boardIndex]===undefined&&b.strike!==null)boardStrikesByIndex[boardIndex]=b.strike;
   const months=[...new Set([month,...boards.flatMap(a=>a.monthlyPremiumBoard.months)])].sort();
@@ -242,14 +243,18 @@ export function installMarketBook(api:any) {
   out+='<div class="mb-month-board" role="region" aria-label="Monthly premium reference table" tabindex="0"><table><thead><tr><th>Exact contract / DTE</th><th>Premium ₹</th>'+keys.map(k=>'<th>'+esc(labels[k]||k+' ₹')+'</th>').join('')+'<th>Recording / reference context</th></tr></thead><tbody>'+b.rows.map((r:any)=>{const p=r.premium;return '<tr><th scope="row">'+esc(p.expiry)+'<br>'+esc(p.strike??'Unavailable')+' '+esc(p.type)+note('DTE '+fmt(p.dte,0))+'</th><td>'+fmt(p.value)+note(r.fresh?'Latest aligned recording':'Unavailable / older recording')+'</td>'+keys.map(k=>cell(r,k)).join('')+'<td class="mb-board-meta">'+esc(when(p.at))+note('Index health '+(state.health[boardIndex]?.freshness?.state||state.health[boardIndex]?.state||'Unavailable'))+note('Pivot reference '+when(r.pivotAt))+note('Opening samples '+r.openingSamples+'/5 · '+p.source)+'</td></tr>';}).join('')+'</tbody></table></div>';
   return out+note('Green/red cells mean this premium is above/below its own reference, not index direction or a trade signal. Each expiry/strike/CE/PE identity stays exact. 15m H/L require all five 09:15–09:27 recorded samples, not exchange candle extremes. Fibonacci uses the same contract’s previous recorded session and exact 15:30 endpoint; load earlier sessions if unavailable. Current timestamps are recording times, not proof of exchange freshness. Only loaded recorded expiries are shown; complete exchange inventory is unproven.');
  }
- function render(){
+ function render(force=false){
+  if(force){cache={};boardCache={};lastRenderKey=null;}
   tableSequence=0;
   const state=api.getState(),symbols=['NIFTY','SENSEX','BANKNIFTY'];if(date!==state.date){date=state.date;cache={};behaviourStrikes={};expiry='';opposite='';strike=undefined;compareStrike=null;}
-  for(const s of symbols){const bs=behaviourStrikes[s]||{},h=state.history[s]||[],c=cache[s],key=[state.current[s],state.baseline[s],h,win,s===symbol?expiry:'',s===symbol?opposite:'',s===symbol?strike:undefined,s===symbol?compareStrike:null,state.date,state.recordedDates,premiumView,expiryScope,bs.CE,bs.PE];
+  for(const s of symbols){const bs=behaviourStrikes[s]||{},h=state.history[s]||emptyHistory,c=cache[s],key=[state.current[s],state.baseline[s],h,win,s===symbol?expiry:'',s===symbol?opposite:'',s===symbol?strike:undefined,s===symbol?compareStrike:null,state.date,state.recordedDates,premiumView,expiryScope,bs.CE,bs.PE];
    if(!c||key.some((v,i)=>v!==c.key[i])){models[s]=api.derive({symbol:s,tradeDate:state.date,recordedDates:state.recordedDates,current:state.current[s],history:[state.baseline[s]||{},...h],window:win,expiry:s===symbol?expiry:'',oppositeExpiry:s===symbol?opposite:'',strike:s===symbol?strike:undefined,compareStrike:s===symbol?compareStrike:null,comparisonView:premiumView,expiryScope,behaviourCEStrike:bs.CE,behaviourPEStrike:bs.PE});cache[s]={key};}}
   const m=models[symbol];$('mb-date').value=state.date||'';$('mb-memory').disabled=!!state.loading;$('mb-refresh').disabled=!!state.loading;expiry=m.expiry;opposite=m.oppositeExpiry;strike=m.strike;compareStrike=m.comparison?.strike??null;chartRecords.clear();
-  options($('mb-expiry'),m.expiries,expiry);options($('mb-opposite'),m.expiries,opposite);options($('mb-strike'),m.strikes,strike);const pinned=$('mb-pinned-compare');pinned.innerHTML='<option value="">No comparison</option>'+m.strikes.filter((k:any)=>k!==strike).map((k:any)=>'<option value="'+k+'">'+k+'</option>').join('');pinned.value=compareStrike===null?'':String(compareStrike);
   $('mb-health').textContent='Observation '+(state.date||'not loaded')+' · '+win+' exact endpoints · '+symbols.map(s=>s+': '+(state.health[s]?.freshness?.state||state.health[s]?.state||'Unavailable')+' '+when(models[s].spot.at)).join(' | ')+' · Earlier dates in memory: '+symbols.map(s=>s+' '+models[s].historyDates.length).join(' / ')+' · existing 60s dashboard checks / 3-minute recorder; not a tick feed.';
+  const renderKey=[page,win,symbol,expiry,opposite,strike,compareStrike,premiumView,expiryScope,graphSide,graphMetric,notableFilter,behaviourFilter,participationFilter,boardMonth,boardIndex,boardFib,JSON.stringify(boardStrikesByIndex),spotLevels,spotCompareMode,spotCompareSpan,showSpotTurns,showPivots,showOpening,showPremiumLevels,expandedChart,state.date,state.loading,state.quoteLoading,state.sectors,state.cash,state.ratings?.length?state.ratings:null,...symbols.flatMap(s=>[models[s],state.stocks?.[s],state.quoteStatus?.[s],state.health[s]?.state,state.health[s]?.freshness?.state]),state.quoteStatus?.sectors];
+  if(lastRenderKey&&renderKey.every((v,i)=>v===lastRenderKey![i]))return;
+  lastRenderKey=renderKey;
+  options($('mb-expiry'),m.expiries,expiry);options($('mb-opposite'),m.expiries,opposite);options($('mb-strike'),m.strikes,strike);const pinned=$('mb-pinned-compare');pinned.innerHTML='<option value="">No comparison</option>'+m.strikes.filter((k:any)=>k!==strike).map((k:any)=>'<option value="'+k+'">'+k+'</option>').join('');pinned.value=compareStrike===null?'':String(compareStrike);
   if($('mb-scope'))$('mb-scope').textContent=[symbol,win,'CE '+(expiry||'Unavailable'),'PE '+(opposite||'Unavailable'),'Strike '+(strike??'Unavailable')].join(' · ');
   if($('mb-chapter')){const choices=chapters.flatMap((c,i)=>i===3?[]:[{i,c}]);$('mb-chapter').innerHTML=choices.map(v=>'<option value="'+v.i+'">'+esc(v.c)+'</option>').join('');$('mb-chapter').value=String(page);}
   $('mb-page-count').textContent=String(page<3?page+1:page).padStart(2,'0')+' / '+(chapters.length-1)+' · '+chapters[page];
@@ -298,5 +303,5 @@ export function installMarketBook(api:any) {
  const previousPageChange=$('mb-page').onchange;
  $('mb-page').onchange=(e:any)=>{if(e.target.id==='mb-board-month'){boardMonth=e.target.value;render();return;}if(e.target.id==='mb-board-strike'){boardStrikesByIndex[boardIndex]=Number(e.target.value);render();return;}previousPageChange(e);};
  $('mb-date').onchange=()=>api.setDate($('mb-date').value);$('mb-refresh').onclick=()=>api.refresh();$('mb-memory').onclick=async()=>{const b=$('mb-memory');b.disabled=true;b.textContent='Loading earlier recordings…';try{await api.memory(/^\d+s$/.test(win)?Number(win.slice(0,-1)):5);}finally{b.disabled=false;b.textContent='Load earlier sessions · all 3';render();}};
- $('mb-legacy').onclick=()=>{legacy=!legacy;$('observations-view').classList.toggle('mb-focus',!legacy);$('mb-legacy').setAttribute('aria-pressed',String(legacy));$('mb-legacy').textContent=legacy?'Hide detailed terminal':'Show detailed terminal';};$('observations-view').classList.add('mb-focus');render();return {render};
+ $('mb-legacy').onclick=()=>{legacy=!legacy;$('observations-view').classList.toggle('mb-focus',!legacy);$('mb-legacy').setAttribute('aria-pressed',String(legacy));$('mb-legacy').textContent=legacy?'Hide detailed terminal':'Show detailed terminal';};$('observations-view').classList.add('mb-focus');render();return {render:()=>render(true),refreshHealth:()=>render()};
 }

@@ -92,3 +92,7 @@ try{Date.now=()=>Date.parse('2026-10-06T10:00:00Z');const pending=sandbox.__test
 console.log('PASS: memory survives same-date refresh, date changes invalidate it, newest session loads first and is published progressively.');
 
 });
+
+test('health ticks do not rebuild unchanged detailed panels but refresh them on freshness-state changes',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),body=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][1][1];const fn=body.match(/function renderSourceHealth\(\)\{[^\n]+\}/)![0];const node:any={innerHTML:''};const ctx:any={draws:0,ticks:0,$:()=>node,esc:(s:any)=>String(s),when:(s:any)=>String(s),syncFreshnessLabels(){},renderDataAnnex(){ctx.draws++;},book:{refreshHealth(){ctx.ticks++;}},symbols:['NIFTY','SENSEX','BANKNIFTY'],loadedScope:{date:'2026-10-13'},data:{},annexView:{},indexLoadState:Object.fromEntries(['NIFTY','SENSEX','BANKNIFTY'].map(s=>[s,{state:'LOADED',freshness:{state:'RECORDED',latestAt:'2026-10-13T10:00:00Z',ageSeconds:null}}]))};vm.createContext(ctx);vm.runInContext("let annexHealthSignature='';"+fn,ctx);ctx.renderSourceHealth();ctx.renderSourceHealth();ctx.renderSourceHealth();assert.equal(ctx.draws,1);assert.equal(ctx.ticks,3);ctx.indexLoadState.NIFTY.freshness.state='DELAYED';ctx.renderSourceHealth();assert.equal(ctx.draws,2);assert(node.innerHTML.includes('DELAYED'));
+});

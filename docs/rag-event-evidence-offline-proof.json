@@ -1,0 +1,70 @@
+{
+  "status": "PARTIAL",
+  "semantics": "LOCAL_ADAPTER_VS_BUNDLED_ARCHIVE_PARITY_NOT_PRODUCTION_RUNTIME",
+  "baseCommit": "aa46fe869131ab68d8b72db6600d6579c6a956c7",
+  "checkedCases": 12,
+  "checks": [
+    {
+      "eventId": "2026-10-08:NIFTY:2026-10-19:22500:PE:09:27:PDH_BREAK",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "394f966ac9fa1c01e020c7ba0d3fb9b40e9befcbf140b1b21e5b8d9d4ede9e2b"
+    },
+    {
+      "eventId": "2026-10-08:SENSEX:2026-10-15:72400:PE:09:27:PDH_BREAK",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "bcf84feaa5f6da71539aaf000ce5376781459fcccd83ac0737320a0915aedb4e"
+    },
+    {
+      "date": "2026-10-08",
+      "index": "BANKNIFTY",
+      "time": "09:18",
+      "status": "BLOCKED_EXPECTED",
+      "reason": "NO_RECONCILED_LEVEL_CROSSING"
+    },
+    {
+      "eventId": "2026-10-09:NIFTY:2026-10-19:22250:CE:14:06:PDH_BREAK",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "70e0200e547d411bca202a6b02392dcea63f49a9ba793bb3ee54914706b86586"
+    },
+    {
+      "eventId": "2026-10-09:SENSEX:2026-10-15:71700:CE:11:00:PDH_BREAK",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "ec15cc0801bbfbeb6f88ecabf17a0f03df29d1d58a94986c03098f501a77d057"
+    },
+    {
+      "eventId": "2026-10-09:BANKNIFTY:2026-10-27:54600:CE:09:30:PDH_BREAK",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "7fab4c6e54277cae0ff0bda9faadfdd383e80deb6df74936bdb1dcbef9caff9b"
+    },
+    {
+      "eventId": "2026-10-12:NIFTY:2026-10-19:22550:CE:09:18:PDH_LOSS",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "8fa6ab6df83891d68304dda0f8e5b9437cf0a36c616636afd195a4087ec8e525"
+    },
+    {
+      "eventId": "2026-10-12:SENSEX:2026-10-15:72700:CE:12:42:PDL_RECOVERY",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "21a307075b192df77baa0153b2da71884fc7b7b22e87e676585043a4dc763e13"
+    },
+    {
+      "eventId": "2026-10-12:BANKNIFTY:2026-10-27:55300:CE:11:06:PDL_LOSS",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "313ba413ffe2cf672deb1ecb611863f0c7eb1ff522c7613595ab364462172d93"
+    },
+    {
+      "eventId": "2026-10-13:NIFTY:2026-10-19:22250:PE:09:57:PDL_LOSS",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "fb94cf3ff1274e30013057fb9c3dd220b185400d95ac295596ecba71225ef2a7"
+    },
+    {
+      "eventId": "2026-10-13:SENSEX:2026-10-15:71800:PE:13:12:PDL_LOSS",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "0ce9d339da0b5b0e72fe8d8994357d11c61fdb696d246ee59a0a139b7a29a158"
+    },
+    {
+      "eventId": "2026-10-13:BANKNIFTY:2026-10-27:54700:CE:09:18:PDL_RECOVERY",
+      "status": "MATCH",
+      "selectedEvidenceSha256": "f3e2144028490c8a81086bb6230d938bbb83b7b113d19717da02c21498a61899"
+    }
+  ]
+}

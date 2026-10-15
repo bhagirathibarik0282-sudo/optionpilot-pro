@@ -361,6 +361,10 @@ export async function dbUpsertMarketSnapshot1m(row: MarketSnapshot1mRow): Promis
   const p = getPool();
   if (!p) return;
   try {
+    // Prefer the whole H1 market row, which carries its evaluated truth status.
+    // Never attach retained truth to a different Storage V3 snapshot. Storage
+    // can insert standalone rows and invalidate its own rows; H1 can likewise
+    // replace its own row with PARTIAL/null. No historical rewrite is performed.
     await p.query(`
       INSERT INTO market_snapshot_1m (
         symbol, minute_bucket, snapshot_id, exchange_timestamp, backend_timestamp, freshness_status,
@@ -379,6 +383,8 @@ export async function dbUpsertMarketSnapshot1m(row: MarketSnapshot1mRow): Promis
         future_oi_change=EXCLUDED.future_oi_change, future_volume=EXCLUDED.future_volume,
         future_basis=EXCLUDED.future_basis, india_vix=EXCLUDED.india_vix,
         india_vix_change=EXCLUDED.india_vix_change, calculation_version=EXCLUDED.calculation_version
+      WHERE market_snapshot_1m.calculation_version IS DISTINCT FROM 'H1_RUNTIME_BRIDGE_V1'
+         OR EXCLUDED.calculation_version IS DISTINCT FROM 'STORAGE_V3_PHASE1'
     `, [
       row.symbol,row.minuteBucket,row.snapshotId ?? null,row.exchangeTimestamp ?? null,row.backendTimestamp ?? null,row.freshnessStatus ?? null,
       row.spotLtp ?? null,row.spotOpen ?? null,row.spotHigh ?? null,row.spotLow ?? null,row.spotPrevClose ?? null,row.vwap ?? null,row.pdh ?? null,row.pdl ?? null,row.gapPercent ?? null,

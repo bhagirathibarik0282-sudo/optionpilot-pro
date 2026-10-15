@@ -1,3 +1,4 @@
+import { openingGapPercent } from "./market-snapshot-semantics.js";
 import {
   dbInsert,
   dbUpsertChainState1m,
@@ -282,9 +283,7 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
       vwap: finiteOrNull(market.vwap),
       pdh: finiteOrNull(market.pdh),
       pdl: finiteOrNull(market.pdl),
-      gapPercent: Number.isFinite(market.pdcClose) && market.pdcClose !== 0
-        ? ((market.dayOpen - market.pdcClose) / market.pdcClose) * 100
-        : null,
+      gapPercent: openingGapPercent(market.dayOpen, market.pdcClose),
       futureLtp: near ? finiteOrNull(near.ltp) : null,
       futureVwap: null,
       futureOi: near ? finiteOrNull(near.oi) : null,

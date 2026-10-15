@@ -1,5 +1,6 @@
 import { persistStorageV3Minute, minuteBucketUtcIso, type StorageV3Symbol, type StorageV3WriteResult } from "./storage-v3-writer.js";
 import type { MarketSnapshot1mRow, OptionSnapshot1mRow, ChainState1mRow } from "./db.js";
+import { openingGapPercent } from "./market-snapshot-semantics.js";
 
 type Numeric = number | null | undefined;
 
@@ -259,7 +260,7 @@ export async function persistStorageV3FromExistingSnapshot(
     vwap: finite(market.vwap),
     pdh: finite(market.pdh),
     pdl: finite(market.pdl),
-    gapPercent: pdc && pdc !== 0 ? ((spot - pdc) / pdc) * 100 : null,
+    gapPercent: openingGapPercent(market.dayOpen, pdc),
     futureLtp: finite(future?.ltp),
     futureVwap: null,
     futureOi: finite(future?.oi),

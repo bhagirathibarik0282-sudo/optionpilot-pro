@@ -28,3 +28,5 @@ English and Odia date/expiry/time labels, Odia numerals, ISO or DD/MM/YYYY dates
 The test suite covers English/Odia extraction, ambiguity, source escaping, no automatic request, exact selection/cutoff parameters, stale-response suppression, missing fields, errors, standalone route and Market Book integration. Existing dashboard/model/reading and backend reader tests are included in the dedicated RAG CI workflow. Serialized DOM checks are not a substitute for real-browser visual inspection; a browser binary was unavailable locally.
 
 Merge/release and production UI acceptance remain pending. After approval, verify both entry points, example selection, query readback, missing-field handling and mobile layout against the real app.
+
+Local validation: 125 initial checks passed. The existing mobile-refresh CI exposed a script-order compatibility issue; preserving the original dashboard script positions fixed it. A focused 51-test run (including all failing refresh checks and actual recorder readback) passed after the fix. The dedicated RAG CI now also includes mobile-refresh regressions.

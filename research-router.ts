@@ -1,3 +1,4 @@
+import { renderRagEvidencePage } from './rag-evidence-card.js';
 import { Hono } from "hono";
 import { mountRagEventEvidenceRoute } from './rag-event-evidence.js';
 import {
@@ -55,6 +56,7 @@ import { H1_LIVE_GATE_EVIDENCE_PERSIST_KIND } from "./h1-live-selector-registry.
 
 export const researchRouter = new Hono();
 mountRagEventEvidenceRoute(researchRouter);
+researchRouter.get('/rag-event-evidence/view',c=>{c.header('Cache-Control','no-store');return c.html(renderRagEvidencePage());});
 
 researchRouter.get('/background-quotes', async (c) => {
   const data = await readDashboardBackgroundQuotes();

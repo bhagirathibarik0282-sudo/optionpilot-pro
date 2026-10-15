@@ -1,0 +1,68 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {Hono} from 'hono';
+import {parseRagEventRequest,buildRagEventEvidence,readRagEventEvidence,mountRagEventEvidenceRoute} from '../rag-event-evidence.js';
+import type {H1ReplayHttpResult} from '../h1-replay-http.js';
+const query={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
+const request=(extra:Record<string,string>={})=>{const p=parseRagEventRequest({...query,...extra});assert.ok(p.ok);return p.value;};
+function fixture(date:string):H1ReplayHttpResult {
+ const points=date==='2026-10-12'?['09:15','15:30']:['09:33','09:36','09:39','09:42','09:51','10:06'];
+ const market:any[]=[],options:any[]=[],chain:any[]=[];
+ for(const [i,t] of points.entries()) {
+  const ms=Date.parse(date+'T'+t+':00+05:30'),bucket=new Date(ms).toISOString(),receipt=new Date(ms+24000).toISOString(),snapshot_id=date+t;
+  market.push({symbol:'NIFTY',minute_bucket:bucket,backend_timestamp:receipt,truth_verdict:'TRUE',snapshot_id,spot_ltp:22484+i,india_vix:14.75-i*.04,calculation_version:'STORAGE_V3_PHASE1'});
+  chain.push({symbol:'NIFTY',minute_bucket:bucket,expiry:'2026-10-13',truth_verdict:'TRUE',calculation_version:'STORAGE_V3_PHASE1',full_chain_oi_pcr:1+i*.05});
+  for(const side of ['CE','PE'])options.push({symbol:'NIFTY',minute_bucket:bucket,expiry:'2026-10-13',strike:22300,option_type:side,snapshot_id,truth_verdict:'TRUE',
+    ltp:side==='CE'?200+i*10:date==='2026-10-12'?20:[12.25,11.2,9.5,7.7,6.65,6.2][i],oi:1000+i*100,quote_timestamp:receipt,quote_age_seconds:0,day_high:73.85,day_low:11.6});
+ }
+ return {ok:true,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request:{symbol:'NIFTY',tradeDate:date,fromTime:'09:15',toTime:'15:30',scope:'CORE'},market,options,chain};
+}
+const result=(extra:Record<string,string>={})=>buildRagEventEvidence(request(extra),fixture('2026-10-13'),fixture('2026-10-12'));
+test('exact own-reference crossing and no outcomes by default',()=>{
+ const r=result();assert.ok(r.ok);assert.deepEqual(r.event.flags,['PDL_LOSS']);assert.equal(r.reference.pdl,11.6);assert.equal(r.event.after,11.2);assert.deepEqual(r.outcomes,[]);
+ assert.equal(r.safety.writesPerformed,false);assert.equal(r.safety.affectsSelector,false);assert.match(r.answer,/PDL_LOSS/);
+});
+test('receipt cutoff excludes a nominal bucket not yet available; future horizons isolated',()=>{
+ assert.equal(result({asOf:'2026-10-13T09:36:00'}).ok,false);
+ const r=result({asOf:'2026-10-13T09:39:59',includeOutcomes:'true'});assert.ok(r.ok);
+ assert.equal(r.outcomes.filter(Boolean).length,1);assert.equal(r.outcomes[0]!.pair.pe!.price,9.5);
+ assert.equal(r.outcomes[1],null);assert.equal(r.outcomes[2],null);
+});
+test('rejects stale, cross-date, wrong snapshot and changed expiry',()=>{
+ for(const mutation of [{snapshot_id:'wrong'},{quote_timestamp:'2026-10-12T04:06:24Z'},{quote_timestamp:'2026-10-13T03:00:00Z'},{expiry:'2026-10-19'}]) {
+  const c=fixture('2026-10-13');Object.assign(c.options!.find(r=>r.option_type==='PE'&&r.minute_bucket==='2026-10-13T04:06:00.000Z')!,mutation);
+  assert.equal(buildRagEventEvidence(request(),c,fixture('2026-10-12')).ok,false);
+ }
+});
+test('missing prior terminal or inconsistent prior aggregate fails closed',()=>{
+ const p=fixture('2026-10-12');p.options=p.options!.filter(r=>r.minute_bucket!=='2026-10-12T10:00:00.000Z');
+ assert.equal(buildRagEventEvidence(request(),fixture('2026-10-13'),p).ok,false);
+ const p2=fixture('2026-10-12');p2.options![1].day_high=100;assert.equal(buildRagEventEvidence(request(),fixture('2026-10-13'),p2).ok,false);
+});
+test('invalid inputs rejected and supported expiry remains exact',()=>{
+ for(const extra of [{date:'2026-02-30'},{date:'2026-10-20'},{time:'09:37'},{time:'09:15'},{strike:'0'},{side:'XX'},{includeOutcomes:'1'},{asOf:'tomorrow'},{asOf:'2026-02-30T09:39:00'},{asOf:'2026-10-13T24:00:00'}])assert.equal(parseRagEventRequest({...query,...extra}).ok,false);
+ assert.equal(request({expiry:'2026-10-19'}).expiry,'2026-10-19');
+});
+test('ambiguous duplicate cannot silently select a quote',()=>{
+ const c=fixture('2026-10-13'),o=c.options!.find(r=>r.option_type==='PE'&&r.minute_bucket==='2026-10-13T04:06:00.000Z')!;
+ c.options!.push({...o,ltp:10});assert.equal(buildRagEventEvidence(request(),c,fixture('2026-10-12')).ok,false);
+});
+test('read wrapper calls only existing replay twice with bounded windows',async()=>{
+ const calls:any[]=[];const r=await readRagEventEvidence(request(),async q=>{calls.push(q);return fixture(q.tradeDate);});
+ assert.ok(r.ok);assert.equal(calls.length,2);assert.equal(calls[0].fromTime,'09:15');assert.equal(calls[0].toTime,'09:36');assert.equal(calls[1].tradeDate,'2026-10-12');
+});
+test('GET route validates, catches unavailable sources, never offers POST',async()=>{
+ const app=new Hono();mountRagEventEvidenceRoute(app,async r=>result());
+ assert.equal((await app.request('/rag-event-evidence?'+new URLSearchParams(query))).status,200);
+ assert.equal((await app.request('/rag-event-evidence')).status,400);
+ assert.equal((await app.request('/rag-event-evidence',{method:'POST'})).status,404);
+ const broken=new Hono();mountRagEventEvidenceRoute(broken,async()=>{throw Error('private connection value');});
+ const response=await broken.request('/rag-event-evidence?'+new URLSearchParams(query));assert.equal(response.status,503);assert.doesNotMatch(await response.text(),/private connection/);
+});
+test('actual recorder parity: known NIFTY event and PCR provenance',{skip:!process.env.RAG_RAW_FIXTURES},()=>{
+ const raw=(date:string)=>JSON.parse(readFileSync(process.env.RAG_RAW_FIXTURES+'/'+date+'_NIFTY.json','utf8'));
+ const r=buildRagEventEvidence(request({includeOutcomes:'true'}),raw('2026-10-13'),raw('2026-10-12'));
+ assert.ok(r.ok);assert.equal(r.reference.pdl,11.6);assert.equal(r.event.after,11.2);assert.equal(r.outcomes[0]!.pair.pe!.price,9.5);
+ assert.ok(Math.abs(r.beforeAndAt.at(-1)!.context.fullPcr!-1.0677544186098389)<1e-10);
+});

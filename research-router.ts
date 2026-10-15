@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { mountRagEventEvidenceRoute } from './rag-event-evidence.js';
 import {
   getResearchIndexReadiness,
   getResearchIndexSnapshot,
@@ -53,6 +54,7 @@ import { JEV_PINNED_MODEL } from "./jev-decision-shadow-v1.js";
 import { H1_LIVE_GATE_EVIDENCE_PERSIST_KIND } from "./h1-live-selector-registry.js";
 
 export const researchRouter = new Hono();
+mountRagEventEvidenceRoute(researchRouter);
 
 researchRouter.get('/background-quotes', async (c) => {
   const data = await readDashboardBackgroundQuotes();

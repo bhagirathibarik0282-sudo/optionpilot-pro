@@ -1,0 +1,26 @@
+name: RAG Event Evidence CI
+on:
+  pull_request:
+    paths:
+      - 'rag-event-evidence.ts'
+      - 'research-router.ts'
+      - 'h1-replay-http.ts'
+      - 'h1-fixed-contract-journey-http.ts'
+      - 'intraday-observation-memory.ts'
+      - 'test/rag-event-evidence.test.ts'
+      - '.github/workflows/rag-event-evidence-ci.yml'
+permissions:
+  contents: read
+jobs:
+  read-only-evidence:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Exact evidence and existing reader regressions
+        run: node --import tsx --test test/rag-event-evidence.test.ts test/intraday-observation-memory.test.ts test/h1-replay-http.test.ts test/h1-fixed-contract-journey-http.test.ts test/research-router-auth.test.ts
+        env:
+          NODE_ENV: test

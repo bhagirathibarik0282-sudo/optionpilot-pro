@@ -48,3 +48,6 @@ export function readDashboardLiveSnapshot(selection:Partial<Record<LiveIndex,{ex
  if(snapshot&&!connected){for(const index of snapshot.indices){for(const q of [index.spot,index.future,index.ce,index.pe]){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.state='STALE';}index.futuresBasis=null;index.fullPcr=null;index.ceTotal=null;index.peTotal=null;index.callWall=null;index.putWall=null;index.coverage.complete=false;}for(const q of [snapshot.vix,...snapshot.participation]){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.state='STALE';}}
  return {enabled:enabled(),connectionState:state,connected,serverTime:new Date().toISOString(),snapshot,source:'KITE_WEBSOCKET_FULL',createsOrders:false,affectsTelegram:false,affectsSelector:false,affectsExecution:false};
 }
+
+/** Cheap dirty check: no full-chain projection until a tick/state changes or heartbeat is due. */
+export function dashboardLiveRevision(){return state+':'+(store?.runtimeId||'none')+':'+(store?.revision()||0);}

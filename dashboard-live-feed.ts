@@ -58,6 +58,7 @@ export class DashboardLiveStore {
    this.ticks.set(p.instrumentToken,{price:price!==null&&price>0?price:null,oi:oi!==null&&oi>=0?oi:null,volume:volume!==null&&volume>=0?volume:null,bid:bid!==null&&bid>0?bid:null,ask:ask!==null&&ask>0?ask:null,close:number(p.close),observedAt:p.exchangeTimestamp||null,receivedAt,mode:p.mode});this.sequence++;
   }
  }
+ revision(){return this.sequence;}
  snapshot(now:number,selection:Partial<Record<LiveIndex,{expiry?:string;strike?:number}>>={}){
   const quote=(e:LiveEntry|undefined)=>{
    const t=e?this.ticks.get(e.token):null,age=t?now-Date.parse(t.observedAt||''):null,receiptAge=t?now-Date.parse(t.receivedAt):null;
@@ -84,7 +85,7 @@ export class DashboardLiveStore {
    const wall=(qs:typeof cq)=>{if(!complete)return null;const sorted=[...qs].sort((a,b)=>b.quote.oi!-a.quote.oi!||a.entry.strike!-b.entry.strike!);return sorted[0]?.quote.oi!>0?{strike:sorted[0].entry.strike,oi:sorted[0].quote.oi,tiedStrikes:sorted.filter(r=>r.quote.oi===sorted[0].quote.oi).map(r=>r.entry.strike)}:null;};
    return {symbol,spot,future,futuresBasis:spot.price!==null&&future.price!==null&&Math.abs(Date.parse(spot.observedAt!)-Date.parse(future.observedAt!))<=5000?future.price-spot.price:null,expiries,expiry,strikes,strike,
     ce:quote(contracts.find(e=>e.strike===strike&&e.side==='CE')),pe:quote(contracts.find(e=>e.strike===strike&&e.side==='PE')),
-    pcrAt:complete?new Date(Math.max(...sourceTimes)).toISOString():null,fullPcr:ceTotal!==null&&ceTotal>0&&peTotal!==null?peTotal/ceTotal:null,ceTotal,peTotal,callWall:wall(cq),putWall:wall(pq),coverage:{expected:contracts.length,freshOi:covered,complete,sourceSkewMs:sourceTimes.length?Math.max(...sourceTimes)-Math.min(...sourceTimes):null},
+    pcrAt:complete?new Date(Math.max(...sourceTimes)).toISOString():null,pcrReceivedAt:complete?new Date(Math.max(...[...cq,...pq].map(r=>Date.parse(r.quote.receivedAt!)))).toISOString():null,fullPcr:ceTotal!==null&&ceTotal>0&&peTotal!==null?peTotal/ceTotal:null,ceTotal,peTotal,callWall:wall(cq),putWall:wall(pq),coverage:{expected:contracts.length,freshOi:covered,complete,sourceSkewMs:sourceTimes.length?Math.max(...sourceTimes)-Math.min(...sourceTimes):null},
     greeks:{iv:null,delta:null,gamma:null,theta:null,vega:null,state:'UNAVAILABLE_FROM_KITE_TICK'}};
   });
   return {runtimeId:this.runtimeId,sequence:this.sequence,asOf:new Date(now).toISOString(),tradeDate:this.inventory.date,indices,vix:quote(all.find(e=>e.role==='VIX')),participation:all.filter(e=>e.role==='STOCK'||e.role==='SECTOR').map(quote),missing:this.inventory.missing,omittedExpiries:this.inventory.omittedExpiries,source:'KITE_WEBSOCKET_FULL',persistence:'BOUNDED_LATEST_TOKEN_MEMORY',affectsExecution:false,affectsSelector:false,affectsTelegram:false,createsOrders:false};

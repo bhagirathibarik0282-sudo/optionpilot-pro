@@ -45,3 +45,10 @@ test('SSE sends a real snapshot envelope and respects stream cancellation',async
  const app=new Hono();const sample:any={connectionState:'DISABLED',snapshot:null,createsOrders:false};mountDashboardLiveRoutes(app,()=>sample);
  const controller=new AbortController();const response=await app.request('/dashboard-live/stream',{signal:controller.signal});assert.equal(response.status,200);assert(response.headers.get('Content-Type')?.includes('text/event-stream'));const reader=response.body!.getReader();const value=await reader.read();const text=new TextDecoder().decode(value.value);assert(text.includes('event: snapshot'));assert(text.includes('"connectionState":"DISABLED"'));controller.abort();await reader.cancel();
 });
+test('same-second packets retain real millisecond receipt times without inventing exchange precision',()=>{
+ const store=fixture(),before=store.revision(),received='2026-10-16T04:30:00.125Z';store.ingest([packet(1,{lastPrice:22006})],received);const a=store.snapshot(now+125).indices[0];assert(store.revision()>before);assert.equal(a.spot.price,22006);assert.equal(a.spot.observedAt,at);assert.equal(a.spot.receivedAt,received);
+});
+test('SSE publishes changed revisions without waiting for its idle heartbeat',async()=>{
+ const app=new Hono();let version=1,reads=0;mountDashboardLiveRoutes(app,()=>({connectionState:'OPEN',snapshot:{sequence:version},reads:++reads}) as any,()=>String(version));
+ const controller=new AbortController(),response=await app.request('/dashboard-live/stream',{signal:controller.signal}),reader=response.body!.getReader();const first=new TextDecoder().decode((await reader.read()).value);assert(first.includes('"sequence":1'));version=2;const next=new TextDecoder().decode((await reader.read()).value);assert(next.includes('"sequence":2'));assert.equal(reads,2);controller.abort();await reader.cancel();
+});

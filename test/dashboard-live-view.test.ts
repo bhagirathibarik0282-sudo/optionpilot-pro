@@ -33,3 +33,7 @@ test('disabled feed is explicit and IV/Greeks are never fabricated; original scr
  const h=harness();h.streams[0].handlers.snapshot({data:JSON.stringify({connectionState:'DISABLED',snapshot:null})});assert(h.nodes.get('op-live-status').textContent.includes('DISABLED'));
  const html=renderBusinessDashboardV1Html({} as any),scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);assert(scripts[0].includes('installMarketBook'));assert(scripts[1].includes('function load('));assert(scripts.at(-1)!.includes('dashboard-live/stream'));assert.equal((html.match(/id="dashboard-live"/g)||[]).length,1);
 });
+test('two updates inside one source second show real receipt milliseconds and advance the chart',()=>{
+ const h=harness();h.tick();h.emit();h.advance(125);
+ h.store.ingest([{instrumentToken:1,lastPrice:22007,exchangeTimestamp:'2026-10-16T04:30:00.000Z',mode:'full',isIndex:true}],'2026-10-16T04:30:00.125Z');h.emit();const html=h.nodes.get('op-live-indices').innerHTML;assert(html.includes('22,007'));assert(html.includes('received 10:00:00.125'));assert(html.includes('Chart time = backend receipt'));assert(html.includes('10:00:00.125'));
+});

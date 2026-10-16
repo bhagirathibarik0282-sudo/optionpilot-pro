@@ -1,9 +1,10 @@
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { readDashboardLiveSnapshot } from './dashboard-live-runtime.js';
+import { readDashboardLiveSnapshot, dashboardLiveRevision } from './dashboard-live-runtime.js';
 import { LIVE_INDICES, type LiveIndex } from './dashboard-live-feed.js';
 
-export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot){
+export const DASHBOARD_LIVE_FLUSH_MS=100;
+export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot,revision=dashboardLiveRevision){
  let clients=0;
  const parse=(query:Record<string,string>)=>{
   const selection:Partial<Record<LiveIndex,{expiry?:string;strike?:number}>>={};
@@ -19,7 +20,7 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
   if(clients>=8)return c.json({ok:false,reason:'LIVE_VIEWER_LIMIT'},429);
   clients++;c.header('Cache-Control','no-store, no-transform');c.header('X-Accel-Buffering','no');
   return streamSSE(c,async stream=>{let closed=false;stream.onAbort(()=>{closed=true;});
-   try{const deadline=Date.now()+15*60000;while(!closed&&Date.now()<deadline){await stream.writeSSE({event:'snapshot',data:JSON.stringify(read(selection)),retry:2000});await stream.sleep(1000);}}
+   try{const deadline=Date.now()+15*60000;let previous:string|null=null,lastSent=0;while(!closed&&Date.now()<deadline){const current=revision(),now=Date.now();if(current!==previous||now-lastSent>=1000){const payload=JSON.stringify(read(selection));await stream.writeSSE({event:'snapshot',data:payload,retry:2000});previous=current;lastSent=Date.now();}await stream.sleep(DASHBOARD_LIVE_FLUSH_MS);}}
    finally{clients--;}
   });
  });

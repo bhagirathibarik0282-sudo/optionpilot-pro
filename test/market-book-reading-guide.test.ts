@@ -23,10 +23,18 @@ test('live strip cannot display unqualified PCR, stale OI or stale VIX; disconne
 test('serialized chapters keep reading guides and share the existing live stream without new requests',()=>{
  const html=renderBusinessDashboardV1Html({} as any),scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);
  const nodes=new Map<string,any>();for(const match of html.matchAll(/\bid="([^"]+)"/g))nodes.set(match[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
- const handlers:any={};const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},window:{addEventListener:(name:string,fn:any)=>handlers[name]=fn},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(scripts[0],ctx);
+ const handlers:any={},published:any[]=[];const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},window:{addEventListener:(name:string,fn:any)=>handlers[name]=fn,dispatchEvent:(event:any)=>{published.push(event);return true;}},CustomEvent:class{type:string;detail:any;constructor(type:string,init:any){this.type=type;this.detail=init.detail;}},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(scripts[0],ctx);
  const rows=[0,3,6,9,12,15,18].map(min=>({symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:new Date(Date.parse('2026-10-16T03:45:00Z')+min*60000).toISOString(),spot_ltp:23000+min,india_vix:14}));
  const current={market:rows,chain:rows.map(r=>({...r,expiry:'2026-10-19',full_chain_oi_pcr:1.1,full_pcr_source:'Normalized full-chain source'})),options:rows.flatMap(r=>['CE','PE'].map(side=>({...r,expiry:'2026-10-19',strike:23000,option_type:side,ltp:100,oi:1000,dte:3})))};
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({date:'2026-10-16',recordedDates:['2026-10-16'],current:{NIFTY:current},history:{},baseline:{},health:{}}),refresh(){requests++;},memory:async()=>{}};vm.runInContext('globalThis.book=installMarketBook(api)',ctx);
  for(const chapter of [0,1,2,4,5,6,7,8,9,10,11,12]){nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:String(chapter)}})}});assert(nodes.get('mb-page').innerHTML.includes('aria-label="Chapter reading guide"'));}
+ handlers['optionpilot:request-recorded-levels']();const refs=published.at(-1);assert.equal(refs.type,'optionpilot:recorded-levels');assert.equal(refs.detail.indices.NIFTY.ce.expiry,'2026-10-19');assert.equal(refs.detail.indices.NIFTY.spot.opening.complete,true);assert.equal(refs.detail.indices.NIFTY.pcr.opening.complete,true);assert.equal(refs.detail.indices.NIFTY.ce.opening.complete,true);
  const recorded=nodes.get('mb-page').innerHTML;handlers['optionpilot:live-context']({detail:{connected:false}});assert(nodes.get('mb-live-context').innerHTML.includes('unavailable'));assert.equal(nodes.get('mb-page').innerHTML,recorded);assert.equal(requests,0);
+});
+
+test('shared chapter context shows the same cadence snapshot and rejects stale or wrong-expiry samples',()=>{
+ const sample:any={state:'COMPLETE',fullPcr:1.2345,expiry:'2026-10-19',periodMs:180000,checkedAt:from,sourceMinAt:from,sourceMaxAt:from,coverage:{complete:true,freshOi:208,expected:208}};
+ const payload:any={connected:true,serverTime:at,pcrDisplay:{NIFTY:sample},snapshot:{indices:[{symbol:'NIFTY',expiry:'2026-10-19',strike:23000,coverage:{complete:false,freshOi:200,expected:208},ce:{},pe:{}}],participation:[]}};
+ const html=live(payload,'NIFTY');assert(html.includes('1.2345'));assert(html.includes('3 min'));assert(html.includes('208/208 verified OI'));
+ sample.expiry='WRONG';assert(!live(payload,'NIFTY').includes('1.2345'));sample.expiry='2026-10-19';payload.serverTime='2026-10-16T04:10:00Z';assert(!live(payload,'NIFTY').includes('1.2345'));
 });

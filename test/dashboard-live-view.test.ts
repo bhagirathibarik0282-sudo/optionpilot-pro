@@ -13,7 +13,7 @@ function harness(){
  const entries:LiveEntry[]=[{token:1,role:'SPOT',symbol:'NIFTY',label:'NIFTY 50'},...['CE','PE'].map((side,i)=>({token:2+i,role:'OPTION' as const,symbol:'NIFTY' as const,label:side,side:side as 'CE'|'PE',expiry:'2026-10-19',strike:22000}))];
  const store=new DashboardLiveStore({entries,date:'2026-10-16',missing:[],omittedExpiries:[]});
  const tick=(price=22001)=>{store.ingest(entries.map(e=>({instrumentToken:e.token,lastPrice:e.role==='SPOT'?price:100,exchangeTimestamp:new Date(now).toISOString(),oi:100,mode:'full' as const,isIndex:e.role==='SPOT'})),new Date(now).toISOString());};
- const emit=()=>{const before=streams.length;const fire=()=>streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',serverTime:new Date(now).toISOString(),snapshot:store.snapshot(now)})});fire();if(streams.length>before)fire();};
+ const emit=(patch?:(snapshot:any)=>void)=>{const before=streams.length;const fire=()=>{const snapshot=store.snapshot(now);patch?.(snapshot);streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',serverTime:new Date(now).toISOString(),snapshot})});};fire();if(streams.length>before)fire();};
  return {nodes,streams,timers,docEvents,winEvents,contextEvents,document,store,tick,emit,advance:(ms:number)=>now+=ms};
 }
 test('real streamed values change the numbers and chart; selection clears old identity and reconnects exactly once',()=>{
@@ -40,4 +40,25 @@ test('two updates inside one source second show real receipt milliseconds and ad
 
 test('one existing live stream shares context with all chapters and clears it on pause/disconnect',()=>{
  const h=harness();h.tick();h.emit();assert.equal(h.contextEvents.at(-1).type,'optionpilot:live-context');assert.equal(h.contextEvents.at(-1).detail.connected,true);const count=h.streams.length;h.nodes.get('op-live-toggle').onclick();assert.equal(h.contextEvents.at(-1).detail,null);assert.equal(h.streams.length,count);
+});
+
+test('PCR cadence is independent per index, samples only complete snapshots and does not create another stream',()=>{
+ const h=harness();let value=1.5;
+ const patch=(s:any)=>{for(const a of s.indices){if(!a.expiry)a.expiry='2026-10-19';a.pcrSnapshot={state:'COMPLETE',fullPcr:value,checkedAt:s.asOf,sourceMinAt:s.asOf,sourceMaxAt:s.asOf,coverage:{complete:true,expected:2,freshOi:2}};}};
+ const valueOf=(symbol:string)=>h.nodes.get('op-live-indices').innerHTML.split('<h3>'+symbol)[1].match(/FULL PCR[^<]*<strong>([^<]*)/)[1];
+ h.tick();h.emit(patch);const count=h.streams.length;assert.equal(valueOf('NIFTY'),'1.5');
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'cadence'},value:'180000'}});
+ h.advance(60000);h.tick();value=2;h.emit(patch);assert.equal(valueOf('NIFTY'),'1.5');assert.equal(valueOf('SENSEX'),'2');assert.equal(h.streams.length,count);
+ h.advance(120000);h.tick();value=3;h.emit(patch);assert.equal(valueOf('NIFTY'),'3');
+ h.emit(s=>{patch(s);s.indices[0].pcrSnapshot.coverage.complete=false;});assert.equal(valueOf('NIFTY'),'—');
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'cadence'},value:'0'}});assert.equal(h.streams.length,count);
+});
+test('15m and FIB overlay exact recorded identities only, with independent per-index switches',()=>{
+ const h=harness();h.tick();h.emit();const count=h.streams.length;assert(h.nodes.get('op-live-indices').innerHTML.includes('data-live-reference="spotFib"'));assert(h.nodes.get('op-live-indices').innerHTML.includes('data-live-reference="pcrOpening"'));
+ const ref={pivot:{P:22000,R1:22100,at:'2026-10-15T10:00:00Z'},opening:{complete:true,high:22050,low:21900,fromAt:'2026-10-16T03:45:00Z',at:'2026-10-16T04:00:00Z'}};
+ h.winEvents['optionpilot:recorded-levels']({detail:{date:'2026-10-16',indices:{NIFTY:{spot:ref,ce:{...ref,expiry:'WRONG',strike:22000,type:'CE'}}}}});
+ const click=(key:string)=>h.nodes.get('op-live-indices').onclick({target:{closest:(selector:string)=>selector==='[data-live-reference]'?{dataset:{liveIndex:'NIFTY',liveReference:key}}:null}});
+ click('spotFib');click('spotOpening');let html=h.nodes.get('op-live-indices').innerHTML;assert(html.includes('Fib P 22,000'));assert(html.includes('15m H 22,050'));assert(!html.split('<h3>SENSEX')[1].split('</article>')[0].includes('Fib P 22,000'));
+ h.nodes.get('op-live-indices').onclick({target:{closest:(selector:string)=>selector==='[data-live-layer]'?{dataset:{liveIndex:'NIFTY',liveLayer:'ce'}}:null}});click('ceFib');html=h.nodes.get('op-live-indices').innerHTML;assert(html.includes('FIB unavailable; load exact previous session'));
+ h.winEvents['optionpilot:recorded-levels']({detail:{date:'2026-10-15',indices:{NIFTY:{spot:ref}}}});assert(!h.nodes.get('op-live-indices').innerHTML.includes('Fib P 22,000'));assert.equal(h.streams.length,count);
 });

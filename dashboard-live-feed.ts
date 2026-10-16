@@ -3,7 +3,7 @@ import type { KiteDecodedPacket } from './kite-websocket-binary-decoder.js';
 
 export const LIVE_INDICES = ['NIFTY','SENSEX','BANKNIFTY'] as const;
 export type LiveIndex = typeof LIVE_INDICES[number];
-export type LiveEntry = { token:number; label:string; role:'SPOT'|'FUTURE'|'OPTION'|'VIX'|'STOCK'|'SECTOR'; symbol?:LiveIndex; expiry?:string; strike?:number; side?:'CE'|'PE' };
+export type LiveEntry = { token:number; label:string; exchange?:string; role:'SPOT'|'FUTURE'|'OPTION'|'VIX'|'STOCK'|'SECTOR'; symbol?:LiveIndex; expiry?:string; strike?:number; side?:'CE'|'PE' };
 export type LiveInventory = { entries:LiveEntry[]; omittedExpiries:string[]; missing:string[]; date:string };
 const dateOf=(at:number)=>new Date(at+19800000).toISOString().slice(0,10);
 const number=(v:unknown):number|null=>typeof v==='number'&&Number.isFinite(v)?v:null;
@@ -33,7 +33,7 @@ export function buildDashboardLiveInventory(rows:KiteInstrumentMasterRow[],date:
   const tokens=new Set(group.rows.map(r=>r.instrument_token));
   const collision=group.rows.some(r=>entries.some(e=>e.token===r.instrument_token));
   if(collision||identities.size!==group.rows.length||tokens.size!==group.rows.length||group.rows.some(r=>!Number.isInteger(r.instrument_token)||r.instrument_token<=0||!Number.isFinite(r.strike)||Number(r.strike)<=0)||entries.length+group.rows.length>limit){omittedExpiries.push(symbol+'|'+group.expiry);continue;}
-  for(const r of group.rows)add(r,{symbol,role:'OPTION',expiry:group.expiry,strike:Number(r.strike),side:r.instrument_type as 'CE'|'PE'});
+  for(const r of group.rows)add(r,{symbol,exchange:r.exchange,role:'OPTION',expiry:group.expiry,strike:Number(r.strike),side:r.instrument_type as 'CE'|'PE'});
  }
  for(const symbol of LIVE_INDICES)if(!entries.some(e=>e.symbol===symbol&&e.role==='OPTION'))missing.push(symbol+':FULL_EXPIRY_INVENTORY');
  if(entries.length>limit||new Set(entries.map(e=>e.token)).size!==entries.length)throw Error('LIVE_INVENTORY_LIMIT_OR_IDENTITY');

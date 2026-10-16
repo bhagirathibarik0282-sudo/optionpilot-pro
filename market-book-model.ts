@@ -186,7 +186,23 @@ export function deriveMarketBook(input: any) {
  const alignment= !pairReady?'Unavailable':spot.delta===0||pcr.delta===0?'FLAT':Math.sign(spot.delta)===Math.sign(pcr.delta)?'SAME_DIRECTION':'OPPOSITE_DIRECTION';
  const firstPair=paired.find(r=>r.spot!==null&&r.pcr!==null);
  const session={fromAt:firstPair?.at||null,at:spot.at===pcr.at?spot.at:null,spotDelta:spot.at===pcr.at?delta(spot.value,firstPair?.spot):null,pcrDelta:spot.at===pcr.at?delta(pcr.value,firstPair?.pcr):null};
- const spotPcr={alignment,turns:{spot:sampledTurns(spot),pcr:sampledTurns(pcr)},ready:pairReady,state:pairReady?pairDirection(spot.delta,pcr.delta):'Unverified: matching exact endpoints unavailable',at:spot.at===pcr.at?spot.at:null,fromAt:pairReady?spot.fromAt:null,windows:pairWindows,timeline:pairTimeline,session,spotSourceAt:m?.exchange_timestamp||null,scope:'Same recorded expiry and exact recording buckets; source timestamps and chain completeness require separate verification. Arrows describe changes only',priorPcr:{value:num(priorPcr?.full_chain_oi_pcr),at:priorPcr?.minute_bucket||null}};
+ // Opening references require all five exact 3m buckets; each series stands alone.
+ const openingReference=(kind:string,field:string)=>{
+  const raw=(current[kind]||[]).filter((r:any)=>r.symbol===symbol&&date(r.minute_bucket)===tradeDate&&(kind!=='chain'||String(r.expiry).slice(0,10)===expiry));
+  const qualified=kind==='chain'?qualifiedChain(raw):raw;
+  const end=Date.parse(tradeDate+'T09:30:00+05:30'),values:number[]=[];
+  const last=kind==='chain'?pcr.at:spot.at;
+  for(let i=0;i<5;i++){
+   const at=end-900000+i*180000,rows=qualified.filter((r:any)=>Date.parse(r.minute_bucket)===at);
+   const v=num(rows[0]?.[field]);
+   if(!rows.length||v===null||v<=0||rows.some((r:any)=>r.truth_verdict!=='TRUE'||num(r[field])!==v))return {complete:false,high:null,low:null,fromAt:null,at:null,reason:'Missing, invalid or conflicting opening 3m recordings'};
+   values.push(v);
+  }
+  if(!last||Date.parse(last)<end)return {complete:false,high:null,low:null,fromAt:null,at:null,reason:'Opening 15m is still forming'};
+  return {complete:true,high:Math.max(...values),low:Math.min(...values),fromAt:new Date(end-900000).toISOString(),at:new Date(end).toISOString(),reason:'09:15 inclusive–09:30 exclusive; five sampled recordings, not tick/candle extremes'};
+ };
+ const opening={spot:openingReference('market','spot_ltp'),pcr:openingReference('chain','full_chain_oi_pcr')};
+ const spotPcr={opening,alignment,turns:{spot:sampledTurns(spot),pcr:sampledTurns(pcr)},ready:pairReady,state:pairReady?pairDirection(spot.delta,pcr.delta):'Unverified: matching exact endpoints unavailable',at:spot.at===pcr.at?spot.at:null,fromAt:pairReady?spot.fromAt:null,windows:pairWindows,timeline:pairTimeline,session,spotSourceAt:m?.exchange_timestamp||null,scope:'Same recorded expiry and exact recording buckets; source timestamps and chain completeness require separate verification. Arrows describe changes only',priorPcr:{value:num(priorPcr?.full_chain_oi_pcr),at:priorPcr?.minute_bucket||null}};
  const positioning={at:positionAt,spotMetric:metrics(market.filter(r=>positionAt&&Date.parse(r.minute_bucket)<=Date.parse(positionAt)),'spot_ltp','market'),spot:num(positionSpot?.spot_ltp),spotAt:positionSpot?.minute_bucket||null,pdh:num(positionSpot?.pdh),pdl:num(positionSpot?.pdl),changes,topCalls:top('CE'),topPuts:top('PE'),callPersistence:persistence('call'),putPersistence:persistence('put'),samples:coverageRows.length,gaps,sessionGaps,baselineAvailable:!!oldChain,timeline,expiryContext,scope:'Rank and share use returned recorded strikes only; full-chain concentration is unavailable.'};
  return {symbol,tradeDate,priorDate,baselineDate,window,minutes,sessions,expiry,oppositeExpiry,expiries:buckets,strike,strikes,comparison,spot,future,ce,pe,pcr,callWall:wall('call'),putWall:wall('put'),bias,synced,expiryPairs,allExpiryPairs,premiumBehaviourRows,premiumExpiryAlignment,premiumBreakGroups,behaviourCEStrike,behaviourPEStrike,behaviourCEChoices:behaviourStrikeChoices('CE'),behaviourPEChoices:behaviourStrikeChoices('PE'),monthlyPremiumBoard,comparisonRows,observedChanges,graphPairs,behaviour,events,positioning,notableGroups,premiumOverview,spotPcr,vix:metrics(market,'india_vix','market'),truth:'TRUE recorded rows only',historyDates:[...new Set(historyRows('market').map(r=>date(r.minute_bucket)))].sort(),fourthExpiryMissing:buckets.length<4};
 }

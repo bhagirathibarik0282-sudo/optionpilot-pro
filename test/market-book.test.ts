@@ -92,7 +92,7 @@ test('structured spot-PCR view isolates selected detail, chart layers and timest
  assert(page.innerHTML.includes('Exact pair aligned'));assert(page.innerHTML.includes('Spot level distances'));assert(svg().includes('PDH 22,015'));assert(!svg().includes('15m H'));
  page.onchange({target:{id:'mb-spot-levels',value:'NONE'}});assert(!svg().includes('PDH'));assert(!svg().includes('15m H'));assert(page.innerHTML.includes('value="NONE" selected'));
  vm.runInContext('installed.render()',ctx);assert(page.innerHTML.includes('value="NONE" selected'));
- page.onchange({target:{id:'mb-spot-levels',value:'OPEN'}});assert(svg().includes('15m H'));assert(!svg().includes('PDH'));
+ page.onclick({target:{closest:(selector:string)=>selector==='[data-spot-setting]'?{dataset:{spotIndex:'NIFTY',spotSetting:'spotOpening'}}:null}});assert(svg().includes('15m H'));assert(!svg().includes('PDH'));
  state.current.NIFTY.chain.pop();vm.runInContext('installed.render()',ctx);assert(page.innerHTML.includes('Pair unverified: compare each series timestamp'));assert(!page.innerHTML.includes('Exact pair aligned'));
  nodes.get('mb-index').value='SENSEX';nodes.get('mb-index').onchange();assert(page.innerHTML.includes('SENSEX · selected detail'));assert(!page.innerHTML.includes('NIFTY · selected detail'));assert(page.innerHTML.includes('Spot / full PCR observations unavailable'));assert(!page.innerHTML.includes('undefined'));assert.equal(requests,0);
 });
@@ -117,15 +117,15 @@ test('three-index percentage overlay, actual units, swing toggles and full chart
  const state:any={date:tradeDate,recordedDates,current,history:{},baseline:{},health:{}};let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{}};
  vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'9'}})}});const page=nodes.get('mb-page');
  assert.equal((page.innerHTML.match(/independent left PCR and right spot axes/g)||[]).length,3);assert(page.innerHTML.includes('UNPROVEN: full-chain strike inventory'));assert(page.innerHTML.includes('3/3 same direction'));assert(page.innerHTML.includes('T+18m'));assert(page.innerHTML.includes('6m'));
- page.onchange({target:{id:'mb-spot-compare-mode',value:'NORMALIZED'}});
+ for(const index of ['NIFTY','SENSEX','BANKNIFTY'])page.onchange({target:{id:'mb-local-'+index+'-mode',value:'NORMALIZED'}});
  assert.equal((page.innerHTML.match(/percentage overlay/g)||[]).length,3);assert(page.innerHTML.includes('3 / 3 indices share exact baseline'));assert(page.innerHTML.includes('★ Same-direction change'));assert(page.innerHTML.includes('>SH</text>'));assert(page.innerHTML.includes('>SL</text>'));
- page.onchange({target:{id:'mb-spot-compare-span',value:'WINDOW'}});assert(!page.innerHTML.split('Selected index ·')[0].includes('>SL</text>'));
- page.onchange({target:{id:'mb-spot-compare-span',value:'SESSION'}});
+ for(const index of ['NIFTY','SENSEX','BANKNIFTY'])page.onchange({target:{id:'mb-local-'+index+'-span',value:'WINDOW'}});assert(!page.innerHTML.split('Selected index ·')[0].includes('>SL</text>'));
+ for(const index of ['NIFTY','SENSEX','BANKNIFTY'])page.onchange({target:{id:'mb-local-'+index+'-span',value:'SESSION'}});
  page.onclick({target:{closest:(s:string)=>s==='[data-expand-spot-pcr]'?{}:null}});const dialog=nodes.get('mb-chart-dialog');assert(dialog.open);assert(nodes.get('mb-chart-title').textContent.includes('three-index comparison'));assert.equal((nodes.get('mb-chart-body').innerHTML.match(/percentage overlay/g)||[]).length,3);
- dialog.onchange({target:{id:'mb-modal-spot-mode',value:'RECORDED'}});assert.equal((nodes.get('mb-chart-body').innerHTML.match(/viewBox="0 0 480 390"/g)||[]).length,3);assert(nodes.get('mb-chart-body').innerHTML.includes('66,030'));assert(nodes.get('mb-chart-body').innerHTML.includes('44,020'));
- dialog.onclick({target:{closest:(s:string)=>s==='[data-spot-turns]'?{}:null}});assert(!nodes.get('mb-chart-body').innerHTML.includes('>SH</text>'));assert(nodes.get('mb-chart-body').innerHTML.includes('Swing SH / SL · OFF'));
+ for(const index of ['NIFTY','SENSEX','BANKNIFTY'])dialog.onchange({target:{id:'mb-modal-'+index+'-mode',value:'RECORDED'}});assert.equal((nodes.get('mb-chart-body').innerHTML.match(/viewBox="0 0 480 390"/g)||[]).length,3);assert(nodes.get('mb-chart-body').innerHTML.includes('66,030'));assert(nodes.get('mb-chart-body').innerHTML.includes('44,020'));
+ for(const index of ['NIFTY','SENSEX','BANKNIFTY'])for(const key of ['spotTurns','pcrTurns'])dialog.onclick({target:{closest:(s:string)=>s==='[data-spot-setting]'?{dataset:{spotIndex:index,spotSetting:key}}:null}});assert(!nodes.get('mb-chart-body').innerHTML.includes('>SH</text>'));assert(nodes.get('mb-chart-body').innerHTML.includes('Spot SH / SL · OFF'));
  nodes.get('mb-chart-close').onclick();assert(!dialog.open);
- page.onchange({target:{id:'mb-spot-compare-mode',value:'NORMALIZED'}});current.SENSEX.chain.pop();vm.runInContext('installed.render()',ctx);assert.equal((page.innerHTML.match(/percentage overlay/g)||[]).length,2);assert(page.innerHTML.includes('Overlay unavailable'));assert(page.innerHTML.includes('UNSYNCED / MISSING'));assert.equal(requests,0);
+ for(const index of ['NIFTY','SENSEX','BANKNIFTY'])page.onchange({target:{id:'mb-local-'+index+'-mode',value:'NORMALIZED'}});current.SENSEX.chain.pop();vm.runInContext('installed.render()',ctx);assert.equal((page.innerHTML.match(/percentage overlay/g)||[]).length,2);assert(page.innerHTML.includes('Overlay unavailable'));assert(page.innerHTML.includes('UNSYNCED / MISSING'));assert.equal(requests,0);
 });
 
 test('six-minute PCR comparisons require exact endpoints; T0 never uses missing provenance',()=>{
@@ -212,4 +212,46 @@ test('unchanged health refresh preserves premium selector DOM and reuses the mon
  const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);const state:any={date:tradeDate,recordedDates,current:{NIFTY:fixture()},history:{},baseline:{},health:{}};let derives=0,writes=0,markup='';Object.defineProperty(nodes.get('mb-page'),'innerHTML',{get:()=>markup,set:v=>{writes++;markup=v;}});const derive=vm.runInContext('deriveMarketBook',ctx);ctx.api={derive:(input:any)=>{derives++;return derive(input);},getState:()=>state};vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'7'}})}});ctx.installed.refreshHealth();ctx.installed.refreshHealth();const before=writes,calls=derives;ctx.installed.refreshHealth();ctx.installed.refreshHealth();assert.equal(writes,before,'same recording/controls must keep the native selector node');assert.equal(derives,calls);
  nodes.get('mb-page').onchange({target:{id:'mb-behaviour-index',value:'SENSEX'}});assert(markup.includes('Premium behaviour · SENSEX'));assert(writes>before);
  state.current.SENSEX={...fixture(),market:fixture().market.map(r=>({...r,symbol:'SENSEX'})),options:fixture().options.map(r=>({...r,symbol:'SENSEX'})),chain:fixture().chain.map(r=>({...r,symbol:'SENSEX'}))};ctx.installed.refreshHealth();assert(markup.includes('Premium behaviour · SENSEX · strike 22000'));
+});
+
+test('opening references require five exact valid buckets independently for spot and qualified exact-expiry PCR',()=>{
+ const c=fixture();c.chain.forEach((r,i)=>r.full_chain_oi_pcr=[1,1.2,.9,1.1,1.05,5,6][i]);
+ let refs=run(c).spotPcr.opening;
+ assert.equal(refs.spot.high,22012);assert.equal(refs.spot.low,22000);
+ assert.equal(refs.pcr.high,1.2);assert.equal(refs.pcr.low,.9);
+ assert.equal(refs.pcr.at,at(15));
+ for(const mode of ['gap','unqualified','conflict','expiry','zero']){
+  const f=structuredClone(c);
+  if(mode==='gap')f.chain.splice(2,1);
+  if(mode==='unqualified')f.chain[2].full_pcr_source='Unverified';
+  if(mode==='conflict')f.chain.push({...f.chain[2],full_chain_oi_pcr:8});
+  if(mode==='expiry')f.chain[2].expiry='2026-10-19';
+  if(mode==='zero')f.chain[2].full_chain_oi_pcr=0;
+  refs=run(f).spotPcr.opening;assert.equal(refs.pcr.complete,false,mode);assert.equal(refs.pcr.high,null);assert.equal(refs.spot.complete,true);
+ }
+ const early=fixture();for(const kind of ['market','options','chain'] as const)early[kind]=early[kind].slice(0,5);
+ assert.equal(run(early).spotPcr.opening.spot.complete,false);
+ const missing=fixture();missing.market.splice(2,1);assert.equal(run(missing).spotPcr.opening.spot.complete,false);assert.equal(run(missing).spotPcr.opening.pcr.complete,true);
+});
+
+test('individual chart controls isolate index and series, survive refresh, and render in all modes and fullscreen',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1];
+ const nodes=new Map<string,any>();for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0,open:false,showModal(){this.open=true;},close(){this.open=false;}});
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
+ const current:any={};for(const s of ['NIFTY','SENSEX','BANKNIFTY']){current[s]=fixture();for(const kind of ['market','options','chain'])current[s][kind].forEach((r:any)=>r.symbol=s);}
+ const state:any={date:tradeDate,recordedDates,current,history:{},baseline:{},health:{}};let requests=0;
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{}};
+ vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'9'}})}});
+ const page=nodes.get('mb-page');
+ const toggle=(target:any,index:string,key:string)=>target.onclick({target:{closest:(s:string)=>s==='[data-spot-setting]'?{dataset:{spotIndex:index,spotSetting:key}}:null}});
+ const charts=(target:any)=>[...target.innerHTML.matchAll(/<svg\b[\s\S]*?<\/svg>/g)].map(m=>m[0]).filter(m=>m.includes('independent left PCR')||m.includes('percentage overlay')||m.includes('spot above full PCR'));
+ toggle(page,'NIFTY','pcrOpening');let cs=charts(page);assert(cs[0].includes('PCR 15m H'));assert(!cs[0].includes('Spot 15m H'));assert(!cs[1].includes('15m H'));assert(!cs[2].includes('15m H'));
+ toggle(page,'NIFTY','spotOpening');assert(charts(page)[0].includes('Spot 15m H'));
+ for(const mode of ['NORMALIZED','RECORDED','DUAL']){page.onchange({target:{id:'mb-local-NIFTY-mode',value:mode}});cs=charts(page);assert(cs[0].includes('15m H'));assert(cs[1].includes('independent left PCR'));}
+ page.onchange({target:{id:'mb-local-NIFTY-span',value:'WINDOW'}});assert(page.innerHTML.includes('id="mb-local-SENSEX-span"'));vm.runInContext('installed.render()',ctx);assert(charts(page)[0].includes('PCR 15m H'));
+ const ids=[...page.innerHTML.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);assert.equal(new Set(ids).size,ids.length);
+ page.onclick({target:{closest:(s:string)=>s==='[data-expand-spot-pcr]'?{}:null}});const dialog=nodes.get('mb-chart-dialog'),body=nodes.get('mb-chart-body');assert(charts(body)[0].includes('PCR 15m H'));
+ toggle(dialog,'SENSEX','pcrOpening');assert(charts(body)[1].includes('PCR 15m H'));assert(!charts(body)[2].includes('15m H'));
+ current.NIFTY.chain.splice(2,1);vm.runInContext('installed.render()',ctx);assert(!charts(body)[0].includes('PCR 15m H'));assert(charts(body)[0].includes('Spot 15m H'));assert(body.innerHTML.includes('Missing, invalid or conflicting opening'));
+ nodes.get('mb-window').value='1s';nodes.get('mb-window').onchange();assert(!charts(body).some(c=>c.includes('data-opening-series')));assert(body.innerHTML.includes('Unavailable in swing endpoint view'));assert.equal(requests,0);
 });

@@ -1,0 +1,7 @@
+# Individual Spot / PCR chart controls
+
+In Market Book → Spot + full PCR, each index owns its chart mode and range. Four independent buttons control Spot SH/SL, PCR SH/SL, Spot opening 15m H/L and PCR opening 15m H/L. Fullscreen reuses those same settings. The selected-index detail shares the series buttons and has its own index-specific Spot PDH/PDL selector. Settings survive refresh and chapter/index switches within the current page instance; a page reload restores defaults.
+
+Opening range means the five exact 09:15, 09:18, 09:21, 09:24 and 09:27 IST sampled values, available once the series reaches 09:30. These are sampled values, not exchange candle or tick extremes. PCR references require the exact selected expiry and existing qualified full-PCR provenance. Missing, invalid or conflicting opening recordings leave the affected series unavailable. Other series remain independent. Opening lines start at 09:30 and are withheld in swing endpoint views. No live orders, candidate authority, recording writes or new network calls are added.
+
+Validation: 79 local tests passed across market-book, strike comparison, reading layout, mobile refresh and RAG card suites. New cases cover index/series isolation, all three rendering modes, fullscreen, refresh retention, unique control IDs, incomplete opening data, expiry/provenance separation, conflicts and swing withholding. Actual browser visual QA remains pending because the production URL was blocked by the cloud browser in the preceding session. Production deployment is not part of this verification.

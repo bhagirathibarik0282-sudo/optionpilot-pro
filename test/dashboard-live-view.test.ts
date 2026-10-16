@@ -4,17 +4,17 @@ import { DashboardLiveStore,type LiveEntry } from '../dashboard-live-feed.js';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
 function harness(){
  const nodes=new Map<string,any>();for(const m of DASHBOARD_LIVE_HTML.matchAll(/id="([^"]+)"/g))nodes.set(m[1],{innerHTML:'',textContent:'',hidden:false,setAttribute(){},contains(){return true;},querySelector(){return null;}});
- const streams:any[]=[],timers:any[]=[],docEvents:any={},winEvents:any={};let now=Date.parse('2026-10-16T04:30:00Z');
+ const streams:any[]=[],timers:any[]=[],docEvents:any={},winEvents:any={},contextEvents:any[]=[];let now=Date.parse('2026-10-16T04:30:00Z');
  class Clock extends Date{static now(){return now;}}
  class Stream{closed=false;handlers:any={};constructor(public url:string){streams.push(this);}close(){this.closed=true;}addEventListener(type:string,fn:any){this.handlers[type]=fn;}}
  const document:any={hidden:false,activeElement:null,getElementById:(id:string)=>nodes.get(id),addEventListener:(type:string,fn:any)=>docEvents[type]=fn};
- const ctx:any={document,window:{addEventListener:(type:string,fn:any)=>winEvents[type]=fn},EventSource:Stream,URLSearchParams,Date:Clock,Map,Set,Number,String,Array,Object,Math,setInterval:(fn:any)=>timers.push(fn)};
+ const ctx:any={document,window:{addEventListener:(type:string,fn:any)=>winEvents[type]=fn,dispatchEvent:(event:any)=>{contextEvents.push(event);return true;}},CustomEvent:class{type:string;detail:any;constructor(type:string,init:any){this.type=type;this.detail=init.detail;}},EventSource:Stream,URLSearchParams,Date:Clock,Map,Set,Number,String,Array,Object,Math,setInterval:(fn:any)=>timers.push(fn)};
  vm.createContext(ctx);const scripts=[...renderBusinessDashboardV1Html({} as any).matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);vm.runInContext(scripts[0],ctx);vm.runInContext(scripts.at(-1)!,ctx);
  const entries:LiveEntry[]=[{token:1,role:'SPOT',symbol:'NIFTY',label:'NIFTY 50'},...['CE','PE'].map((side,i)=>({token:2+i,role:'OPTION' as const,symbol:'NIFTY' as const,label:side,side:side as 'CE'|'PE',expiry:'2026-10-19',strike:22000}))];
  const store=new DashboardLiveStore({entries,date:'2026-10-16',missing:[],omittedExpiries:[]});
  const tick=(price=22001)=>{store.ingest(entries.map(e=>({instrumentToken:e.token,lastPrice:e.role==='SPOT'?price:100,exchangeTimestamp:new Date(now).toISOString(),oi:100,mode:'full' as const,isIndex:e.role==='SPOT'})),new Date(now).toISOString());};
  const emit=()=>{const before=streams.length;const fire=()=>streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',serverTime:new Date(now).toISOString(),snapshot:store.snapshot(now)})});fire();if(streams.length>before)fire();};
- return {nodes,streams,timers,docEvents,winEvents,document,store,tick,emit,advance:(ms:number)=>now+=ms};
+ return {nodes,streams,timers,docEvents,winEvents,contextEvents,document,store,tick,emit,advance:(ms:number)=>now+=ms};
 }
 test('real streamed values change the numbers and chart; selection clears old identity and reconnects exactly once',()=>{
  const h=harness();assert.equal(h.streams.length,1);assert(h.streams[0].url.startsWith('/api/research/dashboard-live/stream?'));
@@ -36,4 +36,8 @@ test('disabled feed is explicit and IV/Greeks are never fabricated; original scr
 test('two updates inside one source second show real receipt milliseconds and advance the chart',()=>{
  const h=harness();h.tick();h.emit();h.advance(125);
  h.store.ingest([{instrumentToken:1,lastPrice:22007,exchangeTimestamp:'2026-10-16T04:30:00.000Z',mode:'full',isIndex:true}],'2026-10-16T04:30:00.125Z');h.emit();const html=h.nodes.get('op-live-indices').innerHTML;assert(html.includes('22,007'));assert(html.includes('received 10:00:00.125'));assert(html.includes('Chart time = backend receipt'));assert(html.includes('10:00:00.125'));
+});
+
+test('one existing live stream shares context with all chapters and clears it on pause/disconnect',()=>{
+ const h=harness();h.tick();h.emit();assert.equal(h.contextEvents.at(-1).type,'optionpilot:live-context');assert.equal(h.contextEvents.at(-1).detail.connected,true);const count=h.streams.length;h.nodes.get('op-live-toggle').onclick();assert.equal(h.contextEvents.at(-1).detail,null);assert.equal(h.streams.length,count);
 });

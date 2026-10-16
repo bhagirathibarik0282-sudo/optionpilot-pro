@@ -46,6 +46,7 @@ export function installDashboardLive(){
  }
  function render(){
   const d=latest,s=d?.snapshot;
+  if(typeof CustomEvent!=='undefined'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent('optionpilot:live-context',{detail:d}));
   if(!d||!s){get('op-live-indices').innerHTML='<p class="op-live-stale">'+esc(d?'Feed '+d.connectionState+' · live values unavailable':'Waiting for a fresh live connection')+'</p>';get('op-live-participation').textContent='Live values unavailable';get('op-live-vix').textContent='India VIX: unavailable';if(d)get('op-live-status').textContent='Feed '+d.connectionState+' · live values unavailable';return;}
   get('op-live-status').textContent='Feed '+d.connectionState+' · server '+time(d.serverTime,true)+' IST · '+(s.omittedExpiries.length?s.omittedExpiries.length+' whole expiries outside subscription capacity · ':'')+'Live packet times below';
   const focused=document.activeElement as HTMLElement|null,editing=!!focused&&root!.contains(focused)&&focused.tagName==='SELECT';
@@ -67,9 +68,9 @@ export function installDashboardLive(){
  }
  get('op-live-indices').onchange=(event:any)=>{const e=event.target,index=e.dataset.liveIndex,field=e.dataset.liveField;if(!indices.includes(index)||!['expiry','strike'].includes(field)||!e.value)return;selection[index]={...selection[index],[field]:field==='strike'?Number(e.value):e.value};if(field==='expiry')delete selection[index].strike;for(const key of ['pcr','ce','pe'])delete buffers[index+'|'+key];latest=null;render();connect();};
  get('op-live-indices').onclick=(event:any)=>{const e=event.target.closest?.('[data-live-layer]');if(!e||!indices.includes(e.dataset.liveIndex)||!['spot','pcr','ce','pe'].includes(e.dataset.liveLayer))return;layers[e.dataset.liveIndex][e.dataset.liveLayer]=!layers[e.dataset.liveIndex][e.dataset.liveLayer];render();};
- get('op-live-toggle').onclick=()=>{on=!on;get('op-live-toggle').setAttribute('aria-pressed',String(on));get('op-live-toggle').textContent=on?'Live view ON':'Live view OFF';get('op-live-body').hidden=!on;if(on)connect();else{close();latest=null;get('op-live-status').textContent='Live stream paused';}};
+ get('op-live-toggle').onclick=()=>{on=!on;get('op-live-toggle').setAttribute('aria-pressed',String(on));get('op-live-toggle').textContent=on?'Live view ON':'Live view OFF';get('op-live-body').hidden=!on;if(on)connect();else{close();latest=null;render();get('op-live-status').textContent='Live stream paused';}};
  document.addEventListener('visibilitychange',()=>{if(document.hidden){close();latest=null;render();}else connect();});
- window.addEventListener('online',connect);window.addEventListener('pageshow',()=>{disposed=false;connect();});window.addEventListener('pagehide',()=>{disposed=true;close();latest=null;});
+ window.addEventListener('online',connect);window.addEventListener('pageshow',()=>{disposed=false;connect();});window.addEventListener('pagehide',()=>{disposed=true;close();latest=null;render();});
  setInterval(()=>{if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();}},1000);
  connect();
 }

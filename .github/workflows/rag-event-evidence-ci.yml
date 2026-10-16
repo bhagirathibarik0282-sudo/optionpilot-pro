@@ -3,11 +3,16 @@ on:
   pull_request:
     paths:
       - 'rag-event-evidence.ts'
+      - 'rag-evidence-card.ts'
+      - 'rag-question.ts'
+      - 'market-book-view.ts'
+      - 'business-dashboard-v1-view.ts'
       - 'research-router.ts'
       - 'h1-replay-http.ts'
       - 'h1-fixed-contract-journey-http.ts'
       - 'intraday-observation-memory.ts'
       - 'test/rag-event-evidence.test.ts'
+      - 'test/rag-evidence-card.test.ts'
       - '.github/workflows/rag-event-evidence-ci.yml'
 permissions:
   contents: read
@@ -21,6 +26,6 @@ jobs:
           node-version: 22
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Exact evidence and existing reader regressions
-        run: node --import tsx --test test/rag-event-evidence.test.ts test/intraday-observation-memory.test.ts test/h1-replay-http.test.ts test/h1-fixed-contract-journey-http.test.ts test/research-router-auth.test.ts
+        run: node --import tsx --test test/rag-evidence-card.test.ts test/rag-event-evidence.test.ts test/intraday-observation-memory.test.ts test/h1-replay-http.test.ts test/h1-fixed-contract-journey-http.test.ts test/research-router-auth.test.ts test/market-book.test.ts test/market-book-strike-comparison.test.ts test/dashboard-reading-layout.test.ts test/data-reading-checklist.test.ts test/dashboard-refresh-mobile.test.ts
         env:
           NODE_ENV: test

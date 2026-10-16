@@ -46,8 +46,9 @@ export function renderMarketBookReadingGuide(a:any,state:any,page:number,window:
 export function renderMarketBookLiveContext(payload:any,symbol:string){
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const n=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
- const fmt=(v:any,d=2)=>n(v)===null?'—':v.toLocaleString('en-IN',{maximumFractionDigits:d});
- const time=(v:any)=>v&&Number.isFinite(Date.parse(v))?new Date(v).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'—';
+ const formats=(renderMarketBookLiveContext as any).formats||((renderMarketBookLiveContext as any).formats={numbers:new Map(),time:new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})});
+ const fmt=(v:any,d=2)=>{if(n(v)===null)return '—';if(!formats.numbers.has(d))formats.numbers.set(d,new Intl.NumberFormat('en-IN',{maximumFractionDigits:d}));return formats.numbers.get(d).format(v);};
+ const time=(v:any)=>v&&Number.isFinite(Date.parse(v))?formats.time.format(new Date(v)):'—';
  const snapshot=payload?.connected?payload.snapshot:null,a=snapshot?.indices?.find((r:any)=>r.symbol===symbol);
  if(!a)return '<span class="mb-note">LIVE context · '+esc(symbol)+' · disconnected / unavailable. Recorded chapter values remain separate.</span>';
  const sectors=(snapshot.participation||[]).filter((q:any)=>q.identity?.role==='SECTOR'&&q.state==='LIVE'&&n(q.changePct)!==null);

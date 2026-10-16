@@ -29,3 +29,13 @@ test('reading font decoration measures all unmarked text before writing style at
  const size:any={value:'comfortable'},tables:any={value:'cards'},body:any={dataset:{},closest:()=>null,querySelectorAll:(selector:string)=>selector==='table'?[]:elements};const ctx:any={document:{body,querySelectorAll:()=>[],getElementById:(id:string)=>id==='op-reading-size'?size:tables},window:{localStorage:{getItem:()=>null,setItem(){}},getComputedStyle:(el:any)=>{log.push('read'+el.i);return {fontSize:'12px'};}}};vm.createContext(ctx);const script=[...withDashboardReading('<html><head></head><body></body></html>').matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)![1];vm.runInContext(script,ctx);assert.deepEqual(log,['read0','read1','read2','write0','write1','write2']);
  log.length=0;vm.runInContext(script,ctx);assert.deepEqual(log,[],'already marked text needs no repeated font read/write');
 });
+
+test('known live subtree uses explicit readable CSS and does not schedule font-measurement frames',()=>{
+ let callback:any,queries=0;const frames:any[]=[];
+ class El{isConnected=true;dataset:any={};constructor(readonly live=false){}closest(selector:string){return this.live&&selector==='#dashboard-live'?{}:null;}querySelectorAll(){queries++;return [];}contains(){return false;}}
+ const body:any=new El(),size:any={value:'comfortable'},tables:any={value:'cards'};
+ const ctx:any={Element:El,MutationObserver:class{constructor(fn:any){callback=fn;}observe(){}},document:{body,querySelectorAll:()=>[],getElementById:(id:string)=>id==='op-reading-size'?size:tables},window:{localStorage:{getItem:()=>null,setItem(){}},requestAnimationFrame:(fn:any)=>frames.push(fn)}};
+ vm.createContext(ctx);const script=[...withDashboardReading('<html><head></head><body></body></html>').matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)![1];vm.runInContext(script,ctx);queries=0;
+ callback([{target:new El(true)}]);assert.equal(frames.length,0);assert.equal(queries,0);
+ callback([{target:new El(false)},{target:new El(true)}]);assert.equal(frames.length,1);frames[0]();assert.equal(queries,2,'only the ordinary subtree is decorated');
+});

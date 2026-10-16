@@ -62,3 +62,25 @@ test('15m and FIB overlay exact recorded identities only, with independent per-i
  h.nodes.get('op-live-indices').onclick({target:{closest:(selector:string)=>selector==='[data-live-layer]'?{dataset:{liveIndex:'NIFTY',liveLayer:'ce'}}:null}});click('ceFib');html=h.nodes.get('op-live-indices').innerHTML;assert(html.includes('FIB unavailable; load exact previous session'));
  h.winEvents['optionpilot:recorded-levels']({detail:{date:'2026-10-15',indices:{NIFTY:{spot:ref}}}});assert(!h.nodes.get('op-live-indices').innerHTML.includes('Fib P 22,000'));assert.equal(h.streams.length,count);
 });
+
+test('streaming patches values without replacing dropdowns; chart cadence retains all receipt observations',()=>{
+ const h=harness(),root=h.nodes.get('dashboard-live'),parent=h.nodes.get('op-live-indices'),fragments=new Map<string,any>();let mounted=false,parentWrites=0,parentHtml='';
+ Object.defineProperty(parent,'innerHTML',{get:()=>parentHtml,set:(html:string)=>{parentHtml=html;parentWrites++;mounted=html.includes('data-live-card=');}});
+ root.querySelector=(selector:string)=>{
+  if(selector.startsWith('[data-live-card='))return mounted?{}:null;
+  if(!mounted)return null;
+  if(!fragments.has(selector)){let html='';const node:any={writes:0};Object.defineProperty(node,'innerHTML',{get:()=>html,set:(next:string)=>{html=next;node.writes++;}});fragments.set(selector,node);}return fragments.get(selector);
+ };
+ h.tick();h.emit();h.emit();const mountWrites=parentWrites,chart=fragments.get('[data-live-charts="NIFTY"]'),chartWrites=chart.writes;
+ h.document.activeElement={tagName:'SELECT'};
+ h.advance(100);h.tick(22009);h.emit();assert.equal(parentWrites,mountWrites);assert(fragments.get('[data-live-values="NIFTY"]').innerHTML.includes('22,009'));assert.equal(chart.writes,chartWrites);
+ h.advance(200);h.tick(22011);h.emit();assert.equal(parentWrites,mountWrites);assert(chart.writes>chartWrites);assert(chart.innerHTML.includes('10:00:00.100'));assert(chart.innerHTML.includes('10:00:00.300'));
+ const changeInventory=(s:any)=>s.indices[0].strikes.push(22050);h.advance(100);h.tick(22012);h.emit(changeInventory);assert(fragments.get('[data-live-values="NIFTY"]').innerHTML.includes('22,012'));assert.equal(parentWrites,mountWrites,'open selector must survive an inventory change');
+ h.document.activeElement=null;h.emit(changeInventory);assert.equal(parentWrites,mountWrites+1,'new inventory mounts once after editing ends');
+});
+
+test('pause/resume with an identical next packet still rebuilds the cleared live view',()=>{
+ const h=harness();h.tick();h.emit();assert(h.nodes.get('op-live-indices').innerHTML.includes('22,001'));
+ h.nodes.get('op-live-toggle').onclick();assert(!h.nodes.get('op-live-indices').innerHTML.includes('22,001'));
+ h.nodes.get('op-live-toggle').onclick();h.emit();assert(h.nodes.get('op-live-indices').innerHTML.includes('22,001'));
+});

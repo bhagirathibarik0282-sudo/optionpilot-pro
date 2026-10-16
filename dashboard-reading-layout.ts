@@ -69,7 +69,7 @@ export function installDashboardReading() {
     }
     const small:Element[]=[];
     for (const el of root.querySelectorAll('p,small,label,button,th,td,span,div')) {
-      if (el.getAttribute('data-op-small')==='true' || el.closest('#op-reading-tools,svg,script,style') || !Array.from(el.childNodes).some(n=>n.nodeType===3 && n.textContent?.trim())) continue;
+      if (el.getAttribute('data-op-small')==='true' || el.closest('#op-reading-tools,#dashboard-live,svg,script,style') || !Array.from(el.childNodes).some(n=>n.nodeType===3 && n.textContent?.trim())) continue;
       const font = Number.parseFloat(window.getComputedStyle(el).fontSize);
       if (font > 0 && font < 16) small.push(el);
     }
@@ -80,8 +80,8 @@ export function installDashboardReading() {
   if (typeof MutationObserver !== 'undefined') {
     const pending = new Set<Element>();let scheduled = false;
     const observer = new MutationObserver(records=>{
-      records.forEach(r=>{if(r.target instanceof Element)pending.add(r.target);});
-      if(scheduled)return;scheduled=true;
+      records.forEach(r=>{if(r.target instanceof Element&&!r.target.closest('#dashboard-live'))pending.add(r.target);});
+      if(!pending.size||scheduled)return;scheduled=true;
       window.requestAnimationFrame(()=>{scheduled=false;const roots=[...pending].filter(root=>root.isConnected);pending.clear();for(const root of roots)if(!roots.some(parent=>parent!==root&&parent.contains(root)))decorate(root);});
     });
     observer.observe(body,{childList:true,subtree:true});

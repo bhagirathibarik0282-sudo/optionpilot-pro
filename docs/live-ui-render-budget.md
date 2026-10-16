@@ -9,3 +9,5 @@ Locale formatters are reused in the live panel and shared chapter strip. Actual 
 Explicit live styles are at least 16px; the shared reading observer skips this known subtree and does not schedule empty measurement frames. All other reading decoration remains active.
 
 Local script-only benchmark, one active Spot series with 150+ real fixture samples: mean render 25.71ms before versus 3.01ms after (eight measured updates). This excludes browser parsing/layout and is not a phone latency guarantee. Browser post-rollout acceptance is still required. Regression checks exercise selector identity across ticks/editing, deferred inventory remount, retained sub-250ms samples, chart throttling, disconnect invalidation and reading-observer isolation.
+
+Sampling also follows the collector cycle-start timestamp, with completion/source times kept separate. Measured response latency can make successive completion timestamps less than 60s apart despite correctly spaced minute cycles; using those completion differences could skip a valid 1min sample. The new cycle metadata fixes that without changing broker cadence or freshness rules.

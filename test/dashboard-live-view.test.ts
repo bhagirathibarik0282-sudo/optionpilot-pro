@@ -84,3 +84,11 @@ test('pause/resume with an identical next packet still rebuilds the cleared live
  h.nodes.get('op-live-toggle').onclick();assert(!h.nodes.get('op-live-indices').innerHTML.includes('22,001'));
  h.nodes.get('op-live-toggle').onclick();h.emit();assert(h.nodes.get('op-live-indices').innerHTML.includes('22,001'));
 });
+
+test('one-minute PCR does not skip a cycle when quote completion times are less than 60 seconds apart',()=>{
+ const h=harness(),start=Date.parse('2026-10-16T04:30:00Z');let cycle=0,value=1.25;
+ const patch=(s:any)=>{s.indices[0].pcrSnapshot={state:'COMPLETE',fullPcr:value,cycleStartedAt:new Date(start+cycle).toISOString(),checkedAt:s.asOf,sourceMinAt:s.asOf,sourceMaxAt:s.asOf,coverage:{complete:true,expected:2,freshOi:2}};};
+ const valueOf=()=>h.nodes.get('op-live-indices').innerHTML.split('<h3>NIFTY')[1].match(/FULL PCR[^<]*<strong>([^<]*)/)[1];
+ h.advance(10000);h.tick();h.emit(patch);assert.equal(valueOf(),'1.25');
+ h.advance(56000);cycle=60000;value=1.5;h.tick();h.emit(patch);assert.equal(valueOf(),'1.5','56s completion gap must not turn minute sampling into 2min sampling');
+});

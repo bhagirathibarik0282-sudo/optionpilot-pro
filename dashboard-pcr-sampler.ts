@@ -9,7 +9,7 @@ export function quoteTime(value:unknown):number {
  const at=/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)?value.replace(' ','T')+'+05:30':value;
  return /(?:Z|[+-]\d{2}:\d{2})$/.test(at)?Date.parse(at):NaN;
 }
-export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number){
+export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number,cycleStartedAt=now){
  let ce=0,pe=0;const times:number[]=[],missing:string[]=[],stale:string[]=[],invalid:string[]=[],calls:LiveEntry[]=[],puts:LiveEntry[]=[];
  const seen=new Set<string>();
  for(const e of entries){
@@ -27,7 +27,7 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
  return {state:complete&&ce>0?'COMPLETE':'INCOMPLETE',fullPcr:complete&&ce>0?pe/ce:null,ceTotal:complete?ce:null,peTotal:complete?pe:null,callWall:wall(calls),putWall:wall(puts),coverage:{expected:entries.length,freshOi:times.length,complete,sourceSkewMs:skew,missing:missing.length,stale:stale.length,invalid:invalid.length},
   // Bounded diagnostics, no credentials or raw broker responses.
   unavailable:[...missing.map(identity=>({identity,reason:'MISSING'})),...stale.map(identity=>({identity,reason:'STALE_TIMESTAMP'})),...invalid.map(identity=>({identity,reason:'INVALID_IDENTITY_OR_OI'}))].slice(0,12),
-  sourceMinAt:times.length?new Date(Math.min(...times)).toISOString():null,sourceMaxAt:times.length?new Date(Math.max(...times)).toISOString():null,checkedAt:new Date(now).toISOString(),source:'KITE_REST_FULL_EXPIRY_SNAPSHOT'};
+  sourceMinAt:times.length?new Date(Math.min(...times)).toISOString():null,sourceMaxAt:times.length?new Date(Math.max(...times)).toISOString():null,checkedAt:new Date(now).toISOString(),cycleStartedAt:new Date(cycleStartedAt).toISOString(),source:'KITE_REST_FULL_EXPIRY_SNAPSHOT'};
 }
 export class DashboardPcrSampler {
  private busy=false;private due=0;private revision=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>>();
@@ -48,7 +48,7 @@ export class DashboardPcrSampler {
   finally{
    if(this.deps.active()){
     const keys=[...new Set(entries.map(e=>e.symbol+'|'+e.expiry))],at=this.deps.now();
-    for(const key of keys)this.results.set(key,measurePcrSnapshot(entries.filter(e=>e.symbol+'|'+e.expiry===key),quotes,this.inventory.date,at));
+    for(const key of keys)this.results.set(key,measurePcrSnapshot(entries.filter(e=>e.symbol+'|'+e.expiry===key),quotes,this.inventory.date,at,now));
     this.revision++;
    }
    this.busy=false;

@@ -24,11 +24,11 @@ export function installDashboardLive(){
   return ref;
  }
  function pcrSample(a:any){
-  const q=a.pcrSnapshot,at=Date.parse(q?.checkedAt||''),now=Date.parse(latest?.serverTime||''),period=cadences[a.symbol];
-  const valid=latest?.connected&&q?.state==='COMPLETE'&&q.coverage?.complete&&typeof q.fullPcr==='number'&&Number.isFinite(q.fullPcr)&&at<=now&&now-at<=90000;
+  const q=a.pcrSnapshot,at=Date.parse(q?.checkedAt||''),cycleAt=Date.parse(q?.cycleStartedAt||q?.checkedAt||''),now=Date.parse(latest?.serverTime||''),period=cadences[a.symbol];
+  const valid=latest?.connected&&q?.state==='COMPLETE'&&q.coverage?.complete&&typeof q.fullPcr==='number'&&Number.isFinite(q.fullPcr)&&at<=now&&now-at<=90000&&Number.isFinite(cycleAt)&&cycleAt<=at&&at-cycleAt<=60000;
   if(!valid){delete sampled[a.symbol];const rows=buffers[a.symbol+'|pcr'];if(rows?.length&&rows.at(-1).value!==null){rows.push({value:null,at:latest.serverTime});if(rows.length>600)rows.shift();}return null;}
   let old=sampled[a.symbol];
-  if(!old||old.expiry!==a.expiry||at-Date.parse(old.checkedAt)>=period){old={...q,expiry:a.expiry,periodMs:period};sampled[a.symbol]=old;append(a.symbol,'pcr',old.fullPcr,old.checkedAt);}
+  if(!old||old.expiry!==a.expiry||cycleAt-Date.parse(old.cycleStartedAt||old.checkedAt)>=period){old={...q,expiry:a.expiry,periodMs:period};sampled[a.symbol]=old;append(a.symbol,'pcr',old.fullPcr,old.checkedAt);}
   if(now-Date.parse(old.checkedAt)>period+30000){delete sampled[a.symbol];return null;}return old;
  }
  function close(){if(source){source.close();source=null;}}

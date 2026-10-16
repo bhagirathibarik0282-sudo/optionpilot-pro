@@ -275,6 +275,22 @@ export function installMarketBook(api:any) {
   out+='<div class="mb-month-board" role="region" aria-label="Monthly premium reference table" tabindex="0"><table><thead><tr><th>Exact contract / DTE</th><th>Premium ₹</th>'+keys.map(k=>'<th>'+esc(labels[k]||k+' ₹')+'</th>').join('')+'<th>Recording / reference context</th></tr></thead><tbody>'+b.rows.map((r:any)=>{const p=r.premium;return '<tr><th scope="row">'+esc(p.expiry)+'<br>'+esc(p.strike??'Unavailable')+' '+esc(p.type)+note('DTE '+fmt(p.dte,0))+'</th><td>'+fmt(p.value)+note(r.fresh?'Latest aligned recording':'Unavailable / older recording')+'</td>'+keys.map(k=>cell(r,k)).join('')+'<td class="mb-board-meta">'+esc(when(p.at))+note('Index health '+(state.health[boardIndex]?.freshness?.state||state.health[boardIndex]?.state||'Unavailable'))+note('Pivot reference '+when(r.pivotAt))+note('Opening samples '+r.openingSamples+'/5 · '+p.source)+'</td></tr>';}).join('')+'</tbody></table></div>';
   return out+note('Green/red cells mean this premium is above/below its own reference, not index direction or a trade signal. Each expiry/strike/CE/PE identity stays exact. 15m H/L require all five 09:15–09:27 recorded samples, not exchange candle extremes. Fibonacci uses the same contract’s previous recorded session and exact 15:30 endpoint; load earlier sessions if unavailable. Current timestamps are recording times, not proof of exchange freshness. Only loaded recorded expiries are shown; complete exchange inventory is unproven.');
  }
+ function publishLiveReferences(){
+  if(typeof CustomEvent==='undefined'||typeof window.dispatchEvent!=='function')return;
+  const data:any={date:date,indices:{}};
+  for(const index of ['NIFTY','SENSEX','BANKNIFTY']){
+   const a=models[index];if(!a||!/^\d{4}-\d{2}-\d{2}$/.test(a.tradeDate))continue;
+   const option=(p:any)=>{
+    if(!p)return null;const end=Date.parse(a.tradeDate+'T09:30:00+05:30'),values:number[]=[];
+    for(let i=0;i<5;i++){const at=end-900000+i*180000,rows=(p.points||[]).filter((r:any)=>Date.parse(r.at)===at),v=rows[0]?.value;if(!rows.length||typeof v!=='number'||!Number.isFinite(v)||v<=0||rows.some((r:any)=>r.value!==v))break;values.push(v);}
+    const complete=values.length===5&&Date.parse(p.at)>=end;
+    return {expiry:p.expiry,strike:p.strike,type:p.type,pivot:p.pivot,opening:{complete,high:complete?Math.max(...values):null,low:complete?Math.min(...values):null,fromAt:new Date(end-900000).toISOString(),at:new Date(end).toISOString()}};
+   };
+   data.indices[index]={spot:{pivot:a.spot.pivot,opening:a.spotPcr.opening.spot},pcr:{expiry:a.expiry,pivot:null,opening:a.spotPcr.opening.pcr},ce:option(a.ce),pe:option(a.pe)};
+  }
+  window.dispatchEvent(new CustomEvent('optionpilot:recorded-levels',{detail:data}));
+ }
+ if(typeof window!=='undefined')window.addEventListener('optionpilot:request-recorded-levels',publishLiveReferences);
  function render(force=false){
   if(force){cache={};boardCache={};lastRenderKey=null;}
   tableSequence=0;
@@ -285,7 +301,7 @@ export function installMarketBook(api:any) {
   $('mb-health').textContent='Observation '+(state.date||'not loaded')+' · '+win+' exact endpoints · '+symbols.map(s=>s+': '+(state.health[s]?.freshness?.state||state.health[s]?.state||'Unavailable')+' '+when(models[s].spot.at)).join(' | ')+' · Earlier dates in memory: '+symbols.map(s=>s+' '+models[s].historyDates.length).join(' / ')+' · existing 60s dashboard checks / 3-minute recorder; not a tick feed.';
   const renderKey=[page,win,symbol,expiry,opposite,strike,compareStrike,premiumView,expiryScope,graphSide,graphMetric,notableFilter,behaviourFilter,participationFilter,boardMonth,boardIndex,boardFib,JSON.stringify(boardStrikesByIndex),JSON.stringify(spotSettings),showPivots,showOpening,showPremiumLevels,expandedChart,state.date,state.loading,state.quoteLoading,state.sectors,state.cash,state.ratings?.length?state.ratings:null,...symbols.flatMap(s=>[models[s],state.stocks?.[s],state.quoteStatus?.[s],state.health[s]?.state,state.health[s]?.freshness?.state]),state.quoteStatus?.sectors];
   if(lastRenderKey&&renderKey.every((v,i)=>v===lastRenderKey![i]))return;
-  lastRenderKey=renderKey;
+  lastRenderKey=renderKey;publishLiveReferences();
   options($('mb-expiry'),m.expiries,expiry);options($('mb-opposite'),m.expiries,opposite);options($('mb-strike'),m.strikes,strike);const pinned=$('mb-pinned-compare');pinned.innerHTML='<option value="">No comparison</option>'+m.strikes.filter((k:any)=>k!==strike).map((k:any)=>'<option value="'+k+'">'+k+'</option>').join('');pinned.value=compareStrike===null?'':String(compareStrike);
   if($('mb-scope'))$('mb-scope').textContent=[symbol,win,'CE '+(expiry||'Unavailable'),'PE '+(opposite||'Unavailable'),'Strike '+(strike??'Unavailable')].join(' · ');
   if($('mb-chapter')){const choices=chapters.flatMap((c,i)=>i===3?[]:[{i,c}]);$('mb-chapter').innerHTML=choices.map(v=>'<option value="'+v.i+'">'+esc(v.c)+'</option>').join('');$('mb-chapter').value=String(page);}

@@ -1,0 +1,54 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import { buildDashboardLiveInventory,DashboardLiveStore,LIVE_INDICES,type LiveEntry } from '../dashboard-live-feed.js';
+import type { KiteInstrumentMasterRow } from '../kite-immediate-registry-builder.js';
+import type { KiteDecodedPacket } from '../kite-websocket-binary-decoder.js';
+import { Hono } from 'hono';import { mountDashboardLiveRoutes } from '../dashboard-live-http.js';
+import { KiteWebSocketTransport,registerKiteTickObserver } from '../kite-websocket-transport.js';
+const date='2026-10-16',at='2026-10-16T04:30:00.000Z',now=Date.parse(at),expiry='2026-10-19';
+const entries:LiveEntry[]=[{token:1,label:'NIFTY 50',symbol:'NIFTY',role:'SPOT'},{token:2,label:'FUT',symbol:'NIFTY',role:'FUTURE',expiry:'2026-10-27'},...['CE','PE'].flatMap((side,i)=>[22000,22100].map((strike,j)=>({token:10+i*2+j,label:side+strike,symbol:'NIFTY' as const,role:'OPTION' as const,expiry,strike,side:side as 'CE'|'PE'})))];
+function packet(token:number,extra:Partial<KiteDecodedPacket>={}):KiteDecodedPacket{return {mode:'full',isIndex:token===1,instrumentToken:token,lastPrice:token===1?22005:token===2?22015:100,exchangeTimestamp:at,oi:100,close:90,...extra};}
+function fixture(){const store=new DashboardLiveStore({entries,missing:[],omittedExpiries:[],date});store.ingest(entries.map(e=>packet(e.token)),at);return store;}
+test('full PCR and walls require the complete exact-expiry inventory; zero OI is valid',()=>{
+ const s=fixture(),a=s.snapshot(now).indices[0];assert.equal(a.fullPcr,1);assert.equal(a.ceTotal,200);assert.equal(a.peTotal,200);assert.deepEqual(a.callWall?.tiedStrikes,[22000,22100]);assert.equal(a.strike,22000);assert.equal(a.futuresBasis,10);
+ s.ingest([packet(12,{oi:0})],at);assert.equal(s.snapshot(now).indices[0].fullPcr,.5);
+ assert.equal(s.snapshot(now).indices[0].greeks.iv,null);
+ const missing=new DashboardLiveStore({entries,missing:[],omittedExpiries:[],date});missing.ingest(entries.slice(0,-1).map(e=>packet(e.token)),at);assert.equal(missing.snapshot(now).indices[0].fullPcr,null);assert.equal(missing.snapshot(now).indices[0].callWall,null);
+});
+test('stale, missing source time, old session, out-of-order, invalid prices and partial modes fail closed',()=>{
+ const s=fixture();assert.equal(s.snapshot(now+31000).indices[0].spot.price,null);assert.equal(s.snapshot(now+86400000).indices[0].fullPcr,null);
+ s.ingest([packet(1,{exchangeTimestamp:'2026-10-16T04:29:59Z',lastPrice:1})],at);assert.equal(s.snapshot(now).indices[0].spot.price,22005);
+ s.ingest([packet(1,{exchangeTimestamp:null,lastPrice:2}),packet(1,{mode:'quote',lastPrice:3}),packet(1,{exchangeTimestamp:'2026-10-15T04:30:00Z',lastPrice:4}),packet(1,{exchangeTimestamp:'2026-10-16T04:31:00Z',lastPrice:5})],at);assert.equal(s.snapshot(now).indices[0].spot.price,22005);
+ s.ingest([packet(1,{lastPrice:0})],at);assert.equal(s.snapshot(now).indices[0].spot.price,null);
+ s.ingest([packet(10,{oi:undefined})],at);assert.equal(s.snapshot(now).indices[0].fullPcr,null);
+});
+test('selection never substitutes a missing exact strike and independent expiry inventory remains explicit',()=>{
+ const s=fixture();assert.equal(s.snapshot(now,{NIFTY:{expiry:'2026-10-01',strike:22000}}).indices[0].expiry,null);const a=s.snapshot(now,{NIFTY:{expiry,strike:99999}}).indices[0];assert.equal(a.strike,null);assert.equal(a.ce.price,null);assert.equal(a.pe.oi,null);
+ assert.equal(s.snapshot(now,{NIFTY:{expiry,strike:22100}}).indices[0].ce.identity?.strike,22100);
+});
+function master(){let token=1;const rows:KiteInstrumentMasterRow[]=[];for(const [symbol,label,exchange] of [['NIFTY','NIFTY 50','NSE'],['SENSEX','SENSEX','BSE'],['BANKNIFTY','NIFTY BANK','NSE']]){rows.push({instrument_token:token++,tradingsymbol:label,exchange,segment:'INDICES'});rows.push({instrument_token:token++,tradingsymbol:symbol+'FUT',exchange,instrument_type:'FUT',name:symbol,expiry:'2026-10-27'});for(const exp of [expiry,'2026-10-26'])for(const side of ['CE','PE'])rows.push({instrument_token:token++,tradingsymbol:symbol+exp+side,exchange,name:symbol,expiry:exp,strike:22000,instrument_type:side});}rows.push({instrument_token:token++,tradingsymbol:'INDIA VIX',exchange:'NSE',segment:'INDICES'});return rows;}
+test('capacity retains whole chains across indices, reports omitted expiries and rejects ambiguous identities',()=>{
+ const rows=master(),inventory=buildDashboardLiveInventory(rows,date,[],13);assert.equal(inventory.entries.length,13);assert.equal(inventory.omittedExpiries.length,3);
+ for(const s of LIVE_INDICES)assert.equal(inventory.entries.filter(e=>e.symbol===s&&e.role==='OPTION').length,2);
+ const ambiguous=master();ambiguous.push({...ambiguous.find(r=>r.name==='NIFTY'&&r.instrument_type==='CE')!,instrument_token:9999});const other=buildDashboardLiveInventory(ambiguous,date,[]);assert(other.omittedExpiries.includes('NIFTY|'+expiry));
+});
+test('read routes validate selection and default runtime has no live numbers when disabled',async()=>{
+ const app=new Hono();mountDashboardLiveRoutes(app);let r=await app.request('/dashboard-live');assert.equal(r.status,200);const body=await r.json();assert.equal(body.connectionState,'DISABLED');assert.equal(body.snapshot,null);assert.equal(body.createsOrders,false);
+ for(const path of ['/dashboard-live?NIFTY_strike=NaN','/dashboard-live/stream?NIFTY_expiry=bad']){r=await app.request(path);assert.equal(r.status,400);}
+});
+test('display-only socket does not broadcast into existing Telegram/selector tick observers',()=>{
+ let callback:any,seen=0,ingested=0;const unsubscribe=registerKiteTickObserver(()=>{seen++;});
+ const socket:any={binaryType:'',readyState:1,send(){},close(){},addEventListener(type:string,fn:any){if(type==='message')callback=fn;}};
+ const transport=new KiteWebSocketTransport({apiKey:'test',accessToken:'test',instrumentTokens:[257],broadcastObservers:false,socketFactory:()=>socket,onTicks:()=>{ingested++;}});
+ transport.connect();const frame=new ArrayBuffer(14),v=new DataView(frame);v.setUint16(0,1);v.setUint16(2,8);v.setInt32(4,257);v.setInt32(8,10000);callback({data:frame});assert.equal(ingested,1);assert.equal(seen,0);transport.disconnect();unsubscribe();
+});
+test('SSE sends a real snapshot envelope and respects stream cancellation',async()=>{
+ const app=new Hono();const sample:any={connectionState:'DISABLED',snapshot:null,createsOrders:false};mountDashboardLiveRoutes(app,()=>sample);
+ const controller=new AbortController();const response=await app.request('/dashboard-live/stream',{signal:controller.signal});assert.equal(response.status,200);assert(response.headers.get('Content-Type')?.includes('text/event-stream'));const reader=response.body!.getReader();const value=await reader.read();const text=new TextDecoder().decode(value.value);assert(text.includes('event: snapshot'));assert(text.includes('"connectionState":"DISABLED"'));controller.abort();await reader.cancel();
+});
+test('same-second packets retain real millisecond receipt times without inventing exchange precision',()=>{
+ const store=fixture(),before=store.revision(),received='2026-10-16T04:30:00.125Z';store.ingest([packet(1,{lastPrice:22006})],received);const a=store.snapshot(now+125).indices[0];assert(store.revision()>before);assert.equal(a.spot.price,22006);assert.equal(a.spot.observedAt,at);assert.equal(a.spot.receivedAt,received);
+});
+test('SSE publishes changed revisions without waiting for its idle heartbeat',async()=>{
+ const app=new Hono();let version=1,reads=0;mountDashboardLiveRoutes(app,()=>({connectionState:'OPEN',snapshot:{sequence:version},reads:++reads}) as any,()=>String(version));
+ const controller=new AbortController(),response=await app.request('/dashboard-live/stream',{signal:controller.signal}),reader=response.body!.getReader();const first=new TextDecoder().decode((await reader.read()).value);assert(first.includes('"sequence":1'));version=2;const next=new TextDecoder().decode((await reader.read()).value);assert(next.includes('"sequence":2'));assert.equal(reads,2);controller.abort();await reader.cancel();
+});

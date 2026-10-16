@@ -31,6 +31,7 @@ export type KiteWebSocketTransportConfig = {
   mode?: "ltp" | "quote" | "full";
   socketFactory?: KiteSocketFactory;
   reconnect?: { enabled: boolean; delayMs?: number; maxAttempts?: number };
+  broadcastObservers?: boolean;
   onTicks: (ticks: KiteDecodedPacket[], receivedAt: string) => void | Promise<void>;
   onTextMessage?: (text: string) => void | Promise<void>;
   onState?: (state: "CONNECTING" | "OPEN" | "CLOSED" | "ERROR" | "RECONNECTING") => void;
@@ -82,13 +83,13 @@ export class KiteWebSocketTransport {
       }
       if (data instanceof ArrayBuffer) {
         const ticks = decodeKiteBinaryFrame(data);
-        if (ticks.length > 0) { void this.config.onTicks(ticks, receivedAt); fanoutTicks(ticks, receivedAt); }
+        if (ticks.length > 0) { void this.config.onTicks(ticks, receivedAt); if (this.config.broadcastObservers !== false) fanoutTicks(ticks, receivedAt); }
         return;
       }
       if (ArrayBuffer.isView(data)) {
         const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
         const ticks = decodeKiteBinaryFrame(bytes);
-        if (ticks.length > 0) { void this.config.onTicks(ticks, receivedAt); fanoutTicks(ticks, receivedAt); }
+        if (ticks.length > 0) { void this.config.onTicks(ticks, receivedAt); if (this.config.broadcastObservers !== false) fanoutTicks(ticks, receivedAt); }
       }
     });
 

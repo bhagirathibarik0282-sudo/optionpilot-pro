@@ -23,3 +23,9 @@ try {
 } catch {
   console.error('[DASHBOARD_BACKGROUND_QUOTES] startup unavailable');
 }
+
+// Dashboard-only market stream; explicit default-OFF flag, no trading authority.
+try {
+  const { startDashboardLiveRuntime } = await import('./dashboard-live-runtime.js');
+  startDashboardLiveRuntime();
+} catch { console.error('[DASHBOARD_LIVE] startup unavailable'); }

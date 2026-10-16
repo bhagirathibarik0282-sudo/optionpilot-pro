@@ -1,3 +1,4 @@
+import { mountDashboardLiveRoutes } from './dashboard-live-http.js';
 import { renderRagEvidencePage } from './rag-evidence-card.js';
 import { Hono } from "hono";
 import { mountRagEventEvidenceRoute } from './rag-event-evidence.js';
@@ -55,6 +56,7 @@ import { JEV_PINNED_MODEL } from "./jev-decision-shadow-v1.js";
 import { H1_LIVE_GATE_EVIDENCE_PERSIST_KIND } from "./h1-live-selector-registry.js";
 
 export const researchRouter = new Hono();
+mountDashboardLiveRoutes(researchRouter);
 mountRagEventEvidenceRoute(researchRouter);
 researchRouter.get('/rag-event-evidence/view',c=>{c.header('Cache-Control','no-store');return c.html(renderRagEvidencePage());});
 

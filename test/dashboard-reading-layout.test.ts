@@ -39,3 +39,12 @@ test('known live subtree uses explicit readable CSS and does not schedule font-m
  callback([{target:new El(true)}]);assert.equal(frames.length,0);assert.equal(queries,0);
  callback([{target:new El(false)},{target:new El(true)}]);assert.equal(frames.length,1);frames[0]();assert.equal(queries,2,'only the ordinary subtree is decorated');
 });
+
+test('notes default to hidden, toggle immediately, and restore across refresh including blocked storage',()=>{
+ for(const saved of [null,'{"notes":"show"}','{"notes":"unexpected"}'])for(const blocked of [false,true]){
+  const size:any={value:'comfortable'},tables:any={value:'cards'},notes:any={value:'hide'},body:any={dataset:{},querySelectorAll:()=>[],closest:()=>null};let stored:any=null;
+  const ctx:any={window:{localStorage:{getItem:()=>saved,setItem:(_k:string,v:string)=>{if(blocked)throw Error('blocked');stored=JSON.parse(v);}}},document:{body,querySelectorAll:()=>[],getElementById:(id:string)=>({'op-reading-size':size,'op-reading-tables':tables,'op-reading-notes':notes}[id])}};
+  vm.createContext(ctx);const html=withDashboardReading('<html><head></head><body><p role="status">STALE at 09:18</p><svg id="chart"></svg></body></html>');const script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)![1];vm.runInContext(script,ctx);
+  assert.equal(body.dataset.opNotes,saved==='{"notes":"show"}'?'show':'hide');notes.value='show';notes.onchange();assert.equal(body.dataset.opNotes,'show');if(!blocked)assert.equal(stored.notes,'show');notes.value='hide';notes.onchange();assert.equal(body.dataset.opNotes,'hide');assert(html.includes('<p role="status">STALE at 09:18</p><svg id="chart"></svg>'));
+ }
+});

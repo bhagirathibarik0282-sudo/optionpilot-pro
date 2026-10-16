@@ -1,6 +1,8 @@
 /** Shared presentation only: no fetch, market calculation or database writes. */
-export const DASHBOARD_READING_HTML = `<aside id="op-reading-tools" aria-label="Dashboard reading settings"><strong>Reading</strong><label>Text size<select id="op-reading-size"><option value="comfortable">Comfortable</option><option value="large">Extra large</option></select></label><label>Tables<select id="op-reading-tables"><option value="cards">Labelled rows</option><option value="wide">Wide table</option></select></label></aside>`;
+export const DASHBOARD_READING_HTML = `<aside id="op-reading-tools" aria-label="Dashboard reading settings"><strong>Reading</strong><label>Text size<select id="op-reading-size"><option value="comfortable">Comfortable</option><option value="large">Extra large</option></select></label><label>Tables<select id="op-reading-tables"><option value="cards">Labelled rows</option><option value="wide">Wide table</option></select></label><label>ବିବରଣୀ<select id="op-reading-notes"><option value="hide">ଲୁଚାନ୍ତୁ · Hide</option><option value="show">ଦେଖନ୍ତୁ · Show</option></select></label></aside>`;
 export const DASHBOARD_READING_CSS = `
+body:not([data-op-notes=show]) [data-op-explanation]{display:none!important}
+
 body[data-op-reading]{--op-reading-text:18px;--op-reading-value:32px;--op-reading-note:16px;font-variant-numeric:tabular-nums;background:#081225;color:#edf3ff}
 body[data-op-reading=large]{--op-reading-text:21px;--op-reading-value:36px;--op-reading-note:18px}
 #op-reading-tools{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;padding:10px 12px;margin:0;background:#0c1930;color:#eff5ff;border-bottom:1px solid #536681;font:16px/1.5 system-ui}
@@ -49,14 +51,16 @@ export function installDashboardReading() {
   if (typeof document.querySelectorAll !== 'function' || typeof window === 'undefined') return;
   const body = document.body, size = document.getElementById('op-reading-size') as HTMLSelectElement | null;
   const tables = document.getElementById('op-reading-tables') as HTMLSelectElement | null;
+  const notes = document.getElementById('op-reading-notes') as HTMLSelectElement | null;
   if (!body || !size || !tables) return;
   const apply = () => {
     body.dataset.opReading = size.value === 'large' ? 'large' : 'comfortable';
     body.dataset.opTables = tables.value === 'wide' ? 'wide' : 'cards';
-    try { window.localStorage.setItem('optionpilot.reading', JSON.stringify({size:size.value,tables:tables.value})); } catch {}
+    body.dataset.opNotes = notes?.value === 'show' ? 'show' : 'hide';
+    try { window.localStorage.setItem('optionpilot.reading', JSON.stringify({size:size.value,tables:tables.value,notes:body.dataset.opNotes})); } catch {}
   };
-  try {const v=JSON.parse(window.localStorage.getItem('optionpilot.reading') || '{}');if(['comfortable','large'].includes(v.size))size.value=v.size;if(['cards','wide'].includes(v.tables))tables.value=v.tables;} catch {}
-  size.onchange = apply; tables.onchange = apply; apply();
+  try {const v=JSON.parse(window.localStorage.getItem('optionpilot.reading') || '{}');if(['comfortable','large'].includes(v.size))size.value=v.size;if(['cards','wide'].includes(v.tables))tables.value=v.tables;if(notes&&['hide','show'].includes(v.notes))notes.value=v.notes;} catch {}
+  size.onchange = apply; tables.onchange = apply; if(notes)notes.onchange = apply; apply();
   const decorate = (root: Element) => {
     const candidates = new Set([...root.querySelectorAll('table'), ...(root.closest('table') ? [root.closest('table')!] : [])]);
     for (const table of candidates) {

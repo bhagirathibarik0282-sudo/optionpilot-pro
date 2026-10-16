@@ -39,3 +39,8 @@ test('batches at 500 and bounds calls without mixing expiry totals',async()=>{
  await sampler.tick();assert.equal(calls,3);assert.equal(waits,2);
  assert.equal(sampler.read('NIFTY','2026-10-19')?.fullPcr,3);assert.equal(sampler.read('NIFTY','2026-10-27')?.coverage.expected,500);
 });
+
+test('cycle-start time stays independent of quote completion latency',async()=>{
+ let now=at;const sampler=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{now:()=>now,active:()=>true,wait:async()=>{},fetchQuotes:async()=>{now+=12000;return quotes();}});
+ await sampler.tick();const result=sampler.read('NIFTY','2026-10-19');assert.equal(result?.cycleStartedAt,new Date(at).toISOString());assert.equal(result?.checkedAt,new Date(at+12000).toISOString());assert.equal(result?.fullPcr,2);
+});

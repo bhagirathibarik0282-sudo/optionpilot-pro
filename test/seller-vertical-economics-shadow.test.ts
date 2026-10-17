@@ -11,3 +11,6 @@ test("reject missing broker margin",()=>assert.equal(evaluateSellerVertical({...
 test("reject insufficient capital",()=>assert.equal(evaluateSellerVertical({...base,availableCapital:2000}).ready,false));
 test("reject invalid lot size",()=>assert.equal(evaluateSellerVertical({...base,lotSize:1.5}).ready,false));
 test("reject future quote",()=>assert.equal(evaluateSellerVertical({...base,longObservedAtMs:1200}).ready,false));
+
+test('reject prefixed malformed expiry',()=>assert.equal(evaluateSellerVertical({...base,expiry:'x2026-10-20'}).ready,false));
+test('reject after-cost negative credit',()=>assert.equal(evaluateSellerVertical({...base,estimatedRoundTripCosts:999999}).ready,false));

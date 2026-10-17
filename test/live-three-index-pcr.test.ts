@@ -53,7 +53,7 @@ test('3-minute cadence compares complete snapshots on 3-minute endpoints and cle
  const p=fixture(0,[1,1.2,1.4],180000);p.serverTime=iso(start+210001);p.snapshot.asOf=p.serverTime;assert(derive(p).rows.every(r=>r.value===null));
 });
 test('generated browser functions parse and chapter integration uses only the existing live event',()=>{
- const html=renderBusinessDashboardV1Html({} as any);for(const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(m[1]);assert(html.includes('id="mb-full-pcr-strip"'));assert(html.includes('deriveLiveThreeIndexPcr(latestLive'));assert(!html.includes('/api/research/three-index-pcr'));assert(css.includes('repeat(3,minmax(0,1fr))'));
+ const html=renderBusinessDashboardV1Html({} as any);for(const m of html.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(m[1]);assert(html.includes('id="mb-full-pcr-strip"'));assert(html.includes('deriveLiveThreeIndexPcr(latestLive'));assert(!html.includes('/api/research/three-index-pcr'));assert(css.includes('table-layout:fixed'));assert(render(derive(fixture())).includes('ATM ±7 · 15 strikes'));
 });
 test('actual serialized live event updates all three PCR values and revokes them on disconnect without touching recordings',()=>{
  const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>(),handlers:any={};
@@ -64,9 +64,31 @@ test('actual serialized live event updates all three PCR values and revokes them
  ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>data,refresh(){requests++;},memory:async()=>{}};vm.runInContext('installMarketBook(api)',ctx);
  const turn=(page:number)=>nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:String(page)}})}});
  turn(5);const recorded=nodes.get('mb-page').innerHTML;
- handlers['optionpilot:live-context']({detail:fixture()});handlers['optionpilot:live-context']({detail:fixture(60000,[1.1,1.3,1.5])});
- let content=nodes.get('mb-full-pcr-strip').innerHTML;assert(content.includes('ALL RISING'));assert(content.includes('1.5000'));assert.equal(nodes.get('mb-full-pcr-strip').hidden,false);assert(!nodes.get('mb-live-context').innerHTML.includes('data-live-kind="pcr"'));assert.equal(nodes.get('mb-page').innerHTML,recorded);
+ handlers['optionpilot:live-context']({detail:withBand(fixture())});handlers['optionpilot:live-context']({detail:withBand(fixture(60000,[1.1,1.3,1.5]),[2,1.9,1.8])});
+ let content=nodes.get('mb-full-pcr-strip').innerHTML;assert(content.includes('ALL RISING'));assert(content.includes('ALL FALLING'));assert(content.includes('1.8000'));assert(content.includes('1.5000'));assert.equal(nodes.get('mb-full-pcr-strip').hidden,false);assert(!nodes.get('mb-live-context').innerHTML.includes('data-live-kind="pcr"'));assert.equal(nodes.get('mb-page').innerHTML,recorded);
  turn(9);assert.equal(nodes.get('mb-full-pcr-strip').hidden,false);assert(!nodes.get('mb-live-context').innerHTML.includes('data-live-kind="pcr"'));
  handlers['optionpilot:live-context']({detail:null});content=nodes.get('mb-full-pcr-strip').innerHTML;assert(!content.includes('1.5000'));assert(!content.includes('ALL RISING'));assert(content.includes('UNAVAILABLE'));
  turn(4);assert.equal(nodes.get('mb-full-pcr-strip').hidden,true);assert.deepEqual(data,before);assert.equal(requests,0);
+});
+function withBand(p:any,values=[2.1,2,1.9]){
+ for(const [i,symbol] of symbols.entries()){const q=p.pcrDisplay[symbol];q.bandPcr={state:'COMPLETE',value:values[i],halfWidth:7,strikeCount:15,expected:30,freshOi:30,anchorStrike:24000,fromStrike:23650,toStrike:24350,ceTotal:200,peTotal:values[i]*200,anchorAt:q.checkedAt};}return p;
+}
+test('compact ladder shows full and band PCR separately; opposite alignments are retained without scope mixing',()=>{
+ const base=derive(withBand(fixture()),null,0);const next=derive(withBand(fixture(60000,[1.1,1.3,1.5]),[2,1.9,1.8]),base,200);
+ assert.equal(next.alignment,'ALL_UP');assert.equal(next.bandAlignment,'ALL_DOWN');assert(next.rows.every(r=>r.bandDirection==='DOWN'));
+ const html=render(next,200);assert.equal((html.match(/<tr data-pcr-index=/g)||[]).length,3);assert.equal((html.match(/data-pcr-metric="full"/g)||[]).length,3);assert.equal((html.match(/data-pcr-metric="band"/g)||[]).length,3);assert(html.includes('ATM ±7 · 15 strikes'));assert.equal((html.match(/<summary>/g)||[]).length,1);
+});
+test('band scope, anchor and ratio validation is independent of a valid full PCR',()=>{
+ for(const modify of [(b:any)=>b.halfWidth=3,(b:any)=>b.strikeCount=7,(b:any)=>b.freshOi=29,(b:any)=>b.peTotal=-1,(b:any)=>b.peTotal=10000,(b:any)=>b.value=999,(b:any)=>b.fromStrike=b.anchorStrike,(b:any)=>b.anchorAt=iso(start-31000)]){const p=withBand(fixture());modify(p.pcrDisplay.NIFTY.bandPcr);const v=derive(p);assert.equal(v.rows[0].value,1);assert.equal(v.rows[0].bandValue,null);}
+ const p=withBand(fixture());p.pcrDisplay.NIFTY.bandPcr.peTotal=0;p.pcrDisplay.NIFTY.bandPcr.value=0;assert.equal(derive(p).rows[0].bandValue,0);
+});
+test('new ATM resets only band comparison; same-cycle band mutation revokes only its displayed value',()=>{
+ const base=derive(withBand(fixture()),null,0),p=withBand(fixture(60000,[1.1,1.3,1.5]),[2,1.9,1.8]);
+ p.pcrDisplay.NIFTY.bandPcr.anchorStrike+=50;p.pcrDisplay.NIFTY.bandPcr.fromStrike+=50;p.pcrDisplay.NIFTY.bandPcr.toStrike+=50;
+ const next=derive(p,base,200);assert.equal(next.alignment,'ALL_UP');assert.equal(next.bandAlignment,'WAIT');assert.equal(next.rows[0].bandValue,2);assert.equal(next.rows[0].bandDirection,'WAIT');
+ p.pcrDisplay.NIFTY.bandPcr.value=1.5;p.pcrDisplay.NIFTY.bandPcr.peTotal=300;const changed=derive(p,next,300);assert.equal(changed.rows[0].value,1.1);assert.equal(changed.rows[0].bandValue,null);
+});
+test('three-index band alignment also requires synchronized ATM source times at both endpoints',()=>{
+ const p=withBand(fixture());p.pcrDisplay.NIFTY.bandPcr.anchorAt=iso(start-30000);p.pcrDisplay.SENSEX.bandPcr.anchorAt=iso(start+5000);
+ const base=derive(p);assert(base.rows.every(r=>r.bandValue!==null));const next=derive(withBand(fixture(60000,[1.1,1.3,1.5]),[2,1.9,1.8]),base);assert.equal(next.alignment,'ALL_UP');assert.equal(next.bandAlignment,'TIME_MISMATCH');
 });

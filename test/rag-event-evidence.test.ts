@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {Hono} from 'hono';
-import {parseRagEventRequest,buildRagEventEvidence,readRagEventEvidence,mountRagEventEvidenceRoute} from '../rag-event-evidence.js';
+import {parseRagEventRequest,buildRagEventEvidence,buildRagPremiumSnapshot,readRagEventEvidence,mountRagEventEvidenceRoute} from '../rag-event-evidence.js';
 import type {H1ReplayHttpResult} from '../h1-replay-http.js';
 const query={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
 const request=(extra:Record<string,string>={})=>{const p=parseRagEventRequest({...query,...extra});assert.ok(p.ok);return p.value;};
@@ -65,4 +65,36 @@ test('actual recorder parity: known NIFTY event and PCR provenance',{skip:!proce
  const r=buildRagEventEvidence(request({includeOutcomes:'true'}),raw('2026-10-13'),raw('2026-10-12'));
  assert.ok(r.ok);assert.equal(r.reference.pdl,11.6);assert.equal(r.event.after,11.2);assert.equal(r.outcomes[0]!.pair.pe!.price,9.5);
  assert.ok(Math.abs(r.beforeAndAt.at(-1)!.context.fullPcr!-1.0677544186098389)<1e-10);
+});
+
+test('snapshot answers a non-crossing with exact opposite-side endpoints',()=>{
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',time:'09:39'}),fixture('2026-10-13'),fixture('2026-10-12'));
+ assert.ok(r.ok);assert.equal(r.event.after,9.5);assert.deepEqual(r.event.flags,[]);
+ assert.ok(Math.abs(r.comparison.selectedChangePercent!-((9.5/11.2-1)*100))<1e-9);
+ assert.ok(Math.abs(r.comparison.oppositeChangePercent!-((220/210-1)*100))<1e-9);
+ assert.match(r.answer,/Opposite CE ₹220.00/);assert.match(r.answer,/09:39 IST/);assert.deepEqual(r.outcomes,[]);
+ assert.equal(r.provenance.selectedEvidenceSha256.length,64);
+});
+test('snapshot works without prior reference, but rejects stale/current identity conflicts',()=>{
+ const noPrior={...fixture('2026-10-12'),ok:false};
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),fixture('2026-10-13'),noPrior);
+ assert.ok(r.ok);assert.equal(r.reference,null);assert.equal(r.status,'PARTIAL');assert.match(r.answer,/reference ଅନୁପଲବ୍ଧ/);
+ const wrong=fixture('2026-10-13');wrong.request!.symbol='SENSEX';assert.equal(buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),wrong,noPrior).ok,false);
+ const stale=fixture('2026-10-13');stale.options!.find(o=>o.minute_bucket==='2026-10-13T04:06:00.000Z'&&o.option_type==='PE')!.truth_verdict='STALE';
+ assert.equal(buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),stale,noPrior).ok,false);
+});
+test('snapshot respects receipt cutoff and never interpolates absent 1/5m baselines',()=>{
+ for(const lookback of ['1','5']){const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',lookback}),fixture('2026-10-13'),fixture('2026-10-12'));assert.ok(r.ok);assert.equal(r.comparison.selectedChangePercent,null);assert.equal(r.comparison.oppositeChangePercent,null);assert.match(r.answer,/exact baseline ଅନୁପଲବ୍ଧ/);}
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',asOf:'2026-10-13T09:36:00'}),fixture('2026-10-13'),fixture('2026-10-12'));assert.equal(r.ok,false);
+ assert.equal(parseRagEventRequest({...query,kind:'SNAPSHOT',time:'09:15'}).ok,true);
+ for(const q of [{kind:'ANY'},{lookback:'2'},{kind:'SNAPSHOT',time:'09:37'}])assert.equal(parseRagEventRequest({...query,...q}).ok,false);
+});
+test('all-strike retrieval is bounded to selected date and requested lookback; default event path preserved',async()=>{
+ const calls:any[]=[];const r=await readRagEventEvidence(request({kind:'SNAPSHOT',lookback:'75',time:'10:06'}),async q=>{calls.push(q);return fixture(q.tradeDate);});
+ assert.ok(r.ok);assert.equal(r.mode,'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1');assert.equal(calls.length,2);assert(calls.every(q=>q.scope==='FULL'));assert.equal(calls[0].fromTime,'09:15');assert.equal(calls[0].toTime,'10:06');
+ assert.equal(result({time:'09:39'}).ok,false,'event mode still requires a reconciled crossing');
+});
+
+test('snapshot still answers current recording when the prior source throws',async()=>{
+ const r=await readRagEventEvidence(request({kind:'SNAPSHOT'}),async q=>{if(q.tradeDate==='2026-10-12')throw Error('unavailable');return fixture(q.tradeDate);});assert.ok(r.ok);assert.equal(r.reference,null);assert.equal(r.referenceUnavailableReason,'REPLAY_SOURCE_UNAVAILABLE');
 });

@@ -24,14 +24,14 @@ test('missing and ambiguous fields never silently choose an index, date or side'
 });
 function browser(fetcher:(url:string)=>Promise<any>) {
  const nodes=new Map<string,any>();
- for(const id of ['form','question','symbol','date','expiry','strike','side','time','asof','outcomes','search','extract','example','clear','status','result']){
+ for(const id of ['form','kind','lookback','question','symbol','date','expiry','strike','side','time','asof','outcomes','search','extract','example','clear','status','result']){
   nodes.set('rag-'+id,{value:'',checked:false,disabled:false,innerHTML:'',textContent:'',listeners:{} as any,
     addEventListener(type:string,fn:Function){this.listeners[type]=fn;},reset(){for(const n of nodes.values()){n.value='';n.checked=false;}}});
  }
- const requests:string[]=[];const context=vm.createContext({URLSearchParams,AbortController,setTimeout,clearTimeout,document:{getElementById:(id:string)=>nodes.get(id)},fetch:async(url:string)=>{requests.push(url);return fetcher(url);}});
+ const events:Record<string,Function>={};nodes.get('rag-form').requestSubmit=()=>nodes.get('rag-form').onsubmit({preventDefault(){}});const requests:string[]=[];const context=vm.createContext({URLSearchParams,AbortController,setTimeout,clearTimeout,window:{addEventListener:(type:string,fn:Function)=>{events[type]=fn;}},document:{getElementById:(id:string)=>nodes.get(id)},fetch:async(url:string)=>{requests.push(url);return fetcher(url);}});
  vm.runInContext(RAG_CARD_SCRIPT,context);const node=(id:string)=>nodes.get('rag-'+id);
  const submit=()=>node('form').onsubmit({preventDefault(){}});
- return {node,requests,submit};
+ return {node,requests,submit,events};
 }
 const success=()=>({ok:true,status:200,json:async()=>({ok:true,identity:{symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:22300,side:'PE',dte:0},
  reference:{sourceDate:'2026-10-12',pdh:73.85,pdl:11.6},event:{availableAt:'2026-10-13T04:06:24Z'},answer:'PE <script>alert(1)</script> PDL loss',
@@ -64,4 +64,17 @@ test('card is in production book and standalone route, without introducing an au
  assert.equal((html.match(/id="rag-evidence-card"/g)||[]).length,1);assert.ok(renderRagEvidencePage().includes('<details open id="rag-evidence-card"'));
  const app=new Hono();app.route('/api/research',researchRouter);const r=await app.request('/api/research/rag-event-evidence/view');assert.equal(r.status,200);assert.match(await r.text(),/id="rag-question"/);
  assert.ok(RAG_CARD_HTML.includes('step="180"'));
+});
+
+test('card Ask RAG submits snapshot identity once and invalidation removes old evidence',async()=>{
+ const b=browser(async()=>{const res=success();const data=await res.json();return {...res,json:async()=>({...data,reference:null,mode:'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1'})};});
+ b.events['optionpilot:rag-selection']({detail:{symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36',lookback:'15'}});await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(b.requests.length,1);const p=new URL(b.requests[0],'https://example.test').searchParams;assert.equal(p.get('kind'),'SNAPSHOT');assert.equal(p.get('lookback'),'15');assert.equal(p.get('time'),'09:36');assert.equal(b.node('outcomes').checked,false);
+ assert.match(b.node('result').innerHTML,/reference ଅନୁପଲବ୍ଧ/);b.events['optionpilot:rag-invalidate']({});assert.equal(b.node('result').innerHTML,'');
+});
+test('a new explicit card question supersedes an in-flight answer without a stale-result race',async()=>{
+ const resolves:Function[]=[];const b=browser(()=>new Promise(r=>resolves.push(r)));const detail={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
+ b.events['optionpilot:rag-selection']({detail});b.events['optionpilot:rag-selection']({detail:{...detail,time:'09:39'}});assert.equal(b.requests.length,2);
+ resolves[0](success());await new Promise(resolve=>setImmediate(resolve));assert.equal(b.node('result').innerHTML,'');assert.equal(b.node('search').disabled,true);
+ resolves[1](success());await new Promise(resolve=>setImmediate(resolve));assert.match(b.node('result').innerHTML,/210.65/);assert.equal(b.node('search').disabled,false);
 });

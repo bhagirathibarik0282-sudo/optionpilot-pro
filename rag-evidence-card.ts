@@ -8,12 +8,12 @@ export const RAG_CARD_CSS=`
 #rag-evidence-card .rag-answer{padding:12px;background:#142a43;border-left:3px solid #f4d889;font-size:20px;color:#fff;white-space:pre-wrap;overflow-wrap:anywhere}
 #rag-evidence-card .rag-scroll{overflow:auto}#rag-evidence-card table{width:100%;border-collapse:collapse;font-size:16px;white-space:nowrap}#rag-evidence-card :is(th,td){padding:10px;border-bottom:1px solid #3c506c;text-align:left;font-size:16px}#rag-evidence-card .rag-note{color:#b9cbe2;font-size:16px}#rag-status{white-space:pre-wrap;overflow-wrap:anywhere}#rag-evidence-card h3{font-size:19px;color:#f4d889}#rag-evidence-card details{margin-top:12px}#rag-evidence-card [hidden]{display:none!important}
 @media(max-width:650px){#rag-evidence-card .rag-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#rag-evidence-card{padding:12px}#rag-evidence-card button{width:100%;margin-right:0}}`;
-export const RAG_CARD_HTML=`<details id="rag-evidence-card" lang="or"><summary>RAG evidence · ପ୍ରଶ୍ନରୁ exact event ଖୋଜନ୍ତୁ</summary>
-<p>ସଞ୍ଚିତ recorder dataରୁ PDH/PDL event ଓ recorded response। ଏହି selection dashboardର ଅନ୍ୟ chart selectionଠାରୁ ସ୍ୱତନ୍ତ୍ର।</p>
+export const RAG_CARD_HTML=`<details id="rag-evidence-card" lang="or"><summary>RAG evidence · recorded premiumକୁ ପଚାରନ୍ତୁ</summary>
+<p>Saved date, contract ଓ timestampରୁ premium / opposite premium response। Premium cardର Ask RAG selection ଏଠାରେ ଭରିଦେବ; ଅଲଗା ପ୍ରଶ୍ନ ମଧ୍ୟ ଲେଖିପାରିବେ।</p>
 <label for="rag-question">ଆପଣଙ୍କ ପ୍ରଶ୍ନ<textarea id="rag-question" maxlength="800" placeholder="NIFTY 22300 PE date 2026-10-13 expiry 2026-10-13 time 09:36ରେ କଣ ହେଲା?"></textarea></label>
 <button id="rag-extract" type="button">ପ୍ରଶ୍ନରୁ selection ଭରନ୍ତୁ</button><button id="rag-example" type="button">13 Octର ଯାଞ୍ଚ ହୋଇଥିବା ଉଦାହରଣ</button>
 <p class="rag-note">NIFTY / SENSEX / BANKNIFTY, CE / PE, date / ତାରିଖ, expiry / ମିଆଦ, time / ସମୟ ଲେଖନ୍ତୁ। Date YYYY-MM-DD ବା DD/MM/YYYY। ତଳର fields ସିଧାସଳଖ ଭରି ମଧ୍ୟ ଖୋଜିପାରିବେ।</p>
-<form id="rag-form"><div class="rag-grid"><label>Index<select id="rag-symbol" required><option value="">ବାଛନ୍ତୁ</option><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>Session date<input id="rag-date" type="date" required></label><label>Exact expiry<input id="rag-expiry" type="date" required></label><label>Strike<input id="rag-strike" type="number" min="1" max="1000000" step="1" required></label><label>Side<select id="rag-side" required><option value="">ବାଛନ୍ତୁ</option><option>CE</option><option>PE</option></select></label><label>Event time · IST<input id="rag-time" type="time" min="09:18" max="15:30" step="180" required></label><label>As-of cutoff · IST (optional)<input id="rag-asof" type="datetime-local" step="1"></label></div>
+<form id="rag-form"><div class="rag-grid"><label>Answer type<select id="rag-kind"><option value="SNAPSHOT">Premium + opposite behaviour</option><option value="EVENT">Verified PDH / PDL crossing · 3m</option></select></label><label>Reaction window<select id="rag-lookback"><option value="1">1 minutes</option><option value="3" selected>3 minutes</option><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="75">75 minutes</option><option value="125">125 minutes</option></select></label><label>Index<select id="rag-symbol" required><option value="">ବାଛନ୍ତୁ</option><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>Session date<input id="rag-date" type="date" required></label><label>Exact expiry<input id="rag-expiry" type="date" required></label><label>Strike<input id="rag-strike" type="number" min="1" max="1000000" step="1" required></label><label>Side<select id="rag-side" required><option value="">ବାଛନ୍ତୁ</option><option>CE</option><option>PE</option></select></label><label>Recorded time · IST<input id="rag-time" type="time" min="09:15" max="15:30" step="180" required></label><label>As-of cutoff · IST (optional)<input id="rag-asof" type="datetime-local" step="1"></label></div>
 <label class="rag-check"><input id="rag-outcomes" type="checkbox">ପରବର୍ତ୍ତୀ +3/+6/+15/+30 ମିନିଟ୍ historical response ଦେଖାନ୍ତୁ</label>
 <button id="rag-search" type="submit">Evidence ଖୋଜନ୍ତୁ</button><button id="rag-clear" type="button">Selection ସଫା କରନ୍ତୁ</button></form>
 <p id="rag-status" role="status" aria-live="polite">ପ୍ରଶ୍ନରୁ selection ଭରି ଯାଞ୍ଚ କରନ୍ତୁ, ତାପରେ Evidence ଖୋଜନ୍ତୁ।</p><div id="rag-result"></div>
@@ -28,18 +28,18 @@ export function installRagEvidenceCard(parseQuestion:typeof parseRagQuestion) {
   const esc=(v:unknown)=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
   const n=(v:unknown,d=2)=>v!==null&&v!==undefined&&typeof v!=='boolean'&&String(v).trim()!==''&&Number.isFinite(Number(v))?Number(v).toFixed(d):'ଅନୁପଲବ୍ଧ';
   let version=0,busy=false,active:AbortController|null=null;
-  const clearResult=()=>{version++;active?.abort();$('result').innerHTML='';};
+  const clearResult=()=>{version++;active?.abort();active=null;busy=false;$('search').disabled=false;$('result').innerHTML='';};
   const extract=()=>{
     clearResult();$('asof').value='';$('outcomes').checked=false;const p=parseQuestion($('question').value);
     for(const key of keys)$(key).value=p.fields[key]??'';
     $('status').textContent=p.issues.length?p.issues.join('\n'):'Selection ଯାଞ୍ଚ କରନ୍ତୁ।'+(p.missing.length?' ଆହୁରି ଦରକାର: '+p.missing.map(k=>names[k]).join(', '):' ସବୁ exact fields ଚିହ୍ନଟ ହୋଇଛି।');
   };
   $('extract').onclick=extract;
-  $('example').onclick=()=>{$('question').value='NIFTY 22300 PE date 2026-10-13 expiry 2026-10-13 time 09:36';$('asof').value='';$('outcomes').checked=false;extract();};
+  $('example').onclick=()=>{if($('kind'))$('kind').value='EVENT';$('question').value='NIFTY 22300 PE date 2026-10-13 expiry 2026-10-13 time 09:36';$('asof').value='';$('outcomes').checked=false;extract();};
   $('clear').onclick=()=>{($('form') as unknown as HTMLFormElement).reset();$('question').value='';clearResult();$('status').textContent='ନୂଆ exact selection ଭରନ୍ତୁ।';};
   $('form').addEventListener('input',()=>{clearResult();$('status').textContent='Selection ବଦଳିଛି। ପୁଣି Evidence ଖୋଜନ୍ତୁ।';});
   $('question').addEventListener('input',()=>{clearResult();for(const key of keys)$(key).value='';$('asof').value='';$('outcomes').checked=false;$('status').textContent='ନୂଆ ପ୍ରଶ୍ନ ପାଇଁ selection ପୁଣି ଭରନ୍ତୁ।';});
-  const messages:Record<string,string>={EXACT_EVENT_PAIR_UNAVAILABLE_AT_CUTOFF:'ଏହି cutoff ସୁଦ୍ଧା exact event pair ଉପଲବ୍ଧ ନାହିଁ।',
+  const messages:Record<string,string>={EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF:'ଏହି contract / timestampର verified premium ଉପଲବ୍ଧ ନାହିଁ।',INVALID_LOOKBACK:'Reaction window ବାଛନ୍ତୁ।',EXACT_EVENT_PAIR_UNAVAILABLE_AT_CUTOFF:'ଏହି cutoff ସୁଦ୍ଧା exact event pair ଉପଲବ୍ଧ ନାହିଁ।',
     PREVIOUS_REFERENCE_UNAVAILABLE:'ଏହି contractର previous-session reference ଯାଞ୍ଚ ପାଇଁ ତଥ୍ୟ ଅନୁପଲବ୍ଧ।',PREVIOUS_REFERENCE_INCONSISTENT:'Previous-session reference ମେଳ ଖାଉନାହିଁ।',
     NO_RECONCILED_LEVEL_CROSSING:'ଚୟନ କରିଥିବା intervalରେ ଯାଞ୍ଚ ହୋଇଥିବା PDH/PDL crossing ମିଳିଲା ନାହିଁ।',EVENT_REQUIRES_REGULAR_3M_PAIR:'09:18ରୁ regular 3-minute event time ବାଛନ୍ତୁ, ଯଥା 09:36।',
     EVENT_AFTER_CUTOFF:'Event ସମୟ cutoff ପରେ ଅଛି।',REPLAY_SOURCE_UNAVAILABLE:'Recorded source ଏବେ ଉପଲବ୍ଧ ନାହିଁ।',EVIDENCE_SOURCE_UNAVAILABLE:'Recorded source ଏବେ ଉପଲବ୍ଧ ନାହିଁ।',
@@ -48,6 +48,7 @@ export function installRagEvidenceCard(parseQuestion:typeof parseRagQuestion) {
     event.preventDefault();if(busy)return;
     const missing=keys.filter(k=>!$(k).value);clearResult();if(missing.length){$('status').textContent='ଆହୁରି ଦରକାର: '+missing.map(k=>names[k]).join(', ');return;}
     const params=new URLSearchParams(Object.fromEntries(keys.map(k=>[k,$(k).value])));
+    params.set('kind',$('kind')?.value||'EVENT');params.set('lookback',$('lookback')?.value||'3');
     if($('outcomes').checked)params.set('includeOutcomes','true');if($('asof').value)params.set('asOf',$('asof').value);
     const mine=version;busy=true;($('search') as unknown as HTMLButtonElement).disabled=true;$('status').textContent='ଏହି exact selectionର recorder evidence ଖୋଜାଯାଉଛି…';
     const controller=new AbortController();active=controller;const timeout=setTimeout(()=>controller.abort(),45000);
@@ -55,13 +56,25 @@ export function installRagEvidenceCard(parseQuestion:typeof parseRagQuestion) {
       const response=await fetch('/api/research/rag-event-evidence?'+params.toString(),{cache:'no-store',signal:controller.signal});const data=await response.json();if(mine!==version)return;
       if(!response.ok||!data.ok){$('status').textContent=(messages[data.reason]??'Selection ଓ source availability ଯାଞ୍ଚ କରନ୍ତୁ।')+' ['+(data.reason??'HTTP '+response.status)+']';return;}
       const i=data.identity,r=data.reference;
-      const table=(points:any[],future=false)=>'<div class="rag-scroll"><table><thead><tr><th>IST / offset</th><th>CE ₹</th><th>PE ₹</th><th>Spot</th><th>Full PCR</th><th>VIX</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody>'+points.map((p,j)=>p?'<tr><td>'+esc(p.timeIst)+' / '+esc(p.offset>0?'+'+p.offset:p.offset)+'m</td><td>'+n(p.pair?.ce?.price)+'</td><td>'+n(p.pair?.pe?.price)+'</td><td>'+n(p.context?.spot)+'</td><td>'+n(p.context?.fullPcr,4)+'</td><td>'+n(p.context?.vix)+'</td><td>'+n(p.context?.ceWall,0)+'</td><td>'+n(p.context?.peWall,0)+'</td></tr>':'<tr><td>'+(future?'+'+[3,6,15,30][j]:[-30,-15,-6,-3,0][j])+'m</td><td colspan="7">ଅନୁପଲବ୍ଧ / cutoff ପରେ / session ବାହାରେ</td></tr>').join('')+'</tbody></table></div>';
-      $('result').innerHTML='<h3>'+esc(i.symbol)+' '+esc(i.strike)+' '+esc(i.side)+' · expiry '+esc(i.expiry)+' · DTE '+esc(i.dte)+'</h3><p class="rag-answer">'+esc(data.answer)+'</p><p>Reference session '+esc(r.sourceDate)+' · PDH ₹'+n(r.pdh)+' · PDL ₹'+n(r.pdl)+'</p><h3>Event ପୂର୍ବରୁ → event ସମୟ</h3>'+table(data.beforeAndAt)+(data.outcomes.length?'<h3>ପରବର୍ତ୍ତୀ historical response</h3>'+table(data.outcomes,true):'<p>ପରବର୍ତ୍ତୀ outcome ଚାହିଁନାହାନ୍ତି।</p>')+
-        '<details><summary>Source ଓ ସମୟ ଯାଞ୍ଚ</summary><p>As-of cutoff: '+esc(data.cutoff??'ନାହିଁ; retrospective readback')+'<br>Event available: '+esc(data.event.availableAt)+'<br>Selected evidence SHA256: '+esc(data.provenance.selectedEvidenceSha256)+'</p>'+data.beforeAndAt.filter(Boolean).map((p:any)=>'<p>'+esc(p.timeIst)+' IST · receipt '+esc(p.receiptAt)+'<br>CE quote '+esc(p.pair?.ce?.quoteAt)+' · PE quote '+esc(p.pair?.pe?.quoteAt)+'<br>Full PCR source '+esc(p.context?.fullPcrSource)+'</p>').join('')+'</details><p class="rag-note">Recorded context ଏକାଠି ଦେଖାଯାଇଛି; causality ବା seller profit ପ୍ରମାଣ ନୁହେଁ। Wall label ବଦଳିବା same-strike OI transferର ପ୍ରମାଣ ନୁହେଁ। Reference retrospective reconciliation; exchange freshness ଓ futures expiry continuity ଅଲଗା ଯାଞ୍ଚ ହୋଇନାହିଁ।</p>';
+      const table=(points:any[],future=false)=>'<div class="rag-scroll"><table><thead><tr><th>IST / offset</th><th>CE ₹</th><th>PE ₹</th><th>Spot</th><th>Full PCR</th><th>VIX</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody>'+points.map((p,j)=>p?'<tr><td>'+esc(p.timeIst)+' / '+esc(p.offset>0?'+'+p.offset:p.offset)+'m</td><td>'+n(p.pair?.ce?.price)+'</td><td>'+n(p.pair?.pe?.price)+'</td><td>'+n(p.context?.spot)+'</td><td>'+n(p.context?.fullPcr,4)+'</td><td>'+n(p.context?.vix)+'</td><td>'+n(p.context?.ceWall,0)+'</td><td>'+n(p.context?.peWall,0)+'</td></tr>':'<tr><td>'+(future?'+'+[3,6,15,30][j]:(data.beforeOffsets||[-30,-15,-6,-3,0])[j])+'m</td><td colspan="7">ଅନୁପଲବ୍ଧ / cutoff ପରେ / session ବାହାରେ</td></tr>').join('')+'</tbody></table></div>';
+      $('result').innerHTML='<h3>'+esc(i.symbol)+' '+esc(i.strike)+' '+esc(i.side)+' · expiry '+esc(i.expiry)+' · DTE '+esc(i.dte)+'</h3><p class="rag-answer">'+esc(data.answer)+'</p>'+(r?'<p>Reference session '+esc(r.sourceDate)+' · PDH ₹'+n(r.pdh)+' · PDL ₹'+n(r.pdl)+'</p>':'<p>Previous-session PDH / PDL reference ଅନୁପଲବ୍ଧ।</p>')+'<h3>ପୂର୍ବରୁ → ଚୟନ କରିଥିବା ସମୟ</h3>'+table(data.beforeAndAt)+(data.outcomes.length?'<h3>ପରବର୍ତ୍ତୀ historical response</h3>'+table(data.outcomes,true):'<p>ପରବର୍ତ୍ତୀ outcome ଚାହିଁନାହାନ୍ତି।</p>')+
+        '<details><summary>Source ଓ ସମୟ ଯାଞ୍ଚ</summary><p>As-of cutoff: '+esc(data.cutoff??'ନାହିଁ; retrospective readback')+'<br>Recorded observation available: '+esc(data.event.availableAt)+'<br>Selected evidence SHA256: '+esc(data.provenance.selectedEvidenceSha256)+'</p>'+data.beforeAndAt.filter(Boolean).map((p:any)=>'<p>'+esc(p.timeIst)+' IST · receipt '+esc(p.receiptAt)+'<br>CE quote '+esc(p.pair?.ce?.quoteAt)+' · PE quote '+esc(p.pair?.pe?.quoteAt)+'<br>Full PCR source '+esc(p.context?.fullPcrSource)+'</p>').join('')+'<p class="rag-note">Recorded context ଏକାଠି ଦେଖାଯାଇଛି; causality ବା seller profit ପ୍ରମାଣ ନୁହେଁ। Wall label ବଦଳିବା same-strike OI transferର ପ୍ରମାଣ ନୁହେଁ। Reference retrospective reconciliation; exchange freshness ଓ futures expiry continuity ଅଲଗା ଯାଞ୍ଚ ହୋଇନାହିଁ।</p></details>';
       $('status').textContent=i.date+'ର historical recorder readback · ଏହା current live quote ନୁହେଁ।';
     }catch{if(mine===version)$('status').textContent='Response ପଢ଼ିହେଲା ନାହିଁ। ପୁଣି Evidence ଖୋଜନ୍ତୁ।';}
-    finally{clearTimeout(timeout);if(active===controller)active=null;busy=false;($('search') as unknown as HTMLButtonElement).disabled=false;}
+    finally{clearTimeout(timeout);if(active===controller){active=null;busy=false;($('search') as unknown as HTMLButtonElement).disabled=false;}}
   };
+  if(typeof window!=='undefined'){
+    window.addEventListener('optionpilot:rag-invalidate',()=>{clearResult();$('status').textContent='Watch selection ବଦଳିଛି। Ask RAGରେ ନୂଆ evidence ଦେଖନ୍ତୁ।';});
+    window.addEventListener('optionpilot:rag-selection',((event:CustomEvent)=>{
+      const d=event.detail||{},text=d.symbol+' '+d.strike+' '+d.side+' date '+d.date+' expiry '+d.expiry+' time '+d.time;
+      const parsed=parseQuestion(text);if(!parsed.complete)return;clearResult();for(const key of keys)$(key).value=parsed.fields[key]||'';
+      if($('kind'))$('kind').value='SNAPSHOT';if($('lookback'))$('lookback').value=[1,3,5,15,30,45,75,125].includes(Number(d.lookback))?String(d.lookback):'3';
+      $('time').min='09:15';$('asof').value='';$('outcomes').checked=false;$('question').value=text+' premium ଓ opposite premiumର reaction କଣ?';
+      const card=document.getElementById('rag-evidence-card') as HTMLDetailsElement|null;if(card){card.open=true;card.scrollIntoView({behavior:'smooth',block:'start'});}
+      ($('form') as unknown as HTMLFormElement).requestSubmit();
+    }) as EventListener);
+  }
+  $('kind')?.addEventListener('change',()=>{$('time').min=$('kind').value==='EVENT'?'09:18':'09:15';});
 }
 export const RAG_CARD_SCRIPT=`(()=>{const __name=(fn,_name)=>fn;(${installRagEvidenceCard.toString()})(${parseRagQuestion.toString()});})();`;
 export function renderRagEvidencePage() {

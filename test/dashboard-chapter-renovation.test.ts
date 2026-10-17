@@ -11,20 +11,20 @@ function recording(symbol:string){
   options:times.flatMap((minute_bucket,i)=>['CE','PE'].map(option_type=>({symbol,minute_bucket,truth_verdict:'TRUE',expiry,strike:22000,option_type,ltp:option_type==='CE'?100+i*10:100-i*10,oi:1000,iv:18,pdh:120,pdl:80,dte:5}))),
   chain:times.map(minute_bucket=>({symbol,minute_bucket,truth_verdict:'TRUE',expiry,full_chain_oi_pcr:1.2345,full_pcr_source:'Exact archived full-chain source',call_wall_strike:22100,call_wall_oi:2000,put_wall_strike:21900,put_wall_oi:3000}))};
 }
-function harness(empty=false,patch?:(state:any)=>void){
+function harness(empty=false,patch?:(state:any)=>void,extras:any={}){
  const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>();
  for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',attrs:{},classList:{add(){},remove(){},toggle(){}},setAttribute(k:string,v:string){this.attrs[k]=v;},getAttribute(k:string){return this.attrs[k];},offsetWidth:0});
  const current=Object.fromEntries(['NIFTY','SENSEX','BANKNIFTY'].map(s=>[s,empty?{}:recording(s)]));
  const state:any={date,recordedDates:[date],current,history:{},baseline:{},health:{},stocks:{},sectors:null,
   cash:{latestStoredSessionDate:'2026-10-07',sourceMode:'STORED',source:'TEST FIXTURE',windows:[{window:'Latest stored session',availableSessions:1,fiiNetCrore:-100,diiNetCrore:200,combinedNetCrore:100,state:'RECORDED'}]}};
  patch?.(state);const before=structuredClone(state);
- const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math,...extras};
  vm.createContext(ctx);const first=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1];vm.runInContext(first,ctx);
  ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){},memory:async()=>{}};vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);
  const turn=(page:number)=>{nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:String(page)}})}});return nodes.get('mb-page').innerHTML as string;};
  return {html,nodes,state,before,turn};
 }
-const markers=['mb-overview','Recorded spot reference levels','mb-contract-grid','mb-expiry-grid','mb-futures-card','mb-positioning-card','mb-event-tiles','Detailed month board','Quote filter','mb-pcr-comparison','mb-cash-grid','ONE MARKET SERIES','mb-combined-card'];
+const markers=['mb-overview','Recorded spot reference levels','mb-contract-grid','mb-expiry-grid','mb-futures-card','mb-positioning-card','mb-event-tiles','Detailed month board','Market agreement comparisons','mb-pcr-comparison','mb-cash-grid','ONE MARKET SERIES','Comparison category'];
 test('all thirteen chapters render their renovated sections without mutating source records',()=>{
  const h=harness();for(let i=0;i<13;i++){const content=h.turn(i);assert.ok(content.includes(markers[i]),'chapter '+(i+1));assert.equal(h.nodes.get('mb-page').attrs['data-chapter'],String(i+1));assert.match(content,/CHAPTER/);assert.ok(!content.includes('NaN'));assert.ok(!content.includes('undefined'));}
  assert.deepEqual(h.state,h.before);
@@ -101,7 +101,7 @@ test('global statistics and optional panels start behind drawers rather than ext
 });
 
 test('empty chapters show a single state and cash windows switch one card at a time without changing data',()=>{
- const empty=harness(true);for(const page of [0,1,2,3,4,5,6,9,11,12]){
+ const empty=harness(true);for(const page of [0,1,2,3,4,5,6,9,11]){
   const html=empty.turn(page);assert(html.includes('NO RECORDING'));assert.equal((html.match(/class="mb-empty"/g)||[]).length,1);assert(!html.includes('ov-card'));assert(!html.includes('mb-event-tiles'));
  }
  const h=harness(false,s=>{s.cash.windows=['1D','3D','5D','20D'].map((window,i)=>({window,fiiNetCrore:100+i,diiNetCrore:200+i,combinedNetCrore:300+i,state:'RECORDED',availableSessions:i+1}));});
@@ -110,4 +110,31 @@ test('empty chapters show a single state and cash windows switch one card at a t
  const selected=h.nodes.get('mb-page').innerHTML;assert.equal((selected.match(/mb-box mb-cash-card/g)||[]).length,1);assert(selected.includes('<h3>20D</h3>'));assert(!selected.includes('<h3>1D</h3>'));
  h.nodes.get('mb-page').onchange({target:{id:'mb-cash-window',value:'99'}});assert.equal(h.nodes.get('mb-page').innerHTML,selected);
  assert.deepEqual(h.state,h.before);
+});
+
+test('agreement buttons show one category, relevant filters and keep shared selectors synchronized',()=>{
+ const h=harness();h.turn(12);
+ const click=(category:string)=>h.nodes.get('mb-page').onclick({target:{closest:(selector:string)=>selector==='[data-agreement-category]'?{dataset:{agreementCategory:category}}:null}});
+ for(const category of ['PARTICIPATION','INDICES','PREMIUM','POSITIONING','VOLATILITY','SUMMARY']){
+  click(category);const content=h.nodes.get('mb-page').innerHTML;
+  assert.equal((content.match(/aria-pressed="true"/g)||[]).length,1);
+  assert.equal(content.includes('data-agreement-control="stock"'),category==='PARTICIPATION');
+  assert.equal(content.includes('data-agreement-control="expiry"'),category==='PREMIUM');
+  if(category!=='PREMIUM')assert(!h.nodes.get('mb-scope').textContent.includes('Strike'));
+ }
+ h.nodes.get('mb-page').onchange({target:{dataset:{agreementControl:'window'},value:'6m'}});
+ assert.equal(h.nodes.get('mb-window').value,'6m');
+ h.nodes.get('mb-page').onchange({target:{dataset:{agreementControl:'symbol'},value:'SENSEX'}});
+ assert.equal(h.nodes.get('mb-index').value,'SENSEX');assert.deepEqual(h.state,h.before);
+});
+test('quote history reads once per selected date and late responses cannot mix sessions',async()=>{
+ const pending:any[]=[],calls:string[]=[];
+ const h=harness(false,undefined,{AbortSignal,fetch:(url:string)=>{calls.push(url);return new Promise(resolve=>pending.push(resolve));}});
+ h.turn(8);await new Promise(resolve=>setImmediate(resolve));assert.equal(calls.length,1);
+ h.turn(8);await new Promise(resolve=>setImmediate(resolve));assert.equal(calls.length,1);
+ h.state.date='2026-10-09';h.turn(8);await new Promise(resolve=>setImmediate(resolve));
+ pending.shift()({ok:true,json:async()=>({date:'2026-10-08',snapshots:[{source:'SERVER_BACKGROUND_KITE_QUOTES',tradingDate:'2026-10-08',timestamp:times[1],stocks:{NIFTY:[{name:'OLD SESSION',change:5}]},sectors:[]}]})});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(calls.length,2);assert(!h.nodes.get('mb-page').innerHTML.includes('OLD SESSION'));
+ pending.shift()({ok:true,json:async()=>({date:'2026-10-09',snapshots:[],truncated:false})});
+ await new Promise(resolve=>setImmediate(resolve));h.turn(8);await new Promise(resolve=>setImmediate(resolve));assert.equal(calls.length,2);assert(!h.nodes.get('mb-page').innerHTML.includes('Loading quotes'));
 });

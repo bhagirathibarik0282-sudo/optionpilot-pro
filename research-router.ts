@@ -1,3 +1,5 @@
+import { readBackgroundQuoteHistory } from './dashboard-background-quotes-history.js';
+import { dbQuerySafe } from './db.js';
 import { mountDashboardLiveRoutes } from './dashboard-live-http.js';
 import { renderRagEvidencePage } from './rag-evidence-card.js';
 import { Hono } from "hono";
@@ -59,6 +61,12 @@ export const researchRouter = new Hono();
 mountDashboardLiveRoutes(researchRouter);
 mountRagEventEvidenceRoute(researchRouter);
 researchRouter.get('/rag-event-evidence/view',c=>{c.header('Cache-Control','no-store');return c.html(renderRagEvidencePage());});
+
+researchRouter.get('/background-quotes/history', async c => {
+  c.header('Cache-Control','no-store');
+  try { return c.json(await readBackgroundQuoteHistory(c.req.query('date')||'',dbQuerySafe)); }
+  catch(error) { const invalid=error instanceof Error&&error.message==='INVALID_DATE';return c.json({error:invalid?'INVALID_DATE':'STORAGE_UNAVAILABLE'},invalid?400:503); }
+});
 
 researchRouter.get('/background-quotes', async (c) => {
   const data = await readDashboardBackgroundQuotes();

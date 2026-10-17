@@ -13,4 +13,4 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: node --import tsx --test test/seller-vertical-economics-shadow.test.ts test/seller-research-evidence-bridge-v1.test.ts test/seller-step3-fail-closed.test.ts test/seller-kite-margin-proof-shadow.test.ts test/seller-kite-basket-margin-reader.test.ts test/h1-kite-exact-depth-adapter.test.ts test/seller-research-integration.test.ts test/dashboard-live-feed.test.ts test/business-dashboard-v1.test.ts test/premium-workspace.test.ts
+      - run: node --import tsx --test test/seller-vertical-economics-shadow.test.ts test/seller-research-evidence-bridge-v1.test.ts test/seller-step3-fail-closed.test.ts test/seller-kite-margin-proof-shadow.test.ts test/seller-kite-basket-margin-reader.test.ts test/h1-kite-exact-depth-adapter.test.ts test/seller-research-integration.test.ts test/dashboard-live-feed.test.ts test/business-dashboard-v1.test.ts test/premium-workspace.test.ts test/dashboard-live-view.test.ts test/data-reading-checklist.test.ts test/data-three-modes.test.ts

@@ -1,3 +1,4 @@
+import { installSellerResearch } from '../seller-research-view.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {deriveDataAnnex,deriveObservationData,renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
@@ -36,5 +37,5 @@ test('no cross-date or cross-expiry notable events; completed day does not fabri
 test('exactly three primary modes, collapsible evidence, reuse-only GET sources',()=>{
  const html=renderBusinessDashboardV1Html({} as any),primary=html.match(/<div class="terminal-tabs"[\s\S]*?<\/div>/)![0];
  assert.deepEqual([...primary.matchAll(/>(INTRADAY|SWING|MEMORY)<\/button>/g)].map(m=>m[1]),['INTRADAY','SWING','MEMORY']);assert.equal((primary.match(/role="tab"/g)||[]).length,3);
- assert(html.includes('id="annex-raw"'));assert(html.includes('Yesterday → Today Bridge'));assert(html.includes('EOD Notable Changes'));assert(html.includes('/api/research/h1-eod-business-backtest-summary?'));assert(html.includes('await ensureAnnexMemory()'));assert(!html.includes('method:'));assert(!html.includes('localStorage.setItem(\'memory'));
+ assert(html.includes('id="annex-raw"'));assert(html.includes('Yesterday → Today Bridge'));assert(html.includes('EOD Notable Changes'));assert(html.includes('/api/research/h1-eod-business-backtest-summary?'));assert(html.includes('await ensureAnnexMemory()'));const observationHtml=html.replace('<script>('+installSellerResearch.toString()+')();</script>','');assert(observationHtml!==html);assert(!observationHtml.includes('method:'));assert(html.includes('/api/account/kite/seller/research'));assert(!html.includes('localStorage.setItem(\'memory'));
 });

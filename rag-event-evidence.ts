@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { alignRecordedRagDte } from './rag-dte-replay-adapter.js';
 import type { Hono } from 'hono';
 import { parseH1FixedContractJourneyRequest } from './h1-fixed-contract-journey-http.js';
 import { parseH1ReplayRequest, runH1ReplayHttp, type H1ReplayHttpResult, type H1ReplayRequest } from './h1-replay-http.js';
@@ -133,10 +134,11 @@ export function buildRagPremiumSnapshot(r:RagEventRequest,current:H1ReplayHttpRe
   const reaction=(side:string,q:Row|null,p:Row|null,delta:number|null)=>side+' '+(q?'₹'+q.price.toFixed(2):'ଅନୁପଲବ୍ଧ')+'; '+lookback+'m '+(p&&q?'₹'+p.price.toFixed(2)+' → ₹'+q.price.toFixed(2)+' ('+(delta!>0?'+':'')+delta!.toFixed(2)+'%)':'exact baseline ଅନୁପଲବ୍ଧ');
   const point=beforeAndAt.at(-1),pairComplete=beforeAndAt.every(p=>p?.pair.ce&&p?.pair.pe)&&outcomes.every(p=>p?.pair.ce&&p?.pair.pe);
   const sourceRows={beforeAndAt,outcomes,previous:referenceResult.ok?referenceResult.referenceRows:[]};
+  const multiDte=lookback===3?alignRecordedRagDte(current,{symbol:r.symbol,date:r.date,strike:r.strike,side:r.side,timeIst:r.time},r.asOf):null;
   return {ok:true,status:pairComplete&&reference?'COMPLETE':'PARTIAL',mode:'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1',source:'EXISTING_POSTGRES_H1_REPLAY',safety:SAFETY,
     identity:{symbol:r.symbol,date:r.date,expiry:r.expiry,strike:r.strike,side:r.side,dte:Math.round((Date.parse(r.expiry)-Date.parse(r.date))/86400000)},
     event:{timeIst:r.time,flags:[],before:before?.price??null,after:selected.price,availableAt:new Date(Math.max(Date.parse(selected.receiptAt),Date.parse(selected.quoteAt))).toISOString()},
-    comparison:{lookbackMinutes:lookback,selectedChangePercent:selectedChange,oppositeSide:otherSide,oppositeChangePercent:oppositeChange},
+    comparison:{lookbackMinutes:lookback,selectedChangePercent:selectedChange,oppositeSide:otherSide,oppositeChangePercent:oppositeChange},multiDte,
     reference,referenceUnavailableReason:referenceResult.ok?null:referenceResult.reason,beforeOffsets,beforeAndAt,outcomes,cutoff:r.asOf===Infinity?null:new Date(r.asOf).toISOString(),
     coverage:{current:current.continuity??null,previous:prior.continuity??null},
     provenance:{selectedEvidenceSha256:hash(sourceRows),digestSemantics:'SELECTED_NORMALIZED_EVIDENCE_NOT_RAW_HTTP_BYTES',snapshotIds:[...new Set(beforeAndAt.filter(Boolean).flatMap(p=>[p!.pair.ce?.snapshotId,p!.pair.pe?.snapshotId]).filter(Boolean))]},

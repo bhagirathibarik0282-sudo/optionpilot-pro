@@ -86,3 +86,28 @@ test('cash and VIX chapters exclude unrelated index and option cards, including 
  h.turn(2);assert(h.nodes.get('mb-scope').textContent.includes('Strike'));
  assert.deepEqual(h.state,h.before);
 });
+
+test('global statistics and optional panels start behind drawers rather than extending every chapter',()=>{
+ const h=harness();
+ for(const id of ['mb-tools','op-workspace-advanced','op-display-tools','op-ticker-tools']){
+  assert.match(h.html,new RegExp('<details id="'+id+'"[^>]*>'));
+  assert(!new RegExp('<details id="'+id+'"[^>]*\\bopen\\b').test(h.html));
+ }
+ assert(h.html.indexOf('id="op-workspace-advanced"')<h.html.indexOf('<section id="statistical-overview"'));
+ assert(h.html.indexOf('id="mb-tools"')<h.html.indexOf('<details id="op-feed-detail"'));
+ assert(h.html.indexOf('id="mb-tools"')<h.html.indexOf('id="op-workspace-ticker"'));
+ assert(!h.html.includes('Clarity in every move'));
+ for(const id of ['op-feed-detail','dashboard-live','op-workspace-ticker','statistical-overview','mb-tools'])assert.equal((h.html.match(new RegExp('id="'+id+'"','g'))||[]).length,1);
+});
+
+test('empty chapters show a single state and cash windows switch one card at a time without changing data',()=>{
+ const empty=harness(true);for(const page of [0,1,2,3,4,5,6,9,11,12]){
+  const html=empty.turn(page);assert(html.includes('NO RECORDING'));assert.equal((html.match(/class="mb-empty"/g)||[]).length,1);assert(!html.includes('ov-card'));assert(!html.includes('mb-event-tiles'));
+ }
+ const h=harness(false,s=>{s.cash.windows=['1D','3D','5D','20D'].map((window,i)=>({window,fiiNetCrore:100+i,diiNetCrore:200+i,combinedNetCrore:300+i,state:'RECORDED',availableSessions:i+1}));});
+ const first=h.turn(10);assert.equal((first.match(/mb-box mb-cash-card/g)||[]).length,1);assert(first.includes('<h3>1D</h3>'));
+ h.nodes.get('mb-page').onchange({target:{id:'mb-cash-window',value:'3'}});
+ const selected=h.nodes.get('mb-page').innerHTML;assert.equal((selected.match(/mb-box mb-cash-card/g)||[]).length,1);assert(selected.includes('<h3>20D</h3>'));assert(!selected.includes('<h3>1D</h3>'));
+ h.nodes.get('mb-page').onchange({target:{id:'mb-cash-window',value:'99'}});assert.equal(h.nodes.get('mb-page').innerHTML,selected);
+ assert.deepEqual(h.state,h.before);
+});

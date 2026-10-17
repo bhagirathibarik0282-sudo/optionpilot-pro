@@ -22,3 +22,16 @@ test('wrong replay session never produces evidence',()=>{
  const x=replay();x.request.tradeDate='2026-10-12';
  assert.equal(alignRecordedRagDte(x,selection).sourceStatus,'REPLAY_UNAVAILABLE_OR_WRONG_IDENTITY');
 });
+
+test('PostgreSQL timestamp-shaped expiry matches exact contract day',()=>{
+ const x=replay();
+ x.options=x.options.map((o:any)=>({...o,expiry:o.expiry+'T00:00:00.000Z'}));
+ const r=alignRecordedRagDte(x,selection);
+ assert.equal(r.coverage.verifiedExpiries,2);
+});
+test('invalid expiry cannot create verified comparison',()=>{
+ const x=replay();
+ x.options=x.options.map((o:any)=>({...o,expiry:'not-a-date'}));
+ const r=alignRecordedRagDte(x,selection);
+ assert.equal(r.coverage.verifiedExpiries,0);
+});

@@ -6,18 +6,18 @@ export function renderMarketBookReadingGuide(a:any,state:any,page:number,window:
  const sign=(v:any,d=2)=>num(v)===null?'—':(v>0?'+':'')+fmt(v,d);
  const when=(v:any)=>v&&Number.isFinite(Date.parse(v))?new Date(v).toLocaleString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})+' IST':'ସମୟ ମିଳିନି';
  const guides:any={
-  0:{order:['spot','pcr','oi','vix'],focus:'ପ୍ରଥମେ spotର ପରିବର୍ତ୍ତନ; ତା’ପରେ PCR, exact option OI ଓ VIXର ସେହି ସମୟର ତଥ୍ୟ ପଢ଼ନ୍ତୁ।'},
-  1:{order:['spot','pcr','vix','sectors'],focus:'Spot କେଉଁ levelରେ ଅଛି ଦେଖନ୍ତୁ; PCR ଓ VIXର ସମୟ ମେଳାନ୍ତୁ। Sector quoteର ସମୟ ଅଲଗା ହୋଇପାରେ।'},
-  2:{order:['premium','oi','pcr','vix'],focus:'Expiry ଓ strike ପ୍ରଥମେ ମେଳାନ୍ତୁ; ପରେ premium ଓ OIର ପରିବର୍ତ୍ତନ ଏକାଠି ପଢ଼ନ୍ତୁ।'},
-  3:{order:['premium','oi','pcr','vix'],focus:'ପ୍ରତ୍ୟେକ expiryର DTE ଓ contract ପରିଚୟ ଅଲଗା ରଖି ତୁଳନା କରନ୍ତୁ।'},
-  4:{order:['future','spot','pcr','sectors'],focus:'Futures ଦାମ, OI ଓ basis ଦେଖନ୍ତୁ; ଅଲଗା futures expiryକୁ ଏକେ series ଭାବେ ଯୋଡ଼ନ୍ତୁନି।'},
-  5:{order:['oi','pcr','walls','premium'],focus:'OI → PCR → wall strike ବଦଳ → premium response କ୍ରମରେ ପଢ଼ନ୍ତୁ। OI ବଦଳ ଏକାକୀ buyer/seller exitର ପ୍ରମାଣ ନୁହେଁ।'},
-  6:{order:['premium','pcr','oi','vix'],focus:'ଘଟଣାର exact ସମୟ ବାଛନ୍ତୁ; ପୂର୍ବ ଓ ପରବର୍ତ୍ତୀ recorded response ଅଲଗା ପଢ଼ନ୍ତୁ। ତଳର context ହେଉଛି latest recorded endpoint।'},
-  7:{order:['premium','oi','pcr','vix'],focus:'Premiumର ନିଜ PDH/PDL break, recovery ବା rejection ପଢ଼ନ୍ତୁ; ପରେ ଅନ୍ୟ expiry ସହ ସମୟ ମେଳାନ୍ତୁ।'},
-  8:{order:['stocks','sectors','spot','vix'],focus:'Stock/sector % ହେଉଛି previous close ସହ ତୁଳନା; ଏହା selected replay windowର % ନୁହେଁ। Up/Down count ହେଉଛି unweighted subset।'},
-  9:{order:['pcr','spot','oi','vix'],focus:'PCR ଓ spotର exact from/to ସମୟ ମେଳିଲେ ତୁଳନା କରନ୍ତୁ। Dual-axis line cross ହେବା correlationର ପ୍ରମାଣ ନୁହେଁ।'},
-  10:{order:['cash','spot','pcr','vix'],focus:'FII/DIIର cash-session date ପ୍ରଥମେ ପଢ଼ନ୍ତୁ; EOD cashକୁ intraday tick ସହ ମିଶାନ୍ତୁନି।'},
-  11:{order:['vix','spot','premium','pcr'],focus:'VIX କେତେ ବଦଳିଲା ଓ ସେହି ସମୟର spot/premium କଣ କଲା ଦେଖନ୍ତୁ। VIX ବଢ଼ିବା ଏକାକୀ market direction କୁହେନି।'},
+  0:{order:['spot','pcr','oi','vix'],focus:'ଏକ ନଜରରେ index, premium ଓ market context ପଢ଼ନ୍ତୁ।'},
+  1:{order:['spot'],focus:'Spot, PDH / PDL / PDC ଓ verified daily pivots ପଢ଼ନ୍ତୁ।'},
+  2:{order:['premium','oi'],focus:'Expiry ଓ strike ପ୍ରଥମେ ମେଳାନ୍ତୁ; ପରେ premium ଓ OIର ପରିବର୍ତ୍ତନ ଏକାଠି ପଢ଼ନ୍ତୁ।'},
+  3:{order:['premium','oi'],focus:'ପ୍ରତ୍ୟେକ expiryର DTE ଓ contract ପରିଚୟ ଅଲଗା ରଖି ତୁଳନା କରନ୍ତୁ।'},
+  4:{order:['future'],focus:'Futures ଦାମ, OI, volume ଓ basis ପଢ଼ନ୍ତୁ; expiry continuity ଅଲଗା ଯାଞ୍ଚ କରନ୍ତୁ।'},
+  5:{order:['oi','pcr','walls'],focus:'OI → PCR → wall strike ବଦଳ → premium response କ୍ରମରେ ପଢ଼ନ୍ତୁ। OI ବଦଳ ଏକାକୀ buyer/seller exitର ପ୍ରମାଣ ନୁହେଁ।'},
+  6:{order:['premium'],focus:'ଘଟଣାର exact ସମୟ ବାଛନ୍ତୁ; ପୂର୍ବ ଓ ପରବର୍ତ୍ତୀ recorded response ଅଲଗା ପଢ଼ନ୍ତୁ। ତଳର context ହେଉଛି latest recorded endpoint।'},
+  7:{order:['premium','oi'],focus:'Premiumର ନିଜ PDH/PDL break, recovery ବା rejection ପଢ଼ନ୍ତୁ; ପରେ ଅନ୍ୟ expiry ସହ ସମୟ ମେଳାନ୍ତୁ।'},
+  8:{order:['stocks','sectors'],focus:'Stock/sector % ହେଉଛି previous close ସହ ତୁଳନା; ଏହା selected replay windowର % ନୁହେଁ। Up/Down count ହେଉଛି unweighted subset।'},
+  9:{order:['spot','pcr'],focus:'PCR ଓ spotର exact from/to ସମୟ ମେଳିଲେ ତୁଳନା କରନ୍ତୁ। Dual-axis line cross ହେବା correlationର ପ୍ରମାଣ ନୁହେଁ।'},
+  10:{order:['cash'],focus:'FII/DIIର cash-session date ପ୍ରଥମେ ପଢ଼ନ୍ତୁ; EOD cashକୁ intraday tick ସହ ମିଶାନ୍ତୁନି।'},
+  11:{order:['vix'],focus:'India VIX value, ପରିବର୍ତ୍ତନ ଓ ନିଜ recorded chart ପଢ଼ନ୍ତୁ।'},
   12:{order:['spot','pcr','oi','sectors'],focus:'ପ୍ରଥମେ ସମୟ ଓ contract ମେଳାନ୍ତୁ; ପରେ ତଥ୍ୟ ଏକମତ କି ଅଲଗା ଚଳୁଛି ଦେଖନ୍ତୁ। Missing dataକୁ vote ଭାବେ ଗଣନ୍ତୁନି।'}
  };
  const g=guides[page]||guides[0],pcr=a.pcr||{},spot=a.spot||{},ce=a.ce||{},pe=a.pe||{},vix=a.vix||{},future=a.future||{};
@@ -50,7 +50,7 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0){
  const fmt=(v:any,d=2)=>{if(n(v)===null)return '—';if(!formats.numbers.has(d))formats.numbers.set(d,new Intl.NumberFormat('en-IN',{maximumFractionDigits:d}));return formats.numbers.get(d).format(v);};
  const time=(v:any)=>v&&Number.isFinite(Date.parse(v))?formats.time.format(new Date(v))+' IST':'—';
  const note=(text:string)=>'<p class="mb-note">'+esc(text)+'</p>';
- if(page===7)return note('Premium behaviour ତଳେ ନିଜ LIVE / RECORDED, index, CE / PE strike ଓ multi-expiry controls ବ୍ୟବହାର କରନ୍ତୁ। ଏହି chapterର live selection ସ୍ୱତନ୍ତ୍ର।');
+ if([3,6,7,10].includes(page))return ''; // These chapters have their own expiry, event, premium or EOD content.
  const snapshot=payload?.connected===true?payload.snapshot:null,now=Date.parse(payload?.serverTime||'');
  const date=(at:number)=>Number.isFinite(at)?new Date(at+19800000).toISOString().slice(0,10):'';
  const age=(at:any)=>now-Date.parse(at||'');
@@ -60,8 +60,8 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0){
  const card=(key:string,label:string,value:string,detail:string,stamp='')=>'<div data-live-kind="'+esc(key)+'"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong>'+(stamp?'<small class="mb-live-stamp">'+esc(stamp)+'</small>':'')+'<small data-mb-detail>'+esc(detail)+'</small></div>';
  const validExpiry=(expiry:any)=>typeof expiry==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(expiry)&&expiry>=snapshot.tradeDate;
  const fresh=(q:any,role:string,index?:string,side?:string,expiry?:string,strike?:number)=>q?.state==='LIVE'&&q.identity?.role===role&&(!index||q.identity.symbol===index)&&(role!=='FUTURE'||validExpiry(q.identity.expiry))&&(!side||validExpiry(expiry)&&typeof strike==='number'&&Number.isFinite(strike)&&strike>0&&q.identity.side===side&&q.identity.expiry===expiry&&q.identity.strike===strike)&&age(q.observedAt)>=-5000&&age(q.observedAt)<=30000&&age(q.receivedAt)>=0&&age(q.receivedAt)<=30000&&date(Date.parse(q.observedAt))===snapshot.tradeDate&&date(Date.parse(q.receivedAt))===snapshot.tradeDate;
- const orders:any={0:['spot','future','ce','pe','pcr','vix'],1:['spot','pdc','spotChange','future','basis'],2:['ce','pe','ceOi','peOi','pcr','vix'],3:['ce','pe','ceOi','peOi'],4:['future','futureOi','futureVolume','basis','spot','pcr'],5:['ceOi','peOi','pcr','callWall','putWall'],6:['ce','pe','pcr','vix'],8:['stocks','sectors','spot','vix'],9:['spot','pcr'],10:['spot','pcr','vix'],11:['vix','spot','ce','pe'],12:['spot','future','basis','ce','pe','pcr','vix']};
- const notes:any={1:'PDH / PDL / pivots ତଳର recorded sectionରେ reference levels; ଏହି live cards spot ଓ previous-close change ଦେଖାଏ।',3:'ଏଠାରେ live panelର selected expiry / strike pair। ସମସ୍ତ live expiries ପାଇଁ Premium behaviour chapter ବ୍ୟବହାର କରନ୍ତୁ; ତଳର four-expiry charts recorded।',6:'ଏଗୁଡ଼ିକ ବର୍ତ୍ତମାନର live values; ତଳର event times ଓ before / after history recorded।',10:'FII / DII cash ହେଉଛି dated EOD data, tick-live ନୁହେଁ। ତଳେ cash-session date ସହ ଦିଆଯାଇଛି।',12:'Live values ପ୍ରତ୍ୟେକର ନିଜ source timeରେ; ଏଠାରେ ନୂଆ agreement score ବା candidate ତିଆରି ହୁଏନି।'};
+ const orders:any={0:['spot','future','ce','pe','pcr','vix'],1:['spot','pdc','spotChange'],2:['ce','pe','ceOi','peOi'],4:['future','futureOi','futureVolume','basis'],5:['ceOi','peOi','pcr','callWall','putWall'],8:['stocks','sectors'],9:['spot','pcr'],11:['vix'],12:['spot','future','basis','ce','pe','pcr','vix']};
+ const notes:any={1:'PDH / PDL / pivots ତଳର recorded sectionରେ reference levels; ଏହି live cards spot ଓ previous-close change ଦେଖାଏ।',12:'Live values ପ୍ରତ୍ୟେକର ନିଜ source timeରେ; ଏଠାରେ ନୂଆ agreement score ବା candidate ତିଆରି ହୁଏନି।'};
  const indices=[0,9].includes(page)?['NIFTY','SENSEX','BANKNIFTY']:[symbol];
  const blocks=indices.map(index=>{
   const a=snapshot.indices.find((r:any)=>r?.symbol===index);
@@ -98,7 +98,7 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0){
    pcr:()=>card('pcr','Full PCR'+(usesSample?' · snapshot':''),fmt(pcr&&n(pcr.fullPcr)!==null&&pcr.fullPcr>=0?pcr.fullPcr:null,4),pcrDetail,pcr?(usesSample?sample.periodMs/60000+' min · '+time(sample.checkedAt):time(a.pcrAt)):'UNAVAILABLE'),
    callWall:()=>wall('call'),putWall:()=>wall('put'),stocks:()=>breadth('STOCK'),sectors:()=>breadth('SECTOR')
   };
-  return '<section class="mb-live-index" aria-label="'+esc(index+' chapter live values')+'"><h3>'+esc(index)+' · '+esc(a.expiry||'No live expiry')+' / '+esc(a.strike??'No live strike')+'</h3><div class="mb-live-facts">'+(orders[page]||orders[0]).map((key:string)=>data[key]()).join('')+'</div></section>';
+  return '<section class="mb-live-index" aria-label="'+esc((page===11?'India VIX':page===8?'Shared stocks and sectors':index)+' chapter live values')+'"><h3>'+esc(page===11?'India VIX':page===8?'Stocks & sectors':index)+([0,2,5,9,12].includes(page)?' · '+esc(a.expiry||'No live expiry')+' / '+esc(a.strike??'No live strike'):'')+'</h3><div class="mb-live-facts">'+(orders[page]||orders[0]).map((key:string)=>data[key]()).join('')+'</div></section>';
  });
  return '<div class="mb-live-heading" data-mb-detail>Kite feed · server '+esc(time(payload.serverTime))+'</div>'+blocks.join('')+(notes[page]?note(notes[page]):'')+note('LIVE selection follows the live panel above; recorded chapter expiry/strike may differ. Parameters carry independent source times. OI is in source units.');
 }

@@ -14,14 +14,16 @@ function fixture(){
 const kinds=(html:string)=>[...html.matchAll(/data-live-kind="([^"]+)"/g)].map(m=>m[1]);
 test('all chapters project only the relevant existing live fields and keep historical exceptions explicit',()=>{
  const p=fixture(),before=structuredClone(p);
- for(let page=0;page<13;page++){const html=live(p,'NIFTY',page);assert(!html.includes('undefined'));assert(!html.includes('NaN'));if(page!==7)assert(html.includes('Kite feed'));}
- assert.deepEqual(kinds(live(p,'NIFTY',4)),['future','futureOi','futureVolume','basis','spot','pcr']);
+ for(let page=0;page<13;page++){const html=live(p,'NIFTY',page);assert(!html.includes('undefined'));assert(!html.includes('NaN'));if([3,6,7,10].includes(page))assert.equal(html,'');else assert(html.includes('Kite feed'));}
+ assert.deepEqual(kinds(live(p,'NIFTY',4)),['future','futureOi','futureVolume','basis']);
  assert.deepEqual(kinds(live(p,'NIFTY',5)),['ceOi','peOi','pcr','callWall','putWall']);
  assert.equal(kinds(live(p,'NIFTY',9)).filter(k=>k==='pcr').length,3);
  assert(live(p,'NIFTY',2).includes('NIFTY · 2026-10-19 · 23000 · CE'));
- assert(live(p,'NIFTY',3).includes('selected expiry / strike pair'));
- assert(live(p,'NIFTY',7).includes('LIVE / RECORDED'));
- assert(live(p,'NIFTY',10).includes('dated EOD data'));
+ assert.deepEqual(kinds(live(p,'NIFTY',1)),['spot','pdc','spotChange']);
+ assert.deepEqual(kinds(live(p,'NIFTY',2)),['ce','pe','ceOi','peOi']);
+ assert.deepEqual(kinds(live(p,'NIFTY',8)),['stocks','sectors']);
+ assert.deepEqual(kinds(live(p,'NIFTY',11)),['vix']);
+ assert(!live(p,'NIFTY',11).includes('23000'));assert(!live(p,'NIFTY',11).includes('Full PCR'));
  assert.deepEqual(p,before);
 });
 test('disconnect, old server snapshot, wrong source or wrong session revokes every numeric live value',()=>{
@@ -63,6 +65,7 @@ test('serialized chapter navigation updates live values while recorded data rema
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({date:'2026-10-16',recordedDates:[],current:{},history:{},baseline:{},health:{}}),refresh(){requests++;},memory:async()=>{}};vm.runInContext('installMarketBook(api)',ctx);
  const turn=(page:number)=>nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:String(page)}})}});
  handlers['optionpilot:live-context']({detail:fixture()});turn(4);assert(nodes.get('mb-live-context').innerHTML.includes('Futures volume'));assert(nodes.get('mb-live-title').textContent.includes('Futures'));
+ turn(10);assert.equal(nodes.get('mb-live-context-shell').hidden,true);assert.equal(nodes.get('mb-live-context').innerHTML,'');turn(11);assert.equal(nodes.get('mb-live-context-shell').hidden,false);assert.equal(nodes.get('mb-live-controls').hidden,true);turn(4);
  const recorded=nodes.get('mb-page').innerHTML;handlers['optionpilot:live-context']({detail:null});assert(!nodes.get('mb-live-context').innerHTML.includes('123.45'));assert.equal(nodes.get('mb-page').innerHTML,recorded);assert.equal(requests,0);
  nodes.get('mb-live-controls').onclick();assert.equal(nodes.get('op-feed-detail').open,true);
  assert(!WORKSPACE_CSS.includes('#mb-live-context-shell{display:none}'));assert(WORKSPACE_CSS.includes('#mb-live-context-shell{display:block}'));

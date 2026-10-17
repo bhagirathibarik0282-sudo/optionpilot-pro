@@ -75,3 +75,14 @@ test('all chapters start compact and Details toggles only presentation without c
  assert(MARKET_BOOK_CSS.includes('.mb-note,.mb-route,div.mb-value,p.mb-value'));
  assert(MARKET_BOOK_CSS.includes(':not(details *)'));
 });
+
+test('cash and VIX chapters exclude unrelated index and option cards, including their scope labels',()=>{
+ const h=harness();const cash=h.turn(10);
+ assert(!cash.includes('cash-index-context'));assert(!cash.includes('ov-card'));assert(!cash.includes('Recorded full PCR'));
+ assert(!h.nodes.get('mb-scope').textContent.includes('Strike'));assert(h.nodes.get('mb-scope').textContent.includes('EOD cash'));
+ const vix=h.turn(11);assert(vix.includes('mb-vix-card'));assert(!vix.includes('Same selected index'));assert(!vix.includes('CE change'));assert(!vix.includes('PE change'));
+ assert(!h.nodes.get('mb-scope').textContent.includes('CE '));assert(h.nodes.get('mb-scope').textContent.includes('India VIX'));
+ h.turn(4);assert(!h.nodes.get('mb-scope').textContent.includes('Strike'));
+ h.turn(2);assert(h.nodes.get('mb-scope').textContent.includes('Strike'));
+ assert.deepEqual(h.state,h.before);
+});

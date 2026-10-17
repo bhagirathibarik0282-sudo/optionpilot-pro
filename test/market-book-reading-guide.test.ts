@@ -6,9 +6,10 @@ const metric={from:100,value:105,delta:5,percent:5,fromAt:from,at};
 const a:any={symbol:'NIFTY',tradeDate:'2026-10-16',expiry:'2026-10-19',spot:metric,pcr:{...metric,from:1,value:1.1,delta:.1,source:'Normalized full-chain source'},ce:{...metric,expiry:'2026-10-19',strike:23000,oi:{...metric,value:2000}},pe:{...metric,expiry:'2026-10-26',strike:23100,oi:{...metric,value:3000}},vix:metric,future:{...metric,oi:metric,basis:10},callWall:{from:23100,strike:23200,fromAt:from,at},putWall:{from:22900,strike:23000,fromAt:from,at}};
 const state:any={stocks:{NIFTY:{timestamp:at,stocks:[{change:1},{change:-1},{change:null}]}},sectors:{timestamp:at,sectors:[{pct:1},{pct:-1},{pct:0},{pct:false},{pct:'2'}]},cash:{latestStoredSessionDate:'2026-10-15',windows:[{window:'1 session',fiiNetCrore:20,diiNetCrore:-10}]}};
 const kinds=(html:string)=>[...html.matchAll(/data-reading-kind="([^"]+)"/g)].map(m=>m[1]);
-test('each chapter has its own four-parameter reading order and exact source labels',()=>{
- for(let page=0;page<13;page++){const html=guide(a,state,page,'3m');assert.equal(kinds(html).length,4);assert(html.includes('selected recorded session 2026-10-16'));assert(html.includes('latest endpoint context'));assert(!html.includes('undefined'));assert(!html.includes('NaN'));}
- assert.deepEqual(kinds(guide(a,state,5,'3m')),['oi','pcr','walls','premium']);assert.deepEqual(kinds(guide(a,state,11,'3m')),['vix','spot','premium','pcr']);assert.deepEqual(kinds(guide(a,state,8,'3m')),['stocks','sectors','spot','vix']);
+test('reading guides contain only the parameter families needed for their chapter',()=>{
+ for(let page=0;page<13;page++){const html=guide(a,state,page,'3m');assert(kinds(html).length>=1);assert(html.includes('selected recorded session 2026-10-16'));assert(html.includes('latest endpoint context'));assert(!html.includes('undefined'));assert(!html.includes('NaN'));}
+ assert.deepEqual(kinds(guide(a,state,10,'3m')),['cash']);assert.deepEqual(kinds(guide(a,state,4,'3m')),['future']);assert.deepEqual(kinds(guide(a,state,2,'3m')),['premium','oi']);
+ assert.deepEqual(kinds(guide(a,state,5,'3m')),['oi','pcr','walls']);assert.deepEqual(kinds(guide(a,state,11,'3m')),['vix']);assert.deepEqual(kinds(guide(a,state,8,'3m')),['stocks','sectors']);
 });
 test('missing or unsupported PCR cannot become zero; CE/PE identities and cash dates remain independent',()=>{
  const missing=guide({symbol:'NIFTY'}, {},9,'3m');assert(missing.includes('Full-chain source ଯାଞ୍ଚ ହୋଇନି'));assert(!missing.includes('>0<'));

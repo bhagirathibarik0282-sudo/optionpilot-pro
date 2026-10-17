@@ -123,7 +123,11 @@ test("data dashboard uses existing read-only observation sources", () => {
   for (const path of ["/api/research/h1-replay?", "/api/research/h1-theory-dates", "/api/research/background-quotes?symbol=", "/api/research/background-quotes"]) assert.ok(html.includes(path));
   assert.doesNotMatch(html, /\/api\/index-stocks|\/api\/sector-heatmap/);
   assert.doesNotMatch(html, /h1-live-selector-decisions|candidate-state|business-decision-card/);
-  assert.doesNotMatch(html, /fetch\([^)]*method\s*:\s*["']POST/i);
+  // The only POST is the cookie-protected, calculation-only seller check.
+  const posts=[...html.matchAll(/fetch\([^)]*method\s*:\s*["']POST/gi)];
+  assert.equal(posts.length,1);
+  assert.match(posts[0][0],/\/api\/account\/kite\/seller\/research/);
+  assert.doesNotMatch(html,/api\.kite\.trade\/orders|\/orders\/regular/);
   assert.match(html, /full_chain_oi_pcr/);
 });
 

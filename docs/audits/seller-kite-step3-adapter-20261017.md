@@ -46,3 +46,24 @@ Status: PARTIAL. Local mocked tests are not live broker proof.
 Official API contracts checked on 2026-10-17:
 - https://kite.trade/docs/connect/v3/margins/
 - https://kite.trade/docs/connect/v3/user/
+
+
+## Integrated seller research card — single release boundary
+Status: PARTIAL. Code and mocked integration checks do not prove production market readiness.
+
+Chain: existing dashboard FULL packet cache → existing exact-depth adapter → same-account Kite basket-margin reader → broker equity net capital → existing seller research/economics builder → collapsible panel in Premium behaviour.
+
+- The user explicitly chooses one NIFTY/SENSEX pair, quantity and MIS/NRML product; this is not automatic candidate selection. An explicit round-trip cost estimate is required, labelled as an estimate rather than a live broker fact. BANKNIFTY, buyer candidate authority and buyer Telegram are unchanged.
+- Retains only the latest raw packet per subscribed token in the existing bounded cache. No second socket, new database/table, scheduled broker request, tick history or database writes are introduced.
+- The private `/api/account/kite/seller/options` and POST `/api/account/kite/seller/research` routes use the existing cookie session. The POST requires same origin and JSON, bounds payload size, permits one in-flight request per process and enforces an eight-second cooldown. No account data or broker-triggering route is added to the public research router. GET options never calls the broker.
+- Live feed credential must match both the browser's account session and shared session authority. The margin result must match the current account/session digest, server-generated snapshot ID, both exact tokens, exchange/symbol, expiry/strike/side, direction, product and quantity. Authority and feed continuity are rechecked after awaited broker operations.
+- Each leg must have a valid FULL packet, non-crossed depth, exchange/receive times no older than five seconds, no future times, leg skew within one second, and short bid / long ask quantity covering the requested size. Fresh depth is re-read after margin/funds responses; a pre-request quote cannot stand in for a current quote.
+- Capital comes from authenticated `/user/margins/equity` `net`; no available-balance or cost default is invented. The existing economics builder checks credit, after-cost maximum loss and the conservative maximum of initial/final basket margin. This remains a research estimate, not available cash verification or an execution authorization.
+- Browser results carry a bounded validity deadline; expired values, disconnected feeds, changed inputs and background-resume invalidate the proof. Local TEST_ONLY source labels remain visible. Broker reads occur only on explicit pair checks; there is no automatic trading or broker polling.
+- Results are always research-only, PARTIAL/BLOCKED, `executionReady:false`, `affectsSelector:false`, `affectsTelegram:false`, `affectsExecution:false`, `createsOrders:false`.
+- Validation: 24 integration tests; 152 focused tests total PASS; full npm regression PASS; permanent guardrails and diff checks PASS. Five generated dashboard scripts parse successfully. DOM checks PASS for explicit action only, TEST_ONLY label, displayed metrics, expiry clearing and disconnection revocation. Actual Chromium visual/mobile screenshot checks were unavailable because the browser binary download failed; responsive layout is implemented but not visually proven here.
+- Remaining release proof: approve merge/release; verify the existing dashboard live flag/session and deployed route; perform a real authenticated pair read during an open session. Real Kite margin/funds, synchronized live liquidity, actual production UI layout and durable outcome journaling remain NOT_PROVEN. No order path is enabled. No new retention burden is introduced.
+
+### Integrated CI follow-up
+The first CI run exposed two legacy presentation assumptions: the live-stream installer was assumed to be the last script, and the entire observation page was assumed to contain no POST. Preserved the live installer as the last script; scoped the no-POST assertion to the observation scripts while separately asserting the sole new account-authenticated calculation path. No trading or authorization guard was removed. Added both regression files to the focused seller CI.
+Follow-up verification: complete Business Dashboard workflow command PASS (178/178), complete RAG workflow command PASS (146 passed, one skipped, zero failed), and expanded Seller workflow command PASS (180/180). All blanket no-POST assertions remain enforced for observation scripts; only the explicitly authenticated seller calculation script is separated. Live-stream installer ordering is preserved.

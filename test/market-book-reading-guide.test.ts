@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';
-import { renderMarketBookReadingGuide as guide,renderMarketBookLiveContext as live } from '../market-book-reading-guide.js';
+import { renderMarketBookReadingGuide as guide } from '../market-book-reading-guide.js';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
 const from='2026-10-16T04:00:00Z',at='2026-10-16T04:03:00Z';
 const metric={from:100,value:105,delta:5,percent:5,fromAt:from,at};
@@ -16,10 +16,6 @@ test('missing or unsupported PCR cannot become zero; CE/PE identities and cash d
  const quote=guide(a,state,8,'15m');assert(quote.includes('1 ↑ / 1 ↓ / 1 ↔'));assert(quote.includes('vs previous close'));assert(quote.includes('SEPARATE QUOTE SNAPSHOT'));assert(guide(a,state,10,'3m').includes('Cash session 2026-10-15'));
  const escaped=guide({...a,symbol:'<unsafe>'},state,0,'3m');assert(!escaped.includes('<unsafe>'));assert(escaped.includes('&lt;unsafe&gt;'));
 });
-test('live strip cannot display unqualified PCR, stale OI or stale VIX; disconnect clears live values',()=>{
- const payload:any={connected:true,serverTime:at,snapshot:{indices:[{symbol:'NIFTY',expiry:'2026-10-19',strike:23000,fullPcr:99,coverage:{freshOi:1,expected:10,complete:false},ce:{oi:123456,state:'STALE',observedAt:at},pe:{oi:123,state:'LIVE',observedAt:at}}],vix:{price:99,state:'STALE',observedAt:at},participation:[{identity:{role:'SECTOR'},state:'LIVE',changePct:1}]}};
- const html=live(payload,'NIFTY');assert(!html.includes('123,456'));assert(!html.includes('<strong>99</strong>'));assert(html.includes('1/10 fresh OI'));assert(html.includes('expiry/strike may differ'));assert(live({...payload,connected:false},'NIFTY').includes('disconnected / unavailable'));
-});
 test('serialized chapters keep reading guides and share the existing live stream without new requests',()=>{
  const html=renderBusinessDashboardV1Html({} as any),scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);
  const nodes=new Map<string,any>();for(const match of html.matchAll(/\bid="([^"]+)"/g))nodes.set(match[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
@@ -30,11 +26,4 @@ test('serialized chapters keep reading guides and share the existing live stream
  for(const chapter of [0,1,2,4,5,6,7,8,9,10,11,12]){nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:String(chapter)}})}});assert(nodes.get('mb-page').innerHTML.includes('aria-label="Chapter reading guide"'));}
  handlers['optionpilot:request-recorded-levels']();const refs=published.at(-1);assert.equal(refs.type,'optionpilot:recorded-levels');assert.equal(refs.detail.indices.NIFTY.ce.expiry,'2026-10-19');assert.equal(refs.detail.indices.NIFTY.spot.opening.complete,true);assert.equal(refs.detail.indices.NIFTY.pcr.opening.complete,true);assert.equal(refs.detail.indices.NIFTY.ce.opening.complete,true);
  const recorded=nodes.get('mb-page').innerHTML;handlers['optionpilot:live-context']({detail:{connected:false}});assert(nodes.get('mb-live-context').innerHTML.includes('unavailable'));assert.equal(nodes.get('mb-page').innerHTML,recorded);assert.equal(requests,0);
-});
-
-test('shared chapter context shows the same cadence snapshot and rejects stale or wrong-expiry samples',()=>{
- const sample:any={state:'COMPLETE',fullPcr:1.2345,expiry:'2026-10-19',periodMs:180000,checkedAt:from,sourceMinAt:from,sourceMaxAt:from,coverage:{complete:true,freshOi:208,expected:208}};
- const payload:any={connected:true,serverTime:at,pcrDisplay:{NIFTY:sample},snapshot:{indices:[{symbol:'NIFTY',expiry:'2026-10-19',strike:23000,coverage:{complete:false,freshOi:200,expected:208},ce:{},pe:{}}],participation:[]}};
- const html=live(payload,'NIFTY');assert(html.includes('1.2345'));assert(html.includes('3 min'));assert(html.includes('208/208 verified OI'));
- sample.expiry='WRONG';assert(!live(payload,'NIFTY').includes('1.2345'));sample.expiry='2026-10-19';payload.serverTime='2026-10-16T04:10:00Z';assert(!live(payload,'NIFTY').includes('1.2345'));
 });

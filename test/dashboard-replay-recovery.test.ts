@@ -78,3 +78,9 @@ test('timeout keeps the existing bounded retry without recursive splitting',asyn
  await assert.rejects(h.getReplayWindow('session','NIFTY','2026-10-12','09:15','10:15'),/aborted/);
  assert.equal(calls,2);
 });
+
+test('FULL archive scope survives chunking and recursive recovery without changing default CORE reads',async()=>{
+ const calls:URL[]=[];const h=harness(async(url:string)=>{const u=new URL(url,'https://example.test');calls.push(u);return response(replay('2026-10-12T03:45:00Z',1));});
+ await h.getReplay('archive','NIFTY','2026-10-12','09:15','11:15','FULL');assert(calls.length>1);assert(calls.every(u=>u.searchParams.get('scope')==='FULL'));
+ calls.length=0;await h.getReplay('focused','NIFTY','2026-10-12','09:15','09:18');assert(calls.every(u=>u.searchParams.get('scope')==='CORE'));
+});

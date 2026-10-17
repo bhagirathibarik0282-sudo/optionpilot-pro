@@ -33,7 +33,7 @@ export function installDashboardWorkspace(api:any){
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const save=()=>{try{localStorage.setItem('optionpilot.workspace.chapters',JSON.stringify(visible));}catch{}};
  const draw=()=>{const page=api.page();active=page;$('op-chapter-links').innerHTML=visible.map(i=>'<button type="button" data-op-chapter="'+i+'"'+(page===i?' aria-current="page"':'')+'><span>'+String(i+1).padStart(2,'0')+'</span>'+esc(chapters[i])+'</button>').join('');$('op-chapter-options').innerHTML=chapters.map((name,i)=>'<label><input type="checkbox" data-op-choose="'+i+'"'+(visible.includes(i)?' checked':'')+'>'+esc(name)+'</label>').join('');};
- const premium=installPremiumWorkspace({getState:api.getState});
+ const premium=installPremiumWorkspace({getState:api.getState,setDate:api.setDate});
  $('op-chapter-links').onclick=(e:any)=>{const b=e.target.closest('[data-op-chapter]');if(b)api.turn(Number(b.dataset.opChapter));};
  $('op-chapter-options').onchange=(e:any)=>{const i=Number(e.target.dataset.opChoose);if(!Number.isInteger(i)||i<0||i>=chapters.length)return;if(e.target.checked)visible=[...new Set([...visible,i])].sort((a,b)=>a-b);else if(visible.length>1)visible=visible.filter(x=>x!==i);save();if(!visible.includes(api.page()))api.turn(visible[0]);draw();};
  $('op-show-chapters').onclick=()=>{visible=chapters.map((_,i)=>i);save();draw();};

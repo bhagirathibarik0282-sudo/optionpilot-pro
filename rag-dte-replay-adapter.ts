@@ -14,11 +14,12 @@ export function alignRecordedRagDte(replay:H1ReplayHttpResult,selection:{symbol:
  };
  const mNow=market(eventBucket),mBefore=market(beforeBucket);
  if(!mNow||!mBefore)return {...empty(),sourceStatus:'MARKET_SNAPSHOT_UNVERIFIED'};
- const expiries=new Set((replay.options??[]).filter(o=>o.symbol===selection.symbol&&Number(o.strike)===selection.strike&&o.option_type===selection.side&&[eventBucket,beforeBucket].includes(new Date(o.minute_bucket).toISOString())).map(o=>String(o.expiry).slice(0,10)));
+ const safeIso=(v:unknown)=>{const n=Date.parse(String(v??''));return Number.isFinite(n)?new Date(n).toISOString():null;};
+ const expiries=new Set((replay.options??[]).filter(o=>o.symbol===selection.symbol&&Number(o.strike)===selection.strike&&o.option_type===selection.side&&[eventBucket,beforeBucket].includes(safeIso(o.minute_bucket)??'')).map(o=>String(o.expiry).slice(0,10)));
  const points:DteEvidencePoint[]=[];
  for(const expiry of expiries){
   const find=(bucket:string,m:any)=>{
-   const rows=(replay.options??[]).filter(o=>o.symbol===selection.symbol&&String(o.expiry).slice(0,10)===expiry&&Number(o.strike)===selection.strike&&o.option_type===selection.side&&new Date(o.minute_bucket).toISOString()===bucket);
+   const rows=(replay.options??[]).filter(o=>o.symbol===selection.symbol&&String(o.expiry).slice(0,10)===expiry&&Number(o.strike)===selection.strike&&o.option_type===selection.side&&safeIso(o.minute_bucket)===bucket);
    if(rows.length!==1)return null;
    const q=rows[0],quote=Date.parse(String(q.quote_timestamp)),receipt=Date.parse(String(m.backend_timestamp));
    if(q.truth_verdict!=='TRUE'||q.snapshot_id!==m.snapshot_id||!Number.isFinite(quote)||!Number.isFinite(receipt)||quote>receipt+5000||receipt-quote>30000)return null;

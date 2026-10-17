@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
 import { deriveMarketBook } from '../market-book-model.js';
+import { MARKET_BOOK_CSS } from '../market-book-view.js';
 
 const date='2026-10-08',expiry='2026-10-13',times=['2026-10-08T04:15:00Z','2026-10-08T04:18:00Z'];
 function recording(symbol:string){
@@ -12,7 +13,7 @@ function recording(symbol:string){
 }
 function harness(empty=false,patch?:(state:any)=>void){
  const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>();
- for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',attrs:{},classList:{add(){},remove(){},toggle(){}},setAttribute(k:string,v:string){this.attrs[k]=v;},offsetWidth:0});
+ for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',attrs:{},classList:{add(){},remove(){},toggle(){}},setAttribute(k:string,v:string){this.attrs[k]=v;},getAttribute(k:string){return this.attrs[k];},offsetWidth:0});
  const current=Object.fromEntries(['NIFTY','SENSEX','BANKNIFTY'].map(s=>[s,empty?{}:recording(s)]));
  const state:any={date,recordedDates:[date],current,history:{},baseline:{},health:{},stocks:{},sectors:null,
   cash:{latestStoredSessionDate:'2026-10-07',sourceMode:'STORED',source:'TEST FIXTURE',windows:[{window:'Latest stored session',availableSessions:1,fiiNetCrore:-100,diiNetCrore:200,combinedNetCrore:100,state:'RECORDED'}]}};
@@ -52,4 +53,25 @@ test('optional premium filters are collapsed, with always-visible watch identity
  const h=harness();assert.match(h.html,/<details id="pw-filter-settings" class="pw-filter-settings">/);assert.ok(!h.html.includes('id="pw-filter-settings" open'));
  for(const id of ['pw-active-filters','pw-symbol','pw-ceStrike','pw-peStrike','pw-minutes','pw-expiries','pw-layout','seller-research-panel'])assert.equal((h.html.match(new RegExp('id="'+id+'"','g'))||[]).length,1);
  assert.match(h.turn(0),/<details class="mb-guide-shell"/);
+});
+
+test('all chapters start compact and Details toggles only presentation without changing values or filters',()=>{
+ const h=harness(),root=h.nodes.get('market-book'),toggle=h.nodes.get('mb-details-toggle');
+ assert.equal(root.attrs['data-op-details'],'hide');
+ assert.match(h.html,/<details id="mb-health-details"><summary>Data status<\/summary>/);
+ for(let page=0;page<13;page++){
+  const before=h.turn(page),selected=h.nodes.get('mb-expiry').value;
+  assert.equal(root.attrs['data-op-details'],'hide');toggle.onclick();
+  assert.equal(root.attrs['data-op-details'],'show');assert.equal(toggle.attrs['aria-expanded'],'true');
+  assert.equal(h.nodes.get('mb-page').innerHTML,before);assert.equal(h.nodes.get('mb-expiry').value,selected);
+  toggle.onclick();assert.equal(root.attrs['data-op-details'],'hide');assert.equal(toggle.attrs['aria-expanded'],'false');
+ }
+ assert.deepEqual(h.state,h.before);
+ const chart=h.turn(9);
+ assert.match(chart,/<details class="mb-chart-settings" data-event-key="chart-settings-mb-local-NIFTY"><summary>Chart settings<\/summary>/);
+ assert(chart.includes('PCR provenance:'));assert(chart.includes('RECORDED · PCR coverage unverified'));
+ assert(!chart.includes('class="mb-chart-settings" open'));
+ assert(MARKET_BOOK_CSS.includes('#market-book:not([data-op-details=show])'));
+ assert(MARKET_BOOK_CSS.includes('.mb-note,.mb-route,div.mb-value,p.mb-value'));
+ assert(MARKET_BOOK_CSS.includes(':not(details *)'));
 });

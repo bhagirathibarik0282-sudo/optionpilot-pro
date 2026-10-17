@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 /** Production smoke probe: reports truthfully; it never manufactures a successful data readback. */
-const BASE='https://optionpilot-pro-v2-production.up.railway.app/rag-event-evidence';
+const BASE='https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-event-evidence';
 const date='2026-10-16';
 test('production RAG multi-DTE readback is explicit and fail-closed',async()=>{
  const params=new URLSearchParams({symbol:'NIFTY',date,expiry:'2026-10-20',strike:'25000',side:'PE',time:'09:36',kind:'SNAPSHOT',lookback:'3'});

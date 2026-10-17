@@ -12,12 +12,13 @@ export function scopeRecordedReplay(state:any, cursor:any) {
 export const RECORDED_REPLAY_HTML = `<details id="recorded-replay"><summary>▶ Recorded Replay · Candle / Line</summary><p class="mb-note">Replay only · 3m recordings · LIVE / chapters have separate times.</p><div class="mb-controls"><label>Chart<select id="rr-mode"><option value="LINE">Line Graph</option><option value="CANDLE">Candle</option></select></label><label>Speed<select id="rr-speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option></select></label><button type="button" id="rr-prev">← Record</button><button type="button" id="rr-play">Play</button><button type="button" id="rr-next">Record →</button><button type="button" id="rr-reset">Reset</button></div><p class="mb-note" data-op-explanation>1× = one recorded step per second; 5× / 10× shorten the delay. This is playback speed, not tick data.</p><label>Replay time · IST<input id="rr-seek" type="range" min="0" max="0" value="0" step="1"></label><p id="rr-status" role="status" aria-live="polite"></p><div class="mb-controls"><label>Index<select id="rr-index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>Expiry<select id="rr-expiry"></select></label><label>Strike · CE / PE<select id="rr-strike"></select></label></div><div id="rr-output"></div></details>`;
 export function installRecordedReplay(api:any){
  const $=(id:string)=>document.getElementById(id) as any,root=$('recorded-replay');if(!root)return null;
+ const listeners=new Set<(snapshot:any)=>void>();let embeddedActive=false,lastPublished:any=null;
  let session='',cursor:string|null=null,timeline:string[]=[],timer:any=null,playing=false,symbol='NIFTY',expiry='',strike:number|undefined,lastKey:any[]=[],selectionKey='';
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const fmt=(v:any)=>v===null||v===undefined||!Number.isFinite(Number(v))?'Unavailable':Number(v).toLocaleString('en-IN',{maximumFractionDigits:3});
  const time=(v:any)=>v?new Date(v).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false}):'Unavailable';
  function stop(){if(timer!==null)clearTimeout(timer);timer=null;playing=false;$('rr-play').textContent='Play';}
- function schedule(){if(!playing)return;timer=setTimeout(()=>{timer=null;if(document.hidden||!root.open){stop();return;}step(1);if(playing)schedule();},1000/Number($('rr-speed').value||1));}
+ function schedule(){if(!playing)return;timer=setTimeout(()=>{timer=null;if(document.hidden||(!root.open&&!embeddedActive)){stop();render(true);return;}step(1);if(playing)schedule();},1000/Number($('rr-speed').value||1));}
  function step(delta:number){const i=timeline.indexOf(cursor||'');cursor=timeline[Math.max(0,Math.min(timeline.length-1,i+delta))]||null;if(timeline.indexOf(cursor||'')>=timeline.length-1)stop();render(true);}
  function chart(points:any[],color:string,at:string){
   const ps=points.filter(p=>Number.isFinite(Date.parse(p.at))&&Date.parse(p.at)<=Date.parse(at)).sort((a,b)=>Date.parse(a.at)-Date.parse(b.at)),nums=ps.filter(p=>p.value!==null&&Number.isFinite(Number(p.value)));
@@ -31,6 +32,8 @@ export function installRecordedReplay(api:any){
   const key=[state.date,...['NIFTY','SENSEX','BANKNIFTY'].flatMap(s=>[state.current?.[s],state.baseline?.[s],state.history?.[s]])];if(!force&&key.every((v,i)=>v===lastKey[i]))return;lastKey=key;
   const scoped=scopeRecordedReplay(state,cursor);timeline=scoped.timeline;cursor=scoped.at;const i=timeline.indexOf(cursor||'');$('rr-seek').max=String(Math.max(0,timeline.length-1));$('rr-seek').value=String(Math.max(0,i));$('rr-seek').disabled=!timeline.length;$('rr-prev').disabled=i<=0;$('rr-next').disabled=i<0||i>=timeline.length-1;$('rr-play').disabled=timeline.length<2;
   $('rr-status').textContent=(state.date||'No session')+' · '+time(cursor)+' IST · '+(i+1)+' / '+timeline.length+' recorded steps · '+(playing?'Playing':'Paused')+' · choose session date in settings above';
+  lastPublished={...scoped,date:state.date,playing,speed:Number($('rr-speed').value||1),index:i};for(const listener of listeners)listener(lastPublished);
+  if(embeddedActive&&!root.open)return;
   // Selector lists contain identities only; values/levels are always derived from scoped rows.
   const source=(state.current?.[symbol]?.options||[]).filter((r:any)=>r.truth_verdict==='TRUE'&&r.symbol===symbol&&Number.isFinite(Date.parse(r.minute_bucket))&&new Date(Date.parse(r.minute_bucket)+19800000).toISOString().slice(0,10)===state.date),ex=[...new Set<string>(source.map((r:any)=>String(r.expiry).slice(0,10)))].sort();
   if(!ex.includes(expiry))expiry=ex[0]||'';const strikes=[...new Set<number>(source.filter((r:any)=>String(r.expiry).slice(0,10)===expiry).map((r:any)=>Number(r.strike)).filter((v:number)=>Number.isFinite(v)&&v>0))].sort((a,b)=>a-b);if(!strikes.includes(strike!)){const spot=scoped.current[symbol].market.filter((r:any)=>r.spot_ltp!==null&&Number.isFinite(Number(r.spot_ltp))).sort((a:any,b:any)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket)).at(-1)?.spot_ltp;strike=spot===undefined?strikes[0]:strikes.reduce((best,k)=>Math.abs(k-Number(spot))<Math.abs(best-Number(spot))?k:best,strikes[0]);}
@@ -50,5 +53,14 @@ export function installRecordedReplay(api:any){
  $('rr-prev').onclick=()=>{stop();step(-1);};$('rr-next').onclick=()=>{stop();step(1);};$('rr-reset').onclick=()=>{stop();cursor=timeline[0]||null;render(true);};$('rr-seek').oninput=()=>{stop();cursor=timeline[Number($('rr-seek').value)]||null;render(true);};
  $('rr-speed').onchange=()=>{if(timer!==null)clearTimeout(timer);timer=null;schedule();};$('rr-mode').onchange=()=>render(true);
  $('rr-index').onchange=()=>{symbol=$('rr-index').value;expiry='';strike=undefined;render(true);};$('rr-expiry').onchange=()=>{expiry=$('rr-expiry').value;strike=undefined;render(true);};$('rr-strike').onchange=()=>{strike=Number($('rr-strike').value);render(true);};
- root.ontoggle=()=>{if(!root.open)stop();else render(true);};if(typeof document.addEventListener==='function')document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});render();return {render};
+ root.ontoggle=()=>{if(!root.open&&!embeddedActive){stop();render(true);}else render(true);};if(typeof document.addEventListener==='function')document.addEventListener('visibilitychange',()=>{if(document.hidden){stop();render(true);}});render();return {render,
+  subscribe(fn:any){listeners.add(fn);if(lastPublished)fn(lastPublished);return ()=>listeners.delete(fn);},
+  setEmbeddedActive(active:boolean){if(embeddedActive===active)return;embeddedActive=active;if(!active)stop();render(true);},
+  playPause(){if(timeline.length>1)$('rr-play').onclick();},
+  step(delta:number){stop();step(delta<0?-1:1);},
+  seek(index:number){stop();cursor=timeline[Math.max(0,Math.min(timeline.length-1,Math.trunc(index)))]||null;render(true);},
+  reset(){$('rr-reset').onclick();},
+  stop(){stop();render(true);},
+  speed(value:number){if(![1,5,10].includes(value))return;$('rr-speed').value=String(value);$('rr-speed').onchange();render(true);}
+ };
 }

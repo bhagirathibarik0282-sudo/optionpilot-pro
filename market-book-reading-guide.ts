@@ -42,20 +42,63 @@ export function renderMarketBookReadingGuide(a:any,state:any,page:number,window:
  return '<section class="mb-reading-guide" aria-label="Chapter reading guide" data-op-explanation><h3>ଏହି chapter କେମିତି ପଢ଼ିବେ</h3><p>'+esc(g.focus)+'</p><p class="mb-note">'+esc(a.symbol+' · selected recorded session '+(a.tradeDate||'—')+' · '+window+' · latest endpoint context; historical event-time values ନୁହେଁ')+'</p><div class="mb-reading-facts">'+g.order.map((key:string)=>{const r=data[key];return '<div class="mb-reading-fact" data-reading-kind="'+key+'"><span>'+esc(r.label)+'</span><strong>'+esc(r.value)+'</strong><small>'+esc(r.basis)+'</small><details data-event-key="reading-'+page+'-'+esc(a.symbol)+'-'+key+'"><summary>ପୂର୍ବ → ଏବେ · ସମୟ</summary><p>'+esc(r.detail)+'</p></details></div>';}).join('')+'</div><p class="mb-note">↑ ବଢ଼ିଛି · ↓ କମିଛି · — ତଥ୍ୟ ମିଳିନି। ପ୍ରତ୍ୟେକ parameter ନିଜ sourceର ସମୟରେ; ଏହି guide buy/sell score ନୁହେଁ।</p></section>';
 }
 
-/** Shared live strip: explicit source/scope; never reused in recorded calculations. */
-export function renderMarketBookLiveContext(payload:any,symbol:string){
+/** Chapter-specific projection of the existing Kite stream. Never reads recorded values. */
+export function renderMarketBookLiveContext(payload:any,symbol:string,page=0){
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const n=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
- const formats=(renderMarketBookLiveContext as any).formats||((renderMarketBookLiveContext as any).formats={numbers:new Map(),time:new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})});
+ const formats=(renderMarketBookLiveContext as any).formats||((renderMarketBookLiveContext as any).formats={numbers:new Map(),time:new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})});
  const fmt=(v:any,d=2)=>{if(n(v)===null)return '—';if(!formats.numbers.has(d))formats.numbers.set(d,new Intl.NumberFormat('en-IN',{maximumFractionDigits:d}));return formats.numbers.get(d).format(v);};
- const time=(v:any)=>v&&Number.isFinite(Date.parse(v))?formats.time.format(new Date(v)):'—';
- const snapshot=payload?.connected?payload.snapshot:null,a=snapshot?.indices?.find((r:any)=>r.symbol===symbol);
- if(!a)return '<span class="mb-note">LIVE context · '+esc(symbol)+' · disconnected / unavailable. Recorded chapter values remain separate.</span>';
- const sectors=(snapshot.participation||[]).filter((q:any)=>q.identity?.role==='SECTOR'&&q.state==='LIVE'&&n(q.changePct)!==null);
- const vix=snapshot.vix,latest=payload.serverTime;
- const usesSample=Object.prototype.hasOwnProperty.call(payload,'pcrDisplay'),sample=payload.pcrDisplay?.[symbol],age=Date.parse(latest)-Date.parse(sample?.checkedAt||'');
- const usable=usesSample&&sample?.state==='COMPLETE'&&sample.coverage?.complete===true&&sample.expiry===a.expiry&&[60000,180000].includes(sample.periodMs)&&age>=0&&age<=sample.periodMs+30000;
- const sampleFact=['Full PCR · snapshot',usable?fmt(sample.fullPcr,4):'—',usable?sample.periodMs/60000+' min · checked '+time(sample.checkedAt)+' · source '+time(sample.sourceMinAt)+' → '+time(sample.sourceMaxAt)+' · '+sample.coverage.freshOi+'/'+sample.coverage.expected+' verified OI':'Complete snapshot unavailable'];
- const facts=[usesSample?sampleFact:['Full PCR',a.coverage?.complete===true?fmt(a.fullPcr,4):'—',a.coverage.freshOi+'/'+a.coverage.expected+' fresh OI · expiry '+(a.expiry||'—')+' · source '+time(a.pcrAt)],['Exact option OI','CE '+fmt(a.ce.state==='LIVE'?a.ce.oi:null,0)+' / PE '+fmt(a.pe.state==='LIVE'?a.pe.oi:null,0),(a.expiry||'—')+' / '+(a.strike??'—')+' · CE '+time(a.ce.observedAt)+' / PE '+time(a.pe.observedAt)],['India VIX',fmt(vix?.state==='LIVE'?vix.price:null),vix?.state+' · source '+time(vix?.observedAt)],['Sector quotes',sectors.length?sectors.filter((q:any)=>q.changePct>0).length+' ↑ / '+sectors.filter((q:any)=>q.changePct<0).length+' ↓ / '+sectors.filter((q:any)=>q.changePct===0).length+' ↔':'—',sectors.length+' fresh unweighted quotes · vs previous close']];
- return '<div class="mb-live-heading">LIVE context · '+esc(symbol)+' · server '+esc(time(latest))+' IST</div><div class="mb-live-facts">'+facts.map(([label,value,detail])=>'<div><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong><small>'+esc(detail)+'</small></div>').join('')+'</div><small>LIVE selection follows the live panel above; recorded chapter expiry/strike may differ. Parameters carry independent source times.</small>';
+ const time=(v:any)=>v&&Number.isFinite(Date.parse(v))?formats.time.format(new Date(v))+' IST':'—';
+ const note=(text:string)=>'<p class="mb-note">'+esc(text)+'</p>';
+ if(page===7)return note('Premium behaviour ତଳେ ନିଜ LIVE / RECORDED, index, CE / PE strike ଓ multi-expiry controls ବ୍ୟବହାର କରନ୍ତୁ। ଏହି chapterର live selection ସ୍ୱତନ୍ତ୍ର।');
+ const snapshot=payload?.connected===true?payload.snapshot:null,now=Date.parse(payload?.serverTime||'');
+ const date=(at:number)=>Number.isFinite(at)?new Date(at+19800000).toISOString().slice(0,10):'';
+ const age=(at:any)=>now-Date.parse(at||'');
+ const source=payload?.source||snapshot?.source;
+ const valid=source==='KITE_WEBSOCKET_FULL'&&Number.isFinite(now)&&snapshot?.tradeDate===date(now)&&age(snapshot?.asOf)>=-5000&&age(snapshot?.asOf)<=4000;
+ if(!valid||!Array.isArray(snapshot?.indices))return note('Kite live context · '+symbol+' · '+(payload?.connectionState||'disconnected / unavailable')+' · fresh values unavailable. Recorded chapter values remain separate.');
+ const card=(key:string,label:string,value:string,detail:string)=>'<div data-live-kind="'+esc(key)+'"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong><small>'+esc(detail)+'</small></div>';
+ const validExpiry=(expiry:any)=>typeof expiry==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(expiry)&&expiry>=snapshot.tradeDate;
+ const fresh=(q:any,role:string,index?:string,side?:string,expiry?:string,strike?:number)=>q?.state==='LIVE'&&q.identity?.role===role&&(!index||q.identity.symbol===index)&&(role!=='FUTURE'||validExpiry(q.identity.expiry))&&(!side||validExpiry(expiry)&&typeof strike==='number'&&Number.isFinite(strike)&&strike>0&&q.identity.side===side&&q.identity.expiry===expiry&&q.identity.strike===strike)&&age(q.observedAt)>=-5000&&age(q.observedAt)<=30000&&age(q.receivedAt)>=0&&age(q.receivedAt)<=30000&&date(Date.parse(q.observedAt))===snapshot.tradeDate&&date(Date.parse(q.receivedAt))===snapshot.tradeDate;
+ const orders:any={0:['spot','future','ce','pe','pcr','vix'],1:['spot','pdc','spotChange','future','basis'],2:['ce','pe','ceOi','peOi','pcr','vix'],3:['ce','pe','ceOi','peOi'],4:['future','futureOi','futureVolume','basis','spot','pcr'],5:['ceOi','peOi','pcr','callWall','putWall'],6:['ce','pe','pcr','vix'],8:['stocks','sectors','spot','vix'],9:['spot','pcr'],10:['spot','pcr','vix'],11:['vix','spot','ce','pe'],12:['spot','future','basis','ce','pe','pcr','vix']};
+ const notes:any={1:'PDH / PDL / pivots ତଳର recorded sectionରେ reference levels; ଏହି live cards spot ଓ previous-close change ଦେଖାଏ।',3:'ଏଠାରେ live panelର selected expiry / strike pair। ସମସ୍ତ live expiries ପାଇଁ Premium behaviour chapter ବ୍ୟବହାର କରନ୍ତୁ; ତଳର four-expiry charts recorded।',6:'ଏଗୁଡ଼ିକ ବର୍ତ୍ତମାନର live values; ତଳର event times ଓ before / after history recorded।',10:'FII / DII cash ହେଉଛି dated EOD data, tick-live ନୁହେଁ। ତଳେ cash-session date ସହ ଦିଆଯାଇଛି।',12:'Live values ପ୍ରତ୍ୟେକର ନିଜ source timeରେ; ଏଠାରେ ନୂଆ agreement score ବା candidate ତିଆରି ହୁଏନି।'};
+ const indices=[0,9].includes(page)?['NIFTY','SENSEX','BANKNIFTY']:[symbol];
+ const blocks=indices.map(index=>{
+  const a=snapshot.indices.find((r:any)=>r?.symbol===index);
+  if(!a)return note(index+' · live inventory unavailable');
+  const spot=a.spot||{},future=a.future||{},ce=a.ce||{},pe=a.pe||{},vix=snapshot.vix||{};
+  const flags:any={spot:fresh(spot,'SPOT',index),future:fresh(future,'FUTURE',index),ce:fresh(ce,'OPTION',index,'CE',a.expiry,a.strike),pe:fresh(pe,'OPTION',index,'PE',a.expiry,a.strike),vix:fresh(vix,'VIX')};
+  const price=(q:any,on:boolean)=>on&&n(q.price)!==null&&q.price>0?q.price:null;
+  const field=(q:any,on:boolean,key:string)=>on&&n(q[key])!==null&&q[key]>=0?q[key]:null;
+  const detail=(q:any,on:boolean)=>String(on?'LIVE':'WITHHELD · '+(q.state||'UNAVAILABLE'))+' · source '+time(q.observedAt)+' · received '+time(q.receivedAt);
+  const quoteCard=(key:string,label:string,q:any,on:boolean,d=2,keyField='price')=>card(key,label,fmt(keyField==='price'?price(q,on):field(q,on,keyField),d),detail(q,on));
+  const contract=(q:any)=>index+' · '+(q.identity?.expiry||a.expiry||'—')+' · '+(q.identity?.strike??a.strike??'—')+' · '+(q.identity?.side||'—');
+  const usesSample=Object.prototype.hasOwnProperty.call(payload,'pcrDisplay'),sample=payload.pcrDisplay?.[index];
+  const coverage=usesSample?sample?.coverage:a.coverage;
+  const complete=validExpiry(a.expiry)&&coverage?.complete===true&&Number.isInteger(coverage.expected)&&coverage.expected>0&&coverage.freshOi===coverage.expected;
+  const sampleOk=usesSample&&complete&&sample?.state==='COMPLETE'&&sample.expiry===a.expiry&&[60000,180000].includes(sample.periodMs)&&date(Date.parse(sample.checkedAt))===snapshot.tradeDate&&date(Date.parse(sample.sourceMinAt))===snapshot.tradeDate&&date(Date.parse(sample.sourceMaxAt))===snapshot.tradeDate&&age(sample.checkedAt)>=0&&age(sample.checkedAt)<=sample.periodMs+30000&&Date.parse(sample.checkedAt)-Date.parse(sample.sourceMinAt)>=-5000&&Date.parse(sample.checkedAt)-Date.parse(sample.sourceMinAt)<=30000&&Date.parse(sample.checkedAt)-Date.parse(sample.sourceMaxAt)>=-5000&&Date.parse(sample.sourceMaxAt)>=Date.parse(sample.sourceMinAt)&&Date.parse(sample.sourceMaxAt)-Date.parse(sample.sourceMinAt)<=30000;
+  const tickOk=!usesSample&&complete&&age(a.pcrAt)>=-5000&&age(a.pcrAt)<=30000&&n(coverage.sourceSkewMs)!==null&&coverage.sourceSkewMs>=0&&coverage.sourceSkewMs<=30000;
+  const pcr=sampleOk?sample:tickOk?a:null;
+  const pcrDetail=usesSample?(sampleOk?sample.periodMs/60000+' min snapshot · checked '+time(sample.checkedAt)+' · source '+time(sample.sourceMinAt)+' → '+time(sample.sourceMaxAt)+' · '+coverage.freshOi+'/'+coverage.expected+' verified OI':'Complete snapshot unavailable'):(a.coverage?.freshOi??0)+'/'+(a.coverage?.expected??0)+' fresh OI · expiry '+(a.expiry||'—')+' · source '+time(a.pcrAt);
+  const wall=(side:string)=>{const w=pcr?.[side+'Wall'];return card(side+'Wall',(side==='call'?'CE':'PE')+' wall · strike',fmt(n(w?.strike)!==null&&w.strike>0&&n(w?.oi)!==null&&w.oi>0?w.strike:null,0),(w?'OI '+fmt(w.oi,0)+' · ties '+(Array.isArray(w.tiedStrikes)?w.tiedStrikes.join(', '):'—')+' · ':'')+pcrDetail);};
+  const breadth=(role:string)=>{
+   const rows=(Array.isArray(snapshot.participation)?snapshot.participation:[]).filter((q:any)=>q?.identity?.role===role),quotes=rows.filter((q:any)=>fresh(q,role)&&n(q.changePct)!==null);
+   const label=role==='SECTOR'?'Sector quotes':'Heavyweight quote subset';
+   const summary=card(role==='SECTOR'?'sectors':'stocks',label,quotes.length?quotes.filter((q:any)=>q.changePct>0).length+' ↑ / '+quotes.filter((q:any)=>q.changePct<0).length+' ↓ / '+quotes.filter((q:any)=>q.changePct===0).length+' ↔':'—',quotes.length+'/'+rows.length+' fresh unweighted quotes · vs previous close · shared universe, not '+index+' weights');const details='<details data-live-detail="'+esc(index+'-'+role)+'"><summary>'+esc(label)+' · source times</summary>'+rows.map((q:any)=>note((q.identity?.label||'—')+' · '+fmt(fresh(q,role)?q.changePct:null)+'% · '+detail(q,fresh(q,role)))).join('')+'</details>';return summary.slice(0,-6)+details+'</div>';
+  };
+  const data:any={
+   spot:()=>quoteCard('spot','Spot · points',spot,flags.spot),future:()=>quoteCard('future','Futures · '+(future.identity?.expiry||'—'),future,flags.future),
+   ce:()=>quoteCard('ce',contract(ce)+' · ₹',ce,flags.ce),pe:()=>quoteCard('pe',contract(pe)+' · ₹',pe,flags.pe),
+   ceOi:()=>quoteCard('ceOi',contract(ce)+' · OI',ce,flags.ce,0,'oi'),peOi:()=>quoteCard('peOi',contract(pe)+' · OI',pe,flags.pe,0,'oi'),
+   futureOi:()=>quoteCard('futureOi','Futures OI · '+(future.identity?.expiry||'—'),future,flags.future,0,'oi'),futureVolume:()=>quoteCard('futureVolume','Futures volume',future,flags.future,0,'volume'),
+   vix:()=>quoteCard('vix','India VIX',vix,flags.vix),
+   pdc:()=>card('pdc','Spot previous close · reference',fmt(flags.spot&&n(spot.pdc)!==null&&spot.pdc>0?spot.pdc:null),detail(spot,flags.spot)),
+   spotChange:()=>card('spotChange','Spot day change · %',fmt(flags.spot?spot.changePct:null),detail(spot,flags.spot)+' · vs previous close'),
+   basis:()=>card('basis','Futures − spot · points',fmt(price(spot,flags.spot)!==null&&price(future,flags.future)!==null&&Math.abs(Date.parse(spot.observedAt)-Date.parse(future.observedAt))<=5000?a.futuresBasis:null),'Spot '+time(spot.observedAt)+' / futures '+time(future.observedAt)+' · maximum source skew 5s'),
+   pcr:()=>card('pcr','Full PCR'+(usesSample?' · snapshot':''),fmt(pcr&&n(pcr.fullPcr)!==null&&pcr.fullPcr>=0?pcr.fullPcr:null,4),pcrDetail),
+   callWall:()=>wall('call'),putWall:()=>wall('put'),stocks:()=>breadth('STOCK'),sectors:()=>breadth('SECTOR')
+  };
+  return '<section class="mb-live-index" aria-label="'+esc(index+' chapter live values')+'"><h3>'+esc(index)+' · '+esc(a.expiry||'No live expiry')+' / '+esc(a.strike??'No live strike')+'</h3><div class="mb-live-facts">'+(orders[page]||orders[0]).map((key:string)=>data[key]()).join('')+'</div></section>';
+ });
+ return '<div class="mb-live-heading">Kite feed · server '+esc(time(payload.serverTime))+'</div>'+blocks.join('')+(notes[page]?note(notes[page]):'')+note('LIVE selection follows the live panel above; recorded chapter expiry/strike may differ. Parameters carry independent source times. OI is in source units.');
 }

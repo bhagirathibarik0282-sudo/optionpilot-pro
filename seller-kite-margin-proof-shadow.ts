@@ -1,4 +1,4 @@
-/** Read-only Kite basket-margin provenance gate. Never calls broker endpoints or places orders. */
+/** Caller-declared margin structure only; does not authenticate Kite provenance. Never calls broker endpoints. */
 export interface SellerBasketLegProof {
   instrumentToken: number;
   exchange: string;
@@ -22,16 +22,69 @@ export interface SellerBasketMarginProof {
   longLeg: SellerBasketLegProof;
   marginRequired: number;
 }
-export type SellerBasketMarginCheck = {verified: false; blockers: string[]; researchOnly: true; createsOrders: false; affectsExecution: false} | {verified: true; marginRequired: number; researchOnly: true; createsOrders: false; affectsExecution: false};
-const SAFE = {researchOnly:true as const,createsOrders:false as const,affectsExecution:false as const};
-const validLeg = (x: SellerBasketLegProof | undefined): boolean => !!x && Number.isSafeInteger(x.instrumentToken) && x.instrumentToken>0 && !!x.exchange?.trim() && !!x.tradingSymbol?.trim() && /^\d{4}-\d{2}-\d{2}$/.test(x.expiry) && Number.isFinite(x.strike) && x.strike>0 && ['CE','PE'].includes(x.optionType) && ['BUY','SELL'].includes(x.transactionType) && Number.isSafeInteger(x.quantity) && x.quantity>0;
-export function validateSellerBasketMarginProof(input: SellerBasketMarginProof | null): SellerBasketMarginCheck {
-  const blockers:string[]=[];
-  if (!input || input.source!=='KITE_BASKET_MARGIN_RESPONSE' || !input.requestId?.trim() || !input.responseId?.trim() || !input.snapshotId?.trim()) blockers.push('MARGIN_RESPONSE_PROVENANCE_MISSING');
-  if (!input || ![input.requestedAtMs,input.receivedAtMs,input.asOfMs,input.maxAgeMs].every(Number.isFinite) || input.maxAgeMs<=0 || input.requestedAtMs<=0 || input.requestedAtMs>input.receivedAtMs || input.receivedAtMs>input.asOfMs || input.asOfMs-input.receivedAtMs>input.maxAgeMs) blockers.push('MARGIN_RESPONSE_TIMESTAMP_INVALID');
-  if (!input || !validLeg(input.shortLeg) || !validLeg(input.longLeg)) blockers.push('MARGIN_LEG_IDENTITY_INVALID');
-  if (input?.shortLeg && input?.longLeg && (input.shortLeg.transactionType!=='SELL' || input.longLeg.transactionType!=='BUY' || input.shortLeg.instrumentToken===input.longLeg.instrumentToken || input.shortLeg.exchange!==input.longLeg.exchange || input.shortLeg.expiry!==input.longLeg.expiry || input.shortLeg.optionType!==input.longLeg.optionType || input.shortLeg.quantity!==input.longLeg.quantity || (input.shortLeg.optionType==='CE' && input.longLeg.strike<=input.shortLeg.strike) || (input.shortLeg.optionType==='PE' && input.longLeg.strike>=input.shortLeg.strike))) blockers.push('MARGIN_BASKET_PAIR_MISMATCH');
-  if (!input || !Number.isFinite(input.marginRequired) || input.marginRequired<=0) blockers.push('MARGIN_AMOUNT_INVALID');
-  if (blockers.length) return {verified:false,blockers,...SAFE};
-  return {verified:true,marginRequired:input!.marginRequired,...SAFE};
+type ResearchBoundary = {
+  researchOnly: true;
+  createsOrders: false;
+  affectsExecution: false;
+  structureOnly: true;
+  brokerProvenanceVerified: false;
+};
+/** `verified` means structural validation only, never broker authentication. */
+export type SellerBasketMarginCheck = ResearchBoundary & (
+  {verified: false; blockers: string[]} |
+  {verified: true; marginRequired: number}
+);
+const SAFE: ResearchBoundary = {
+  researchOnly: true, createsOrders: false, affectsExecution: false,
+  structureOnly: true, brokerProvenanceVerified: false,
+};
+const nonempty = (x: unknown): x is string => typeof x === 'string' && x.trim().length > 0;
+const record = (x: unknown): x is Record<string, unknown> =>
+  typeof x === 'object' && x !== null && !Array.isArray(x);
+const validExpiry = (x: unknown): boolean => {
+  if (typeof x !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(x)) return false;
+  const date = new Date(x + 'T00:00:00.000Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === x;
+};
+const validLeg = (x: unknown): x is SellerBasketLegProof => {
+  if (!record(x)) return false;
+  return Number.isSafeInteger(x.instrumentToken) && (x.instrumentToken as number) > 0 &&
+    nonempty(x.exchange) && nonempty(x.tradingSymbol) && validExpiry(x.expiry) &&
+    Number.isFinite(x.strike) && (x.strike as number) > 0 &&
+    (x.optionType === 'CE' || x.optionType === 'PE') &&
+    (x.transactionType === 'BUY' || x.transactionType === 'SELL') &&
+    Number.isSafeInteger(x.quantity) && (x.quantity as number) > 0;
+};
+export function validateSellerBasketMarginProof(value: unknown): SellerBasketMarginCheck {
+  // Runtime JSON is untrusted even when a TypeScript caller declares an interface.
+  const input = record(value) ? value as unknown as SellerBasketMarginProof : null;
+  const blockers: string[] = [];
+  if (!input || input.source !== 'KITE_BASKET_MARGIN_RESPONSE' ||
+      !nonempty(input.requestId) || !nonempty(input.responseId) || !nonempty(input.snapshotId)) {
+    blockers.push('MARGIN_RESPONSE_PROVENANCE_MISSING');
+  }
+  if (!input || ![input.requestedAtMs, input.receivedAtMs, input.asOfMs, input.maxAgeMs].every(Number.isFinite) ||
+      input.maxAgeMs <= 0 || input.requestedAtMs <= 0 || input.requestedAtMs > input.receivedAtMs ||
+      input.receivedAtMs > input.asOfMs || input.asOfMs - input.receivedAtMs > input.maxAgeMs) {
+    blockers.push('MARGIN_RESPONSE_TIMESTAMP_INVALID');
+  }
+  if (!input || !validLeg(input.shortLeg) || !validLeg(input.longLeg)) {
+    blockers.push('MARGIN_LEG_IDENTITY_INVALID');
+  } else {
+    const short = input.shortLeg, long = input.longLeg;
+    if (short.transactionType !== 'SELL' || long.transactionType !== 'BUY' ||
+        short.instrumentToken === long.instrumentToken ||
+        short.tradingSymbol.trim().toUpperCase() === long.tradingSymbol.trim().toUpperCase() ||
+        short.exchange !== long.exchange || short.expiry !== long.expiry ||
+        short.optionType !== long.optionType || short.quantity !== long.quantity ||
+        (short.optionType === 'CE' && long.strike <= short.strike) ||
+        (short.optionType === 'PE' && long.strike >= short.strike)) {
+      blockers.push('MARGIN_BASKET_PAIR_MISMATCH');
+    }
+  }
+  if (!input || !Number.isFinite(input.marginRequired) || input.marginRequired <= 0) {
+    blockers.push('MARGIN_AMOUNT_INVALID');
+  }
+  if (blockers.length) return {verified: false, blockers, ...SAFE};
+  return {verified: true, marginRequired: input!.marginRequired, ...SAFE};
 }

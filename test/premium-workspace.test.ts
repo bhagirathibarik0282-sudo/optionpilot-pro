@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Hono } from 'hono';
-import { derivePremiumWorkspace } from '../premium-workspace-model.js';
+import { derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext } from '../premium-workspace-model.js';
 import { DashboardLiveStore } from '../dashboard-live-feed.js';
 import { mountDashboardLiveRoutes } from '../dashboard-live-http.js';
 
@@ -55,4 +55,33 @@ test('watch route validates every public filter and returns no-store closed-feed
  const app=new Hono();mountDashboardLiveRoutes(app);
  const r=await app.request('/dashboard-live/premiums?symbol=NIFTY&side=CE&nearby=2&limit=60');assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'no-store');assert.equal((await r.json()).snapshot,null);
  for(const q of ['symbol=OTHER','side=XX','limit=121','offset=-1','expiries=bad','nearby=10','ceStrike=NaN','minDte=10&maxDte=4'])assert.equal((await app.request('/dashboard-live/premiums?'+q)).status,400,q);
+});
+
+function liveFixture(){
+ const q={identity:{role:'OPTION',symbol:'NIFTY',expiry,strike:22000,side:'CE'},price:100,oi:200,bid:99,ask:101,volume:500,pdc:90,state:'LIVE',observedAt:at(0),receivedAt:at(0)};
+ const pcr={state:'COMPLETE',expiry,fullPcr:1.2,periodMs:60000,coverage:{expected:100,freshOi:100,complete:true},sourceMinAt:at(0),sourceMaxAt:at(0),checkedAt:at(0)};
+ const payload={connected:true,serverTime:at(0),snapshot:{tradeDate:date,vix:{...q,price:14},indices:[{symbol:'NIFTY',expiry,future:{...q,price:22000}}]},pcrDisplay:{NIFTY:pcr}};
+ return {q,payload};
+}
+test('every live premium field changes with its source; IV never borrows recorded values',()=>{
+ const {q,payload}=liveFixture(),ref=row(0,999,{iv:40});let p=projectLivePremiumQuote(payload,q,ref)!;
+ assert.equal(p.ltp,100);assert.equal(p.oi,200);assert.equal(p.bid,99);assert.equal(p.ask,101);assert.equal(p.volume,500);assert.equal(p.iv,null);
+ p=projectLivePremiumQuote(payload,{...q,price:105,oi:220,bid:104,ask:106,volume:600},ref)!;
+ assert.deepEqual([p.ltp,p.oi,p.bid,p.ask,p.volume],[105,220,104,106,600]);
+ assert.equal(projectLivePremiumQuote(payload,q,{...ref,expiry:'2026-10-26'})!.pdh,null);
+});
+test('stalled browser delivery, stale quote times and disconnect revoke every current numeric quote field',()=>{
+ const {q,payload}=liveFixture();assert.equal(premiumLiveClock(payload,3000).valid,true);assert.equal(premiumLiveClock(payload,3001).valid,false);
+ for(const [p,quote,elapsed] of [[payload,q,3001],[{...payload,connected:false},q,0],[payload,{...q,observedAt:at(-1)},0],[payload,{...q,receivedAt:at(-1)},0],[{...payload,snapshot:{...payload.snapshot,tradeDate:'2026-10-12'}},q,0]] as any[]){
+  const point=projectLivePremiumQuote(p,quote,null,elapsed)!;assert.equal(point.truth_verdict,'STALE');for(const key of ['ltp','oi','bid','ask','volume','pdc','iv'])assert.equal((point as any)[key],null,key);
+ }
+});
+test('live PCR needs complete exact-expiry coverage and keeps its own cadence and timestamp',()=>{
+ const {payload}=liveFixture();const c=derivePremiumLiveContext(payload,'NIFTY',[expiry]);assert.equal(c.indices[0].pcr.value,1.2);assert.equal(c.indices[0].pcr.minutes,1);assert.equal(c.indices[0].pcr.at,at(0));
+ for(const patch of [{coverage:{expected:100,freshOi:99,complete:true}},{expiry:'2026-10-26'},{state:'INCOMPLETE'},{checkedAt:at(-2)},{sourceMinAt:at(-2)}])assert.equal(derivePremiumLiveContext({...payload,pcrDisplay:{NIFTY:{...payload.pcrDisplay.NIFTY,...patch}}}).indices[0].pcr.value,null);
+ assert.equal(derivePremiumLiveContext(payload,'NIFTY',['2026-10-26']).indices[0].pcr.value,null);
+});
+test('live context never keeps stale future or VIX values during a stalled delivery',()=>{
+ const {payload}=liveFixture();assert.equal(derivePremiumLiveContext(payload).vix.value,14);assert.equal(derivePremiumLiveContext(payload).indices[0].future.value,22000);
+ const c=derivePremiumLiveContext(payload,'ALL',[],4000);assert.equal(c.vix.value,null);assert.equal(c.indices[0].future.value,null);assert.equal(c.indices[0].pcr.value,null);
 });

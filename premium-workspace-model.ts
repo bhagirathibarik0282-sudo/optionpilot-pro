@@ -1,3 +1,34 @@
+/** Freshness is checked again at display time, even if a request or stream stalls. */
+export function premiumLiveClock(payload:any,elapsedMs=0){
+ const base=Date.parse(payload?.serverTime||''),now=base+elapsedMs;
+ const day=Number.isFinite(now)?new Date(now+19800000).toISOString().slice(0,10):null;
+ return {now,valid:payload?.connected===true&&Number.isFinite(base)&&Number.isFinite(elapsedMs)&&elapsedMs>=0&&elapsedMs<=3000&&payload?.snapshot?.tradeDate===day};
+}
+
+export function projectLivePremiumQuote(payload:any,q:any,reference:any=null,elapsedMs=0){
+ const clock=premiumLiveClock(payload,elapsedMs),e=q?.identity,at=Date.parse(q?.observedAt||''),received=Date.parse(q?.receivedAt||'');
+ if(!e||e.role!=='OPTION'||!['NIFTY','SENSEX','BANKNIFTY'].includes(e.symbol)||!['CE','PE'].includes(e.side)||typeof e.strike!=='number'||!Number.isFinite(e.strike)||e.strike<=0)return null;
+ const day=(v:number)=>Number.isFinite(v)?new Date(v+19800000).toISOString().slice(0,10):null;
+ const fresh=clock.valid&&q.state==='LIVE'&&clock.now-at>=-5000&&clock.now-at<=30000&&clock.now-received>=0&&clock.now-received<=30000&&day(at)===payload.snapshot.tradeDate&&day(received)===payload.snapshot.tradeDate;
+ const n=(v:any,positive=false)=>fresh&&typeof v==='number'&&Number.isFinite(v)&&(positive?v>0:v>=0)?v:null;
+ const exact=reference?.truth_verdict==='TRUE'&&reference.symbol===e.symbol&&String(reference.expiry).slice(0,10)===e.expiry&&reference.strike===e.strike&&reference.option_type===e.side&&String(reference.minute_bucket).slice(0,10)===payload?.snapshot?.tradeDate;
+ return {symbol:e.symbol,expiry:e.expiry,strike:e.strike,option_type:e.side,minute_bucket:q.observedAt||payload.serverTime,observedAt:q.observedAt||null,receivedAt:q.receivedAt||null,
+  ltp:n(q.price,true),oi:n(q.oi),pdc:n(q.pdc,true),bid:n(q.bid,true),ask:n(q.ask,true),volume:n(q.volume),iv:null,
+  truth_verdict:fresh&&n(q.price,true)!==null?'TRUE':'STALE',pdh:exact?reference.pdh:null,pdl:exact?reference.pdl:null,referenceDate:exact?String(reference.minute_bucket).slice(0,10):null};
+}
+
+export function derivePremiumLiveContext(payload:any,symbol='ALL',expiries:string[]=[],elapsedMs=0){
+ const clock=premiumLiveClock(payload,elapsedMs),n=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
+ const quote=(q:any)=>{const at=Date.parse(q?.observedAt||''),received=Date.parse(q?.receivedAt||''),valid=clock.valid&&q?.state==='LIVE'&&clock.now-at>=-5000&&clock.now-at<=30000&&clock.now-received>=0&&clock.now-received<=30000;
+  return {value:valid&&n(q.price)!==null&&q.price>0?q.price:null,at:q?.observedAt||null};};
+ return {vix:quote(payload?.snapshot?.vix),indices:(payload?.snapshot?.indices||[]).filter((r:any)=>symbol==='ALL'||r.symbol===symbol).map((r:any)=>{
+  const s=payload?.pcrDisplay?.[r.symbol],checked=Date.parse(s?.checkedAt||''),period=s?.periodMs;
+  const sourceMin=Date.parse(s?.sourceMinAt||''),sourceMax=Date.parse(s?.sourceMaxAt||'');
+  const complete=clock.valid&&s?.state==='COMPLETE'&&s.coverage?.complete===true&&s.coverage.expected>0&&s.coverage.freshOi===s.coverage.expected&&s.expiry===r.expiry&&(!expiries.length||expiries.includes(s.expiry))&&[60000,180000].includes(period)&&clock.now-checked>=0&&clock.now-checked<=period+30000&&checked-sourceMax>=-5000&&checked-sourceMax<=30000&&sourceMax-sourceMin>=0&&sourceMax-sourceMin<=30000;
+  return {symbol:r.symbol,future:quote(r.future),pcr:{value:complete?n(s.fullPcr):null,expiry:s?.expiry||null,at:s?.checkedAt||null,minutes:[60000,180000].includes(period)?period/60000:null}};
+ })};
+}
+
 /** Descriptive presentation model. Each row retains its exact contract and source times. */
 export function derivePremiumWorkspace(input:any){
  const num=(v:any):number|null=>typeof v==='number'&&Number.isFinite(v)?v:null;

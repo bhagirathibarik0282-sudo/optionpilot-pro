@@ -9,7 +9,7 @@ export function quoteTime(value:unknown):number {
  const at=/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)?value.replace(' ','T')+'+05:30':value;
  return /(?:Z|[+-]\d{2}:\d{2})$/.test(at)?Date.parse(at):NaN;
 }
-export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number,cycleStartedAt=now){
+export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number,cycleStartedAt=now,spot?:any){
  let ce=0,pe=0;const times:number[]=[],missing:string[]=[],stale:string[]=[],invalid:string[]=[],calls:LiveEntry[]=[],puts:LiveEntry[]=[];
  const seen=new Set<string>();
  for(const e of entries){
@@ -24,14 +24,33 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
  const skew=times.length?Math.max(...times)-Math.min(...times):null;
  const complete=entries.length>0&&times.length===entries.length&&calls.length>0&&puts.length>0&&skew!==null&&skew<=30_000&&day(now)===date&&Number.isFinite(ce)&&Number.isFinite(pe);
  const wall=(rows:LiveEntry[])=>{if(!complete)return null;const sorted=[...rows].sort((a,b)=>quotes[b.exchange+':'+b.label].oi-quotes[a.exchange+':'+a.label].oi||a.strike!-b.strike!),first=sorted[0],oi=quotes[first.exchange+':'+first.label].oi;return oi>0?{strike:first.strike,oi,tiedStrikes:sorted.filter(e=>quotes[e.exchange+':'+e.label].oi===oi).map(e=>e.strike)}:null;};
- return {state:complete&&ce>0?'COMPLETE':'INCOMPLETE',fullPcr:complete&&ce>0?pe/ce:null,ceTotal:complete?ce:null,peTotal:complete?pe:null,callWall:wall(calls),putWall:wall(puts),coverage:{expected:entries.length,freshOi:times.length,complete,sourceSkewMs:skew,missing:missing.length,stale:stale.length,invalid:invalid.length},
+ // ATM +/-7 listed strikes = 15 strikes, not a seven-strike or full-chain ratio.
+ // Anchor is frozen with this completed OI snapshot, never moved by later ticks.
+ const bandPcr:any={state:'INCOMPLETE',value:null,halfWidth:7,strikeCount:15,anchorStrike:null,fromStrike:null,toStrike:null,ceTotal:null,peTotal:null,expected:30,freshOi:0,anchorAt:null};
+ const spotAt=quoteTime(spot?.observedAt),receipt=quoteTime(spot?.receivedAt);
+ const spotOk=complete&&spot?.state==='LIVE'&&spot.identity?.role==='SPOT'&&spot.identity.symbol===entries[0]?.symbol&&finite(spot.price)&&spot.price>0&&Number.isFinite(spotAt)&&day(spotAt)===date&&now-spotAt>=-5000&&now-spotAt<=30000&&Number.isFinite(receipt)&&day(receipt)===date&&now-receipt>=0&&now-receipt<=30000&&Math.max(...times,spotAt)-Math.min(...times,spotAt)<=30000;
+ if(spotOk){
+  const strikes=[...new Set(entries.map(e=>e.strike!))].sort((a,b)=>a-b);
+  const anchor=strikes.reduce((best,k)=>Math.abs(k-spot.price)<Math.abs(best-spot.price)?k:best,strikes[0]),index=strikes.indexOf(anchor);
+  bandPcr.anchorStrike=anchor;bandPcr.anchorAt=new Date(spotAt).toISOString();
+  if(index>=7&&index+7<strikes.length){
+   const allowed=new Set(strikes.slice(index-7,index+8)),band=entries.filter(e=>allowed.has(e.strike!));
+   const bandCe=band.filter(e=>e.side==='CE'),bandPe=band.filter(e=>e.side==='PE');
+   const sum=(xs:LiveEntry[])=>xs.reduce((total,e)=>total+quotes[e.exchange+':'+e.label].oi,0);
+   const ceTotal=sum(bandCe),peTotal=sum(bandPe);
+   if(band.length===30&&bandCe.length===15&&bandPe.length===15&&finite(ceTotal)&&ceTotal>0&&finite(peTotal)&&peTotal>=0){
+    Object.assign(bandPcr,{state:'COMPLETE',value:peTotal/ceTotal,fromStrike:strikes[index-7],toStrike:strikes[index+7],ceTotal,peTotal,freshOi:30});
+   }
+  }
+ }
+ return {state:complete&&ce>0?'COMPLETE':'INCOMPLETE',fullPcr:complete&&ce>0?pe/ce:null,ceTotal:complete?ce:null,peTotal:complete?pe:null,bandPcr,callWall:wall(calls),putWall:wall(puts),coverage:{expected:entries.length,freshOi:times.length,complete,sourceSkewMs:skew,missing:missing.length,stale:stale.length,invalid:invalid.length},
   // Bounded diagnostics, no credentials or raw broker responses.
   unavailable:[...missing.map(identity=>({identity,reason:'MISSING'})),...stale.map(identity=>({identity,reason:'STALE_TIMESTAMP'})),...invalid.map(identity=>({identity,reason:'INVALID_IDENTITY_OR_OI'}))].slice(0,12),
   sourceMinAt:times.length?new Date(Math.min(...times)).toISOString():null,sourceMaxAt:times.length?new Date(Math.max(...times)).toISOString():null,checkedAt:new Date(now).toISOString(),cycleStartedAt:new Date(cycleStartedAt).toISOString(),source:'KITE_REST_FULL_EXPIRY_SNAPSHOT'};
 }
 export class DashboardPcrSampler {
  private busy=false;private due=0;private revision=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>>();
- constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>}){}
+ constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;readSpot?(symbol:string):any}){}
  async tick(){
   const now=this.deps.now();if(this.busy||now<this.due||!this.deps.active()||day(now)!==this.inventory.date)return;
   this.busy=true;this.due=now+PCR_REFRESH_MS;
@@ -48,7 +67,7 @@ export class DashboardPcrSampler {
   finally{
    if(this.deps.active()){
     const keys=[...new Set(entries.map(e=>e.symbol+'|'+e.expiry))],at=this.deps.now();
-    for(const key of keys)this.results.set(key,measurePcrSnapshot(entries.filter(e=>e.symbol+'|'+e.expiry===key),quotes,this.inventory.date,at,now));
+    for(const key of keys){const group=entries.filter(e=>e.symbol+'|'+e.expiry===key);let spot:any=null;try{spot=this.deps.readSpot?.(group[0].symbol!);}catch{/* Missing cache reference only withholds band PCR. */}this.results.set(key,measurePcrSnapshot(group,quotes,this.inventory.date,at,now,spot));}
     this.revision++;
    }
    this.busy=false;
@@ -56,7 +75,7 @@ export class DashboardPcrSampler {
  }
  read(symbol:string,expiry:string|null){
   const result=this.results.get(symbol+'|'+expiry);if(!result)return null;
-  if(this.deps.now()-Date.parse(result.checkedAt)>90_000||day(this.deps.now())!==this.inventory.date)return {...result,state:'STALE',fullPcr:null,ceTotal:null,peTotal:null,callWall:null,putWall:null,coverage:{...result.coverage,complete:false}};
+  if(this.deps.now()-Date.parse(result.checkedAt)>90_000||day(this.deps.now())!==this.inventory.date)return {...result,state:'STALE',fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,callWall:null,putWall:null,coverage:{...result.coverage,complete:false}};
   return result;
  }
  version(){return this.revision;}

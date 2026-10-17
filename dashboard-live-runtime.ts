@@ -38,6 +38,7 @@ export async function reconcileDashboardLiveRuntime(force=false){
   pcrSampler=new DashboardPcrSampler(inventory,{
    now:()=>Date.now(),active:()=>attempt===generation&&enabled()&&state==='OPEN'&&isIndianEquityMarketOpenAt(new Date()),
    wait:ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+   readSpot:symbol=>target.spotQuote(symbol,Date.now()),
    fetchQuotes:async keys=>{
     const params=new URLSearchParams();for(const key of keys)params.append('i',key);
     const response=await fetch('https://api.kite.trade/quote?'+params,{headers:{'X-Kite-Version':'3',Authorization:'token '+apiKey+':'+sessionToken},signal:AbortSignal.timeout(8000)});

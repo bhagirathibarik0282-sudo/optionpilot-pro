@@ -52,3 +52,7 @@ test('SSE publishes changed revisions without waiting for its idle heartbeat',as
  const app=new Hono();let version=1,reads=0;mountDashboardLiveRoutes(app,()=>({connectionState:'OPEN',snapshot:{sequence:version},reads:++reads}) as any,()=>String(version));
  const controller=new AbortController(),response=await app.request('/dashboard-live/stream',{signal:controller.signal}),reader=response.body!.getReader();const first=new TextDecoder().decode((await reader.read()).value);assert(first.includes('"sequence":1'));version=2;const next=new TextDecoder().decode((await reader.read()).value);assert(next.includes('"sequence":2'));assert.equal(reads,2);controller.abort();await reader.cancel();
 });
+test('band ATM reader reuses the exact existing spot cache and cannot refresh a stale quote',()=>{
+ const store=fixture(),before=store.revision();assert.deepEqual(store.spotQuote('NIFTY',now),store.snapshot(now).indices[0].spot);assert.equal(store.revision(),before);
+ assert.equal(store.spotQuote('NIFTY',now+31000).price,null);assert.equal(store.spotQuote('SENSEX',now).price,null);assert.equal(store.revision(),before);
+});

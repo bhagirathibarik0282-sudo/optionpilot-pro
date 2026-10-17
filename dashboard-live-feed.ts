@@ -77,6 +77,11 @@ export class DashboardLiveStore {
    return {identity:e||null,price:fresh?t!.price:null,oi:fresh?t!.oi:null,volume:fresh?t!.volume:null,bid:fresh?t!.bid:null,ask:fresh?t!.ask:null,pdc:fresh?t!.close:null,changePct:fresh&&t!.price!==null&&t!.close!==null&&t!.close>0?(t!.price/t!.close-1)*100:null,state:!t?'WAITING':fresh?'LIVE':'STALE',observedAt:t?.observedAt||null,receivedAt:t?.receivedAt||null,ageMs:age};
  }
 
+ /** Existing cache only; used to freeze the ATM reference at each OI snapshot. */
+ spotQuote(symbol:string,now:number){
+  return this.quote(this.inventory.entries.find(e=>e.role==='SPOT'&&e.symbol===symbol),now);
+ }
+
  snapshot(now:number,selection:Partial<Record<LiveIndex,{expiry?:string;strike?:number}>>={}){
   const quote=(e:LiveEntry|undefined)=>this.quote(e,now);
   const all=this.inventory.entries;

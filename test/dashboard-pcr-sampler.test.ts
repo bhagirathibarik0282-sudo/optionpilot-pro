@@ -44,3 +44,35 @@ test('cycle-start time stays independent of quote completion latency',async()=>{
  let now=at;const sampler=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{now:()=>now,active:()=>true,wait:async()=>{},fetchQuotes:async()=>{now+=12000;return quotes();}});
  await sampler.tick();const result=sampler.read('NIFTY','2026-10-19');assert.equal(result?.cycleStartedAt,new Date(at).toISOString());assert.equal(result?.checkedAt,new Date(at+12000).toISOString());assert.equal(result?.fullPcr,2);
 });
+function wideChain(){
+ const es:LiveEntry[]=Array.from({length:41},(_,i)=>['CE','PE'].map((side,j)=>({token:100+i*2+j,exchange:'NFO',label:'NIFTY'+i+side,role:'OPTION' as const,symbol:'NIFTY' as const,expiry:'2026-10-19',strike:23000+(i-20)*50,side:side as 'CE'|'PE'}))).flat();
+ const qs=Object.fromEntries(es.map(e=>[e.exchange+':'+e.label,{instrument_token:e.token,oi:e.side==='CE'?100:Math.abs(e.strike!-23000)<=350?300:100,timestamp:new Date(at).toISOString()}]));
+ const spot:any={identity:{role:'SPOT',symbol:'NIFTY'},state:'LIVE',price:23000,observedAt:new Date(at).toISOString(),receivedAt:new Date(at).toISOString()};
+ return {es,qs,spot};
+}
+test('band PCR uses exactly ATM +/-7 listed strikes and the same complete full-expiry quote batch',()=>{
+ const {es,qs,spot}=wideChain(),s=measurePcrSnapshot(es,qs,date,at,at,spot);
+ assert.equal(s.fullPcr,7100/4100);assert.equal(s.bandPcr.value,3);assert.equal(s.bandPcr.anchorStrike,23000);assert.equal(s.bandPcr.fromStrike,22650);assert.equal(s.bandPcr.toStrike,23350);assert.equal(s.bandPcr.strikeCount,15);assert.equal(s.bandPcr.freshOi,30);assert.equal(s.bandPcr.ceTotal,1500);assert.equal(s.bandPcr.peTotal,4500);
+});
+test('missing, stale, future, wrong-index or unsynced spot withholds only the band',()=>{
+ for(const patch of [(s:any)=>s.price=null,(s:any)=>s.state='STALE',(s:any)=>s.identity.symbol='SENSEX',(s:any)=>s.observedAt=new Date(at-31000).toISOString(),(s:any)=>s.receivedAt=new Date(at+1).toISOString(),(s:any)=>s.observedAt=new Date(at+6000).toISOString()]){const {es,qs,spot}=wideChain();patch(spot);const s=measurePcrSnapshot(es,qs,date,at,at,spot);assert.equal(s.bandPcr.value,null);assert.equal(s.fullPcr,7100/4100);}
+ const {es,qs}=wideChain();assert.equal(measurePcrSnapshot(es,qs,date,at).bandPcr.value,null);
+});
+test('edge bands, missing opposite contracts and zero CE denominator never pretend to be a complete band',()=>{
+ const {es,qs,spot}=wideChain();spot.price=22000;assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).bandPcr.value,null);spot.price=23000;
+ const incomplete=es.filter(e=>!(e.strike===23000&&e.side==='PE'));assert.equal(measurePcrSnapshot(incomplete,qs,date,at,at,spot).bandPcr.value,null);
+ for(const e of es)if(e.side==='CE'&&Math.abs(e.strike!-23000)<=350)qs[e.exchange+':'+e.label].oi=0;
+ assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).bandPcr.value,null);
+});
+test('zero put OI survives in the band, while an unavailable outer full-chain quote revokes the band',()=>{
+ const {es,qs,spot}=wideChain();for(const e of es)if(e.side==='PE'&&Math.abs(e.strike!-23000)<=350)qs[e.exchange+':'+e.label].oi=0;
+ assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).bandPcr.value,0);
+ delete qs[es[0].exchange+':'+es[0].label];assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).fullPcr,null);assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).bandPcr.value,null);
+});
+test('ATM is frozen once per OI snapshot; later price ticks do not silently change the band or add requests',async()=>{
+ const {es,qs,spot}=wideChain();let now=at,calls=0,reads=0;
+ const sampler=new DashboardPcrSampler({date,entries:es,missing:[],omittedExpiries:[]},{now:()=>now,active:()=>true,wait:async()=>{},fetchQuotes:async()=>{calls++;return qs;},readSpot:()=>{reads++;return spot;}});
+ await sampler.tick();assert.equal(calls,1);assert.equal(reads,1);assert.equal(sampler.read('NIFTY','2026-10-19')?.bandPcr.anchorStrike,23000);
+ spot.price=23100;assert.equal(sampler.read('NIFTY','2026-10-19')?.bandPcr.anchorStrike,23000);assert.equal(calls,1);assert.equal(reads,1);
+ now+=90001;assert.equal(sampler.read('NIFTY','2026-10-19')?.bandPcr,null);
+});

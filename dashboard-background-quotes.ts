@@ -17,16 +17,16 @@ export type QuoteMap = Record<string, Quote>;
 const finite = (value: unknown): number | null => typeof value === 'number' && Number.isFinite(value) ? value : null;
 function observation(q?: Quote) {
   const price = finite(q?.last_price), close = finite(q?.ohlc?.close);
-  return { price, change: price !== null && close !== null && close > 0 ? (price - close) / close * 100 : null,
+  return { price, previousClose: close, change: price !== null && close !== null && close > 0 ? (price - close) / close * 100 : null,
     volume: finite(q?.volume), exchangeTimestamp: typeof q?.timestamp === 'string' ? q.timestamp : null };
 }
 export function buildBackgroundQuotes(quotes: QuoteMap, now: Date) {
   const stocks = Object.fromEntries(Object.entries(KEY_STOCKS).map(([index, names]) => [index,
-    Object.entries(names).map(([name, symbol]) => ({ name, ...observation(quotes[symbol]) }))]));
+    Object.entries(names).map(([name, symbol]) => ({ name, symbol, ...observation(quotes[symbol]) }))]));
   const sectors = Object.entries(SECTORS).map(([name, symbol]) => {
     const q = observation(quotes[symbol]);
     const pct = q.change === null ? null : Math.round(q.change * 100) / 100;
-    return { name, pct, exchangeTimestamp: q.exchangeTimestamp,
+    return { name, symbol, price: q.price, previousClose: q.previousClose, pct, exchangeTimestamp: q.exchangeTimestamp,
       category: pct === null ? 'unavailable' : pct >= .5 ? 'green' : pct <= -.5 ? 'red' : 'neutral' };
   });
   return { version: 1, source: 'SERVER_BACKGROUND_KITE_QUOTES', timestamp: now.toISOString(),

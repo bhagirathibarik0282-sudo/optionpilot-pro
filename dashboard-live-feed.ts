@@ -1,9 +1,11 @@
+import { mapKiteFullPacketToH1ExactDepth } from './h1-kite-exact-depth-adapter.js';
+import { KiteImmediateTokenRegistry } from './kite-immediate-token-registry.js';
 import type { KiteInstrumentMasterRow } from './kite-immediate-registry-builder.js';
 import type { KiteDecodedPacket } from './kite-websocket-binary-decoder.js';
 
 export const LIVE_INDICES = ['NIFTY','SENSEX','BANKNIFTY'] as const;
 export type LiveIndex = typeof LIVE_INDICES[number];
-export type LiveEntry = { token:number; label:string; exchange?:string; role:'SPOT'|'FUTURE'|'OPTION'|'VIX'|'STOCK'|'SECTOR'; symbol?:LiveIndex; expiry?:string; strike?:number; side?:'CE'|'PE' };
+export type LiveEntry = { token:number; label:string; exchange?:string; lotSize?:number; role:'SPOT'|'FUTURE'|'OPTION'|'VIX'|'STOCK'|'SECTOR'; symbol?:LiveIndex; expiry?:string; strike?:number; side?:'CE'|'PE' };
 export type LiveInventory = { entries:LiveEntry[]; omittedExpiries:string[]; missing:string[]; date:string };
 const dateOf=(at:number)=>new Date(at+19800000).toISOString().slice(0,10);
 const number=(v:unknown):number|null=>typeof v==='number'&&Number.isFinite(v)?v:null;
@@ -33,14 +35,14 @@ export function buildDashboardLiveInventory(rows:KiteInstrumentMasterRow[],date:
   const tokens=new Set(group.rows.map(r=>r.instrument_token));
   const collision=group.rows.some(r=>entries.some(e=>e.token===r.instrument_token));
   if(collision||identities.size!==group.rows.length||tokens.size!==group.rows.length||group.rows.some(r=>!Number.isInteger(r.instrument_token)||r.instrument_token<=0||!Number.isFinite(r.strike)||Number(r.strike)<=0)||entries.length+group.rows.length>limit){omittedExpiries.push(symbol+'|'+group.expiry);continue;}
-  for(const r of group.rows)add(r,{symbol,exchange:r.exchange,role:'OPTION',expiry:group.expiry,strike:Number(r.strike),side:r.instrument_type as 'CE'|'PE'});
+  for(const r of group.rows)add(r,{symbol,exchange:r.exchange,lotSize:Number(r.lot_size)||undefined,role:'OPTION',expiry:group.expiry,strike:Number(r.strike),side:r.instrument_type as 'CE'|'PE'});
  }
  for(const symbol of LIVE_INDICES)if(!entries.some(e=>e.symbol===symbol&&e.role==='OPTION'))missing.push(symbol+':FULL_EXPIRY_INVENTORY');
  if(entries.length>limit||new Set(entries.map(e=>e.token)).size!==entries.length)throw Error('LIVE_INVENTORY_LIMIT_OR_IDENTITY');
  return {entries,omittedExpiries,missing,date};
 }
 
-type Tick = {price:number|null;oi:number|null;volume:number|null;bid:number|null;ask:number|null;close:number|null;observedAt:string|null;receivedAt:string;mode:string};
+type Tick = {packet:KiteDecodedPacket;price:number|null;oi:number|null;volume:number|null;bid:number|null;ask:number|null;close:number|null;observedAt:string|null;receivedAt:string;mode:string};
 /** Latest value per subscribed token only: no database writes or unbounded tick history. */
 export class DashboardLiveStore {
  private ticks=new Map<number,Tick>();
@@ -55,10 +57,20 @@ export class DashboardLiveStore {
    if(!Number.isFinite(at)||at>receipt+5000||dateOf(at)!==this.inventory.date)continue;
    const previous=this.ticks.get(p.instrumentToken);if(previous&&at<Date.parse(previous.observedAt||''))continue;
    const price=number(p.lastPrice),oi=number(p.oi),volume=number(p.volume),bid=number(p.marketDepth?.buy[0]?.price),ask=number(p.marketDepth?.sell[0]?.price);
-   this.ticks.set(p.instrumentToken,{price:price!==null&&price>0?price:null,oi:oi!==null&&oi>=0?oi:null,volume:volume!==null&&volume>=0?volume:null,bid:bid!==null&&bid>0?bid:null,ask:ask!==null&&ask>0?ask:null,close:number(p.close),observedAt:p.exchangeTimestamp||null,receivedAt,mode:p.mode});this.sequence++;
+   this.ticks.set(p.instrumentToken,{packet:p,price:price!==null&&price>0?price:null,oi:oi!==null&&oi>=0?oi:null,volume:volume!==null&&volume>=0?volume:null,bid:bid!==null&&bid>0?bid:null,ask:ask!==null&&ask>0?ask:null,close:number(p.close),observedAt:p.exchangeTimestamp||null,receivedAt,mode:p.mode});this.sequence++;
   }
  }
  revision(){return this.sequence;}
+ /** Exact packet adapter reused for seller research; never infers depth from LTP. */
+ sellerLeg(token:number,quantity:number){
+  const entry=this.entries.get(token),tick=this.ticks.get(token);
+  if(!entry||entry.role!=='OPTION'||!entry.symbol||!tick)return null;
+  const registry=new KiteImmediateTokenRegistry([{instrumentToken:entry.token,symbol:entry.symbol,
+   role:'OPTION',instrumentLabel:entry.label,expiry:entry.expiry,strike:entry.strike,optionSide:entry.side}]);
+  const depth=mapKiteFullPacketToH1ExactDepth(tick.packet,registry,tick.receivedAt,quantity);
+  return depth?{entry:{...entry},depth}:null;
+ }
+
  private quote(e:LiveEntry|undefined,now:number){
    const t=e?this.ticks.get(e.token):null,age=t?now-Date.parse(t.observedAt||''):null,receiptAge=t?now-Date.parse(t.receivedAt):null;
    const fresh=!!t&&age!==null&&receiptAge!==null&&age>=-5000&&age<=30000&&receiptAge>=0&&receiptAge<=30000&&dateOf(now)===this.inventory.date;

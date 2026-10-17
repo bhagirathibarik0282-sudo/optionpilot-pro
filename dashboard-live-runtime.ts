@@ -72,3 +72,14 @@ export function readDashboardPremiumSnapshot(filter:PremiumWatchFilter={}){
  if(snapshot&&!connected)for(const q of snapshot.rows){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.pdc=null;q.state='STALE';}
  return {connected,connectionState:state,serverTime:new Date().toISOString(),snapshot,createsOrders:false,affectsSelector:false,affectsTelegram:false,affectsExecution:false};
 }
+
+/** Internal authenticated seller consumer only; never exposes account values in the public stream. */
+export function readDashboardSellerContext(shortToken:number,longToken:number,quantity:number){
+ return {connected:state==='OPEN',connectionState:state,runtimeId:store?.runtimeId||null,
+  sessionToken:credential,short:state==='OPEN'?store?.sellerLeg(shortToken,quantity)||null:null,
+  long:state==='OPEN'?store?.sellerLeg(longToken,quantity)||null:null};
+}
+export function readDashboardSellerOptions(){
+ return {connectionState:state,rows:store?.inventory.entries.filter(e=>e.role==='OPTION'&&
+  (e.symbol==='NIFTY'||e.symbol==='SENSEX')).map(e=>({...e}))||[]};
+}

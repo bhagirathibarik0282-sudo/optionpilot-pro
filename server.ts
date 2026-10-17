@@ -1,3 +1,4 @@
+import { mountSellerResearchRoutes } from './seller-research-http.js';
 import { Hono } from "hono";
 import { persistConnectedDriveSession } from "./drive-connected-session.js";
 import { mountResearchRoutes } from "./research-server-hook.js";
@@ -24307,6 +24308,8 @@ async function fetchKiteAccountData(accessToken: string) {
     ordersError: ordersRes.ok ? null : (ordersJson?.message || `HTTP ${ordersRes.status}`),
   };
 }
+
+mountSellerResearchRoutes(app, c => { const s=getSession(c); return s ? {accessToken:s.accessToken,userId:s.userId} : null; });
 
 app.get("/api/account/kite", async (c) => {
   const session = getSession(c);

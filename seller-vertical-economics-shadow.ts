@@ -23,7 +23,7 @@ export type SellerVerticalResult =
 const SAFE = {researchOnly: true as const, affectsExecution: false as const, createsOrders: false as const};
 export function evaluateSellerVertical(input: SellerVerticalQuote): SellerVerticalResult {
   const blockers: string[] = [];
-  if (!input || !["NIFTY","SENSEX","BANKNIFTY"].includes(input.symbol) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(input.expiry) || !["CE","PE"].includes(input.side)) blockers.push("INVALID_CONTRACT_IDENTITY");
+  if (!input || !["NIFTY","SENSEX","BANKNIFTY"].includes(input.symbol) || !/[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(input.expiry) || !["CE","PE"].includes(input.side)) blockers.push("INVALID_CONTRACT_IDENTITY");
   const nums = [input?.shortStrike,input?.longStrike,input?.shortBid,input?.longAsk,input?.lotSize,input?.lots,input?.shortObservedAtMs,input?.longObservedAtMs,input?.asOfMs,input?.maxQuoteAgeMs,input?.estimatedRoundTripCosts];
   if (nums.some(v=>typeof v!=="number"||!Number.isFinite(v))) blockers.push("INVALID_NUMERIC_EVIDENCE");
   if (blockers.length) return {ready:false,blockers,...SAFE};

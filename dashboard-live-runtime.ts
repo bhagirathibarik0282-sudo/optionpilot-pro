@@ -1,5 +1,5 @@
 import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
-import { DashboardLiveStore, buildDashboardLiveInventory, type LiveIndex } from './dashboard-live-feed.js';
+import { DashboardLiveStore, buildDashboardLiveInventory, type LiveIndex, type PremiumWatchFilter } from './dashboard-live-feed.js';
 import { fetchH1KiteLiveInstrumentMaster } from './h1-kite-live-instrument-master-adapter.js';
 import { resolveKiteAuthoritySession, subscribeKiteAuthoritySessionPersisted } from './kite-session-authority.js';
 import { KiteWebSocketTransport } from './kite-websocket-transport.js';
@@ -59,9 +59,16 @@ export function readDashboardLiveSnapshot(selection:Partial<Record<LiveIndex,{ex
  const snapshot=store?.snapshot(Date.now(),selection)||null;
  if(snapshot)for(const index of snapshot.indices)(index as any).pcrSnapshot=connected?pcrSampler?.read(index.symbol,index.expiry)||null:null;
  // Socket closure must immediately revoke numeric live values, even before age expiry.
- if(snapshot&&!connected){for(const index of snapshot.indices){for(const q of [index.spot,index.future,index.ce,index.pe]){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.state='STALE';}index.futuresBasis=null;index.fullPcr=null;index.ceTotal=null;index.peTotal=null;index.callWall=null;index.putWall=null;index.coverage.complete=false;}for(const q of [snapshot.vix,...snapshot.participation]){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.state='STALE';}}
+ if(snapshot&&!connected){for(const index of snapshot.indices){for(const q of [index.spot,index.future,index.ce,index.pe]){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.pdc=null;q.state='STALE';}index.futuresBasis=null;index.fullPcr=null;index.ceTotal=null;index.peTotal=null;index.callWall=null;index.putWall=null;index.coverage.complete=false;}for(const q of [snapshot.vix,...snapshot.participation]){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.pdc=null;q.state='STALE';}}
  return {enabled:enabled(),connectionState:state,connected,serverTime:new Date().toISOString(),snapshot,source:'KITE_WEBSOCKET_FULL',createsOrders:false,affectsTelegram:false,affectsSelector:false,affectsExecution:false};
 }
 
 /** Cheap dirty check: no full-chain projection until a tick/state changes or heartbeat is due. */
 export function dashboardLiveRevision(){return state+':'+(store?.runtimeId||'none')+':'+(store?.revision()||0)+':'+(pcrSampler?.version()||0);}
+
+/** Display-only view of the same socket cache; disconnection revokes all values. */
+export function readDashboardPremiumSnapshot(filter:PremiumWatchFilter={}){
+ const connected=state==='OPEN',snapshot=store?.premiums(Date.now(),filter)||null;
+ if(snapshot&&!connected)for(const q of snapshot.rows){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.pdc=null;q.state='STALE';}
+ return {connected,connectionState:state,serverTime:new Date().toISOString(),snapshot,createsOrders:false,affectsSelector:false,affectsTelegram:false,affectsExecution:false};
+}

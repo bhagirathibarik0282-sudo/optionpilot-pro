@@ -59,12 +59,14 @@ export class DashboardLiveStore {
   }
  }
  revision(){return this.sequence;}
- snapshot(now:number,selection:Partial<Record<LiveIndex,{expiry?:string;strike?:number}>>={}){
-  const quote=(e:LiveEntry|undefined)=>{
+ private quote(e:LiveEntry|undefined,now:number){
    const t=e?this.ticks.get(e.token):null,age=t?now-Date.parse(t.observedAt||''):null,receiptAge=t?now-Date.parse(t.receivedAt):null;
    const fresh=!!t&&age!==null&&receiptAge!==null&&age>=-5000&&age<=30000&&receiptAge>=0&&receiptAge<=30000&&dateOf(now)===this.inventory.date;
-   return {identity:e||null,price:fresh?t!.price:null,oi:fresh?t!.oi:null,volume:fresh?t!.volume:null,bid:fresh?t!.bid:null,ask:fresh?t!.ask:null,changePct:fresh&&t!.price!==null&&t!.close!==null&&t!.close>0?(t!.price/t!.close-1)*100:null,state:!t?'WAITING':fresh?'LIVE':'STALE',observedAt:t?.observedAt||null,receivedAt:t?.receivedAt||null,ageMs:age};
-  };
+   return {identity:e||null,price:fresh?t!.price:null,oi:fresh?t!.oi:null,volume:fresh?t!.volume:null,bid:fresh?t!.bid:null,ask:fresh?t!.ask:null,pdc:fresh?t!.close:null,changePct:fresh&&t!.price!==null&&t!.close!==null&&t!.close>0?(t!.price/t!.close-1)*100:null,state:!t?'WAITING':fresh?'LIVE':'STALE',observedAt:t?.observedAt||null,receivedAt:t?.receivedAt||null,ageMs:age};
+ }
+
+ snapshot(now:number,selection:Partial<Record<LiveIndex,{expiry?:string;strike?:number}>>={}){
+  const quote=(e:LiveEntry|undefined)=>this.quote(e,now);
   const all=this.inventory.entries;
   const indices=LIVE_INDICES.map(symbol=>{
    const spot=quote(all.find(e=>e.symbol===symbol&&e.role==='SPOT')),future=quote(all.find(e=>e.symbol===symbol&&e.role==='FUTURE'));
@@ -90,4 +92,22 @@ export class DashboardLiveStore {
   });
   return {runtimeId:this.runtimeId,sequence:this.sequence,asOf:new Date(now).toISOString(),tradeDate:this.inventory.date,indices,vix:quote(all.find(e=>e.role==='VIX')),participation:all.filter(e=>e.role==='STOCK'||e.role==='SECTOR').map(quote),missing:this.inventory.missing,omittedExpiries:this.inventory.omittedExpiries,source:'KITE_WEBSOCKET_FULL',persistence:'BOUNDED_LATEST_TOKEN_MEMORY',affectsExecution:false,affectsSelector:false,affectsTelegram:false,createsOrders:false};
  }
+ /** Filter the existing token cache; no provider call or persistence. */
+ premiums(now:number,filter:PremiumWatchFilter={}){
+  const options=this.inventory.entries.filter(e=>e.role==='OPTION'&&(!filter.symbol||e.symbol===filter.symbol));
+  const expiries=[...new Set(options.map(e=>e.expiry!))].sort(),strikes=[...new Set(options.map(e=>e.strike!))].sort((a,b)=>a-b);
+  const dte=(e:LiveEntry)=>Math.round((Date.parse(e.expiry!+'T00:00:00Z')-Date.parse(this.inventory.date+'T00:00:00Z'))/86400000);
+  const nearbyCache=new Map<string,Set<number>>();
+  const nearby=(e:LiveEntry)=>{if(!filter.nearby||e.side==='CE'&&filter.ceStrike!==undefined||e.side==='PE'&&filter.peStrike!==undefined)return true;const spot=this.quote(this.inventory.entries.find(r=>r.role==='SPOT'&&r.symbol===e.symbol),now).price;if(spot===null)return false;const key=e.symbol+'|'+e.expiry;let allowed=nearbyCache.get(key);if(!allowed){const ks=[...new Set(options.filter(x=>x.symbol===e.symbol&&x.expiry===e.expiry).map(x=>x.strike!))].sort((a,b)=>a-b),atm=ks.reduce((a,k)=>Math.abs(k-spot)<Math.abs(a-spot)?k:a,ks[0]),at=ks.indexOf(atm);allowed=new Set(ks.slice(Math.max(0,at-filter.nearby),at+filter.nearby+1));nearbyCache.set(key,allowed);}return allowed.has(e.strike!);};
+  const selected=options.filter(e=>nearby(e)&&(!filter.expiries?.length||filter.expiries.includes(e.expiry!))&&(!filter.side||e.side===filter.side)&&
+   (filter.minDte===undefined||dte(e)>=filter.minDte)&&(filter.maxDte===undefined||dte(e)<=filter.maxDte)&&
+   (e.side==='CE'?filter.ceStrike===undefined||e.strike===filter.ceStrike:filter.peStrike===undefined||e.strike===filter.peStrike))
+   .sort((a,b)=>String(a.symbol).localeCompare(String(b.symbol))||a.strike!-b.strike!||String(a.expiry).localeCompare(String(b.expiry))||String(a.side).localeCompare(String(b.side)));
+  const offset=filter.offset||0,limit=Math.min(120,filter.limit||60);
+  return {tradeDate:this.inventory.date,runtimeId:this.runtimeId,total:selected.length,offset,limit,expiries,strikes,
+   rows:selected.slice(offset,offset+limit).map(e=>({...this.quote(e,now),dte:dte(e)})),omittedExpiries:this.inventory.omittedExpiries};
+ }
+
 }
+
+export type PremiumWatchFilter={symbol?:LiveIndex;nearby?:number;expiries?:string[];side?:'CE'|'PE';ceStrike?:number;peStrike?:number;minDte?:number;maxDte?:number;offset?:number;limit?:number};

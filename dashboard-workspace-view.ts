@@ -1,5 +1,7 @@
 import { installPremiumWorkspace } from './premium-workspace-view.js';
-export const WORKSPACE_NAV_HTML=`<aside id="op-workspace-nav" aria-label="Dashboard chapters"><div class="op-rail-inner"><a class="op-logo" href="/">OP<span>OptionPilot <b>PRO</b></span></a><div class="op-rail-label">YOUR MARKET WORKSPACE</div><div id="op-chapter-links"></div><details id="op-customize"><summary>＋ Choose my chapters</summary><div id="op-chapter-options"></div><button id="op-show-chapters" type="button">Show all chapters</button></details><div class="op-rail-foot">NIFTY · SENSEX<br><span>BANKNIFTY · monthly observation</span></div></div></aside><div id="op-workspace-top"><div><span class="op-kicker">MARKET OBSERVATORY</span><h2>Clarity in every move<span>.</span></h2><p>ଆପଣଙ୍କ chapter · ଆପଣଙ୍କ ପସନ୍ଦ</p></div><div id="op-workspace-feed" role="status">Connecting to market feed</div></div><div id="op-workspace-ticker" aria-label="Market snapshot"></div>`;
+export const WORKSPACE_NAV_HTML=`<aside id="op-workspace-nav" aria-label="Dashboard chapters"><div class="op-rail-inner"><a class="op-logo" href="/">OP<span>OptionPilot <b>PRO</b></span></a><div class="op-rail-label">YOUR MARKET WORKSPACE</div><div id="op-chapter-links"></div><details id="op-customize"><summary>＋ Choose my chapters</summary><div id="op-chapter-options"></div><button id="op-show-chapters" type="button">Show all chapters</button></details><div class="op-rail-foot">NIFTY · SENSEX<br><span>BANKNIFTY · monthly observation</span></div></div></aside><div id="op-workspace-top"><strong>OptionPilot</strong><div id="op-workspace-feed" role="status">Connecting to market feed</div></div>`;
+
+export const WORKSPACE_TICKER_HTML=`<details id="op-ticker-tools"><summary>Market ticker</summary><div id="op-workspace-ticker" aria-label="Market snapshot"></div></details>`;
 
 export const WORKSPACE_CSS=`
 :root{--op-ink:#eff6ff;--op-muted:#a5b5cf;--op-edge:#243650;--op-aqua:#58e5dc;--op-rise:#85f4ad;--op-fall:#ff89a9;--op-gold:#f5ce7b}
@@ -22,6 +24,17 @@ body[data-op-workspace] #mb-page>.mb-reading-guide{margin:0 0 12px}body[data-op-
 @media(min-width:1500px){body[data-op-workspace] #market-book{padding-left:282px}#op-workspace-nav{width:260px}}
 @media(max-width:900px){body[data-op-workspace] #market-book{padding:16px}#op-workspace-nav{position:static;width:auto;padding:0;background:none;border:0;border-radius:0}.op-rail-inner{position:static}.op-logo,.op-rail-label,.op-rail-foot{display:none}#op-chapter-links{display:flex;overflow-x:auto;gap:6px;padding-bottom:10px;scrollbar-width:thin}#market-book #op-chapter-links button{width:auto;flex:0 0 auto;padding:10px 12px;font-size:15px;min-height:44px}#op-customize{margin:0 0 14px;padding:5px 0;border:0}#op-chapter-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:600px){body[data-op-workspace] main{padding:6px}body[data-op-workspace] #market-book{padding:12px;border-radius:14px}#op-workspace-top{align-items:flex-start;gap:10px}#op-workspace-feed{max-width:130px;font-size:11px;padding:7px 9px}#op-workspace-top p{font-size:12px}#op-workspace-ticker{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.op-ticker{padding:11px}.op-ticker strong{font-size:28px}#op-chapter-options{grid-template-columns:repeat(2,minmax(0,1fr))}body[data-op-workspace] #mb-live-context-shell{display:block}}
+
+/* One compact workspace header; optional tools never precede the chapter as separate panels. */
+body[data-op-workspace] #market-book{min-height:0}
+#op-workspace-top{margin-bottom:8px;min-height:36px}#op-workspace-top>strong{font-size:18px}
+body[data-op-workspace] .mb-turn{margin:8px 0;padding:6px 0}
+#mb-tools,#op-workspace-advanced,#op-display-tools{border:1px solid var(--op-edge);border-radius:10px;padding:0 10px;margin:8px 0}
+:is(#mb-tools,#op-workspace-advanced,#op-display-tools)>summary{cursor:pointer;min-height:44px;padding:10px 0;font-size:15px}
+#op-workspace-advanced{order:8}#mb-tools[open]>:not(summary),#op-workspace-advanced[open]>:not(summary){margin-block:10px}
+body[data-op-workspace] .mb-scope{margin:6px 0;padding:4px 8px;font-size:13px}
+body[data-op-workspace] .mb-detail-toolbar{margin:4px 0}body[data-op-workspace] #mb-page .mb-chapter-head{margin-bottom:8px;padding-bottom:6px}
+body[data-op-workspace] #mb-page .mb-chapter-head h2{margin:3px 0;font-size:23px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 `;
 

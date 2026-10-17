@@ -92,3 +92,12 @@ test('one-minute PCR does not skip a cycle when quote completion times are less 
  h.advance(10000);h.tick();h.emit(patch);assert.equal(valueOf(),'1.25');
  h.advance(56000);cycle=60000;value=1.5;h.tick();h.emit(patch);assert.equal(valueOf(),'1.5','56s completion gap must not turn minute sampling into 2min sampling');
 });
+test('Chapter 6 selections reuse the existing EventSource; independent sides and snapshot row deltas retain identity',()=>{
+ const h=harness();h.tick();h.emit();const count=h.streams.length;
+ h.winEvents['optionpilot:live-selection']({detail:{symbol:'NIFTY',ceStrike:22000,peStrike:22000}});
+ assert.equal(h.streams.length,count+1);assert(h.streams.at(-2).closed);assert(h.streams.at(-1).url.includes('NIFTY_ceStrike=22000'));assert(h.streams.at(-1).url.includes('NIFTY_peStrike=22000'));
+ h.emit((s:any)=>{s.indices[0].pcrSnapshot={state:'COMPLETE',checkedAt:s.asOf,cycleStartedAt:s.asOf,fullPcr:1,coverage:{complete:true},strikeRows:[{token:2,oi:100}]};});
+ h.emit((s:any)=>{s.indices[0].pcrSnapshot={state:'COMPLETE',checkedAt:s.asOf,cycleStartedAt:s.asOf,fullPcr:1,coverage:{complete:true},strikeRowsUnchanged:true};});
+ const q=h.contextEvents.at(-1).detail.snapshot.indices[0].pcrSnapshot;assert.equal(q.strikeRows[0].token,2);
+ const before=h.streams.length;h.winEvents['optionpilot:live-selection']({detail:{symbol:'NIFTY',ceStrike:-1}});assert.equal(h.streams.length,before);
+});

@@ -60,7 +60,7 @@ test('breadth uses fresh unweighted quotes with denominators, per-source times a
 test('serialized chapter navigation updates live values while recorded data remains untouched; mobile keeps live shell',()=>{
  const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>(),handlers:any={};
  for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
- const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},window:{addEventListener:(name:string,fn:any)=>handlers[name]=fn,dispatchEvent(){}},CustomEvent:class{},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},window:{addEventListener:(name:string,fn:any)=>handlers[name]=fn,dispatchEvent(){}},CustomEvent:class{},setTimeout:()=>1,clearTimeout(){},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);
  const scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];for(const script of scripts)new vm.Script(script[1]);vm.runInContext(scripts[0][1],ctx);
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({date:'2026-10-16',recordedDates:[],current:{},history:{},baseline:{},health:{}}),refresh(){requests++;},memory:async()=>{}};vm.runInContext('installMarketBook(api)',ctx);
  const turn=(page:number)=>nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:String(page)}})}});

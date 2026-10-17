@@ -35,13 +35,15 @@ export function installDashboardLive(){
  function connect(){
   close();if(!on||document.hidden||disposed)return;
   if(typeof EventSource==='undefined'){get('op-live-status').textContent='Live streaming is not supported by this browser.';return;}
-  const q=new URLSearchParams();for(const symbol of indices){const s=selection[symbol];if(s?.expiry)q.set(symbol+'_expiry',s.expiry);if(s?.strike)q.set(symbol+'_strike',String(s.strike));}
+  const q=new URLSearchParams();for(const symbol of indices){const s=selection[symbol];if(s?.expiry)q.set(symbol+'_expiry',s.expiry);if(s?.strike)q.set(symbol+'_strike',String(s.strike));for(const field of ['ceStrike','peStrike'])if(s?.[field])q.set(symbol+'_'+field,String(s[field]));}
   const active=new EventSource('/api/research/dashboard-live/stream?'+q.toString());source=active;
   get('op-live-status').textContent='Connecting · historical data below is recorded data';
   active.addEventListener('snapshot',(event:any)=>{
    if(source!==active||!on||disposed)return;
    try{const d=JSON.parse(event.data);if(!d||typeof d.connectionState!=='string')throw Error();
-    if(d.snapshot){if(runtime&&runtime!==d.snapshot.runtimeId){for(const key of Object.keys(buffers))delete buffers[key];for(const key of Object.keys(sampled))delete sampled[key];}runtime=d.snapshot.runtimeId;}
+    if(d.snapshot){
+     for(const a of d.snapshot.indices){const q=a.pcrSnapshot;if(q?.strikeRowsUnchanged){const prior=latest?.snapshot?.runtimeId===d.snapshot.runtimeId?latest.snapshot.indices.find((r:any)=>r.symbol===a.symbol&&r.expiry===a.expiry)?.pcrSnapshot:null;a.pcrSnapshot={...q,strikeRows:prior?.cycleStartedAt===q.cycleStartedAt&&prior?.checkedAt===q.checkedAt?prior.strikeRows||[]:[]};}}
+     if(runtime&&runtime!==d.snapshot.runtimeId){for(const key of Object.keys(buffers))delete buffers[key];for(const key of Object.keys(sampled))delete sampled[key];}runtime=d.snapshot.runtimeId;}
     let pin=false;if(d.snapshot)for(const a of d.snapshot.indices){if(!selection[a.symbol]&&a.expiry&&a.strike){selection[a.symbol]={expiry:a.expiry,strike:a.strike};pin=true;}}
     if(pin){latest=null;render();connect();return;}
     latest=d;lastReceived=Date.now();render();
@@ -110,6 +112,16 @@ export function installDashboardLive(){
   writeHtml(get('op-live-vix'),'<div class="op-live-kpis">'+quote('INDIA VIX',s.vix)+'</div>');
   writeHtml(get('op-live-participation'),'<div class="op-live-quotes">'+s.participation.map((q:any)=>'<div>'+esc(q.identity?.label)+'<strong>'+fmt(q.price)+' · '+fmt(q.changePct)+'%</strong><small>'+esc(q.state+' · '+time(q.observedAt)+' IST · received '+time(q.receivedAt,true))+'</small></div>').join('')+'</div>');
  }
+ if(typeof window.addEventListener==='function')window.addEventListener('optionpilot:live-selection',((event:any)=>{
+  const next=event.detail,index=next?.symbol;if(!indices.includes(index)||!latest?.snapshot)return;
+  const a=latest.snapshot.indices.find((r:any)=>r.symbol===index);if(!a)return;
+  if(next.expiry&&!a.expiries.includes(next.expiry))return;
+  if(['ceStrike','peStrike'].some(field=>next[field]!==undefined&&!a.strikes.includes(next[field])))return;
+  const changed=Object.keys(next).some(field=>field!=='symbol'&&selection[index]?.[field]!==next[field]);if(!changed)return;
+  selection[index]={...selection[index],...(next.expiry?{expiry:next.expiry}:{}),...(next.ceStrike!==undefined?{ceStrike:next.ceStrike}:{}),...(next.peStrike!==undefined?{peStrike:next.peStrike}:{})};
+  if(next.expiry&&next.expiry!==a.expiry){delete selection[index].strike;delete selection[index].ceStrike;delete selection[index].peStrike;}
+  delete sampled[index];delete chartPaints[index];latest=null;render();connect();
+ }) as EventListener);
  get('op-live-indices').onchange=(event:any)=>{const e=event.target,index=e.dataset.liveIndex,field=e.dataset.liveField;if(indices.includes(index)&&field==='cadence'){if(!['60000','180000'].includes(e.value))return;cadences[index]=Number(e.value);delete sampled[index];delete buffers[index+'|pcr'];delete chartPaints[index];render();return;}if(!indices.includes(index)||!['expiry','strike'].includes(field)||!e.value)return;delete sampled[index];delete chartPaints[index];selection[index]={...selection[index],[field]:field==='strike'?Number(e.value):e.value};if(field==='expiry')delete selection[index].strike;for(const key of ['pcr','ce','pe'])delete buffers[index+'|'+key];latest=null;render();connect();};
  get('op-live-indices').onclick=(event:any)=>{const ref=event.target.closest?.('[data-live-reference]');if(ref){const index=ref.dataset.liveIndex,key=ref.dataset.liveReference;if(indices.includes(index)&&/^(spot|pcr|ce|pe)Opening$|^(spot|ce|pe)Fib$/.test(key)){levelSettings[index][key]=!levelSettings[index][key];render();}return;}const e=event.target.closest?.('[data-live-layer]');if(!e||!indices.includes(e.dataset.liveIndex)||!['spot','pcr','ce','pe'].includes(e.dataset.liveLayer))return;layers[e.dataset.liveIndex][e.dataset.liveLayer]=!layers[e.dataset.liveIndex][e.dataset.liveLayer];render();};
  get('op-live-toggle').onclick=()=>{on=!on;get('op-live-toggle').setAttribute('aria-pressed',String(on));get('op-live-toggle').textContent=on?'Live view ON':'Live view OFF';get('op-live-body').hidden=!on;if(on)connect();else{close();latest=null;render();get('op-live-status').textContent='Live stream paused';}};

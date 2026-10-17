@@ -5,6 +5,7 @@ import type { KiteDecodedPacket } from './kite-websocket-binary-decoder.js';
 
 export const LIVE_INDICES = ['NIFTY','SENSEX','BANKNIFTY'] as const;
 export type LiveIndex = typeof LIVE_INDICES[number];
+export type LiveSelection=Partial<Record<LiveIndex,{expiry?:string;strike?:number;ceStrike?:number;peStrike?:number}>>;
 export type LiveEntry = { token:number; label:string; exchange?:string; lotSize?:number; role:'SPOT'|'FUTURE'|'OPTION'|'VIX'|'STOCK'|'SECTOR'; symbol?:LiveIndex; expiry?:string; strike?:number; side?:'CE'|'PE' };
 export type LiveInventory = { entries:LiveEntry[]; omittedExpiries:string[]; missing:string[]; date:string };
 const dateOf=(at:number)=>new Date(at+19800000).toISOString().slice(0,10);
@@ -82,7 +83,7 @@ export class DashboardLiveStore {
   return this.quote(this.inventory.entries.find(e=>e.role==='SPOT'&&e.symbol===symbol),now);
  }
 
- snapshot(now:number,selection:Partial<Record<LiveIndex,{expiry?:string;strike?:number}>>={}){
+ snapshot(now:number,selection:LiveSelection={}){
   const quote=(e:LiveEntry|undefined)=>this.quote(e,now);
   const all=this.inventory.entries;
   const indices=LIVE_INDICES.map(symbol=>{
@@ -93,6 +94,12 @@ export class DashboardLiveStore {
    const contracts=options.filter(e=>e.expiry===expiry),strikes=[...new Set(contracts.map(e=>e.strike!))].sort((a,b)=>a-b);
    const requested=selection[symbol]?.strike;
    const strike=requested!==undefined?(strikes.includes(requested)?requested:null):spot.price!==null?strikes.reduce<number|null>((best,k)=>best===null||Math.abs(k-spot.price!)<Math.abs(best-spot.price!)?k:best,null):null;
+   const sideStrike=(side:'ceStrike'|'peStrike')=>selection[symbol]?.[side]===undefined?strike:strikes.includes(selection[symbol]![side]!)?selection[symbol]![side]!:null;
+   const ceStrike=sideStrike('ceStrike'),peStrike=sideStrike('peStrike');
+   const anchor=spot.price===null?null:strikes.reduce<number|null>((best,k)=>best===null||Math.abs(k-spot.price!)<Math.abs(best-spot.price!)?k:best,null),anchorIndex=strikes.indexOf(anchor!);
+   const visible=new Set(anchorIndex<0?[]:strikes.slice(Math.max(0,anchorIndex-3),anchorIndex+4));
+   // Fourteen nearby contracts plus the two pinned premiums, existing cache only.
+   const oiQuotes=contracts.filter(e=>visible.has(e.strike!)||e.side==='CE'&&e.strike===ceStrike||e.side==='PE'&&e.strike===peStrike).map(quote);
    const calls=contracts.filter(e=>e.side==='CE'),puts=contracts.filter(e=>e.side==='PE');
    const cq=calls.map(e=>({entry:e,quote:quote(e)})),pq=puts.map(e=>({entry:e,quote:quote(e)}));
    const usable=(q:ReturnType<typeof quote>)=>q.state==='LIVE'&&q.oi!==null;
@@ -102,8 +109,9 @@ export class DashboardLiveStore {
    const complete=calls.length>0&&puts.length>0&&covered===contracts.length&&synced;
    const ceTotal=complete?cq.reduce((s,r)=>s+r.quote.oi!,0):null,peTotal=complete?pq.reduce((s,r)=>s+r.quote.oi!,0):null;
    const wall=(qs:typeof cq)=>{if(!complete)return null;const sorted=[...qs].sort((a,b)=>b.quote.oi!-a.quote.oi!||a.entry.strike!-b.entry.strike!);return sorted[0]?.quote.oi!>0?{strike:sorted[0].entry.strike,oi:sorted[0].quote.oi,tiedStrikes:sorted.filter(r=>r.quote.oi===sorted[0].quote.oi).map(r=>r.entry.strike)}:null;};
-   return {symbol,spot,future,futuresBasis:spot.price!==null&&future.price!==null&&Math.abs(Date.parse(spot.observedAt!)-Date.parse(future.observedAt!))<=5000?future.price-spot.price:null,expiries,expiry,strikes,strike,
+   return {symbol,spot,future,futuresBasis:spot.price!==null&&future.price!==null&&Math.abs(Date.parse(spot.observedAt!)-Date.parse(future.observedAt!))<=5000?future.price-spot.price:null,expiries,expiry,strikes,strike,ceStrike,peStrike,oiQuotes,
     ce:quote(contracts.find(e=>e.strike===strike&&e.side==='CE')),pe:quote(contracts.find(e=>e.strike===strike&&e.side==='PE')),
+    studioCE:quote(contracts.find(e=>e.strike===ceStrike&&e.side==='CE')),studioPE:quote(contracts.find(e=>e.strike===peStrike&&e.side==='PE')),
     pcrAt:complete?new Date(Math.max(...sourceTimes)).toISOString():null,pcrReceivedAt:complete?new Date(Math.max(...[...cq,...pq].map(r=>Date.parse(r.quote.receivedAt!)))).toISOString():null,fullPcr:ceTotal!==null&&ceTotal>0&&peTotal!==null?peTotal/ceTotal:null,ceTotal,peTotal,callWall:wall(cq),putWall:wall(pq),coverage:{expected:contracts.length,freshOi:covered,complete,sourceSkewMs:sourceTimes.length?Math.max(...sourceTimes)-Math.min(...sourceTimes):null},
     greeks:{iv:null,delta:null,gamma:null,theta:null,vega:null,state:'UNAVAILABLE_FROM_KITE_TICK'}};
   });

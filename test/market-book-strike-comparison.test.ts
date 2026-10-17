@@ -63,7 +63,9 @@ test('chapter controls compare, preserve selection on refresh, and reset across 
  page.onchange({target:{id:'mb-premium-view',value:'EXPIRY'}});
  assert(page.innerHTML.includes('Fourth expiry unavailable'));assert(page.innerHTML.includes('data-expand-chart="NIFTY|'+expiry+'|22100|CE"'));
  assert(page.innerHTML.includes('Pivots · OFF'));
+ nodes.get('mb-next').onclick();assert(page.innerHTML.includes('<h2>Four expiries</h2>'));
  nodes.get('mb-next').onclick();assert(page.innerHTML.includes('<h2>Futures</h2>'));
+ nodes.get('mb-prev').onclick();assert(page.innerHTML.includes('<h2>Four expiries</h2>'));
  nodes.get('mb-prev').onclick();assert(page.innerHTML.includes('<h2>Premium comparison</h2>'));
  nodes.get('mb-index').value='SENSEX';nodes.get('mb-index').onchange();
  assert(!page.innerHTML.includes('Strike A vs B'));assert(!page.innerHTML.includes('undefined'));

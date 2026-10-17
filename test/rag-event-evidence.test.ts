@@ -98,3 +98,18 @@ test('all-strike retrieval is bounded to selected date and requested lookback; d
 test('snapshot still answers current recording when the prior source throws',async()=>{
  const r=await readRagEventEvidence(request({kind:'SNAPSHOT'}),async q=>{if(q.tradeDate==='2026-10-12')throw Error('unavailable');return fixture(q.tradeDate);});assert.ok(r.ok);assert.equal(r.reference,null);assert.equal(r.referenceUnavailableReason,'REPLAY_SOURCE_UNAVAILABLE');
 });
+
+test('RAG snapshot includes independently verified multi-expiry 3m evidence',()=>{
+ const current=fixture('2026-10-13');
+ const other=current.options!.filter((o:any)=>o.option_type==='PE'&&['09:33','09:36'].some(t=>o.minute_bucket===new Date('2026-10-13T'+t+':00+05:30').toISOString())).map((o:any)=>({...o,expiry:'2026-10-20'}));
+ current.options!.push(...other);
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',lookback:'3'}),current,fixture('2026-10-12'));
+ assert.ok(r.ok);
+ assert.equal(r.multiDte?.coverage.verifiedExpiries,2);
+ assert.equal(r.multiDte?.accepted.length,2);
+});
+test('RAG snapshot does not infer multi-DTE for non-3m windows',()=>{
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',lookback:'5'}),fixture('2026-10-13'),fixture('2026-10-12'));
+ assert.ok(r.ok);
+ assert.equal(r.multiDte,null);
+});

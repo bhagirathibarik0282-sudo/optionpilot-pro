@@ -58,7 +58,7 @@ test('generated browser functions parse and chapter integration uses only the ex
 test('actual serialized live event updates all three PCR values and revokes them on disconnect without touching recordings',()=>{
  const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>(),handlers:any={};
  for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},getAttribute(){return null;},offsetWidth:0});
- const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},window:{addEventListener:(name:string,fn:any)=>handlers[name]=fn,dispatchEvent(){}},CustomEvent:class{},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},window:{addEventListener:(name:string,fn:any)=>handlers[name]=fn,dispatchEvent(){}},CustomEvent:class{},setTimeout:()=>1,clearTimeout(){},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);
  vm.runInContext([...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1],ctx);
  let requests=0;const data:any={date:'2026-10-16',recordedDates:[],current:{},history:{},baseline:{},health:{}};const before=structuredClone(data);
  ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>data,refresh(){requests++;},memory:async()=>{}};vm.runInContext('installMarketBook(api)',ctx);

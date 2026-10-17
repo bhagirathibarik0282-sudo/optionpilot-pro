@@ -21,3 +21,11 @@ Reuse the existing registry, packet decoder, depth adapter and seller research b
 
 ## Existing tests (not claimed executed)
 `node --import tsx --test test/h1-kite-exact-depth-adapter.test.ts test/seller-vertical-economics-shadow.test.ts test/seller-research-evidence-bridge-v1.test.ts`
+
+## PR #700 follow-up Devil Check
+- Reproduced malformed JSON crashes for non-string IDs, exchange and trading symbol; added regression coverage and runtime type guards.
+- Reject impossible calendar expiry dates and duplicate trading symbols across the two legs.
+- `verified` denotes structure only. Every result explicitly includes `structureOnly: true` and `brokerProvenanceVerified: false`; broker provenance remains NOT_PROVEN. Caller-controlled timestamps and age limits are not an independent freshness policy.
+- This validator has no production callers. It cannot establish same underlying, product, account, lot size, trusted request/response linkage, broker margin authenticity, or execution readiness. Those remain blocked pending the trusted adapter.
+- Local verification: 59 focused tests PASS (depth adapter, seller economics, bridge, fail-closed cases and margin validator); `npm test` PASS; permanent guardrail check PASS; `git diff --check` PASS.
+- No broker calls, runtime wiring, selector promotion, orders, configuration changes or deployment.

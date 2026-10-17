@@ -47,7 +47,7 @@ test('sampler exposes only qualified exact contract rows and separately qualifie
  const quotes={'NFO:CE':{instrument_token:1,oi:100,timestamp:iso(base),last_price:90,last_trade_time:iso(base-31000)},'NFO:PE':{instrument_token:2,oi:100,timestamp:iso(base),last_price:90}};
  const result=measurePcrSnapshot(entries,quotes,date,base);assert.equal(result.state,'COMPLETE');assert(result.strikeRows.every(r=>r.price===null));delete (quotes as any)['NFO:PE'];assert.deepEqual(measurePcrSnapshot(entries,quotes,date,base).strikeRows,[]);
 });
-class Node {value='';innerHTML='';textContent='';hidden=false;onclick:any;onchange:any;nodes:any[]=[];setAttribute(){}querySelectorAll(){return this.nodes;}}
+class Node {value='';writes=0;private html='';get innerHTML(){return this.html;}set innerHTML(value:string){this.writes++;this.html=value;}textContent='';hidden=false;onclick:any;onchange:any;nodes:any[]=[];setAttribute(){}querySelectorAll(){return this.nodes;}}
 function harness(){
  const nodes=new Map<string,Node>();for(const m of OI_WALL_STUDIO_HTML.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],new Node());
  const events:any[]=[];let now=base,fn:any;const timers=new Map<number,any>();let id=0;
@@ -101,4 +101,10 @@ test('actual dashboard serializes the full component with no undefined browser d
 test('mutated same-cycle chain and reversed server clocks revoke studio values instead of repainting another history',()=>{
  const h=harness();h.studio.update(fixture());const p=fixture(0,5);h.studio.update(p);assert(!h.nodes.get('ows-chart')!.innerHTML.includes('ows-ladder'));
  const g=harness();g.studio.update(fixture(2));g.studio.update(fixture(1));assert(!g.nodes.get('ows-chart')!.innerHTML.includes('ows-ladder'));
+});
+test('source heartbeats preserve the After event DOM so an open event can be read without closing',()=>{
+ const h=harness();h.studio.update(fixture());h.studio.recorded({NIFTY:{expiry,expiries:[expiry],positioning:{timeline:[{minute_bucket:iso(base),responseStrike:24000,side:'CALL',responses:[]}]}}},date);h.click('research-tabs','owsResearch','outcome');
+ const node=h.nodes.get('ows-research-result')!,writes=node.writes;node.innerHTML=node.innerHTML.replace('<details','<details open');const editedWrites=node.writes;
+ h.studio.update(fixture());h.studio.recorded({NIFTY:{expiry,expiries:[expiry],positioning:{timeline:[{minute_bucket:iso(base),responseStrike:24000,side:'CALL',responses:[]}]}}},date);
+ assert.equal(node.writes,editedWrites);assert(node.innerHTML.includes('<details open'));assert(editedWrites>writes);
 });

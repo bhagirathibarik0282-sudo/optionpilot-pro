@@ -43,7 +43,7 @@ export function renderMarketBookReadingGuide(a:any,state:any,page:number,window:
 }
 
 /** Chapter-specific projection of the existing Kite stream. Never reads recorded values. */
-export function renderMarketBookLiveContext(payload:any,symbol:string,page=0){
+export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hidePcr=false){
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const n=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
  const formats=(renderMarketBookLiveContext as any).formats||((renderMarketBookLiveContext as any).formats={numbers:new Map(),time:new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})});
@@ -98,7 +98,7 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0){
    pcr:()=>card('pcr','Full PCR'+(usesSample?' · snapshot':''),fmt(pcr&&n(pcr.fullPcr)!==null&&pcr.fullPcr>=0?pcr.fullPcr:null,4),pcrDetail,pcr?(usesSample?sample.periodMs/60000+' min · '+time(sample.checkedAt):time(a.pcrAt)):'UNAVAILABLE'),
    callWall:()=>wall('call'),putWall:()=>wall('put'),stocks:()=>breadth('STOCK'),sectors:()=>breadth('SECTOR')
   };
-  return '<section class="mb-live-index" aria-label="'+esc((page===11?'India VIX':page===8?'Shared stocks and sectors':index)+' chapter live values')+'"><h3>'+esc(page===11?'India VIX':page===8?'Stocks & sectors':index)+([0,2,5,9,12].includes(page)?' · '+esc(a.expiry||'No live expiry')+' / '+esc(a.strike??'No live strike'):'')+'</h3><div class="mb-live-facts">'+(orders[page]||orders[0]).map((key:string)=>data[key]()).join('')+'</div></section>';
+  return '<section class="mb-live-index" aria-label="'+esc((page===11?'India VIX':page===8?'Shared stocks and sectors':index)+' chapter live values')+'"><h3>'+esc(page===11?'India VIX':page===8?'Stocks & sectors':index)+([0,2,5,9,12].includes(page)?' · '+esc(a.expiry||'No live expiry')+' / '+esc(a.strike??'No live strike'):'')+'</h3><div class="mb-live-facts">'+(orders[page]||orders[0]).filter((key:string)=>!hidePcr||key!=='pcr').map((key:string)=>data[key]()).join('')+'</div></section>';
  });
  return '<div class="mb-live-heading" data-mb-detail>Kite feed · server '+esc(time(payload.serverTime))+'</div>'+blocks.join('')+(notes[page]?note(notes[page]):'')+note('LIVE selection follows the live panel above; recorded chapter expiry/strike may differ. Parameters carry independent source times. OI is in source units.');
 }

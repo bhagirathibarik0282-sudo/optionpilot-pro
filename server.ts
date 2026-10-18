@@ -1,4 +1,6 @@
 import { mountSellerResearchRoutes } from './seller-research-http.js';
+import { resolveIndexExpiryClock } from './index-expiry-clock.js';
+import { isClosingObservationAt } from './index-observation-session.js';
 import { Hono } from "hono";
 import { persistConnectedDriveSession } from "./drive-connected-session.js";
 import { mountResearchRoutes } from "./research-server-hook.js";
@@ -2089,7 +2091,7 @@ function computeSnapshotStatus(indexSnaps: Array<RecorderIndexSnapshot | null>):
   return "LIVE";
 }
 
-async function captureRecorderSnapshot(reason: string): Promise<void> {
+async function captureRecorderSnapshot(reason: string, observationOnly = false): Promise<void> {
   try {
     const today = indiaTradingDate();
     if (recorderSession.tradingDate !== today) {
@@ -2145,9 +2147,11 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     // V2 Module 8: capture tiny cross-expiry OI summaries from this already-fetched
     // 3-minute market snapshot. No extra broker request and no Recorder schema change.
     const rolloverTimestamp = new Date().toISOString();
-    captureV2RolloverSummary("NIFTY", snapshot.NIFTY, rolloverTimestamp);
-    captureV2RolloverSummary("BANKNIFTY", snapshot.BANKNIFTY, rolloverTimestamp);
-    captureV2RolloverSummary("SENSEX", snapshot.SENSEX, rolloverTimestamp);
+    if (!observationOnly) {
+      captureV2RolloverSummary("NIFTY", snapshot.NIFTY, rolloverTimestamp);
+      captureV2RolloverSummary("BANKNIFTY", snapshot.BANKNIFTY, rolloverTimestamp);
+      captureV2RolloverSummary("SENSEX", snapshot.SENSEX, rolloverTimestamp);
+    }
 
     // K2 (2026-08-21, FULL_MIGRATION_TO_KITE_ONLY) — Recorder Truth-check and
     // storage for NIFTY/BANKNIFTY switched BACK to Kite, matching SENSEX
@@ -2174,6 +2178,12 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     // H1_TRUTH_BY_SYMBOL_V1 / H1_RUNTIME_PATCH_V2: research-only, fail-open side-channel.
     // Reuse the exact TruthReport objects already computed by the existing recorder cycle.
     const h1TruthBySymbol = { NIFTY: niftyTruth, BANKNIFTY: bankTruth, SENSEX: sensexTruth };
+    if (observationOnly) {
+      // Closing-session observations reuse existing market-data refresh/storage.
+      // Return before selector marking, journal, shadow outcomes and Telegram.
+      await recordH1FromRuntimeSnapshot(snapshot, h1TruthBySymbol);
+      return;
+    }
     void (() => {
       // H1_SELECTOR_REGISTRY_WIRING_V1: consume only fresh LIVE_RUNTIME_EXACT selector evidence.
       const h1Selector = collectH1LiveSelectorDecisions(new Date().toISOString());
@@ -4501,8 +4511,9 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
 
 let lastRecorderSlot = -1;
 setInterval(() => {
-  if (!isMarketOpenNowServer()) return;
   const now = new Date();
+  const observationOnly = isClosingObservationAt(now);
+  if (!isMarketOpenNowServer() && !observationOnly) return;
   const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
   const ist = new Date(istString);
   const minutesSinceMidnight = ist.getHours() * 60 + ist.getMinutes();
@@ -4512,7 +4523,7 @@ setInterval(() => {
   const slot = Math.floor(minutesSinceMidnight / 3); // one slot per 3-minute window
   if (slot === lastRecorderSlot) return; // already captured this slot
   lastRecorderSlot = slot;
-  void captureRecorderSnapshot("SCHEDULED_3MIN");
+  void captureRecorderSnapshot(observationOnly ? "CLOSING_OBSERVATION_3MIN" : "SCHEDULED_3MIN", observationOnly);
 }, 30 * 1000); // check every 30s so we don't miss the 3-min boundary
 
 // Telegram Market Snapshot fast cycle (2026-08-18, user-requested): a
@@ -5136,13 +5147,12 @@ function parseExpiryDate(expiryStr: string): Date | null {
   }
 }
 
-// V2.1 IV/Greeks integrity fix (2026-08-11): derivative expiry strings identify
-// the calendar date, not midnight. On Railway (UTC), subtracting Date.now()
-// from a midnight Date made same-day Tuesday NIFTY expiries look already
-// expired during the live session, forcing IV/Greeks to zero. NSE index
-// derivatives trade through the normal market close on expiry day, so use
-// 15:30 IST (= 10:00 UTC) as the model expiry instant for an expiry date.
-function daysToDerivativeExpiry(expiryStr: string, nowMs = Date.now()): number {
+// Index IV/Greeks use the announcement/effective-dated standard-session clock.
+// The no-symbol branch retains the existing commodity model convention.
+function daysToDerivativeExpiry(expiryStr: string, nowMs = Date.now(), indexSymbol?: string): number {
+  if (indexSymbol !== undefined) {
+    return resolveIndexExpiryClock(indexSymbol, expiryStr, nowMs)?.remainingCalendarDays ?? Number.NaN;
+  }
   if (!expiryStr) return 0;
   const parts = expiryStr.split("-").map(Number);
   if (parts.length !== 3 || parts.some((x) => !Number.isFinite(x))) return 0;
@@ -5923,16 +5933,19 @@ function calcAdvancedGreeks(
   strike: number,
   ivPercent: number,
   daysToExpiry: number,
-  isCall: boolean
+  isCall: boolean,
+  exactExpiryTime = false
 ): {
   intrinsicValue: number; extrinsicValue: number; theoreticalPremium: number;
   delta: number; gamma: number; vega: number; theta: number;
   vanna: number; charm: number; speed: number; zomma: number; color: number;
   vomma: number; ultima: number;
 } | null {
-  if (spot <= 0 || strike <= 0 || ivPercent <= 0 || daysToExpiry < 0) return null;
+  if (spot <= 0 || strike <= 0 || ivPercent <= 0 || !Number.isFinite(daysToExpiry) || (exactExpiryTime ? daysToExpiry <= 0 : daysToExpiry < 0)) return null;
   const sigma = ivPercent / 100;
-  const T = Math.max(daysToExpiry / 365, 0.0001); // avoid divide-by-zero on expiry day
+  // Index quote production opts into exact positive time. Preserve the legacy
+  // convention for commodity and standalone calibration callers in this patch.
+  const T = exactExpiryTime ? daysToExpiry / 365 : Math.max(daysToExpiry / 365, 0.0001);
   const r = BS_RISK_FREE_RATE;
   const sqrtT = Math.sqrt(T);
   const d1 = (Math.log(spot / strike) + (r + (sigma * sigma) / 2) * T) / (sigma * sqrtT);
@@ -6862,11 +6875,11 @@ async function fetchIndexData(
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
                 const levels = pdhPdlMap.get(ceInst.instrument_token) || { pdh: 0, pdl: 0 };
-                const daysToExpiry = daysToDerivativeExpiry(ceInst.expiry || expiryDate);
-                const computedIv = calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, true);
-                const greeks = calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true);
-                const advGreeksCe = calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true);
-                const gammaCe = advGreeksCe ? advGreeksCe.gamma : 0;
+                const daysToExpiry = daysToDerivativeExpiry(ceInst.expiry || expiryDate, Date.now(), symbol);
+                const computedIv = daysToExpiry > 0 ? calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, true) : Number.NaN;
+                const greeks = daysToExpiry > 0 ? calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true) : { delta: Number.NaN, vega: Number.NaN, theta: Number.NaN };
+                const advGreeksCe = daysToExpiry > 0 ? calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true, true) : null;
+                const gammaCe = advGreeksCe ? advGreeksCe.gamma : Number.NaN;
                 expiry.ceStrikes.push({
                   strike,
                   isAtm,
@@ -6914,11 +6927,11 @@ async function fetchIndexData(
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
                 const levels = pdhPdlMap.get(peInst.instrument_token) || { pdh: 0, pdl: 0 };
-                const daysToExpiry = daysToDerivativeExpiry(peInst.expiry || expiryDate);
-                const computedIv = calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, false);
-                const greeks = calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false);
-                const advGreeksPe = calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false);
-                const gammaPe = advGreeksPe ? advGreeksPe.gamma : 0;
+                const daysToExpiry = daysToDerivativeExpiry(peInst.expiry || expiryDate, Date.now(), symbol);
+                const computedIv = daysToExpiry > 0 ? calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, false) : Number.NaN;
+                const greeks = daysToExpiry > 0 ? calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false) : { delta: Number.NaN, vega: Number.NaN, theta: Number.NaN };
+                const advGreeksPe = daysToExpiry > 0 ? calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false, true) : null;
+                const gammaPe = advGreeksPe ? advGreeksPe.gamma : Number.NaN;
                 expiry.peStrikes.push({
                   strike,
                   isAtm,

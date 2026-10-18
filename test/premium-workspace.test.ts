@@ -135,3 +135,21 @@ test('ladder request validates explicit complete-view scope and widened strike r
  for(const q of ['view=ladder&nearby=7','view=ladder&offset=0'])assert.equal((await app.request('/dashboard-live/premiums?'+q)).status,200);
  for(const q of ['view=anything','view=ladder&offset=12','nearby=8'])assert.equal((await app.request('/dashboard-live/premiums?'+q)).status,400);
 });
+
+test('delta pairing keeps signed legs in one exact expiry and exposes nearest-match gap',async()=>{
+ const {derivePremiumDeltaPair:pair}=await import('../premium-workspace-model.js');
+ const rows=run([row(0,100,{delta:.51}),row(0,120,{strike:22100,delta:-.50,option_type:'PE'}),row(0,90,{strike:22200,delta:.49}),row(0,80,{strike:22300,delta:-.1,option_type:'PE'})]).rows;
+ const p=pair(rows,.5);assert(p.matched);assert.equal(p.CE.strike,22000);assert.equal(p.PE.strike,22100);assert(Math.abs(p.gap-.01)<1e-10);
+ assert.equal(pair([...rows,{...rows[0],expiry:'2026-10-27'}],.5).matched,false);
+ assert.equal(pair([...rows,{...rows[0],symbol:'SENSEX'}],.5).matched,false);
+ assert.equal(pair(rows,.8).matched,false);
+});
+test('delta pairing rejects missing, wrong-sign, stale, conflicting, duplicate and asynchronous legs without fallback',async()=>{
+ const {derivePremiumDeltaPair:pair}=await import('../premium-workspace-model.js');
+ const original=run([row(0,100,{delta:.5}),row(0,120,{strike:22100,delta:-.5,option_type:'PE'})]).rows;
+ for(const patch of [{delta:null},{delta:0},{delta:.5},{delta:-2},{delta:-.55},{state:'STALE'},{price:null},{observedAt:at(1)},{at:at(1)}]){const rows=structuredClone(original);Object.assign(rows.find(r=>r.type==='PE'),patch);assert.equal(pair(rows,.5).matched,false,JSON.stringify(patch));}
+ assert.equal(pair([...original,original[0]],.5).matched,false);
+ const conflicts=run([row(0,100,{delta:.5}),row(0,100,{delta:.49}),row(0,120,{strike:22100,delta:-.5,option_type:'PE'})]).rows;assert.equal(pair(conflicts,.5).matched,false);
+ const live=original.map(r=>({...r,state:'LIVE'}));assert(pair(live,.5,'LIVE').matched);live[1].observedAt=new Date(Date.parse(at(0))+5001).toISOString();assert.equal(pair(live,.5,'LIVE').matched,false);
+ assert.equal(pair(original,.5,'LIVE').matched,false);
+});

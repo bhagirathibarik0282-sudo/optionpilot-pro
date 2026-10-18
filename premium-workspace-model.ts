@@ -57,7 +57,7 @@ export function derivePremiumWorkspace(input:any){
   // Quarantine contradictory duplicates at the same source timestamp.
   const byTime=new Map<string,any[]>();for(const r of items){if(!byTime.has(r.minute_bucket))byTime.set(r.minute_bucket,[]);byTime.get(r.minute_bucket)!.push(r);}
   const series=[...byTime.values()].map(rs=>{
-   const r=rs[0],conflict=rs.some(x=>['ltp','oi','pdh','pdl','pdc','iv'].some(k=>x[k]!==r[k]));
+   const r=rs[0],conflict=rs.some(x=>['ltp','oi','pdh','pdl','pdc','iv','delta'].some(k=>x[k]!==r[k]));
    return conflict?{...r,ltp:null,oi:null,iv:null,truth_verdict:'CONFLICT'}:r;
   }).sort((a,b)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket));
   const last=series.at(-1),usable=(r:any)=>r?.truth_verdict==='TRUE'&&num(r.ltp)!==null&&r.ltp>0;
@@ -94,4 +94,24 @@ export function derivePremiumWorkspace(input:any){
   (!f.reaction||f.reaction==='ALL'||f.reaction==='UP'&&r.change>0||f.reaction==='DOWN'&&r.change<0||r.reaction===f.reaction));
  filtered.sort((a,b)=>a.symbol.localeCompare(b.symbol)||a.strike-b.strike||a.expiry.localeCompare(b.expiry)||a.type.localeCompare(b.type));
  return {rows:filtered,total:contracts.length,series:derivePremiumSeriesInventory(contracts,input.date,f.symbol||'ALL',f),expiries:[...new Set(contracts.map(r=>r.expiry))].sort(),strikes:[...new Set(contracts.map(r=>r.strike))].sort((a,b)=>a-b),up:filtered.filter(r=>r.change!==null&&r.change>0).length,down:filtered.filter(r=>r.change!==null&&r.change<0).length,events:filtered.filter(r=>r.eventAt).length};
+}
+
+/** Pair only observed, same-expiry contracts. No Greek calculation or historical live fallback. */
+export function derivePremiumDeltaPair(rows:any[],target:number,source='RECORDED'){
+ const validNumber=(v:any)=>typeof v==='number'&&Number.isFinite(v);
+ const empty={CE:null,PE:null,gap:null,matched:false};
+ if(![.25,.4,.5].includes(target)||!['LIVE','RECORDED'].includes(source)||!rows.length)return empty;
+ const first=rows[0],key=first.symbol+'|'+first.expiry;
+ if(!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol)||!/^\d{4}-\d{2}-\d{2}$/.test(first.expiry)||rows.some(r=>r.symbol+'|'+r.expiry!==key||r.dte!==first.dte))return empty;
+ const latest=Math.max(...rows.map(r=>Date.parse(r.at)).filter(Number.isFinite));
+ const identities=new Map<string,number>();for(const r of rows)identities.set(r.key,(identities.get(r.key)||0)+1);
+ const usable=rows.filter(r=>identities.get(r.key)===1&&r.state===source&&validNumber(r.price)&&r.price>0&&validNumber(r.delta)&&Math.abs(r.delta)>0&&Math.abs(r.delta)<=1&&(r.type==='CE'?r.delta>0:r.type==='PE'&&r.delta<0)&&Math.abs(Math.abs(r.delta)-target)<=.050000000001&&Number.isFinite(Date.parse(r.at))&&(source==='RECORDED'?Date.parse(r.at)===latest:latest-Date.parse(r.at)<=5000));
+ let best:any=null;
+ for(const CE of usable.filter(r=>r.type==='CE'))for(const PE of usable.filter(r=>r.type==='PE')){
+  const ceAt=Date.parse(CE.observedAt),peAt=Date.parse(PE.observedAt),gap=Math.abs(CE.delta+PE.delta);
+  if(!Number.isFinite(ceAt)||!Number.isFinite(peAt)||Math.abs(ceAt-peAt)>(source==='LIVE'?5000:0)||gap>.020000000001)continue;
+  const score=Math.abs(CE.delta-target)+Math.abs(-PE.delta-target);
+  if(!best||score<best.score||score===best.score&&(gap<best.gap||gap===best.gap&&(CE.strike<best.CE.strike||CE.strike===best.CE.strike&&PE.strike<best.PE.strike)))best={CE,PE,gap,score,matched:true};
+ }
+ return best||empty;
 }

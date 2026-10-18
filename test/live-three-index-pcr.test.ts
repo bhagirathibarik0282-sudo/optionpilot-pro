@@ -103,3 +103,21 @@ test('recorded PCR strip keeps source proof, exact expiry, gaps and backward see
  state.current.NIFTY.chain.splice(1,1);assert.equal(deriveRecorded(state).rows[0].direction,'WAIT');
  state.current.BANKNIFTY.chain.push({...state.current.BANKNIFTY.chain[2]});assert.equal(deriveRecorded(state).rows[2].value,null);
 });
+
+test('spot updates on unchanged PCR snapshots and clears independently when stale or disconnected',()=>{
+ const p:any=fixture();const q={identity:{role:'SPOT',symbol:'NIFTY'},price:24567.8,state:'LIVE',observedAt:p.serverTime,receivedAt:p.serverTime};p.snapshot.indices[0].spot=q;
+ const first=derive(p);assert.equal(first.rows[0].spotValue,24567.8);assert(render(first).includes('Spot 24,567.80'));
+ p.serverTime=iso(start+1000);p.snapshot.asOf=p.serverTime;q.price=24570;q.observedAt=p.serverTime;q.receivedAt=p.serverTime;
+ const next=derive(p,first);assert.equal(next.rows[0].spotValue,24570);assert.equal(next.rows[0].current.checked,first.rows[0].current.checked);
+ for(const patch of [{observedAt:iso(start-31000)},{identity:{role:'SPOT',symbol:'SENSEX'}},{state:'STALE'},{price:0},{receivedAt:iso(start+2000)}]){const bad=structuredClone(p);Object.assign(bad.snapshot.indices[0].spot,patch);const v=derive(bad,next);assert.equal(v.rows[0].spotValue,null);assert.equal(v.rows[0].value,1);}
+ p.connected=false;assert.equal(derive(p,next).rows[0].spotValue,null);
+});
+
+test('recorded spot uses the PCR minute, respects replay cursor and rejects duplicates and unverified rows',async()=>{
+ const {deriveRecordedThreeIndexPcr:recorded}=await import('../live-three-index-pcr.js');
+ const market=[0,180000].map((offset,i)=>({symbol:'NIFTY',minute_bucket:iso(start+offset),truth_verdict:'TRUE',spot_ltp:24000+i}));
+ const state:any={date:'2026-10-16',current:{NIFTY:{market,chain:market.map(r=>({...r,expiry:expiries[0],full_pcr_source:'Exact archived full-chain source',full_chain_oi_pcr:1}))}}};
+ assert.equal(recorded(state,iso(start)).rows[0].spotValue,24000);assert.equal(recorded(state).rows[0].spotValue,24001);
+ market[1].truth_verdict='UNKNOWN';assert.equal(recorded(state).rows[0].spotValue,null);market[1].truth_verdict='TRUE';
+ market.push({...market[1]});assert.equal(recorded(state).rows[0].spotValue,null);market.splice(1);assert.equal(recorded(state).rows[0].spotValue,null);
+});

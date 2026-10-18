@@ -9,6 +9,9 @@ on:
       - 'index-expiry-clock.ts'
       - 'h1-theory-history.ts'
       - 'test/rag-same-dte-history.test.ts'
+      - 'premium-response-evidence.ts'
+      - 'scripts/check-premium-response-recordings.ts'
+      - 'test/premium-response-evidence.test.ts'
       - 'rag-evidence-card.ts'
       - 'rag-question.ts'
       - 'premium-workspace-view.ts'
@@ -36,6 +39,6 @@ jobs:
           node-version: 22
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Exact evidence and existing reader regressions
-        run: node --import tsx --test test/rag-same-dte-history.test.ts test/premium-recorded-workspace.test.ts test/rag-evidence-card.test.ts test/rag-event-evidence.test.ts test/intraday-observation-memory.test.ts test/h1-replay-http.test.ts test/h1-fixed-contract-journey-http.test.ts test/research-router-auth.test.ts test/market-book.test.ts test/market-book-strike-comparison.test.ts test/dashboard-reading-layout.test.ts test/data-reading-checklist.test.ts test/dashboard-refresh-mobile.test.ts
+        run: node --import tsx --test test/premium-response-evidence.test.ts test/rag-same-dte-history.test.ts test/premium-recorded-workspace.test.ts test/rag-evidence-card.test.ts test/rag-event-evidence.test.ts test/intraday-observation-memory.test.ts test/h1-replay-http.test.ts test/h1-fixed-contract-journey-http.test.ts test/research-router-auth.test.ts test/market-book.test.ts test/market-book-strike-comparison.test.ts test/dashboard-reading-layout.test.ts test/data-reading-checklist.test.ts test/dashboard-refresh-mobile.test.ts
         env:
           NODE_ENV: test

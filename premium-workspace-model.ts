@@ -100,7 +100,7 @@ export function derivePremiumWorkspace(input:any){
 export function derivePremiumDeltaPair(rows:any[],target:number,source='RECORDED'){
  const validNumber=(v:any)=>typeof v==='number'&&Number.isFinite(v);
  const empty={CE:null,PE:null,gap:null,matched:false};
- if(![.25,.4,.5].includes(target)||!['LIVE','RECORDED'].includes(source)||!rows.length)return empty;
+ if(!validNumber(target)||target<=0||target>1||!['LIVE','RECORDED'].includes(source)||!rows.length)return empty;
  const first=rows[0],key=first.symbol+'|'+first.expiry;
  if(!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol)||!/^\d{4}-\d{2}-\d{2}$/.test(first.expiry)||rows.some(r=>r.symbol+'|'+r.expiry!==key||r.dte!==first.dte))return empty;
  const latest=Math.max(...rows.map(r=>Date.parse(r.at)).filter(Number.isFinite));

@@ -153,3 +153,10 @@ test('delta pairing rejects missing, wrong-sign, stale, conflicting, duplicate a
  const live=original.map(r=>({...r,state:'LIVE'}));assert(pair(live,.5,'LIVE').matched);live[1].observedAt=new Date(Date.parse(at(0))+5001).toISOString();assert.equal(pair(live,.5,'LIVE').matched,false);
  assert.equal(pair(original,.5,'LIVE').matched,false);
 });
+
+test('deep ITM and custom Delta targets accept values through 1 and reject invalid targets',async()=>{
+ const {derivePremiumDeltaPair:pair}=await import('../premium-workspace-model.js');
+ const rows=run([row(0,800,{delta:.99}),row(0,820,{strike:22500,delta:-.99,option_type:'PE'})]).rows;
+ assert(pair(rows,.99).matched);assert(pair(rows,1).matched);
+ for(const target of [0,-.1,1.01,NaN,Infinity])assert.equal(pair(rows,target).matched,false);
+});

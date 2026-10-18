@@ -67,3 +67,10 @@ test('Spot and selected-premium level crossings use unchanged recorded reference
  const d=fixture();for(const r of d.market){r.pdh=24001;r.pdl=23900;}for(const r of d.options){r.pdh=r.option_type==='CE'?101:150;r.pdl=60;}
  const result=derive(d,{...cfg,event:'LEVELS'});assert(result.events.some((e:any)=>e.facts.some((f:any)=>f.kind==='SPOT_PDH')));assert(result.events.some((e:any)=>e.facts.some((f:any)=>f.kind==='CE_PDH')));
 });
+
+test('Follow Delta UI visibly marks changed strikes and withholds cross-contract rupee differences as well as returns',async()=>{
+ const d=fixture();for(const r of d.options)if(r.minute_bucket===at(3))r.delta=r.option_type==='CE'?.7:-.7;
+ d.options.push(...d.options.filter(r=>r.minute_bucket===at(3)).map(r=>({...r,strike:r.strike+200,delta:r.option_type==='CE'?.5:-.5,ltp:900})));
+ const h=harness(async()=>d);h.nodes.get('mi-from').value=date;h.nodes.get('mi-tracking').value='FOLLOW';await h.view.run();const detail=h.nodes.get('mi-detail').innerHTML;
+ assert(detail.includes('<b>CONTRACT CHANGED</b>'));assert(detail.includes('Leg differences and returns withheld'));assert(!detail.includes('Observed fixed-contract range'));assert.match(detail,/<th>CE ₹<\/th>.*?<td>—<\/td><\/tr>/);assert(!detail.includes('<td>+800</td>'));
+});

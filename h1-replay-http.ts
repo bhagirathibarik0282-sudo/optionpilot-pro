@@ -40,6 +40,8 @@ export interface H1ReplayHttpResult {
   canonical?: Record<string, unknown>[];
   continuity?: H1ReplayContinuity;
   markerGapEvidence?: H1ReplayMarkerGapEvidence;
+  /** Read durations include waiting for the existing connection pool. */
+  queryTimingsMs?: Record<string, number>;
   reason?: string;
 }
 
@@ -247,10 +249,16 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
 
   const params = [request.symbol, request.tradeDate, request.fromTime, request.toTime];
   const cte = markerCte();
+  const queryTimingsMs: Record<string, number> = {};
+  const timedRows = async <T extends Record<string, unknown>>(label: string, sql: string, values: unknown[]): Promise<T[]> => {
+    const started = performance.now();
+    try { return await rows<T>(sql, values); }
+    finally { queryTimingsMs[label] = Math.round((performance.now() - started) * 10) / 10; }
+  };
 
   try {
-    const [market, chain, options, markerRows, canonical, rawGapRows] = await Promise.all([
-      rows(`${cte}
+    const [market, chain, options, markerRows, canonical] = await Promise.all([
+      timedRows("market", `${cte}
         SELECT
           m.symbol, m.minute_bucket, h.truth_verdict,
           m.snapshot_id, m.exchange_timestamp, m.backend_timestamp, m.freshness_status,
@@ -261,7 +269,7 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
         FROM market_snapshot_1m m
         JOIN markers h ON h.symbol = m.symbol AND h.minute_bucket = m.minute_bucket
         ORDER BY m.minute_bucket ASC`, params),
-      rows(`${cte}
+      timedRows("chain", `${cte}
         SELECT
           c.symbol, c.minute_bucket, h.truth_verdict,
           c.expiry, c.expiry_bucket, c.atm_strike,
@@ -273,7 +281,7 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
         FROM chain_state_1m c
         JOIN markers h ON h.symbol = c.symbol AND h.minute_bucket = c.minute_bucket
         ORDER BY c.minute_bucket ASC, c.expiry ASC`, params),
-      rows(`${cte}
+      timedRows("options", `${cte}
         SELECT
           o.symbol, o.minute_bucket, h.truth_verdict,
           o.snapshot_id, o.expiry, o.expiry_bucket, o.dte,
@@ -288,11 +296,11 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
         JOIN markers h ON h.symbol = o.symbol AND h.minute_bucket = o.minute_bucket
         WHERE ($5::text = 'FULL' OR o.atm_offset BETWEEN -7 AND 7)
         ORDER BY o.minute_bucket ASC, o.expiry ASC, o.strike ASC, o.option_type ASC`, [...params, request.scope]),
-      rows<{ minute_bucket: unknown; truth_verdict: unknown }>(
+      timedRows<{ minute_bucket: unknown; truth_verdict: unknown }>("markers",
         `${cte} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`,
         params,
       ),
-      rows<Record<string, unknown>>(`
+      timedRows<Record<string, unknown>>("canonical", `
         SELECT
           (payload->>'minuteBucket')::timestamptz AS minute_bucket,
           payload->>'symbol' AS symbol,
@@ -310,35 +318,37 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
           AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
         ORDER BY (payload->>'minuteBucket')::timestamptz ASC
       `, params),
-      rows<RawGapRow>(`
+    ]);
+
+    const continuity = buildH1ReplayContinuity(request, markerRows, canonical);
+    // Raw normalized counts are only observable for missing marker buckets.
+    // A complete marker grid needs no additional full-table presence audit.
+    const rawGapRows = continuity.missingBuckets.length
+      ? await timedRows<RawGapRow>("raw_gaps", `
         SELECT 'market'::text AS source, minute_bucket, COUNT(*)::bigint AS row_count
         FROM market_snapshot_1m
         WHERE symbol = $1
-          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
-          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
-          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+          AND minute_bucket >= (($2::date + $3::time) AT TIME ZONE 'Asia/Kolkata')
+          AND minute_bucket <= (($2::date + $4::time) AT TIME ZONE 'Asia/Kolkata')
         GROUP BY minute_bucket
         UNION ALL
         SELECT 'option'::text AS source, minute_bucket, COUNT(*)::bigint AS row_count
         FROM option_snapshot_1m
         WHERE symbol = $1
-          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
-          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
-          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+          AND minute_bucket >= (($2::date + $3::time) AT TIME ZONE 'Asia/Kolkata')
+          AND minute_bucket <= (($2::date + $4::time) AT TIME ZONE 'Asia/Kolkata')
         GROUP BY minute_bucket
         UNION ALL
         SELECT 'chain'::text AS source, minute_bucket, COUNT(*)::bigint AS row_count
         FROM chain_state_1m
         WHERE symbol = $1
-          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
-          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
-          AND ((minute_bucket AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+          AND minute_bucket >= (($2::date + $3::time) AT TIME ZONE 'Asia/Kolkata')
+          AND minute_bucket <= (($2::date + $4::time) AT TIME ZONE 'Asia/Kolkata')
         GROUP BY minute_bucket
         ORDER BY minute_bucket ASC
-      `, params),
-    ]);
-
-    const continuity = buildH1ReplayContinuity(request, markerRows, canonical);
+      `, params)
+      : [];
+    if (!continuity.missingBuckets.length) queryTimingsMs.raw_gaps = 0;
     const markerGapEvidence = buildH1ReplayMarkerGapEvidence(continuity.missingBuckets, rawGapRows);
 
     return {
@@ -359,6 +369,7 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
       canonical,
       continuity,
       markerGapEvidence,
+      queryTimingsMs,
     };
   } catch (err) {
     return {

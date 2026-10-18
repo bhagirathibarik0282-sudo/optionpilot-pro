@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {Hono} from 'hono';
 import {parseRagQuestion} from '../rag-question.js';
-import {RAG_CARD_SCRIPT,RAG_CARD_HTML,renderRagEvidencePage} from '../rag-evidence-card.js';
+import {RAG_CARD_SCRIPT,RAG_CARD_HTML,renderRagEvidencePage,renderPremiumResponseEvidence} from '../rag-evidence-card.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 import {researchRouter} from '../research-router.js';
 import {renderSameDteHistory} from '../rag-same-dte-history-view.js';
@@ -110,4 +110,11 @@ test('no matching days and read failures remain visible without invented histori
 test('editing history selection discards an in-flight historical answer',async()=>{
  let resolve!:(v:any)=>void;const b=browser(()=>new Promise(r=>resolve=r));b.node('example').onclick();b.node('kind').value='HISTORY';const pending=b.submit();
  b.node('strike').value='22400';b.node('form').listeners.input();resolve(historySuccess());await pending;assert.equal(b.node('result').innerHTML,'');assert.equal(b.node('search').disabled,false);
+});
+
+test('source-backed response is rendered by the actual serialized card, with unknowns and escaped source text',async()=>{
+ const b=browser(async()=>{const res=success(),data=await res.json();return {...res,json:async()=>({...data,premiumResponse:{lookbackMinutes:3,status:'PARTIAL',reason:'<img src=x onerror=alert(1)>',clock:{calendarDte:0},before:null,current:{price:11.2,spot:22486.05,bucketAt:'2026-10-13T04:06:00Z'},change:null,evidenceSha256:'b'.repeat(64)}})};});
+ b.node('example').onclick();await b.submit();const html=b.node('result').innerHTML;
+ assert.match(html,/Recorded premium response/);assert.match(html,/Calendar DTE 0/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);assert.match(html,/theoretical Delta/);assert.match(html,/11\.20/);assert.match(html,/expiry timestamp/);
+ assert.equal(renderPremiumResponseEvidence(null),'');
 });

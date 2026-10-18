@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr} from '../live-three-index-pcr.js';
 import { PREMIUM_WORKSPACE_HTML, installPremiumWorkspace } from '../premium-workspace-view.js';
 import { derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext } from '../premium-workspace-model.js';
 
@@ -12,7 +13,7 @@ function harness(saved:any=null){
  const row=(t:string,ltp:number,option_type='CE')=>({symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type,minute_bucket:'2026-10-13T'+t+':00.000Z',quote_timestamp:'2026-10-13T'+t+':22.000Z',truth_verdict:'TRUE',ltp,pdh:110,pdl:90,oi:200,day_high:120,day_low:80});
  const data={market:[{minute_bucket:'2026-10-13T04:00:00.000Z',spot_ltp:22000}],options:[row('04:00',100),row('04:03',105),row('04:06',111),row('04:00',150,'PE'),row('04:03',145,'PE'),row('04:06',140,'PE')]};
  const api={getState:()=>state,setDate:async(date:string,options:any)=>{calls.push({date,options});state={...state,date,scope:options.scope,current:date==='2026-10-13'?{NIFTY:data}:{}};}};
- const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(){},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,api});
+ const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(){},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,api});
  vm.runInContext('globalThis.view=('+installPremiumWorkspace.toString()+')(api);',context);
  const node=(id:string)=>nodes.get(id),click=(id:string,dataset:any={})=>node('op-premium-workspace').onclick({target:{closest:()=>({id,dataset})}}),change=(id:string,value:string)=>node('op-premium-workspace').onchange({target:{id,value}});
  return {node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
@@ -93,4 +94,17 @@ test('series coverage follows the recorded cursor and cannot leak a later expiry
  h.state().current.NIFTY.options.push({...h.state().current.NIFTY.options[0],expiry:'2026-10-27',minute_bucket:'2026-10-13T04:06:00.000Z'});
  h.change('pw-at','2026-10-13T04:03:00.000Z');assert.doesNotMatch(h.node('pw-series-inventory').innerHTML,/2026-10-27/);
  h.change('pw-at','2026-10-13T04:06:00.000Z');assert.match(h.node('pw-series-inventory').innerHTML,/2026-10-27/);
+});
+
+test('compact ladder quick controls use exact DTE and switch displayed parameters',async()=>{
+ const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
+ h.click('',{pwLayout:'ladder'});assert.equal(h.node('pw-chain-top').hidden,false);assert.match(h.node('pw-chain-dtes').innerHTML,/data-pw-dte="1"[^>]*disabled/);assert.match(h.node('pw-results').innerHTML,/<th>CE OI \(L\)<\/th>/);assert.match(h.node('pw-results').innerHTML,/<th>STRIKE<\/th>/);
+ h.click('',{pwMetric:'delta'});assert.match(h.node('pw-results').innerHTML,/<th>CE Delta<\/th>/);
+ h.click('',{pwDte:'1'});assert.match(h.node('pw-results').innerHTML,/No premiums match/,'DTE1 must never substitute the DTE6 contract');
+ h.click('',{pwDte:'ALL'});assert.match(h.node('pw-results').innerHTML,/₹111/);
+ h.change('pw-chain-symbol','SENSEX');assert.equal(h.node('pw-symbol').value,'SENSEX');assert.doesNotMatch(h.node('pw-results').innerHTML,/₹111/);
+});
+test('OI ladder entry reuses the premium workspace and exact watch remains locked',async()=>{
+ const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();assert.match(h.node('pw-results').innerHTML,/pw-chain-table/);
+ h.click('',{pwLock:'NIFTY|2026-10-19|22000|CE'});h.view.openLadder({source:'RECORDED',symbol:'SENSEX'});assert.equal(h.node('pw-symbol').value,'NIFTY');assert.equal(h.stored().watch,'NIFTY|2026-10-19|22000|CE');
 });

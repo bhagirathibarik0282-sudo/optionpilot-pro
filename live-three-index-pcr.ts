@@ -71,3 +71,21 @@ export function renderLiveThreeIndexPcr(view:any,localNow=Date.now()) {
 export const LIVE_THREE_INDEX_PCR_CSS=`
 .mb-full-pcr{margin:10px 0 14px}.mb-full-pcr-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px}.mb-full-pcr-heading>strong{font-size:15px;font-weight:500}.mb-pcr-badges{display:flex;gap:6px;flex-wrap:wrap}.mb-pcr-alignment{font-size:12px;border:1px solid #425252;border-radius:7px;padding:4px 7px;color:#d4e6df}.mb-pcr-alignment[data-pcr-alignment=ALL_UP]{color:#69e9d9}.mb-pcr-alignment[data-pcr-alignment=ALL_DOWN]{color:#ff9f89}.mb-pcr-alignment[data-pcr-alignment=MIXED]{color:#edc86c}.mb-pcr-ladder{width:100%;border-collapse:collapse;table-layout:fixed}.mb-pcr-ladder th,.mb-pcr-ladder td{padding:8px 10px;border-bottom:1px solid #425252;text-align:left;font-weight:400;vertical-align:middle;overflow-wrap:anywhere}.mb-pcr-ladder thead th{font-size:12px;color:#bbcdc7}.mb-pcr-ladder th:first-child{width:37%}.mb-pcr-ladder small{display:block;font-size:11px;color:#bbcdc7}.mb-pcr-index{font-size:13px;font-weight:500}.mb-pcr-number{display:flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums;flex-wrap:wrap}.mb-pcr-number>strong{font-size:23px;font-weight:500;overflow-wrap:anywhere}.mb-pcr-number>span{font-size:21px}.mb-pcr-number [data-pcr-direction=UP]{color:#69e9d9}.mb-pcr-number [data-pcr-direction=DOWN]{color:#ff9f89}.mb-pcr-sources{margin-top:8px;font-size:12px}.mb-pcr-sources p{overflow-wrap:anywhere;color:#bbcdc7}.mb-pcr-blink{animation:mb-pcr-change .6s ease-in-out 3 both}@keyframes mb-pcr-change{0%,100%{opacity:1;transform:translateY(0)}50%{opacity:.35;transform:translateY(-2px)}}@media(max-width:480px){.mb-pcr-ladder th,.mb-pcr-ladder td{padding:7px 4px}.mb-pcr-index{font-size:12px}.mb-pcr-number{gap:3px}.mb-pcr-number>strong{font-size:17px}.mb-pcr-number>span{font-size:17px}.mb-pcr-ladder thead th{font-size:11px}}@media(prefers-reduced-motion:reduce){.mb-pcr-blink{animation:none}}
 `;
+
+/** Recorded, nearest-expiry full PCR. Never compare across expiry, session or recorder gaps. */
+export function deriveRecordedThreeIndexPcr(state:any,cursor='',previous:any=null,now=Date.now()){
+ const key='RECORDED|'+state.date,day=(v:any)=>String(v||'').slice(0,10),cut=cursor?Date.parse(cursor):Infinity;
+ const rows=['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>{
+  const empty={symbol,expiry:null,value:null,direction:'WAIT',current:null,baseline:null,blinkUntil:0};
+  const all=(state.current?.[symbol]?.chain||[]).filter((r:any)=>r.symbol===symbol&&day(r.minute_bucket)===state.date&&Date.parse(r.minute_bucket)<=cut&&day(r.expiry)>=state.date);
+  const expiry=[...new Set<string>(all.map((r:any)=>day(r.expiry)))].sort()[0];if(!expiry)return empty;
+  const source=all.filter((r:any)=>day(r.expiry)===expiry),times=[...new Set<number>(source.map((r:any)=>Date.parse(r.minute_bucket)))].sort((a,b)=>b-a);
+  const sample=(at:number)=>{const matches=source.filter((r:any)=>Date.parse(r.minute_bucket)===at);const r=matches.length===1?matches[0]:null;return r&&r.truth_verdict==='TRUE'&&/^(Exact archived full-chain source|Normalized full-chain source)$/.test(r.full_pcr_source||'')&&typeof r.full_chain_oi_pcr==='number'&&Number.isFinite(r.full_chain_oi_pcr)&&r.full_chain_oi_pcr>=0?{value:r.full_chain_oi_pcr,checked:at,expiry}:null;};
+  const current=sample(times[0]);if(!current)return {...empty,expiry};const baseline=times[0]-times[1]===180000?sample(times[1]):null;
+  const direction=!baseline?'WAIT':current.value===baseline.value?'FLAT':current.value>baseline.value?'UP':'DOWN',prior=previous?.key===key?previous.rows?.find((r:any)=>r.symbol===symbol&&r.expiry===expiry):null;
+  const blinkUntil=prior?.current?.checked===current.checked?prior.blinkUntil:baseline&&prior?.current?.checked===baseline.checked&&['UP','DOWN'].includes(direction)?now+1800:0;
+  return {symbol,expiry,value:current.value,direction,current,baseline,blinkUntil};
+ });
+ const ready=rows.every(r=>r.current),synced=ready&&new Set(rows.map(r=>r.current.checked)).size===1;
+ return {key,rows,alignment:!ready?'WAIT':synced?'SYNC':'TIME_MISMATCH'};
+}

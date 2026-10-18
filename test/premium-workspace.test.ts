@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import { Hono } from 'hono';
-import { derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext } from '../premium-workspace-model.js';
+import { derivePremiumSeriesInventory, derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext } from '../premium-workspace-model.js';
 import { DashboardLiveStore } from '../dashboard-live-feed.js';
 import { mountDashboardLiveRoutes } from '../dashboard-live-http.js';
 
@@ -37,6 +38,36 @@ test('3/5/7 strike scopes follow each index ATM and an explicit CE strike remain
  assert.equal(run(rows,{spots:{NIFTY:22010},filter:{strikeScope:'5'}}).rows.length,5);
  assert.equal(run(rows,{spots:{NIFTY:22010},filter:{strikeScope:'7'}}).rows.length,7);
  assert.equal(run(rows,{spots:{NIFTY:22010},filter:{strikeScope:'3',ceStrike:21500}}).rows[0].strike,21500);
+});
+test('series inventory deduplicates exact identities, separates indices, and never guesses expiry type',()=>{
+ const x=row(0,100),rows=[x,{...x},{...x,option_type:'PE'}, {...x,symbol:'SENSEX',strike:72000}];
+ const all=derivePremiumSeriesInventory(rows,date,'ALL',{ceStrike:22000,peStrike:22100});
+ assert.equal(all.length,2);assert.equal(all[0].ceCount,1);assert.equal(all[0].peCount,1);assert.equal(all[0].dte,6);
+ assert.equal(all[0].cePinnedAvailable,true);assert.equal(all[0].pePinnedAvailable,false);assert.ok(all.every(x=>x.seriesType==='UNVERIFIED'));
+ assert.equal(derivePremiumSeriesInventory(rows,date,'SENSEX').length,1);
+});
+test('inventory handles valid PostgreSQL dates, rejects malformed calendar identities, and preserves absence',()=>{
+ const x={...row(0,100),expiry:new Date(expiry+'T00:00:00Z')};assert.equal(derivePremiumSeriesInventory([x],date)[0].expiry,expiry);
+ for(const e of ['2026-02-30','2026-10-19garbage',new Date(NaN)])assert.equal(derivePremiumSeriesInventory([{...x,expiry:e}],date).length,0);
+ assert.deepEqual(derivePremiumSeriesInventory([x],'bad'),[]);assert.equal(derivePremiumSeriesInventory([x],date)[0].peCount,0);
+});
+test('serialized browser model resolves the shared inventory helper',()=>{
+ const code='const __name=(fn,_name)=>fn;const derivePremiumSeriesInventory='+derivePremiumSeriesInventory.toString()+';const derivePremiumWorkspace='+derivePremiumWorkspace.toString()+';derivePremiumWorkspace(input);';
+ const r=vm.runInNewContext(code,{input:{date,rows:[row(0,100)],minutes:'3'}});
+ assert.equal(r.series[0].expiry,expiry);assert.equal(r.series[0].ceCount,1);
+});
+test('inventory is available across watch filters and describes loaded identities rather than fresh quotes',()=>{
+ const r=run([row(0,100),row(0,100,{expiry:'2026-10-20',truth_verdict:'STALE'})],{filter:{expiries:[expiry],side:'PE',ceStrike:99999}});
+ assert.equal(r.rows.length,0);assert.equal(r.series.length,2);assert.equal(r.series[1].ceCount,1);assert.equal(r.series[1].cePinnedAvailable,false);
+});
+test('live series metadata covers inventory before pagination and does not cross index or expiry pins',()=>{
+ const entries=[{token:1,label:'CE',role:'OPTION' as const,symbol:'NIFTY' as const,expiry,strike:22000,side:'CE' as const},
+ {token:2,label:'PE',role:'OPTION' as const,symbol:'NIFTY' as const,expiry,strike:22100,side:'PE' as const},
+ {token:3,label:'CE2',role:'OPTION' as const,symbol:'NIFTY' as const,expiry:'2026-10-26',strike:22100,side:'CE' as const}];
+ const s=new DashboardLiveStore({entries,date,missing:[],omittedExpiries:[]});
+ const a=s.premiums(Date.parse(at(0)),{limit:1,ceStrike:22000,peStrike:22100,expiries:[expiry]});
+ assert.equal(a.rows.length,1);assert.equal(a.series.length,2);assert.equal(a.series[0].pePinnedAvailable,true);assert.equal(a.series[1].cePinnedAvailable,false);
+ assert.deepEqual(a.series,s.premiums(Date.parse(at(0)),{limit:1,offset:1,ceStrike:22000,peStrike:22100}).series);
 });
 test('live baseline exposes actual sample time and previous-close change uses its separate basis',()=>{
  const r=run([row(0,100),row(3.2,110)],{live:true}).rows[0];assert.equal(r.fromAt,at(0));assert(Math.abs(r.change-10)<1e-8);

@@ -37,3 +37,22 @@ test('recorded playback advances only saved buckets and stops at the last one',a
  const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
  h.click('pw-play');assert.match(h.node('pw-time-label').textContent,/09:30/);h.timers[0]();assert.match(h.node('pw-time-label').textContent,/09:33/);h.timers[0]();assert.match(h.node('pw-time-label').textContent,/09:36/);h.timers[0]();assert.equal(h.node('pw-play').textContent,'▶ Replay');
 });
+test('existing filters expose exact expiry/DTE and loaded identity counts without an expanded new card',async()=>{
+ const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
+ assert.match(h.node('pw-expiries').innerHTML,/2026-10-19 · DTE 6/);assert.match(h.node('pw-series-inventory').innerHTML,/NIFTY \/ 2026-10-19/);
+ assert.match(h.node('pw-series-inventory').innerHTML,/1 \/ 1/);assert.match(h.node('pw-series-inventory').innerHTML,/not fresh-quote coverage/);
+ assert.ok(PREMIUM_WORKSPACE_HTML.includes('<details id="pw-series-details">'));assert.ok(PREMIUM_WORKSPACE_HTML.includes('ATM ±3 · up to 7 strikes'));
+});
+test('a missing fixed strike remains visible and cannot silently become an ATM watch',async()=>{
+ const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
+ h.change('pw-ceStrike','99999');assert.match(h.node('pw-ceStrike').innerHTML,/Fixed 99999 · not loaded/);assert.equal(h.node('pw-ceStrike').value,'99999');
+ assert.match(h.node('pw-active-filters').textContent,/CE fixed 99999/);assert.match(h.node('pw-series-inventory').innerHTML,/Fixed 99999 · not loaded/);
+ assert.doesNotMatch(h.node('pw-results').innerHTML,/22,000 CE/);assert.match(h.node('pw-results').innerHTML,/22,000 PE/);
+ h.click('',{pwExpiry:'2026-10-19'});assert.equal(h.node('pw-ceStrike').value,'99999');
+});
+test('series coverage follows the recorded cursor and cannot leak a later expiry',async()=>{
+ const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
+ h.state().current.NIFTY.options.push({...h.state().current.NIFTY.options[0],expiry:'2026-10-27',minute_bucket:'2026-10-13T04:06:00.000Z'});
+ h.change('pw-at','2026-10-13T04:03:00.000Z');assert.doesNotMatch(h.node('pw-series-inventory').innerHTML,/2026-10-27/);
+ h.change('pw-at','2026-10-13T04:06:00.000Z');assert.match(h.node('pw-series-inventory').innerHTML,/2026-10-27/);
+});

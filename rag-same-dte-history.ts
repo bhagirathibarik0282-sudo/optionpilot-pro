@@ -4,8 +4,8 @@ import { resolveIndexExpiryClock } from './index-expiry-clock.js';
 
 export type SameDteSelection = { symbol:string; date:string; expiry:string; strike:number; side:'CE'|'PE'; timeIst:string; asOf:number };
 const n=(v:unknown)=> typeof v==='number'||typeof v==='string'&&v.trim()!=='' ? (Number.isFinite(Number(v))?Number(v):null):null;
-const ms=(v:unknown)=>Date.parse(String(v??''));
-const date=(v:unknown)=>{const raw=String(v??''),s=raw.slice(0,10),t=Date.parse(s+'T00:00:00Z');if(raw.length!==10&&(!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(raw)||!Number.isFinite(Date.parse(raw))))return null;return /^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(t)&&new Date(t).toISOString().slice(0,10)===s?s:null;};
+const ms=(v:unknown)=>v instanceof Date?v.getTime():Date.parse(String(v??''));
+const date=(v:unknown)=>{if(v instanceof Date)return Number.isFinite(v.getTime())?v.toISOString().slice(0,10):null;const raw=String(v??''),s=raw.slice(0,10),t=Date.parse(s+'T00:00:00Z');if(raw.length!==10&&(!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(raw)||!Number.isFinite(Date.parse(raw))))return null;return /^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(t)&&new Date(t).toISOString().slice(0,10)===s?s:null;};
 const istDay=(t:number)=>new Date(t+19800000).toISOString().slice(0,10);
 const unique=(rows:Record<string,unknown>[])=>{const u=new Map(rows.map(r=>[JSON.stringify(r),r]));return u.size===1?[...u.values()][0]:null;};
 const safety={readOnly:true,writesPerformed:false,affectsSelector:false,affectsVerdict:false,affectsTelegram:false,affectsExecution:false};

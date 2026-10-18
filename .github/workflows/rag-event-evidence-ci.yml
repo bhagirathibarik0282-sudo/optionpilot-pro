@@ -4,6 +4,7 @@ on:
     paths:
       - 'rag-event-evidence.ts'
       - 'rag-same-dte-history.ts'
+      - 'rag-same-dte-history-view.ts'
       - 'rag-same-dte-history-http.ts'
       - 'index-expiry-clock.ts'
       - 'h1-theory-history.ts'

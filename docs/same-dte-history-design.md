@@ -1,6 +1,6 @@
 # Same-DTE historical comparison — first stage
 
-Status: PARTIAL. Local implementation and archive replay; not a deployed feature.
+Status: PARTIAL. Backend merged in PR #716 and Railway deployment succeeded on 2026-10-18. Production readback exposed a Date decoding defect: the direct PostgreSQL reader returns Date objects, while the initial matcher accepted only ISO strings for expiry. This branch accepts valid Date objects and preserves timestamp milliseconds; invalid dates still fail closed. A regression compares PostgreSQL-shaped rows with identical archived JSON and checks the subsecond cutoff boundary. This fix is not deployed yet. The compact UI in this branch is not deployed.
 
 The existing RAG page already compares expiries within one recorded session. This stage adds a separate read-only historical endpoint, `/api/research/rag-same-dte-history`, accepting the existing `symbol/date/expiry/strike/side/time/asOf` fields. It does not depend on unmerged PR #714.
 
@@ -26,6 +26,6 @@ Use the existing recorded-date index and existing FULL replay reader. The HTTP w
 
 ## Remaining work
 
-This stage has no dashboard control yet. It does not match IV, spread/liquidity, event regime, OI/PCR/walls, futures or volatility context. Those must be added with source quality and point-in-time checks before calling two days broadly similar. Special sessions and actual contract-master expiry timestamps remain unverified. No historical predictive edge has been demonstrated.
+The proposed UI adds Same-DTE history to the existing RAG Answer type selector, reusing its contract/time/cutoff fields. It shows one compact comparison table; provenance, blocked days and source failures stay under closed details. Historical mode fixes the response to exact 3m and hides inapplicable reaction-window/outcome controls. Selection changes invalidate pending results; returning to normal premium mode restores those controls. UI acceptance is covered by serialized browser-code tests, not a visual browser acceptance claim. It does not match IV, spread/liquidity, event regime, OI/PCR/walls, futures or volatility context. Those must be added with source quality and point-in-time checks before calling two days broadly similar. Special sessions and actual contract-master expiry timestamps remain unverified. No historical predictive edge has been demonstrated.
 
 The expiry-clock sources and their primary-text audit are in `index-expiry-clock-source-audit.md`; this stage introduces no new option-pricing theory or causal claim.

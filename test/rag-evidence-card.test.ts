@@ -6,6 +6,7 @@ import {parseRagQuestion} from '../rag-question.js';
 import {RAG_CARD_SCRIPT,RAG_CARD_HTML,renderRagEvidencePage} from '../rag-evidence-card.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 import {researchRouter} from '../research-router.js';
+import {renderSameDteHistory} from '../rag-same-dte-history-view.js';
 const question='NIFTY 22300 PE date 2026-10-13 expiry 2026-10-13 time 09:36ରେ କଣ ହେଲା?';
 test('extracts exact English identity without expanding expiry or side',()=>{
  const p=parseRagQuestion(question);assert.equal(p.complete,true);assert.deepEqual(p.fields,{symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'});
@@ -77,4 +78,36 @@ test('a new explicit card question supersedes an in-flight answer without a stal
  b.events['optionpilot:rag-selection']({detail});b.events['optionpilot:rag-selection']({detail:{...detail,time:'09:39'}});assert.equal(b.requests.length,2);
  resolves[0](success());await new Promise(resolve=>setImmediate(resolve));assert.equal(b.node('result').innerHTML,'');assert.equal(b.node('search').disabled,true);
  resolves[1](success());await new Promise(resolve=>setImmediate(resolve));assert.match(b.node('result').innerHTML,/210.65/);assert.equal(b.node('search').disabled,false);
+});
+
+function historySuccess(){
+ const point={quoteAt:'2026-09-15T04:06:20Z',receiptAt:'2026-09-15T04:06:24Z',snapshotId:'safe',bucketAt:'2026-09-15T04:06:00Z',price:10};
+ const anchor={date:'2026-09-15',expiry:'2026-09-15',strike:23450,side:'CE',calendarDte:0,before:point,at:{...point,price:8.3},premiumChange:-1.7,spotChange:-4,clock:{closeIst:'15:40',rule:'MODEL'}};
+ return {ok:true,status:200,json:async()=>({ok:true,anchor,matches:[{...anchor,date:'2026-09-08',expiry:'2026-09-08',strike:23700,premiumChange:3.7,moneynessDifferenceBps:5.6854}],cutoff:'2026-09-15T04:06:24Z',retrieval:{requestedDays:['2026-09-08'],readFailures:[]},provenance:{selectedEvidenceSha256:'b'.repeat(64)},blocked:[]})};
+}
+test('same-DTE selection uses historical endpoint with explicit cutoff and no future outcomes',async()=>{
+ const b=browser(async()=>historySuccess());b.node('example').onclick();b.node('kind').value='HISTORY';b.node('kind').listeners.change();
+ assert.equal(b.node('lookback').disabled,true);assert.equal(b.node('outcomes').disabled,true);
+ b.node('outcomes').checked=true;b.node('asof').value='2026-10-13T09:36:30';await b.submit();
+ const u=new URL(b.requests[0],'https://example.test');assert.equal(u.pathname,'/api/research/rag-same-dte-history');assert.equal(u.searchParams.has('includeOutcomes'),false);assert.equal(u.searchParams.get('lookback'),'3');assert.equal(u.searchParams.get('asOf'),'2026-10-13T09:36:30');
+ assert.match(b.node('result').innerHTML,/23700/);assert.match(b.node('result').innerHTML,/09:36 IST/);assert.match(b.node('result').innerHTML,/5\.69 bps/);assert.match(b.node('result').innerHTML,/↓ -1\.70/);assert.match(b.node('result').innerHTML,/↑ \+3\.70/);
+ assert.match(b.node('result').innerHTML,/<details><summary>Context/);assert.doesNotMatch(b.node('result').innerHTML,/<details open/);
+});
+test('switching back from history and Ask RAG restore normal controls',async()=>{
+ const b=browser(async()=>success());b.node('kind').value='HISTORY';b.node('kind').listeners.change();
+ b.events['optionpilot:rag-selection']({detail:{symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36',lookback:15}});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(b.node('lookback').disabled,false);assert.equal(b.node('outcomes').disabled,false);assert.equal(b.node('lookback').value,'15');
+ assert.match(b.requests[0],/rag-event-evidence/);
+});
+test('historical renderer escapes provenance and keeps unavailable differences missing',async()=>{
+ const d:any=await historySuccess().json();d.matches[0].date='<img src=x onerror=alert(1)>';d.matches[0].moneynessDifferenceBps=null;d.matches[0].spotChange=null;d.anchor.at.snapshotId='<script>bad</script>';
+ const html=renderSameDteHistory(d);assert.doesNotMatch(html,/<img|<script>/);assert.match(html,/&lt;img/);assert.match(html,/&lt;script&gt;/);assert.match(html,/ଅନୁପଲବ୍ଧ/);
+});
+test('no matching days and read failures remain visible without invented historical rows',async()=>{
+ const d:any=await historySuccess().json();d.matches=[];d.retrieval.readFailures=['2026-09-08'];d.blocked=[{date:'2026-09-07',reason:'NO_VERIFIED_SAME_DTE_CLOCK_PAIR'}];
+ const html=renderSameDteHistory(d);assert.match(html,/pair ମିଳିଲା ନାହିଁ/);assert.match(html,/Source read failed: 2026-09-08/);assert.equal((html.match(/<tbody><tr>/g)||[]).length,1);assert.doesNotMatch(html,/23700/);
+});
+test('editing history selection discards an in-flight historical answer',async()=>{
+ let resolve!:(v:any)=>void;const b=browser(()=>new Promise(r=>resolve=r));b.node('example').onclick();b.node('kind').value='HISTORY';const pending=b.submit();
+ b.node('strike').value='22400';b.node('form').listeners.input();resolve(historySuccess());await pending;assert.equal(b.node('result').innerHTML,'');assert.equal(b.node('search').disabled,false);
 });

@@ -367,7 +367,7 @@ researchRouter.get("/h1-replay", async (c) => {
   }
   const result = await runH1ReplayHttp(parsed.value);
   const response = (c.req.query("format") ?? "").trim().toLowerCase() === "compact"
-    ? compactH1Replay(result)
+    ? compactH1Replay(result, c.req.query("canonical") === "pcr-provenance")
     : result;
   return c.json(response, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
 });

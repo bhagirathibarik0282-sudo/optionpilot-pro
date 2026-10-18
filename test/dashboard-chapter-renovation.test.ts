@@ -138,3 +138,12 @@ test('quote history reads once per selected date and late responses cannot mix s
  pending.shift()({ok:true,json:async()=>({date:'2026-10-09',snapshots:[],truncated:false})});
  await new Promise(resolve=>setImmediate(resolve));h.turn(8);await new Promise(resolve=>setImmediate(resolve));assert.equal(calls.length,2);assert(!h.nodes.get('mb-page').innerHTML.includes('Loading quotes'));
 });
+
+test('cold-start loading is visible in compact chapters and never reports missing recordings while pending',()=>{
+ const h=harness(true,state=>Object.assign(state,{date:'',loading:true,archiveLoading:true,loadingDate:'2026-10-16'}));
+ for(const page of [0,1,5,9]){const html=h.turn(page);assert.match(html,/Loading saved records/);assert.doesNotMatch(html,/NO RECORDING/);assert.equal(h.nodes.get('mb-load-status').hidden,false);assert.match(h.nodes.get('mb-load-status').textContent,/2026-10-16/);}
+ h.state.current={NIFTY:recording('NIFTY')};h.state.date=date;h.state.loading=false;h.state.archiveLoading=false;
+ assert.match(h.turn(0),/22,010/);assert.equal(h.nodes.get('mb-load-status').hidden,true);
+ h.state.loading=true;h.state.archiveLoading=true;h.state.loadingDate='2026-10-16';assert.match(h.turn(0),/22,010/,'successful recorded values remain visible during refresh');
+ h.state.loading=false;h.state.archiveLoading=false;h.state.current={};assert.match(h.turn(0),/NO RECORDING/);assert.equal(h.nodes.get('mb-load-status').hidden,true);
+});

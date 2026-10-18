@@ -36,3 +36,42 @@ test("compact replay preserves counts, continuity and authority boundary", () =>
   assert.deepEqual(expandRows(compact.chain!), source.chain);
   assert.deepEqual(expandRows(compact.canonical!), source.canonical);
 });
+
+test("dashboard projection removes duplicated strike archives while preserving displayed data and calibration", async () => {
+  const { deriveObservationData } = await import("../business-dashboard-v1-view.js");
+  const bucket = "2026-10-16T10:00:00Z";
+  const source: any = {
+    ok: true, request: { symbol: "NIFTY", tradeDate: "2026-10-16", fromTime: "15:27", toTime: "15:30", scope: "FULL" },
+    market: [{ symbol: "NIFTY", minute_bucket: bucket, spot_ltp: 23000 }],
+    options: [{ symbol: "NIFTY", minute_bucket: bucket, expiry: "2026-10-20", strike: 23000, option_type: "CE", ltp: 155.9, oi: 7215260 }],
+    chain: [{ symbol: "NIFTY", minute_bucket: bucket, expiry: "2026-10-20", truth_verdict: "TRUE", calculation_version: "H1_RUNTIME_BRIDGE_V1", full_chain_oi_pcr: 0.5 }],
+    canonical: [{ symbol: "NIFTY", minute_bucket: bucket, source_timestamp: bucket, truth_verdict: "TRUE", calculation_version: "H1_RUNTIME_BRIDGE_V1", market: {
+      symbol: "NIFTY", gapScore: { fullChainPcr: 1.3158 },
+      expiries: [{ expiry: "current", expiryDate: "2026-10-20", ceStrikes: Array.from({ length: 100 }, (_, strike) => ({ strike, oi: 100000 })), peStrikes: [] }],
+    } }],
+  };
+  const original = JSON.stringify(source);
+  const full = compactH1Replay(source), projected = compactH1Replay(source, true);
+  assert.equal(full.lossless, true);
+  assert.equal(projected.lossless, false);
+  assert.equal(projected.canonicalProjection, "PCR_PROVENANCE_V1");
+  assert.deepEqual(deriveObservationData(projected), deriveObservationData(full));
+  assert.equal(deriveObservationData(projected).chain[0].full_chain_oi_pcr, 1.3158);
+  assert.deepEqual(projected.dte0Calibration, full.dte0Calibration);
+  assert.deepEqual(projected.options, full.options);
+  assert.ok(JSON.stringify(projected).length < JSON.stringify(full).length);
+  assert.equal(JSON.stringify(source), original, "projection must not mutate source archives");
+});
+
+test("dashboard PCR projection preserves duplicate, mismatched and unavailable evidence", async () => {
+  const { resolveRecordedFullPcr } = await import("../business-dashboard-v1-view.js");
+  const row: any = { symbol: "NIFTY", minute_bucket: "2026-10-16T10:00:00Z", truth_verdict: "TRUE", calculation_version: "H1_RUNTIME_BRIDGE_V1", expiry: "2026-10-20" };
+  const canonical = { ...row, market: { symbol: "NIFTY", gapScore: { fullChainPcr: 1.3158 }, expiries: [{ expiry: "current", expiryDate: row.expiry }] } };
+  const variants = [[], [canonical, canonical], [{ ...canonical, symbol: "SENSEX" }], [{ ...canonical, truth_verdict: "FALSE" }], [{ ...canonical, market: { ...canonical.market, expiries: [canonical.market.expiries[0], canonical.market.expiries[0]] } }], [{ ...canonical, market: null }], [{ ...canonical, market: { ...canonical.market, gapScore: { fullChainPcr: "1.3158" } } }]];
+  for (const records of variants) {
+    const source: any = { ok: false, request: null, chain: [row], canonical: records };
+    const full = compactH1Replay(source), projected = compactH1Replay(source, true);
+    assert.deepEqual(resolveRecordedFullPcr(projected), resolveRecordedFullPcr(full));
+    assert.equal(resolveRecordedFullPcr(projected)[0].full_chain_oi_pcr, null);
+  }
+});

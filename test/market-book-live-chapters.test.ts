@@ -64,9 +64,20 @@ test('serialized chapter navigation updates live values while recorded data rema
  const scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];for(const script of scripts)new vm.Script(script[1]);vm.runInContext(scripts[0][1],ctx);
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({date:'2026-10-16',recordedDates:[],current:{},history:{},baseline:{},health:{}}),refresh(){requests++;},memory:async()=>{}};vm.runInContext('installMarketBook(api)',ctx);
  const turn=(page:number)=>nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:String(page)}})}});
- handlers['optionpilot:live-context']({detail:fixture()});turn(4);assert(nodes.get('mb-live-context').innerHTML.includes('Futures volume'));assert(nodes.get('mb-live-title').textContent.includes('Futures'));
+ handlers['optionpilot:live-context']({detail:fixture()});turn(4);assert.equal(nodes.get('mb-future-metrics').hidden,false);nodes.get('mb-future-metrics').onclick({target:{closest:()=>({dataset:{mbFuture:'futureVolume'}})}});assert.deepEqual(kinds(nodes.get('mb-live-context').innerHTML),['futureVolume']);nodes.get('mb-future-metrics').onclick({target:{closest:()=>({dataset:{mbFuture:'ALL'}})}});assert(nodes.get('mb-live-context').innerHTML.includes('Futures volume'));assert(nodes.get('mb-live-title').textContent.includes('Futures'));
  turn(10);assert.equal(nodes.get('mb-live-context-shell').hidden,true);assert.equal(nodes.get('mb-live-context').innerHTML,'');turn(11);assert.equal(nodes.get('mb-live-context-shell').hidden,false);assert.equal(nodes.get('mb-live-controls').hidden,true);turn(4);
  const recorded=nodes.get('mb-page').innerHTML;handlers['optionpilot:live-context']({detail:null});assert(!nodes.get('mb-live-context').innerHTML.includes('123.45'));assert.equal(nodes.get('mb-page').innerHTML,recorded);assert.equal(requests,0);
  nodes.get('mb-live-controls').onclick();assert.equal(nodes.get('op-feed-detail').open,true);
  assert(!WORKSPACE_CSS.includes('#mb-live-context-shell{display:none}'));assert(WORKSPACE_CSS.includes('#mb-live-context-shell{display:block}'));
+});
+
+test('wheel breadth keeps missing quotes grey and never substitutes index weights',()=>{
+ const p=fixture();p.snapshot.participation.push({...p.snapshot.participation[0],state:'STALE',changePct:99});
+ const html=live(p,'NIFTY',8,false,{wheel:true,metric:'stocks'});
+ assert(html.includes('1 up, 0 down, 0 unchanged, 1 unavailable'));assert(html.includes('not index-weight contribution'));assert(!html.includes('99%'));assert(!html.includes('Sector quotes'));
+ const empty=fixture();empty.snapshot.participation=[];assert(!live(empty,'NIFTY',8,false,{wheel:true,metric:'stocks'}).includes('NaN'));assert(!live(empty,'NIFTY',8,false,{wheel:true,metric:'stocks'}).includes('mb-breadth-wheel'));
+});
+test('Futures metric buttons reuse qualified live projection and withhold stale source',()=>{
+ const p=fixture();for(const key of ['future','futureOi','futureVolume','basis'])assert.deepEqual(kinds(live(p,'NIFTY',4,false,{metric:key})),[key]);
+ p.snapshot.indices[0].future.state='STALE';const html=live(p,'NIFTY',4,false,{metric:'futureVolume'});assert(!html.includes('123.45'));assert(html.includes('WITHHELD'));
 });

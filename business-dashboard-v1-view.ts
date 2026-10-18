@@ -432,7 +432,7 @@ function mergeReplayParts(parts,request){
  const countRows=field=>Array.isArray(merged[field])?merged[field].length:(merged[field]?.rows||[]).length;merged.counts={market:countRows('market'),options:countRows('options'),chain:countRows('chain'),markers:countRows('market'),canonical:countRows('canonical')};return merged;
 }
 async function getReplayWindow(label,symbol,date,from,to,depth=0,replayScope='CORE'){
- const url='/api/research/h1-replay?symbol='+symbol+'&date='+date+'&from='+from+'&to='+to+'&scope='+replayScope+'&format=compact';
+ const url='/api/research/h1-replay?symbol='+symbol+'&date='+date+'&from='+from+'&to='+to+'&scope='+replayScope+'&format=compact&canonical=pcr-provenance';
  try{return await get(label,url);}catch(error){
   const start=minuteNumber(from),end=minuteNumber(to);
   if(!error.unreadableSuccess||start===null||end===null||end-start<=3||depth>=5)throw error;

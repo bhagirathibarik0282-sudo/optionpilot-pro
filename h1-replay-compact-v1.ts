@@ -12,7 +12,8 @@ export interface H1ReplayCompactResult {
   sourceMode: "READ_ONLY_H1_3M_REPLAY";
   productionImpact: "NONE";
   format: "compact";
-  lossless: true;
+  lossless: boolean;
+  canonicalProjection?: "PCR_PROVENANCE_V1";
   request: H1ReplayHttpResult["request"];
   counts?: H1ReplayHttpResult["counts"];
   dte0Calibration?: ReturnType<typeof buildH1Dte0TransitionCalibration>;
@@ -46,7 +47,26 @@ export function expandRows(table: H1CompactTable): Record<string, unknown>[] {
   return table.rows.map((values) => Object.fromEntries(table.columns.map((key, i) => [key, values[i]])));
 }
 
-export function compactH1Replay(result: H1ReplayHttpResult): H1ReplayCompactResult {
+/** Dashboard only: retain every identity/provenance field used by Full PCR repair.
+ * Keep duplicates and malformed structures intact so ambiguity still fails closed.
+ * The default compact API remains lossless for research consumers.
+ */
+export function projectCanonicalPcrRows(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  return rows.map(row => {
+    const market = row.market as any;
+    if (!market || typeof market !== "object" || Array.isArray(market)) return { ...row };
+    return { ...row, market: {
+      symbol: market.symbol,
+      gapScore: { fullChainPcr: market.gapScore?.fullChainPcr },
+      expiries: Array.isArray(market.expiries)
+        ? market.expiries.map((expiry: any) => expiry && typeof expiry === "object"
+          ? { expiry: expiry.expiry, expiryDate: expiry.expiryDate } : expiry)
+        : market.expiries,
+    } };
+  });
+}
+
+export function compactH1Replay(result: H1ReplayHttpResult, canonicalPcrOnly = false): H1ReplayCompactResult {
   const dte0Calibration = result.ok && result.request
     ? buildH1Dte0TransitionCalibration(result.request, result)
     : undefined;
@@ -56,14 +76,15 @@ export function compactH1Replay(result: H1ReplayHttpResult): H1ReplayCompactResu
     sourceMode: "READ_ONLY_H1_3M_REPLAY",
     productionImpact: "NONE",
     format: "compact",
-    lossless: true,
+    lossless: !canonicalPcrOnly,
+    ...(canonicalPcrOnly ? { canonicalProjection: "PCR_PROVENANCE_V1" as const } : {}),
     request: result.request,
     ...(result.counts ? { counts: result.counts } : {}),
     ...(dte0Calibration ? { dte0Calibration } : {}),
     ...(result.market ? { market: compactRows(result.market) } : {}),
     ...(result.options ? { options: compactRows(result.options) } : {}),
     ...(result.chain ? { chain: compactRows(result.chain) } : {}),
-    ...(result.canonical ? { canonical: compactRows(result.canonical) } : {}),
+    ...(result.canonical ? { canonical: compactRows(canonicalPcrOnly ? projectCanonicalPcrRows(result.canonical) : result.canonical) } : {}),
     ...(result.continuity ? { continuity: result.continuity } : {}),
     ...(result.reason ? { reason: result.reason } : {}),
   };

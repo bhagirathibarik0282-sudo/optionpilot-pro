@@ -36,7 +36,7 @@ test("rejects ranges outside the regular market session", () => {
   const beforeOpen = parseH1ReplayRequest({ symbol: "NIFTY", tradeDate: "2026-08-31", fromTime: "09:14", toTime: "15:30" });
   assert.deepEqual(beforeOpen, { ok: false, reason: "OUTSIDE_MARKET_SESSION" });
 
-  const afterClose = parseH1ReplayRequest({ symbol: "NIFTY", tradeDate: "2026-08-31", fromTime: "09:15", toTime: "15:31" });
+  const afterClose = parseH1ReplayRequest({ symbol: "NIFTY", tradeDate: "2026-08-31", fromTime: "09:15", toTime: "15:41" });
   assert.deepEqual(afterClose, { ok: false, reason: "OUTSIDE_MARKET_SESSION" });
 });
 

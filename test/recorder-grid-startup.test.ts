@@ -14,6 +14,7 @@ function scheduler() {
  class Clock extends Date { constructor(value?:any) { super(value===undefined?at:value); } }
  vm.runInNewContext(source.slice(start,end),{
   Date:Clock,isMarketOpenNowServer:()=>open,
+  isClosingObservationAt:()=>false,
   setInterval:(fn:()=>void,ms:number)=>{assert.equal(ms,30000);tick=fn;},
   captureRecorderSnapshot:(reason:string)=>{captures.push(reason);},
  });

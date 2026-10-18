@@ -1,0 +1,165 @@
+{
+  "source": "EXISTING_PRODUCTION_POSTGRES_H1_TRUTH_MARKER_DATE_INDEX",
+  "endpoint": "/api/research/h1-theory-dates",
+  "readAtIST": "2026-10-18",
+  "queryScope": "MIN/MAX per IST date and index; no replay-window predicate",
+  "rows": [
+    {
+      "tradeDate": "2026-10-16",
+      "symbol": "NIFTY",
+      "markerCount": 124,
+      "firstMinute": "2026-10-16T03:51:00.000Z",
+      "lastMinute": "2026-10-16T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-16",
+      "symbol": "SENSEX",
+      "markerCount": 124,
+      "firstMinute": "2026-10-16T03:51:00.000Z",
+      "lastMinute": "2026-10-16T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-16",
+      "symbol": "BANKNIFTY",
+      "markerCount": 124,
+      "firstMinute": "2026-10-16T03:51:00.000Z",
+      "lastMinute": "2026-10-16T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-15",
+      "symbol": "NIFTY",
+      "markerCount": 126,
+      "firstMinute": "2026-10-15T03:45:00.000Z",
+      "lastMinute": "2026-10-15T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-15",
+      "symbol": "SENSEX",
+      "markerCount": 126,
+      "firstMinute": "2026-10-15T03:45:00.000Z",
+      "lastMinute": "2026-10-15T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-15",
+      "symbol": "BANKNIFTY",
+      "markerCount": 126,
+      "firstMinute": "2026-10-15T03:45:00.000Z",
+      "lastMinute": "2026-10-15T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-14",
+      "symbol": "NIFTY",
+      "markerCount": 126,
+      "firstMinute": "2026-10-14T03:45:00.000Z",
+      "lastMinute": "2026-10-14T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-14",
+      "symbol": "SENSEX",
+      "markerCount": 126,
+      "firstMinute": "2026-10-14T03:45:00.000Z",
+      "lastMinute": "2026-10-14T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-14",
+      "symbol": "BANKNIFTY",
+      "markerCount": 126,
+      "firstMinute": "2026-10-14T03:45:00.000Z",
+      "lastMinute": "2026-10-14T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-13",
+      "symbol": "NIFTY",
+      "markerCount": 127,
+      "firstMinute": "2026-10-13T03:45:00.000Z",
+      "lastMinute": "2026-10-13T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-13",
+      "symbol": "SENSEX",
+      "markerCount": 127,
+      "firstMinute": "2026-10-13T03:45:00.000Z",
+      "lastMinute": "2026-10-13T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-13",
+      "symbol": "BANKNIFTY",
+      "markerCount": 127,
+      "firstMinute": "2026-10-13T03:45:00.000Z",
+      "lastMinute": "2026-10-13T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-12",
+      "symbol": "NIFTY",
+      "markerCount": 128,
+      "firstMinute": "2026-10-12T03:45:00.000Z",
+      "lastMinute": "2026-10-12T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-12",
+      "symbol": "SENSEX",
+      "markerCount": 128,
+      "firstMinute": "2026-10-12T03:45:00.000Z",
+      "lastMinute": "2026-10-12T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-12",
+      "symbol": "BANKNIFTY",
+      "markerCount": 128,
+      "firstMinute": "2026-10-12T03:45:00.000Z",
+      "lastMinute": "2026-10-12T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-09",
+      "symbol": "NIFTY",
+      "markerCount": 131,
+      "firstMinute": "2026-10-09T03:45:00.000Z",
+      "lastMinute": "2026-10-09T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-09",
+      "symbol": "SENSEX",
+      "markerCount": 131,
+      "firstMinute": "2026-10-09T03:45:00.000Z",
+      "lastMinute": "2026-10-09T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-09",
+      "symbol": "BANKNIFTY",
+      "markerCount": 131,
+      "firstMinute": "2026-10-09T03:45:00.000Z",
+      "lastMinute": "2026-10-09T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-08",
+      "symbol": "NIFTY",
+      "markerCount": 68,
+      "firstMinute": "2026-10-08T03:45:00.000Z",
+      "lastMinute": "2026-10-08T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-08",
+      "symbol": "SENSEX",
+      "markerCount": 68,
+      "firstMinute": "2026-10-08T03:45:00.000Z",
+      "lastMinute": "2026-10-08T10:00:00.000Z"
+    },
+    {
+      "tradeDate": "2026-10-08",
+      "symbol": "BANKNIFTY",
+      "markerCount": 68,
+      "firstMinute": "2026-10-08T03:45:00.000Z",
+      "lastMinute": "2026-10-08T10:00:00.000Z"
+    }
+  ],
+  "findings": {
+    "indexDays": 21,
+    "indexDaysEndingAt1530": 21,
+    "qualifiedMarkerCoverageAfter1530": "NOT_PRESENT_IN_SELECTED_DATE_INDEX",
+    "rawTablesWithoutMarker": "NOT_QUERIED"
+  },
+  "limits": [
+    "Marker count can include off-grid minutes and is not a completeness percentage.",
+    "No inference about unmarked raw rows or recovery from brokers."
+  ]
+}

@@ -1,5 +1,6 @@
 import { mountSellerResearchRoutes } from './seller-research-http.js';
 import { resolveIndexExpiryClock } from './index-expiry-clock.js';
+import { isClosingObservationAt } from './index-observation-session.js';
 import { Hono } from "hono";
 import { persistConnectedDriveSession } from "./drive-connected-session.js";
 import { mountResearchRoutes } from "./research-server-hook.js";
@@ -2090,7 +2091,7 @@ function computeSnapshotStatus(indexSnaps: Array<RecorderIndexSnapshot | null>):
   return "LIVE";
 }
 
-async function captureRecorderSnapshot(reason: string): Promise<void> {
+async function captureRecorderSnapshot(reason: string, observationOnly = false): Promise<void> {
   try {
     const today = indiaTradingDate();
     if (recorderSession.tradingDate !== today) {
@@ -2146,9 +2147,11 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     // V2 Module 8: capture tiny cross-expiry OI summaries from this already-fetched
     // 3-minute market snapshot. No extra broker request and no Recorder schema change.
     const rolloverTimestamp = new Date().toISOString();
-    captureV2RolloverSummary("NIFTY", snapshot.NIFTY, rolloverTimestamp);
-    captureV2RolloverSummary("BANKNIFTY", snapshot.BANKNIFTY, rolloverTimestamp);
-    captureV2RolloverSummary("SENSEX", snapshot.SENSEX, rolloverTimestamp);
+    if (!observationOnly) {
+      captureV2RolloverSummary("NIFTY", snapshot.NIFTY, rolloverTimestamp);
+      captureV2RolloverSummary("BANKNIFTY", snapshot.BANKNIFTY, rolloverTimestamp);
+      captureV2RolloverSummary("SENSEX", snapshot.SENSEX, rolloverTimestamp);
+    }
 
     // K2 (2026-08-21, FULL_MIGRATION_TO_KITE_ONLY) — Recorder Truth-check and
     // storage for NIFTY/BANKNIFTY switched BACK to Kite, matching SENSEX
@@ -2175,6 +2178,12 @@ async function captureRecorderSnapshot(reason: string): Promise<void> {
     // H1_TRUTH_BY_SYMBOL_V1 / H1_RUNTIME_PATCH_V2: research-only, fail-open side-channel.
     // Reuse the exact TruthReport objects already computed by the existing recorder cycle.
     const h1TruthBySymbol = { NIFTY: niftyTruth, BANKNIFTY: bankTruth, SENSEX: sensexTruth };
+    if (observationOnly) {
+      // Closing-session observations reuse existing market-data refresh/storage.
+      // Return before selector marking, journal, shadow outcomes and Telegram.
+      await recordH1FromRuntimeSnapshot(snapshot, h1TruthBySymbol);
+      return;
+    }
     void (() => {
       // H1_SELECTOR_REGISTRY_WIRING_V1: consume only fresh LIVE_RUNTIME_EXACT selector evidence.
       const h1Selector = collectH1LiveSelectorDecisions(new Date().toISOString());
@@ -4502,8 +4511,9 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
 
 let lastRecorderSlot = -1;
 setInterval(() => {
-  if (!isMarketOpenNowServer()) return;
   const now = new Date();
+  const observationOnly = isClosingObservationAt(now);
+  if (!isMarketOpenNowServer() && !observationOnly) return;
   const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
   const ist = new Date(istString);
   const minutesSinceMidnight = ist.getHours() * 60 + ist.getMinutes();
@@ -4513,7 +4523,7 @@ setInterval(() => {
   const slot = Math.floor(minutesSinceMidnight / 3); // one slot per 3-minute window
   if (slot === lastRecorderSlot) return; // already captured this slot
   lastRecorderSlot = slot;
-  void captureRecorderSnapshot("SCHEDULED_3MIN");
+  void captureRecorderSnapshot(observationOnly ? "CLOSING_OBSERVATION_3MIN" : "SCHEDULED_3MIN", observationOnly);
 }, 30 * 1000); // check every 30s so we don't miss the 3-min boundary
 
 // Telegram Market Snapshot fast cycle (2026-08-18, user-requested): a

@@ -1,4 +1,5 @@
 import { dbIsConfigured, dbQuerySafe } from "./db.js";
+import { standardIndexObservationClose } from './index-observation-session.js';
 
 export const H1_REPLAY_SYMBOLS = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
 export type H1ReplaySymbol = (typeof H1_REPLAY_SYMBOLS)[number];
@@ -72,12 +73,13 @@ export function parseH1ReplayRequest(input: {
   if (!validCalendarDate(tradeDate)) return { ok: false, reason: "INVALID_TRADE_DATE" };
 
   const fromTime = String(input.fromTime ?? "09:15").trim();
-  const toTime = String(input.toTime ?? "15:30").trim();
+  const sessionClose = standardIndexObservationClose(tradeDate);
+  const toTime = String(input.toTime ?? sessionClose).trim();
   if (!TIME_RE.test(fromTime) || !TIME_RE.test(toTime)) return { ok: false, reason: "INVALID_TIME_RANGE" };
   if (timeMinutes(fromTime) > timeMinutes(toTime)) return { ok: false, reason: "INVALID_TIME_RANGE" };
 
   const marketOpen = timeMinutes("09:15");
-  const marketClose = timeMinutes("15:30");
+  const marketClose = timeMinutes(sessionClose);
   if (timeMinutes(fromTime) < marketOpen || timeMinutes(toTime) > marketClose) {
     return { ok: false, reason: "OUTSIDE_MARKET_SESSION" };
   }

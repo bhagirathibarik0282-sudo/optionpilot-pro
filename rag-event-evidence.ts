@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { deriveRecordedPremiumResponse } from './premium-response-evidence.js';
 import { alignRecordedRagDte } from './rag-dte-replay-adapter.js';
 import type { Hono } from 'hono';
 import { parseH1FixedContractJourneyRequest } from './h1-fixed-contract-journey-http.js';
@@ -33,7 +34,7 @@ export function parseRagEventRequest(q:Record<string,string|undefined>): {ok:tru
   if(!replay.ok)return replay;
   if(!isCasTradingDate(fixed.value.fromDate)||!previousRagSession(fixed.value.fromDate))return {ok:false,reason:'UNSUPPORTED_OR_NONTRADING_DATE'};
   const kind=q.kind??'EVENT';if(!['EVENT','SNAPSHOT'].includes(kind))return {ok:false,reason:'INVALID_EVIDENCE_KIND'};
-  const lookback=Number(q.lookback??3);if(![1,3,5,15,30,45,75,125].includes(lookback))return {ok:false,reason:'INVALID_LOOKBACK'};
+  const lookback=Number(q.lookback??3);if(![1,3,5,6,15,30,45,75,125].includes(lookback))return {ok:false,reason:'INVALID_LOOKBACK'};
   const minutes=Number(time.slice(0,2))*60+Number(time.slice(3));
   if(minutes<(kind==='SNAPSHOT'?555:558)||(minutes-555)%3!==0)return {ok:false,reason:'EVENT_REQUIRES_REGULAR_3M_PAIR'};
   if(q.includeOutcomes!==undefined&&!['true','false'].includes(q.includeOutcomes))return {ok:false,reason:'INVALID_OUTCOME_OPTION'};
@@ -112,7 +113,7 @@ export function buildRagEventEvidence(r:RagEventRequest,current:H1ReplayHttpResu
     identity:{symbol:r.symbol,date:r.date,expiry:r.expiry,strike:r.strike,side:r.side,dte:Math.round((Date.parse(r.expiry)-Date.parse(r.date))/86400000)},
     event:{timeIst:r.time,flags,before:a,after:b,availableAt:new Date(Math.max(Date.parse(event.receiptAt),Date.parse(event.quoteAt))).toISOString()},
     reference:{sourceDate:previous,pdh:hi,pdl:lo,terminalAt:terminal.receiptAt,semantics:'RETROSPECTIVELY_RECONCILED_RECORDED_RANGE'},
-    beforeAndAt,outcomes,cutoff:r.asOf===Infinity?null:new Date(r.asOf).toISOString(),
+    beforeAndAt,outcomes,premiumResponse:deriveRecordedPremiumResponse(current,{...r,lookback:3}),cutoff:r.asOf===Infinity?null:new Date(r.asOf).toISOString(),
     coverage:{current:current.continuity??null,previous:prior.continuity??null},
     provenance:{selectedEvidenceSha256:hash(sourceRows),digestSemantics:'SELECTED_NORMALIZED_EVIDENCE_NOT_RAW_HTTP_BYTES',snapshotIds:[...new Set([before.snapshotId,event.snapshotId])]},
     answer:`${r.date} ${r.symbol} ${r.strike} ${r.side}, expiry ${r.expiry}: ${r.time} ISTରେ ${flags.join(', ')}। ପୂର୍ବ ୩ ମିନିଟ୍‌ର ₹${a.toFixed(2)} → ₹${b.toFixed(2)}; ଯାଞ୍ଚ ହୋଇଥିବା PDH ₹${hi.toFixed(2)}, PDL ₹${lo.toFixed(2)}।`,
@@ -139,7 +140,7 @@ export function buildRagPremiumSnapshot(r:RagEventRequest,current:H1ReplayHttpRe
     identity:{symbol:r.symbol,date:r.date,expiry:r.expiry,strike:r.strike,side:r.side,dte:Math.round((Date.parse(r.expiry)-Date.parse(r.date))/86400000)},
     event:{timeIst:r.time,flags:[],before:before?.price??null,after:selected.price,availableAt:new Date(Math.max(Date.parse(selected.receiptAt),Date.parse(selected.quoteAt))).toISOString()},
     comparison:{lookbackMinutes:lookback,selectedChangePercent:selectedChange,oppositeSide:otherSide,oppositeChangePercent:oppositeChange},multiDte,
-    reference,referenceUnavailableReason:referenceResult.ok?null:referenceResult.reason,beforeOffsets,beforeAndAt,outcomes,cutoff:r.asOf===Infinity?null:new Date(r.asOf).toISOString(),
+    reference,referenceUnavailableReason:referenceResult.ok?null:referenceResult.reason,beforeOffsets,beforeAndAt,outcomes,premiumResponse:deriveRecordedPremiumResponse(current,r),cutoff:r.asOf===Infinity?null:new Date(r.asOf).toISOString(),
     coverage:{current:current.continuity??null,previous:prior.continuity??null},
     provenance:{selectedEvidenceSha256:hash(sourceRows),digestSemantics:'SELECTED_NORMALIZED_EVIDENCE_NOT_RAW_HTTP_BYTES',snapshotIds:[...new Set(beforeAndAt.filter(Boolean).flatMap(p=>[p!.pair.ce?.snapshotId,p!.pair.pe?.snapshotId]).filter(Boolean))]},
     answer:r.date+' '+r.symbol+' '+r.strike+' · expiry '+r.expiry+' · '+r.time+' IST: '+reaction(r.side,selected,before,selectedChange)+'। Opposite '+reaction(otherSide,opposite,otherBefore,oppositeChange)+'। '+(reference?'Previous-session PDH ₹'+reference.pdh.toFixed(2)+' / PDL ₹'+reference.pdl.toFixed(2)+'।':'Previous-session PDH/PDL reference ଅନୁପଲବ୍ଧ।')+(point?.context.fullPcr!==null&&point?.context.fullPcr!==undefined?' Full PCR '+point.context.fullPcr.toFixed(4)+'।':''),

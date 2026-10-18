@@ -5933,16 +5933,19 @@ function calcAdvancedGreeks(
   strike: number,
   ivPercent: number,
   daysToExpiry: number,
-  isCall: boolean
+  isCall: boolean,
+  exactExpiryTime = false
 ): {
   intrinsicValue: number; extrinsicValue: number; theoreticalPremium: number;
   delta: number; gamma: number; vega: number; theta: number;
   vanna: number; charm: number; speed: number; zomma: number; color: number;
   vomma: number; ultima: number;
 } | null {
-  if (spot <= 0 || strike <= 0 || ivPercent <= 0 || daysToExpiry < 0) return null;
+  if (spot <= 0 || strike <= 0 || ivPercent <= 0 || !Number.isFinite(daysToExpiry) || (exactExpiryTime ? daysToExpiry <= 0 : daysToExpiry < 0)) return null;
   const sigma = ivPercent / 100;
-  const T = Math.max(daysToExpiry / 365, 0.0001); // avoid divide-by-zero on expiry day
+  // Index quote production opts into exact positive time. Preserve the legacy
+  // convention for commodity and standalone calibration callers in this patch.
+  const T = exactExpiryTime ? daysToExpiry / 365 : Math.max(daysToExpiry / 365, 0.0001);
   const r = BS_RISK_FREE_RATE;
   const sqrtT = Math.sqrt(T);
   const d1 = (Math.log(spot / strike) + (r + (sigma * sigma) / 2) * T) / (sigma * sqrtT);
@@ -6875,7 +6878,7 @@ async function fetchIndexData(
                 const daysToExpiry = daysToDerivativeExpiry(ceInst.expiry || expiryDate, Date.now(), symbol);
                 const computedIv = daysToExpiry > 0 ? calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, true) : Number.NaN;
                 const greeks = daysToExpiry > 0 ? calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true) : { delta: Number.NaN, vega: Number.NaN, theta: Number.NaN };
-                const advGreeksCe = daysToExpiry > 0 ? calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true) : null;
+                const advGreeksCe = daysToExpiry > 0 ? calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true, true) : null;
                 const gammaCe = advGreeksCe ? advGreeksCe.gamma : Number.NaN;
                 expiry.ceStrikes.push({
                   strike,
@@ -6927,7 +6930,7 @@ async function fetchIndexData(
                 const daysToExpiry = daysToDerivativeExpiry(peInst.expiry || expiryDate, Date.now(), symbol);
                 const computedIv = daysToExpiry > 0 ? calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, false) : Number.NaN;
                 const greeks = daysToExpiry > 0 ? calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false) : { delta: Number.NaN, vega: Number.NaN, theta: Number.NaN };
-                const advGreeksPe = daysToExpiry > 0 ? calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false) : null;
+                const advGreeksPe = daysToExpiry > 0 ? calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false, true) : null;
                 const gammaPe = advGreeksPe ? advGreeksPe.gamma : Number.NaN;
                 expiry.peStrikes.push({
                   strike,

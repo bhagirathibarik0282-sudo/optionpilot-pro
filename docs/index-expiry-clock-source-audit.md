@@ -41,6 +41,13 @@ No public market price data was fetched.
 - Exact expiry/after expiry yields no valid new Greeks. Unresolved index clocks
   preserve quote fields and use the existing nonfinite/missing-value path for
   model metrics, rather than manufacturing zero Greeks.
+- Index quote production opts out of the advanced-Greek model's
+  `T >= 0.0001 years` floor (52.56 minutes), which disagreed with the actual
+  positive expiry time used by Delta/Theta/Vega. Commodity and standalone
+  calibration callers retain their existing convention for separate review.
+  A five-minute-to-expiry regression checks actual server Gamma against an
+  independent second finite difference of option prices. Zero/nonfinite time
+  remains unavailable instead of receiving an artificial time floor.
 
 ## Devil Check and limits
 
@@ -100,7 +107,7 @@ after release, which is why this patch requires review before production.
 ## Local validation receipt
 
 - Focused clocks/actual CE+PE calculation/actual recorder scheduler and capture/
-  replay/market-gate/Greek cross-check suite: 43 passed, 0 failed, 0 skipped.
+  replay/market-gate/Greek cross-check suite: 44 passed, 0 failed, 0 skipped.
 - Full existing `npm test`: 655 passed, 0 failed, 1 existing skipped test.
 - Permanent guardrails and server TypeScript syntax transform passed.
 - Test-time wiring scripts generated unrelated Telegram wiring edits; those were

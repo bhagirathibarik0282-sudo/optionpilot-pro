@@ -55,3 +55,33 @@ for (const side of ['CE', 'PE'] as const) {
     }
   });
 }
+
+test('actual advanced Gamma respects five remaining minutes rather than a 52.56-minute floor', () => {
+  const mathStart = source.indexOf('function normPdf(');
+  const mathEnd = source.indexOf('// Implied Volatility solver', mathStart);
+  const greekStart = source.indexOf('function calcGreeks(');
+  const greekEnd = source.indexOf('function findActiveIndexFuture(', greekStart);
+  assert.ok(mathStart >= 0 && mathEnd > mathStart && greekEnd > greekStart);
+  const code = transformSync(source.slice(mathStart, mathEnd) + source.slice(greekStart, greekEnd), { loader: 'ts' }).code;
+  const advanced = runInNewContext(code + '\ncalcAdvancedGreeks;', { BS_RISK_FREE_RATE: .1 });
+  const years = 5 / 525600, sigma = .2, spot = 100, strike = 100;
+  // Independent central second difference of the option price; no Greek call.
+  const cdf = (x: number) => {
+    // Integrated normal-density series, accurate in this near-zero stencil.
+    let term = x, integral = x;
+    for (let n = 1; n <= 20; n++) {
+      term *= -x * x / (2 * n);
+      integral += term / (2 * n + 1);
+    }
+    return .5 + integral / Math.sqrt(2 * Math.PI);
+  };
+  const price = (s: number) => {
+    const d1 = (Math.log(s / strike) + (.1 + sigma * sigma / 2) * years) / (sigma * Math.sqrt(years));
+    return s * cdf(d1) - strike * Math.exp(-.1 * years) * cdf(d1 - sigma * Math.sqrt(years));
+  };
+  const h = .001, numericalGamma = (price(spot + h) - 2 * price(spot) + price(spot - h)) / (h * h);
+  assert.ok(Math.abs(advanced(spot, strike, 20, 5 / 1440, true, true).gamma - numericalGamma) < .005);
+  assert.equal(advanced(spot, strike, 20, 0, true, true), null);
+  assert.equal(advanced(spot, strike, 20, NaN, true, true), null);
+  assert.ok(advanced(spot, strike, 20, 5 / 1440, true).gamma < numericalGamma / 2);
+});

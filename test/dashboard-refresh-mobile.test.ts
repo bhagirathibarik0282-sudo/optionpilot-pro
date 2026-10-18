@@ -105,3 +105,16 @@ test('completed replay refresh skips heavy requests only with exact recorded end
 });
 
 test('book controls do not trigger hidden annex history loading',async()=>{const html=renderBusinessDashboardV1Html({} as any),body=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][1][1],fn=body.match(/async function ensureAnnexMemory\(\)\{[\s\S]*?\n\}/)![0];const ctx:any={$:()=>({classList:{contains:(name:string)=>name==='mb-focus'}})};vm.createContext(ctx);vm.runInContext(fn,ctx);await ctx.ensureAnnexMemory();});
+
+test('fresh startup loads the latest saved session on Sunday instead of querying an empty today',async()=>{
+ const html=renderBusinessDashboardV1Html({} as any),body=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][1][1];
+ const helper=body.match(/function initialRecordedDate\([^\n]+\n/)![0],startup=body.split('\n').find(l=>l.startsWith("get('Recorded dates'"))!;
+ let now=Date.parse('2026-10-18T11:10:00Z');class Clock extends Date{static now(){return now;}}
+ const nodes:any={date:{value:''},to:{value:''},baseline:{value:''},status:{textContent:''}},loads:any[]=[];
+ const ctx:any={Date:Clock,recordedDates:[],$:(id:string)=>nodes[id],get:async()=>({dates:[{tradeDate:'2026-10-15'},{tradeDate:'2026-10-16'}]}),load:()=>loads.push({date:nodes.date.value,baseline:nodes.baseline.value}),observationSessionClose:()=> '15:40',live(){},setInterval(){},renderSourceHealth(){}};
+ vm.createContext(ctx);vm.runInContext(helper+startup,ctx);await Promise.resolve();await Promise.resolve();
+ assert.deepEqual(loads,[{date:'2026-10-16',baseline:'2026-10-15'}]);assert.equal(nodes.date.value,'2026-10-16');
+ assert.equal(ctx.initialRecordedDate(['2026-10-16','2026-10-19','2026-02-30','bad']), '2026-10-16');
+ now=Date.parse('2026-10-19T04:00:00Z');assert.equal(ctx.initialRecordedDate(['2026-10-16','2026-10-19']),'2026-10-19');assert.equal(ctx.initialRecordedDate(['2026-10-16']),'2026-10-16');
+ now=Date.parse('2026-10-18T18:31:00Z');assert.equal(ctx.initialRecordedDate(['2026-10-19']),'2026-10-19','IST date, independently of host timezone');
+});

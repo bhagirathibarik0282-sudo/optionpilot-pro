@@ -2179,12 +2179,12 @@ async function captureRecorderSnapshot(reason: string, observationOnly = false):
     // Reuse the exact TruthReport objects already computed by the existing recorder cycle.
     const h1TruthBySymbol = { NIFTY: niftyTruth, BANKNIFTY: bankTruth, SENSEX: sensexTruth };
     if (observationOnly) {
-      // Closing-session observations reuse existing market-data refresh/storage.
+      // Intermediate-minute and closing observations reuse market-data refresh/storage.
       // Return before selector marking, journal, shadow outcomes and Telegram.
       await recordH1FromRuntimeSnapshot(snapshot, h1TruthBySymbol);
       return;
     }
-    void (() => {
+    await (() => {
       // H1_SELECTOR_REGISTRY_WIRING_V1: consume only fresh LIVE_RUNTIME_EXACT selector evidence.
       const h1Selector = collectH1LiveSelectorDecisions(new Date().toISOString());
       const h1CandidateDecisions = h1Selector.eligibleForLiveH1Marking ? h1Selector.decisions : undefined;
@@ -4510,24 +4510,29 @@ async function runTelegramAlertCycle(session: KiteSession): Promise<void> {
 }
 
 let lastRecorderSlot = -1;
-setInterval(() => {
+let recorderCaptureInFlight = false;
+setInterval(async () => {
   const now = new Date();
-  const observationOnly = isClosingObservationAt(now);
-  if (!isMarketOpenNowServer() && !observationOnly) return;
-  const istString = now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" });
-  const ist = new Date(istString);
-  const minutesSinceMidnight = ist.getHours() * 60 + ist.getMinutes();
-  // A deployment can start between grid minutes; wait for the next actual
-  // grid minute instead of capturing the floor slot with an off-grid timestamp.
-  if (minutesSinceMidnight % 3 !== 0) return;
-  const slot = Math.floor(minutesSinceMidnight / 3); // one slot per 3-minute window
-  if (slot === lastRecorderSlot) return; // already captured this slot
+  const closing = isClosingObservationAt(now);
+  if ((!isMarketOpenNowServer() && !closing) || recorderCaptureInFlight) return;
+  const ist = new Date(now.getTime() + 19_800_000);
+  const minutesSinceMidnight = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  const slot = Math.floor(now.getTime() / 60_000);
+  if (slot === lastRecorderSlot) return;
+  // Archive every observed minute. Keep existing business/Telegram processing
+  // on its three-minute grid; intermediate minutes use the storage-only path.
+  const observationOnly = closing || minutesSinceMidnight % 3 !== 0;
   lastRecorderSlot = slot;
-  void captureRecorderSnapshot(observationOnly ? "CLOSING_OBSERVATION_3MIN" : "SCHEDULED_3MIN", observationOnly);
-}, 30 * 1000); // check every 30s so we don't miss the 3-min boundary
+  recorderCaptureInFlight = true;
+  try {
+    await captureRecorderSnapshot(closing ? "CLOSING_OBSERVATION_1MIN" : observationOnly ? "SCHEDULED_1MIN_ARCHIVE" : "SCHEDULED_3MIN", observationOnly);
+  } finally {
+    recorderCaptureInFlight = false;
+  }
+}, 30 * 1000); // At most one capture per actual minute; missed minutes stay missing.
 
 // Telegram Market Snapshot fast cycle (2026-08-18, user-requested): a
-// genuinely separate 1-minute cadence from the Recorder's 3-min cycle
+// separate Telegram 1-minute cadence from the archive recorder
 // above, gated the same way (market hours only). This does a REAL extra
 // Kite fetch per symbol per minute (fetchTelegramFastPcrSnapshot) --
 // explicitly a deliberate cost tradeoff the user chose (fresh PCR/premium/

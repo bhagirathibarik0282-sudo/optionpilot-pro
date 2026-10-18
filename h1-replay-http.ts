@@ -108,7 +108,7 @@ async function rows<T extends Record<string, unknown>>(sql: string, params: unkn
 }
 
 export interface H1ReplayContinuity {
-  cadenceMinutes: 3;
+  cadenceMinutes: 1 | 3;
   expectedBuckets: number;
   observedMarkerBuckets: number;
   missingBuckets: string[];
@@ -127,7 +127,7 @@ function expectedBucketIsos(request: H1ReplayRequest): string[] {
   const end = Date.parse(`${request.tradeDate}T${request.toTime}:00+05:30`);
   const out: string[] = [];
   if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) return out;
-  for (let t = start; t <= end; t += 3 * 60_000) out.push(new Date(t).toISOString());
+  for (let t = start; t <= end; t += (request.tradeDate >= "2026-10-19" ? 1 : 3) * 60_000) out.push(new Date(t).toISOString());
   return out;
 }
 
@@ -165,7 +165,7 @@ export function buildH1ReplayContinuity(
   const coveragePct = expected.length ? (observedExpectedCount / expected.length) * 100 : 0;
   const canonicalCoveragePct = expected.length ? (canonicalExpectedCount / expected.length) * 100 : 0;
   return {
-    cadenceMinutes: 3,
+    cadenceMinutes: request.tradeDate >= "2026-10-19" ? 1 : 3,
     expectedBuckets: expected.length,
     observedMarkerBuckets: observed.size,
     missingBuckets,

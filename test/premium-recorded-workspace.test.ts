@@ -10,7 +10,7 @@ function harness(saved:any=null){
  const nodes=new Map<string,any>(),events:any[]=[],timers:Function[]=[],calls:any[]=[];
  for(const [,id] of PREMIUM_WORKSPACE_HTML.matchAll(/id="([^"]+)"/g))nodes.set(id,{id,innerHTML:'',textContent:'',value:'',disabled:false,hidden:false,options:[],scrollLeft:0,querySelectorAll:()=>[],scrollIntoView(){},setAttribute(){}});
  let state:any={date:'2026-10-17',scope:'CORE',recordedDates:['2026-10-12','2026-10-13','2026-10-16'],current:{},baseline:{},loading:false};
- const row=(t:string,ltp:number,option_type='CE')=>({symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type,minute_bucket:'2026-10-13T'+t+':00.000Z',quote_timestamp:'2026-10-13T'+t+':22.000Z',truth_verdict:'TRUE',ltp,pdh:110,pdl:90,oi:200,day_high:120,day_low:80});
+ const row=(t:string,ltp:number,option_type='CE')=>({symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type,minute_bucket:'2026-10-13T'+t+':00.000Z',quote_timestamp:'2026-10-13T'+t+':22.000Z',truth_verdict:'TRUE',ltp,pdh:110,pdl:90,oi:200,pdc:100,day_high:120,day_low:80});
  const data={market:[{minute_bucket:'2026-10-13T04:00:00.000Z',spot_ltp:22000}],options:[row('04:00',100),row('04:03',105),row('04:06',111),row('04:00',150,'PE'),row('04:03',145,'PE'),row('04:06',140,'PE')]};
  const api={getState:()=>state,setDate:async(date:string,options:any)=>{calls.push({date,options});state={...state,date,scope:options.scope,current:date==='2026-10-13'?{NIFTY:data}:{}};}};
  const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(){},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,api});
@@ -118,4 +118,16 @@ test('recorded bigint OI and volume render as counts without accepting unsafe or
   for(const r of h.state().current.NIFTY.options){r.oi=bad;r.volume=bad;}
   h.click('',{pwMetric:'oi'});assert.doesNotMatch(h.node('pw-results').innerHTML,/class="ce" style=/);
  }
+});
+
+test('ladder previous-day switch shows exact PDC and missing FIB never invents holding',async()=>{
+ const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
+ h.click('',{pwMetric:'levels'});assert.match(h.node('pw-results').innerHTML,/PDH \/ PDC \/ PDL/);assert.match(h.node('pw-results').innerHTML,/110 \/ 100 \/ 90/);
+ h.click('',{pwMetric:'fib'});assert.match(h.node('pw-results').innerHTML,/Daily FIB/);assert.doesNotMatch(h.node('pw-results').innerHTML,/data-pw-position/);
+});
+
+test('FIB ladder colours only observed price position and preserves missing prior-contract data',async()=>{
+ const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
+ h.state().baseline.NIFTY={options:[{symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type:'CE',truth_verdict:'TRUE',minute_bucket:'2026-10-12T10:00:00.000Z',day_high:120,day_low:80,ltp:100}]};
+ h.click('',{pwMetric:'fib'});const html=h.node('pw-results').innerHTML;assert.match(html,/data-pw-position="BELOW"/);assert.match(html,/R1 · BELOW/);assert.match(html,/HOLD unconfirmed/);assert.equal((html.match(/data-pw-position=/g)||[]).length,1,'PE cannot borrow CE levels');
 });

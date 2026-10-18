@@ -121,3 +121,10 @@ test('recorded spot uses the PCR minute, respects replay cursor and rejects dupl
  market[1].truth_verdict='UNKNOWN';assert.equal(recorded(state).rows[0].spotValue,null);market[1].truth_verdict='TRUE';
  market.push({...market[1]});assert.equal(recorded(state).rows[0].spotValue,null);market.splice(1);assert.equal(recorded(state).rows[0].spotValue,null);
 });
+
+test('new one-minute archive compares adjacent minutes and withholds arrows across missing minutes',async()=>{
+ const {deriveRecordedThreeIndexPcr:deriveRecorded}=await import('../live-three-index-pcr.js');
+ const state:any={date:'2026-10-19',current:{NIFTY:{chain:[0,60000,180000].map((n,i)=>({symbol:'NIFTY',expiry:'2026-10-20',minute_bucket:iso(Date.parse('2026-10-19T04:00:00Z')+n),truth_verdict:'TRUE',full_pcr_source:'Exact archived full-chain source',full_chain_oi_pcr:1+i*.1}))}}};
+ assert.equal(deriveRecorded(state,'2026-10-19T04:01:00Z').rows[0].direction,'UP');
+ assert.equal(deriveRecorded(state).rows[0].direction,'WAIT');
+});

@@ -33,22 +33,22 @@ test('date-aware replay exposes missing closing buckets without manufacturing re
   assert.equal(parseH1ReplayRequest({ tradeDate: '2026-10-16', toTime: '15:41' }).ok, false);
 });
 
-test('actual scheduler keeps one existing timer, observes three closing slots and never backfills', () => {
+test('actual scheduler records each closing minute without business processing or backfill', async () => {
   const start = server.indexOf('let lastRecorderSlot = -1;');
   const end = server.indexOf('// Telegram Market Snapshot fast cycle', start);
-  let at = '2026-10-16T10:00:07Z', tick: () => void = () => {};
+  let at = '2026-10-16T10:00:07Z', tick: () => Promise<void> = async () => {};
   const captures: unknown[][] = [];
   class Clock extends Date { constructor(v?: any) { super(v === undefined ? at : v); } }
   runInNewContext(server.slice(start, end), {
     Date: Clock, isClosingObservationAt,
     isMarketOpenNowServer: () => isIndianEquityMarketOpenAt(new Date(at)),
-    setInterval: (fn: () => void, ms: number) => { assert.equal(ms, 30000); tick = fn; },
+    setInterval: (fn: () => Promise<void>, ms: number) => { assert.equal(ms, 30000); tick = fn; },
     captureRecorderSnapshot: (...args: unknown[]) => captures.push(args),
   });
   for (const iso of ['10:00:07', '10:01:07', '10:03:07', '10:03:37', '10:06:07', '10:09:07', '10:12:07']) {
-    at = '2026-10-16T' + iso + 'Z'; tick();
+    at = '2026-10-16T' + iso + 'Z'; await tick();
   }
-  assert.deepEqual(captures, [['SCHEDULED_3MIN', false], ['CLOSING_OBSERVATION_3MIN', true], ['CLOSING_OBSERVATION_3MIN', true], ['CLOSING_OBSERVATION_3MIN', true]]);
+  assert.deepEqual(captures, [['SCHEDULED_3MIN', false], ['CLOSING_OBSERVATION_1MIN', true], ['CLOSING_OBSERVATION_1MIN', true], ['CLOSING_OBSERVATION_1MIN', true], ['CLOSING_OBSERVATION_1MIN', true]]);
 });
 
 test('actual observation-only capture writes H1 then returns before selector, journal, outcomes and Telegram', async () => {
@@ -70,8 +70,9 @@ test('actual observation-only capture writes H1 then returns before selector, jo
     captureV2ShadowCycle: forbidden, runTelegramAlertCycle: forbidden, dbInsert: forbidden,
     console: { error: (...args: unknown[]) => { throw Error(JSON.stringify(args)); } },
   });
-  await capture('CLOSING_OBSERVATION_3MIN', true);
-  assert.equal(calls.length, 1);
+  await capture('CLOSING_OBSERVATION_1MIN', true);
+  await capture('SCHEDULED_1MIN_ARCHIVE', true);
+  assert.equal(calls.length, 2);
   assert.equal(calls[0].length, 2); // No candidate decisions supplied.
 });
 
@@ -91,4 +92,12 @@ test('dashboard full-session selection uses the same clock and emits valid scrip
   }
   assert.equal(loads, 3);
   for (const script of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) new Script(script[1]);
+});
+
+test('one-minute replay continuity starts on cutover date and retains historical three-minute grids',()=>{
+ for(const [date,cadence,count] of [['2026-10-16',3,3],['2026-10-19',1,7]] as const){
+  const parsed=parseH1ReplayRequest({tradeDate:date,fromTime:'09:15',toTime:'09:21',symbol:'NIFTY'});assert.ok(parsed.ok);
+  const markers=[0,3,6].map(n=>({minute_bucket:new Date(Date.parse(date+'T03:45:00Z')+n*60000).toISOString(),truth_verdict:'TRUE'}));
+  const c=buildH1ReplayContinuity(parsed.value,markers,markers);assert.equal(c.cadenceMinutes,cadence);assert.equal(c.expectedBuckets,count);assert.equal(c.missingBuckets.length,count-3);
+ }
 });

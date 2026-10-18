@@ -88,7 +88,7 @@ export function deriveRecordedThreeIndexPcr(state:any,cursor='',previous:any=nul
   const expiry=[...new Set<string>(all.map((r:any)=>day(r.expiry)))].sort()[0];if(!expiry)return empty;
   const source=all.filter((r:any)=>day(r.expiry)===expiry),times=[...new Set<number>(source.map((r:any)=>Date.parse(r.minute_bucket)))].sort((a,b)=>b-a);
   const sample=(at:number)=>{const matches=source.filter((r:any)=>Date.parse(r.minute_bucket)===at);const r=matches.length===1?matches[0]:null;return r&&r.truth_verdict==='TRUE'&&/^(Exact archived full-chain source|Normalized full-chain source)$/.test(r.full_pcr_source||'')&&typeof r.full_chain_oi_pcr==='number'&&Number.isFinite(r.full_chain_oi_pcr)&&r.full_chain_oi_pcr>=0?{value:r.full_chain_oi_pcr,checked:at,expiry}:null;};
-  const current=sample(times[0]);if(!current)return {...empty,expiry};const baseline=times[0]-times[1]===180000?sample(times[1]):null;
+  const current=sample(times[0]);if(!current)return {...empty,expiry};const baseline=times[0]-times[1]===(state.date>='2026-10-19'?60000:180000)?sample(times[1]):null;
   const direction=!baseline?'WAIT':current.value===baseline.value?'FLAT':current.value>baseline.value?'UP':'DOWN',prior=previous?.key===key?previous.rows?.find((r:any)=>r.symbol===symbol&&r.expiry===expiry):null;
   const blinkUntil=prior?.current?.checked===current.checked?prior.blinkUntil:baseline&&prior?.current?.checked===baseline.checked&&['UP','DOWN'].includes(direction)?now+1800:0;
   return {symbol,expiry,value:current.value,direction,current,baseline,blinkUntil};

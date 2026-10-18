@@ -47,6 +47,7 @@ export function derivePremiumLiveContext(payload:any,symbol='ALL',expiries:strin
 /** Descriptive presentation model. Each row retains its exact contract and source times. */
 export function derivePremiumWorkspace(input:any){
  const num=(v:any):number|null=>typeof v==='number'&&Number.isFinite(v)?v:null;
+ const count=(v:any):number|null=>{const n=typeof v==='string'&&/^\d+$/.test(v)?Number(v):v;return typeof n==='number'&&Number.isSafeInteger(n)&&n>=0?n:null;};
  const day=(v:any)=>String(v||'').slice(0,10),id=(r:any)=>[r.symbol,day(r.expiry),r.strike,r.option_type].join('|');
  const rows=(input.rows||[]).filter((r:any)=>['NIFTY','SENSEX','BANKNIFTY'].includes(r.symbol)&&['CE','PE'].includes(r.option_type)&&num(r.strike)!==null&&r.strike>0&&/^\d{4}-\d{2}-\d{2}$/.test(day(r.expiry))&&day(r.minute_bucket)===input.date&&Number.isFinite(Date.parse(r.minute_bucket)));
  const groups=new Map<string,any[]>();for(const r of rows){const k=id(r);if(!groups.has(k))groups.set(k,[]);groups.get(k)!.push(r);}
@@ -82,7 +83,7 @@ export function derivePremiumWorkspace(input:any){
   const nearest=price===null?null:Object.entries(fib).sort((a:any,b:any)=>Math.abs(price-a[1])-Math.abs(price-b[1]))[0]||null;
   const dte=Math.round((Date.parse(day(last.expiry)+'T00:00:00Z')-Date.parse(input.date+'T00:00:00Z'))/86400000);
   contracts.push({key,symbol:last.symbol,expiry:day(last.expiry),strike:last.strike,type:last.option_type,dte,price,change,from,fromAt:input.minutes==='DAY'?null:baseline?.minute_bucket||null,at:last.minute_bucket,observedAt:last.observedAt||last.minute_bucket,receivedAt:last.receivedAt||null,
-   pdh,pdl,reaction,eventAt,eventFrom,oi:usable(last)?num(last.oi):null,oiChange:usable(last)&&baseline&&num(last.oi)!==null&&num(baseline.oi)!==null?last.oi-baseline.oi:null,iv:usable(last)?num(last.iv):null,delta:usable(last)?num(last.delta):null,gamma:usable(last)?num(last.gamma):null,theta:usable(last)?num(last.theta):null,vega:usable(last)?num(last.vega):null,volume:usable(last)?num(last.volume):null,bid:usable(last)?num(last.bid):null,ask:usable(last)?num(last.ask):null,
+   pdh,pdl,reaction,eventAt,eventFrom,oi:usable(last)?count(last.oi):null,oiChange:usable(last)&&baseline&&count(last.oi)!==null&&count(baseline.oi)!==null?count(last.oi)!-count(baseline.oi)!:null,iv:usable(last)?num(last.iv):null,delta:usable(last)?num(last.delta):null,gamma:usable(last)?num(last.gamma):null,theta:usable(last)?num(last.theta):null,vega:usable(last)?num(last.vega):null,volume:usable(last)?count(last.volume):null,bid:usable(last)?num(last.bid):null,ask:usable(last)?num(last.ask):null,
    fib,fibAt:old?.minute_bucket||null,nearest,points:series.map(r=>({at:r.minute_bucket,value:usable(r)?r.ltp:null})),state:last.truth_verdict==='CONFLICT'?'CONFLICT':price===null?'UNAVAILABLE':input.live?'LIVE':'RECORDED'});
  });
  const f=input.filter||{};

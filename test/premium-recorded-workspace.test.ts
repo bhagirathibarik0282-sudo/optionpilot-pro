@@ -108,3 +108,14 @@ test('OI ladder entry reuses the premium workspace and exact watch remains locke
  const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();assert.match(h.node('pw-results').innerHTML,/pw-chain-table/);
  h.click('',{pwLock:'NIFTY|2026-10-19|22000|CE'});h.view.openLadder({source:'RECORDED',symbol:'SENSEX'});assert.equal(h.node('pw-symbol').value,'NIFTY');assert.equal(h.stored().watch,'NIFTY|2026-10-19|22000|CE');
 });
+
+test('recorded bigint OI and volume render as counts without accepting unsafe or malformed values',async()=>{
+ const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
+ for(const r of h.state().current.NIFTY.options){r.oi='7215260';r.volume='12345';}
+ h.click('',{pwLayout:'ladder'});assert.match(h.node('pw-results').innerHTML,/72.15/);assert.match(h.node('pw-results').innerHTML,/class="ce" style="width:100%/);
+ h.click('',{pwMetric:'volume'});assert.match(h.node('pw-results').innerHTML,/12,345/);
+ for(const bad of ['',' 12','1e6','-1','9007199254740992','NaN']){
+  for(const r of h.state().current.NIFTY.options){r.oi=bad;r.volume=bad;}
+  h.click('',{pwMetric:'oi'});assert.doesNotMatch(h.node('pw-results').innerHTML,/class="ce" style=/);
+ }
+});

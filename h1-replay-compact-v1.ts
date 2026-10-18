@@ -16,6 +16,7 @@ export interface H1ReplayCompactResult {
   canonicalProjection?: "PCR_PROVENANCE_V1";
   request: H1ReplayHttpResult["request"];
   counts?: H1ReplayHttpResult["counts"];
+  queryTimingsMs?: H1ReplayHttpResult["queryTimingsMs"];
   dte0Calibration?: ReturnType<typeof buildH1Dte0TransitionCalibration>;
   market?: H1CompactTable;
   options?: H1CompactTable;
@@ -80,6 +81,7 @@ export function compactH1Replay(result: H1ReplayHttpResult, canonicalPcrOnly = f
     ...(canonicalPcrOnly ? { canonicalProjection: "PCR_PROVENANCE_V1" as const } : {}),
     request: result.request,
     ...(result.counts ? { counts: result.counts } : {}),
+    ...(result.queryTimingsMs ? { queryTimingsMs: result.queryTimingsMs } : {}),
     ...(dte0Calibration ? { dte0Calibration } : {}),
     ...(result.market ? { market: compactRows(result.market) } : {}),
     ...(result.options ? { options: compactRows(result.options) } : {}),

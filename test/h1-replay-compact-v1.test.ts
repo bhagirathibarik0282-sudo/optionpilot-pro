@@ -19,6 +19,7 @@ test("compact replay preserves counts, continuity and authority boundary", () =>
     productionImpact: "NONE",
     request: { symbol: "NIFTY", tradeDate: "2026-09-07", fromTime: "09:15", toTime: "15:30", scope: "CORE" },
     counts: { market: 1, options: 2, chain: 1, markers: 1, canonical: 1 },
+    queryTimingsMs: { market: 12.3, raw_gaps: 0 },
     market: [{ symbol: "NIFTY", minute_bucket: "2026-09-07T03:45:00.000Z", spot_ltp: 24000 }],
     options: [{ symbol: "NIFTY", strike: 24000, option_type: "CE", ltp: 100 }, { symbol: "NIFTY", strike: 24000, option_type: "PE", ltp: 95 }],
     chain: [{ symbol: "NIFTY", call_wall_strike: 24100, put_wall_strike: 23900 }],
@@ -30,6 +31,7 @@ test("compact replay preserves counts, continuity and authority boundary", () =>
   assert.equal(compact.productionImpact, "NONE");
   assert.equal(compact.lossless, true);
   assert.deepEqual(compact.counts, source.counts);
+  assert.deepEqual(compact.queryTimingsMs, source.queryTimingsMs);
   assert.deepEqual(compact.continuity, source.continuity);
   assert.deepEqual(expandRows(compact.market!), source.market);
   assert.deepEqual(expandRows(compact.options!), source.options);

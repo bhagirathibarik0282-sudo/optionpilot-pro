@@ -137,3 +137,55 @@ test("marker gap evidence reports raw normalized rows without granting authority
   assert.equal(out.affectsTelegram, false);
   assert.equal(out.affectsExecution, false);
 });
+
+async function replayReadHarness(missing = false, failGapRead = false) {
+  const { readFileSync } = await import('node:fs');
+  const { runInNewContext } = await import('node:vm');
+  const { transformSync } = await import('esbuild');
+  const source = readFileSync(new URL('../h1-replay-http.ts', import.meta.url), 'utf8');
+  const module = { exports: {} as any }, calls: string[] = [];
+  const bucket = '2026-10-16T03:45:00.000Z';
+  const observed = [{ symbol: 'NIFTY', minute_bucket: bucket, truth_verdict: 'TRUE' }];
+  runInNewContext(transformSync(source, { loader: 'ts', format: 'cjs' }).code, {
+    module, exports: module.exports, performance, Date,
+    require: (name: string) => name === './db.js' ? {
+      dbIsConfigured: () => true,
+      dbQuerySafe: async (sql: string) => {
+        calls.push(sql);
+        if (sql.includes("SELECT 'market'::text AS source")) return failGapRead ? null : { rows: [{ source: 'option', minute_bucket: '2026-10-16T03:48:00.000Z', row_count: '12' }] };
+        if (sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'")) return { rows: observed };
+        if (sql.includes('SELECT minute_bucket, truth_verdict FROM markers')) return { rows: missing ? observed : [...observed, { ...observed[0], minute_bucket: '2026-10-16T03:48:00.000Z' }] };
+        return { rows: observed };
+      },
+    } : { standardIndexObservationClose: () => '15:30' },
+  });
+  const result = await module.exports.runH1ReplayHttp({ symbol: 'NIFTY', tradeDate: '2026-10-16', fromTime: '09:15', toTime: '09:18', scope: 'CORE' });
+  return { result: JSON.parse(JSON.stringify(result)), calls };
+}
+
+test('complete marker grid skips raw presence reads without changing observations', async () => {
+  const { result, calls } = await replayReadHarness();
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 5);
+  assert.deepEqual(result.markerGapEvidence.buckets, []);
+  assert.equal(result.market.length, 1);
+  assert.equal(result.counts.options, 1);
+  assert.equal(result.queryTimingsMs.raw_gaps, 0);
+  assert.equal(result.continuity.complete, true);
+});
+
+test('missing marker retains raw normalized evidence and read timing', async () => {
+  const { result, calls } = await replayReadHarness(true);
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 6);
+  assert.deepEqual(result.markerGapEvidence.buckets, [{ minuteBucket: '2026-10-16T03:48:00.000Z', marketRows: 0, optionRows: 12, chainRows: 0 }]);
+  assert.equal(result.continuity.complete, false);
+  assert.equal(typeof result.queryTimingsMs.raw_gaps, 'number');
+});
+
+test('required raw gap read failure remains fail closed', async () => {
+  const { result } = await replayReadHarness(true, true);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'H1_REPLAY_DB_QUERY_FAILED');
+  assert.equal(result.market, undefined);
+});

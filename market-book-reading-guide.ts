@@ -48,7 +48,7 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hid
  const n=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
  const formats=(renderMarketBookLiveContext as any).formats||((renderMarketBookLiveContext as any).formats={numbers:new Map(),time:new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})});
  const fmt=(v:any,d=2)=>{if(n(v)===null)return '—';if(!formats.numbers.has(d))formats.numbers.set(d,new Intl.NumberFormat('en-IN',{maximumFractionDigits:d}));return formats.numbers.get(d).format(v);};
- const time=(v:any)=>v&&Number.isFinite(Date.parse(v))?formats.time.format(new Date(v))+' IST':'—';
+ const time=(v:any)=>{const at=typeof v==='number'?v:Date.parse(v||'');return Number.isFinite(at)?formats.time.format(new Date(at))+' IST':'—';};
  const note=(text:string)=>'<p class="mb-note">'+esc(text)+'</p>';
  if([3,6,7,10].includes(page))return ''; // These chapters have their own expiry, event, premium or EOD content.
  const snapshot=payload?.connected===true?payload.snapshot:null,now=Date.parse(payload?.serverTime||'');
@@ -82,11 +82,25 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hid
   const pcrDetail=usesSample?(sampleOk?sample.periodMs/60000+' min snapshot · checked '+time(sample.checkedAt)+' · source '+time(sample.sourceMinAt)+' → '+time(sample.sourceMaxAt)+' · '+coverage.freshOi+'/'+coverage.expected+' verified OI':'Complete snapshot unavailable'):(a.coverage?.freshOi??0)+'/'+(a.coverage?.expected??0)+' fresh OI · expiry '+(a.expiry||'—')+' · source '+time(a.pcrAt);
   const wall=(side:string)=>{const w=pcr?.[side+'Wall'];return card(side+'Wall',(side==='call'?'CE':'PE')+' wall · strike',fmt(n(w?.strike)!==null&&w.strike>0&&n(w?.oi)!==null&&w.oi>0?w.strike:null,0),(w?'OI '+fmt(w.oi,0)+' · ties '+(Array.isArray(w.tiedStrikes)?w.tiedStrikes.join(', '):'—')+' · ':'')+pcrDetail);};
   const breadth=(role:string)=>{
-   const rows=(Array.isArray(snapshot.participation)?snapshot.participation:[]).filter((q:any)=>q?.identity?.role===role),quotes=rows.filter((q:any)=>fresh(q,role)&&n(q.changePct)!==null);
+   const rows=(Array.isArray(snapshot.participation)?snapshot.participation:[]).filter((q:any)=>q?.identity?.role===role);
+   const interval=display.wheel&&[1,3,6,15,30].includes(Number(display.windowMinutes))?Number(display.windowMinutes):null;
    const label=role==='SECTOR'?'Sector quotes':'Heavyweight quote subset';
-   const summary=card(role==='SECTOR'?'sectors':'stocks',label,quotes.length?quotes.filter((q:any)=>q.changePct>0).length+' ↑ / '+quotes.filter((q:any)=>q.changePct<0).length+' ↓ / '+quotes.filter((q:any)=>q.changePct===0).length+' ↔':'—',quotes.length+'/'+rows.length+' fresh unweighted quotes · vs previous close · shared universe, not '+index+' weights',quotes.length+'/'+rows.length+' fresh');const details='<details data-live-detail="'+esc(index+'-'+role)+'"><summary>'+esc(label)+' · source times</summary>'+rows.map((q:any)=>note((q.identity?.label||'—')+' · '+fmt(fresh(q,role)?q.changePct:null)+'% · '+detail(q,fresh(q,role)))).join('')+'</details>';const up=quotes.filter((q:any)=>q.changePct>0).length,down=quotes.filter((q:any)=>q.changePct<0).length,flat=quotes.length-up-down,total=rows.length;
-   const wheel=display.wheel&&total?'<div class="mb-breadth-wheel-row"><div class="mb-breadth-wheel" style="--up:'+up/total*360+'deg;--down:'+(up+down)/total*360+'deg;--flat:'+(up+down+flat)/total*360+'deg" role="img" aria-label="'+esc(label+' unweighted breadth: '+up+' up, '+down+' down, '+flat+' unchanged, '+(total-quotes.length)+' unavailable')+'"><span>'+quotes.length+'/'+total+'</span></div><small>↑ '+up+' · ↓ '+down+' · → '+flat+' · unavailable '+(total-quotes.length)+'<br>Equal quote counts · not index-weight contribution</small></div>':'';
-   return summary.slice(0,-6)+wheel+details+'</div>';
+   const values=rows.map((q:any)=>{
+    const on=fresh(q,role),at=Date.parse(q.observedAt),token=q.identity?.token,key=role+'|'+token;
+    const history=Number.isInteger(token)&&token>0?display.participationHistory?.get(key)||[]:[];
+    const target=at-(interval||0)*60000,prior=interval?history.filter((p:any)=>p.at<=target&&target-p.at<=5000&&p.at<at&&p.token===token&&p.role===role&&p.date===snapshot.tradeDate&&p.label===q.identity?.label&&p.symbol===q.identity?.symbol&&n(p.price)!==null&&p.price>0).at(-1):null;
+    const value=on?(interval?(prior&&n(q.price)!==null&&q.price>0?(q.price/prior.price-1)*100:null):n(q.changePct)):null;
+    return {q,on,value,prior};
+   });
+   const usable=values.filter((r:any)=>r.value!==null),up=usable.filter((r:any)=>r.value>0).length,down=usable.filter((r:any)=>r.value<0).length,flat=usable.length-up-down,total=rows.length,missing=total-usable.length;
+   const basis=interval?interval+'m sampled endpoints':'vs previous close';
+   const summary=card(role==='SECTOR'?'sectors':'stocks',label,usable.length?up+' ↑ / '+down+' ↓ / '+flat+' ↔':'—',usable.length+'/'+total+(interval?' usable':' fresh')+' unweighted quotes · '+basis+' · shared universe, not '+index+' weights',usable.length+'/'+total+' usable · '+basis);
+   const details='<details data-live-detail="'+esc(index+'-'+role)+'"><summary>'+esc(label)+' · source times</summary>'+values.map((r:any)=>note((r.q.identity?.label||'—')+' · '+fmt(r.value)+'% · '+detail(r.q,r.on)+(interval?' · baseline '+time(r.prior?.at):''))).join('')+'</details>';
+   if(!display.wheel)return summary.slice(0,-6)+details+'</div>';
+   const share=(count:number)=>total?fmt(count/total*100,1)+'%':'—';
+   const wheel=total?'<div class="mb-breadth-wheel-row"><div class="mb-breadth-wheel" style="--up:'+up/total*360+'deg;--down:'+(up+down)/total*360+'deg;--flat:'+(up+down+flat)/total*360+'deg" role="img" aria-label="'+esc(label+' unweighted breadth: '+up+' up, '+down+' down, '+flat+' unchanged, '+missing+' unavailable')+'"><span>'+usable.length+'/'+total+'</span></div><small>↑ '+up+' · '+share(up)+'<br>↓ '+down+' · '+share(down)+'<br>→ '+flat+' · '+share(flat)+'<br>Unavailable '+missing+' · '+share(missing)+'<br>Equal quote counts · not index-weight contribution</small></div>':'';
+   const components='<div class="mb-wheel-components" role="region" aria-label="'+esc(label+' interval changes')+'"><table><thead><tr><th>Component</th><th>Live price</th><th>'+esc(interval?interval+'m Δ %':'Day Δ %')+'</th></tr></thead><tbody>'+values.map((r:any)=>'<tr><th scope="row">'+esc(r.q.identity?.label||'—')+'</th><td>'+fmt(r.on?r.q.price:null)+'<small>'+time(r.q.observedAt)+'</small></td><td class="'+(r.value>0?'op-positive':r.value<0?'op-negative':'')+'">'+(r.value>0?'+':'')+fmt(r.value,interval?4:2)+'%<small>'+(interval?(r.prior?time(r.prior.at)+' → '+time(r.q.observedAt):'Building '+interval+'m history'):'vs previous close')+'</small></td></tr>').join('')+'</tbody></table></div>';
+   return summary.slice(0,-6)+wheel+components+details+'</div>';
   };
   const data:any={
    spot:()=>quoteCard('spot','Spot · points',spot,flags.spot),future:()=>quoteCard('future','Futures · '+(future.identity?.expiry||'—'),future,flags.future),

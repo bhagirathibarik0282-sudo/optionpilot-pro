@@ -64,7 +64,7 @@ export function installDashboardReading() {
   const decorate = (root: Element) => {
     const candidates = new Set([...root.querySelectorAll('table'), ...(root.closest('table') ? [root.closest('table')!] : [])]);
     for (const table of candidates) {
-      if(table.closest('#op-premium-workspace'))continue;
+      if(table.closest('#op-premium-workspace,.mb-wheel-components'))continue;
       const headers = Array.from(table.querySelectorAll('thead tr:last-child th')).map(h=>h.textContent?.trim() || 'Value');
       const rows = Array.from(table.querySelectorAll('tbody tr'));
       if (!headers.length || !rows.length || table.querySelector('[colspan]:not([colspan="1"]),[rowspan]:not([rowspan="1"])') || rows.some(r=>r.children.length !== headers.length)) continue;

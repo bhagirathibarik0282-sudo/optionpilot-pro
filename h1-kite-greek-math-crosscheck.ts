@@ -1,6 +1,7 @@
 import type { H1ExactPriceGreekObservation, H1ExactSnapshotBundle } from "./h1-live-exact-snapshot-aggregator.js";
 import type { H1ExactUnderlyingObservation, H1KiteGreekModelPolicy } from "./h1-kite-exact-price-greek-adapter.js";
 import type { H1ExactLiveSpotDirectionPolicy } from "./h1-exact-live-spot-direction-provider.js";
+import { resolveIndexExpiryClock } from "./index-expiry-clock.js";
 
 const YEAR_MS = 365 * 86_400_000;
 const SQRT_2PI = Math.sqrt(2 * Math.PI);
@@ -210,8 +211,8 @@ export function crosscheckH1KiteGreeks(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(observation?.expiryDate ?? "")) blockers.push("VALID_EXPIRY_REQUIRED");
   if (blockers.length) return invalidResult(blockers);
 
-  const expiryMs = Date.parse(`${observation.expiryDate}T10:00:00.000Z`);
-  if (!Number.isFinite(expiryMs) || expiryMs <= observedMs!) return invalidResult(["POSITIVE_TIME_TO_EXPIRY_REQUIRED"]);
+  const expiryMs = resolveIndexExpiryClock(observation.symbol, observation.expiryDate, observedMs!)?.expiryMs;
+  if (expiryMs == null || expiryMs <= observedMs!) return invalidResult(["POSITIVE_TIME_TO_EXPIRY_REQUIRED"]);
   const years = (expiryMs - observedMs!) / YEAR_MS;
   const sigma = observation.iv / 100;
 

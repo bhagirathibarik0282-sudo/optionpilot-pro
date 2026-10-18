@@ -1,6 +1,7 @@
 import type { H1ExactPriceGreekObservation } from "./h1-live-exact-snapshot-aggregator.js";
 import { KiteImmediateTokenRegistry } from "./kite-immediate-token-registry.js";
 import type { KiteDecodedPacket } from "./kite-websocket-binary-decoder.js";
+import { resolveIndexExpiryClock } from "./index-expiry-clock.js";
 
 const DAY_MS = 86_400_000;
 const YEAR_DAYS = 365;
@@ -44,12 +45,6 @@ function calendarDte(expiry: string, observedAt: string): number | null {
   if (!tradeDate) return null;
   const dte = (Date.parse(`${expiry}T00:00:00.000Z`) - Date.parse(`${tradeDate}T00:00:00.000Z`)) / DAY_MS;
   return Number.isInteger(dte) && dte >= 0 ? dte : null;
-}
-
-function expiryCloseMs(expiry: string): number | null {
-  if (!validDateOnly(expiry)) return null;
-  const ms = Date.parse(`${expiry}T10:00:00.000Z`); // 15:30 IST
-  return Number.isFinite(ms) ? ms : null;
 }
 
 function normalPdf(x: number): number {
@@ -126,7 +121,7 @@ export function mapKiteFullPacketToH1ExactPriceGreek(
   if (Math.abs(observedMs - underlyingMs) > policy.maxUnderlyingSkewMs) return null;
   if (!Number.isFinite(packet.lastPrice) || packet.lastPrice <= 0) return null;
 
-  const expiryMs = expiryCloseMs(entry.expiry);
+  const expiryMs = resolveIndexExpiryClock(entry.symbol, entry.expiry, observedAt)?.expiryMs ?? null;
   const dte = calendarDte(entry.expiry, observedAt);
   if (expiryMs == null || dte == null || expiryMs <= observedMs) return null;
   const years = (expiryMs - observedMs) / (YEAR_DAYS * DAY_MS);

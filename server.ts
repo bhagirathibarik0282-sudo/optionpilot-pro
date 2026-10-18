@@ -1,4 +1,5 @@
 import { mountSellerResearchRoutes } from './seller-research-http.js';
+import { resolveIndexExpiryClock } from './index-expiry-clock.js';
 import { Hono } from "hono";
 import { persistConnectedDriveSession } from "./drive-connected-session.js";
 import { mountResearchRoutes } from "./research-server-hook.js";
@@ -5136,13 +5137,12 @@ function parseExpiryDate(expiryStr: string): Date | null {
   }
 }
 
-// V2.1 IV/Greeks integrity fix (2026-08-11): derivative expiry strings identify
-// the calendar date, not midnight. On Railway (UTC), subtracting Date.now()
-// from a midnight Date made same-day Tuesday NIFTY expiries look already
-// expired during the live session, forcing IV/Greeks to zero. NSE index
-// derivatives trade through the normal market close on expiry day, so use
-// 15:30 IST (= 10:00 UTC) as the model expiry instant for an expiry date.
-function daysToDerivativeExpiry(expiryStr: string, nowMs = Date.now()): number {
+// Index IV/Greeks use the announcement/effective-dated standard-session clock.
+// The no-symbol branch retains the existing commodity model convention.
+function daysToDerivativeExpiry(expiryStr: string, nowMs = Date.now(), indexSymbol?: string): number {
+  if (indexSymbol !== undefined) {
+    return resolveIndexExpiryClock(indexSymbol, expiryStr, nowMs)?.remainingCalendarDays ?? Number.NaN;
+  }
   if (!expiryStr) return 0;
   const parts = expiryStr.split("-").map(Number);
   if (parts.length !== 3 || parts.some((x) => !Number.isFinite(x))) return 0;
@@ -6862,11 +6862,11 @@ async function fetchIndexData(
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
                 const levels = pdhPdlMap.get(ceInst.instrument_token) || { pdh: 0, pdl: 0 };
-                const daysToExpiry = daysToDerivativeExpiry(ceInst.expiry || expiryDate);
-                const computedIv = calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, true);
-                const greeks = calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true);
-                const advGreeksCe = calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true);
-                const gammaCe = advGreeksCe ? advGreeksCe.gamma : 0;
+                const daysToExpiry = daysToDerivativeExpiry(ceInst.expiry || expiryDate, Date.now(), symbol);
+                const computedIv = daysToExpiry > 0 ? calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, true) : Number.NaN;
+                const greeks = daysToExpiry > 0 ? calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true) : { delta: Number.NaN, vega: Number.NaN, theta: Number.NaN };
+                const advGreeksCe = daysToExpiry > 0 ? calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, true) : null;
+                const gammaCe = advGreeksCe ? advGreeksCe.gamma : Number.NaN;
                 expiry.ceStrikes.push({
                   strike,
                   isAtm,
@@ -6914,11 +6914,11 @@ async function fetchIndexData(
                 const dayHigh = q.ohlc?.high || q.last_price;
                 const dayLow = q.ohlc?.low || q.last_price;
                 const levels = pdhPdlMap.get(peInst.instrument_token) || { pdh: 0, pdl: 0 };
-                const daysToExpiry = daysToDerivativeExpiry(peInst.expiry || expiryDate);
-                const computedIv = calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, false);
-                const greeks = calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false);
-                const advGreeksPe = calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false);
-                const gammaPe = advGreeksPe ? advGreeksPe.gamma : 0;
+                const daysToExpiry = daysToDerivativeExpiry(peInst.expiry || expiryDate, Date.now(), symbol);
+                const computedIv = daysToExpiry > 0 ? calcImpliedVolatility(q.last_price || 0, baseMetrics.current, strike, daysToExpiry, false) : Number.NaN;
+                const greeks = daysToExpiry > 0 ? calcGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false) : { delta: Number.NaN, vega: Number.NaN, theta: Number.NaN };
+                const advGreeksPe = daysToExpiry > 0 ? calcAdvancedGreeks(baseMetrics.current, strike, computedIv, daysToExpiry, false) : null;
+                const gammaPe = advGreeksPe ? advGreeksPe.gamma : Number.NaN;
                 expiry.peStrikes.push({
                   strike,
                   isAtm,

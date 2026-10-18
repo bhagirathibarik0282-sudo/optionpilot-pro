@@ -3,6 +3,11 @@ name: H1 Kite Greek Math Crosscheck CI
 on:
   pull_request:
     paths:
+      - "index-expiry-clock.ts"
+      - "server.ts"
+      - "h1-kite-exact-price-greek-adapter.ts"
+      - "test/index-expiry-clock.test.ts"
+      - "test/index-expiry-clock-server.test.ts"
       - "h1-kite-greek-math-crosscheck.ts"
       - "test/h1-kite-greek-math-crosscheck.test.ts"
       - ".github/workflows/h1-kite-greek-math-crosscheck-ci.yml"
@@ -19,7 +24,7 @@ jobs:
         with:
           node-version: "22"
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/h1-kite-greek-math-crosscheck.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/index-expiry-clock.test.ts test/index-expiry-clock-server.test.ts test/h1-kite-exact-price-greek-adapter.test.ts test/h1-kite-greek-math-crosscheck.test.ts
       - name: Kite-only authority guard
         run: |
           node <<'NODE'

@@ -62,3 +62,25 @@ lock restore, bounded exact live requests, disconnected/missing data, identity
 change rejection, replay cutoff, date changes, release/reset, malformed stored
 locks, independent side times and cross-expiry/index separation. Browser visual
 acceptance for these new controls and market-open live acceptance remain pending.
+
+## Fresh-entry defect found from the user's mobile screenshot
+
+Earlier navigation checks used an already-loaded October 16 session and did not
+certify the cold-start path. On Sunday October 18, startup instead selected the
+empty current date. Chapter 6 independently defaulted to its Live OI workspace,
+showing Waiting and unavailable strikes while saved records remained elsewhere.
+
+Correction prepared locally: startup chooses the latest valid saved date no
+later than today in IST. Chapter 6 defaults to recorded mode with the latest
+recorded option cursor when the session is historical or the regular observation
+window is closed, unless the user has explicitly selected a mode. Disconnected
+Live shows one Open saved records action and hides its empty live-card workspace.
+Recorded and Live remain explicitly separate. No fallback invents live prices,
+Max Pain or full-chain completeness. Existing recorder, cursor and timers reused.
+
+Validation: actual serialized startup callback tested for Sunday, market-open
+same-day availability, missing current session and IST midnight. Serialized OI
+view/controller tests verify populated recorded entry, latest cursor, explicit
+Live preservation and saved-record recovery. Complete dashboard CI: 266 pass,
+0 fail, 0 skip; guardrails and diff checks pass. This correction is pending
+review/release; no post-release visual acceptance is claimed yet.

@@ -108,3 +108,10 @@ test('source heartbeats preserve the After event DOM so an open event can be rea
  h.studio.update(fixture());h.studio.recorded({NIFTY:{expiry,expiries:[expiry],positioning:{timeline:[{minute_bucket:iso(base),responseStrike:24000,side:'CALL',responses:[]}]}}},date);
  assert.equal(node.writes,editedWrites);assert(node.innerHTML.includes('<details open'));assert(editedWrites>writes);
 });
+test('disconnected live entry exposes saved-record recovery instead of a screen of blank premium cards',()=>{
+ const h=harness();assert.equal(h.nodes.get('ows-live-empty')!.hidden,false);assert.match(OI_WALL_STUDIO_HTML,/Open saved records/);
+ assert.match(OI_WALL_STUDIO_CSS,/\[data-live-empty="true"\] #ows-live-workspace\{display:none!important\}/);
+ h.studio.update(fixture());assert.equal(h.nodes.get('ows-live-empty')!.hidden,true);
+ h.studio.update({...fixture(),connected:false,connectionState:'MARKET_CLOSED'});assert.equal(h.nodes.get('ows-live-empty')!.hidden,false);
+ h.nodes.get('ows-live-workspace')!.hidden=true;h.studio.recorded({},date);assert.equal(h.nodes.get('ows-live-empty')!.hidden,true,'recorded mode has no live warning');
+});

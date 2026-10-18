@@ -20,11 +20,13 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
   c.header('Cache-Control','no-store');
   try{
    const q=c.req.query(),filter:PremiumWatchFilter={};
-   if(q.nearby){if(!['1','2','3'].includes(q.nearby))throw Error();filter.nearby=Number(q.nearby);}
+   if(q.view!==undefined){if(q.view!=='ladder')throw Error();filter.view='ladder';}
+   if(q.nearby){if(!['1','2','3','7'].includes(q.nearby))throw Error();filter.nearby=Number(q.nearby);}
    if(q.symbol&&q.symbol!=='ALL'){if(!(LIVE_INDICES as readonly string[]).includes(q.symbol))throw Error();filter.symbol=q.symbol as LiveIndex;}
    if(q.side&&q.side!=='BOTH'){if(!['CE','PE'].includes(q.side))throw Error();filter.side=q.side as 'CE'|'PE';}
    if(q.expiries){const xs=q.expiries.split(',');if(xs.length>4||xs.some(x=>!/^\d{4}-\d{2}-\d{2}$/.test(x)))throw Error();filter.expiries=xs;}
    for(const key of ['ceStrike','peStrike','minDte','maxDte','offset','limit'] as const)if(q[key]!==undefined){const v=Number(q[key]);if(!/^\d+(?:\.\d+)?$/.test(q[key])||!Number.isFinite(v)||v<0||(['ceStrike','peStrike','limit'].includes(key)&&v===0)||(!['ceStrike','peStrike'].includes(key)&&!Number.isInteger(v)))throw Error();filter[key]=v;}
+   if(filter.view==='ladder'&&(filter.offset||0)!==0)throw Error();
    if((filter.limit||0)>120||(filter.offset||0)>20000||(filter.maxDte!==undefined&&filter.minDte!==undefined&&filter.minDte>filter.maxDte))throw Error();
    return c.json(readDashboardPremiumSnapshot(filter));
   }catch{return c.json({ok:false,reason:'INVALID_PREMIUM_FILTER'},400);}

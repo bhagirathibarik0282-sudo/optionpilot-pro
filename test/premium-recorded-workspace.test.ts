@@ -46,12 +46,12 @@ test('restored exact watch constrains live requests, stays visible when disconne
 });
 test('paired layout keeps exact index/expiry/strike identity and independent missing sides/times',async()=>{
  const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();h.change('pw-layout','ladder');
- let html=h.node('pw-results').innerHTML;assert.equal((html.match(/pw-pair-grid/g)||[]).length,1);assert.match(html,/₹111/);assert.match(html,/₹140/);assert.doesNotMatch(html,/Not loaded on this page/);
- assert.match(html,/current page only/);assert.match(html,/data-pw-lock="NIFTY\|2026-10-19\|22000\|PE"/);
+ let html=h.node('pw-results').innerHTML;assert.equal((html.match(/pw-pair-grid/g)||[]).length,1);assert.match(html,/₹111/);assert.match(html,/₹140/);assert.doesNotMatch(html,/Contract unavailable/);
+ assert.match(html,/All selected loaded contracts/);assert.match(html,/data-pw-lock="NIFTY\|2026-10-19\|22000\|PE"/);
  const data=h.state().current.NIFTY;data.options=data.options.filter((r:any)=>r.option_type==='CE'||r.minute_bucket==='2026-10-13T04:03:00.000Z');h.change('pw-layout','ladder');
  assert.match(h.node('pw-results').innerHTML,/CE \/ PE quote times differ/);
  for(const row of data.options)if(row.option_type==='PE')row.expiry='2026-10-27';h.change('pw-layout','ladder');html=h.node('pw-results').innerHTML;
- assert.equal((html.match(/pw-pair-grid/g)||[]).length,2);assert.equal((html.match(/Not loaded on this page/g)||[]).length,2);
+ assert.equal((html.match(/pw-pair-grid/g)||[]).length,2);assert.equal((html.match(/Contract unavailable/g)||[]).length,2);
  h.state().current.SENSEX={market:data.market,options:data.options.filter((r:any)=>r.option_type==='CE').map((r:any)=>({...r,symbol:'SENSEX'}))};h.change('pw-symbol','ALL');h.change('pw-layout','ladder');
  assert.equal((h.node('pw-results').innerHTML.match(/pw-pair-grid/g)||[]).length,3);
  h.click('',{pwLock:'NIFTY|2026-10-19|22000|CE'});assert.match(h.node('pw-results').innerHTML,/Side filtered/);assert.equal((h.node('pw-results').innerHTML.match(/pw-pair-grid/g)||[]).length,1);
@@ -98,8 +98,8 @@ test('series coverage follows the recorded cursor and cannot leak a later expiry
 
 test('compact ladder quick controls use exact DTE and switch displayed parameters',async()=>{
  const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
- h.click('',{pwLayout:'ladder'});assert.equal(h.node('pw-chain-top').hidden,false);assert.match(h.node('pw-chain-dtes').innerHTML,/data-pw-dte="1"[^>]*disabled/);assert.match(h.node('pw-results').innerHTML,/<th>CE OI \(L\)<\/th>/);assert.match(h.node('pw-results').innerHTML,/<th>STRIKE<\/th>/);
- h.click('',{pwMetric:'delta'});assert.match(h.node('pw-results').innerHTML,/<th>CE Delta<\/th>/);
+ h.click('',{pwLayout:'ladder'});assert.equal(h.node('pw-chain-top').hidden,false);assert.match(h.node('pw-chain-dtes').innerHTML,/data-pw-dte="1"[^>]*disabled/);assert.match(h.node('pw-results').innerHTML,/<th>CE ₹ · selected parameters<\/th>/);assert.match(h.node('pw-results').innerHTML,/<th>STRIKE<\/th>/);
+ h.click('',{pwMetric:'delta'});assert.match(h.node('pw-results').innerHTML,/<span>Delta<\/span>/);
  h.click('',{pwDte:'1'});assert.match(h.node('pw-results').innerHTML,/No premiums match/,'DTE1 must never substitute the DTE6 contract');
  h.click('',{pwDte:'ALL'});assert.match(h.node('pw-results').innerHTML,/₹111/);
  h.change('pw-chain-symbol','SENSEX');assert.equal(h.node('pw-symbol').value,'SENSEX');assert.doesNotMatch(h.node('pw-results').innerHTML,/₹111/);
@@ -112,17 +112,17 @@ test('OI ladder entry reuses the premium workspace and exact watch remains locke
 test('recorded bigint OI and volume render as counts without accepting unsafe or malformed values',async()=>{
  const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
  for(const r of h.state().current.NIFTY.options){r.oi='7215260';r.volume='12345';}
- h.click('',{pwLayout:'ladder'});assert.match(h.node('pw-results').innerHTML,/72.15/);assert.match(h.node('pw-results').innerHTML,/class="ce" style="width:100%/);
+ h.click('',{pwLayout:'ladder'});assert.match(h.node('pw-results').innerHTML,/72.15/);assert.match(h.node('pw-results').innerHTML,/<span>OI \(L\)<\/span><b>72.1526/);
  h.click('',{pwMetric:'volume'});assert.match(h.node('pw-results').innerHTML,/12,345/);
  for(const bad of ['',' 12','1e6','-1','9007199254740992','NaN']){
   for(const r of h.state().current.NIFTY.options){r.oi=bad;r.volume=bad;}
-  h.click('',{pwMetric:'oi'});assert.doesNotMatch(h.node('pw-results').innerHTML,/class="ce" style=/);
+  h.change('pw-minutes','3');assert.match(h.node('pw-results').innerHTML,/<span>OI \(L\)<\/span><b>—/);
  }
 });
 
 test('ladder previous-day switch shows exact PDC and missing FIB never invents holding',async()=>{
  const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
- h.click('',{pwMetric:'levels'});assert.match(h.node('pw-results').innerHTML,/PDH \/ PDC \/ PDL/);assert.match(h.node('pw-results').innerHTML,/110 \/ 100 \/ 90/);
+ assert.match(h.node('pw-results').innerHTML,/data-pw-level="PDH"/);assert.match(h.node('pw-results').innerHTML,/PDC <b>₹100/);assert.match(h.node('pw-results').innerHTML,/data-pw-level="PDL"/);
  h.click('',{pwMetric:'fib'});assert.match(h.node('pw-results').innerHTML,/Daily FIB/);assert.doesNotMatch(h.node('pw-results').innerHTML,/data-pw-position/);
 });
 
@@ -130,4 +130,15 @@ test('FIB ladder colours only observed price position and preserves missing prio
  const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
  h.state().baseline.NIFTY={options:[{symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type:'CE',truth_verdict:'TRUE',minute_bucket:'2026-10-12T10:00:00.000Z',day_high:120,day_low:80,ltp:100}]};
  h.click('',{pwMetric:'fib'});const html=h.node('pw-results').innerHTML;assert.match(html,/data-pw-position="BELOW"/);assert.match(html,/R1 · BELOW/);assert.match(html,/HOLD unconfirmed/);assert.equal((html.match(/data-pw-position=/g)||[]).length,1,'PE cannot borrow CE levels');
+});
+
+test('mixed ladder metrics stay under each price, selected ATM ±7 displays all 15 strikes without pages',async()=>{
+ const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
+ const input=h.state().current.NIFTY,template=input.options[0];input.options=[];
+ for(let i=-7;i<=7;i++)for(const side of ['CE','PE'])input.options.push({...template,strike:22000+i*50,option_type:side,ltp:100+i,volume:1234,bid:99,ask:101});
+ h.change('pw-chain-range','15');h.click('',{pwMetric:'volume'});h.click('',{pwMetric:'bid'});h.click('',{pwMetric:'ask'});h.click('',{pwMetric:'spread'});
+ const html=h.node('pw-results').innerHTML;assert.equal((html.match(/class="pw-pair-grid"/g)||[]).length,15);assert.equal((html.match(/class="pw-chain-price"/g)||[]).length,30);assert.equal(h.node('pw-pagination').hidden,true);
+ assert.match(html,/pw-chain-price[\s\S]*pw-chain-facts[\s\S]*Volume/);assert.match(html,/<span>Spread ₹<\/span><b>2/);assert.match(html,/data-pw-level="PDH"/);assert.match(html,/data-pw-level="PDL"/);
+ h.click('',{pwMetric:'volume'});assert.doesNotMatch(h.node('pw-results').innerHTML,/<span>Volume<\/span>/);assert.match(h.node('pw-results').innerHTML,/<span>Bid ₹/);
+ h.click('',{pwLayout:'cards'});assert.equal(h.node('pw-pagination').hidden,false);
 });

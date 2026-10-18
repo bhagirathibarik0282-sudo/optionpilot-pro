@@ -121,3 +121,17 @@ test('PDC is an exact current contract field and is withheld for missing or unus
  assert.equal(run([row(0,111,{pdc:101})]).rows[0].pdc,101);
  for(const patch of [{pdc:null},{pdc:0},{pdc:NaN},{truth_verdict:'STALE'},{truth_verdict:'CONFLICT'}])assert.equal(run([row(0,111,patch)]).rows[0].pdc,null);
 });
+
+test('complete ladder projects all selected cached contracts in one read, while cards retain pagination',()=>{
+ const entries:any[]=Array.from({length:150},(_,i)=>({token:i+1,label:'C'+i,role:'OPTION',symbol:'NIFTY',expiry,strike:22000+i*50,side:i%2?'PE':'CE'}));
+ const store=new DashboardLiveStore({entries,date,missing:[],omittedExpiries:[]}),now=Date.parse(at(0));
+ const full=store.premiums(now,{view:'ladder',limit:12});assert.equal(full.rows.length,150);assert.equal(full.total,150);assert.equal(full.offset,0);
+ assert.equal(store.premiums(now,{limit:12}).rows.length,12);
+ const both=[...entries,{token:999,label:'SPOT',role:'SPOT',symbol:'NIFTY'}];const nearby=new DashboardLiveStore({entries:both,date,missing:[],omittedExpiries:[]});nearby.ingest([{instrumentToken:999,lastPrice:25000,exchangeTimestamp:at(0),mode:'full'}] as any,at(0));assert.equal(nearby.premiums(now,{view:'ladder',nearby:7}).rows.length,15);
+});
+
+test('ladder request validates explicit complete-view scope and widened strike range',async()=>{
+ const app=new Hono();mountDashboardLiveRoutes(app,(()=>({})) as any);
+ for(const q of ['view=ladder&nearby=7','view=ladder&offset=0'])assert.equal((await app.request('/dashboard-live/premiums?'+q)).status,200);
+ for(const q of ['view=anything','view=ladder&offset=12','nearby=8'])assert.equal((await app.request('/dashboard-live/premiums?'+q)).status,400);
+});

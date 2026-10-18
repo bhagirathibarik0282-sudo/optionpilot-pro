@@ -74,9 +74,22 @@ function evidenceCheckpoint(r:RagEventRequest,current:H1ReplayHttpResult,eventMs
     if(!market||market.truth_verdict!=='TRUE'||!iso(market.backend_timestamp)||Date.parse(iso(market.backend_timestamp)!)>r.asOf)return null;
     const ce=quoteAt(current,r,ms,'CE',r.asOf),pe=quoteAt(current,r,ms,'PE',r.asOf);
     const chain=one(prepared.chain.filter(c=>c.symbol===r.symbol&&expiry(c)===r.expiry&&iso(c.minute_bucket)===new Date(ms).toISOString()));
+    // Some recordings have a runtime market marker but an older normalized chain
+    // version. Keep that chain excluded; recover only the exact canonical PCR.
+    const canonical=one((current.canonical??[]).filter(c=>c.symbol===r.symbol&&iso(c.minute_bucket)===new Date(ms).toISOString()));
+    const sourceAt=canonical&&iso(canonical.source_timestamp);
+    const currentExpiries=Array.isArray(canonical?.market?.expiries)?canonical.market.expiries.filter((e:Row)=>e.expiry==='Current Expiry'):[];
+    const rawPcr=canonical?.market?.gapScore?.fullChainPcr;
+    const canonicalPcr=canonical?.truth_verdict==='TRUE'&&canonical.calculation_version==='H1_RUNTIME_BRIDGE_V1'&&canonical.calculation_version===market.calculation_version&&
+      !!canonical.snapshot_id&&canonical.snapshot_id===market.snapshot_id&&canonical.market?.symbol===r.symbol&&
+      sourceAt&&Date.parse(sourceAt)>=ms&&Date.parse(sourceAt)<=ms+60000&&Date.parse(sourceAt)<=r.asOf&&
+      currentExpiries.length===1&&iso(currentExpiries[0].expiryDate)?.slice(0,10)===r.expiry&&
+      typeof rawPcr==='number'&&Number.isFinite(rawPcr)&&rawPcr>=0?rawPcr:null;
+    const normalizedPcr=num(chain?.full_chain_oi_pcr);
     return {offset,timeIst:clock(ms),bucketAt:new Date(ms).toISOString(),receiptAt:iso(market.backend_timestamp),pair:{ce,pe},
       context:{spot:num(market.spot_ltp),pdc:num(market.spot_prev_close),pdh:num(market.pdh),pdl:num(market.pdl),vix:num(market.india_vix),
-        futures:num(market.future_ltp),futuresOi:num(market.future_oi),fullPcr:num(chain?.full_chain_oi_pcr),fullPcrSource:chain?.full_pcr_source??null,
+        futures:num(market.future_ltp),futuresOi:num(market.future_oi),fullPcr:normalizedPcr??canonicalPcr,
+        fullPcrSource:normalizedPcr!==null?chain?.full_pcr_source:canonicalPcr!==null?'Exact canonical full-chain source':chain?.full_pcr_source??null,
         ceWall:num(chain?.call_wall_strike),peWall:num(chain?.put_wall_strike),ceWallOi:num(chain?.call_wall_oi),peWallOi:num(chain?.put_wall_oi)}};
   };
 }

@@ -19,6 +19,37 @@ function fixture(date:string):H1ReplayHttpResult {
  return {ok:true,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request:{symbol:'NIFTY',tradeDate:date,fromTime:'09:15',toTime:'15:30',scope:'CORE'},market,options,chain};
 }
 const result=(extra:Record<string,string>={})=>buildRagEventEvidence(request(extra),fixture('2026-10-13'),fixture('2026-10-12'));
+test('mixed-version chain recovers only snapshot-matched canonical current-expiry PCR',()=>{
+ const c=fixture('2026-10-13');
+ for(const m of c.market!)m.calculation_version='H1_RUNTIME_BRIDGE_V1';
+ c.canonical=c.market!.map(m=>({symbol:m.symbol,minute_bucket:m.minute_bucket,snapshot_id:m.snapshot_id,truth_verdict:'TRUE',
+  source_timestamp:m.backend_timestamp,calculation_version:m.calculation_version,
+  market:{symbol:m.symbol,expiries:[{expiry:'Current Expiry',expiryDate:'2026-10-13'}],gapScore:{fullChainPcr:1.23}}}));
+ for(const row of c.chain!)Object.assign(row,{call_wall_strike:22500,put_wall_strike:22300});
+ const run=()=>{const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),c,fixture('2026-10-12'));assert.ok(r.ok);return r.beforeAndAt.at(-1)!.context;};
+ assert.equal(run().fullPcr,1.23);assert.equal(run().fullPcrSource,'Exact canonical full-chain source');
+ assert.equal(run().ceWall,null);assert.equal(run().peWall,null);
+ const target=c.canonical.find(row=>row.minute_bucket==='2026-10-13T04:06:00.000Z')!;
+ const original=structuredClone(target);
+ for(const mutate of [
+  (v:any)=>v.snapshot_id='wrong',
+  (v:any)=>v.truth_verdict='STALE',
+  (v:any)=>v.calculation_version='UNVERIFIED',
+  (v:any)=>v.market.symbol='SENSEX',
+  (v:any)=>v.market.expiries[0].expiryDate='2026-10-19',
+  (v:any)=>v.market.expiries.push({...v.market.expiries[0]}),
+  (v:any)=>v.market.gapScore.fullChainPcr='1.23',
+  (v:any)=>v.market.gapScore.fullChainPcr=-1,
+  (v:any)=>v.source_timestamp='2026-10-13T04:07:01Z',
+  (v:any)=>v.source_timestamp='2026-10-13T04:05:59Z',
+ ]){Object.assign(target,structuredClone(original));mutate(target);assert.equal(run().fullPcr,null);}
+ Object.assign(target,structuredClone(original));
+ const cutoff=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',asOf:'2026-10-13T09:36:25'}),c,fixture('2026-10-12'));
+ assert.ok(cutoff.ok);target.source_timestamp='2026-10-13T04:06:26Z';
+ const late=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',asOf:'2026-10-13T09:36:25'}),c,fixture('2026-10-12'));
+ assert.ok(late.ok);assert.equal(late.beforeAndAt.at(-1)!.context.fullPcr,null);
+ Object.assign(target,structuredClone(original));c.canonical.push({...structuredClone(target),snapshot_id:'conflict'});assert.equal(run().fullPcr,null);
+});
 test('exact own-reference crossing and no outcomes by default',()=>{
  const r=result();assert.ok(r.ok);assert.deepEqual(r.event.flags,['PDL_LOSS']);assert.equal(r.reference.pdl,11.6);assert.equal(r.event.after,11.2);assert.deepEqual(r.outcomes,[]);
  assert.equal(r.safety.writesPerformed,false);assert.equal(r.safety.affectsSelector,false);assert.match(r.answer,/PDL_LOSS/);

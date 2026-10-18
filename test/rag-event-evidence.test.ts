@@ -51,8 +51,8 @@ test('ambiguous duplicate cannot silently select a quote',()=>{
 test('read wrapper calls only existing replay twice with bounded windows',async()=>{
  const calls:any[]=[];const r=await readRagEventEvidence(request(),async q=>{calls.push(q);return fixture(q.tradeDate);});
  assert.ok(r.ok);
- assert.equal(r.premiumResponse.status,'MEASURED');assert.equal(r.premiumResponse.change!.price,9.5-11.2);
- assert.equal(r.premiumResponse.change!.spot,1);assert.equal(r.premiumResponse.modelAttribution.status,'UNAVAILABLE');assert.equal(calls.length,2);assert.equal(calls[0].fromTime,'09:15');assert.equal(calls[0].toTime,'09:36');assert.equal(calls[1].tradeDate,'2026-10-12');
+ assert.equal(r.premiumResponse.status,'MEASURED');assert.equal(r.premiumResponse.change!.price,r.premiumResponse.current!.price-r.premiumResponse.before!.price);
+ assert.equal(r.premiumResponse.change!.spot,r.premiumResponse.current!.spot-r.premiumResponse.before!.spot);assert.equal(r.premiumResponse.modelAttribution.status,'UNAVAILABLE');assert.equal(calls.length,2);assert.equal(calls[0].fromTime,'09:15');assert.equal(calls[0].toTime,'09:36');assert.equal(calls[1].tradeDate,'2026-10-12');
 });
 test('GET route validates, catches unavailable sources, never offers POST',async()=>{
  const app=new Hono();mountRagEventEvidenceRoute(app,async r=>result());

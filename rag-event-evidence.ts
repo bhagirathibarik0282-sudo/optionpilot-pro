@@ -65,6 +65,29 @@ function quoteAt(replay:H1ReplayHttpResult,r:RagEventRequest,ms:number,side:stri
   return {price,oi:num(q.oi),quoteAt:qt,receiptAt:iso(m.backend_timestamp),snapshotId:q.snapshot_id,
     quoteAgeSeconds:age,dayHigh:num(q.day_high),dayLow:num(q.day_low),storedPdh:num(q.pdh),storedPdl:num(q.pdl)};
 }
+// Corroborate the old writer's wall against its exact archived input. This is
+// only the maximum OI among loaded strikes, never certified exchange-wide OI.
+function corroboratedWall(canonical:Row,stored:Row|null,r:RagEventRequest,side:'CE'|'PE') {
+  if(!stored||stored.truth_verdict!=='TRUE'||stored.calculation_version!=='STORAGE_V3_PHASE1')return null;
+  const field=side==='CE'?'ceStrikes':'peStrikes',prefix=side==='CE'?'call':'put';
+  const groups=(Array.isArray(canonical.market.expiries)?canonical.market.expiries:[]).filter((e:Row)=>iso(e.expiryDate)?.slice(0,10)===r.expiry);
+  const variants=groups.map((e:Row)=>Array.isArray(e[field])?e[field]:[]);
+  if(!variants.length||variants.some((rows:Row[])=>!rows.length))return null;
+  const signatures=new Set(variants.map((rows:Row[])=>JSON.stringify(rows.map(p=>[p.strike,p.oi,p.expiryDate,p.optionType,p.quoteTimestamp]).sort((a,b)=>Number(a[0])-Number(b[0])))));
+  if(signatures.size!==1)return null;
+  const rows=variants[0] as Row[],strikes=new Set<number>();
+  for(const p of rows){const qt=iso(p.quoteTimestamp);
+    if(typeof p.strike!=='number'||!Number.isFinite(p.strike)||p.strike<=0||strikes.has(p.strike)||
+      typeof p.oi!=='number'||!Number.isFinite(p.oi)||p.oi<0||p.optionType!==side||iso(p.expiryDate)?.slice(0,10)!==r.expiry||
+      !qt||day(Date.parse(qt))!==r.date||Date.parse(qt)>r.asOf||Date.parse(qt)>Date.parse(canonical.source_timestamp)+5000)return null;
+    strikes.add(p.strike);
+  }
+  const max=Math.max(...rows.map(p=>p.oi)),tops=rows.filter(p=>p.oi===max);
+  if(max<=0||tops.length!==1)return null;
+  const top=tops[0];
+  if(num(stored[prefix+'_wall_strike'])!==top.strike||num(stored[prefix+'_wall_oi'])!==top.oi)return null;
+  return {strike:top.strike,oi:top.oi,count:rows.length,quoteAt:iso(top.quoteTimestamp),source:'Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified'};
+}
 function evidenceCheckpoint(r:RagEventRequest,current:H1ReplayHttpResult,eventMs:number){
   const prepared=prepareMemoryData(current);
   return (offset:number) => {
@@ -75,22 +98,28 @@ function evidenceCheckpoint(r:RagEventRequest,current:H1ReplayHttpResult,eventMs
     const ce=quoteAt(current,r,ms,'CE',r.asOf),pe=quoteAt(current,r,ms,'PE',r.asOf);
     const chain=one(prepared.chain.filter(c=>c.symbol===r.symbol&&expiry(c)===r.expiry&&iso(c.minute_bucket)===new Date(ms).toISOString()));
     // Some recordings have a runtime market marker but an older normalized chain
-    // version. Keep that chain excluded; recover only the exact canonical PCR.
+    // version. Keep that chain excluded; canonical evidence is checked separately.
     const canonical=one((current.canonical??[]).filter(c=>c.symbol===r.symbol&&iso(c.minute_bucket)===new Date(ms).toISOString()));
     const sourceAt=canonical&&iso(canonical.source_timestamp);
     const currentExpiries=Array.isArray(canonical?.market?.expiries)?canonical.market.expiries.filter((e:Row)=>e.expiry==='Current Expiry'):[];
     const rawPcr=canonical?.market?.gapScore?.fullChainPcr;
-    const canonicalPcr=canonical?.truth_verdict==='TRUE'&&canonical.calculation_version==='H1_RUNTIME_BRIDGE_V1'&&canonical.calculation_version===market.calculation_version&&
+    const canonicalVerified=canonical?.truth_verdict==='TRUE'&&canonical.calculation_version==='H1_RUNTIME_BRIDGE_V1'&&canonical.calculation_version===market.calculation_version&&
       !!canonical.snapshot_id&&canonical.snapshot_id===market.snapshot_id&&canonical.market?.symbol===r.symbol&&
-      sourceAt&&Date.parse(sourceAt)>=ms&&Date.parse(sourceAt)<=ms+60000&&Date.parse(sourceAt)<=r.asOf&&
+      sourceAt&&Date.parse(sourceAt)>=ms&&Date.parse(sourceAt)<=ms+60000&&Date.parse(sourceAt)<=r.asOf;
+    const canonicalPcr=canonicalVerified&&
       currentExpiries.length===1&&iso(currentExpiries[0].expiryDate)?.slice(0,10)===r.expiry&&
       typeof rawPcr==='number'&&Number.isFinite(rawPcr)&&rawPcr>=0?rawPcr:null;
     const normalizedPcr=num(chain?.full_chain_oi_pcr);
+    const stored=one((current.chain??[]).filter(c=>c.symbol===r.symbol&&expiry(c)===r.expiry&&iso(c.minute_bucket)===new Date(ms).toISOString()));
+    const ceWall=!chain&&canonicalVerified?corroboratedWall(canonical!,stored,r,'CE'):null;
+    const peWall=!chain&&canonicalVerified?corroboratedWall(canonical!,stored,r,'PE'):null;
     return {offset,timeIst:clock(ms),bucketAt:new Date(ms).toISOString(),receiptAt:iso(market.backend_timestamp),pair:{ce,pe},
       context:{spot:num(market.spot_ltp),pdc:num(market.spot_prev_close),pdh:num(market.pdh),pdl:num(market.pdl),vix:num(market.india_vix),
         futures:num(market.future_ltp),futuresOi:num(market.future_oi),fullPcr:normalizedPcr??canonicalPcr,
         fullPcrSource:normalizedPcr!==null?chain?.full_pcr_source:canonicalPcr!==null?'Exact canonical full-chain source':chain?.full_pcr_source??null,
-        ceWall:num(chain?.call_wall_strike),peWall:num(chain?.put_wall_strike),ceWallOi:num(chain?.call_wall_oi),peWallOi:num(chain?.put_wall_oi)}};
+        ceWall:num(chain?.call_wall_strike)??ceWall?.strike??null,peWall:num(chain?.put_wall_strike)??peWall?.strike??null,
+        ceWallOi:num(chain?.call_wall_oi)??ceWall?.oi??null,peWallOi:num(chain?.put_wall_oi)??peWall?.oi??null,
+        wallEvidence:{CE:ceWall,PE:peWall}}};
   };
 }
 function reconciledReference(r:RagEventRequest,prior:H1ReplayHttpResult){

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {Hono} from 'hono';
 import {parseRagQuestion} from '../rag-question.js';
-import {RAG_CARD_SCRIPT,RAG_CARD_HTML,renderRagEvidencePage} from '../rag-evidence-card.js';
+import {RAG_CARD_SCRIPT,RAG_CARD_HTML,renderRagEvidencePage,renderPremiumResponseEvidence} from '../rag-evidence-card.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 import {researchRouter} from '../research-router.js';
 const question='NIFTY 22300 PE date 2026-10-13 expiry 2026-10-13 time 09:36ରେ କଣ ହେଲା?';
@@ -77,4 +77,10 @@ test('a new explicit card question supersedes an in-flight answer without a stal
  b.events['optionpilot:rag-selection']({detail});b.events['optionpilot:rag-selection']({detail:{...detail,time:'09:39'}});assert.equal(b.requests.length,2);
  resolves[0](success());await new Promise(resolve=>setImmediate(resolve));assert.equal(b.node('result').innerHTML,'');assert.equal(b.node('search').disabled,true);
  resolves[1](success());await new Promise(resolve=>setImmediate(resolve));assert.match(b.node('result').innerHTML,/210.65/);assert.equal(b.node('search').disabled,false);
+});
+test('source-backed response is rendered by the actual serialized card, with unknowns and escaped source text',async()=>{
+ const b=browser(async()=>{const res=success(),data=await res.json();return {...res,json:async()=>({...data,premiumResponse:{lookbackMinutes:3,status:'PARTIAL',reason:'<img src=x onerror=alert(1)>',clock:{calendarDte:0},before:null,current:{price:11.2,spot:22486.05,bucketAt:'2026-10-13T04:06:00Z'},change:null,evidenceSha256:'b'.repeat(64)}})};});
+ b.node('example').onclick();await b.submit();const html=b.node('result').innerHTML;
+ assert.match(html,/Recorded premium response/);assert.match(html,/Calendar DTE 0/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);assert.match(html,/theoretical Delta/);assert.match(html,/11\.20/);assert.match(html,/expiry timestamp/);
+ assert.equal(renderPremiumResponseEvidence(null),'');
 });

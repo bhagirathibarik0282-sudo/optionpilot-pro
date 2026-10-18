@@ -74,6 +74,8 @@ test('snapshot answers a non-crossing with exact opposite-side endpoints',()=>{
  assert.ok(Math.abs(r.comparison.oppositeChangePercent!-((220/210-1)*100))<1e-9);
  assert.match(r.answer,/Opposite CE ₹220.00/);assert.match(r.answer,/09:39 IST/);assert.deepEqual(r.outcomes,[]);
  assert.equal(r.provenance.selectedEvidenceSha256.length,64);
+ assert.equal(r.premiumResponse.status,'MEASURED');assert.equal(r.premiumResponse.change!.price,9.5-11.2);
+ assert.equal(r.premiumResponse.change!.spot,1);assert.equal(r.premiumResponse.modelAttribution.status,'UNAVAILABLE');
 });
 test('snapshot works without prior reference, but rejects stale/current identity conflicts',()=>{
  const noPrior={...fixture('2026-10-12'),ok:false};
@@ -88,6 +90,10 @@ test('snapshot respects receipt cutoff and never interpolates absent 1/5m baseli
  const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',asOf:'2026-10-13T09:36:00'}),fixture('2026-10-13'),fixture('2026-10-12'));assert.equal(r.ok,false);
  assert.equal(parseRagEventRequest({...query,kind:'SNAPSHOT',time:'09:15'}).ok,true);
  for(const q of [{kind:'ANY'},{lookback:'2'},{kind:'SNAPSHOT',time:'09:37'}])assert.equal(parseRagEventRequest({...query,...q}).ok,false);
+});
+test('six-minute snapshot uses its exact recorded endpoints and keeps multi-DTE scope explicit',()=>{
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',time:'09:42',lookback:'6'}),fixture('2026-10-13'),fixture('2026-10-12'));
+ assert.ok(r.ok);assert.equal(r.premiumResponse.lookbackMinutes,6);assert.equal(r.premiumResponse.before!.price,11.2);assert.equal(r.premiumResponse.current!.price,7.7);assert.equal(r.premiumResponse.change!.price,7.7-11.2);assert.equal(r.multiDte,null);
 });
 test('all-strike retrieval is bounded to selected date and requested lookback; default event path preserved',async()=>{
  const calls:any[]=[];const r=await readRagEventEvidence(request({kind:'SNAPSHOT',lookback:'75',time:'10:06'}),async q=>{calls.push(q);return fixture(q.tradeDate);});

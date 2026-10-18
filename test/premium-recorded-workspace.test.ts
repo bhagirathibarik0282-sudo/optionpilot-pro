@@ -98,7 +98,7 @@ test('series coverage follows the recorded cursor and cannot leak a later expiry
 
 test('compact ladder quick controls use exact DTE and switch displayed parameters',async()=>{
  const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
- h.click('',{pwLayout:'ladder'});assert.equal(h.node('pw-chain-top').hidden,false);assert.match(h.node('pw-chain-dtes').innerHTML,/data-pw-dte="1"[^>]*disabled/);assert.match(h.node('pw-results').innerHTML,/<th>CE ₹ · selected parameters<\/th>/);assert.match(h.node('pw-results').innerHTML,/<th>STRIKE<\/th>/);
+ h.click('',{pwLayout:'ladder'});assert.equal(h.node('pw-chain-top').hidden,false);assert.match(h.node('pw-chain-dtes').innerHTML,/data-pw-dte="1"[^>]*disabled/);assert.match(h.node('pw-results').innerHTML,/<th scope="col">CE ₹<\/th>/);assert.match(h.node('pw-results').innerHTML,/<th scope="col">STRIKE<\/th>/);
  h.click('',{pwMetric:'delta'});assert.match(h.node('pw-results').innerHTML,/<span>Delta<\/span>/);
  h.click('',{pwDte:'1'});assert.match(h.node('pw-results').innerHTML,/No premiums match/,'DTE1 must never substitute the DTE6 contract');
  h.click('',{pwDte:'ALL'});assert.match(h.node('pw-results').innerHTML,/₹111/);
@@ -141,4 +141,10 @@ test('mixed ladder metrics stay under each price, selected ATM ±7 displays all 
  assert.match(html,/pw-chain-price[\s\S]*pw-chain-facts[\s\S]*Volume/);assert.match(html,/<span>Spread ₹<\/span><b>2/);assert.match(html,/data-pw-level="PDH"/);assert.match(html,/data-pw-level="PDL"/);
  h.click('',{pwMetric:'volume'});assert.doesNotMatch(h.node('pw-results').innerHTML,/<span>Volume<\/span>/);assert.match(h.node('pw-results').innerHTML,/<span>Bid ₹/);
  h.click('',{pwLayout:'cards'});assert.equal(h.node('pw-pagination').hidden,false);
+});
+
+test('compact ladder headers fit narrow columns and selected change is never printed twice per contract',async()=>{
+ const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
+ const before=h.node('pw-results').innerHTML;assert.match(before,/<th scope="col">CE ₹<\/th>/);assert.doesNotMatch(before,/selected parameters/);assert.equal((before.match(/\+5.71%/g)||[]).length,1);
+ h.click('',{pwMetric:'change'});const mixed=h.node('pw-results').innerHTML;assert.equal((mixed.match(/\+5.71%/g)||[]).length,0);assert.match(mixed,/<span>Δ%<\/span><b>5.71/);assert.match(mixed,/PDH BREAK/);
 });

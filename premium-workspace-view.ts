@@ -136,7 +136,7 @@ export function installPremiumWorkspace(api:any){
   $('pw-chain-symbol').value=cfg.symbol;$('pw-chain-range').value=cfg.strikeScope;
   sameWrite('pw-chain-expiry','<option value="">All expiries</option>'+series.map((r:any)=>'<option value="'+esc(r.expiry)+'">'+esc(r.expiry)+' · '+r.dte+' DTE</option>').join(''));$('pw-chain-expiry').value=cfg.expiries.length===1?cfg.expiries[0]:'';
   for(const id of ['pw-chain-symbol','pw-chain-range','pw-chain-expiry'])$(id).disabled=!!cfg.watch;
-  $('pw-pairing').value=cfg.watch?'STRIKE':cfg.pairing;$('pw-pairing').disabled=!!cfg.watch;$('pw-delta-target').value=cfg.deltaTarget;$('pw-delta-target-label').hidden=!deltaMode();$('pw-chain-range').disabled=!!cfg.watch||deltaMode();
+  $('pw-pairing').value=cfg.watch?'STRIKE':cfg.pairing;$('pw-pairing').disabled=!!cfg.watch;if(document.activeElement!==$('pw-delta-target'))$('pw-delta-target').value=cfg.deltaTarget;$('pw-delta-target-label').hidden=!deltaMode();$('pw-chain-range').disabled=!!cfg.watch||deltaMode();
   root.querySelectorAll('[data-pw-metric]').forEach((b:any)=>b.setAttribute('aria-pressed',String(chainMetrics.includes(b.dataset.pwMetric))));
  }
  function draw(){

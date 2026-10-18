@@ -50,7 +50,9 @@ test('ambiguous duplicate cannot silently select a quote',()=>{
 });
 test('read wrapper calls only existing replay twice with bounded windows',async()=>{
  const calls:any[]=[];const r=await readRagEventEvidence(request(),async q=>{calls.push(q);return fixture(q.tradeDate);});
- assert.ok(r.ok);assert.equal(calls.length,2);assert.equal(calls[0].fromTime,'09:15');assert.equal(calls[0].toTime,'09:36');assert.equal(calls[1].tradeDate,'2026-10-12');
+ assert.ok(r.ok);
+ assert.equal(r.premiumResponse.status,'MEASURED');assert.equal(r.premiumResponse.change!.price,9.5-11.2);
+ assert.equal(r.premiumResponse.change!.spot,1);assert.equal(r.premiumResponse.modelAttribution.status,'UNAVAILABLE');assert.equal(calls.length,2);assert.equal(calls[0].fromTime,'09:15');assert.equal(calls[0].toTime,'09:36');assert.equal(calls[1].tradeDate,'2026-10-12');
 });
 test('GET route validates, catches unavailable sources, never offers POST',async()=>{
  const app=new Hono();mountRagEventEvidenceRoute(app,async r=>result());
@@ -88,6 +90,35 @@ test('snapshot respects receipt cutoff and never interpolates absent 1/5m baseli
  const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',asOf:'2026-10-13T09:36:00'}),fixture('2026-10-13'),fixture('2026-10-12'));assert.equal(r.ok,false);
  assert.equal(parseRagEventRequest({...query,kind:'SNAPSHOT',time:'09:15'}).ok,true);
  for(const q of [{kind:'ANY'},{lookback:'2'},{kind:'SNAPSHOT',time:'09:37'}])assert.equal(parseRagEventRequest({...query,...q}).ok,false);
+});
+test('all-strike retrieval is bounded to selected date and requested lookback; default event path preserved',async()=>{
+ const calls:any[]=[];const r=await readRagEventEvidence(request({kind:'SNAPSHOT',lookback:'75',time:'10:06'}),async q=>{calls.push(q);return fixture(q.tradeDate);});
+ assert.ok(r.ok);assert.equal(r.mode,'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1');assert.equal(calls.length,2);assert(calls.every(q=>q.scope==='FULL'));assert.equal(calls[0].fromTime,'09:15');assert.equal(calls[0].toTime,'10:06');
+ assert.equal(result({time:'09:39'}).ok,false,'event mode still requires a reconciled crossing');
+});
+
+test('snapshot still answers current recording when the prior source throws',async()=>{
+ const r=await readRagEventEvidence(request({kind:'SNAPSHOT'}),async q=>{if(q.tradeDate==='2026-10-12')throw Error('unavailable');return fixture(q.tradeDate);});assert.ok(r.ok);assert.equal(r.reference,null);assert.equal(r.referenceUnavailableReason,'REPLAY_SOURCE_UNAVAILABLE');
+});
+
+test('RAG snapshot includes independently verified multi-expiry 3m evidence',()=>{
+ const current=fixture('2026-10-13');
+ const other=current.options!.filter((o:any)=>o.option_type==='PE'&&['09:33','09:36'].some(t=>o.minute_bucket===new Date('2026-10-13T'+t+':00+05:30').toISOString())).map((o:any)=>({...o,expiry:'2026-10-20'}));
+ current.options!.push(...other);
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',lookback:'3'}),current,fixture('2026-10-12'));
+ assert.ok(r.ok);
+ assert.equal(r.multiDte?.coverage.verifiedExpiries,2);
+ assert.equal(r.multiDte?.accepted.length,2);
+});
+test('RAG snapshot does not infer multi-DTE for non-3m windows',()=>{
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',lookback:'5'}),fixture('2026-10-13'),fixture('2026-10-12'));
+ assert.ok(r.ok);
+ assert.equal(r.multiDte,null);
+});
+
+test('six-minute snapshot uses its exact recorded endpoints and keeps multi-DTE scope explicit',()=>{
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',time:'09:42',lookback:'6'}),fixture('2026-10-13'),fixture('2026-10-12'));
+ assert.ok(r.ok);assert.equal(r.premiumResponse.lookbackMinutes,6);assert.equal(r.premiumResponse.before!.price,11.2);assert.equal(r.premiumResponse.current!.price,7.7);assert.equal(r.premiumResponse.change!.price,7.7-11.2);assert.equal(r.multiDte,null);
 });
 test('all-strike retrieval is bounded to selected date and requested lookback; default event path preserved',async()=>{
  const calls:any[]=[];const r=await readRagEventEvidence(request({kind:'SNAPSHOT',lookback:'75',time:'10:06'}),async q=>{calls.push(q);return fixture(q.tradeDate);});

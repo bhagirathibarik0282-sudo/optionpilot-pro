@@ -92,3 +92,14 @@ test('three-index band alignment also requires synchronized ATM source times at 
  const p=withBand(fixture());p.pcrDisplay.NIFTY.bandPcr.anchorAt=iso(start-30000);p.pcrDisplay.SENSEX.bandPcr.anchorAt=iso(start+5000);
  const base=derive(p);assert(base.rows.every(r=>r.bandValue!==null));const next=derive(withBand(fixture(60000,[1.1,1.3,1.5]),[2,1.9,1.8]),base);assert.equal(next.alignment,'ALL_UP');assert.equal(next.bandAlignment,'TIME_MISMATCH');
 });
+
+test('recorded PCR strip keeps source proof, exact expiry, gaps and backward seeks',async()=>{
+ const {deriveRecordedThreeIndexPcr:deriveRecorded}=await import('../live-three-index-pcr.js');
+ const state:any={date:'2026-10-16',current:Object.fromEntries(symbols.map((s,i)=>[s,{chain:[0,180000,360000].map((n,j)=>({symbol:s,expiry:expiries[i],minute_bucket:iso(start+n),truth_verdict:'TRUE',full_pcr_source:'Exact archived full-chain source',full_chain_oi_pcr:1+j*.1}))}]))};
+ const first=deriveRecorded(state,iso(start+180000),null,100);assert.equal(first.alignment,'SYNC');assert(first.rows.every(r=>r.value===1.1&&r.direction==='UP'&&r.blinkUntil===0));
+ const next=deriveRecorded(state,iso(start+360000),first,200);assert(next.rows.every(r=>r.blinkUntil===2000));
+ assert(deriveRecorded(state,iso(start+180000),next,300).rows.every(r=>r.blinkUntil===0));
+ state.current.SENSEX.chain[2].full_pcr_source='unverified';assert.equal(deriveRecorded(state).rows[1].value,null);
+ state.current.NIFTY.chain.splice(1,1);assert.equal(deriveRecorded(state).rows[0].direction,'WAIT');
+ state.current.BANKNIFTY.chain.push({...state.current.BANKNIFTY.chain[2]});assert.equal(deriveRecorded(state).rows[2].value,null);
+});

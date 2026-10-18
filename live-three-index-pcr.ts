@@ -40,6 +40,13 @@ export function deriveLiveThreeIndexPcr(payload:any,previous:any=null,localNow=D
   }
   return {...empty,value:current.value,current,bandValue:band?.value??null};
  });
+ // Spot ticks update independently of the slower PCR snapshot cadence.
+ for(const row of rows){
+  const matches=live?snapshot.indices.filter((a:any)=>a?.symbol===row.symbol):[],q=matches.length===1?matches[0].spot:null;
+  const observed=ms(q?.observedAt),received=ms(q?.receivedAt);
+  const valid=q?.identity?.role==='SPOT'&&q.identity.symbol===row.symbol&&q.state==='LIVE'&&num(q.price)&&q.price>0&&day(observed)===snapshot.tradeDate&&day(received)===snapshot.tradeDate&&now-observed>=-5000&&now-observed<=30000&&now-received>=0&&now-received<=30000;
+  Object.assign(row,{spotValue:valid?q.price:null,spotAt:valid?q.observedAt:null});
+ }
  const ready=rows.every(r=>r.current&&r.baseline&&r.direction!=='WAIT');
  let alignment='WAIT';
  if(ready){
@@ -65,7 +72,7 @@ export function renderLiveThreeIndexPcr(view:any,localNow=Date.now()) {
   return '<div class="mb-pcr-number" data-pcr-metric="'+kind+'"><strong>'+(typeof value==='number'?value.toFixed(4):'—')+'</strong><span data-pcr-direction="'+esc(direction)+'"'+(blink?' class="mb-pcr-blink" style="animation-delay:-'+Math.floor(1800-remaining)+'ms"':'')+' aria-label="'+kind+' PCR '+esc(direction.toLowerCase())+'">'+esc(glyph[direction])+'</span></div>';
  };
  const badge=(label:string,state:string)=>'<span class="mb-pcr-alignment" data-pcr-alignment="'+esc(state||'WAIT')+'" role="status">'+label+' · '+esc(labels[state]||labels.WAIT)+'</span>';
- return '<section class="mb-full-pcr" aria-label="Three-index live full-chain PCR"><div class="mb-full-pcr-heading"><strong>PCR ladder · LIVE snapshots</strong><div class="mb-pcr-badges">'+badge('Full',view.alignment)+badge('Band',view.bandAlignment)+'</div></div><table class="mb-pcr-ladder"><thead><tr><th scope="col">Index / expiry</th><th scope="col">Full OI PCR</th><th scope="col">Band OI PCR<small>ATM ±7 · 15 strikes</small></th></tr></thead><tbody>'+view.rows.map((r:any)=>'<tr data-pcr-index="'+esc(r.symbol)+'"><th scope="row"><span class="mb-pcr-index">'+esc(r.symbol)+'</span><small>'+esc(r.expiry||'Expiry unavailable')+(r.symbol==='BANKNIFTY'?' · M':'')+'</small><small>'+esc(r.current?r.current.period/60000+'m · '+time(r.current.checked)+' IST':'UNAVAILABLE')+'</small></th><td>'+number(r.value,r.direction,r.blinkUntil,'full')+'</td><td>'+number(r.bandValue,r.bandDirection||'WAIT',r.bandBlinkUntil||0,'band')+'</td></tr>').join('')+'</tbody></table><details class="mb-pcr-sources" data-live-detail="pcr-ladder"><summary>Source &amp; band range</summary>'+view.rows.map((r:any)=>'<p>'+esc(r.symbol)+' · full coverage '+esc(r.current?.expected)+'/'+esc(r.current?.expected)+' · '+esc(r.baseline?time(r.baseline.checked):'Baseline pending')+' → '+esc(time(r.current?.checked))+'<br>Band: '+esc(r.current?.band?r.current.band.from+' → '+r.current.band.to+' · ATM '+r.current.band.anchor+' · 30/30 contracts · spot '+time(r.current.band.anchorAt):'UNAVAILABLE · complete band and fresh ATM reference required')+'</p>').join('')+'<p>Both ratios use PE OI ÷ CE OI. Full uses the complete expiry; band uses 7 listed strikes each side of snapshot ATM. Changing ATM resets only the band comparison. Arrows describe ratio changes.</p></details></section>';
+ return '<section class="mb-full-pcr" aria-label="Three-index live full-chain PCR"><div class="mb-full-pcr-heading"><strong>PCR ladder · LIVE snapshots</strong><div class="mb-pcr-badges">'+badge('Full',view.alignment)+badge('Band',view.bandAlignment)+'</div></div><table class="mb-pcr-ladder"><thead><tr><th scope="col">Index / expiry</th><th scope="col">Full OI PCR</th><th scope="col">Band OI PCR<small>ATM ±7 · 15 strikes</small></th></tr></thead><tbody>'+view.rows.map((r:any)=>'<tr data-pcr-index="'+esc(r.symbol)+'"><th scope="row"><span class="mb-pcr-index">'+esc(r.symbol)+'</span><small class="mb-pcr-spot">Spot '+(typeof r.spotValue==='number'?r.spotValue.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'—')+' · '+time(Date.parse(r.spotAt))+' IST</small><small>'+esc(r.expiry||'Expiry unavailable')+(r.symbol==='BANKNIFTY'?' · M':'')+'</small><small>'+esc(r.current?r.current.period/60000+'m · '+time(r.current.checked)+' IST':'UNAVAILABLE')+'</small></th><td>'+number(r.value,r.direction,r.blinkUntil,'full')+'</td><td>'+number(r.bandValue,r.bandDirection||'WAIT',r.bandBlinkUntil||0,'band')+'</td></tr>').join('')+'</tbody></table><details class="mb-pcr-sources" data-live-detail="pcr-ladder"><summary>Source &amp; band range</summary>'+view.rows.map((r:any)=>'<p>'+esc(r.symbol)+' · full coverage '+esc(r.current?.expected)+'/'+esc(r.current?.expected)+' · '+esc(r.baseline?time(r.baseline.checked):'Baseline pending')+' → '+esc(time(r.current?.checked))+'<br>Band: '+esc(r.current?.band?r.current.band.from+' → '+r.current.band.to+' · ATM '+r.current.band.anchor+' · 30/30 contracts · spot '+time(r.current.band.anchorAt):'UNAVAILABLE · complete band and fresh ATM reference required')+'</p>').join('')+'<p>Both ratios use PE OI ÷ CE OI. Full uses the complete expiry; band uses 7 listed strikes each side of snapshot ATM. Changing ATM resets only the band comparison. Arrows describe ratio changes.</p></details></section>';
 }
 
 export const LIVE_THREE_INDEX_PCR_CSS=`
@@ -86,6 +93,13 @@ export function deriveRecordedThreeIndexPcr(state:any,cursor='',previous:any=nul
   const blinkUntil=prior?.current?.checked===current.checked?prior.blinkUntil:baseline&&prior?.current?.checked===baseline.checked&&['UP','DOWN'].includes(direction)?now+1800:0;
   return {symbol,expiry,value:current.value,direction,current,baseline,blinkUntil};
  });
+ for(const row of rows){
+  const source=(state.current?.[row.symbol]?.market||[]).filter((r:any)=>r.symbol===row.symbol&&day(r.minute_bucket)===state.date&&Date.parse(r.minute_bucket)<=cut);
+  const at=row.current?.checked??Math.max(...source.map((r:any)=>Date.parse(r.minute_bucket)));
+  const matches=source.filter((r:any)=>Date.parse(r.minute_bucket)===at),q=matches.length===1?matches[0]:null;
+  const valid=q?.truth_verdict==='TRUE'&&typeof q.spot_ltp==='number'&&Number.isFinite(q.spot_ltp)&&q.spot_ltp>0;
+  Object.assign(row,{spotValue:valid?q.spot_ltp:null,spotAt:valid?q.minute_bucket:null});
+ }
  const ready=rows.every(r=>r.current),synced=ready&&new Set(rows.map(r=>r.current.checked)).size===1;
  return {key,rows,alignment:!ready?'WAIT':synced?'SYNC':'TIME_MISMATCH'};
 }

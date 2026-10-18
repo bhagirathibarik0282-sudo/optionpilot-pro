@@ -19,6 +19,35 @@ function fixture(date:string):H1ReplayHttpResult {
  return {ok:true,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request:{symbol:'NIFTY',tradeDate:date,fromTime:'09:15',toTime:'15:30',scope:'CORE'},market,options,chain};
 }
 const result=(extra:Record<string,string>={})=>buildRagEventEvidence(request(extra),fixture('2026-10-13'),fixture('2026-10-12'));
+test('mixed-version loaded OI maxima require exact canonical corroboration, including alias conflicts',()=>{
+ const c=fixture('2026-10-13');
+ for(const m of c.market!)m.calculation_version='H1_RUNTIME_BRIDGE_V1';
+ c.canonical=c.market!.map(m=>({symbol:m.symbol,minute_bucket:m.minute_bucket,snapshot_id:m.snapshot_id,truth_verdict:'TRUE',source_timestamp:m.backend_timestamp,calculation_version:m.calculation_version,
+  market:{symbol:m.symbol,expiries:[{expiry:'Current Expiry',expiryDate:'2026-10-13',...Object.fromEntries(['CE','PE'].map(side=>[side==='CE'?'ceStrikes':'peStrikes',[22300,22400].map((strike,i)=>({strike,oi:1000+i*100,optionType:side,expiryDate:'2026-10-13',quoteTimestamp:m.backend_timestamp}))]))}],gapScore:{fullChainPcr:1.23}}}));
+ for(const row of c.chain!)Object.assign(row,{call_wall_strike:22400,call_wall_oi:1100,put_wall_strike:22400,put_wall_oi:1100});
+ const run=()=>{const out=buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),c,fixture('2026-10-12'));assert.ok(out.ok);return out.beforeAndAt.at(-1)!.context;};
+ assert.equal(run().ceWall,22400);assert.equal(run().peWallOi,1100);assert.equal(run().wallEvidence.CE!.count,2);
+ assert.match(run().wallEvidence.CE!.source,/full-chain coverage and freshness unverified/);
+ const target=c.canonical.find(row=>row.minute_bucket==='2026-10-13T04:06:00.000Z')!,original=structuredClone(target);
+ for(const mutate of [
+  (v:any)=>v.market.expiries[0].ceStrikes[1].oi=1200,
+  (v:any)=>v.market.expiries[0].ceStrikes[0].oi=null,
+  (v:any)=>v.market.expiries[0].ceStrikes[0].oi=1100,
+  (v:any)=>v.market.expiries[0].ceStrikes[0].optionType='PE',
+  (v:any)=>v.market.expiries[0].ceStrikes[0].expiryDate='2026-10-19',
+  (v:any)=>v.market.expiries[0].ceStrikes[0].quoteTimestamp='2026-10-12T04:06:24Z',
+  (v:any)=>v.market.expiries[0].ceStrikes[0].quoteTimestamp='2026-10-13T04:07:24Z',
+  (v:any)=>v.market.expiries[0].ceStrikes.push({...v.market.expiries[0].ceStrikes[0]}),
+  (v:any)=>v.market.expiries.push({...structuredClone(v.market.expiries[0]),ceStrikes:[]}),
+ ]){Object.assign(target,structuredClone(original));mutate(target);assert.equal(run().ceWall,null);assert.equal(run().peWall,22400);}
+ Object.assign(target,structuredClone(original));target.market.expiries.push({...structuredClone(target.market.expiries[0]),expiry:'Monthly'});
+ assert.equal(run().ceWall,22400);
+ const row=c.chain!.find(row=>row.minute_bucket==='2026-10-13T04:06:00.000Z')!;
+ c.chain!.push({...row,call_wall_oi:9999});assert.equal(run().ceWall,null);assert.equal(run().peWall,null);
+ c.chain!.pop();Object.assign(target,structuredClone(original));target.market.expiries[0].ceStrikes[1].quoteTimestamp='2026-10-13T04:06:26Z';
+ const cut=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',asOf:'2026-10-13T09:36:25'}),c,fixture('2026-10-12'));
+ assert.ok(cut.ok);assert.equal(cut.beforeAndAt.at(-1)!.context.ceWall,null);assert.equal(cut.beforeAndAt.at(-1)!.context.peWall,22400);
+});
 test('mixed-version chain recovers only snapshot-matched canonical current-expiry PCR',()=>{
  const c=fixture('2026-10-13');
  for(const m of c.market!)m.calculation_version='H1_RUNTIME_BRIDGE_V1';

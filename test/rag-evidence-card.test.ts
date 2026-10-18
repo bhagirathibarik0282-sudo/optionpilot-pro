@@ -45,6 +45,12 @@ test('serialized card starts with no request; explicit search uses exact GET and
  assert.match(b.node('result').innerHTML,/210\.65/);assert.match(b.node('result').innerHTML,/ଅନୁପଲବ୍ଧ/);assert.doesNotMatch(b.node('result').innerHTML,/<script>alert/);assert.match(b.node('result').innerHTML,/&lt;script&gt;/);
  assert.match(b.node('status').textContent,/2026-10-13/);assert.equal(b.node('search').disabled,false);
 });
+test('wall scope and exact loaded-strike provenance are visible and escaped',async()=>{
+ const b=browser(async()=>{const res=success(),data:any=await res.json();data.beforeAndAt[1].context.wallEvidence={CE:{count:21,quoteAt:'2026-10-13T04:06:24Z',source:'<img src=x> loaded strikes'},PE:null};return {...res,json:async()=>data};});
+ b.node('example').onclick();await b.submit();const html=b.node('result').innerHTML;
+ assert.match(html,/CE loaded OI max/);assert.match(html,/21 loaded strikes/);assert.match(html,/full-chain coverage\/freshness verified ନୁହେଁ/);
+ assert.match(html,/&lt;img src=x&gt; loaded strikes/);assert.doesNotMatch(html,/<img src=x>/);
+});
 test('missing fields block fetch; extraction clears stale contract fields',async()=>{
  const b=browser(async()=>success());await b.submit();assert.equal(b.requests.length,0);
  b.node('example').onclick();b.node('asof').value='2026-10-13T09:39';b.node('outcomes').checked=true;b.node('question').value='SENSEX PE';b.node('extract').onclick();assert.equal(b.node('strike').value,'');assert.equal(b.node('date').value,'');assert.equal(b.node('asof').value,'');assert.equal(b.node('outcomes').checked,false);assert.match(b.node('status').textContent,/ଆହୁରି/);

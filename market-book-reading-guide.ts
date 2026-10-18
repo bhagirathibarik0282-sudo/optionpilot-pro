@@ -43,7 +43,7 @@ export function renderMarketBookReadingGuide(a:any,state:any,page:number,window:
 }
 
 /** Chapter-specific projection of the existing Kite stream. Never reads recorded values. */
-export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hidePcr=false){
+export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hidePcr=false,display:any={}){
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const n=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
  const formats=(renderMarketBookLiveContext as any).formats||((renderMarketBookLiveContext as any).formats={numbers:new Map(),time:new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})});
@@ -84,7 +84,9 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hid
   const breadth=(role:string)=>{
    const rows=(Array.isArray(snapshot.participation)?snapshot.participation:[]).filter((q:any)=>q?.identity?.role===role),quotes=rows.filter((q:any)=>fresh(q,role)&&n(q.changePct)!==null);
    const label=role==='SECTOR'?'Sector quotes':'Heavyweight quote subset';
-   const summary=card(role==='SECTOR'?'sectors':'stocks',label,quotes.length?quotes.filter((q:any)=>q.changePct>0).length+' ↑ / '+quotes.filter((q:any)=>q.changePct<0).length+' ↓ / '+quotes.filter((q:any)=>q.changePct===0).length+' ↔':'—',quotes.length+'/'+rows.length+' fresh unweighted quotes · vs previous close · shared universe, not '+index+' weights',quotes.length+'/'+rows.length+' fresh');const details='<details data-live-detail="'+esc(index+'-'+role)+'"><summary>'+esc(label)+' · source times</summary>'+rows.map((q:any)=>note((q.identity?.label||'—')+' · '+fmt(fresh(q,role)?q.changePct:null)+'% · '+detail(q,fresh(q,role)))).join('')+'</details>';return summary.slice(0,-6)+details+'</div>';
+   const summary=card(role==='SECTOR'?'sectors':'stocks',label,quotes.length?quotes.filter((q:any)=>q.changePct>0).length+' ↑ / '+quotes.filter((q:any)=>q.changePct<0).length+' ↓ / '+quotes.filter((q:any)=>q.changePct===0).length+' ↔':'—',quotes.length+'/'+rows.length+' fresh unweighted quotes · vs previous close · shared universe, not '+index+' weights',quotes.length+'/'+rows.length+' fresh');const details='<details data-live-detail="'+esc(index+'-'+role)+'"><summary>'+esc(label)+' · source times</summary>'+rows.map((q:any)=>note((q.identity?.label||'—')+' · '+fmt(fresh(q,role)?q.changePct:null)+'% · '+detail(q,fresh(q,role)))).join('')+'</details>';const up=quotes.filter((q:any)=>q.changePct>0).length,down=quotes.filter((q:any)=>q.changePct<0).length,flat=quotes.length-up-down,total=rows.length;
+   const wheel=display.wheel&&total?'<div class="mb-breadth-wheel-row"><div class="mb-breadth-wheel" style="--up:'+up/total*360+'deg;--down:'+(up+down)/total*360+'deg;--flat:'+(up+down+flat)/total*360+'deg" role="img" aria-label="'+esc(label+' unweighted breadth: '+up+' up, '+down+' down, '+flat+' unchanged, '+(total-quotes.length)+' unavailable')+'"><span>'+quotes.length+'/'+total+'</span></div><small>↑ '+up+' · ↓ '+down+' · → '+flat+' · unavailable '+(total-quotes.length)+'<br>Equal quote counts · not index-weight contribution</small></div>':'';
+   return summary.slice(0,-6)+wheel+details+'</div>';
   };
   const data:any={
    spot:()=>quoteCard('spot','Spot · points',spot,flags.spot),future:()=>quoteCard('future','Futures · '+(future.identity?.expiry||'—'),future,flags.future),
@@ -98,7 +100,7 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hid
    pcr:()=>card('pcr','Full PCR'+(usesSample?' · snapshot':''),fmt(pcr&&n(pcr.fullPcr)!==null&&pcr.fullPcr>=0?pcr.fullPcr:null,4),pcrDetail,pcr?(usesSample?sample.periodMs/60000+' min · '+time(sample.checkedAt):time(a.pcrAt)):'UNAVAILABLE'),
    callWall:()=>wall('call'),putWall:()=>wall('put'),stocks:()=>breadth('STOCK'),sectors:()=>breadth('SECTOR')
   };
-  return '<section class="mb-live-index" aria-label="'+esc((page===11?'India VIX':page===8?'Shared stocks and sectors':index)+' chapter live values')+'"><h3>'+esc(page===11?'India VIX':page===8?'Stocks & sectors':index)+([0,2,5,9,12].includes(page)?' · '+esc(a.expiry||'No live expiry')+' / '+esc(a.strike??'No live strike'):'')+'</h3><div class="mb-live-facts">'+(orders[page]||orders[0]).filter((key:string)=>!hidePcr||key!=='pcr').map((key:string)=>data[key]()).join('')+'</div></section>';
+  return '<section class="mb-live-index" aria-label="'+esc((page===11?'India VIX':page===8?'Shared stocks and sectors':index)+' chapter live values')+'"><h3>'+esc(page===11?'India VIX':page===8?'Stocks & sectors':index)+([0,2,5,9,12].includes(page)?' · '+esc(a.expiry||'No live expiry')+' / '+esc(a.strike??'No live strike'):'')+'</h3><div class="mb-live-facts">'+(orders[page]||orders[0]).filter((key:string)=>(!hidePcr||key!=='pcr')&&(!display.metric||display.metric==='ALL'||key===display.metric)).map((key:string)=>data[key]()).join('')+'</div></section>';
  });
  return '<div class="mb-live-heading" data-mb-detail>Kite feed · server '+esc(time(payload.serverTime))+'</div>'+blocks.join('')+(notes[page]?note(notes[page]):'')+note('LIVE selection follows the live panel above; recorded chapter expiry/strike may differ. Parameters carry independent source times. OI is in source units.');
 }

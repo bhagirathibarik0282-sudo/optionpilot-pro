@@ -116,3 +116,8 @@ test('live context never keeps stale future or VIX values during a stalled deliv
  const {payload}=liveFixture();assert.equal(derivePremiumLiveContext(payload).vix.value,14);assert.equal(derivePremiumLiveContext(payload).indices[0].future.value,22000);
  const c=derivePremiumLiveContext(payload,'ALL',[],4000);assert.equal(c.vix.value,null);assert.equal(c.indices[0].future.value,null);assert.equal(c.indices[0].pcr.value,null);
 });
+
+test('PDC is an exact current contract field and is withheld for missing or unusable observations',()=>{
+ assert.equal(run([row(0,111,{pdc:101})]).rows[0].pdc,101);
+ for(const patch of [{pdc:null},{pdc:0},{pdc:NaN},{truth_verdict:'STALE'},{truth_verdict:'CONFLICT'}])assert.equal(run([row(0,111,patch)]).rows[0].pdc,null);
+});

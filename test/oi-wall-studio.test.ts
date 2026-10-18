@@ -1,3 +1,4 @@
+import {renderMarketBookLiveContext} from '../market-book-reading-guide.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -53,7 +54,7 @@ function harness(){
  const events:any[]=[];let now=base,fn:any;const timers=new Map<number,any>();let id=0;
  class Clock extends Date{static now(){return now;}}
  const ctx:any={__name:(f:any)=>f,document:{getElementById:(id:string)=>nodes.get(id)},window:{dispatchEvent:(e:any)=>events.push(e)},CustomEvent:class{type:any;detail:any;constructor(type:any,data:any){this.type=type;this.detail=data.detail;}},Date:Clock,setTimeout:(f:any)=>{timers.set(++id,f);return id;},clearTimeout:(i:number)=>timers.delete(i),fetch:async()=>{throw Error('Network not mocked');},AbortSignal};
- vm.createContext(ctx);ctx.deriveOiStudioSnapshot=deriveOiStudioSnapshot;vm.runInContext('const install='+installOiWallStudio.toString()+';var studio=install();',ctx);const studio=ctx.studio;studio.setPage(5);
+ vm.createContext(ctx);ctx.renderMarketBookLiveContext=renderMarketBookLiveContext;ctx.deriveOiStudioSnapshot=deriveOiStudioSnapshot;vm.runInContext('const install='+installOiWallStudio.toString()+';var studio=install();',ctx);const studio=ctx.studio;studio.setPage(5);
  const click=(id:string,key:string,value:string)=>nodes.get('ows-'+id)!.onclick({target:{closest:()=>({dataset:{[key]:value}})}});
  return {nodes,events,ctx,studio,click,setNow:(n:number)=>now=n,timers};
 }
@@ -114,4 +115,12 @@ test('disconnected live entry exposes saved-record recovery instead of a screen 
  h.studio.update(fixture());assert.equal(h.nodes.get('ows-live-empty')!.hidden,true);
  h.studio.update({...fixture(),connected:false,connectionState:'MARKET_CLOSED'});assert.equal(h.nodes.get('ows-live-empty')!.hidden,false);
  h.nodes.get('ows-live-workspace')!.hidden=true;h.studio.recorded({},date);assert.equal(h.nodes.get('ows-live-empty')!.hidden,true,'recorded mode has no live warning');
+});
+
+test('wheel switches independent quote breadth even when complete option OI is unavailable',()=>{
+ const h=harness(),p:any=fixture();p.snapshot.participation=[{identity:{role:'STOCK',label:'HDFC'},price:100,changePct:1,state:'LIVE',observedAt:p.serverTime,receivedAt:p.serverTime},{identity:{role:'SECTOR',label:'BANK'},price:100,changePct:-2,state:'LIVE',observedAt:p.serverTime,receivedAt:p.serverTime}];
+ p.snapshot.indices[0].pcrSnapshot=null;h.studio.update(p);h.click('view-tabs','owsView','wheel');h.click('wheel-tabs','owsWheel','stocks');
+ const chart=h.nodes.get('ows-chart')!;assert(chart.innerHTML.includes('mb-breadth-wheel'));assert(chart.innerHTML.includes('HDFC'));assert(!chart.innerHTML.includes('Sector quotes'));
+ h.click('wheel-tabs','owsWheel','sectors');assert(chart.innerHTML.includes('BANK'));assert(!chart.innerHTML.includes('Heavyweight quote subset'));
+ h.studio.update(null);assert(!chart.innerHTML.includes('mb-breadth-wheel'));assert(!chart.innerHTML.includes('-2%'));
 });

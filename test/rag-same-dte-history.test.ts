@@ -42,6 +42,16 @@ test('anchor receipt and quote must exist at explicit replay cutoff',()=>{
  assert.equal((compareSameDteHistory({...s,asOf:Date.parse('2026-10-13T09:36:23+05:30')},replay(),[]) as any).reason,'ANCHOR_PAIR_UNAVAILABLE_AT_CUTOFF');
  assert.equal(compareSameDteHistory({...s,asOf:Infinity},replay(),[]).ok,false);
 });
+test('PostgreSQL Date values match JSON archive evidence without losing receipt milliseconds',()=>{
+ const json=replay();json.market[1].backend_timestamp='2026-10-13T04:06:24.258Z';
+ const database=structuredClone(json);
+ for(const m of database.market){m.minute_bucket=new Date(m.minute_bucket);m.backend_timestamp=new Date(m.backend_timestamp);}
+ for(const q of database.options){q.minute_bucket=new Date(q.minute_bucket);q.quote_timestamp=new Date(q.quote_timestamp);q.expiry=new Date(q.expiry+'T00:00:00Z');}
+ const a:any=compareSameDteHistory(s,json,[]),b:any=compareSameDteHistory(s,database,[]);
+ assert.equal(b.ok,true);assert.deepEqual(b.anchor,a.anchor);assert.equal(b.provenance.selectedEvidenceSha256,a.provenance.selectedEvidenceSha256);
+ assert.equal(compareSameDteHistory({...s,asOf:Date.parse('2026-10-13T04:06:24.257Z')},database,[]).ok,false);
+ database.options[1].expiry=new Date(NaN);assert.equal(compareSameDteHistory(s,database,[]).ok,false);
+});
 test('malformed dates, non-grid selections and absent spot cannot produce evidence',()=>{
  assert.equal(compareSameDteHistory({...s,date:'2026-02-30'},replay(),[]).ok,false);
  assert.equal(compareSameDteHistory({...s,timeIst:'09:35'},replay(),[]).ok,false);

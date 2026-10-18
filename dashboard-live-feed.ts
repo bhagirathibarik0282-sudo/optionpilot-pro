@@ -1,4 +1,5 @@
 import { mapKiteFullPacketToH1ExactDepth } from './h1-kite-exact-depth-adapter.js';
+import { derivePremiumSeriesInventory } from './premium-workspace-model.js';
 import { KiteImmediateTokenRegistry } from './kite-immediate-token-registry.js';
 import type { KiteInstrumentMasterRow } from './kite-immediate-registry-builder.js';
 import type { KiteDecodedPacket } from './kite-websocket-binary-decoder.js';
@@ -129,7 +130,7 @@ export class DashboardLiveStore {
    (e.side==='CE'?filter.ceStrike===undefined||e.strike===filter.ceStrike:filter.peStrike===undefined||e.strike===filter.peStrike))
    .sort((a,b)=>String(a.symbol).localeCompare(String(b.symbol))||a.strike!-b.strike!||String(a.expiry).localeCompare(String(b.expiry))||String(a.side).localeCompare(String(b.side)));
   const offset=filter.offset||0,limit=Math.min(120,filter.limit||60);
-  return {tradeDate:this.inventory.date,runtimeId:this.runtimeId,total:selected.length,offset,limit,expiries,strikes,
+  return {tradeDate:this.inventory.date,runtimeId:this.runtimeId,total:selected.length,offset,limit,expiries,strikes,series:derivePremiumSeriesInventory(options,this.inventory.date,filter.symbol||'ALL',filter),
    rows:selected.slice(offset,offset+limit).map(e=>({...this.quote(e,now),dte:dte(e)})),omittedExpiries:this.inventory.omittedExpiries};
  }
 

@@ -1,3 +1,18 @@
+/** Loaded contract identities, not freshness or exchange-wide coverage. No expiry-type inference. */
+export function derivePremiumSeriesInventory(rows:any[],tradeDate:string,symbol='ALL',pins:any={}){
+ const day=(v:any)=>{if(v instanceof Date)return Number.isFinite(v.getTime())?v.toISOString().slice(0,10):null;if(typeof v!=='string'||v.length!==10&&(!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(v)||!Number.isFinite(Date.parse(v))))return null;const s=v.slice(0,10),t=Date.parse(s+'T00:00:00Z');return /^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(t)&&new Date(t).toISOString().slice(0,10)===s?s:null;};
+ const date=day(tradeDate);if(!date)return [];
+ const groups=new Map<string,{symbol:string;expiry:string;ce:Set<number>;pe:Set<number>}>();
+ for(const r of rows){const expiry=day(r.expiry),side=r.side??r.option_type??r.type;
+  if(!['NIFTY','SENSEX','BANKNIFTY'].includes(r.symbol)||symbol!=='ALL'&&r.symbol!==symbol||!expiry||!['CE','PE'].includes(side)||typeof r.strike!=='number'||!Number.isFinite(r.strike)||r.strike<=0)continue;
+  const key=r.symbol+'|'+expiry;let g=groups.get(key);if(!g){g={symbol:r.symbol,expiry,ce:new Set(),pe:new Set()};groups.set(key,g);}(side==='CE'?g.ce:g.pe).add(r.strike);
+ }
+ const pinned=(v:any,ks:Set<number>)=>v!==undefined&&v!==null&&v!==''?ks.has(Number(v)):null;
+ return [...groups.values()].sort((a,b)=>a.symbol.localeCompare(b.symbol)||a.expiry.localeCompare(b.expiry)).map(g=>({symbol:g.symbol,expiry:g.expiry,
+  dte:Math.round((Date.parse(g.expiry+'T00:00:00Z')-Date.parse(date+'T00:00:00Z'))/86400000),ceCount:g.ce.size,peCount:g.pe.size,
+  cePinnedAvailable:pinned(pins.ceStrike,g.ce),pePinnedAvailable:pinned(pins.peStrike,g.pe),seriesType:'UNVERIFIED'}));
+}
+
 /** Freshness is checked again at display time, even if a request or stream stalls. */
 export function premiumLiveClock(payload:any,elapsedMs=0){
  const base=Date.parse(payload?.serverTime||''),now=base+elapsedMs;
@@ -77,5 +92,5 @@ export function derivePremiumWorkspace(input:any){
   (!f.dte||f.dte==='ALL'||f.dte==='NEAR'&&r.dte<=4||f.dte==='MID'&&r.dte>=5&&r.dte<=9||f.dte==='FAR'&&r.dte>=10)&&
   (!f.reaction||f.reaction==='ALL'||f.reaction==='UP'&&r.change>0||f.reaction==='DOWN'&&r.change<0||r.reaction===f.reaction));
  filtered.sort((a,b)=>a.symbol.localeCompare(b.symbol)||a.strike-b.strike||a.expiry.localeCompare(b.expiry)||a.type.localeCompare(b.type));
- return {rows:filtered,total:contracts.length,expiries:[...new Set(contracts.map(r=>r.expiry))].sort(),strikes:[...new Set(contracts.map(r=>r.strike))].sort((a,b)=>a-b),up:filtered.filter(r=>r.change!==null&&r.change>0).length,down:filtered.filter(r=>r.change!==null&&r.change<0).length,events:filtered.filter(r=>r.eventAt).length};
+ return {rows:filtered,total:contracts.length,series:derivePremiumSeriesInventory(contracts,input.date,f.symbol||'ALL',f),expiries:[...new Set(contracts.map(r=>r.expiry))].sort(),strikes:[...new Set(contracts.map(r=>r.strike))].sort((a,b)=>a-b),up:filtered.filter(r=>r.change!==null&&r.change>0).length,down:filtered.filter(r=>r.change!==null&&r.change<0).length,events:filtered.filter(r=>r.eventAt).length};
 }

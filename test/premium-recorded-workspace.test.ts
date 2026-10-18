@@ -4,19 +4,57 @@ import vm from 'node:vm';
 import { PREMIUM_WORKSPACE_HTML, installPremiumWorkspace } from '../premium-workspace-view.js';
 import { derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext } from '../premium-workspace-model.js';
 
-function harness(){
+function harness(saved:any=null){
+ let stored=saved?JSON.stringify(saved):null;const requests:string[]=[];
  const nodes=new Map<string,any>(),events:any[]=[],timers:Function[]=[],calls:any[]=[];
  for(const [,id] of PREMIUM_WORKSPACE_HTML.matchAll(/id="([^"]+)"/g))nodes.set(id,{id,innerHTML:'',textContent:'',value:'',disabled:false,hidden:false,options:[],scrollLeft:0,querySelectorAll:()=>[],scrollIntoView(){},setAttribute(){}});
  let state:any={date:'2026-10-17',scope:'CORE',recordedDates:['2026-10-12','2026-10-13','2026-10-16'],current:{},baseline:{},loading:false};
  const row=(t:string,ltp:number,option_type='CE')=>({symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type,minute_bucket:'2026-10-13T'+t+':00.000Z',quote_timestamp:'2026-10-13T'+t+':22.000Z',truth_verdict:'TRUE',ltp,pdh:110,pdl:90,oi:200,day_high:120,day_low:80});
  const data={market:[{minute_bucket:'2026-10-13T04:00:00.000Z',spot_ltp:22000}],options:[row('04:00',100),row('04:03',105),row('04:06',111),row('04:00',150,'PE'),row('04:03',145,'PE'),row('04:06',140,'PE')]};
  const api={getState:()=>state,setDate:async(date:string,options:any)=>{calls.push({date,options});state={...state,date,scope:options.scope,current:date==='2026-10-13'?{NIFTY:data}:{}};}};
- const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(){},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>null,setItem(){}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async()=>({ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})}),derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,api});
+ const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(){},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,api});
  vm.runInContext('globalThis.view=('+installPremiumWorkspace.toString()+')(api);',context);
  const node=(id:string)=>nodes.get(id),click=(id:string,dataset:any={})=>node('op-premium-workspace').onclick({target:{closest:()=>({id,dataset})}}),change=(id:string,value:string)=>node('op-premium-workspace').onchange({target:{id,value}});
- return {node,events,timers,calls,click,change,view:context.view,state:()=>state};
+ return {node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
 }
 const settle=async()=>{await Promise.resolve();await Promise.resolve();};
+test('exact watch survives cursor/date changes, blocks identity edits, and never substitutes missing data',async()=>{
+ const h=harness(),key='NIFTY|2026-10-19|22000|CE';h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
+ h.click('',{pwLock:'NIFTY|2026-10-19|99999|CE'});assert.equal(h.stored().watch,undefined,'cannot lock an absent row');
+ assert.match(h.node('pw-results').innerHTML,/Lock watch/);h.click('',{pwLock:key});
+ assert.equal(h.stored().watch,key);assert.equal(h.node('pw-watch').hidden,false);assert.match(h.node('pw-watch').innerHTML,/NIFTY · 2026-10-19 · 22000 · CE/);
+ assert.equal(h.node('pw-symbol').disabled,true);assert.equal(h.node('pw-minutes').disabled,false);
+ h.change('pw-symbol','SENSEX');h.change('pw-side','PE');h.change('pw-ceStrike','23000');h.click('',{pwExpiry:'2026-10-27'});
+ assert.equal(h.node('pw-symbol').value,'NIFTY');assert.equal(h.node('pw-side').value,'CE');assert.equal(h.node('pw-ceStrike').value,'22000');
+ assert.match(h.node('pw-results').innerHTML,/22,000 CE/);assert.doesNotMatch(h.node('pw-results').innerHTML,/22,000 PE/);
+ h.change('pw-at','2026-10-13T04:03:00.000Z');assert.doesNotMatch(h.node('pw-results').innerHTML,/₹111/);
+ h.change('pw-date','2026-10-12');await settle();assert.match(h.node('pw-results').innerHTML,/Locked contract unavailable/);assert.equal(h.stored().watch,key);
+ h.change('pw-date','2026-10-13');await settle();assert.match(h.node('pw-results').innerHTML,/22,000 CE/);
+ h.click('pw-unlock');assert.equal(h.stored().watch,undefined);assert.equal(h.node('pw-symbol').disabled,false);
+ h.click('pw-reset');assert.equal(h.node('pw-watch').hidden,true);
+});
+test('restored exact watch constrains live requests, stays visible when disconnected and unlocks explicitly',async()=>{
+ const key='SENSEX|2026-10-22|74700|PE',h=harness({watch:key});h.view.setVisible(true);await settle();await settle();
+ const q=new URL(h.requests[0],'https://example.test').searchParams;
+ assert.equal(q.get('symbol'),'SENSEX');assert.equal(q.get('side'),'PE');assert.equal(q.get('expiries'),'2026-10-22');assert.equal(q.get('peStrike'),'74700');
+ assert.equal(q.has('nearby'),false);assert.match(h.node('pw-watch').innerHTML,/SENSEX/);assert.match(h.node('pw-results').innerHTML,/Locked contract unavailable/);
+ h.click('pw-unlock');assert.equal(h.node('pw-watch').hidden,true);
+ for(const watch of ['NIFTY|2026-02-30|22000|CE','NIFTY|2026-10-19|0|CE','NIFTY|2026-10-19|22000|CE|extra','<img>|2026-10-19|22000|CE']){
+  const bad=harness({watch});bad.view.setVisible(true);assert.equal(bad.node('pw-watch').hidden,true);
+ }
+});
+test('paired layout keeps exact index/expiry/strike identity and independent missing sides/times',async()=>{
+ const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();h.change('pw-layout','ladder');
+ let html=h.node('pw-results').innerHTML;assert.equal((html.match(/pw-pair-grid/g)||[]).length,1);assert.match(html,/₹111/);assert.match(html,/₹140/);assert.doesNotMatch(html,/Not loaded on this page/);
+ assert.match(html,/current page only/);assert.match(html,/data-pw-lock="NIFTY\|2026-10-19\|22000\|PE"/);
+ const data=h.state().current.NIFTY;data.options=data.options.filter((r:any)=>r.option_type==='CE'||r.minute_bucket==='2026-10-13T04:03:00.000Z');h.change('pw-layout','ladder');
+ assert.match(h.node('pw-results').innerHTML,/CE \/ PE quote times differ/);
+ for(const row of data.options)if(row.option_type==='PE')row.expiry='2026-10-27';h.change('pw-layout','ladder');html=h.node('pw-results').innerHTML;
+ assert.equal((html.match(/pw-pair-grid/g)||[]).length,2);assert.equal((html.match(/Not loaded on this page/g)||[]).length,2);
+ h.state().current.SENSEX={market:data.market,options:data.options.filter((r:any)=>r.option_type==='CE').map((r:any)=>({...r,symbol:'SENSEX'}))};h.change('pw-symbol','ALL');h.change('pw-layout','ladder');
+ assert.equal((h.node('pw-results').innerHTML.match(/pw-pair-grid/g)||[]).length,3);
+ h.click('',{pwLock:'NIFTY|2026-10-19|22000|CE'});assert.match(h.node('pw-results').innerHTML,/Side filtered/);assert.equal((h.node('pw-results').innerHTML.match(/pw-pair-grid/g)||[]).length,1);
+});
 test('Recorded falls back to latest saved date, offers every session and loads FULL once',async()=>{
  const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();
  assert.equal(h.calls.length,1);assert.equal(h.calls[0].date,'2026-10-16');assert.equal(h.calls[0].options.scope,'FULL');assert.equal(h.calls[0].options.fullSession,true);

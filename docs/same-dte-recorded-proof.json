@@ -1,0 +1,114 @@
+{
+  "status": "PARTIAL",
+  "semantics": "RECORDED_ARCHIVE_REPLAY_FIRST_ACCEPTED_EXAMPLE_NOT_PERFORMANCE_STUDY",
+  "sources": [
+    {
+      "file": "2026-09-15_NIFTY.json",
+      "sha256": "2e58b38d096752da5f5a10cd431097b3a3917b7e3fe28e37bf9b8c1e136d532f"
+    },
+    {
+      "file": "2026-09-08_NIFTY.json",
+      "sha256": "530a6103d324c2d9fcbdf75dd9604102df6b589409086b7a20b88a7e8a950846"
+    }
+  ],
+  "attempted": 1,
+  "result": {
+    "mode": "READ_ONLY_SAME_DTE_HISTORY_V1",
+    "safety": {
+      "readOnly": true,
+      "writesPerformed": false,
+      "affectsSelector": false,
+      "affectsVerdict": false,
+      "affectsTelegram": false,
+      "affectsExecution": false
+    },
+    "ok": true,
+    "status": "PARTIAL",
+    "anchor": {
+      "date": "2026-09-15",
+      "expiry": "2026-09-15",
+      "strike": 23450,
+      "side": "CE",
+      "before": {
+        "bucketAt": "2026-09-15T04:03:00.000Z",
+        "receiptAt": "2026-09-15T04:03:21.972Z",
+        "quoteAt": "2026-09-15T04:03:22.000Z",
+        "snapshotId": "NIFTY-1789445001972-51c3c3b8",
+        "price": 61.1,
+        "spot": 23451.75
+      },
+      "at": {
+        "bucketAt": "2026-09-15T04:06:00.000Z",
+        "receiptAt": "2026-09-15T04:06:21.975Z",
+        "quoteAt": "2026-09-15T04:06:23.000Z",
+        "snapshotId": "NIFTY-1789445181975-0273250f",
+        "price": 59.4,
+        "spot": 23446.5
+      },
+      "calendarDte": 0,
+      "moneynessBps": 1.4927601134506752,
+      "premiumChange": -1.7000000000000028,
+      "premiumChangePercent": -2.782324058919805,
+      "spotChange": -5.25,
+      "clock": {
+        "closeIst": "15:40",
+        "rule": "SEBI_20260116_EFFECTIVE_20260803",
+        "minutesToExpiry": 364,
+        "standardSessionOnly": true
+      }
+    },
+    "matches": [
+      {
+        "date": "2026-09-08",
+        "expiry": "2026-09-08",
+        "strike": 23700,
+        "side": "CE",
+        "before": {
+          "bucketAt": "2026-09-08T04:03:00.000Z",
+          "receiptAt": "2026-09-08T04:03:23.343Z",
+          "quoteAt": "2026-09-08T04:03:23.000Z",
+          "snapshotId": "NIFTY-1788840203343-9be49773",
+          "price": 45.5,
+          "spot": 23673.6
+        },
+        "at": {
+          "bucketAt": "2026-09-08T04:06:00.000Z",
+          "receiptAt": "2026-09-08T04:06:23.350Z",
+          "quoteAt": "2026-09-08T04:06:24.000Z",
+          "snapshotId": "NIFTY-1788840383350-ad5b14de",
+          "price": 49.2,
+          "spot": 23683
+        },
+        "calendarDte": 0,
+        "moneynessBps": 7.1781446607266375,
+        "premiumChange": 3.700000000000003,
+        "premiumChangePercent": 8.131868131868147,
+        "spotChange": 9.400000000001455,
+        "clock": {
+          "closeIst": "15:40",
+          "rule": "SEBI_20260116_EFFECTIVE_20260803",
+          "minutesToExpiry": 364,
+          "standardSessionOnly": true
+        },
+        "moneynessDifferenceBps": 5.685384547275962
+      }
+    ],
+    "blocked": [],
+    "cutoff": "2026-09-15T04:06:21.975Z",
+    "coverage": {
+      "suppliedPriorDays": 1,
+      "matchedDays": 1
+    },
+    "selectionMethod": "ONE_CONTRACT_PER_DAY_CLOSEST_OBSERVED_STRIKE_TO_SPOT_RATIO; SAME_INDEX_SIDE_CALENDAR_DTE_IST_MINUTE_CLOSE_CLOCK",
+    "provenance": {
+      "selectedEvidenceSha256": "f253f9276fc56c7d6ff9fc632a72e6f2ac4d0ca94e769cbe0d8272de7d7510df"
+    },
+    "limitations": [
+      "Descriptive comparison only; no candidate, probability, causality or profitability claim.",
+      "Closest recorded moneyness is not a validated similarity threshold; differences remain visible.",
+      "IV, liquidity, event regime, OI, PCR and wall context are not matched in this stage.",
+      "Standard-session model expiry clock; contract-master and special-session validation unavailable.",
+      "No future outcomes retrieved; supplied days and recorded contracts are not exhaustive."
+    ]
+  }
+}

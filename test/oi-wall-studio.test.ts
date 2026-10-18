@@ -111,7 +111,7 @@ test('source heartbeats preserve the After event DOM so an open event can be rea
 });
 test('disconnected live entry exposes saved-record recovery instead of a screen of blank premium cards',()=>{
  const h=harness();assert.equal(h.nodes.get('ows-live-empty')!.hidden,false);assert.match(OI_WALL_STUDIO_HTML,/Open saved records/);
- assert.match(OI_WALL_STUDIO_CSS,/\[data-live-empty="true"\] #ows-live-workspace\{display:none!important\}/);
+ assert(!OI_WALL_STUDIO_CSS.includes('[data-live-empty="true"] #ows-live-workspace{display:none!important}'));assert(OI_WALL_STUDIO_CSS.includes(':not(#ows-wheel-tabs)'));assert(OI_WALL_STUDIO_CSS.includes(':not(#ows-chart)'));
  h.studio.update(fixture());assert.equal(h.nodes.get('ows-live-empty')!.hidden,true);
  h.studio.update({...fixture(),connected:false,connectionState:'MARKET_CLOSED'});assert.equal(h.nodes.get('ows-live-empty')!.hidden,false);
  h.nodes.get('ows-live-workspace')!.hidden=true;h.studio.recorded({},date);assert.equal(h.nodes.get('ows-live-empty')!.hidden,true,'recorded mode has no live warning');
@@ -123,4 +123,24 @@ test('wheel switches independent quote breadth even when complete option OI is u
  const chart=h.nodes.get('ows-chart')!;assert(chart.innerHTML.includes('mb-breadth-wheel'));assert(chart.innerHTML.includes('HDFC'));assert(!chart.innerHTML.includes('Sector quotes'));
  h.click('wheel-tabs','owsWheel','sectors');assert(chart.innerHTML.includes('BANK'));assert(!chart.innerHTML.includes('Heavyweight quote subset'));
  h.studio.update(null);assert(!chart.innerHTML.includes('mb-breadth-wheel'));assert(!chart.innerHTML.includes('-2%'));
+});
+
+test('participation wheel interval uses exact token endpoints, not day %; disconnect, identity and elapsed delivery revoke it',()=>{
+ const h=harness();const make=(minute:number,price:number,token=99)=>{const p:any=fixture(minute);p.snapshot.participation=[{identity:{role:'STOCK',token,label:'HDFC'},price,changePct:-8,state:'LIVE',observedAt:p.serverTime,receivedAt:p.serverTime}];return p;};
+ h.studio.update(make(0,100));h.click('view-tabs','owsView','wheel');h.click('wheel-tabs','owsWheel','stocks');h.nodes.get('ows-participation-window')!.value='1';h.nodes.get('ows-participation-window')!.onchange();
+ assert(h.nodes.get('ows-chart')!.innerHTML.includes('Building 1m history'));
+ h.setNow(base+60000);h.studio.update(make(1,110));let html=h.nodes.get('ows-chart')!.innerHTML;assert(html.includes('+10%'));assert(html.includes('100%'));assert(!html.includes('-8%'));
+ h.setNow(base+64001);h.nodes.get('ows-participation-window')!.onchange();assert(!h.nodes.get('ows-chart')!.innerHTML.includes('+10%'));
+ h.setNow(base+120000);h.studio.update(make(2,120,100));assert(h.nodes.get('ows-chart')!.innerHTML.includes('Building 1m history'));
+ h.studio.update(null);assert(!h.nodes.get('ows-chart')!.innerHTML.includes('mb-breadth-wheel'));
+});
+
+test('all participation intervals preserve their own source endpoints and clear on runtime changes',()=>{
+ for(const minutes of [1,3,6,15,30]){
+  const h=harness();const sample=(minute:number,price:number,runtime='runtime')=>{const p:any=fixture(minute);p.snapshot.runtimeId=runtime;p.snapshot.participation=[{identity:{role:'SECTOR',token:555,label:'BANK'},price,changePct:99,state:'LIVE',observedAt:p.serverTime,receivedAt:p.serverTime}];return p;};
+  h.studio.update(sample(0,200));h.setNow(base+minutes*60000);h.studio.update(sample(minutes,220));h.click('view-tabs','owsView','wheel');h.click('wheel-tabs','owsWheel','sectors');
+  h.nodes.get('ows-participation-window')!.value=String(minutes);h.nodes.get('ows-participation-window')!.onchange();let html=h.nodes.get('ows-chart')!.innerHTML;
+  assert(html.includes('+10%'),minutes+'m uses the exact earlier price, not day change');assert(html.includes('09:30:00 IST →'));assert(!html.includes('+99%'));
+  h.studio.update(sample(minutes,220,'new-runtime'));html=h.nodes.get('ows-chart')!.innerHTML;assert(html.includes('Building '+minutes+'m history'));assert(!html.includes('+10%'));
+ }
 });

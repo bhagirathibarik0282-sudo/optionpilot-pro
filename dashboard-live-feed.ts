@@ -129,11 +129,11 @@ export class DashboardLiveStore {
    (filter.minDte===undefined||dte(e)>=filter.minDte)&&(filter.maxDte===undefined||dte(e)<=filter.maxDte)&&
    (e.side==='CE'?filter.ceStrike===undefined||e.strike===filter.ceStrike:filter.peStrike===undefined||e.strike===filter.peStrike))
    .sort((a,b)=>String(a.symbol).localeCompare(String(b.symbol))||a.strike!-b.strike!||String(a.expiry).localeCompare(String(b.expiry))||String(a.side).localeCompare(String(b.side)));
-  const offset=filter.offset||0,limit=Math.min(120,filter.limit||60);
+  const offset=filter.view==='ladder'?0:filter.offset||0,limit=filter.view==='ladder'?selected.length:Math.min(120,filter.limit||60);
   return {tradeDate:this.inventory.date,runtimeId:this.runtimeId,total:selected.length,offset,limit,expiries,strikes,series:derivePremiumSeriesInventory(options,this.inventory.date,filter.symbol||'ALL',filter),
    rows:selected.slice(offset,offset+limit).map(e=>({...this.quote(e,now),dte:dte(e)})),omittedExpiries:this.inventory.omittedExpiries};
  }
 
 }
 
-export type PremiumWatchFilter={symbol?:LiveIndex;nearby?:number;expiries?:string[];side?:'CE'|'PE';ceStrike?:number;peStrike?:number;minDte?:number;maxDte?:number;offset?:number;limit?:number};
+export type PremiumWatchFilter={view?:'ladder';symbol?:LiveIndex;nearby?:number;expiries?:string[];side?:'CE'|'PE';ceStrike?:number;peStrike?:number;minDte?:number;maxDte?:number;offset?:number;limit?:number};

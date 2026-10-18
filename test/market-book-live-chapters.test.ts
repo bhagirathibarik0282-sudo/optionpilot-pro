@@ -81,3 +81,11 @@ test('Futures metric buttons reuse qualified live projection and withhold stale 
  const p=fixture();for(const key of ['future','futureOi','futureVolume','basis'])assert.deepEqual(kinds(live(p,'NIFTY',4,false,{metric:key})),[key]);
  p.snapshot.indices[0].future.state='STALE';const html=live(p,'NIFTY',4,false,{metric:'futureVolume'});assert(!html.includes('123.45'));assert(html.includes('WITHHELD'));
 });
+
+test('interval wheel never borrows a wrong token, old baseline or another session',()=>{
+ const p:any=fixture(),q=p.snapshot.participation[0];q.identity.token=77;q.identity.label='HDFC';q.price=110;
+ const stamp=Date.parse(q.observedAt),point={token:77,role:'STOCK',at:stamp-60000,date:p.snapshot.tradeDate,label:'HDFC',symbol:q.identity.symbol,price:100};
+ for(const patch of [{token:78},{date:'2026-10-15'},{at:stamp-66000},{label:'OTHER'},{price:null}]){
+  const history=new Map([['STOCK|77',[{...point,...patch}]]]);const html=live(p,'NIFTY',8,false,{wheel:true,metric:'stocks',windowMinutes:1,participationHistory:history});assert(html.includes('Building 1m history'));assert(!html.includes('+10%'));
+ }
+});

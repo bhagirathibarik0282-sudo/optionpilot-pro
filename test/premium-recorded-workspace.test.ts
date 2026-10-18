@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr} from '../live-three-index-pcr.js';
 import { PREMIUM_WORKSPACE_HTML, installPremiumWorkspace } from '../premium-workspace-view.js';
-import { derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext } from '../premium-workspace-model.js';
+import { derivePremiumDeltaPair, derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext } from '../premium-workspace-model.js';
 
 function harness(saved:any=null){
  let stored=saved?JSON.stringify(saved):null;const requests:string[]=[];
@@ -13,7 +13,7 @@ function harness(saved:any=null){
  const row=(t:string,ltp:number,option_type='CE')=>({symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type,minute_bucket:'2026-10-13T'+t+':00.000Z',quote_timestamp:'2026-10-13T'+t+':22.000Z',truth_verdict:'TRUE',ltp,pdh:110,pdl:90,oi:200,pdc:100,day_high:120,day_low:80});
  const data={market:[{minute_bucket:'2026-10-13T04:00:00.000Z',spot_ltp:22000}],options:[row('04:00',100),row('04:03',105),row('04:06',111),row('04:00',150,'PE'),row('04:03',145,'PE'),row('04:06',140,'PE')]};
  const api={getState:()=>state,setDate:async(date:string,options:any)=>{calls.push({date,options});state={...state,date,scope:options.scope,current:date==='2026-10-13'?{NIFTY:data}:{}};}};
- const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(){},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,api});
+ const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(){},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},derivePremiumDeltaPair,derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,api});
  vm.runInContext('globalThis.view=('+installPremiumWorkspace.toString()+')(api);',context);
  const node=(id:string)=>nodes.get(id),click=(id:string,dataset:any={})=>node('op-premium-workspace').onclick({target:{closest:()=>({id,dataset})}}),change=(id:string,value:string)=>node('op-premium-workspace').onchange({target:{id,value}});
  return {node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
@@ -147,4 +147,19 @@ test('compact ladder headers fit narrow columns and selected change is never pri
  const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
  const before=h.node('pw-results').innerHTML;assert.match(before,/<th scope="col">CE ₹<\/th>/);assert.doesNotMatch(before,/selected parameters/);assert.equal((before.match(/\+5.71%/g)||[]).length,1);
  h.click('',{pwMetric:'change'});const mixed=h.node('pw-results').innerHTML;assert.equal((mixed.match(/\+5.71%/g)||[]).length,0);assert.match(mixed,/<span>Δ%<\/span><b>5.71/);assert.match(mixed,/PDH BREAK/);
+});
+
+test('Same Delta ladder pairs recorded strikes and replay clears missing Greeks; Same Strike restores original rows',async()=>{
+ const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
+ const data=h.state().current.NIFTY;
+ for(const r of data.options){r.delta=r.option_type==='CE'?.49:-.50;if(r.option_type==='PE')r.strike=22100;}
+ h.click('',{pwLayout:'ladder'});h.change('pw-pairing','DELTA');
+ let html=h.node('pw-results').innerHTML;assert(html.includes('Same |Delta|'));assert(html.includes('22,000 CE · Δ 0.49'));assert(html.includes('22,100 PE · Δ -0.5'));assert(html.includes('Nearest match'));assert.equal(h.node('pw-chain-range').disabled,true);assert.equal(h.stored().pairing,'DELTA');
+ data.options.filter((r:any)=>r.minute_bucket.includes('04:00')).forEach((r:any)=>r.delta=null);
+ h.change('pw-at','2026-10-13T04:00:00.000Z');html=h.node('pw-results').innerHTML;assert(html.includes('No verified pair'));assert(!html.includes('Nearest match'));
+ h.change('pw-pairing','STRIKE');assert(h.node('pw-results').innerHTML.includes('STRIKE'));assert.equal(h.node('pw-delta-target-label').hidden,true);
+});
+test('Live Same Delta requests both loaded strike sets and never displays recorded Greeks as live',async()=>{
+ const h=harness({pairing:'DELTA',deltaTarget:'0.4'});h.view.setVisible(true);await settle();h.click('',{pwLayout:'ladder'});await settle();await h.timers[0]();await settle();
+ const request=h.requests.at(-1)||'';assert(request.includes('view=ladder'));assert(request.includes('side=BOTH'));assert(!request.includes('nearby='));assert(h.node('pw-results').innerHTML.includes('Market feed'));assert(!h.node('pw-results').innerHTML.includes('Nearest match'));
 });

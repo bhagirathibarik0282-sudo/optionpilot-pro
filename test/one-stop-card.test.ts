@@ -279,3 +279,66 @@ test('PR4 verified ticker, card and ATM revoke connected but stale, forged or wr
  assert.match(el('op-one-rows').innerHTML,/values withheld/);
  assert.match(el('op-workspace-feed').textContent,/STALE/);
 });
+
+
+test('PR5 repeated live packets preserve ATM DOM and flashing; new premium, disconnect and reconnect still redraw',()=>{
+ let fakeNow=Date.now();
+ class Clock extends Date{static now(){return fakeNow;}}
+ const nodes=new Map<string,any>(),listeners:any={};
+ const el=(id:string)=>{
+  if(!nodes.has(id)){
+   let html='',text='',css='';
+   const node:any={value:'NIFTY',htmlWrites:0,textWrites:0,classWrites:0,
+    setAttribute(){},classList:{toggle(){}},querySelectorAll(){return [];},scrollIntoView(){}};
+   Object.defineProperties(node,{
+    innerHTML:{get(){return html;},set(v){html=v;node.htmlWrites++;}},
+    textContent:{get(){return text;},set(v){text=v;node.textWrites++;}},
+    className:{get(){return css;},set(v){css=v;node.classWrites++;}}
+   });
+   nodes.set(id,node);
+  }
+  return nodes.get(id);
+ };
+ const document:any={body:{dataset:{}},hidden:false,getElementById:el,querySelectorAll(){return [];}};
+ const window:any={addEventListener(n:string,fn:any){listeners[n]=fn;}};
+ const localStorage:any={getItem(){return null},setItem(){}};
+ const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{
+  document,window,localStorage,Date:Clock,deriveLiveThreeIndexPcr,deriveAtmFibHold,
+  installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}
+ });
+ installer({chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {};}});
+ const at=()=>new Date(fakeNow).toISOString();
+ const date=new Date(fakeNow+19800000).toISOString().slice(0,10),expiry='2026-10-26';
+ const quote=(role:string,price:number,side?:string)=>({
+  state:'LIVE',price,observedAt:at(),receivedAt:at(),
+  identity:{role,symbol:'NIFTY',expiry,strike:22000,side}
+ });
+ const spot=quote('SPOT',22000),ce=quote('OPTION',112,'CE'),pe=quote('OPTION',102,'PE');
+ const idx:any={symbol:'NIFTY',expiry,strike:22000,expiries:[expiry],spot,
+  future:quote('FUTURE',22010),ce,pe,pcrSnapshot:{state:'INCOMPLETE',
+   coverage:{expected:100,freshOi:60,missing:40,stale:0,invalid:0,complete:false}}};
+ const p:any={source:'KITE_WEBSOCKET_FULL',connected:true,connectionState:'OPEN',serverTime:at(),
+  snapshot:{runtimeId:'run',tradeDate:date,asOf:at(),indices:[idx],
+   atmExpiryLadder:[{symbol:'NIFTY',spot,rows:[{expiry,strike:22000,ce,pe}]}],omittedExpiries:[]}};
+ const send=()=>listeners['optionpilot:live-context']({detail:p});
+ const count=()=>['op-atm-pairs','op-one-rows','op-workspace-ticker'].map(id=>el(id).htmlWrites);
+ send();
+ assert.match(el('op-atm-pairs').innerHTML,/112/);
+ assert.match(el('op-one-rows').innerHTML,/112/);
+ const initial=count();
+ fakeNow+=650;send();fakeNow+=650;send();
+ assert.deepEqual(count(),initial,'same visible evidence must not recreate rows or restart blink animations');
+ fakeNow+=650;ce.price=115;ce.observedAt=at();ce.receivedAt=at();p.serverTime=at();p.snapshot.asOf=at();send();
+ const updated=count();
+ assert(updated[0]>initial[0]&&updated[1]>initial[1],'new premium paints immediately');
+ assert.equal(updated[2],initial[2],'unchanged spot ticker does not repaint for CE ticks');
+ assert.match(el('op-atm-pairs').innerHTML,/115/);
+ p.connected=false;p.connectionState='DISCONNECTED';send();
+ const invalid=count();
+ assert(invalid[0]>updated[0]&&invalid[1]>updated[1]&&invalid[2]>updated[2]);
+ assert.match(el('op-atm-pairs').innerHTML,/LIVE unavailable/);
+ send();assert.deepEqual(count(),invalid,'repeated offline event must not recreate unavailable cards');
+ fakeNow+=650;p.connected=true;p.connectionState='OPEN';p.serverTime=at();p.snapshot.asOf=at();send();
+ assert.match(el('op-atm-pairs').innerHTML,/115/);
+ assert.match(el('op-one-rows').innerHTML,/115/);
+});

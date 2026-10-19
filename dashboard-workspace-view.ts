@@ -132,6 +132,12 @@ export function installDashboardWorkspace(api:any){
 
  // Reuse the already-running shared Kite stream: no new source, query, timer or snapshot.
  const oneStatus=$('op-one-status'),oneRows=$('op-one-rows');
+ // PR5: only skip identical DOM writes, never source/event processing.
+ // Bounded to mounted elements; Kite sampling and observed break handling are untouched.
+ const painted=new WeakMap<object,string>();
+ const setHtml=(node:any,html:string)=>{if(node&&painted.get(node)!==html){node.innerHTML=html;painted.set(node,html);}};
+ const setText=(node:any,value:string)=>{if(node&&node.textContent!==value)node.textContent=value;};
+ const setClass=(node:any,value:string)=>{if(node&&node.className!==value)node.className=value;};
  const oneFmt=(v:any,d=2)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-IN',{maximumFractionDigits:d}):'—';
  const oneTime=(v:any)=>v&&Number.isFinite(Date.parse(v))?new Date(v).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';
  let oneLast=0;
@@ -194,7 +200,7 @@ export function installDashboardWorkspace(api:any){
   if(d?.connected!==true){atmEvents.clear();atmPrevious.clear();atmSession='';}
   const snap=d?.snapshot,serverMs=Date.parse(d?.serverTime||''),now=Date.now();
   if(d?.connected!==true||!Array.isArray(snap?.atmExpiryLadder)||!Number.isFinite(serverMs)||serverMs>now+5000||now-serverMs>5000){
-   atmPairs.className='op-atm-columns';atmPairs.innerHTML='<p>LIVE unavailable · stale and missing premiums withheld</p>';atmStatus.textContent='No connected, fresh expiry snapshot';return;
+   setClass(atmPairs,'op-atm-columns');setHtml(atmPairs,'<p>LIVE unavailable · stale and missing premiums withheld</p>');setText(atmStatus,'No connected, fresh expiry snapshot');return;
   }
   const identity=[snap.runtimeId,snap.tradeDate].join('|');if(identity!==atmSession){atmEvents.clear();atmPrevious.clear();atmSession=identity;}
   const group=snap.atmExpiryLadder.find((x:any)=>x.symbol===atmSelected),spot=group?.spot;
@@ -202,7 +208,7 @@ export function installDashboardWorkspace(api:any){
   const freshSpot=spot?.state==='LIVE'&&spot.identity?.role==='SPOT'&&spot.identity?.symbol===atmSelected&&
    typeof spot.price==='number'&&Number.isFinite(spot.price)&&spot.price>0&&
    Number.isFinite(Date.parse(spot.observedAt||''))&&serverMs-Date.parse(spot.observedAt)>=-5000&&serverMs-Date.parse(spot.observedAt)<=30000;
-  if(!group||!freshSpot){atmPairs.innerHTML='<p>ATM unavailable · waiting for fresh '+esc(atmSelected)+' Spot / inventory</p>';atmStatus.textContent='Spot not fresh or no exact expiry inventory';return;}
+  if(!group||!freshSpot){setHtml(atmPairs,'<p>ATM unavailable · waiting for fresh '+esc(atmSelected)+' Spot / inventory</p>');setText(atmStatus,'Spot not fresh or no exact expiry inventory');return;}
   const safe=rows.filter((r:any)=>/^\d{4}-\d{2}-\d{2}$/.test(r?.expiry||'')&&
     r.expiry>=snap.tradeDate&&Number.isFinite(r.strike)&&r.strike>0).sort((a:any,b:any)=>a.expiry.localeCompare(b.expiry));
   const sides=(atmMode==='BOTH'?['CE','PE']:[atmMode]) as ('CE'|'PE')[];
@@ -238,10 +244,10 @@ export function installDashboardWorkspace(api:any){
      const ohlc=down&&event.openHigh?'DAY O=H + ':'';
      return main+'<tr class="'+(down?'op-atm-event-down':'op-atm-event-up')+'" data-flash="'+String(event.flash)+'"><td colspan="3">'+direction+' '+ohlc+event.kind+' BREAK · '+stamp+' IST (first observed) · '+side+' '+oneFmt(r.strike,0)+'</td></tr>';
     }).join('')+'</tbody></table></article>';
-  atmPairs.className='op-atm-columns'+(sides.length===1?' op-atm-solo':'');
-  atmPairs.innerHTML=safe.length?sides.map(card).join(''):'<p>No subscribed future expiry with a matched CE/PE strike</p>';
+  setClass(atmPairs,'op-atm-columns'+(sides.length===1?' op-atm-solo':''));
+  setHtml(atmPairs,safe.length?sides.map(card).join(''):'<p>No subscribed future expiry with a matched CE/PE strike</p>');
   const missing=(snap.omittedExpiries||[]).filter((x:any)=>typeof x==='string'&&x.startsWith(atmSelected+'|')).length;
-  atmStatus.textContent=safe.length+' available expiry date(s) · Spot '+oneFmt(spot.price)+' · '+oneTime(d.serverTime)+' IST'+(missing?' · '+missing+' other expiry inventories omitted':'');
+  setText(atmStatus,safe.length+' available expiry date(s) · Spot '+oneFmt(spot.price)+' · '+oneTime(d.serverTime)+' IST'+(missing?' · '+missing+' other expiry inventories omitted':''));
  };
  $('op-atm-levels').onclick=(e:any)=>{
   if(e.target.closest?.('[data-atm-open-fib]')){
@@ -290,8 +296,8 @@ export function installDashboardWorkspace(api:any){
   const connected=freshEnvelope(d);
   paintAtm(connected?d:null); // stale source revokes ATM and summary together
   const snap=d?.snapshot;
-  if(!connected){oneStatus.textContent='LIVE unavailable · '+String(d?.connectionState||'stale source');
-   oneRows.innerHTML='<tr><td colspan="8">No fresh verified Kite snapshot · values withheld</td></tr>';oneLast=0;return;}
+  if(!connected){setText(oneStatus,'LIVE unavailable · '+String(d?.connectionState||'stale source'));
+   setHtml(oneRows,'<tr><td colspan="8">No fresh verified Kite snapshot · values withheld</td></tr>');oneLast=0;return;}
   if(Date.now()-oneLast<500)return;oneLast=Date.now();
   const finite=(v:any)=>typeof v==='number'&&Number.isFinite(v);
   const verified=(q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>
@@ -316,7 +322,7 @@ export function installDashboardWorkspace(api:any){
      (q.checkedAt?' · '+oneTime(q.checkedAt)+' IST':'')+(c.complete?' · verifying':'');
    return 'Full OI coverage unverified';
   };
-  oneRows.innerHTML=['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>{
+  const summaryHtml=['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>{
    const matches=snap.indices.filter((x:any)=>x?.symbol===symbol),a=matches.length===1?matches[0]:null;
    if(!a)return '<tr><th scope="row">'+symbol+'</th><td colspan="7">Exact index unavailable</td></tr>';
    const p=strictPcr.rows.find((x:any)=>x.symbol===symbol&&x.expiry===a.expiry);
@@ -335,8 +341,9 @@ export function installDashboardWorkspace(api:any){
     '<td data-metric="CE wall">'+(full?oneFmt(d.pcrDisplay?.[symbol]?.callWall?.strike,0):'—')+'</td>'+
     '<td data-metric="PE wall">'+(full?oneFmt(d.pcrDisplay?.[symbol]?.putWall?.strike,0):'—')+'</td></tr>';
   }).join('');
-  oneStatus.textContent='Verified Kite · '+oneTime(d.serverTime)+' IST · VIX '+
-   (verified(snap.vix,'VIX')?oneFmt(snap.vix.price):'—')+' · — means unavailable';
+  setHtml(oneRows,summaryHtml);
+  setText(oneStatus,'Verified Kite · '+oneTime(d.serverTime)+' IST · VIX '+
+   (verified(snap.vix,'VIX')?oneFmt(snap.vix.price):'—')+' · — means unavailable');
  };
  const oneActions=$('op-one-actions');
  if(oneActions)oneActions.onclick=(e:any)=>{
@@ -351,7 +358,7 @@ export function installDashboardWorkspace(api:any){
  let lastTicker=0,lastTickerLive=false;
  window.addEventListener('optionpilot:live-context',((e:any)=>{
   const d=e.detail,on=freshEnvelope(d);paintOne(d);
-  $('op-workspace-feed').textContent=on?'● LIVE · Kite':'OFFLINE / STALE';
+  setText($('op-workspace-feed'),on?'● LIVE · Kite':'OFFLINE / STALE');
   $('op-workspace-feed').classList.toggle('op-feed-on',on);
   if(Date.now()-lastTicker<250&&on&&lastTickerLive)return;lastTicker=Date.now();lastTickerLive=on;
   const fmt=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-IN',{maximumFractionDigits:2}):'—';
@@ -360,13 +367,14 @@ export function installDashboardWorkspace(api:any){
    return {label:symbol,role:'SPOT',symbol,q:matches.length===1?matches[0].spot:null};
   });
   quotes.push({label:'INDIA VIX',role:'VIX',symbol:'',q:on?d.snapshot.vix:null});
-  $('op-workspace-ticker').innerHTML=quotes.map((r:any)=>{
+  const tickerHtml=quotes.map((r:any)=>{
    const valid=on&&freshQuote(d,r.q,r.role,r.symbol||undefined),q=r.q;
    return '<div class="op-ticker"><span>'+esc(r.label)+'</span><strong>'+fmt(valid?q.price:null)+
     '</strong><small class="'+(valid&&q.changePct>0?'op-positive':valid&&q.changePct<0?'op-negative':'')+'">'+
     (valid&&typeof q.changePct==='number'&&Number.isFinite(q.changePct)?fmt(q.changePct)+'%':'—')+
     ' · '+(valid?oneTime(q.observedAt):'withheld')+'</small></div>';
   }).join('');
+  setHtml($('op-workspace-ticker'),tickerHtml);
  }) as EventListener);
  return {render(){if(active!==api.page())draw();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
 }

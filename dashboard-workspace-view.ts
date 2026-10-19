@@ -1,4 +1,5 @@
 import { installPremiumWorkspace } from './premium-workspace-view.js';
+import { deriveLiveThreeIndexPcr } from './live-three-index-pcr.js';
 export const WORKSPACE_NAV_HTML=`<aside id="op-workspace-nav" aria-label="Dashboard chapters"><div class="op-rail-inner"><a class="op-logo" href="/">OP<span>OptionPilot <b>PRO</b></span></a><div class="op-rail-label">YOUR MARKET WORKSPACE</div><div id="op-chapter-links"></div><details id="op-customize"><summary>＋ Choose my chapters</summary><div id="op-chapter-options"></div><button id="op-show-chapters" type="button">Show all chapters</button></details><div class="op-rail-foot">NIFTY · SENSEX<br><span>BANKNIFTY · monthly observation</span></div></div></aside><div id="op-workspace-top"><strong>OptionPilot</strong><div id="op-workspace-feed" role="status">Connecting to market feed</div></div><section id="op-one-stop" aria-label="One-stop market evidence"><div class="op-one-title"><div><span class="op-kicker">ONE CARD / ONE STOP</span><h2>Market command card</h2></div><div id="op-one-status" role="status" aria-live="polite">Waiting for connected live evidence</div></div><div id="op-one-actions" role="group" aria-label="Open existing market tools"><button type="button" data-op-one="LIVE">Live detail</button><button type="button" data-op-one="LADDER">CE / PE ladder</button><button type="button" data-op-one="MULTIDAY">Multi-day research</button><button type="button" data-op-one="RAG">Ask RAG</button></div><div class="op-one-scroll"><table aria-label="Verified latest Kite market readings"><thead><tr><th>Index / expiry</th><th>Spot</th><th>Future</th><th>CE ₹</th><th>PE ₹</th><th>Full PCR</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody id="op-one-rows"><tr><td colspan="8">Waiting for actual Kite stream · unavailable is not zero</td></tr></tbody></table></div><section id="op-atm-weeklies" aria-label="ATM CE and PE by expiry date"><div class="op-atm-head"><div><strong>ATM CE × ATM PE · expiry by expiry</strong><small>Actual listed expiry dates — not DTE 0–4</small></div><div class="op-atm-settings"><label>Index <select id="op-atm-index" aria-label="ATM ladder index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><div id="op-atm-modes" role="group" aria-label="ATM CE PE display"><button type="button" data-atm-mode="BOTH" aria-pressed="true">CE + PE</button><button type="button" data-atm-mode="CE" aria-pressed="false">CE only</button><button type="button" data-atm-mode="PE" aria-pressed="false">PE only</button></div></div></div><div id="op-atm-levels" role="group" aria-label="Premium PDH PDL and FIB controls"><button data-atm-level="PDL" type="button" aria-pressed="true">↓ PDL</button><button data-atm-level="PDH" type="button" aria-pressed="false">↑ PDH</button><button data-atm-level="FIB" type="button" aria-pressed="false">FIB R3–S3</button><button data-atm-open-fib type="button" aria-label="Open detailed FIB ladder">FIB detail ↗</button><small id="op-atm-level-note">Select multiple levels together · FIB HOLD needs verified same-contract observations.</small></div><div id="op-atm-status" role="status">Awaiting exact expiry inventory</div><div id="op-atm-pairs" class="op-atm-columns"><p>Waiting for fresh subscribed options.</p></div><p class="op-one-note">ATM strike is selected separately for each exact expiry from available matched CE/PE strikes. Not every calendar week is guaranteed in the Kite subscription. BANKNIFTY remains monthly observation.</p></section><p class="op-one-note">One shared stream; exact expiry and source timestamps. PCR and wall values appear only for a complete, current full-chain snapshot. BANKNIFTY = monthly observation. Read-only evidence, not a trading signal.</p></section>`;
 
 export const WORKSPACE_TICKER_HTML=`<details id="op-ticker-tools"><summary>Market ticker</summary><div id="op-workspace-ticker" aria-label="Market snapshot"></div></details>`;
@@ -237,54 +238,68 @@ export function installDashboardWorkspace(api:any){
  $('op-atm-modes').onclick=(e:any)=>{const mode=e.target.closest?.('[data-atm-mode]')?.dataset?.atmMode;if(!['BOTH','CE','PE'].includes(mode))return;atmMode=mode;
   $('op-atm-modes').querySelectorAll('[data-atm-mode]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.atmMode===mode)));paintAtm(atmLast);
  };
+ // PR3: reuse the strict three-index full-PCR verifier; render from the existing stream only.
  const paintOne=(d:any)=>{
   if(!oneStatus||!oneRows)return;
-  const connected=d?.connected===true&&d?.snapshot&&Array.isArray(d.snapshot.indices);paintAtm(d);
-  if(!connected){oneStatus.textContent='LIVE unavailable · '+String(d?.connectionState||'waiting');oneRows.innerHTML='<tr><td colspan="8">No fresh Kite stream · values withheld</td></tr>';oneLast=0;return;}
+  paintAtm(d);
+  const snap=d?.snapshot,serverMs=Date.parse(d?.serverTime||''),asOf=Date.parse(snap?.asOf||'');
+  const day=(at:number)=>new Date(at+19800000).toISOString().slice(0,10);
+  const connected=d?.connected===true&&d?.source==='KITE_WEBSOCKET_FULL'&&Array.isArray(snap?.indices)&&
+   Number.isFinite(serverMs)&&serverMs<=Date.now()+5000&&Date.now()-serverMs<=5000&&
+   Number.isFinite(asOf)&&serverMs>=asOf&&serverMs-asOf<=5000&&snap.tradeDate===day(serverMs);
+  if(!connected){oneStatus.textContent='LIVE unavailable · '+String(d?.connectionState||'stale source');
+   oneRows.innerHTML='<tr><td colspan="8">No fresh verified Kite snapshot · values withheld</td></tr>';oneLast=0;return;}
   if(Date.now()-oneLast<500)return;oneLast=Date.now();
-  const snap=d.snapshot,serverMs=Date.parse(d.serverTime||'');
-  const valid=(q:any)=>q?.state==='LIVE'&&typeof q.price==='number'&&Number.isFinite(q.price);
-  const quote=(q:any)=>valid(q)?oneFmt(q.price):'—';
-  const pcr=(a:any)=>{
-   const p=d.pcrDisplay?.[a.symbol],at=Date.parse(p?.checkedAt||'');
-   return p&&p.expiry===a.expiry&&p.coverage?.complete===true&&p.coverage?.expected>0&&
-    Number.isFinite(serverMs)&&Number.isFinite(at)&&at<=serverMs&&serverMs-at<=(p.periodMs||60000)+30000&&
-    typeof p.fullPcr==='number'&&Number.isFinite(p.fullPcr)?p:null;
+  const finite=(v:any)=>typeof v==='number'&&Number.isFinite(v);
+  const verified=(q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>{
+   const id=q?.identity,at=Date.parse(q?.observedAt||''),received=Date.parse(q?.receivedAt||'');
+   return q?.state==='LIVE'&&id?.role===role&&(!symbol||id.symbol===symbol)&&
+    (!expiry||id.expiry===expiry)&&(!side||id.side===side)&&
+    (strike===undefined||id.strike===strike)&&finite(q.price)&&q.price>0&&
+    Number.isFinite(at)&&Number.isFinite(received)&&day(at)===snap.tradeDate&&day(received)===snap.tradeDate&&
+    serverMs-at>=-5000&&serverMs-at<=30000&&serverMs-received>=0&&serverMs-received<=30000;
   };
-  // Show why an exact-expiry PCR is withheld; never turn partial chain into "full".
+  const priceCell=(q:any,role:string,symbol:string)=>{
+   const ok=verified(q,role,symbol);
+   return '<td>'+(ok?oneFmt(q.price):'—')+'<small>'+(ok?'Kite '+oneTime(q.observedAt)+' IST':'Not verified')+'</small></td>';
+  };
+  const strictPcr=deriveLiveThreeIndexPcr(d,null,Date.now());
+  // PCR numbers and wall strikes are from a *complete, validated* expiry snapshot only.
   const pcrReason=(a:any)=>{
    const q=a?.pcrSnapshot,c=q?.coverage;
-   if(!q)return 'PCR snapshot not received';
-   if(q.state==='STALE')return 'PCR source expired';
-   if(q.fetchState==='RATE_LIMITED')return 'Kite quote rate-limited · next cycle';
-   if(q.fetchState==='REQUEST_REJECTED')return 'Kite quote request rejected';
-   if(q.fetchState==='SESSION_REQUIRED')return 'Kite authorization required';
-   if(q.fetchState==='IDENTITY_TOO_LONG')return 'Quote identity too long';
-   if(q.fetchState==='UPSTREAM_UNAVAILABLE')return 'Kite quote request failed';
-   if(!c)return 'OI coverage unavailable';
-   if(c.expected>0&&!c.complete){
-    const missing=Number(c.missing)||0,stale=Number(c.stale)||0,invalid=Number(c.invalid)||0;
-    if((c.freshOi||0)<c.expected)return oneFmt(c.freshOi,0)+'/'+oneFmt(c.expected,0)+' fresh · M:'+missing+' S:'+stale+' I:'+invalid;
-    if(c.sourceSkewMs>30000)return 'OI source times not aligned';
-   }
-   if(c.complete&&q.fullPcr===null)return 'CE total OI is zero';
-   return 'Next complete PCR check pending';
+   if(!q)return 'Full OI snapshot pending';
+   if(q.state==='STALE')return 'OI snapshot expired';
+   if(q.fetchState==='RATE_LIMITED')return 'Kite rate limited';
+   if(q.fetchState==='REQUEST_REJECTED')return 'Kite quote rejected';
+   if(q.fetchState==='SESSION_REQUIRED')return 'Kite login required';
+   if(q.fetchState==='IDENTITY_TOO_LONG')return 'Kite symbol too long';
+   if(q.fetchState==='UPSTREAM_UNAVAILABLE')return 'Kite quote unavailable';
+   if(c&&Number.isInteger(c.expected)&&c.expected>0&&Number.isInteger(c.freshOi))
+    return 'OI '+c.freshOi+'/'+c.expected+' · M:'+(c.missing||0)+' S:'+(c.stale||0)+' I:'+(c.invalid||0)+
+     (q.checkedAt?' · '+oneTime(q.checkedAt)+' IST':'')+(c.complete?' · verifying':'');
+   return 'Full OI coverage unverified';
   };
-  const order=['NIFTY','SENSEX','BANKNIFTY'];
-  oneRows.innerHTML=order.map(symbol=>{
-   const a=snap.indices.find((r:any)=>r.symbol===symbol),p=a?pcr(a):null;
-   if(!a)return '<tr><th scope="row">'+symbol+'</th><td colspan="7">Not supplied</td></tr>';
-   const c=(q:any)=>'<td>'+quote(q)+'</td>';
-   const ceStrike=a.ce?.identity?.strike,peStrike=a.pe?.identity?.strike;
-   return '<tr><th scope="row">'+symbol+'<small>'+esc(a.expiry||'Expiry unavailable')+'</small></th>'+
-    c(a.spot)+c(a.future)+
-    '<td>'+quote(a.ce)+'<small>CE '+oneFmt(ceStrike,0)+'</small></td>'+
-    '<td>'+quote(a.pe)+'<small>PE '+oneFmt(peStrike,0)+'</small></td>'+
-    '<td>'+(p?oneFmt(p.fullPcr,4):'—')+'<small>'+(p?'checked '+oneTime(p.checkedAt):esc(pcrReason(a)))+'</small></td>'+
-    '<td>'+(p?oneFmt(p.callWall?.strike,0):'—')+'</td>'+
-    '<td>'+(p?oneFmt(p.putWall?.strike,0):'—')+'</td></tr>';
+  oneRows.innerHTML=['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>{
+   const matches=snap.indices.filter((x:any)=>x?.symbol===symbol),a=matches.length===1?matches[0]:null;
+   if(!a)return '<tr><th scope="row">'+symbol+'</th><td colspan="7">Exact index unavailable</td></tr>';
+   const p=strictPcr.rows.find((x:any)=>x.symbol===symbol&&x.expiry===a.expiry);
+   const full=p?.current&&finite(p.value)?p:null;
+   const leg=(q:any,side:'CE'|'PE')=>{
+    const strike=q?.identity?.strike,ok=Number.isFinite(strike)&&
+     verified(q,'OPTION',symbol,a.expiry,side,strike)&&a.strike===strike;
+    return '<td>'+(ok?oneFmt(q.price):'—')+'<small>'+side+' '+(ok?oneFmt(strike,0):'—')+'</small>'+
+     '<small>'+(ok?'Kite '+oneTime(q.observedAt)+' IST':'Not verified')+'</small></td>';
+   };
+   return '<tr><th scope="row">'+symbol+'<small>'+esc(a.expiry||'Expiry unavailable')+
+    (symbol==='BANKNIFTY'?' · Monthly':'')+'</small></th>'+
+    priceCell(a.spot,'SPOT',symbol)+priceCell(a.future,'FUTURE',symbol)+leg(a.ce,'CE')+leg(a.pe,'PE')+
+    '<td>'+(full?oneFmt(full.value,4):'—')+'<small>'+(full?'FULL · OI '+full.current.expected+
+      '/'+full.current.expected+' · '+oneTime(new Date(full.current.checked).toISOString())+' IST':esc(pcrReason(a)))+'</small></td>'+
+    '<td>'+(full?oneFmt(d.pcrDisplay?.[symbol]?.callWall?.strike,0):'—')+'</td>'+
+    '<td>'+(full?oneFmt(d.pcrDisplay?.[symbol]?.putWall?.strike,0):'—')+'</td></tr>';
   }).join('');
-  oneStatus.textContent='Kite stream · '+oneTime(d.serverTime)+' IST · India VIX '+(valid(snap.vix)?oneFmt(snap.vix.price):'—')+' · — means unavailable';
+  oneStatus.textContent='Verified Kite · '+oneTime(d.serverTime)+' IST · VIX '+
+   (verified(snap.vix,'VIX')?oneFmt(snap.vix.price):'—')+' · — means unavailable';
  };
  const oneActions=$('op-one-actions');
  if(oneActions)oneActions.onclick=(e:any)=>{

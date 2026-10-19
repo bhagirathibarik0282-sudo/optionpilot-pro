@@ -174,7 +174,8 @@ export function mountResearchRoutes(app: Hono): void {
         <iframe
           id="optionpilot-data-annex-frame"
           title="OptionPilot market observations"
-          src="${BUSINESS_DATA_HREF}"
+          src="about:blank"
+          data-src="${BUSINESS_DATA_HREF}"
           loading="lazy"
           style="display:block;width:100%;height:calc(100dvh - 56px);border:0;background:#060f23"
         ></iframe>
@@ -185,12 +186,16 @@ export function mountResearchRoutes(app: Hono): void {
           const shell = document.getElementById("optionpilot-data-annex-shell");
           const close = document.getElementById("optionpilot-data-annex-close");
           const tools = document.getElementById("optionpilot-tools-menu");
-          if (!open || !shell || !close) return;
+          const frame = document.getElementById("optionpilot-data-annex-frame");
+          if (!open || !shell || !close || !frame) return;
           let previousOverflow = "";
           const setOpen = (show) => {
             if (show) {
               previousOverflow = document.body.style.overflow;
               shell.hidden = false;
+              // Never boot the separate market terminal (SSE + replay) while
+              // the homepage is merely open. Preserve its state on close/reopen.
+              if (frame.getAttribute("src") === "about:blank") frame.setAttribute("src", frame.dataset.src);
               document.body.style.overflow = "hidden";
               open.setAttribute("aria-expanded", "true");
               close.focus();

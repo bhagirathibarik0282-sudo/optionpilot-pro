@@ -106,7 +106,7 @@ export function deriveAtmFibHold(input:any){
  const good=(v:any)=>typeof v==='number'&&Number.isFinite(v)&&v>0;
  const at=Date.parse(quoteAt||''),date=String(tradeDate||'');
  if(!['NIFTY','SENSEX','BANKNIFTY'].includes(symbol)||!['CE','PE'].includes(side)||
-  !/^\\d{4}-\\d{2}-\\d{2}$/.test(expiry)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||
+  !/^\d{4}-\d{2}-\d{2}$/.test(expiry)||!/^\d{4}-\d{2}-\d{2}$/.test(date)||
   !good(strike)||!good(price)||!Number.isFinite(at)||String(quoteAt).slice(0,10)!==date)return empty;
  const identity=(r:any)=>r?.symbol===symbol&&String(r?.expiry||'').slice(0,10)===expiry&&r?.strike===strike&&r?.option_type===side;
  // Existing model alone computes FIB R3..S3 from a TRUE earlier exact-contract 15:30 close.

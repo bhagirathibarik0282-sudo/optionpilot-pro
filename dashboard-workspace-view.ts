@@ -129,7 +129,7 @@ export function installDashboardWorkspace(api:any){
   const finite=(v:any)=>typeof v==='number'&&Number.isFinite(v)&&v>0;
   const level=(key:'pdh'|'pdl')=>{
    const found=candidates.filter((r:any)=>finite(r[key])).map((r:any)=>r[key]);
-   return found.length&&found.every((n:number)=>n===found[0])?found[0]:null;
+   return found.length>0&&found.every((n:number)=>n===found[0])?found[0]:null;
   };
   const pdh=level('pdh'),pdl=level('pdl');
   return pdh!==null&&pdl!==null&&pdh<=pdl?{pdh:null,pdl:null}:{pdh,pdl};

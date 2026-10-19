@@ -136,40 +136,47 @@ export function mountResearchRoutes(app: Hono): void {
     if (!contentType.includes("text/html")) return;
 
     const html = await response.text();
-    if (!html.includes("</body>") || html.includes("data-optionpilot-intelligence-shortcut")) return;
+    // DATA is already the read-only observation terminal. Never inject an iframe launcher into its own iframe.
+    if (c.req.path === "/api/research/business-dashboard/view" || !html.includes("</body>") || html.includes("id=\"optionpilot-data-annex-open\"")) return;
 
     const shortcut = `
-      <!-- OPTIONPILOT_DATA_ANNEX_V1: same-page shell; reuses the existing read-only observation terminal. -->
+      <!-- OPTIONPILOT_DATA_ANNEX_V1: one compact launcher; existing observation engine, theory and intelligence preserved. -->
       <button
         type="button"
         data-optionpilot-data-annex="true"
         id="optionpilot-data-annex-open"
         aria-controls="optionpilot-data-annex-shell"
         aria-expanded="false"
-        style="position:fixed;right:12px;bottom:154px;z-index:9999;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;border:1px solid rgba(255,225,118,.72);border-radius:999px;background:rgba(8,18,24,.96);color:#ffe176;font:800 12px/1.1 system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:.04em;box-shadow:0 0 18px rgba(255,225,118,.2);backdrop-filter:blur(8px);cursor:pointer">
-        <span aria-hidden="true">▦</span>
-        <span>DATA</span>
+        aria-label="Open ONE STOP live market dashboard"
+        style="position:fixed;right:12px;bottom:max(16px,env(safe-area-inset-bottom));z-index:9999;min-height:48px;padding:12px 16px;border:1px solid rgba(105,233,217,.65);border-radius:14px;background:#102b31;color:#b4fff1;font:800 14px/1.2 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 4px 22px #0009;cursor:pointer">
+        ⚡ ONE STOP
       </button>
       <section
         id="optionpilot-data-annex-shell"
         hidden
-        aria-label="OptionPilot data observation terminal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="OptionPilot ONE STOP market dashboard"
         style="position:fixed;inset:0;z-index:10000;background:#050914;color:#eef2ff">
-        <div style="height:52px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;border-bottom:1px solid rgba(255,225,118,.35);background:#08162f;font:700 13px/1.2 system-ui,-apple-system,Segoe UI,sans-serif">
-          <span style="color:#ffe176">OPTIONPILOT · DATA</span>
-          <button
-            type="button"
-            id="optionpilot-data-annex-close"
-            style="min-height:36px;padding:8px 12px;border:1px solid rgba(255,225,118,.55);border-radius:9px;background:#111f39;color:#ffe176;font:700 12px system-ui,-apple-system,Segoe UI,sans-serif;cursor:pointer">
-            ← Dashboard
-          </button>
+        <div style="min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid rgba(105,233,217,.35);background:#08162f;font:700 13px/1.2 system-ui,-apple-system,Segoe UI,sans-serif">
+          <span style="color:#96f6e8">⚡ ONE STOP</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <details id="optionpilot-tools-menu" style="position:relative">
+              <summary style="min-height:40px;display:flex;align-items:center;padding:6px 9px;border:1px solid #476676;border-radius:9px;cursor:pointer;list-style:none">Tools ▾</summary>
+              <nav aria-label="OptionPilot research tools" style="position:absolute;right:0;top:44px;z-index:1;display:grid;gap:4px;min-width:190px;padding:8px;background:#102334;border:1px solid #547184;border-radius:10px;box-shadow:0 10px 28px #000b">
+                <a data-optionpilot-theory-lab-shortcut="true" href="${THEORY_LAB_HREF}" style="padding:12px 8px;color:#eee2ff;text-decoration:none">Date-wise Theory Lab</a>
+                <a data-optionpilot-intelligence-shortcut="true" href="${INTELLIGENCE_LAYER_HREF}" style="padding:12px 8px;color:#a9ffe7;text-decoration:none">Intelligence Layer</a>
+              </nav>
+            </details>
+            <button type="button" id="optionpilot-data-annex-close" style="min-height:40px;padding:8px 12px;border:1px solid #5f8794;border-radius:9px;background:#17333e;color:#efffff;font:700 13px system-ui;cursor:pointer">← Dashboard</button>
+          </div>
         </div>
         <iframe
           id="optionpilot-data-annex-frame"
           title="OptionPilot market observations"
           src="${BUSINESS_DATA_HREF}"
           loading="lazy"
-          style="display:block;width:100%;height:calc(100dvh - 52px);border:0;background:#060f23"
+          style="display:block;width:100%;height:calc(100dvh - 56px);border:0;background:#060f23"
         ></iframe>
       </section>
       <script>
@@ -177,6 +184,7 @@ export function mountResearchRoutes(app: Hono): void {
           const open = document.getElementById("optionpilot-data-annex-open");
           const shell = document.getElementById("optionpilot-data-annex-shell");
           const close = document.getElementById("optionpilot-data-annex-close");
+          const tools = document.getElementById("optionpilot-tools-menu");
           if (!open || !shell || !close) return;
           let previousOverflow = "";
           const setOpen = (show) => {
@@ -187,6 +195,7 @@ export function mountResearchRoutes(app: Hono): void {
               open.setAttribute("aria-expanded", "true");
               close.focus();
             } else {
+              if (tools) tools.open = false;
               shell.hidden = true;
               document.body.style.overflow = previousOverflow;
               open.setAttribute("aria-expanded", "false");
@@ -196,26 +205,13 @@ export function mountResearchRoutes(app: Hono): void {
           open.addEventListener("click", () => setOpen(true));
           close.addEventListener("click", () => setOpen(false));
           document.addEventListener("keydown", (event) => {
-            if (event.key === "Escape" && !shell.hidden) setOpen(false);
+            if (event.key === "Escape" && !shell.hidden) {
+              if (tools && tools.open) tools.open = false;
+              else setOpen(false);
+            }
           });
         })();
       </script>
-      <a
-        data-optionpilot-theory-lab-shortcut="true"
-        href="${THEORY_LAB_HREF}"
-        aria-label="Open Date-wise Theory Lab"
-        style="position:fixed;right:12px;bottom:108px;z-index:9999;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;border:1px solid rgba(187,156,255,.55);border-radius:999px;background:rgba(8,18,24,.94);color:#cfbaff;text-decoration:none;font:700 12px/1.1 system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:.02em;box-shadow:0 0 18px rgba(187,156,255,.18);backdrop-filter:blur(8px)">
-        <span aria-hidden="true">⌁</span>
-        <span>Date-wise Theory Lab</span>
-      </a>
-      <a
-        data-optionpilot-intelligence-shortcut="true"
-        href="${INTELLIGENCE_LAYER_HREF}"
-        aria-label="Open Intelligence Layer"
-        style="position:fixed;right:12px;bottom:62px;z-index:9999;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;border:1px solid rgba(0,255,200,.55);border-radius:999px;background:rgba(8,18,24,.94);color:#55ffd8;text-decoration:none;font:700 12px/1.1 system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:.02em;box-shadow:0 0 18px rgba(0,255,200,.18);backdrop-filter:blur(8px)">
-        <span aria-hidden="true">✦</span>
-        <span>Intelligence Layer</span>
-      </a>
     `;
 
     const headers = new Headers(response.headers);

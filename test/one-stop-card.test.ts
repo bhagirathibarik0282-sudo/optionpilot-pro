@@ -28,9 +28,11 @@ test('command shortcuts restore hidden chapters and Recorded opens only the save
  assert(el('op-chapter-links').innerHTML.includes('data-op-chapter="7"'));
  listeners['optionpilot:live-context']({detail:{connected:false,connectionState:'MARKET_CLOSED',snapshot:null}});
  assert.match(el('op-one-status').textContent,/MARKET CLOSED/);
+ assert.equal(el('op-workspace-feed').textContent,'MARKET CLOSED');
  assert.match(el('op-one-rows').innerHTML,/Open recorded ladder/);
  listeners['optionpilot:live-context']({detail:{connected:false,connectionState:'SESSION_REQUIRED',snapshot:null}});
  assert.match(el('op-one-status').textContent,/SESSION_REQUIRED/);
+ assert.equal(el('op-workspace-feed').textContent,'OFFLINE / STALE');
  assert(!el('op-one-status').textContent.includes('MARKET CLOSED'));
  const html=renderBusinessDashboardV1Html({} as any);
  assert.match(html,/<details id="op-summary-panel" open>/);

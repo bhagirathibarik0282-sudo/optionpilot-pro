@@ -328,7 +328,7 @@ test('PR5 repeated live packets preserve ATM DOM and flashing; new premium, disc
  const initial=count();
  fakeNow+=650;send();fakeNow+=650;send();
  assert.deepEqual(count(),initial,'same visible evidence must not recreate rows or restart blink animations');
- ce.price=115;ce.observedAt=at();ce.receivedAt=at();p.serverTime=at();p.snapshot.asOf=at();send();
+ fakeNow+=650;ce.price=115;ce.observedAt=at();ce.receivedAt=at();p.serverTime=at();p.snapshot.asOf=at();send();
  const updated=count();
  assert(updated[0]>initial[0]&&updated[1]>initial[1],'new premium paints immediately');
  assert.equal(updated[2],initial[2],'unchanged spot ticker does not repaint for CE ticks');

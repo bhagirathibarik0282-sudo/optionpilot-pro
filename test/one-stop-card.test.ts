@@ -29,10 +29,10 @@ test('one-stop withholds disconnected, stale and incomplete values',()=>{
  const installer=installDashboardWorkspace.toString();
  assert.match(installer,/d\?\.connected===true/);
  assert.match(installer,/q\?\.state==='LIVE'/);
- assert.match(installer,/p\.coverage\?\.complete===true/);
- assert.match(installer,/p\.expiry===a\.expiry/);
+ assert.match(installer,/deriveLiveThreeIndexPcr/);
+ assert.match(installer,/x\.expiry===a\.expiry/);
  assert.match(installer,/serverMs-at/);
- assert.match(installer,/No fresh Kite stream/);
+ assert.match(installer,/No fresh verified Kite snapshot/);
 });
 test('one-stop serialized browser script parses without changing existing source ordering',()=>{
  const html=renderBusinessDashboardV1Html({} as any);
@@ -223,6 +223,7 @@ test('PR3 one-stop displays only verified Kite ticks and never upgrades partial 
  assert.match(html,/OI 70\/100/);
  assert.doesNotMatch(html,/FULL · OI/);
  // A wrong-side exact contract must not leak its premium number.
+ listeners['optionpilot:live-context']({detail:{connected:false,connectionState:'DISCONNECTED'}});
  a.ce.identity.side='PE';a.ce.price=99999;payload.serverTime=new Date(Date.now()+650).toISOString();
  payload.snapshot.asOf=payload.serverTime;
  listeners['optionpilot:live-context']({detail:payload});

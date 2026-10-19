@@ -20,6 +20,31 @@ function harness(saved:any=null){
  return {respond:(payload:any)=>{livePayload=payload;context.fetch=async(url:string)=>{requests.push(url);return {ok:true,json:async()=>structuredClone(livePayload)};};},focus:(id:string)=>context.document.activeElement=node(id),node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
 }
 const settle=async()=>{await Promise.resolve();await Promise.resolve();};
+test('closed-market live ladder explains the missing values and opens the existing recorded archive explicitly',async()=>{
+ const h=harness();h.respond({connected:false,connectionState:'MARKET_CLOSED',serverTime:new Date().toISOString(),snapshot:null});
+ h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');await settle();await settle();
+ const strip=h.node('pw-chain-pcr').innerHTML;
+ assert.match(strip,/FULL PCR · MARKET CLOSED/);
+ assert.match(strip,/live prices are paused/);
+ assert.match(strip,/data-pw-source="RECORDED">Open Recorded/);
+ assert.doesNotMatch(strip,/FULL PCR · LIVE|SYNC ✓/);
+ assert.match(h.node('pw-status').textContent,/Market closed/);
+ assert.equal(h.calls.length,0,'the Live selection must not silently load or relabel recordings');
+ h.click('',{pwSource:'RECORDED'});await settle();await settle();
+ assert.equal(h.calls[0].date,'2026-10-16');
+ assert.equal(h.calls[0].options.scope,'FULL');
+ assert.match(h.node('pw-status').textContent,/^RECORDED/);
+ assert.doesNotMatch(h.node('pw-chain-pcr').innerHTML,/MARKET CLOSED|Open Recorded/);
+});
+test('broker authentication and network failures are not mislabelled as market closure',async()=>{
+ for(const state of ['KITE_SESSION_REQUIRED','TIMEOUT']){
+  const h=harness();h.respond({connected:false,connectionState:state,serverTime:new Date().toISOString(),snapshot:null});
+  h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');await settle();await settle();
+  assert.match(h.node('pw-chain-pcr').innerHTML,new RegExp('FULL PCR · '+state.replaceAll('_',' ')));
+  assert.doesNotMatch(h.node('pw-chain-pcr').innerHTML,/FULL PCR · LIVE|Market closed/);
+  assert.equal(h.calls.length,0);
+ }
+});
 test('exact watch survives cursor/date changes, blocks identity edits, and never substitutes missing data',async()=>{
  const h=harness(),key='NIFTY|2026-10-19|22000|CE';h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
  h.click('',{pwLock:'NIFTY|2026-10-19|99999|CE'});assert.equal(h.stored().watch,undefined,'cannot lock an absent row');

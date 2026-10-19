@@ -113,3 +113,48 @@ test('Chapter 6 selections reuse the existing EventSource; independent sides and
  const q=h.contextEvents.at(-1).detail.snapshot.indices[0].pcrSnapshot;assert.equal(q.strikeRows[0].token,2);
  const before=h.streams.length;h.winEvents['optionpilot:live-selection']({detail:{symbol:'NIFTY',ceStrike:-1}});assert.equal(h.streams.length,before);
 });
+
+
+test('PR6 startup pageshow and online reuse one live EventSource without refreshing an active URL',()=>{
+ const h=harness(),initial=h.streams[0];
+ assert.equal(h.streams.length,1);
+ h.winEvents.pageshow();h.winEvents.online({type:'online'});
+ assert.equal(h.streams.length,1,'lifecycle events cannot multiply startup subscriptions');
+ assert.equal(initial.closed,false,'the original live connection remains active');
+ h.tick();h.emit(); // Existing initial contract pin deliberately reconnects with its new query.
+ const pinned=h.streams.at(-1),count=h.streams.length;
+ assert.notEqual(pinned,initial);
+ h.winEvents.pageshow();h.winEvents.online({type:'online'});
+ assert.equal(h.streams.length,count,'repeat lifecycle events must preserve pinned stream');
+ assert.equal(pinned.closed,false);
+ // A genuinely closed EventSource may be replaced even with the same query.
+ pinned.readyState=2;
+ h.winEvents.pageshow();
+ assert.equal(h.streams.length,count+1);
+ assert.equal(pinned.closed,true);
+});
+
+test('PR6 resumes exactly once after hidden/pagehide, still replaces stale and user-selected streams',()=>{
+ const h=harness();
+ h.tick();h.emit();const active=h.streams.at(-1),count=h.streams.length;
+ h.document.hidden=true;h.docEvents.visibilitychange();assert(active.closed);
+ h.document.hidden=false;h.docEvents.visibilitychange();
+ assert.equal(h.streams.length,count+1);
+ const resumed=h.streams.at(-1);
+ h.winEvents.pageshow();h.winEvents.online({type:'online'});
+ assert.equal(h.streams.length,count+1,'resume and pageshow share one connection');
+ assert.equal(resumed.closed,false);
+ h.winEvents.pagehide();assert(resumed.closed);
+ h.winEvents.pageshow();
+ assert.equal(h.streams.length,count+2,'pagehide pageshow replaces closed stream once');
+ h.winEvents.pageshow();assert.equal(h.streams.length,count+2);
+ h.tick();h.emit();const selected=h.streams.at(-1),n=h.streams.length;
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'strike'},value:'22000'}});
+ assert.equal(h.streams.length,n+1,'explicit selection still forces reconnect');
+ assert(selected.closed);
+ const replacement=h.streams.at(-1);
+ h.tick();h.emit(); // The existing 4-second watchdog measures from a received packet.
+ h.advance(5000);h.timers[0]();
+ assert(replacement.closed,'silent stale stream replaced, not reused');
+ assert.equal(h.streams.length,n+2);
+});

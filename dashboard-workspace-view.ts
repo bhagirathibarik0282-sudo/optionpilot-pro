@@ -348,12 +348,12 @@ export function installDashboardWorkspace(api:any){
   else if(action==='RAG'){$('mb-tools').open=true;target=$('rag-evidence-card');if(target)target.open=true;}
   if(target&&typeof target.scrollIntoView==='function')target.scrollIntoView({block:'start',behavior:'auto'});
  };
- let lastTicker=0;
+ let lastTicker=0,lastTickerLive=false;
  window.addEventListener('optionpilot:live-context',((e:any)=>{
   const d=e.detail,on=freshEnvelope(d);paintOne(d);
   $('op-workspace-feed').textContent=on?'● LIVE · Kite':'OFFLINE / STALE';
   $('op-workspace-feed').classList.toggle('op-feed-on',on);
-  if(Date.now()-lastTicker<250&&on)return;lastTicker=Date.now();
+  if(Date.now()-lastTicker<250&&on&&lastTickerLive)return;lastTicker=Date.now();lastTickerLive=on;
   const fmt=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-IN',{maximumFractionDigits:2}):'—';
   const quotes=['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>{
    const matches=on?d.snapshot.indices.filter((a:any)=>a.symbol===symbol):[];

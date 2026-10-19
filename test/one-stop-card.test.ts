@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { WORKSPACE_NAV_HTML, WORKSPACE_CSS, installDashboardWorkspace } from '../dashboard-workspace-view.js';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
+import { deriveAtmFibHold } from '../premium-workspace-model.js';
 
 test('one-stop card is a single top-level workspace panel, not hidden inside feed/settings',()=>{
  const html=renderBusinessDashboardV1Html({} as any);
@@ -104,6 +105,7 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
   minute_bucket:iso(-12000),truth_verdict:'TRUE',pdh:125,pdl:95}))}};
  const api:any={chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {date:day,current};}};
  const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+  deriveAtmFibHold,
   installPremiumWorkspace(){return {openLadder(d:any){opened.push(d);},setVisible(){},refreshRecorded(){}};}});
  installer(api);
  const q=(side:string,price:number,stamp:number,open:number,high:number)=>({state:'LIVE',price,
@@ -130,8 +132,13 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
  assert(html.includes(stamp),'break event must use real tick observedAt');
  el('op-atm-levels').onclick({target:{closest:()=>({dataset:{atmLevel:'PDH'}})}});
  assert.match(el('op-atm-pairs').innerHTML,/PDH ₹125/);
- el('op-atm-levels').onclick({target:{closest:()=>({dataset:{atmLevel:'FIB'}})}});
- assert.equal(opened.length,1);
+ el('op-atm-levels').onclick({target:{closest:(selector:string)=>selector==='[data-atm-level]'?{dataset:{atmLevel:'FIB'}}:null}});
+ assert.equal(opened.length,0,'FIB is an additive level toggle, not forced navigation');
+ assert.match(el('op-atm-pairs').innerHTML,/PDL ₹95/,'PDL remains visible alongside PDH');
+ assert.match(el('op-atm-pairs').innerHTML,/PDH ₹125/);
+ assert.match(el('op-atm-pairs').innerHTML,/FIB — source unavailable/,'missing earlier exact-contract FIB never fabricates a value');
+ el('op-atm-levels').onclick({target:{closest:(selector:string)=>selector==='[data-atm-open-fib]'?{}:null}});
+ assert.equal(opened.length,1,'optional detail action reuses existing ladder');
  assert.equal(opened[0].metric,'fib');
  assert.equal(opened[0].symbol,'NIFTY');
  send(false);
@@ -149,5 +156,23 @@ test('PDH/PDL flash guards require same expiry/strike/day evidence and actual Ki
  assert.match(code,/dayOpen/);
  assert.match(code,/first observed/);
  assert.match(WORKSPACE_CSS,/prefers-reduced-motion:reduce/);
+ assert.doesNotMatch(code,/new EventSource|fetch\(|orderSubmit/);
+});
+
+test('multi-select ATM layer buttons keep independent PDH, PDL and sourced FIB per CE/PE expiry',()=>{
+ const html=renderBusinessDashboardV1Html({} as any);
+ assert.match(html,/data-atm-level="PDH"/);
+ assert.match(html,/data-atm-level="PDL"/);
+ assert.match(html,/data-atm-level="FIB"/);
+ assert.match(html,/data-atm-open-fib/);
+ const code=installDashboardWorkspace.toString();
+ assert.match(code,/atmLayers=new Set<string>\(\['PDL'\]\)/);
+ assert.match(code,/atmLayers\.has\('FIB'\)/);
+ assert.match(code,/atmLayers\.delete\(level\)/);
+ assert.match(code,/deriveAtmFibHold/);
+ assert.match(code,/session\?\.baseline\?\.\[atmSelected\]\?\.options/);
+ assert.match(code,/session\?\.current\?\.\[atmSelected\]\?\.options/);
+ assert.match(code,/held\.name/);
+ assert.match(code,/HOLD unconfirmed/);
  assert.doesNotMatch(code,/new EventSource|fetch\(|orderSubmit/);
 });

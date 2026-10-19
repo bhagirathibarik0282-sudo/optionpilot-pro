@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { runSpreadTheoryBacktest } from "./spread-theory-backtest.js";
 import { parseH1FixedContractJourneyRequest, runH1FixedContractJourneyHttp, type H1FixedContractJourneyResult } from "./h1-fixed-contract-journey-http.js";
 import { renderPremiumSpreadView } from "./premium-spread-view.js";
 
@@ -119,6 +120,13 @@ export async function readPremiumSpread(q: Record<string, string | undefined>) {
 }
 
 export function mountPremiumSpreadRoutes(router: Hono): void {
+  router.get("/premium-spread/theory-backtest", async c => {
+    c.header("Cache-Control", "no-store");
+    const { status, json } = await runSpreadTheoryBacktest({
+      symbol: c.req.query("symbol"), dates: c.req.query("dates"),
+    });
+    return c.json(json, status);
+  });
   router.get("/premium-spread/view", c => {
     c.header("Cache-Control", "no-store");
     return c.html(renderPremiumSpreadView());

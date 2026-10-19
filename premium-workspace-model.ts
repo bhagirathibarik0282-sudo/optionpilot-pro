@@ -98,6 +98,56 @@ export function derivePremiumWorkspace(input:any){
  return {rows:filtered,total:contracts.length,series:derivePremiumSeriesInventory(contracts,input.date,f.symbol||'ALL',f),expiries:[...new Set(contracts.map(r=>r.expiry))].sort(),strikes:[...new Set(contracts.map(r=>r.strike))].sort((a,b)=>a-b),up:filtered.filter(r=>r.change!==null&&r.change>0).length,down:filtered.filter(r=>r.change!==null&&r.change<0).length,events:filtered.filter(r=>r.eventAt).length};
 }
 
+/** Descriptive sampled retest only. Reuse exactly the same sourced Daily FIB model as Premium Workspace.
+ * Not a candle-close confirmation or an execution signal. Missing/mismatched evidence fails closed. */
+export function deriveAtmFibHold(input:any){
+ const empty={nearest:null,observedHold:null,sourceAt:null,reason:'Exact prior-close FIB unavailable'};
+ const {symbol,expiry,strike,side,tradeDate,price,quoteAt}=input;
+ const good=(v:any)=>typeof v==='number'&&Number.isFinite(v)&&v>0;
+ const at=Date.parse(quoteAt||''),date=String(tradeDate||'');
+ if(!['NIFTY','SENSEX','BANKNIFTY'].includes(symbol)||!['CE','PE'].includes(side)||
+  !/^\\d{4}-\\d{2}-\\d{2}$/.test(expiry)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)||
+  !good(strike)||!good(price)||!Number.isFinite(at)||String(quoteAt).slice(0,10)!==date)return empty;
+ const identity=(r:any)=>r?.symbol===symbol&&String(r?.expiry||'').slice(0,10)===expiry&&r?.strike===strike&&r?.option_type===side;
+ // Existing model alone computes FIB R3..S3 from a TRUE earlier exact-contract 15:30 close.
+ const prior=(Array.isArray(input.prior)?input.prior:[]).filter((r:any)=>identity(r));
+ const viewed=derivePremiumWorkspace({date,rows:[{symbol,expiry,strike,option_type:side,minute_bucket:quoteAt,
+  truth_verdict:'TRUE',ltp:price}],prior,minutes:'3',live:true}).rows[0];
+ const fib=viewed?.fib||{},sourceAt=viewed?.fibAt||null;
+ const names=['R3','R2','R1','P','S1','S2','S3'],levels=names.filter(k=>good(fib[k])).map(k=>({name:k,value:fib[k]}));
+ if(levels.length!==7||!sourceAt||!Number.isFinite(Date.parse(sourceAt)))return empty;
+ const nearest=levels.reduce((a,b)=>Math.abs(price-b.value)<Math.abs(price-a.value)?b:a);
+ const observed=(Array.isArray(input.observed)?input.observed:[]).filter((r:any)=>identity(r)&&
+  r?.truth_verdict==='TRUE'&&typeof r.ltp==='number'&&Number.isFinite(r.ltp)&&r.ltp>0&&
+  Number.isFinite(Date.parse(r.minute_bucket))&&String(r.minute_bucket).slice(0,10)===date&&
+  Date.parse(r.minute_bucket)<=at&&at-Date.parse(r.minute_bucket)<=15*60000);
+ const byTime=new Map<string,number|null>();
+ for(const r of observed){const k=r.minute_bucket,p=byTime.get(k);
+  if(!byTime.has(k))byTime.set(k,r.ltp);else if(p!==r.ltp)byTime.set(k,null);
+ }
+ const samples=[...byTime].sort((a,b)=>Date.parse(a[0])-Date.parse(b[0])).map(([at,value])=>({at,value}));
+ const tested:any[]=[];
+ for(const level of levels)for(const direction of ['SUPPORT','RESISTANCE']){
+  const keeps=(v:number)=>direction==='SUPPORT'?v>=level.value:v<=level.value;
+  if(!keeps(price))continue;
+  // Level test: within 0.1% from its own side; then >=2 distinct recorded observations
+  // on that side, no conflicted/missing sample or >3-minute interval.
+  const tolerance=Math.max(0.05,level.value*.001);
+  for(let i=0;i<samples.length-2;i++){
+   const first=samples[i];if(first.value===null||!keeps(first.value)||Math.abs(first.value-level.value)>tolerance)continue;
+   const run=samples.slice(i),last=run.at(-1)!;
+   if(run.length<3||at-Date.parse(last.at)>180000||Date.parse(last.at)-Date.parse(first.at)>15*60000)continue;
+   if(run.some(r=>r.value===null||!keeps(r.value)))continue;
+   if(run.some((r,j)=>j>0&&(Date.parse(r.at)-Date.parse(run[j-1].at)<=0||Date.parse(r.at)-Date.parse(run[j-1].at)>180000)))continue;
+   tested.push({name:level.name,value:level.value,kind:direction,testAt:first.at,confirmedAt:last.at,
+    observations:run.length,source:'RECORDED_1M_OBSERVATIONS'});
+  }
+ }
+ tested.sort((a,b)=>Date.parse(b.confirmedAt)-Date.parse(a.confirmedAt)||Math.abs(price-a.value)-Math.abs(price-b.value));
+ return {nearest:{name:nearest.name,value:nearest.value,position:price>nearest.value?'ABOVE':price<nearest.value?'BELOW':'AT'},
+  observedHold:tested[0]||null,sourceAt,reason:tested.length?'Recorded price-sample retest, not candle-confirmed':'HOLD not confirmed from recorded price samples'};
+}
+
 /** Pair only observed, same-expiry contracts. No Greek calculation or historical live fallback. */
 export function derivePremiumDeltaPair(rows:any[],target:number,source='RECORDED'){
  const validNumber=(v:any)=>typeof v==='number'&&Number.isFinite(v);

@@ -219,7 +219,7 @@ test('PR2 coalesces unchanged ladder DOM redraw while retaining 1s REST polling 
  assert.match(code,/const tick=\(\)=>\{/);
  assert.match(code,/if\(visible&&cfg\.source==='LIVE'&&live\?\.connected&&!premiumLiveClock\(live,Date\.now\(\)-liveReceived\)\.valid\)draw\(\)/);
  assert.doesNotMatch(code,/if\(visible&&cfg\.source==='LIVE'\)\{if\(live\)draw\(\)/,'timer no longer duplicates every successful response repaint');
- assert.match(code,/if\(live\?\.connected&&Date\.parse\(payload\.serverTime\)<=Date\.parse\(live\.serverTime\)\)return/,'same REST sample never triggers a new full DOM rebuild');
+ assert.match(code,/if\(live\?\.connected&&payload\.connected===true&&payload\.snapshot\?\.runtimeId===live\.snapshot\?\.runtimeId&&Date\.parse\(payload\.serverTime\)<=Date\.parse\(live\.serverTime\)\)return/,'only same live runtime may skip duplicate redraw');
  assert.match(code,/live=payload;liveReceived=Date\.now\(\)/);
  assert.match(code,/if\(!payload\.connected\)history\.clear\(\);draw\(\)/);
  assert.match(code,/if\(visible&&cfg\.source==='LIVE'&&live\?\.connected&&!premiumLiveClock/);

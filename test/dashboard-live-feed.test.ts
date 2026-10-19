@@ -107,3 +107,19 @@ test('no invented opposite premium or ATM strike without an exact same-expiry pa
  const row=store.snapshot(now).atmExpiryLadder[0].rows.find(r=>r.expiry===solo.expiry)!;
  assert.equal(row.strike,null);assert.equal(row.ce,null);assert.equal(row.pe,null);
 });
+
+test('daily Open/High in ATM expiry quote are broker packet fields only, gated by freshness',()=>{
+ const store=fixture();
+ const atFresh=new Date(now+1000).toISOString();
+ store.ingest([packet(10,{open:110,high:110,low:89,lastPrice:100,exchangeTimestamp:atFresh})],atFresh);
+ const q=store.snapshot(now+1000).atmExpiryLadder[0].rows.find(r=>r.expiry===expiry)?.ce;
+ assert.equal(q?.dayOpen,110);
+ assert.equal(q?.dayHigh,110);
+ assert.equal(store.snapshot(now+32000).atmExpiryLadder[0].rows.find(r=>r.expiry===expiry)?.ce,null,'stale spot withholds ATM selection');
+ const staleQuote=store.premiums(now+32000,{view:'ladder'}).rows.find(r=>r.identity?.token===10);
+ assert.equal(staleQuote?.dayOpen,null,'stale option OHLC never remains published');
+ assert.equal(staleQuote?.dayHigh,null);
+ store.ingest([packet(10,{open:undefined,high:undefined,lastPrice:95,exchangeTimestamp:atFresh})],atFresh);
+ assert.equal(store.snapshot(now+1000).atmExpiryLadder[0].rows.find(r=>r.expiry===expiry)?.ce?.dayOpen,null);
+ assert.equal(store.snapshot(now+1000).atmExpiryLadder[0].rows.find(r=>r.expiry===expiry)?.ce?.dayHigh,null);
+});

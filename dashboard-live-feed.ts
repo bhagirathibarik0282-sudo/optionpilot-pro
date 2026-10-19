@@ -78,7 +78,7 @@ export class DashboardLiveStore {
  private quote(e:LiveEntry|undefined,now:number){
    const t=e?this.ticks.get(e.token):null,age=t?now-Date.parse(t.observedAt||''):null,receiptAge=t?now-Date.parse(t.receivedAt):null;
    const fresh=!!t&&age!==null&&receiptAge!==null&&age>=-5000&&age<=30000&&receiptAge>=0&&receiptAge<=30000&&dateOf(now)===this.inventory.date;
-   return {identity:e||null,price:fresh?t!.price:null,oi:fresh?t!.oi:null,volume:fresh?t!.volume:null,bid:fresh?t!.bid:null,ask:fresh?t!.ask:null,pdc:fresh?t!.close:null,changePct:fresh&&t!.price!==null&&t!.close!==null&&t!.close>0?(t!.price/t!.close-1)*100:null,state:!t?'WAITING':fresh?'LIVE':'STALE',observedAt:t?.observedAt||null,receivedAt:t?.receivedAt||null,ageMs:age};
+   return {identity:e||null,price:fresh?t!.price:null,dayOpen:fresh&&number(t!.packet.open)!==null&&number(t!.packet.open)!>0?number(t!.packet.open):null,dayHigh:fresh&&number(t!.packet.high)!==null&&number(t!.packet.high)!>0?number(t!.packet.high):null,oi:fresh?t!.oi:null,volume:fresh?t!.volume:null,bid:fresh?t!.bid:null,ask:fresh?t!.ask:null,pdc:fresh?t!.close:null,changePct:fresh&&t!.price!==null&&t!.close!==null&&t!.close>0?(t!.price/t!.close-1)*100:null,state:!t?'WAITING':fresh?'LIVE':'STALE',observedAt:t?.observedAt||null,receivedAt:t?.receivedAt||null,ageMs:age};
  }
 
  /** Existing cache only; used to freeze the ATM reference at each OI snapshot. */

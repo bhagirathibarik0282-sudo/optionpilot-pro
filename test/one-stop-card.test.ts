@@ -90,3 +90,64 @@ test('ATM weekly expiry rows render two sides, switch individually and clear on 
  assert(!el('op-atm-pairs').innerHTML.includes('234'));
  assert.match(el('op-atm-pairs').innerHTML,/LIVE unavailable/);
 });
+
+test('exact CE/PE PDH PDL crosses flash below their expiry row with observed time; FIB button reuses ladder',()=>{
+ const nodes=new Map<string,any>(),listeners:any={},opened:any[]=[];
+ const el=(id:string)=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',value:'NIFTY',
+  setAttribute(){},classList:{toggle(){}},querySelectorAll(){return ['PDL','PDH','FIB'].map(atmLevel=>({dataset:{atmLevel},setAttribute(){}}));},
+  scrollIntoView(){}});return nodes.get(id);};
+ const document:any={body:{dataset:{}},hidden:false,getElementById:el,querySelectorAll(){return [];}};
+ const window:any={addEventListener(n:string,fn:any){listeners[n]=fn;}};
+ const localStorage:any={getItem(){return null},setItem(){}};
+ const at0=Date.now(),iso=(v:number)=>new Date(at0+v).toISOString(),day=iso(0).slice(0,10),expiry='2026-10-26';
+ const current={NIFTY:{options:['CE','PE'].map(side=>({symbol:'NIFTY',expiry,strike:22000,option_type:side,
+  minute_bucket:iso(-12000),truth_verdict:'TRUE',pdh:125,pdl:95}))}};
+ const api:any={chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {date:day,current};}};
+ const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+  installPremiumWorkspace(){return {openLadder(d:any){opened.push(d);},setVisible(){},refreshRecorded(){}};}});
+ installer(api);
+ const q=(side:string,price:number,stamp:number,open:number,high:number)=>({state:'LIVE',price,
+  dayOpen:open,dayHigh:high,observedAt:iso(stamp),receivedAt:iso(stamp),
+  identity:{role:'OPTION',symbol:'NIFTY',expiry,strike:22000,side}});
+ const snap:any={runtimeId:'same',tradeDate:day,indices:[],omittedExpiries:[],atmExpiryLadder:[
+  {symbol:'NIFTY',spot:{state:'LIVE',price:22000,observedAt:iso(-1000),identity:{role:'SPOT',symbol:'NIFTY'}},
+   rows:[{expiry,strike:22000,ce:q('CE',100,-5000,120,120),pe:q('PE',110,-5000,105,130)}]}]};
+ const send=(connected=true)=>listeners['optionpilot:live-context']({detail:{connected,serverTime:iso(0),connectionState:connected?'OPEN':'DISCONNECTED',snapshot:connected?snap:null}});
+ send();
+ let html=el('op-atm-pairs').innerHTML;
+ assert.doesNotMatch(html,/PDL BREAK|PDH BREAK/,'first reading below/above level cannot fabricate event');
+ assert.match(html,/DAY O=H/);
+ assert.match(html,/PDL ₹95/);
+ snap.atmExpiryLadder[0].rows[0].ce=q('CE',94,-2000,120,120);
+ snap.atmExpiryLadder[0].rows[0].pe=q('PE',130,-2000,105,130);
+ send();
+ html=el('op-atm-pairs').innerHTML;
+ assert.match(html,/↓ DAY O=H \+ PDL BREAK/);
+ assert.match(html,/↑ PDH BREAK/);
+ assert.match(html,/data-flash="true"/);
+ assert.match(html,/first observed/);
+ const isoAt=iso(-2000),stamp=new Date(isoAt).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+ assert(html.includes(stamp),'break event must use real tick observedAt');
+ el('op-atm-levels').onclick({target:{closest:()=>({dataset:{atmLevel:'PDH'}})}});
+ assert.match(el('op-atm-pairs').innerHTML,/PDH ₹125/);
+ el('op-atm-levels').onclick({target:{closest:()=>({dataset:{atmLevel:'FIB'}})}});
+ assert.equal(opened.length,1);
+ assert.equal(opened[0].metric,'fib');
+ assert.equal(opened[0].symbol,'NIFTY');
+ send(false);
+ assert.doesNotMatch(el('op-atm-pairs').innerHTML,/PDL BREAK|PDH BREAK|₹94/);
+ // Disconnection cannot resurrect an old crossing if reconnect starts below PDL.
+ send(true);
+ assert.doesNotMatch(el('op-atm-pairs').innerHTML,/PDL BREAK|PDH BREAK/);
+});
+test('PDH/PDL flash guards require same expiry/strike/day evidence and actual Kite FULL daily O=H',()=>{
+ const code=installDashboardWorkspace.toString();
+ assert.match(code,/String\(r\.expiry\)\.slice\(0,10\)===expiry&&r\.strike===strike&&r\.option_type===side/);
+ assert.match(code,/truth_verdict==='TRUE'/);
+ assert.match(code,/old\.price>=level\.pdl&&q\.price<level\.pdl/);
+ assert.match(code,/old\.price<=level\.pdh&&q\.price>level\.pdh/);
+ assert.match(code,/dayOpen/);
+ assert.match(code,/first observed/);
+ assert.match(WORKSPACE_CSS,/prefers-reduced-motion:reduce/);
+ assert.doesNotMatch(code,/new EventSource|fetch\(|orderSubmit/);
+});

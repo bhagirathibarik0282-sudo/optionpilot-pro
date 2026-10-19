@@ -82,7 +82,7 @@ export class DashboardPcrSampler {
   this.busy=true;this.due=now+PCR_REFRESH_MS;
   const entries=this.inventory.entries.filter(e=>e.role==='OPTION'),quotes:Record<string,any>={};
   let fetchState='OK',batchesRequested=0,batchesCompleted=0;
-  const completedAt=new Map<string,number>();
+  const completedAt=new Map<string,number>(),completedSpot=new Map<string,any>();
   try{
    // Sequential requests at <=1 req/s, with bounded encoded URL size as well as count.
    // Never retry 429 or borrow a quote from a previous cycle.
@@ -95,7 +95,10 @@ export class DashboardPcrSampler {
    for(const [i,keys] of batches.entries()){
     if(batchesRequested)await this.deps.wait(1100);if(!this.deps.active())return;
     batchesRequested++;Object.assign(quotes,await this.deps.fetchQuotes(keys));batchesCompleted++;
-    for(const [group,last] of lastBatch)if(last===i)completedAt.set(group,this.deps.now());
+    for(const [group,last] of lastBatch)if(last===i){
+     completedAt.set(group,this.deps.now());
+     try{completedSpot.set(group,this.deps.readSpot?.(group.split('|')[0]));}catch{/* Band stays unavailable without matching spot. */}
+    }
    }
   }catch(error){
    const code=error instanceof Error?error.message:'';
@@ -108,8 +111,8 @@ export class DashboardPcrSampler {
    if(this.deps.active()){
     const keys=[...new Set(entries.map(e=>e.symbol+'|'+e.expiry))],at=this.deps.now();
     for(const key of keys){
-     const group=entries.filter(e=>e.symbol+'|'+e.expiry===key);let spot:any=null;
-     try{spot=this.deps.readSpot?.(group[0].symbol!);}catch{/* Missing cache reference only withholds band PCR. */}
+     const group=entries.filter(e=>e.symbol+'|'+e.expiry===key);let spot:any=completedSpot.get(key)??null;
+     if(!completedAt.has(key))try{spot=this.deps.readSpot?.(group[0].symbol!);}catch{/* Missing cache reference only withholds band PCR. */}
      const measured=measurePcrSnapshot(group,quotes,this.inventory.date,completedAt.get(key)??at,now,spot);
      // A later failed batch invalidates the entire attempt; never publish
      // an earlier expiry from a partially failed REST cycle.

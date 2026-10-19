@@ -11,7 +11,8 @@ test("same-page DATA annex reuses the existing read-only observation terminal", 
   assert.match(source, /id="optionpilot-data-annex-open"/);
   assert.match(source, /id="optionpilot-data-annex-shell"/);
   assert.match(source, /id="optionpilot-data-annex-frame"/);
-  assert.match(source, /src="\$\{BUSINESS_DATA_HREF\}"/);
+  assert.match(source, /src="about:blank"/);
+  assert.match(source, /data-src="\$\{BUSINESS_DATA_HREF\}"/);
   assert.match(source, /id="optionpilot-data-annex-close"/);
   assert.match(source, /document\.body\.style\.overflow = "hidden"/);
   assert.match(source, /event\.key === "Escape"/);
@@ -54,4 +55,29 @@ test("single launcher inline browser code parses with no market fetch or order a
  const script=source.slice(from+8,to);
  assert.doesNotThrow(()=>new vm.Script(script));
  assert.doesNotMatch(script,/\bfetch\s*\(|EventSource|WebSocket|placeOrder|submitOrder/);
+});
+
+test("ONE STOP initializes its iframe only upon first open and preserves it on close/reopen",()=>{
+ const at=source.indexOf('const shortcut = `'),from=source.indexOf('<script>',at),to=source.indexOf('</script>',from);
+ assert(at>=0&&from>=0&&to>from);
+ const attrs:Record<string,string>={src:'about:blank'},listeners:Record<string,Function>={};
+ const button=(name:string)=>({handlers:{} as Record<string,Function>,setAttribute(key:string,value:string){attrs[name+'_'+key]=value;},focus(){},
+  addEventListener(type:string,fn:Function){this.handlers[type]=fn;}});
+ const open=button('open'),close=button('close'),shell={hidden:true},tools={open:false};
+ const frame={dataset:{src:'/api/research/business-dashboard/view?symbol=NIFTY'},writes:0,
+  getAttribute(key:string){return attrs[key];},
+  setAttribute(key:string,value:string){attrs[key]=value;this.writes++;}};
+ const nodes:Record<string,any>={'optionpilot-data-annex-open':open,'optionpilot-data-annex-shell':shell,
+  'optionpilot-data-annex-close':close,'optionpilot-tools-menu':tools,'optionpilot-data-annex-frame':frame};
+ const document:any={body:{style:{overflow:''}},getElementById(id:string){return nodes[id];},
+  addEventListener(type:string,fn:Function){listeners[type]=fn;}};
+ vm.runInNewContext(source.slice(from+8,to),{document});
+ assert.equal(frame.writes,0,'homepage must never start DATA network requests before opening ONE STOP');
+ open.handlers.click();assert.equal(shell.hidden,false);assert.equal(frame.writes,1);
+ assert.equal(attrs.src,frame.dataset.src);assert.equal(document.body.style.overflow,'hidden');
+ close.handlers.click();assert.equal(shell.hidden,true);assert.equal(frame.writes,1,'closing must not reload DATA or forget selected contract');
+ assert.equal(document.body.style.overflow,'');
+ open.handlers.click();assert.equal(frame.writes,1,'reopening must reuse the same iframe and preserve session state');
+ tools.open=true;listeners.keydown({key:'Escape'});assert.equal(tools.open,false);assert.equal(shell.hidden,false);
+ listeners.keydown({key:'Escape'});assert.equal(shell.hidden,true);
 });

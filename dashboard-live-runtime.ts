@@ -42,8 +42,8 @@ export async function reconcileDashboardLiveRuntime(force=false){
    fetchQuotes:async keys=>{
     const params=new URLSearchParams();for(const key of keys)params.append('i',key);
     const response=await fetch('https://api.kite.trade/quote?'+params,{headers:{'X-Kite-Version':'3',Authorization:'token '+apiKey+':'+sessionToken},signal:AbortSignal.timeout(8000)});
-    if(!response.ok)throw Error('PCR_QUOTE_UNAVAILABLE');const body=await response.json() as any;
-    if(body?.status!=='success'||!body.data||typeof body.data!=='object'||Array.isArray(body.data))throw Error('PCR_QUOTE_UNAVAILABLE');return body.data;
+    if(!response.ok)throw Error('PCR_QUOTE_HTTP_'+response.status);const body=await response.json() as any;
+    if(body?.status!=='success'||!body.data||typeof body.data!=='object'||Array.isArray(body.data))throw Error('PCR_QUOTE_INVALID_RESPONSE');return body.data;
    }
   });
   socket.connect();

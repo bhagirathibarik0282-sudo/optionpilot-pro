@@ -26,12 +26,24 @@ test('real streamed values change the numbers and chart; selection clears old id
 test('disconnects, silent stalled stream, hidden/mobile resume and restart never present old prices as live',()=>{
  const h=harness();h.tick();h.emit();h.advance(5000);h.timers[0]();assert(!h.nodes.get('op-live-indices').innerHTML.includes('22,001'));
  h.tick();h.emit();h.streams.at(-1).onerror();assert(h.nodes.get('op-live-status').textContent.includes('Disconnected'));assert(!h.nodes.get('op-live-indices').innerHTML.includes('22,001'));
- h.document.hidden=true;h.docEvents.visibilitychange();assert(h.streams[0].closed);h.document.hidden=false;h.docEvents.visibilitychange();assert.equal(h.streams.length,3);
- h.tick();h.emit();h.winEvents.pagehide();assert(h.streams[2].closed);h.winEvents.pageshow();assert.equal(h.streams.length,4);
+ const beforeResume=h.streams.length;h.document.hidden=true;h.docEvents.visibilitychange();assert(h.streams.at(-1).closed);h.document.hidden=false;h.docEvents.visibilitychange();assert.equal(h.streams.length,beforeResume+1);
+ h.tick();h.emit();h.winEvents.pagehide();assert(h.streams.at(-1).closed);h.winEvents.pageshow();assert.equal(h.streams.length,beforeResume+2);
 });
 test('disabled feed is explicit and IV/Greeks are never fabricated; original script order stays intact',()=>{
  const h=harness();h.streams[0].handlers.snapshot({data:JSON.stringify({connectionState:'DISABLED',snapshot:null})});assert(h.nodes.get('op-live-status').textContent.includes('DISABLED'));
  const html=renderBusinessDashboardV1Html({} as any),scripts=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);assert(scripts[0].includes('installMarketBook'));assert(scripts[1].includes('function load('));assert(scripts.at(-1)!.includes('dashboard-live/stream'));assert.equal((html.match(/id="dashboard-live"/g)||[]).length,1);
+});
+test('a silently stalled open stream reconnects once and ignores superseded packets',()=>{
+ const h=harness();h.tick();h.emit();const old=h.streams.at(-1),count=h.streams.length;
+ h.advance(5000);h.timers[0]();
+ assert(old.closed,'stalled connection must be closed, not just blanked');
+ assert.equal(h.contextEvents.filter((e:any)=>e.type==='optionpilot:live-context').at(-1).detail,null,'every shared chapter must lose stale context');
+ assert.equal(h.streams.length,count+1,'reuse one replacement stream');
+ h.timers[0]();assert.equal(h.streams.length,count+1,'no reconnect storm while waiting');
+ const snapshot=h.store.snapshot(Date.now());
+ old.handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',snapshot})});
+ assert(!h.nodes.get('op-live-indices').innerHTML.includes('22,001'));
+ h.tick(22025);h.emit();assert(h.nodes.get('op-live-indices').innerHTML.includes('22,025'));
 });
 test('two updates inside one source second show real receipt milliseconds and advance the chart',()=>{
  const h=harness();h.tick();h.emit();h.advance(125);

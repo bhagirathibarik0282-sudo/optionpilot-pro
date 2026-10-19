@@ -58,7 +58,10 @@ import {
 import { JEV_PINNED_MODEL } from "./jev-decision-shadow-v1.js";
 import { H1_LIVE_GATE_EVIDENCE_PERSIST_KIND } from "./h1-live-selector-registry.js";
 
+import { mountPremiumSpreadRoutes } from './premium-spread-comparison.js';
+
 export const researchRouter = new Hono();
+mountPremiumSpreadRoutes(researchRouter);
 mountDashboardLiveRoutes(researchRouter);
 mountRagEventEvidenceRoute(researchRouter);
 mountSameDteHistoryRoute(researchRouter);

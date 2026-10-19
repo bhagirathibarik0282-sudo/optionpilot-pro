@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { WORKSPACE_NAV_HTML, WORKSPACE_CSS, installDashboardWorkspace } from '../dashboard-workspace-view.js';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
 import { deriveAtmFibHold } from '../premium-workspace-model.js';
+import { deriveLiveThreeIndexPcr } from '../live-three-index-pcr.js';
 
 test('one-stop card is a single top-level workspace panel, not hidden inside feed/settings',()=>{
  const html=renderBusinessDashboardV1Html({} as any);
@@ -64,6 +65,7 @@ test('ATM weekly expiry rows render two sides, switch individually and clear on 
  const window:any={addEventListener(name:string,fn:any){listeners[name]=fn;}};
  const localStorage:any={getItem(){return null},setItem(){}};
  const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+  deriveLiveThreeIndexPcr,
   installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}});
  installer({chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {};}});
  const date=(days:number)=>new Date(Date.now()+days*86400000).toISOString().slice(0,10),at=new Date().toISOString();
@@ -107,6 +109,7 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
  const api:any={chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {date:day,current};}};
  const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
   deriveAtmFibHold,
+  deriveLiveThreeIndexPcr,
   installPremiumWorkspace(){return {openLadder(d:any){opened.push(d);},setVisible(){},refreshRecorded(){}};}});
  installer(api);
  const q=(side:string,price:number,stamp:number,open:number,high:number)=>({state:'LIVE',price,
@@ -191,4 +194,43 @@ test('PR2 historical replay does not auto-fetch all three indices on every minut
  assert.match(code,/setInterval\(resumeRefresh,60000\)/,'the recorder UI cadence was not changed');
  assert.match(block,/refreshQuoteSnapshots\(\)/,'separate quote context still refreshed as before');
  assert.match(block,/loadCashContext\(\)/,'saved FII DII still refreshed as before');
+});
+
+test('PR3 one-stop displays only verified Kite ticks and never upgrades partial OI to Full PCR',()=>{
+ const nodes=new Map<string,any>(),listeners:any={};
+ const el=(id:string)=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',value:'NIFTY',
+  setAttribute(){},classList:{toggle(){}},querySelectorAll(){return [];},scrollIntoView(){}});return nodes.get(id);};
+ const document:any={body:{dataset:{}},hidden:false,getElementById:el,querySelectorAll(){return [];}};
+ const window:any={addEventListener(n:string,fn:any){listeners[n]=fn;}};
+ const localStorage:any={getItem(){return null},setItem(){}};
+ const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+  deriveAtmFibHold,deriveLiveThreeIndexPcr,installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}});
+ installer({chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {};}});
+ const now=Date.now(),at=new Date(now).toISOString(),date=new Date(now+19800000).toISOString().slice(0,10),expiry='2026-10-26';
+ const quote=(role:string,symbol:string,price:number,side?:string)=>({state:'LIVE',price,observedAt:at,receivedAt:at,
+  identity:{role,symbol,expiry,strike:22000,side}});
+ const a:any={symbol:'NIFTY',expiry,strike:22000,expiries:[expiry],
+  spot:quote('SPOT','NIFTY',22001),future:quote('FUTURE','NIFTY',22015),
+  ce:quote('OPTION','NIFTY',123,'CE'),pe:quote('OPTION','NIFTY',99,'PE'),
+  pcrSnapshot:{state:'INCOMPLETE',source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',checkedAt:at,
+   coverage:{expected:100,freshOi:70,missing:30,stale:0,invalid:0,complete:false}}};
+ const payload:any={connected:true,source:'KITE_WEBSOCKET_FULL',serverTime:at,connectionState:'OPEN',
+  snapshot:{asOf:at,runtimeId:'run',tradeDate:date,indices:[a],atmExpiryLadder:[],vix:quote('VIX','INDIA VIX',14)}};
+ listeners['optionpilot:live-context']({detail:payload});
+ let html=el('op-one-rows').innerHTML;
+ assert.match(html,/22,001/);
+ assert.match(html,/Kite /);
+ assert.match(html,/OI 70\/100/);
+ assert.doesNotMatch(html,/FULL · OI/);
+ // A wrong-side exact contract must not leak its premium number.
+ a.ce.identity.side='PE';a.ce.price=99999;payload.serverTime=new Date(Date.now()+650).toISOString();
+ payload.snapshot.asOf=payload.serverTime;
+ listeners['optionpilot:live-context']({detail:payload});
+ html=el('op-one-rows').innerHTML;
+ assert.doesNotMatch(html,/99,999/);
+ assert.match(html,/Not verified/);
+ // Server source ages out: summary must revoke all numeric fields.
+ payload.serverTime=new Date(Date.now()-7000).toISOString();payload.snapshot.asOf=payload.serverTime;
+ listeners['optionpilot:live-context']({detail:payload});
+ assert.match(el('op-one-rows').innerHTML,/values withheld/);
 });

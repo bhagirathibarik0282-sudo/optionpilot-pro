@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';
+import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import { readFileSync } from 'node:fs';
 import { installDashboardLive,DASHBOARD_LIVE_HTML } from '../dashboard-live-view.js';
 import { DashboardLiveStore,type LiveEntry } from '../dashboard-live-feed.js';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
@@ -192,7 +192,7 @@ test('PR7 100 hidden live frames produce zero heavyweight DOM renders but keep t
 });
 
 test('PR7 structural memory and cadence audit: 600 chart points max per series, one live SSE, no extra timer',()=>{
- const src=installDashboardLive.toString();
+ const src=readFileSync(new URL('../dashboard-live-view.ts',import.meta.url),'utf8');
  assert.equal((src.match(/new EventSource\(/g)||[]).length,1);
  assert.equal((src.match(/setInterval\(/g)||[]).length,1);
  assert.match(src,/rows.length>600/);

@@ -56,6 +56,8 @@ test("recorded 19 Oct pair becomes clear CE up and PE down, without promoting ra
   assert.match(element("story").innerHTML, /71\.20/);
   assert.match(element("chart").innerHTML, /#51e9b1/);
   assert.match(element("chart").innerHTML, /#ff879d/);
-  assert.match(element("rows").innerHTML, /data-time="09:15"/);
-  assert.match(element("rows").innerHTML, /UNMARKED/);
+  assert.doesNotMatch(element("rows").innerHTML, /data-time="09:15"/, "default TRUE view must not promote raw rows");
+  assert.match(element("rows").innerHTML, /TRUE_ELIGIBLE_BOTH/);
+  assert.match(element("rows").innerHTML, /TRUE_DIAGNOSTIC/);
+  assert.equal(mockData.rows[0].status, "UNMARKED");
 });

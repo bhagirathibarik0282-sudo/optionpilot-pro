@@ -30,7 +30,7 @@ export function parseSpreadTheory(q: { symbol?: string; dates?: string }) {
 }
 function goodQuote(r: Row, side: "ce" | "pe", t: number) {
   const qt = ms(r[side + "_quote_timestamp"]), age = number(r[side + "_quote_age_seconds"]);
-  return positive(r[side + "_ltp"]) != null && r[side + "_validation_status"] === "RESEARCH_ELIGIBLE" &&
+  return positive(r[side + "_ltp"]) != null && ["RESEARCH_ELIGIBLE", "TIMESTAMP_PRESENT"].includes(String(r[side + "_validation_status"])) &&
     Number.isFinite(qt) && qt >= t && qt < t + 60000 &&
     age != null && age >= 0 && age <= 30;
 }
@@ -41,7 +41,8 @@ export function qualifySpreadRows(rows: Row[]) {
     if (!Number.isFinite(t)) continue;
     const a = groups.get(t) ?? []; a.push(row); groups.set(t, a);
   }
-  const points: Point[] = []; let excludedBuckets = 0;
+  const points: Point[] = [], contextPoints: Point[] = [];
+  let excludedBuckets = 0, diagnosticBuckets = 0;
   for (const [t, group] of [...groups].sort(([a], [b]) => a - b)) {
     if (group.length !== 1) { excludedBuckets++; continue; }
     const r = group[0], spot = positive(r.spot_ltp);
@@ -50,9 +51,12 @@ export function qualifySpreadRows(rows: Row[]) {
         r.market_snapshot_id !== r.pe_snapshot_id ||
         !goodQuote(r, "ce", t) || !goodQuote(r, "pe", t)) { excludedBuckets++; continue; }
     const ce = positive(r.ce_ltp)!, pe = positive(r.pe_ltp)!;
-    points.push({ minute: new Date(t).toISOString(), spot, ce, pe, gap: round(ce - pe) });
+    const point = { minute: new Date(t).toISOString(), spot, ce, pe, gap: round(ce - pe) };
+    contextPoints.push(point);
+    if (r.ce_validation_status === "RESEARCH_ELIGIBLE" && r.pe_validation_status === "RESEARCH_ELIGIBLE") points.push(point);
+    else diagnosticBuckets++;
   }
-  return { points, excludedBuckets, observedBuckets: groups.size };
+  return { points, contextPoints, excludedBuckets, diagnosticBuckets, observedBuckets: groups.size };
 }
 
 export function evaluateSpreadTheory(points: Point[], cadence: 1 | 3) {
@@ -143,11 +147,16 @@ async function runDay(symbol: Symbol, date: string) {
   const chosen = selection[0], expiry = String(chosen.expiry).slice(0, 10), strike = Number(chosen.strike);
   const raw = await read(recordedSql, [...scope, expiry, strike]);
   const eligible = qualifySpreadRows(raw);
-  const study = evaluateSpreadTheory(eligible.points, date >= "2026-10-19" ? 1 : 3);
+  const cadence = date >= "2026-10-19" ? 1 : 3;
+  const study = evaluateSpreadTheory(eligible.points, cadence);
+  const diagnosticContext = evaluateSpreadTheory(eligible.contextPoints, cadence);
   return { date, status: eligible.points.length ? "OBSERVED" : "NO_ELIGIBLE_PAIR_SAMPLES",
     selected: { expiry, strike, sameStrike: true, fixedAllDay: true,
       selectedAt: new Date(String(chosen.selected_at)).toISOString() },
     observedMinuteBuckets: eligible.observedBuckets, excludedMinuteBuckets: eligible.excludedBuckets,
+    diagnosticMinuteBuckets: eligible.diagnosticBuckets,
+    diagnosticCrossoverContext: { label: "TRUE_MARKER_BUT_INCLUDES_TIMESTAMP_PRESENT_DIAGNOSTICS_NOT_PROOF",
+      crossovers: diagnosticContext.crossovers, events: diagnosticContext.events },
     ...study };
 }
 
@@ -169,7 +178,7 @@ export async function runSpreadTheoryBacktest(q: { symbol?: string; dates?: stri
     baseline: "PRIOR_SPOT_DIRECTION_SAME_WINDOWS",
     cadence: "EXACT_3M_BEFORE_2026_10_19_ELSE_1M",
     policy: "TRUE_MARKER_BOTH_RESEARCH_ELIGIBLE_MATCHING_MARKET_SNAPSHOT_AGE_LE_30S",
-    limitations: ["RESEARCH_ONLY_NOT_WIN_RATE", "NO_CROSS_STRIKE_PARITY_CLAIM",
+    limitations: ["RESEARCH_ONLY_NOT_WIN_RATE", "NO_CROSS_STRIKE_PARITY_CLAIM", "DIAGNOSTICS_ARE_NOT_RESEARCH_ELIGIBLE",
       "RETROSPECTIVE_CROSSOVER_CONFIRMATION", "NO_INTERPOLATION", "NO_SLIPPAGE_OR_EXECUTION"],
     safety,
   } };

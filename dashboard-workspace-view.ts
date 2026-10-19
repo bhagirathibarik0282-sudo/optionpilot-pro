@@ -283,7 +283,7 @@ export function installDashboardWorkspace(api:any){
   };
   const priceCell=(q:any,role:string,symbol:string)=>{
    const ok=verified(q,role,symbol);
-   return '<td>'+(ok?oneFmt(q.price):'—')+'<small>'+(ok?'Kite '+oneTime(q.observedAt)+' IST':'Not verified')+'</small></td>';
+   return '<td data-metric="'+(role==='SPOT'?'Spot':'Future')+'">'+(ok?oneFmt(q.price):'—')+'<small>'+(ok?'Kite '+oneTime(q.observedAt)+' IST':'Not verified')+'</small></td>';
   };
   const strictPcr=deriveLiveThreeIndexPcr(d,null,Date.now());
   // PCR numbers and wall strikes are from a *complete, validated* expiry snapshot only.
@@ -309,16 +309,16 @@ export function installDashboardWorkspace(api:any){
    const leg=(q:any,side:'CE'|'PE')=>{
     const strike=q?.identity?.strike,ok=Number.isFinite(strike)&&
      verified(q,'OPTION',symbol,a.expiry,side,strike)&&a.strike===strike;
-    return '<td>'+(ok?oneFmt(q.price):'—')+'<small>'+side+' '+(ok?oneFmt(strike,0):'—')+'</small>'+
+    return '<td data-metric="'+side+' ₹">'+(ok?oneFmt(q.price):'—')+'<small>'+side+' '+(ok?oneFmt(strike,0):'—')+'</small>'+
      '<small>'+(ok?'Kite '+oneTime(q.observedAt)+' IST':'Not verified')+'</small></td>';
    };
    return '<tr><th scope="row">'+symbol+'<small>'+esc(a.expiry||'Expiry unavailable')+
     (symbol==='BANKNIFTY'?' · Monthly':'')+'</small></th>'+
     priceCell(a.spot,'SPOT',symbol)+priceCell(a.future,'FUTURE',symbol)+leg(a.ce,'CE')+leg(a.pe,'PE')+
-    '<td>'+(full?oneFmt(full.value,4):'—')+'<small>'+(full?'FULL · OI '+full.current.expected+
+    '<td data-metric="Full PCR">'+(full?oneFmt(full.value,4):'—')+'<small>'+(full?'FULL · OI '+full.current.expected+
       '/'+full.current.expected+' · '+oneTime(new Date(full.current.checked).toISOString())+' IST':esc(pcrReason(a)))+'</small></td>'+
-    '<td>'+(full?oneFmt(d.pcrDisplay?.[symbol]?.callWall?.strike,0):'—')+'</td>'+
-    '<td>'+(full?oneFmt(d.pcrDisplay?.[symbol]?.putWall?.strike,0):'—')+'</td></tr>';
+    '<td data-metric="CE wall">'+(full?oneFmt(d.pcrDisplay?.[symbol]?.callWall?.strike,0):'—')+'</td>'+
+    '<td data-metric="PE wall">'+(full?oneFmt(d.pcrDisplay?.[symbol]?.putWall?.strike,0):'—')+'</td></tr>';
   }).join('');
   oneStatus.textContent='Verified Kite · '+oneTime(d.serverTime)+' IST · VIX '+
    (verified(snap.vix,'VIX')?oneFmt(snap.vix.price):'—')+' · — means unavailable';

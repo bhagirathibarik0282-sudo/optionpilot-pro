@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {DashboardPcrSampler,measurePcrSnapshot,quoteTime} from '../dashboard-pcr-sampler.js';
+import {DashboardPcrSampler,measurePcrSnapshot,quoteTime,partitionPcrQuoteKeys,PCR_MAX_QUERY_CHARS} from '../dashboard-pcr-sampler.js';
 import type {LiveEntry} from '../dashboard-live-feed.js';
 const date='2026-10-16',at=Date.parse('2026-10-16T04:30:00Z');
 const entries:LiveEntry[]=['CE','PE'].map((side,i)=>({token:10+i,exchange:'NFO',label:'OPTION'+side,role:'OPTION',symbol:'NIFTY',expiry:'2026-10-19',strike:23000,side:side as 'CE'|'PE'}));
@@ -75,4 +75,59 @@ test('ATM is frozen once per OI snapshot; later price ticks do not silently chan
  await sampler.tick();assert.equal(calls,1);assert.equal(reads,1);assert.equal(sampler.read('NIFTY','2026-10-19')?.bandPcr.anchorStrike,23000);
  spot.price=23100;assert.equal(sampler.read('NIFTY','2026-10-19')?.bandPcr.anchorStrike,23000);assert.equal(calls,1);assert.equal(reads,1);
  now+=90001;assert.equal(sampler.read('NIFTY','2026-10-19')?.bandPcr,null);
+});
+
+test('Kite PCR batches honor encoded URL length and 500-count simultaneously, with no token omission',async()=>{
+ const many:LiveEntry[]=Array.from({length:1101},(_,i)=>({
+  token:2000+i,exchange:i%3===0?'BFO':'NFO',label:'BANKNIFTY26OCT2026'+String(20000+i).padStart(5,'0')+(i%2?'PE':'CE'),
+  symbol:'BANKNIFTY',role:'OPTION',expiry:'2026-10-27',strike:20000+Math.floor(i/2),side:i%2?'PE':'CE'
+ }));
+ const batches=partitionPcrQuoteKeys(many);
+ assert(batches.length>3,'long exchange-qualified symbols require URL-aware batches');
+ assert.equal(batches.flat().length,many.length);
+ assert.equal(new Set(batches.flat()).size,many.length);
+ for(const keys of batches){
+  assert(keys.length<=500);
+  const query=new URLSearchParams();for(const key of keys)query.append('i',key);
+  assert(query.toString().length<=PCR_MAX_QUERY_CHARS,'encoded query must fit budget');
+ }
+ let calls=0,waits=0;
+ const sampler=new DashboardPcrSampler({entries:many,date,missing:[],omittedExpiries:[]},{
+  now:()=>at,active:()=>true,wait:async ms=>{assert(ms>=1000);waits++;},
+  fetchQuotes:async keys=>{calls++;assert(keys.length<=500);return Object.fromEntries(keys.map(k=>{
+   const e=many.find(x=>x.exchange+':'+x.label===k)!;
+   return [k,{instrument_token:e.token,oi:100,timestamp:new Date(at).toISOString()}];
+  }));}
+ });
+ await sampler.tick();
+ assert.equal(calls,batches.length);
+ assert.equal(waits,calls-1);
+ const q=sampler.read('BANKNIFTY','2026-10-27');
+ assert.equal(q?.fetchState,'OK');
+ assert.equal(q?.batchesCompleted,calls);
+ assert.equal(q?.coverage.expected,many.length);
+ assert.equal(q?.coverage.complete,true);
+});
+test('Kite full PCR failures are explicit, credential-safe and never reused as a fresh snapshot',async()=>{
+ for(const [code,expected] of [['PCR_QUOTE_HTTP_429','RATE_LIMITED'],['PCR_QUOTE_HTTP_414','REQUEST_REJECTED'],
+  ['PCR_QUOTE_HTTP_403','SESSION_REQUIRED'],['PCR_QUOTE_INVALID_RESPONSE','UPSTREAM_UNAVAILABLE']]){
+  let current=at,fail=false;
+  const sampler=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{
+   now:()=>current,active:()=>true,wait:async()=>{},
+   fetchQuotes:async()=>{if(fail)throw Error(code);return quotes();}
+  });
+  await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.fullPcr,2);
+  current+=60000;fail=true;await sampler.tick();
+  const q=sampler.read('NIFTY','2026-10-19');
+  assert.equal(q?.fullPcr,null);
+  assert.equal(q?.coverage.complete,false);
+  assert.equal(q?.fetchState,expected);
+  assert.equal(q?.batchesRequested,1);
+  assert.equal(q?.batchesCompleted,0);
+  assert(!JSON.stringify(q).includes('Authorization'),'auth headers cannot be reflected');
+ }
+});
+test('encoded query protects against one impossible instrument key',()=>{
+ const tooLong:LiveEntry={...entries[0],label:'S'.repeat(7000)};
+ assert.throws(()=>partitionPcrQuoteKeys([tooLong]),/IDENTITY_TOO_LONG/);
 });

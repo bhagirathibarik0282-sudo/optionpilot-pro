@@ -64,7 +64,7 @@ export function installDashboardReading() {
   const decorate = (root: Element) => {
     const candidates = new Set([...root.querySelectorAll('table'), ...(root.closest('table') ? [root.closest('table')!] : [])]);
     for (const table of candidates) {
-      if(table.closest('#op-premium-workspace,.mb-wheel-components'))continue;
+      if(table.closest('#op-premium-workspace,#op-one-stop,.mb-wheel-components'))continue;
       const headers = Array.from(table.querySelectorAll('thead tr:last-child th')).map(h=>h.textContent?.trim() || 'Value');
       const rows = Array.from(table.querySelectorAll('tbody tr'));
       if (!headers.length || !rows.length || table.querySelector('[colspan]:not([colspan="1"]),[rowspan]:not([rowspan="1"])') || rows.some(r=>r.children.length !== headers.length)) continue;
@@ -74,7 +74,7 @@ export function installDashboardReading() {
     }
     const small:Element[]=[];
     for (const el of root.querySelectorAll('p,small,label,button,th,td,span,div')) {
-      if (el.getAttribute('data-op-small')==='true' || el.closest('#op-reading-tools,#dashboard-live,#op-premium-workspace,#op-workspace-nav,#op-workspace-top,#op-workspace-ticker,svg,script,style') || !Array.from(el.childNodes).some(n=>n.nodeType===3 && n.textContent?.trim())) continue;
+      if (el.getAttribute('data-op-small')==='true' || el.closest('#op-reading-tools,#dashboard-live,#op-one-stop,#op-premium-workspace,#op-workspace-nav,#op-workspace-top,#op-workspace-ticker,svg,script,style') || !Array.from(el.childNodes).some(n=>n.nodeType===3 && n.textContent?.trim())) continue;
       const font = Number.parseFloat(window.getComputedStyle(el).fontSize);
       if (font > 0 && font < 16) small.push(el);
     }
@@ -85,7 +85,7 @@ export function installDashboardReading() {
   if (typeof MutationObserver !== 'undefined') {
     const pending = new Set<Element>();let scheduled = false;
     const observer = new MutationObserver(records=>{
-      records.forEach(r=>{if(r.target instanceof Element&&!r.target.closest('#dashboard-live')&&!r.target.closest('#op-premium-workspace')&&!r.target.closest('#op-workspace-nav')&&!r.target.closest('#op-workspace-top')&&!r.target.closest('#op-workspace-ticker'))pending.add(r.target);});
+      records.forEach(r=>{if(r.target instanceof Element&&!r.target.closest('#dashboard-live')&&!r.target.closest('#op-one-stop')&&!r.target.closest('#op-premium-workspace')&&!r.target.closest('#op-workspace-nav')&&!r.target.closest('#op-workspace-top')&&!r.target.closest('#op-workspace-ticker'))pending.add(r.target);});
       if(!pending.size||scheduled)return;scheduled=true;
       window.requestAnimationFrame(()=>{scheduled=false;const roots=[...pending].filter(root=>root.isConnected);pending.clear();for(const root of roots)if(!roots.some(parent=>parent!==root&&parent.contains(root)))decorate(root);});
     });

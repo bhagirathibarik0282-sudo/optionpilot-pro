@@ -35,9 +35,9 @@ test('command shortcuts restore hidden chapters and Recorded opens only the save
  assert.equal(el('op-workspace-feed').textContent,'OFFLINE / STALE');
  assert(!el('op-one-status').textContent.includes('MARKET CLOSED'));
  const html=renderBusinessDashboardV1Html({} as any);
- assert.match(html,/<details id="op-summary-panel" open>/);
- assert.match(html,/<details id="op-atm-weeklies" aria-label=/);
- assert(!html.includes('<details id="op-atm-weeklies" open'));
+ assert.match(html,/<details id="op-summary-panel">/);
+ assert.match(html,/<details id="op-atm-weeklies" open aria-label=/);
+ assert(html.includes('<details id="op-atm-weeklies" open'));
 });
 
 test('one-stop card is a single top-level workspace panel, not hidden inside feed/settings',()=>{
@@ -53,8 +53,8 @@ test('one-stop exposes existing destinations including explicit recorded access 
  const buttons=[...WORKSPACE_NAV_HTML.matchAll(/data-op-one="([^"]+)"/g)].map(m=>m[1]);
  assert.deepEqual(buttons,['LIVE','LADDER','MULTIDAY','RAG','RECORDED']);
  const installer=readFileSync(new URL('../dashboard-workspace-view.ts',import.meta.url),'utf8');
- assert.match(installer,/openLadder\(\{source:'LIVE'\}\)/);
- assert.match(installer,/openLadder\(\{source:'RECORDED'\}\)/);
+ assert.match(installer,/openLadder\(\{source:'LIVE',symbol:atmSelected\}\)/);
+ assert.match(installer,/openLadder\(\{source:'RECORDED',symbol:atmSelected\}\)/);
  assert.match(installer,/rag-evidence-card/);
  assert.doesNotMatch(installer,/new EventSource|fetch\(|placeOrder|sendOrder|orderSubmit/);
 });

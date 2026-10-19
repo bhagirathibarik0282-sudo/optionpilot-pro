@@ -79,6 +79,28 @@ body[data-op-workspace] #op-atm-modes button{font-size:12px;min-height:39px;padd
 #op-atm-pairs th{color:#a6bfce}#op-atm-pairs td strong{font-variant-numeric:tabular-nums}
 #op-atm-pairs td small{display:block;color:#8eb3c8;font-size:10px}
 @media(max-width:600px){#op-atm-pairs{grid-template-columns:repeat(2,minmax(195px,1fr))}#op-atm-pairs.op-atm-solo{grid-template-columns:minmax(0,1fr)}.op-atm-side{padding:5px}#op-atm-pairs :is(th,td){font-size:11px;padding:5px 3px}}
+
+/* PR4: mobile one-stop, all three indices readable without sideways scrolling. */
+@media(max-width:600px){
+ .op-one-scroll{overflow-x:visible;border:0}
+ #op-one-stop table{display:block;min-width:0;width:100%;white-space:normal}
+ #op-one-stop thead{display:none}
+ #op-one-stop tbody{display:block}
+ #op-one-stop tbody tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;border:1px solid #2a5360;border-radius:9px;padding:6px;margin:0 0 7px}
+ #op-one-stop tbody tr>th{grid-column:1/-1;border:0;padding:3px 4px;font-size:14px;color:#bcfff0}
+ #op-one-stop tbody tr>td{min-width:0;border:0;padding:4px 3px;font-size:13px;line-height:1.3;overflow-wrap:anywhere}
+ #op-one-stop tbody tr>td:before{content:attr(data-metric);display:block;font-size:10px;color:#9ed5da;font-weight:700}
+ #op-one-stop tbody tr>td:not([data-metric]){grid-column:1/-1}
+ #op-one-stop tbody tr>td:not([data-metric]):before{display:none}
+ #op-one-stop td small{font-size:10px;white-space:normal;overflow-wrap:anywhere}
+ #op-atm-pairs{grid-template-columns:repeat(2,minmax(0,1fr));overflow-x:visible;gap:6px}
+ #op-atm-pairs.op-atm-solo{grid-template-columns:minmax(0,1fr)}
+ #op-atm-pairs .op-atm-side{min-width:0;padding:5px;overflow-wrap:anywhere}
+ #op-atm-pairs table{width:100%;min-width:0;table-layout:fixed}
+ #op-atm-pairs :is(th,td){font-size:10px;padding:4px 2px;white-space:normal;overflow-wrap:anywhere}
+ #op-atm-pairs td small{font-size:9px;white-space:normal;overflow-wrap:anywhere}
+}
+
 /* One compact workspace header; optional tools never precede the chapter as separate panels. */
 body[data-op-workspace] #market-book{min-height:0}
 #op-workspace-top{margin-bottom:8px;min-height:36px}#op-workspace-top>strong{font-size:18px}

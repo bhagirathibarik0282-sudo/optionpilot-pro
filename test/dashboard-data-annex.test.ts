@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../research-server-hook.ts", import.meta.url), "utf8");
@@ -45,4 +46,12 @@ test("DATA iframe route cannot acquire nested ONE STOP launcher or duplicated na
  assert.match(source,/html\.includes\("id=\\\"optionpilot-data-annex-open\\\""/);
  assert.match(source,/src="\$\{BUSINESS_DATA_HREF\}"/);
  assert.doesNotMatch(source,/setInterval\(.*optionpilot-data-annex/);
+});
+
+test("single launcher inline browser code parses with no market fetch or order authority",()=>{
+ const at=source.indexOf('const shortcut = `'),from=source.indexOf('<script>',at),to=source.indexOf('</script>',from);
+ assert(from>=0&&to>from);
+ const script=source.slice(from+8,to);
+ assert.doesNotThrow(()=>new vm.Script(script));
+ assert.doesNotMatch(script,/\bfetch\s*\(|EventSource|WebSocket|placeOrder|submitOrder/);
 });

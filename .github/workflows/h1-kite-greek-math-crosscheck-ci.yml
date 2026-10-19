@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: "22"
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/index-expiry-clock.test.ts test/index-expiry-clock-server.test.ts test/index-closing-observation.test.ts test/recorder-grid-startup.test.ts test/h1-replay-http.test.ts test/market-session-calendar.test.ts test/h1-kite-exact-price-greek-adapter.test.ts test/h1-kite-greek-math-crosscheck.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/recorder-shared-authority.test.ts test/index-expiry-clock.test.ts test/index-expiry-clock-server.test.ts test/index-closing-observation.test.ts test/recorder-grid-startup.test.ts test/h1-replay-http.test.ts test/market-session-calendar.test.ts test/h1-kite-exact-price-greek-adapter.test.ts test/h1-kite-greek-math-crosscheck.test.ts
       - name: Kite-only authority guard
         run: |
           node <<'NODE'

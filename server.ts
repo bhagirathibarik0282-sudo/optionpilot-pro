@@ -2107,33 +2107,27 @@ async function captureRecorderSnapshot(reason: string, observationOnly = false):
       };
     }
 
-    let activeSession: KiteSession | undefined;
-    for (const s of sessions.values()) {
-      if (s.expiresAt > Date.now()) { activeSession = s; break; }
-    }
-
     // H1_CONTINUOUS_RECORDER_AUTHORITY_FALLBACK_V1:
-    // the scheduled recorder must not depend on an open dashboard/browser session.
-    // Reuse the encrypted shared Kite authority already maintained by Phase 62.
-    // This creates an ephemeral read-only market-data session object only; it is NOT
-    // inserted into the browser session map and grants no order/execution authority.
-    if (!activeSession) {
-      const authority = phase62RestoredKiteAuthority ?? (await resolveKiteAuthoritySession()).session;
-      if (authority && authority.expiresAt > Date.now()) {
-        phase62RestoredKiteAuthority = authority;
-        activeSession = {
+    // Resolve the current shared authority on EVERY capture, as the display feed
+    // does. Browser-map insertion order and the startup cache can retain a token
+    // superseded by a later login even while its local expiresAt is in the future.
+    // Never fall back to either when the authority is unavailable/revoked.
+    // The ephemeral object is not added to browser sessions or order authority.
+    const resolvedAuthority = await resolveKiteAuthoritySession();
+    const authority = resolvedAuthority.status.active ? resolvedAuthority.session : null;
+    const activeSession: KiteSession | undefined = authority && authority.expiresAt > Date.now()
+      ? {
           accessToken: authority.accessToken,
           userId: authority.userId,
           email: authority.email ?? "",
           loginTime: authority.loginTime,
           expiresAt: authority.expiresAt,
-        };
-      }
-    }
+        }
+      : undefined;
 
     if (!activeSession) {
       recorderSession.status = "DEGRADED";
-      recorderSession.lastErrorRedacted = "No active or persisted Kite authority session available";
+      recorderSession.lastErrorRedacted = "Current shared Kite authority unavailable; recorder failed closed";
       void dbInsert("H1_RECORDER_AUTHORITY_BLOCKED", {
         tradingDate: today,
         observedAt: new Date().toISOString(),

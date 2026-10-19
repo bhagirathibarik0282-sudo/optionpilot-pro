@@ -31,7 +31,7 @@ test('one-stop withholds disconnected, stale and incomplete values',()=>{
  assert.match(installer,/q\?\.state==='LIVE'/);
  assert.match(installer,/deriveLiveThreeIndexPcr/);
  assert.match(installer,/x\.expiry===a\.expiry/);
- assert.match(installer,/serverMs-at/);
+ assert.match(installer,/server-observed/);
  assert.match(installer,/No fresh verified Kite snapshot/);
 });
 test('one-stop serialized browser script parses without changing existing source ordering',()=>{
@@ -68,15 +68,15 @@ test('ATM weekly expiry rows render two sides, switch individually and clear on 
   deriveLiveThreeIndexPcr,
   installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}});
  installer({chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {};}});
- const date=(days:number)=>new Date(Date.now()+days*86400000).toISOString().slice(0,10),at=new Date().toISOString();
+ const date=(days:number)=>new Date(Date.now()+19800000+days*86400000).toISOString().slice(0,10),at=new Date().toISOString();
  const quote=(side:string,expiry:string,strike:number,price:number)=>({state:'LIVE',price,observedAt:at,receivedAt:at,
   identity:{role:'OPTION',side,expiry,strike,symbol:'NIFTY'}});
  const first=date(1),second=date(8),strike=22000;
- const snapshot:any={tradeDate:date(0),indices:[],vix:null,omittedExpiries:[],
+ const snapshot:any={runtimeId:'unit',asOf:at,tradeDate:date(0),indices:[],vix:null,omittedExpiries:[],
   atmExpiryLadder:[{symbol:'NIFTY',spot:{state:'LIVE',price:22005,observedAt:at,identity:{role:'SPOT',symbol:'NIFTY'}},
    rows:[{expiry:second,strike,ce:quote('CE',second,strike,111),pe:quote('PE',second,strike,222)},
          {expiry:first,strike,ce:quote('CE',first,strike,123),pe:quote('PE',first,strike,234)}]}]};
- const send=(connected:boolean)=>listeners['optionpilot:live-context']({detail:{connected,serverTime:new Date().toISOString(),snapshot:connected?snapshot:null,connectionState:connected?'OPEN':'DISCONNECTED'}});
+ const send=(connected:boolean)=>{const now=new Date().toISOString();snapshot.asOf=now;listeners['optionpilot:live-context']({detail:{connected,source:'KITE_WEBSOCKET_FULL',serverTime:now,snapshot:connected?snapshot:null,connectionState:connected?'OPEN':'DISCONNECTED'}});};
  send(true);
  const paired=el('op-atm-pairs').innerHTML;
  assert.equal((paired.match(/data-atm-side=/g)||[]).length,2);
@@ -115,10 +115,10 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
  const q=(side:string,price:number,stamp:number,open:number,high:number)=>({state:'LIVE',price,
   dayOpen:open,dayHigh:high,observedAt:iso(stamp),receivedAt:iso(stamp),
   identity:{role:'OPTION',symbol:'NIFTY',expiry,strike:22000,side}});
- const snap:any={runtimeId:'same',tradeDate:day,indices:[],omittedExpiries:[],atmExpiryLadder:[
+ const snap:any={runtimeId:'same',asOf:iso(0),tradeDate:day,indices:[],omittedExpiries:[],atmExpiryLadder:[
   {symbol:'NIFTY',spot:{state:'LIVE',price:22000,observedAt:iso(-1000),identity:{role:'SPOT',symbol:'NIFTY'}},
    rows:[{expiry,strike:22000,ce:q('CE',100,-5000,120,120),pe:q('PE',110,-5000,105,130)}]}]};
- const send=(connected=true)=>listeners['optionpilot:live-context']({detail:{connected,serverTime:iso(0),connectionState:connected?'OPEN':'DISCONNECTED',snapshot:connected?snap:null}});
+ const send=(connected=true)=>listeners['optionpilot:live-context']({detail:{connected,source:'KITE_WEBSOCKET_FULL',serverTime:iso(0),connectionState:connected?'OPEN':'DISCONNECTED',snapshot:connected?snap:null}});
  send();
  let html=el('op-atm-pairs').innerHTML;
  assert.doesNotMatch(html,/PDL BREAK|PDH BREAK/,'first reading below/above level cannot fabricate event');
@@ -234,4 +234,48 @@ test('PR3 one-stop displays only verified Kite ticks and never upgrades partial 
  payload.serverTime=new Date(Date.now()-7000).toISOString();payload.snapshot.asOf=payload.serverTime;
  listeners['optionpilot:live-context']({detail:payload});
  assert.match(el('op-one-rows').innerHTML,/values withheld/);
+});
+
+test('PR4 narrow cards use compact metric grid without hiding exact expiry ATM CE and PE',()=>{
+ assert.match(WORKSPACE_CSS,/@media\(max-width:600px\)[\s\S]*?\.op-one-scroll\{overflow-x:visible/);
+ assert.match(WORKSPACE_CSS,/#op-one-stop tbody tr\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+ assert.match(WORKSPACE_CSS,/#op-atm-pairs\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\);overflow-x:visible/);
+ const code=installDashboardWorkspace.toString();
+ assert.match(code,/data-metric="Full PCR"/);
+ assert.match(code,/data-metric="CE wall"/);
+ assert.match(code,/data-metric="PE wall"/);
+ assert.match(code,/data-metric="'\+side\+' ₹"/);
+ assert.doesNotMatch(code,/new EventSource|fetch\(/);
+});
+
+test('PR4 verified ticker, card and ATM revoke connected but stale, forged or wrong-identity readings',()=>{
+ const nodes=new Map<string,any>(),listeners:any={};
+ const el=(id:string)=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',value:'NIFTY',
+  setAttribute(){},classList:{toggle(){}},querySelectorAll(){return [];},scrollIntoView(){}});return nodes.get(id);};
+ const document:any={body:{dataset:{}},hidden:false,getElementById:el,querySelectorAll(){return [];}};
+ const window:any={addEventListener(n:string,fn:any){listeners[n]=fn;}};
+ const localStorage:any={getItem(){return null},setItem(){}};
+ const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+  deriveAtmFibHold,deriveLiveThreeIndexPcr,installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}});
+ installer({chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {};}});
+ const at=new Date().toISOString(),date=new Date(Date.now()+19800000).toISOString().slice(0,10);
+ const spot:any={state:'LIVE',price:21234,observedAt:at,receivedAt:at,identity:{role:'SPOT',symbol:'NIFTY'}};
+ const p:any={connected:true,source:'KITE_WEBSOCKET_FULL',serverTime:at,connectionState:'OPEN',
+  snapshot:{asOf:at,runtimeId:'run',tradeDate:date,indices:[{symbol:'NIFTY',spot,expiry:'2026-10-26'}],atmExpiryLadder:[]}};
+ const send=()=>listeners['optionpilot:live-context']({detail:p});
+ send();assert.match(el('op-workspace-ticker').innerHTML,/21,234/);
+ assert.match(el('op-one-rows').innerHTML,/21,234/);
+ // The same previously displayed value may not survive an untrusted source.
+ p.source='UNVERIFIED';send();
+ assert.doesNotMatch(el('op-workspace-ticker').innerHTML,/21,234/);
+ assert.doesNotMatch(el('op-one-rows').innerHTML,/21,234/);
+ assert.match(el('op-atm-pairs').innerHTML,/LIVE unavailable/);
+ assert.match(el('op-workspace-feed').textContent,/OFFLINE/);
+ // Connected but wrong symbol identity also cannot recreate the numeric ticker.
+ p.source='KITE_WEBSOCKET_FULL';spot.identity.symbol='SENSEX';send();
+ assert.doesNotMatch(el('op-workspace-ticker').innerHTML,/21,234/);
+ // Stale server time invalidates all cards even if socket connected.
+ p.serverTime=new Date(Date.now()-8000).toISOString();p.snapshot.asOf=p.serverTime;send();
+ assert.match(el('op-one-rows').innerHTML,/values withheld/);
+ assert.match(el('op-workspace-feed').textContent,/STALE/);
 });

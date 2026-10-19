@@ -79,6 +79,28 @@ body[data-op-workspace] #op-atm-modes button{font-size:12px;min-height:39px;padd
 #op-atm-pairs th{color:#a6bfce}#op-atm-pairs td strong{font-variant-numeric:tabular-nums}
 #op-atm-pairs td small{display:block;color:#8eb3c8;font-size:10px}
 @media(max-width:600px){#op-atm-pairs{grid-template-columns:repeat(2,minmax(195px,1fr))}#op-atm-pairs.op-atm-solo{grid-template-columns:minmax(0,1fr)}.op-atm-side{padding:5px}#op-atm-pairs :is(th,td){font-size:11px;padding:5px 3px}}
+
+/* PR4: mobile one-stop, all three indices readable without sideways scrolling. */
+@media(max-width:600px){
+ .op-one-scroll{overflow-x:visible;border:0}
+ #op-one-stop table{display:block;min-width:0;width:100%;white-space:normal}
+ #op-one-stop thead{display:none}
+ #op-one-stop tbody{display:block}
+ #op-one-stop tbody tr{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;border:1px solid #2a5360;border-radius:9px;padding:6px;margin:0 0 7px}
+ #op-one-stop tbody tr>th{grid-column:1/-1;border:0;padding:3px 4px;font-size:14px;color:#bcfff0}
+ #op-one-stop tbody tr>td{min-width:0;border:0;padding:4px 3px;font-size:13px;line-height:1.3;overflow-wrap:anywhere}
+ #op-one-stop tbody tr>td:before{content:attr(data-metric);display:block;font-size:10px;color:#9ed5da;font-weight:700}
+ #op-one-stop tbody tr>td:not([data-metric]){grid-column:1/-1}
+ #op-one-stop tbody tr>td:not([data-metric]):before{display:none}
+ #op-one-stop td small{font-size:10px;white-space:normal;overflow-wrap:anywhere}
+ #op-atm-pairs{grid-template-columns:repeat(2,minmax(0,1fr));overflow-x:visible;gap:6px}
+ #op-atm-pairs.op-atm-solo{grid-template-columns:minmax(0,1fr)}
+ #op-atm-pairs .op-atm-side{min-width:0;padding:5px;overflow-wrap:anywhere}
+ #op-atm-pairs table{width:100%;min-width:0;table-layout:fixed}
+ #op-atm-pairs :is(th,td){font-size:10px;padding:4px 2px;white-space:normal;overflow-wrap:anywhere}
+ #op-atm-pairs td small{font-size:9px;white-space:normal;overflow-wrap:anywhere}
+}
+
 /* One compact workspace header; optional tools never precede the chapter as separate panels. */
 body[data-op-workspace] #market-book{min-height:0}
 #op-workspace-top{margin-bottom:8px;min-height:36px}#op-workspace-top>strong{font-size:18px}
@@ -238,30 +260,45 @@ export function installDashboardWorkspace(api:any){
  $('op-atm-modes').onclick=(e:any)=>{const mode=e.target.closest?.('[data-atm-mode]')?.dataset?.atmMode;if(!['BOTH','CE','PE'].includes(mode))return;atmMode=mode;
   $('op-atm-modes').querySelectorAll('[data-atm-mode]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.atmMode===mode)));paintAtm(atmLast);
  };
+
+ // PR4: one consistent source validation for summary, ATM and ticker.
+ // Presentation only; no added network requests or recurring timers.
+ const freshEnvelope=(d:any)=>{
+  const snap=d?.snapshot,server=Date.parse(d?.serverTime||''),asOf=Date.parse(snap?.asOf||'');
+  const day=Number.isFinite(server)?new Date(server+19800000).toISOString().slice(0,10):null;
+  return d?.connected===true&&d?.source==='KITE_WEBSOCKET_FULL'&&
+   typeof snap?.runtimeId==='string'&&snap.runtimeId.length>0&&
+   Array.isArray(snap.indices)&&Number.isFinite(server)&&server<=Date.now()+5000&&
+   Date.now()-server<=5000&&Number.isFinite(asOf)&&server>=asOf&&
+   server-asOf<=5000&&snap.tradeDate===day;
+ };
+ const freshQuote=(d:any,q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>{
+  if(!freshEnvelope(d))return false;
+  const id=q?.identity,server=Date.parse(d.serverTime);
+  const observed=Date.parse(q?.observedAt||''),received=Date.parse(q?.receivedAt||'');
+  const day=(at:number)=>Number.isFinite(at)?new Date(at+19800000).toISOString().slice(0,10):null;
+  return q?.state==='LIVE'&&id?.role===role&&(!symbol||id.symbol===symbol)&&
+   (!expiry||id.expiry===expiry)&&(!side||id.side===side)&&
+   (strike===undefined||id.strike===strike)&&typeof q.price==='number'&&
+   Number.isFinite(q.price)&&q.price>0&&day(observed)===d.snapshot.tradeDate&&
+   day(received)===d.snapshot.tradeDate&&server-observed>=-5000&&
+   server-observed<=30000&&server-received>=0&&server-received<=30000;
+ };
  // PR3: reuse the strict three-index full-PCR verifier; render from the existing stream only.
  const paintOne=(d:any)=>{
   if(!oneStatus||!oneRows)return;
-  paintAtm(d);
-  const snap=d?.snapshot,serverMs=Date.parse(d?.serverTime||''),asOf=Date.parse(snap?.asOf||'');
-  const day=(at:number)=>new Date(at+19800000).toISOString().slice(0,10);
-  const connected=d?.connected===true&&d?.source==='KITE_WEBSOCKET_FULL'&&Array.isArray(snap?.indices)&&
-   Number.isFinite(serverMs)&&serverMs<=Date.now()+5000&&Date.now()-serverMs<=5000&&
-   Number.isFinite(asOf)&&serverMs>=asOf&&serverMs-asOf<=5000&&snap.tradeDate===day(serverMs);
+  const connected=freshEnvelope(d);
+  paintAtm(connected?d:null); // stale source revokes ATM and summary together
+  const snap=d?.snapshot;
   if(!connected){oneStatus.textContent='LIVE unavailable · '+String(d?.connectionState||'stale source');
    oneRows.innerHTML='<tr><td colspan="8">No fresh verified Kite snapshot · values withheld</td></tr>';oneLast=0;return;}
   if(Date.now()-oneLast<500)return;oneLast=Date.now();
   const finite=(v:any)=>typeof v==='number'&&Number.isFinite(v);
-  const verified=(q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>{
-   const id=q?.identity,at=Date.parse(q?.observedAt||''),received=Date.parse(q?.receivedAt||'');
-   return q?.state==='LIVE'&&id?.role===role&&(!symbol||id.symbol===symbol)&&
-    (!expiry||id.expiry===expiry)&&(!side||id.side===side)&&
-    (strike===undefined||id.strike===strike)&&finite(q.price)&&q.price>0&&
-    Number.isFinite(at)&&Number.isFinite(received)&&day(at)===snap.tradeDate&&day(received)===snap.tradeDate&&
-    serverMs-at>=-5000&&serverMs-at<=30000&&serverMs-received>=0&&serverMs-received<=30000;
-  };
+  const verified=(q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>
+   freshQuote(d,q,role,symbol,expiry,side,strike);
   const priceCell=(q:any,role:string,symbol:string)=>{
    const ok=verified(q,role,symbol);
-   return '<td>'+(ok?oneFmt(q.price):'—')+'<small>'+(ok?'Kite '+oneTime(q.observedAt)+' IST':'Not verified')+'</small></td>';
+   return '<td data-metric="'+(role==='SPOT'?'Spot':'Future')+'">'+(ok?oneFmt(q.price):'—')+'<small>'+(ok?'Kite '+oneTime(q.observedAt)+' IST':'Not verified')+'</small></td>';
   };
   const strictPcr=deriveLiveThreeIndexPcr(d,null,Date.now());
   // PCR numbers and wall strikes are from a *complete, validated* expiry snapshot only.
@@ -287,16 +324,16 @@ export function installDashboardWorkspace(api:any){
    const leg=(q:any,side:'CE'|'PE')=>{
     const strike=q?.identity?.strike,ok=Number.isFinite(strike)&&
      verified(q,'OPTION',symbol,a.expiry,side,strike)&&a.strike===strike;
-    return '<td>'+(ok?oneFmt(q.price):'—')+'<small>'+side+' '+(ok?oneFmt(strike,0):'—')+'</small>'+
+    return '<td data-metric="'+side+' ₹">'+(ok?oneFmt(q.price):'—')+'<small>'+side+' '+(ok?oneFmt(strike,0):'—')+'</small>'+
      '<small>'+(ok?'Kite '+oneTime(q.observedAt)+' IST':'Not verified')+'</small></td>';
    };
    return '<tr><th scope="row">'+symbol+'<small>'+esc(a.expiry||'Expiry unavailable')+
     (symbol==='BANKNIFTY'?' · Monthly':'')+'</small></th>'+
     priceCell(a.spot,'SPOT',symbol)+priceCell(a.future,'FUTURE',symbol)+leg(a.ce,'CE')+leg(a.pe,'PE')+
-    '<td>'+(full?oneFmt(full.value,4):'—')+'<small>'+(full?'FULL · OI '+full.current.expected+
+    '<td data-metric="Full PCR">'+(full?oneFmt(full.value,4):'—')+'<small>'+(full?'FULL · OI '+full.current.expected+
       '/'+full.current.expected+' · '+oneTime(new Date(full.current.checked).toISOString())+' IST':esc(pcrReason(a)))+'</small></td>'+
-    '<td>'+(full?oneFmt(d.pcrDisplay?.[symbol]?.callWall?.strike,0):'—')+'</td>'+
-    '<td>'+(full?oneFmt(d.pcrDisplay?.[symbol]?.putWall?.strike,0):'—')+'</td></tr>';
+    '<td data-metric="CE wall">'+(full?oneFmt(d.pcrDisplay?.[symbol]?.callWall?.strike,0):'—')+'</td>'+
+    '<td data-metric="PE wall">'+(full?oneFmt(d.pcrDisplay?.[symbol]?.putWall?.strike,0):'—')+'</td></tr>';
   }).join('');
   oneStatus.textContent='Verified Kite · '+oneTime(d.serverTime)+' IST · VIX '+
    (verified(snap.vix,'VIX')?oneFmt(snap.vix.price):'—')+' · — means unavailable';
@@ -311,7 +348,25 @@ export function installDashboardWorkspace(api:any){
   else if(action==='RAG'){$('mb-tools').open=true;target=$('rag-evidence-card');if(target)target.open=true;}
   if(target&&typeof target.scrollIntoView==='function')target.scrollIntoView({block:'start',behavior:'auto'});
  };
- let lastTicker=0;
- window.addEventListener('optionpilot:live-context',((e:any)=>{const d=e.detail,on=d?.connected&&d?.snapshot;paintOne(d);$('op-workspace-feed').textContent=on?'● LIVE · Kite':String(d?.connectionState||'OFFLINE').replaceAll('_',' ');$('op-workspace-feed').classList.toggle('op-feed-on',!!on);if(Date.now()-lastTicker<250&&on)return;lastTicker=Date.now();const fmt=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-IN',{maximumFractionDigits:2}):'—',time=(v:any)=>v?new Date(v).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false}):'—';const quotes=[...(d?.snapshot?.indices||[]).map((r:any)=>({label:r.symbol,q:r.spot})),{label:'INDIA VIX',q:d?.snapshot?.vix}];$('op-workspace-ticker').innerHTML=quotes.map((r:any)=>'<div class="op-ticker"><span>'+esc(r.label)+'</span><strong>'+fmt(on?r.q?.price:null)+'</strong><small class="'+(on&&r.q?.changePct>0?'op-positive':on&&r.q?.changePct<0?'op-negative':'')+'">'+(on&&typeof r.q?.changePct==='number'?fmt(r.q.changePct)+'%':'—')+' · '+esc(time(r.q?.observedAt))+'</small></div>').join('');}) as EventListener);
+ let lastTicker=0,lastTickerLive=false;
+ window.addEventListener('optionpilot:live-context',((e:any)=>{
+  const d=e.detail,on=freshEnvelope(d);paintOne(d);
+  $('op-workspace-feed').textContent=on?'● LIVE · Kite':'OFFLINE / STALE';
+  $('op-workspace-feed').classList.toggle('op-feed-on',on);
+  if(Date.now()-lastTicker<250&&on&&lastTickerLive)return;lastTicker=Date.now();lastTickerLive=on;
+  const fmt=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-IN',{maximumFractionDigits:2}):'—';
+  const quotes=['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>{
+   const matches=on?d.snapshot.indices.filter((a:any)=>a.symbol===symbol):[];
+   return {label:symbol,role:'SPOT',symbol,q:matches.length===1?matches[0].spot:null};
+  });
+  quotes.push({label:'INDIA VIX',role:'VIX',symbol:'',q:on?d.snapshot.vix:null});
+  $('op-workspace-ticker').innerHTML=quotes.map((r:any)=>{
+   const valid=on&&freshQuote(d,r.q,r.role,r.symbol||undefined),q=r.q;
+   return '<div class="op-ticker"><span>'+esc(r.label)+'</span><strong>'+fmt(valid?q.price:null)+
+    '</strong><small class="'+(valid&&q.changePct>0?'op-positive':valid&&q.changePct<0?'op-negative':'')+'">'+
+    (valid&&typeof q.changePct==='number'&&Number.isFinite(q.changePct)?fmt(q.changePct)+'%':'—')+
+    ' · '+(valid?oneTime(q.observedAt):'withheld')+'</small></div>';
+  }).join('');
+ }) as EventListener);
  return {render(){if(active!==api.page())draw();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
 }

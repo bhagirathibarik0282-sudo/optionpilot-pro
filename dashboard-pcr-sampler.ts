@@ -1,6 +1,24 @@
 import type { LiveEntry, LiveInventory } from './dashboard-live-feed.js';
 
 export const PCR_REFRESH_MS = 60_000;
+// Broker /quote accepts <=500 instruments, but long exchange:symbol values can exceed
+// the HTTP request-target limit much earlier. Leave headroom for base URL and proxies.
+export const PCR_MAX_QUOTE_KEYS = 500;
+export const PCR_MAX_QUERY_CHARS = 6800;
+/** Only partitions existing subscribed option identities; no universe expansion or new source. */
+export function partitionPcrQuoteKeys(entries:LiveEntry[],maxKeys=PCR_MAX_QUOTE_KEYS,maxChars=PCR_MAX_QUERY_CHARS):string[][]{
+ if(!Number.isInteger(maxKeys)||maxKeys<1||maxKeys>500||!Number.isInteger(maxChars)||maxChars<100)throw Error('INVALID_PCR_BATCH_LIMIT');
+ const batches:string[][]=[];let current:string[]=[],size=0;
+ for(const entry of entries){
+  if(!entry.exchange||!entry.label)continue;
+  const key=entry.exchange+':'+entry.label,part=new URLSearchParams([['i',key]]).toString(),extra=part.length+(current.length?1:0);
+  if(part.length>maxChars)throw Error('PCR_QUOTE_IDENTITY_TOO_LONG');
+  if(current.length&&(current.length>=maxKeys||size+extra>maxChars)){batches.push(current);current=[];size=0;}
+  current.push(key);size+=part.length+(current.length>1?1:0);
+ }
+ if(current.length)batches.push(current);
+ return batches;
+}
 const day = (at:number) => new Date(at + 19800000).toISOString().slice(0,10);
 const finite = (v:unknown):v is number => typeof v === 'number' && Number.isFinite(v);
 // Kite's timezone-less quote timestamps are IST, never the host timezone.
@@ -55,25 +73,38 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
   sourceMinAt:times.length?new Date(Math.min(...times)).toISOString():null,sourceMaxAt:times.length?new Date(Math.max(...times)).toISOString():null,checkedAt:new Date(now).toISOString(),cycleStartedAt:new Date(cycleStartedAt).toISOString(),source:'KITE_REST_FULL_EXPIRY_SNAPSHOT'};
 }
 export class DashboardPcrSampler {
- private busy=false;private due=0;private revision=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>>();
+ private busy=false;private due=0;private revision=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string;batchesRequested:number;batchesCompleted:number}>();
  constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;readSpot?(symbol:string):any}){}
  async tick(){
   const now=this.deps.now();if(this.busy||now<this.due||!this.deps.active()||day(now)!==this.inventory.date)return;
   this.busy=true;this.due=now+PCR_REFRESH_MS;
   const entries=this.inventory.entries.filter(e=>e.role==='OPTION'),quotes:Record<string,any>={};
+  let fetchState='OK',batchesRequested=0,batchesCompleted=0;
   try{
-   // At most 3,000 subscribed tokens, six sequential requests per minute/process.
-   // No retries on 429; the next regular cycle is the retry.
-   for(let i=0;i<entries.length;i+=500){
-    if(i)await this.deps.wait(1100);if(!this.deps.active())return;
-    const keys=entries.slice(i,i+500).filter(e=>e.exchange).map(e=>e.exchange+':'+e.label);
-    if(keys.length)Object.assign(quotes,await this.deps.fetchQuotes(keys));
+   // Sequential requests at <=1 req/s, with bounded encoded URL size as well as count.
+   // Never retry 429 or borrow a quote from a previous cycle.
+   const batches=partitionPcrQuoteKeys(entries);
+   for(const keys of batches){
+    if(batchesRequested)await this.deps.wait(1100);if(!this.deps.active())return;
+    batchesRequested++;Object.assign(quotes,await this.deps.fetchQuotes(keys));batchesCompleted++;
    }
-  }catch{ /* Publish incomplete coverage, never retain a prior cycle as current. */ }
-  finally{
+  }catch(error){
+   const code=error instanceof Error?error.message:'';
+   fetchState=code==='PCR_QUOTE_HTTP_429'?'RATE_LIMITED':
+    code==='PCR_QUOTE_HTTP_414'||code==='PCR_QUOTE_HTTP_400'?'REQUEST_REJECTED':
+    code==='PCR_QUOTE_HTTP_401'||code==='PCR_QUOTE_HTTP_403'?'SESSION_REQUIRED':
+    code==='PCR_QUOTE_IDENTITY_TOO_LONG'?'IDENTITY_TOO_LONG':'UPSTREAM_UNAVAILABLE';
+   // Fail closed on partial REST cycles. The following regular cycle is the retry.
+  }finally{
    if(this.deps.active()){
     const keys=[...new Set(entries.map(e=>e.symbol+'|'+e.expiry))],at=this.deps.now();
-    for(const key of keys){const group=entries.filter(e=>e.symbol+'|'+e.expiry===key);let spot:any=null;try{spot=this.deps.readSpot?.(group[0].symbol!);}catch{/* Missing cache reference only withholds band PCR. */}this.results.set(key,measurePcrSnapshot(group,quotes,this.inventory.date,at,now,spot));}
+    for(const key of keys){
+     const group=entries.filter(e=>e.symbol+'|'+e.expiry===key);let spot:any=null;
+     try{spot=this.deps.readSpot?.(group[0].symbol!);}catch{/* Missing cache reference only withholds band PCR. */}
+     const measured=measurePcrSnapshot(group,quotes,this.inventory.date,at,now,spot);
+     // No network errors are surfaced verbatim (credentials and URLs are excluded).
+     this.results.set(key,{...measured,fetchState,batchesRequested,batchesCompleted});
+    }
     this.revision++;
    }
    this.busy=false;

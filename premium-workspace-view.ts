@@ -68,6 +68,17 @@ export function installPremiumWorkspace(api:any){
  const deltaMode=()=>cfg.layout==='ladder'&&cfg.pairing==='DELTA'&&!cfg.watch;
  const save=()=>{try{localStorage.setItem('optionpilot.premium.workspace',JSON.stringify(cfg));}catch{}};
  const sameWrite=(id:string,html:string)=>{const el=$(id);if(el&&el.innerHTML!==html)el.innerHTML=html;};
+ function liveFeedStatus(pcr=false){
+  const now=Date.now(),fresh=(at:number)=>at>0&&now-at>=0&&now-at<=3000;
+  const packet=pcr&&fresh(contextReceived)?context:fresh(liveReceived)?live:fresh(contextReceived)?context:null;
+  let state=packet?.connectionState||(live||context?'WAITING_FOR_FRESH_UPDATE':'CONNECTING');
+  const elapsed=packet===context?now-contextReceived:now-liveReceived;
+  const active=premiumLiveClock(packet,elapsed).valid;
+  if(active)state='OPEN';else if(state==='OPEN')state='WAITING_FOR_FRESH_UPDATE';
+  const closed=state==='MARKET_CLOSED';
+  return {state,active,closed,label:active?'LIVE':String(state).replaceAll('_',' '),
+   message:closed?'Market closed · live prices are paused. Open Recorded for saved session data.':state==='KITE_SESSION_REQUIRED'?'Kite session required · live prices unavailable.':active?'':'Live feed '+String(state).replaceAll('_',' ').toLowerCase()+' · values withheld until fresh data arrives.'};
+ }
  const identityControls=['symbol','side','ceStrike','peStrike','strikeScope','dte','reaction'];
  function watchIdentity(key:any){
   if(typeof key!=='string')return null;const [symbol,expiry,strike,side,...extra]=key.split('|'),n=Number(strike),date=Date.parse(expiry+'T00:00:00Z');
@@ -129,8 +140,10 @@ export function installPremiumWorkspace(api:any){
   root.setAttribute('data-pw-layout',cfg.layout);$('pw-title').textContent=cfg.layout==='ladder'?'OptionPilot · Ladder':'Every premium. A clear reaction.';$('pw-chain-top').hidden=cfg.layout!=='ladder';$('pw-chain-pcr').hidden=cfg.layout!=='ladder';if(cfg.layout!=='ladder')return;
   const state=api.getState(),now=Date.now();
   pcrView=cfg.source==='LIVE'?deriveLiveThreeIndexPcr(now-contextReceived<=3000?context:null,pcrView,now):deriveRecordedThreeIndexPcr(state,cursor,pcrView,now);
+  const feed=liveFeedStatus(true),sourceLabel=cfg.source==='LIVE'?feed.label:'RECORDED';
+  const feedNotice=cfg.source==='LIVE'&&!feed.active?'<div class="pw-chain-caption" role="status">'+esc(feed.message)+(feed.closed?' <button type="button" data-pw-source="RECORDED">Open Recorded</button>':'')+'</div>':'';
   const glyph:any={UP:'↑',DOWN:'↓',FLAT:'→',WAIT:'—'};
-  sameWrite('pw-chain-pcr','<div class="pw-chain-pcr-title">FULL PCR · '+cfg.source+'<small>'+esc(pcrView.alignment==='SYNC'?'SYNC ✓':pcrView.alignment?.replaceAll('_',' ')||'WAIT')+'</small></div><div class="pw-chain-pcr-grid">'+pcrView.rows.map((r:any)=>{const until=r.blinkUntil||0,remaining=Math.max(0,until-now),pulse=remaining>0&&remaining<=1800;return '<article data-direction="'+esc(r.direction)+'"><span>'+esc(r.symbol)+'</span><b class="pw-chain-spot">Spot '+fmt(r.spotValue,2)+'</b><small>Spot · '+time(r.spotAt)+'</small><strong'+(pulse?' class="pw-chain-pulse" style="animation-delay:-'+Math.floor(1800-remaining)+'ms"':'')+'>'+fmt(r.value,4)+' '+glyph[r.direction]+'</strong><small>'+time(r.current?.checked?new Date(r.current.checked).toISOString():null)+'</small><small>'+esc(r.expiry||'Unavailable')+'</small></article>';}).join('')+'</div>');
+  sameWrite('pw-chain-pcr','<div class="pw-chain-pcr-title">FULL PCR · '+esc(sourceLabel)+'<small>'+esc(cfg.source==='LIVE'&&!feed.active?'LIVE PAUSED':pcrView.alignment==='SYNC'?'SYNC ✓':pcrView.alignment?.replaceAll('_',' ')||'WAIT')+'</small></div>'+feedNotice+'<div class="pw-chain-pcr-grid">'+pcrView.rows.map((r:any)=>{const until=r.blinkUntil||0,remaining=Math.max(0,until-now),pulse=remaining>0&&remaining<=1800;return '<article data-direction="'+esc(r.direction)+'"><span>'+esc(r.symbol)+'</span><b class="pw-chain-spot">Spot '+fmt(r.spotValue,2)+'</b><small>Spot · '+time(r.spotAt)+'</small><strong'+(pulse?' class="pw-chain-pulse" style="animation-delay:-'+Math.floor(1800-remaining)+'ms"':'')+'>'+fmt(r.value,4)+' '+glyph[r.direction]+'</strong><small>'+time(r.current?.checked?new Date(r.current.checked).toISOString():null)+'</small><small>'+esc(r.expiry||(cfg.source==='LIVE'&&feed.closed?'Market closed':'Unavailable'))+'</small></article>';}).join('')+'</div>');
   const series=cfg.source==='LIVE'?live?.snapshot?.series||[]:result.series||[],available=new Set(series.filter((r:any)=>cfg.symbol==='ALL'||r.symbol===cfg.symbol).map((r:any)=>r.dte));
   sameWrite('pw-chain-dtes',[1,2,3,4,0].map(d=>'<button type="button" data-pw-dte="'+d+'" aria-pressed="'+(cfg.dte===String(d))+'"'+(!available.has(d)||cfg.watch?' disabled':'')+'>DTE '+d+'</button>').join('')+'<button type="button" data-pw-dte="ALL" aria-pressed="'+(cfg.dte==='ALL')+'"'+(cfg.watch?' disabled':'')+'>All / More</button>');
   $('pw-chain-symbol').value=cfg.symbol;$('pw-chain-range').value=cfg.strikeScope;
@@ -153,7 +166,8 @@ export function installPremiumWorkspace(api:any){
   const currentKeys=new Set((snapshot?.rows||[]).map((q:any)=>{const e=q.identity;return [e?.symbol,e?.expiry,e?.strike,e?.side].join('|');}));
   const scoped=cfg.source==='LIVE'?result.rows.filter((x:any)=>currentKeys.has(x.key)):result.rows;
   const shown=cfg.layout==='ladder'||cfg.source==='LIVE'?scoped:scoped.slice(page*size,(page+1)*size),pages=Math.max(1,Math.ceil(total/size)),current=cfg.source==='LIVE'?Math.floor(offset/size):page;
-  $('pw-status').textContent=cfg.source==='LIVE'?'LIVE · '+String(live?.connectionState||'CONNECTING').replaceAll('_',' ')+' · '+time(live?.serverTime)+' IST · '+(snapshot?.omittedExpiries?.length||0)+' expiries outside live capacity':'RECORDED · '+(date||'choose a session in Session settings')+' · watch '+(cursor?time(cursor):'latest')+' IST · '+cfg.minutes.replace('DAY','Previous close')+(cfg.minutes==='DAY'?'':'m reaction');
+  const feed=liveFeedStatus();root.querySelectorAll('[data-pw-source]').forEach((b:any)=>{if(b.dataset.pwSource==='LIVE')b.textContent=feed.active?'● Live':feed.closed?'Live · Closed':'Live · Offline';});
+  $('pw-status').textContent=cfg.source==='LIVE'?(feed.active?'LIVE · '+time(live?.serverTime)+' IST · '+(snapshot?.omittedExpiries?.length||0)+' expiries outside live capacity':feed.message):'RECORDED · '+(date||'choose a session in Session settings')+' · watch '+(cursor?time(cursor):'latest')+' IST · '+cfg.minutes.replace('DAY','Previous close')+(cfg.minutes==='DAY'?'':'m reaction');
   const up=shown.filter((r:any)=>r.change>0).length,down=shown.filter((r:any)=>r.change<0).length,events=shown.filter((r:any)=>r.eventAt).length;
   sameWrite('pw-summary','<span><b>'+shown.length+'</b> visible / '+total+' in watchlist</span><span class="op-positive"><b>'+up+'</b> rising on this page</span><span class="op-negative"><b>'+down+'</b> falling on this page</span><span><b>'+events+'</b> level events on this page</span>');
   const positive=(r:any)=>/PDH BREAK|ABOVE PDH|PDL RECOVER/.test(r.reaction),negative=(r:any)=>/PDL BREAK|BELOW PDL|PDH REJECT/.test(r.reaction);

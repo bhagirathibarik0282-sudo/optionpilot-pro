@@ -82,13 +82,20 @@ export class DashboardPcrSampler {
   this.busy=true;this.due=now+PCR_REFRESH_MS;
   const entries=this.inventory.entries.filter(e=>e.role==='OPTION'),quotes:Record<string,any>={};
   let fetchState='OK',batchesRequested=0,batchesCompleted=0;
+  const completedAt=new Map<string,number>();
   try{
    // Sequential requests at <=1 req/s, with bounded encoded URL size as well as count.
    // Never retry 429 or borrow a quote from a previous cycle.
    const batches=partitionPcrQuoteKeys(entries);
-   for(const keys of batches){
+   // Close an expiry's freshness clock at its last quote batch, not after
+   // unrelated later expiries finish downloading.
+   const quoteGroup=new Map(entries.map(e=>[e.exchange+':'+e.label,e.symbol+'|'+e.expiry]));
+   const lastBatch=new Map<string,number>();
+   batches.forEach((keys,i)=>keys.forEach(key=>{const group=quoteGroup.get(key);if(group)lastBatch.set(group,i);}));
+   for(const [i,keys] of batches.entries()){
     if(batchesRequested)await this.deps.wait(1100);if(!this.deps.active())return;
     batchesRequested++;Object.assign(quotes,await this.deps.fetchQuotes(keys));batchesCompleted++;
+    for(const [group,last] of lastBatch)if(last===i)completedAt.set(group,this.deps.now());
    }
   }catch(error){
    const code=error instanceof Error?error.message:'';
@@ -103,9 +110,12 @@ export class DashboardPcrSampler {
     for(const key of keys){
      const group=entries.filter(e=>e.symbol+'|'+e.expiry===key);let spot:any=null;
      try{spot=this.deps.readSpot?.(group[0].symbol!);}catch{/* Missing cache reference only withholds band PCR. */}
-     const measured=measurePcrSnapshot(group,quotes,this.inventory.date,at,now,spot);
+     const measured=measurePcrSnapshot(group,quotes,this.inventory.date,completedAt.get(key)??at,now,spot);
+     // A later failed batch invalidates the entire attempt; never publish
+     // an earlier expiry from a partially failed REST cycle.
+     const result=fetchState==='OK'?measured:{...measured,state:'INCOMPLETE',reason:'INCOMPLETE',fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...measured.coverage,complete:false}};
      // No network errors are surfaced verbatim (credentials and URLs are excluded).
-     this.results.set(key,{...measured,fetchState,batchesRequested,batchesCompleted});
+     this.results.set(key,{...result,fetchState,batchesRequested,batchesCompleted});
     }
     this.revision++;
     const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2)}));

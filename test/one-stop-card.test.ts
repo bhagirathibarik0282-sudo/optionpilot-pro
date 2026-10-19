@@ -48,7 +48,7 @@ test('weekly expiry ATM design uses real date rows, CE/PE side-by-side and indiv
  assert.deepEqual([...html.matchAll(/data-atm-mode="(BOTH|CE|PE)"/g)].map(m=>m[1]),['BOTH','CE','PE']);
  const code=installDashboardWorkspace.toString();
  assert.match(code,/snap\.atmExpiryLadder/);
- assert.match(code,/r\.expiry\.localeCompare\(b\.expiry\)/);
+ assert.match(code,/a\.expiry\.localeCompare\(b\.expiry\)/);
  assert.match(code,/id\?\.expiry!==expiry/);
  assert.match(code,/No connected, fresh expiry snapshot/);
  assert.doesNotMatch(code,/new EventSource|fetch\(|orderSubmit/);
@@ -76,7 +76,8 @@ test('ATM weekly expiry rows render two sides, switch individually and clear on 
  send(true);
  const paired=el('op-atm-pairs').innerHTML;
  assert.equal((paired.match(/data-atm-side=/g)||[]).length,2);
- assert(paired.indexOf(first.slice(8))<paired.indexOf(second.slice(8)),'exact expiry rows should be chronologically sorted');
+ const shown=(v:string)=>v.slice(8)+'/'+v.slice(5,7)+'/'+v.slice(2,4);
+ assert(paired.indexOf(shown(first))<paired.indexOf(shown(second)),'exact expiry rows should be chronologically sorted');
  assert(paired.includes('123')&&paired.includes('234')&&paired.includes('111')&&paired.includes('222'));
  const modes=el('op-atm-modes');modes.onclick({target:{closest:()=>({dataset:{atmMode:'PE'}})}});
  assert.equal((el('op-atm-pairs').innerHTML.match(/data-atm-side=/g)||[]).length,1);

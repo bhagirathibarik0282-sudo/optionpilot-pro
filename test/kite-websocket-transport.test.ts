@@ -77,3 +77,20 @@ test("manual disconnect never schedules reconnect", async () => {
   await new Promise((resolve)=>setTimeout(resolve, 10));
   assert.equal(sockets.length, 1);
 });
+
+test("heartbeats update transport activity; superseded socket events cannot revive old feed", async () => {
+  const sockets: FakeSocket[] = [],states: string[] = [];
+  let texts=0;
+  const transport=new KiteWebSocketTransport({apiKey:'k',accessToken:'t',instrumentTokens:[1],reconnect:{enabled:true,delayMs:1,maxAttempts:2},socketFactory:()=>{const s=new FakeSocket();sockets.push(s);return s;},onTicks:()=>{},onTextMessage:()=>{texts++;},onState:s=>states.push(s)});
+  const realNow=Date.now;let now=1000;Date.now=()=>now;
+  try{
+    transport.connect();sockets[0].emit('open',{});
+    now=2000;sockets[0].emit('message',{data:new Uint8Array([0]).buffer});
+    assert.equal(transport.lastActivityAt,2000);
+    sockets[0].emit('close',{});await new Promise(resolve=>setTimeout(resolve,10));sockets[1].emit('open',{});
+    const count=states.length;now=3000;
+    sockets[0].emit('message',{data:'old'});sockets[0].emit('error',{});sockets[0].emit('close',{});sockets[0].emit('open',{});
+    assert.equal(texts,0);assert.equal(states.length,count);assert.equal(transport.lastActivityAt,2000);
+    transport.disconnect();
+  }finally{Date.now=realNow;}
+});

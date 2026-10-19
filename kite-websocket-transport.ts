@@ -43,6 +43,8 @@ export class KiteWebSocketTransport {
   private reconnectAttempts = 0;
   private manualDisconnect = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private activityAt=0;
+  get lastActivityAt(){return this.activityAt;}
 
   constructor(private readonly config: KiteWebSocketTransportConfig) {
     this.mode = config.mode ?? "full";
@@ -63,11 +65,14 @@ export class KiteWebSocketTransport {
     const factory = this.config.socketFactory ?? ((url: string) => new WebSocket(url) as unknown as KiteSocketLike);
     const url = `${KITE_WS_ENDPOINT}?api_key=${encodeURIComponent(this.config.apiKey)}&access_token=${encodeURIComponent(this.config.accessToken)}`;
     this.config.onState?.(isReconnect ? "RECONNECTING" : "CONNECTING");
+    this.activityAt=Date.now();
     const socket = factory(url);
     this.socket = socket;
     socket.binaryType = "arraybuffer";
 
     socket.addEventListener("open", () => {
+      if(this.manualDisconnect||this.socket!==socket)return;
+      this.activityAt=Date.now();
       this.reconnectAttempts = 0;
       socket.send(JSON.stringify({ a: "subscribe", v: this.config.instrumentTokens }));
       socket.send(JSON.stringify({ a: "mode", v: [this.mode, this.config.instrumentTokens] }));
@@ -75,6 +80,8 @@ export class KiteWebSocketTransport {
     });
 
     socket.addEventListener("message", (event: any) => {
+      if(this.manualDisconnect||this.socket!==socket)return;
+      this.activityAt=Date.now(); // Includes broker heartbeats; quiet instruments are not dead sockets.
       const receivedAt = new Date().toISOString();
       const data = event?.data;
       if (typeof data === "string") {
@@ -93,8 +100,9 @@ export class KiteWebSocketTransport {
       }
     });
 
-    socket.addEventListener("error", () => this.config.onState?.("ERROR"));
+    socket.addEventListener("error", () => {if(!this.manualDisconnect&&this.socket===socket)this.config.onState?.("ERROR");});
     socket.addEventListener("close", () => {
+      if(this.manualDisconnect||this.socket!==socket)return;
       this.config.onState?.("CLOSED");
       if (this.socket === socket) this.socket = null;
       this.scheduleReconnect();

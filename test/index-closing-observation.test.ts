@@ -62,7 +62,7 @@ test('actual observation-only capture writes H1 then returns before selector, jo
   const capture = runInNewContext(code + '\ncaptureRecorderSnapshot;', {
     Date: Clock, indiaTradingDate: () => '2026-10-16', recorderSession: { tradingDate: '2026-10-16' },
     sessions: new Map([['test', { expiresAt: Date.parse(at) + 60000 }]]),
-    resolveKiteAuthoritySession: async () => ({ status: { active: true }, session: { accessToken: 'fixture', userId: 'fixture', loginTime: Date.parse(at), expiresAt: Date.parse(at) + 60000 } }),
+    resolveVerifiedKiteAuthoritySession: async () => ({ status: { active: true }, session: { accessToken: 'fixture', userId: 'fixture', loginTime: Date.parse(at), expiresAt: Date.parse(at) + 60000 } }),
     refreshMarketSnapshot: async () => ({ NIFTY: {}, SENSEX: {}, BANKNIFTY: {} }),
     computeTruthReport: () => ({ overallVerdict: 'TRUE' }),
     recordH1FromRuntimeSnapshot: async (...args: unknown[]) => { calls.push(args); },

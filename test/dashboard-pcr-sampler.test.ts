@@ -141,3 +141,48 @@ test('encoded query protects against one impossible instrument key',()=>{
  const tooLong:LiveEntry={...entries[0],label:'S'.repeat(7000)};
  assert.throws(()=>partitionPcrQuoteKeys([tooLong]),/IDENTITY_TOO_LONG/);
 });
+
+
+test('an earlier full expiry is checked when its own quote batch completes, not after later DTEs',async()=>{
+ const {es,spot}=wideChain();
+ const tail:LiveEntry[]=Array.from({length:1100},(_,i)=>({token:3000+i,exchange:'NFO',label:'BN'+i,role:'OPTION',symbol:'BANKNIFTY',expiry:'2026-10-27',strike:54000+Math.floor(i/2)*100,side:i%2?'PE':'CE'}));
+ const all=[...es,...tail],byKey=new Map(all.map(e=>[e.exchange+':'+e.label,e]));
+ assert(partitionPcrQuoteKeys(all).length>=3);
+ let now=at,reads=0,calls=0;
+ const sampler=new DashboardPcrSampler({entries:all,date,missing:[],omittedExpiries:[]},{
+  now:()=>now,active:()=>true,wait:async()=>{},
+  readSpot:symbol=>{reads++;return {...spot,identity:{role:'SPOT',symbol},price:symbol==='NIFTY'?23000:55000,observedAt:new Date(now).toISOString(),receivedAt:new Date(now).toISOString()};},
+  fetchQuotes:async keys=>{calls++;now+=19000;return Object.fromEntries(keys.map(key=>{
+   const e=byKey.get(key)!;return [key,{instrument_token:e.token,oi:e.side==='CE'?100:Math.abs(e.strike!-23000)<=350&&e.symbol==='NIFTY'?300:100,timestamp:new Date(now).toISOString()}];
+  }));}
+ });
+ await sampler.tick();
+ const n=sampler.read('NIFTY','2026-10-19');
+ assert(n&&n.coverage.complete&&typeof n.fullPcr==='number');
+ assert.equal(n.checkedAt,new Date(at+19000).toISOString());
+ assert(now-Date.parse(n.checkedAt)>30000,'later DTE quote batches ran after this verified expiry');
+ assert.equal(n.bandPcr?.state,'COMPLETE','spot reference was frozen at the same expiry close');
+ assert.equal(n.bandPcr?.anchorStrike,23000);
+ assert.equal(calls,partitionPcrQuoteKeys(all).length);
+ assert.equal(reads,2,'one stored spot reference per exact expiry');
+});
+
+test('a failed later quote batch revokes earlier completed PCR rather than committing a partial cycle',async()=>{
+ const early=entries,late:LiveEntry[]=Array.from({length:1100},(_,i)=>({...entries[i%2],token:9000+i,symbol:'SENSEX',expiry:'2026-10-22',label:'SX'+i,strike:73000+Math.floor(i/2)*100}));
+ const all=[...early,...late],byKey=new Map(all.map(e=>[e.exchange+':'+e.label,e]));
+ let now=at,calls=0;
+ const sampler=new DashboardPcrSampler({entries:all,date,missing:[],omittedExpiries:[]},{
+  now:()=>now,active:()=>true,wait:async()=>{},
+  fetchQuotes:async keys=>{calls++;now+=10000;if(calls===2)throw Error('PCR_QUOTE_HTTP_429');
+   return Object.fromEntries(keys.map(key=>{const e=byKey.get(key)!;return [key,{instrument_token:e.token,oi:e.side==='CE'?100:200,timestamp:new Date(now).toISOString()}];}));
+  }
+ });
+ await sampler.tick();
+ assert.equal(calls,2);
+ const first=sampler.read('NIFTY','2026-10-19');
+ assert.equal(first?.fetchState,'RATE_LIMITED');
+ assert.equal(first?.fullPcr,null);
+ assert.equal(first?.coverage.complete,false);
+ assert.equal(first?.callWall,null);
+ assert.equal(sampler.read('SENSEX','2026-10-22')?.fullPcr,null);
+});

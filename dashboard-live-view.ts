@@ -15,7 +15,7 @@ export function installDashboardLive(){
  const writeHtml=(node:any,html:string)=>{if(node&&renderedHtml.get(node)!==html){node.innerHTML=html;renderedHtml.set(node,html);}};
  const indices=['NIFTY','SENSEX','BANKNIFTY'];
  const selection:any={},buffers:any={},layers:any={},cadences:any={},sampled:any={},levelSettings:any={};let recorded:any=null;for(const symbol of indices){layers[symbol]={spot:true,pcr:true,ce:false,pe:false};cadences[symbol]=60000;levelSettings[symbol]={};}
- let source:any=null,on=true,lastReceived=0,latest:any=null,runtime:string|null=null,disposed=false;
+ let source:any=null,sourceUrl='',on=true,lastReceived=0,latest:any=null,runtime:string|null=null,disposed=false;
  if(typeof window.addEventListener==='function')window.addEventListener('optionpilot:recorded-levels',((event:any)=>{recorded=event.detail;render();}) as EventListener);
  function references(a:any,kind:string){
   const row=recorded?.indices?.[a.symbol];if(!row||recorded.date!==latest?.snapshot?.tradeDate)return null;
@@ -31,12 +31,17 @@ export function installDashboardLive(){
   if(!old||old.expiry!==a.expiry||cycleAt-Date.parse(old.cycleStartedAt||old.checkedAt)>=period){old={...q,expiry:a.expiry,periodMs:period};sampled[a.symbol]=old;append(a.symbol,'pcr',old.fullPcr,old.checkedAt);}
   if(now-Date.parse(old.checkedAt)>period+30000){delete sampled[a.symbol];return null;}return old;
  }
- function close(){if(source){source.close();source=null;}}
- function connect(){
-  close();if(!on||document.hidden||disposed)return;
+ function close(){if(source){source.close();source=null;}sourceUrl='';}
+ function connect(force=false){
+  if(!on||document.hidden||disposed){close();return;}
   if(typeof EventSource==='undefined'){get('op-live-status').textContent='Live streaming is not supported by this browser.';return;}
   const q=new URLSearchParams();for(const symbol of indices){const s=selection[symbol];if(s?.expiry)q.set(symbol+'_expiry',s.expiry);if(s?.strike)q.set(symbol+'_strike',String(s.strike));for(const field of ['ceStrike','peStrike'])if(s?.[field])q.set(symbol+'_'+field,String(s[field]));}
-  const active=new EventSource('/api/research/dashboard-live/stream?'+q.toString());source=active;
+  const url='/api/research/dashboard-live/stream?'+q.toString();
+  // PR6: do not reconnect the same active stream on startup pageshow/online duplicates.
+  // Selections, CLOSED sources, stalled streams and true resume still reconnect.
+  if(!force&&source&&sourceUrl===url&&source.readyState!==2)return;
+  close();
+  const active=new EventSource(url);source=active;sourceUrl=url;
   get('op-live-status').textContent='Connecting · historical data below is recorded data';
   active.addEventListener('snapshot',(event:any)=>{
    if(source!==active||!on||disposed)return;
@@ -125,14 +130,14 @@ export function installDashboardLive(){
   const changed=Object.keys(next).some(field=>field!=='symbol'&&selection[index]?.[field]!==next[field]);if(!changed)return;
   selection[index]={...selection[index],...(next.expiry?{expiry:next.expiry}:{}),...(next.ceStrike!==undefined?{ceStrike:next.ceStrike}:{}),...(next.peStrike!==undefined?{peStrike:next.peStrike}:{})};
   if(next.expiry&&next.expiry!==a.expiry){delete selection[index].strike;delete selection[index].ceStrike;delete selection[index].peStrike;}
-  delete sampled[index];delete chartPaints[index];latest=null;render();connect();
+  delete sampled[index];delete chartPaints[index];latest=null;render();connect(true);
  }) as EventListener);
- get('op-live-indices').onchange=(event:any)=>{const e=event.target,index=e.dataset.liveIndex,field=e.dataset.liveField;if(indices.includes(index)&&field==='cadence'){if(!['60000','180000'].includes(e.value))return;cadences[index]=Number(e.value);delete sampled[index];delete buffers[index+'|pcr'];delete chartPaints[index];render();return;}if(!indices.includes(index)||!['expiry','strike'].includes(field)||!e.value)return;delete sampled[index];delete chartPaints[index];selection[index]={...selection[index],[field]:field==='strike'?Number(e.value):e.value};if(field==='expiry')delete selection[index].strike;for(const key of ['pcr','ce','pe'])delete buffers[index+'|'+key];latest=null;render();connect();};
+ get('op-live-indices').onchange=(event:any)=>{const e=event.target,index=e.dataset.liveIndex,field=e.dataset.liveField;if(indices.includes(index)&&field==='cadence'){if(!['60000','180000'].includes(e.value))return;cadences[index]=Number(e.value);delete sampled[index];delete buffers[index+'|pcr'];delete chartPaints[index];render();return;}if(!indices.includes(index)||!['expiry','strike'].includes(field)||!e.value)return;delete sampled[index];delete chartPaints[index];selection[index]={...selection[index],[field]:field==='strike'?Number(e.value):e.value};if(field==='expiry')delete selection[index].strike;for(const key of ['pcr','ce','pe'])delete buffers[index+'|'+key];latest=null;render();connect(true);};
  get('op-live-indices').onclick=(event:any)=>{const ref=event.target.closest?.('[data-live-reference]');if(ref){const index=ref.dataset.liveIndex,key=ref.dataset.liveReference;if(indices.includes(index)&&/^(spot|pcr|ce|pe)Opening$|^(spot|ce|pe)Fib$/.test(key)){levelSettings[index][key]=!levelSettings[index][key];render();}return;}const e=event.target.closest?.('[data-live-layer]');if(!e||!indices.includes(e.dataset.liveIndex)||!['spot','pcr','ce','pe'].includes(e.dataset.liveLayer))return;layers[e.dataset.liveIndex][e.dataset.liveLayer]=!layers[e.dataset.liveIndex][e.dataset.liveLayer];render();};
  get('op-live-toggle').onclick=()=>{on=!on;get('op-live-toggle').setAttribute('aria-pressed',String(on));get('op-live-toggle').textContent=on?'Live view ON':'Live view OFF';get('op-live-body').hidden=!on;if(on)connect();else{close();latest=null;render();get('op-live-status').textContent='Live stream paused';}};
  document.addEventListener('visibilitychange',()=>{if(document.hidden){close();latest=null;render();}else connect();});
- window.addEventListener('online',connect);window.addEventListener('pageshow',()=>{disposed=false;connect();});window.addEventListener('pagehide',()=>{disposed=true;close();latest=null;render();});
- setInterval(()=>{if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect();}},1000);
+ window.addEventListener('online',()=>connect());window.addEventListener('pageshow',()=>{disposed=false;connect();});window.addEventListener('pagehide',()=>{disposed=true;close();latest=null;render();});
+ setInterval(()=>{if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect(true);}},1000);
  if(typeof CustomEvent!=='undefined'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent('optionpilot:request-recorded-levels',{detail:null}));
  connect();
 }

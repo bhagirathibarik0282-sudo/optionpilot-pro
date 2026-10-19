@@ -119,7 +119,7 @@ export function installDashboardWorkspace(api:any){
    typeof spot.price==='number'&&Number.isFinite(spot.price)&&spot.price>0&&
    Number.isFinite(Date.parse(spot.observedAt||''))&&serverMs-Date.parse(spot.observedAt)>=-5000&&serverMs-Date.parse(spot.observedAt)<=30000;
   if(!group||!freshSpot){atmPairs.innerHTML='<p>ATM unavailable · waiting for fresh '+esc(atmSelected)+' Spot / inventory</p>';atmStatus.textContent='Spot not fresh or no exact expiry inventory';return;}
-  const safe=rows.filter((r:any)=>/^\\d{4}-\\d{2}-\\d{2}$/.test(r?.expiry||'')&&
+  const safe=rows.filter((r:any)=>/^\d{4}-\d{2}-\d{2}$/.test(r?.expiry||'')&&
     r.expiry>=snap.tradeDate&&Number.isFinite(r.strike)&&r.strike>0).sort((a:any,b:any)=>a.expiry.localeCompare(b.expiry));
   const sides=(atmMode==='BOTH'?['CE','PE']:[atmMode]) as ('CE'|'PE')[];
   const card=(side:'CE'|'PE')=>'<article class="op-atm-side" data-atm-side="'+side+'"><h3>ATM '+side+' · '+esc(atmSelected)+'</h3>'+

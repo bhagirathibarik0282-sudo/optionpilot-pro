@@ -83,7 +83,7 @@ export function comparePremiumSpread(req: PremiumSpreadRequest, ce: H1FixedContr
     const markedNow = status === "TRUE_ELIGIBLE_BOTH" || status === "TRUE_DIAGNOSTIC";
     const markedPrev = prev?.status === "TRUE_ELIGIBLE_BOTH" || prev?.status === "TRUE_DIAGNOSTIC";
     // Only consecutive minute buckets in the same marker tier: never bridge gaps or promote raw data.
-    const change1m = gap !== null && prev?.gap !== null &&
+    const change1m = gap !== null && prev !== undefined && prev.gap !== null &&
       ((markedNow && markedPrev) || (status === "UNMARKED" && prev.status === "UNMARKED"))
       ? Number((gap - prev.gap).toFixed(2)) : null;
     rows.push({

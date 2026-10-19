@@ -1,4 +1,5 @@
 import { mapKiteFullPacketToH1ExactDepth } from './h1-kite-exact-depth-adapter.js';
+import { deriveDashboardModelDelta } from './dashboard-model-delta.js';
 import { derivePremiumSeriesInventory } from './premium-workspace-model.js';
 import { KiteImmediateTokenRegistry } from './kite-immediate-token-registry.js';
 import type { KiteInstrumentMasterRow } from './kite-immediate-registry-builder.js';
@@ -48,6 +49,7 @@ type Tick = {packet:KiteDecodedPacket;price:number|null;oi:number|null;volume:nu
 /** Latest value per subscribed token only: no database writes or unbounded tick history. */
 export class DashboardLiveStore {
  private ticks=new Map<number,Tick>();
+ private modelDeltas=new Map<number,{key:string;value:ReturnType<typeof deriveDashboardModelDelta>}>();
  private entries:Map<number,LiveEntry>;
  private sequence=0;
  readonly runtimeId=globalThis.crypto.randomUUID();
@@ -82,6 +84,17 @@ export class DashboardLiveStore {
  /** Existing cache only; used to freeze the ATM reference at each OI snapshot. */
  spotQuote(symbol:string,now:number){
   return this.quote(this.inventory.entries.find(e=>e.role==='SPOT'&&e.symbol===symbol),now);
+ }
+
+ private modelDelta(e:LiveEntry,now:number){
+  const tick=this.ticks.get(e.token),spotEntry=this.inventory.entries.find(s=>s.role==='SPOT'&&s.symbol===e.symbol),spot=spotEntry?this.ticks.get(spotEntry.token):null;
+  if(!tick||!spot||!spotEntry)return null;
+  if([tick.observedAt,tick.receivedAt,spot.observedAt,spot.receivedAt].some(t=>now-Date.parse(t||'')<0||now-Date.parse(t||'')>5000||!Number.isFinite(Date.parse(t||''))))return null;
+  const key=[Math.floor(now/1000),tick.observedAt,tick.receivedAt,tick.price,spot.observedAt,spot.receivedAt,spot.price].join('|'),old=this.modelDeltas.get(e.token);
+  if(old?.key===key)return old.value;
+  const value=deriveDashboardModelDelta(e,tick.packet,tick.receivedAt,spotEntry,spot.packet,spot.receivedAt,now);
+  // At most one cache slot per subscribed option token, never per tick/request.
+  this.modelDeltas.set(e.token,{key,value});return value;
  }
 
  snapshot(now:number,selection:LiveSelection={}){
@@ -131,9 +144,9 @@ export class DashboardLiveStore {
    .sort((a,b)=>String(a.symbol).localeCompare(String(b.symbol))||a.strike!-b.strike!||String(a.expiry).localeCompare(String(b.expiry))||String(a.side).localeCompare(String(b.side)));
   const offset=filter.view==='ladder'?0:filter.offset||0,limit=filter.view==='ladder'?selected.length:Math.min(120,filter.limit||60);
   return {tradeDate:this.inventory.date,runtimeId:this.runtimeId,total:selected.length,offset,limit,expiries,strikes,series:derivePremiumSeriesInventory(options,this.inventory.date,filter.symbol||'ALL',filter),
-   rows:selected.slice(offset,offset+limit).map(e=>({...this.quote(e,now),dte:dte(e)})),omittedExpiries:this.inventory.omittedExpiries};
+   rows:selected.slice(offset,offset+limit).map(e=>({...this.quote(e,now),dte:dte(e),...(filter.modelDelta?{modelDelta:this.modelDelta(e,now)}:{})})),omittedExpiries:this.inventory.omittedExpiries};
  }
 
 }
 
-export type PremiumWatchFilter={view?:'ladder';symbol?:LiveIndex;nearby?:number;expiries?:string[];side?:'CE'|'PE';ceStrike?:number;peStrike?:number;minDte?:number;maxDte?:number;offset?:number;limit?:number};
+export type PremiumWatchFilter={view?:'ladder';modelDelta?:boolean;symbol?:LiveIndex;nearby?:number;expiries?:string[];side?:'CE'|'PE';ceStrike?:number;peStrike?:number;minDte?:number;maxDte?:number;offset?:number;limit?:number};

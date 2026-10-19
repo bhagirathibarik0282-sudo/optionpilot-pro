@@ -21,6 +21,7 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
   try{
    const q=c.req.query(),filter:PremiumWatchFilter={};
    if(q.view!==undefined){if(q.view!=='ladder')throw Error();filter.view='ladder';}
+   if(q.modelDelta!==undefined){if(q.modelDelta!=='1'||filter.view!=='ladder')throw Error();filter.modelDelta=true;}
    if(q.nearby){if(!['1','2','3','7'].includes(q.nearby))throw Error();filter.nearby=Number(q.nearby);}
    if(q.symbol&&q.symbol!=='ALL'){if(!(LIVE_INDICES as readonly string[]).includes(q.symbol))throw Error();filter.symbol=q.symbol as LiveIndex;}
    if(q.side&&q.side!=='BOTH'){if(!['CE','PE'].includes(q.side))throw Error();filter.side=q.side as 'CE'|'PE';}

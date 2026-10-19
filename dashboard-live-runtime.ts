@@ -70,7 +70,7 @@ export function dashboardLiveRevision(){return state+':'+(store?.runtimeId||'non
 /** Display-only view of the same socket cache; disconnection revokes all values. */
 export function readDashboardPremiumSnapshot(filter:PremiumWatchFilter={}){
  const connected=state==='OPEN',snapshot=store?.premiums(Date.now(),filter)||null;
- if(snapshot&&!connected)for(const q of snapshot.rows){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.pdc=null;q.state='STALE';}
+ if(snapshot&&!connected)for(const q of snapshot.rows){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.pdc=null;q.state='STALE';if('modelDelta' in q)q.modelDelta=null;}
  return {connected,connectionState:state,serverTime:new Date().toISOString(),snapshot,createsOrders:false,affectsSelector:false,affectsTelegram:false,affectsExecution:false};
 }
 

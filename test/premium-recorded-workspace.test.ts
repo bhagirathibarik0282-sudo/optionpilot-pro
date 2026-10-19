@@ -7,7 +7,7 @@ import { PREMIUM_WORKSPACE_HTML, installPremiumWorkspace } from '../premium-work
 import { derivePremiumDeltaPair, derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext } from '../premium-workspace-model.js';
 
 function harness(saved:any=null){
- let stored=saved?JSON.stringify(saved):null;const requests:string[]=[];
+ let stored=saved?JSON.stringify(saved):null;const requests:string[]=[];let livePayload:any=null;
  const nodes=new Map<string,any>(),events:any[]=[],timers:Function[]=[],calls:any[]=[];
  for(const [,id] of PREMIUM_WORKSPACE_HTML.matchAll(/id="([^"]+)"/g))nodes.set(id,{id,innerHTML:'',textContent:'',value:'',disabled:false,hidden:false,options:[],scrollLeft:0,querySelectorAll:()=>[],scrollIntoView(){},setAttribute(){}});
  let state:any={date:'2026-10-17',scope:'CORE',recordedDates:['2026-10-12','2026-10-13','2026-10-16'],current:{},baseline:{},loading:false};
@@ -17,7 +17,7 @@ function harness(saved:any=null){
  const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(){},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},installMarketInvestigation,derivePremiumDeltaPair,derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,api});
  vm.runInContext('globalThis.view=('+installPremiumWorkspace.toString()+')(api);',context);
  const node=(id:string)=>nodes.get(id),click=(id:string,dataset:any={})=>node('op-premium-workspace').onclick({target:{closest:()=>({id,dataset})}}),change=(id:string,value:string)=>node('op-premium-workspace').onchange({target:{id,value}});
- return {focus:(id:string)=>context.document.activeElement=node(id),node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
+ return {respond:(payload:any)=>{livePayload=payload;context.fetch=async(url:string)=>{requests.push(url);return {ok:true,json:async()=>structuredClone(livePayload)};};},focus:(id:string)=>context.document.activeElement=node(id),node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
 }
 const settle=async()=>{await Promise.resolve();await Promise.resolve();};
 test('exact watch survives cursor/date changes, blocks identity edits, and never substitutes missing data',async()=>{
@@ -162,7 +162,18 @@ test('Same Delta ladder pairs recorded strikes and replay clears missing Greeks;
 });
 test('Live Same Delta requests both loaded strike sets and never displays recorded Greeks as live',async()=>{
  const h=harness({pairing:'DELTA',deltaTarget:'0.4'});h.view.setVisible(true);await settle();h.click('',{pwLayout:'ladder'});await settle();await h.timers[0]();await settle();
- const request=h.requests.at(-1)||'';assert(request.includes('view=ladder'));assert(request.includes('side=BOTH'));assert(!request.includes('nearby='));assert(h.node('pw-results').innerHTML.includes('Market feed'));assert(!h.node('pw-results').innerHTML.includes('Nearest match'));
+ const request=h.requests.at(-1)||'';assert(request.includes('view=ladder'));assert(request.includes('side=BOTH'));assert(request.includes('modelDelta=1'));assert(!request.includes('nearby='));assert(h.node('pw-results').innerHTML.includes('Market feed'));assert(!h.node('pw-results').innerHTML.includes('Nearest match'));
+});
+test('serialized live ladder displays labelled Model Delta pairs and revokes a model without hiding premiums',async()=>{
+ const h=harness({pairing:'DELTA',deltaTarget:'0.5'}),now=Date.now(),at=new Date(now).toISOString(),date=new Date(now+19800000).toISOString().slice(0,10),expiry='2027-10-19';
+ const rows=['CE','PE'].map((side,i)=>{const identity={role:'OPTION',symbol:'NIFTY',token:42+i,expiry,strike:22000+i*100,side};return {identity,price:100+i*10,state:'LIVE',observedAt:at,receivedAt:at,modelDelta:{...identity,source:'BLACK_SCHOLES_MODEL',delta:i?-.50:.51,premium:100+i*10,premiumAt:at,spot:22000,spotAt:at,calculatedAt:at,annualRiskFreeRate:.05,annualDividendYield:0}};});
+ const payload={connected:true,serverTime:at,snapshot:{tradeDate:date,runtimeId:'model-runtime',total:2,rows,expiries:[expiry],strikes:[22000,22100],series:[]}};
+ const flush=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
+ h.respond(payload);h.view.setVisible(true);await flush();h.click('',{pwLayout:'ladder'});await flush();await h.timers[0]();await flush();
+ let html=h.node('pw-results').innerHTML;assert(html.includes('Model Delta'),html+' / '+h.node('pw-status').textContent);assert(html.includes('22,000 CE · Δ 0.51'));assert(html.includes('22,100 PE · Δ -0.5'));assert(html.includes('rate 5%, dividend 0'));assert(html.includes('Not broker Greeks'));assert(html.includes('Nearest match'));
+ payload.serverTime=new Date(now+1).toISOString();payload.snapshot.rows[1].modelDelta=null as any;
+ await h.timers[0]();await flush();html=h.node('pw-results').innerHTML;assert(!html.includes('Nearest match'),'current absent model cannot borrow a prior good one');assert(html.includes('Model Delta unavailable'));
+ h.change('pw-pairing','STRIKE');await flush();assert(h.node('pw-results').innerHTML.includes('₹100'),'live premium remains usable without Model Delta');
 });
 
 test('live redraw preserves a focused custom Delta value until the user commits it',async()=>{

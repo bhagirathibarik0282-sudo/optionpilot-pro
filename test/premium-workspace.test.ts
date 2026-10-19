@@ -150,8 +150,20 @@ test('delta pairing rejects missing, wrong-sign, stale, conflicting, duplicate a
  for(const patch of [{delta:null},{delta:0},{delta:.5},{delta:-2},{delta:-.55},{state:'STALE'},{price:null},{observedAt:at(1)},{at:at(1)}]){const rows=structuredClone(original);Object.assign(rows.find(r=>r.type==='PE'),patch);assert.equal(pair(rows,.5).matched,false,JSON.stringify(patch));}
  assert.equal(pair([...original,original[0]],.5).matched,false);
  const conflicts=run([row(0,100,{delta:.5}),row(0,100,{delta:.49}),row(0,120,{strike:22100,delta:-.5,option_type:'PE'})]).rows;assert.equal(pair(conflicts,.5).matched,false);
- const live=original.map(r=>({...r,state:'LIVE'}));assert(pair(live,.5,'LIVE').matched);live[1].observedAt=new Date(Date.parse(at(0))+5001).toISOString();assert.equal(pair(live,.5,'LIVE').matched,false);
+ const unproved=original.map(r=>({...r,state:'LIVE'}));assert.equal(pair(unproved,.5,'LIVE').matched,false);
+ const live=original.map(r=>({...r,state:'LIVE',deltaSource:'BLACK_SCHOLES_MODEL'}));assert(pair(live,.5,'LIVE').matched);live[1].observedAt=new Date(Date.parse(at(0))+5001).toISOString();assert.equal(pair(live,.5,'LIVE').matched,false);
  assert.equal(pair(original,.5,'LIVE').matched,false);
+});
+test('live Model Delta projection checks exact contract, assumptions and both source times independently of price',()=>{
+ const {q,payload}=liveFixture();const identity={...q.identity,token:42};
+ const model={source:'BLACK_SCHOLES_MODEL',delta:.51,token:42,symbol:'NIFTY',expiry,strike:22000,side:'CE',premium:100,premiumAt:at(0),spot:22000,spotAt:at(0),calculatedAt:at(0),annualRiskFreeRate:.05,annualDividendYield:0};
+ const live={...q,identity,modelDelta:model};assert.equal(projectLivePremiumQuote(payload,live)!.delta,.51);
+ for(const patch of [{source:'BROKER'},{delta:null},{delta:-.5},{delta:1.1},{token:43},{symbol:'SENSEX'},{expiry:'2026-10-27'},{strike:22100},{side:'PE'},{premium:101},{premiumAt:at(1)},{spotAt:new Date(Date.parse(at(0))-2001).toISOString()},{annualRiskFreeRate:.06},{annualDividendYield:.01},{calculatedAt:at(1)}]){
+  const p=projectLivePremiumQuote(payload,{...live,modelDelta:{...model,...patch}})!;assert.equal(p.delta,null,JSON.stringify(patch));assert.equal(p.ltp,100,'unavailable model must not hide a fresh premium');
+ }
+ const later={...payload,serverTime:new Date(Date.parse(at(0))+5001).toISOString()};assert.equal(projectLivePremiumQuote(later,live)!.delta,null);
+ assert.equal(projectLivePremiumQuote({...payload,connected:false},live)!.delta,null);
+ assert.equal(projectLivePremiumQuote(payload,{...q,delta:.51},row(0,100,{delta:.51}))!.delta,null,'neither unproved live fields nor recorded Greeks are borrowed');
 });
 
 test('deep ITM and custom Delta targets accept values through 1 and reject invalid targets',async()=>{

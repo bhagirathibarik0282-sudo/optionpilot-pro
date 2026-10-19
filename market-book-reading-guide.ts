@@ -96,11 +96,17 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hid
    const basis=interval?interval+'m sampled endpoints':'vs previous close';
    const summary=card(role==='SECTOR'?'sectors':'stocks',label,usable.length?up+' ↑ / '+down+' ↓ / '+flat+' ↔':'—',usable.length+'/'+total+(interval?' usable':' fresh')+' unweighted quotes · '+basis+' · shared universe, not '+index+' weights',usable.length+'/'+total+' usable · '+basis);
    const details='<details data-live-detail="'+esc(index+'-'+role)+'"><summary>'+esc(label)+' · source times</summary>'+values.map((r:any)=>note((r.q.identity?.label||'—')+' · '+fmt(r.value)+'% · '+detail(r.q,r.on)+(interval?' · baseline '+time(r.prior?.at):''))).join('')+'</details>';
-   if(!display.wheel)return summary.slice(0,-6)+details+'</div>';
+   const ranks=(gain:boolean)=>{
+    const identity=(q:any)=>q.identity?.token??q.identity?.label;
+    const ranked=usable.filter((r:any)=>n(r.q.price)!==null&&r.q.price>0&&identity(r.q)!==undefined&&rows.filter((q:any)=>identity(q)===identity(r.q)).length===1&&(gain?r.value>0:r.value<0)).sort((a:any,b:any)=>(gain?b.value-a.value:a.value-b.value)||String(a.q.identity?.label).localeCompare(String(b.q.identity?.label))).slice(0,5);
+    return '<details data-live-detail="'+esc(index+'-'+role+(gain?'-gainers':'-losers'))+'"><summary class="'+(gain?'op-positive':'op-negative')+'">Top 5 '+(gain?'gainers':'losers')+' · '+esc(basis)+'</summary>'+(ranked.length?'<table aria-label="'+esc(label+(gain?' top gainers':' top losers'))+'"><thead><tr><th>Rank / instrument</th><th>Price</th><th>Δ %</th><th>Source time</th></tr></thead><tbody>'+ranked.map((r:any,i:number)=>'<tr><th scope="row">'+(i+1)+' · '+esc(r.q.identity?.label||'—')+'</th><td>'+fmt(r.q.price)+'</td><td class="'+(gain?'op-positive':'op-negative')+'">'+(gain?'+':'')+fmt(r.value,interval?4:2)+'%</td><td>'+time(r.q.observedAt)+'</td></tr>').join('')+'</tbody></table>':note('No fresh '+(gain?'gaining':'losing')+' quotes in the tracked subset.'))+'</details>';
+   };
+   const ranking=page===8?ranks(true)+ranks(false)+note('Tracked quote subset · ranked by change %, not verified index weight or point contribution.'):'';
+   if(!display.wheel)return summary.slice(0,-6)+ranking+details+'</div>';
    const share=(count:number)=>total?fmt(count/total*100,1)+'%':'—';
    const wheel=total?'<div class="mb-breadth-wheel-row"><div class="mb-breadth-wheel" style="--up:'+up/total*360+'deg;--down:'+(up+down)/total*360+'deg;--flat:'+(up+down+flat)/total*360+'deg" role="img" aria-label="'+esc(label+' unweighted breadth: '+up+' up, '+down+' down, '+flat+' unchanged, '+missing+' unavailable')+'"><span>'+usable.length+'/'+total+'</span></div><small>↑ '+up+' · '+share(up)+'<br>↓ '+down+' · '+share(down)+'<br>→ '+flat+' · '+share(flat)+'<br>Unavailable '+missing+' · '+share(missing)+'<br>Equal quote counts · not index-weight contribution</small></div>':'';
    const components='<div class="mb-wheel-components" role="region" aria-label="'+esc(label+' interval changes')+'"><table><thead><tr><th>Component</th><th>Live price</th><th>'+esc(interval?interval+'m Δ %':'Day Δ %')+'</th></tr></thead><tbody>'+values.map((r:any)=>'<tr><th scope="row">'+esc(r.q.identity?.label||'—')+'</th><td>'+fmt(r.on?r.q.price:null)+'<small>'+time(r.q.observedAt)+'</small></td><td class="'+(r.value>0?'op-positive':r.value<0?'op-negative':'')+'">'+(r.value>0?'+':'')+fmt(r.value,interval?4:2)+'%<small>'+(interval?(r.prior?time(r.prior.at)+' → '+time(r.q.observedAt):'Building '+interval+'m history'):'vs previous close')+'</small></td></tr>').join('')+'</tbody></table></div>';
-   return summary.slice(0,-6)+wheel+components+details+'</div>';
+   return summary.slice(0,-6)+wheel+ranking+components+details+'</div>';
   };
   const data:any={
    spot:()=>quoteCard('spot','Spot · points',spot,flags.spot),future:()=>quoteCard('future','Futures · '+(future.identity?.expiry||'—'),future,flags.future),

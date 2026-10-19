@@ -84,3 +84,46 @@ view/controller tests verify populated recorded entry, latest cursor, explicit
 Live preservation and saved-record recovery. Complete dashboard CI: 266 pass,
 0 fail, 0 skip; guardrails and diff checks pass. This correction is pending
 review/release; no post-release visual acceptance is claimed yet.
+
+
+## Index dashboard completion pass — 19 October evening
+
+Commodities are PAUSED at user request. Existing commodity placeholders are unchanged.
+Dashboard only; no Telegram or seller execution changes.
+
+Implemented in this pass:
+- Command card lists all 13 existing numbered chapters. Opening a hidden chapter
+  through a shortcut restores its navigation entry; premium shortcuts do likewise.
+- Separate Show / hide controls for the three-index summary, ATM CE/PE expiry pairs
+  and the chapter index. ATM starts collapsed to reduce initial mobile scrolling.
+- Explicit Open recorded ladder action, with a market-closed explanation instead of
+  an unexplained waiting table. A login failure remains a distinct state.
+- Existing Sectors + stocks chapter exposes the live participation panel, including
+  separate top-five gainers and losers for stocks and sector proxies. Price,
+  percentage and source time are shown. Rank is by change percentage over the
+  tracked subset; stale, duplicate and invalid-price quotes cannot rank.
+- Existing one-stop regressions are now included in dashboard CI. Test VM setup
+  supports the transpiler's function-name helper; static assertions read the source
+  rather than depending on transpiler quote/whitespace formatting.
+
+Reused existing features, not newly implemented or newly certified:
+
+| Feature | Existing implementation | Acceptance limit |
+| --- | --- | --- |
+| Three-index spot / futures / PCR | Shared Kite stream and exact-expiry PCR sampler | Open-session coverage still unverified after #755 |
+| CE/PE side-by-side, individual view, four expiry dates | Premium workspace / ATM expiry pairs | Only subscribed, verified contracts; omitted expiries stay explicit |
+| PDH/PDL, FIB, O=H, break time and recovery | Exact-contract premium layers and observed events | Missing dated references remain unavailable |
+| 3/5/7/15-strike layouts, live / recorded, replay | Existing premium controls and stored snapshots | No history is fabricated to fill gaps |
+| Multi-day, exact-contract watch, RAG | Existing recorded/research tools | Limited to available recorded evidence |
+| Mobile Show/Hide and numbered navigation | Existing workspace plus this pass | Real-browser acceptance recorded separately |
+
+Source-dependent work is NOT declared complete:
+- Verified constituent/sector weights and index-point contribution are not present
+  in the shared quote source. Percentage ranking must not be called weight ranking.
+- Exact premium-following-futures claims need matching contract identity, synchronized
+  endpoint observations and a defined comparison window. Recorded futures continuity
+  is explicitly unverified today; same-day percent changes do not establish this.
+- Market-open live freshness, full OI coverage, wall migration and all-expiry events
+  still require source evidence. After-hours HTTP 200 does not certify these.
+- A final expiry time/countdown must use verified exchange/session identity; a plain
+  expiry date must not be represented as an independently verified remaining time.

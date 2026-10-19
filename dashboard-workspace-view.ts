@@ -260,27 +260,42 @@ export function installDashboardWorkspace(api:any){
  $('op-atm-modes').onclick=(e:any)=>{const mode=e.target.closest?.('[data-atm-mode]')?.dataset?.atmMode;if(!['BOTH','CE','PE'].includes(mode))return;atmMode=mode;
   $('op-atm-modes').querySelectorAll('[data-atm-mode]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.atmMode===mode)));paintAtm(atmLast);
  };
+
+ // PR4: one consistent source validation for summary, ATM and ticker.
+ // Presentation only; no added network requests or recurring timers.
+ const freshEnvelope=(d:any)=>{
+  const snap=d?.snapshot,server=Date.parse(d?.serverTime||''),asOf=Date.parse(snap?.asOf||'');
+  const day=Number.isFinite(server)?new Date(server+19800000).toISOString().slice(0,10):null;
+  return d?.connected===true&&d?.source==='KITE_WEBSOCKET_FULL'&&
+   typeof snap?.runtimeId==='string'&&snap.runtimeId.length>0&&
+   Array.isArray(snap.indices)&&Number.isFinite(server)&&server<=Date.now()+5000&&
+   Date.now()-server<=5000&&Number.isFinite(asOf)&&server>=asOf&&
+   server-asOf<=5000&&snap.tradeDate===day;
+ };
+ const freshQuote=(d:any,q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>{
+  if(!freshEnvelope(d))return false;
+  const id=q?.identity,server=Date.parse(d.serverTime);
+  const observed=Date.parse(q?.observedAt||''),received=Date.parse(q?.receivedAt||'');
+  const day=(at:number)=>Number.isFinite(at)?new Date(at+19800000).toISOString().slice(0,10):null;
+  return q?.state==='LIVE'&&id?.role===role&&(!symbol||id.symbol===symbol)&&
+   (!expiry||id.expiry===expiry)&&(!side||id.side===side)&&
+   (strike===undefined||id.strike===strike)&&typeof q.price==='number'&&
+   Number.isFinite(q.price)&&q.price>0&&day(observed)===d.snapshot.tradeDate&&
+   day(received)===d.snapshot.tradeDate&&server-observed>=-5000&&
+   server-observed<=30000&&server-received>=0&&server-received<=30000;
+ };
  // PR3: reuse the strict three-index full-PCR verifier; render from the existing stream only.
  const paintOne=(d:any)=>{
   if(!oneStatus||!oneRows)return;
-  paintAtm(d);
-  const snap=d?.snapshot,serverMs=Date.parse(d?.serverTime||''),asOf=Date.parse(snap?.asOf||'');
-  const day=(at:number)=>new Date(at+19800000).toISOString().slice(0,10);
-  const connected=d?.connected===true&&d?.source==='KITE_WEBSOCKET_FULL'&&Array.isArray(snap?.indices)&&
-   Number.isFinite(serverMs)&&serverMs<=Date.now()+5000&&Date.now()-serverMs<=5000&&
-   Number.isFinite(asOf)&&serverMs>=asOf&&serverMs-asOf<=5000&&snap.tradeDate===day(serverMs);
+  const connected=freshEnvelope(d);
+  paintAtm(connected?d:null); // stale source revokes ATM and summary together
+  const snap=d?.snapshot;
   if(!connected){oneStatus.textContent='LIVE unavailable · '+String(d?.connectionState||'stale source');
    oneRows.innerHTML='<tr><td colspan="8">No fresh verified Kite snapshot · values withheld</td></tr>';oneLast=0;return;}
   if(Date.now()-oneLast<500)return;oneLast=Date.now();
   const finite=(v:any)=>typeof v==='number'&&Number.isFinite(v);
-  const verified=(q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>{
-   const id=q?.identity,at=Date.parse(q?.observedAt||''),received=Date.parse(q?.receivedAt||'');
-   return q?.state==='LIVE'&&id?.role===role&&(!symbol||id.symbol===symbol)&&
-    (!expiry||id.expiry===expiry)&&(!side||id.side===side)&&
-    (strike===undefined||id.strike===strike)&&finite(q.price)&&q.price>0&&
-    Number.isFinite(at)&&Number.isFinite(received)&&day(at)===snap.tradeDate&&day(received)===snap.tradeDate&&
-    serverMs-at>=-5000&&serverMs-at<=30000&&serverMs-received>=0&&serverMs-received<=30000;
-  };
+  const verified=(q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>
+   freshQuote(d,q,role,symbol,expiry,side,strike);
   const priceCell=(q:any,role:string,symbol:string)=>{
    const ok=verified(q,role,symbol);
    return '<td data-metric="'+(role==='SPOT'?'Spot':'Future')+'">'+(ok?oneFmt(q.price):'—')+'<small>'+(ok?'Kite '+oneTime(q.observedAt)+' IST':'Not verified')+'</small></td>';

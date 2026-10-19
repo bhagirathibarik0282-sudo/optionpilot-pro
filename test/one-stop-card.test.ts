@@ -130,7 +130,7 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
  assert.match(html,/first observed/);
  const isoAt=iso(-2000),stamp=new Date(isoAt).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
  assert(html.includes(stamp),'break event must use real tick observedAt');
- el('op-atm-levels').onclick({target:{closest:()=>({dataset:{atmLevel:'PDH'}})}});
+ el('op-atm-levels').onclick({target:{closest:(selector:string)=>selector==='[data-atm-level]'?{dataset:{atmLevel:'PDH'}}:null}});
  assert.match(el('op-atm-pairs').innerHTML,/PDH ₹125/);
  el('op-atm-levels').onclick({target:{closest:(selector:string)=>selector==='[data-atm-level]'?{dataset:{atmLevel:'FIB'}}:null}});
  assert.equal(opened.length,0,'FIB is an additive level toggle, not forced navigation');
@@ -166,7 +166,7 @@ test('multi-select ATM layer buttons keep independent PDH, PDL and sourced FIB p
  assert.match(html,/data-atm-level="FIB"/);
  assert.match(html,/data-atm-open-fib/);
  const code=installDashboardWorkspace.toString();
- assert.match(code,/atmLayers=new Set<string>\(\['PDL'\]\)/);
+ assert.match(code,/atmLayers=new Set(?:<string>)?\(\['PDL'\]\)/);
  assert.match(code,/atmLayers\.has\('FIB'\)/);
  assert.match(code,/atmLayers\.delete\(level\)/);
  assert.match(code,/deriveAtmFibHold/);

@@ -129,9 +129,9 @@ export class DashboardLiveStore {
     pcrAt:complete?new Date(Math.max(...sourceTimes)).toISOString():null,pcrReceivedAt:complete?new Date(Math.max(...[...cq,...pq].map(r=>Date.parse(r.quote.receivedAt!)))).toISOString():null,fullPcr:ceTotal!==null&&ceTotal>0&&peTotal!==null?peTotal/ceTotal:null,ceTotal,peTotal,callWall:wall(cq),putWall:wall(pq),coverage:{expected:contracts.length,freshOi:covered,complete,sourceSkewMs:sourceTimes.length?Math.max(...sourceTimes)-Math.min(...sourceTimes):null},
     greeks:{iv:null,delta:null,gamma:null,theta:null,vega:null,state:'UNAVAILABLE_FROM_KITE_TICK'}};
   });
-  // One ATM strike per subscribed exact expiry, using the same fresh spot and token cache.
+  // One ATM strike per subscribed exact expiry (date-labelled, not DTE buckets), using the same fresh spot and token cache.
   // Missing paired strikes, spot or option ticks are not filled or replaced.
-  const atmDteLadder=LIVE_INDICES.map(symbol=>{
+  const atmExpiryLadder=LIVE_INDICES.map(symbol=>{
    const spot=quote(all.find(e=>e.role==='SPOT'&&e.symbol===symbol));
    const options=all.filter(e=>e.role==='OPTION'&&e.symbol===symbol);
    const expiries=[...new Set(options.map(e=>e.expiry).filter((e):e is string=>!!e))].sort();
@@ -143,12 +143,11 @@ export class DashboardLiveStore {
     const strike=spot.price!==null&&common.length>0?common.reduce((best,k)=>Math.abs(k-spot.price!)<Math.abs(best-spot.price!)?k:best,common[0]):null;
     const ce=strike===null?null:quote(calls.get(strike));
     const pe=strike===null?null:quote(puts.get(strike));
-    const dte=Math.round((Date.parse(expiry+'T00:00:00Z')-Date.parse(this.inventory.date+'T00:00:00Z'))/86400000);
-    return {expiry,dte,strike,ce,pe};
+    return {expiry,strike,ce,pe};
    });
    return {symbol,spot,rows};
   });
-  return {runtimeId:this.runtimeId,sequence:this.sequence,asOf:new Date(now).toISOString(),tradeDate:this.inventory.date,indices,atmDteLadder,vix:quote(all.find(e=>e.role==='VIX')),participation:all.filter(e=>e.role==='STOCK'||e.role==='SECTOR').map(quote),missing:this.inventory.missing,omittedExpiries:this.inventory.omittedExpiries,source:'KITE_WEBSOCKET_FULL',persistence:'BOUNDED_LATEST_TOKEN_MEMORY',affectsExecution:false,affectsSelector:false,affectsTelegram:false,createsOrders:false};
+  return {runtimeId:this.runtimeId,sequence:this.sequence,asOf:new Date(now).toISOString(),tradeDate:this.inventory.date,indices,atmExpiryLadder,vix:quote(all.find(e=>e.role==='VIX')),participation:all.filter(e=>e.role==='STOCK'||e.role==='SECTOR').map(quote),missing:this.inventory.missing,omittedExpiries:this.inventory.omittedExpiries,source:'KITE_WEBSOCKET_FULL',persistence:'BOUNDED_LATEST_TOKEN_MEMORY',affectsExecution:false,affectsSelector:false,affectsTelegram:false,createsOrders:false};
  }
  /** Filter the existing token cache; no provider call or persistence. */
  premiums(now:number,filter:PremiumWatchFilter={}){

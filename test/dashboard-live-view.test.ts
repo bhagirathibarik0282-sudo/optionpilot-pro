@@ -158,3 +158,46 @@ test('PR6 resumes exactly once after hidden/pagehide, still replaces stale and u
  assert(replacement.closed,'silent stale stream replaced, not reused');
  assert.equal(h.streams.length,n+2);
 });
+
+
+test('PR7 100 hidden live frames produce zero heavyweight DOM renders but keep the shared feed active',()=>{
+ const h=harness(),panel=h.nodes.get('op-live-participation-panel'),node=h.nodes.get('op-live-participation');
+ let html='',writes=0,txt='';
+ Object.defineProperties(node,{
+  innerHTML:{get(){return html;},set(v:string){html=v;txt=v;writes++;}},
+  textContent:{get(){return txt;},set(v:string){txt=v;html=v;}}
+ });
+ panel.open=false;
+ const payload=(s:any)=>{s.participation=[{identity:{label:'TEST SECTOR'},price:100,changePct:1,
+   state:'LIVE',observedAt:s.asOf,receivedAt:s.asOf}];};
+ for(let i=0;i<100;i++){h.advance(100);h.tick(22000+i);h.emit(payload);}
+ const liveCount=h.streams.length;
+ assert.equal(writes,0,'100 snapshots while collapsed must not build/replace heavyweight HTML');
+ assert(h.contextEvents.filter((x:any)=>x.type==='optionpilot:live-context').length>=100,
+  'other chapters must keep receiving all live packets');
+ assert.match(h.nodes.get('op-live-indices').innerHTML,/22,099/,'live index still updates');
+ panel.open=true;panel.ontoggle();assert.equal(writes,1,'opening paints the freshest held frame');
+ assert.match(html,/TEST SECTOR/);
+ assert.match(html,/received/);
+ h.advance(100);h.tick(22222);h.emit(payload);
+ assert(writes>=2,'expanded participation continues updating with live snapshots');
+ panel.open=false;panel.ontoggle();assert.equal(node.textContent,'','closing releases hidden quote DOM');
+ const count=writes;
+ for(let i=0;i<100;i++){h.advance(100);h.tick(22500+i);h.emit(payload);}
+ assert.equal(writes,count,'closed panel stays idle while shared market stream stays active');
+ assert.equal(h.streams.length,liveCount,'no extra EventSource for heavyweight updates');
+ panel.open=true;panel.ontoggle();assert.equal(writes,count+1,'reopening must render newly received readings');
+ h.streams.at(-1).onerror();
+ assert.equal(node.textContent,'Live values unavailable','disconnection revokes expanded heavyweight values');
+});
+
+test('PR7 structural memory and cadence audit: 600 chart points max per series, one live SSE, no extra timer',()=>{
+ const src=installDashboardLive.toString();
+ assert.equal((src.match(/new EventSource\(/g)||[]).length,1);
+ assert.equal((src.match(/setInterval\(/g)||[]).length,1);
+ assert.match(src,/rows.length>600/);
+ assert.match(src,/rows.splice\(0,rows.length-600\)/);
+ assert.match(src,/Date.now\(\)-paint.at>=250/);
+ assert.match(src,/Date.now\(\)-lastReceived>4000/);
+ assert.match(DASHBOARD_LIVE_HTML,/id="op-live-participation-panel"/);
+});

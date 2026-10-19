@@ -82,7 +82,7 @@ test('band ATM reader reuses the exact existing spot cache and cannot refresh a 
 
 test('one ATM CE/PE pair per actual listed expiry; never treat expiry dates as numbered DTE rows',()=>{
  const other='2026-10-26';
- const extra:LiveEntry=[21900,22100].flatMap((strike,i)=>[
+ const extra:LiveEntry[]=[21900,22100].flatMap((strike,i)=>[
   {token:200+i, label:'NIFTY'+other+strike+'CE',symbol:'NIFTY' as const,role:'OPTION' as const,expiry:other,strike,side:'CE' as const},
   {token:210+i, label:'NIFTY'+other+strike+'PE',symbol:'NIFTY' as const,role:'OPTION' as const,expiry:other,strike,side:'PE' as const}
  ]);

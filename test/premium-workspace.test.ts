@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
 import { Hono } from 'hono';
 import { derivePremiumSeriesInventory, derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext, deriveAtmFibHold } from '../premium-workspace-model.js';
 import { DashboardLiveStore } from '../dashboard-live-feed.js';
@@ -210,4 +211,22 @@ test('ATM FIB records observed resistance under the same sourced level without c
  assert.equal(got.observedHold?.kind,'RESISTANCE');
  assert.equal(got.observedHold?.source,'RECORDED_1M_OBSERVATIONS');
  assert.match(got.reason,/not candle-confirmed/);
+});
+
+test('PR2 coalesces unchanged ladder DOM redraw while retaining 1s REST polling and 3s stale fail-closed',()=>{
+ const code=readFileSync(new URL('../premium-workspace-view.ts',import.meta.url),'utf8');
+ assert.match(code,/setInterval\(tick,1000\)/,'1s premium read cadence unchanged');
+ assert.match(code,/const tick=\(\)=>\{/);
+ assert.match(code,/if\(visible&&cfg\.source==='LIVE'&&live\?\.connected&&!premiumLiveClock\(live,Date\.now\(\)-liveReceived\)\.valid\)draw\(\)/);
+ assert.doesNotMatch(code,/if\(visible&&cfg\.source==='LIVE'\)\{if\(live\)draw\(\)/,'timer no longer duplicates every successful response repaint');
+ assert.match(code,/if\(live\?\.connected&&Date\.parse\(payload\.serverTime\)<=Date\.parse\(live\.serverTime\)\)return/,'same REST sample never triggers a new full DOM rebuild');
+ assert.match(code,/live=payload;liveReceived=Date\.now\(\)/);
+ assert.match(code,/if\(!payload\.connected\)history\.clear\(\);draw\(\)/);
+ assert.match(code,/if\(visible&&cfg\.source==='LIVE'&&live\?\.connected&&!premiumLiveClock/);
+ assert.match(code,/if\(!visible\|\|cfg\.source!=='LIVE'\|\|document\.hidden\|\|busy\)return/);
+ assert.match(code,/if\(deltaMode\(\)\)\{q\.set\('side','BOTH'\);q\.set\('modelDelta','1'\)/);
+ const connected={connected:true,serverTime:'2026-10-19T04:00:00.000Z',snapshot:{tradeDate:'2026-10-19'}};
+ assert.equal(premiumLiveClock(connected,2999).valid,true);
+ assert.equal(premiumLiveClock(connected,3001).valid,false,'stale timeout continues invalidating cached live prices');
+ assert.equal(premiumLiveClock({...connected,connected:false},1).valid,false,'disconnect remains fail-closed');
 });

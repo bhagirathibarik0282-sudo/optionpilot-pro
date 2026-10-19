@@ -251,6 +251,25 @@ export function installDashboardWorkspace(api:any){
     Number.isFinite(serverMs)&&Number.isFinite(at)&&at<=serverMs&&serverMs-at<=(p.periodMs||60000)+30000&&
     typeof p.fullPcr==='number'&&Number.isFinite(p.fullPcr)?p:null;
   };
+  // Show why an exact-expiry PCR is withheld; never turn partial chain into "full".
+  const pcrReason=(a:any)=>{
+   const q=a?.pcrSnapshot,c=q?.coverage;
+   if(!q)return 'PCR snapshot not received';
+   if(q.state==='STALE')return 'PCR source expired';
+   if(q.fetchState==='RATE_LIMITED')return 'Kite quote rate-limited · next cycle';
+   if(q.fetchState==='REQUEST_REJECTED')return 'Kite quote request rejected';
+   if(q.fetchState==='SESSION_REQUIRED')return 'Kite authorization required';
+   if(q.fetchState==='IDENTITY_TOO_LONG')return 'Quote identity too long';
+   if(q.fetchState==='UPSTREAM_UNAVAILABLE')return 'Kite quote request failed';
+   if(!c)return 'OI coverage unavailable';
+   if(c.expected>0&&!c.complete){
+    const missing=Number(c.missing)||0,stale=Number(c.stale)||0,invalid=Number(c.invalid)||0;
+    if((c.freshOi||0)<c.expected)return oneFmt(c.freshOi,0)+'/'+oneFmt(c.expected,0)+' fresh · M:'+missing+' S:'+stale+' I:'+invalid;
+    if(c.sourceSkewMs>30000)return 'OI source times not aligned';
+   }
+   if(c.complete&&q.fullPcr===null)return 'CE total OI is zero';
+   return 'Next complete PCR check pending';
+  };
   const order=['NIFTY','SENSEX','BANKNIFTY'];
   oneRows.innerHTML=order.map(symbol=>{
    const a=snap.indices.find((r:any)=>r.symbol===symbol),p=a?pcr(a):null;
@@ -261,7 +280,7 @@ export function installDashboardWorkspace(api:any){
     c(a.spot)+c(a.future)+
     '<td>'+quote(a.ce)+'<small>CE '+oneFmt(ceStrike,0)+'</small></td>'+
     '<td>'+quote(a.pe)+'<small>PE '+oneFmt(peStrike,0)+'</small></td>'+
-    '<td>'+(p?oneFmt(p.fullPcr,4):'—')+'<small>'+(p?'checked '+oneTime(p.checkedAt):'Incomplete / stale OI')+'</small></td>'+
+    '<td>'+(p?oneFmt(p.fullPcr,4):'—')+'<small>'+(p?'checked '+oneTime(p.checkedAt):esc(pcrReason(a)))+'</small></td>'+
     '<td>'+(p?oneFmt(p.callWall?.strike,0):'—')+'</td>'+
     '<td>'+(p?oneFmt(p.putWall?.strike,0):'—')+'</td></tr>';
   }).join('');

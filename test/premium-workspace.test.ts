@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { Hono } from 'hono';
-import { derivePremiumSeriesInventory, derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext } from '../premium-workspace-model.js';
+import { derivePremiumSeriesInventory, derivePremiumWorkspace, premiumLiveClock, projectLivePremiumQuote, derivePremiumLiveContext, deriveAtmFibHold } from '../premium-workspace-model.js';
 import { DashboardLiveStore } from '../dashboard-live-feed.js';
 import { mountDashboardLiveRoutes } from '../dashboard-live-http.js';
 
@@ -171,4 +171,43 @@ test('deep ITM and custom Delta targets accept values through 1 and reject inval
  const rows=run([row(0,800,{delta:.99}),row(0,820,{strike:22500,delta:-.99,option_type:'PE'})]).rows;
  assert(pair(rows,.99).matched);assert(pair(rows,1).matched);
  for(const target of [0,-.1,1.01,NaN,Infinity])assert.equal(pair(rows,target).matched,false);
+});
+
+test('ATM FIB uses prior 15:30 same-contract R3..S3; 3 verified 1m observations identify held level',()=>{
+ const symbol='NIFTY',expiry='2026-10-26',tradeDate='2026-10-16',side='CE',strike=22000;
+ const quoteAt='2026-10-16T04:03:10.000Z';
+ const prior=[{symbol,expiry,strike,option_type:side,minute_bucket:'2026-10-15T10:00:00.000Z',
+  truth_verdict:'TRUE',day_high:110,day_low:90,ltp:100}];
+ const observed=[100.03,100.5,101].map((ltp,i)=>({symbol,expiry,strike,option_type:side,
+  minute_bucket:new Date(Date.parse('2026-10-16T04:00:00Z')+i*60000).toISOString(),truth_verdict:'TRUE',ltp}));
+ const input={symbol,expiry,strike,side,tradeDate,quoteAt,price:101,prior,observed};
+ const good=deriveAtmFibHold(input);
+ assert.equal(good.nearest?.name,'P');
+ assert.equal(good.nearest?.value,100);
+ assert.equal(good.observedHold?.name,'P');
+ assert.equal(good.observedHold?.kind,'SUPPORT');
+ assert.equal(good.observedHold?.observations,3);
+ assert.equal(good.observedHold?.testAt,observed[0].minute_bucket);
+ assert.equal(good.observedHold?.confirmedAt,observed[2].minute_bucket);
+ assert.equal(good.sourceAt,prior[0].minute_bucket);
+ assert.equal(deriveAtmFibHold({...input,observed:observed.slice(0,2)}).observedHold,null);
+ assert.equal(deriveAtmFibHold({...input,observed:[observed[0],{...observed[1],ltp:99},observed[2]]}).observedHold,null);
+ assert.equal(deriveAtmFibHold({...input,quoteAt:'2026-10-16T04:10:00Z',price:101}).observedHold,null,'old test cannot remain held');
+ assert.equal(deriveAtmFibHold({...input,prior:prior.map(x=>({...x,expiry:'2026-11-02'}))}).nearest,null,'cross-expiry FIB is prohibited');
+ assert.equal(deriveAtmFibHold({...input,prior:prior.map(x=>({...x,minute_bucket:'2026-10-15T09:57:00Z'}))}).nearest,null,'non-close reference cannot generate Daily FIB');
+ assert.equal(deriveAtmFibHold({...input,observed:[...observed,{...observed[1],ltp:98}]}).observedHold,null,'contradictory same-timestamp observations are quarantined');
+ assert.equal(deriveAtmFibHold({...input,observed:observed.map(x=>({...x,option_type:'PE'}))}).observedHold,null,'opposite side cannot confirm hold');
+ assert.equal(deriveAtmFibHold({...input,observed:observed.map(x=>({...x,truth_verdict:'STALE'}))}).observedHold,null);
+});
+test('ATM FIB records observed resistance under the same sourced level without claiming candle closes',()=>{
+ const symbol='NIFTY',expiry='2026-10-26',tradeDate='2026-10-16',side='PE',strike=22000;
+ const prior=[{symbol,expiry,strike,option_type:side,minute_bucket:'2026-10-15T10:00:00.000Z',
+  truth_verdict:'TRUE',day_high:110,day_low:90,ltp:100}];
+ const observed=[99.95,99.5,99].map((ltp,i)=>({symbol,expiry,strike,option_type:side,
+  minute_bucket:new Date(Date.parse('2026-10-16T04:00:00Z')+i*60000).toISOString(),truth_verdict:'TRUE',ltp}));
+ const got=deriveAtmFibHold({symbol,expiry,strike,side,tradeDate,quoteAt:'2026-10-16T04:02:30Z',price:99,prior,observed});
+ assert.equal(got.observedHold?.name,'P');
+ assert.equal(got.observedHold?.kind,'RESISTANCE');
+ assert.equal(got.observedHold?.source,'RECORDED_1M_OBSERVATIONS');
+ assert.match(got.reason,/not candle-confirmed/);
 });

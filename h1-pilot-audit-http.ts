@@ -36,7 +36,7 @@ export async function runH1PilotHttpAudit(): Promise<{
     marketTruthCounts: Record<string, number>;
     optionValidationCounts: Record<string, number>;
     cePeMismatchBySymbol: Record<string, number>;
-    cePeMismatchBySymbolExpiry: Array<{ symbol: string; expiry: string; mismatchBuckets: number }>;
+    cePeMismatchBySymbolExpiry: Array<{ symbol: string; expiry: string; mismatchBuckets: number; firstMismatchAt: string | null; lastMismatchAt: string | null; totalCountGap: number }>;
     truthMarkerSource: "APP_STATE_LOG_H1_TRUTH_MARKER";
     cePeRule: "ATM_OFFSET_MINUS7_TO_PLUS7";
   };
@@ -145,8 +145,11 @@ export async function runH1PilotHttpAudit(): Promise<{
           HAVING COUNT(*) FILTER (WHERE o.option_type='CE' AND o.atm_offset BETWEEN -7 AND 7)
               <> COUNT(*) FILTER (WHERE o.option_type='PE' AND o.atm_offset BETWEEN -7 AND 7)
         ) x GROUP BY symbol ORDER BY symbol`, [tradeDate]),
-      rows<{ symbol: string; expiry: string; mismatch_buckets: string }>(`${cte}
-        SELECT symbol, expiry::text AS expiry, COUNT(*)::text AS mismatch_buckets FROM (
+      rows<{ symbol: string; expiry: string; mismatch_buckets: string; first_mismatch_at: string | null; last_mismatch_at: string | null; total_count_gap: string }>(`${cte}
+        SELECT symbol, expiry::text AS expiry, COUNT(*)::text AS mismatch_buckets,
+          MIN(minute_bucket)::text AS first_mismatch_at,
+          MAX(minute_bucket)::text AS last_mismatch_at,
+          SUM(ABS(ce-pe))::text AS total_count_gap FROM (
           SELECT o.symbol, o.minute_bucket, o.expiry,
             COUNT(*) FILTER (WHERE o.option_type='CE' AND o.atm_offset BETWEEN -7 AND 7) AS ce,
             COUNT(*) FILTER (WHERE o.option_type='PE' AND o.atm_offset BETWEEN -7 AND 7) AS pe
@@ -181,6 +184,9 @@ export async function runH1PilotHttpAudit(): Promise<{
         symbol: row.symbol,
         expiry: row.expiry,
         mismatchBuckets: Number(row.mismatch_buckets) || 0,
+        firstMismatchAt: row.first_mismatch_at ?? null,
+        lastMismatchAt: row.last_mismatch_at ?? null,
+        totalCountGap: Number(row.total_count_gap) || 0,
       })),
       truthMarkerSource: "APP_STATE_LOG_H1_TRUTH_MARKER" as const,
       cePeRule: "ATM_OFFSET_MINUS7_TO_PLUS7" as const,

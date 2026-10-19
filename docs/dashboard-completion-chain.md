@@ -127,3 +127,37 @@ Source-dependent work is NOT declared complete:
   still require source evidence. After-hours HTTP 200 does not certify these.
 - A final expiry time/countdown must use verified exchange/session identity; a plain
   expiry date must not be represented as an independently verified remaining time.
+
+
+## Actual One Shot live card — 19 October evening
+
+The earlier #757/#758 release improved the old command card but did not ship
+this design. This implementation REPLACES the old top-level command-table panel
+with the approved One Shot visual hierarchy, gradients, three-index radar,
+Spot / PCR pulse, VIX panel and prominent multi-expiry CE/PE ladder.
+The original evidence table moves under 10 · Sources / tools.
+
+| Category | Actual source / behavior |
+| --- | --- |
+| 01 Radar | Existing shared Kite spot/future quotes; current-session recorded PDH/PDL and broker previous close; no invented reference levels |
+| 02 Pulse | Actual received spot/PCR samples only; 1/3/15/60m view; independently labelled axes; actual recorded first-15m sampled H/L when available |
+| 03 Premiums | Existing exact-expiry ATM pairs, CE/PE toggles, PDH/PDC/PDL/FIB controls, observed break rows; calendar DTE is not an expiry-time countdown |
+| 04 Futures response | Exact live future identity and premium expiry/strike/side; endpoints aligned within 5s, sampled baseline within 15s; reports co-movement, not causal/exact following |
+| 05 OI / walls | Existing strict full-PCR validator, band ratio, CE/PE OI totals and same-expiry baseline deltas, wall strikes/OI and fresh futures OI |
+| 06 / 07 Ranks | Fresh, unique quote-token subset; price and % vs own previous close; separate top-five gainers/losers; no unverified weights/contribution |
+| 08 VIX / agreement | Fresh VIX and day return; actual freshness/coverage counts; existing strict synchronized PCR-change classification |
+| 09 Memory / events | Observed spot-level crossings with source time and same-side three-index badge only within 5s; recovery revokes active badge; existing recorded/multiday/RAG actions |
+| 10 Tools | Existing 13 numbered chapters and verified-value evidence table; detailed provenance stays expandable |
+
+No extra provider calls, EventSource, timers, database storage, Telegram, trading
+or commodity work. All new rendering uses the existing context event. Display
+history is bounded to 48 series × 600 real samples, sampled no more often than
+10s per source series; session/runtime/expiry changes and stale sources revoke
+incompatible history. Opening rank panels paints the latest snapshot; collapsed
+rank DOM stays idle. Reading decoration excludes this explicitly styled live
+subtree to avoid per-tick font measurements or automatic table reshaping.
+
+Outstanding source limits remain visible: missing prior-session futures identity/
+levels, broker IV and official weights cannot be fabricated. Browser-local pulse
+history starts on connection; saved replay remains explicitly recorded. After-hours
+release acceptance cannot certify market-open full-chain coverage or all live events.

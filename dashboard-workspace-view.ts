@@ -1,3 +1,4 @@
+import { renderOneShotCard, ONE_SHOT_CSS, installOneShotLiveCard } from './one-shot-live-card.js';
 import { installPremiumWorkspace } from './premium-workspace-view.js';
 import { deriveLiveThreeIndexPcr } from './live-three-index-pcr.js';
 
@@ -12,7 +13,15 @@ const COMMODITY_CARD_HTML=`<details id="op-commodities" aria-label="10 Commoditi
 <details id="op-commodity-status" open><summary>10.5 · Data status</summary><p>NOT CONNECTED · Source timestamp: — · Contract identity: unverified.</p><small>Live / stale / missing readings will require verified Kite MCX quotes. No commodity values are available yet.</small></details>
 </div></details>`;
 
-export const WORKSPACE_NAV_HTML=`<aside id="op-workspace-nav" aria-label="Dashboard chapters"><div class="op-rail-inner"><a class="op-logo" href="/">OP<span>OptionPilot <b>PRO</b></span></a><div class="op-rail-label">YOUR MARKET WORKSPACE</div><div id="op-chapter-links"></div><details id="op-customize"><summary>＋ Choose my chapters</summary><div id="op-chapter-options"></div><button id="op-show-chapters" type="button">Show all chapters</button></details><div class="op-rail-foot">NIFTY · SENSEX<br><span>BANKNIFTY · monthly observation</span></div></div></aside><div id="op-workspace-top"><strong>OptionPilot</strong><button id="op-open-commodities" type="button" aria-controls="op-commodities" aria-expanded="false">10 · Commodities</button><div id="op-workspace-feed" role="status">Connecting to market feed</div></div><section id="op-one-stop" aria-label="One-stop market evidence"><div class="op-one-title"><div><span class="op-kicker">ONE CARD / ONE STOP</span><h2>Market command card</h2></div><div id="op-one-status" role="status" aria-live="polite">Waiting for connected live evidence</div></div><div id="op-one-actions" role="group" aria-label="Open existing market tools"><button type="button" data-op-one="LIVE">Live detail</button><button type="button" data-op-one="LADDER">CE / PE ladder</button><button type="button" data-op-one="MULTIDAY">Multi-day research</button><button type="button" data-op-one="RAG">Ask RAG</button><button type="button" data-op-one="RECORDED">Open recorded ladder</button></div><details id="op-command-index"><summary>All numbered chapters · Show / hide</summary><nav id="op-command-chapters" aria-label="Command card chapter shortcuts"></nav></details><details id="op-summary-panel" open><summary>Three-index summary · Show / hide</summary><div class="op-one-scroll"><table aria-label="Verified latest Kite market readings"><thead><tr><th>Index / expiry</th><th>Spot</th><th>Future</th><th>CE ₹</th><th>PE ₹</th><th>Full PCR</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody id="op-one-rows"><tr><td colspan="8">Waiting for actual Kite stream · unavailable is not zero</td></tr></tbody></table></div></details><details id="op-atm-weeklies" aria-label="ATM CE and PE by expiry date"><summary>ATM CE / PE · all expiries · Show / hide</summary><div class="op-atm-head"><div><strong>ATM CE × ATM PE · expiry by expiry</strong><small>Actual listed expiry dates — not DTE 0–4</small></div><div class="op-atm-settings"><label>Index <select id="op-atm-index" aria-label="ATM ladder index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><div id="op-atm-modes" role="group" aria-label="ATM CE PE display"><button type="button" data-atm-mode="BOTH" aria-pressed="true">CE + PE</button><button type="button" data-atm-mode="CE" aria-pressed="false">CE only</button><button type="button" data-atm-mode="PE" aria-pressed="false">PE only</button></div></div></div><div id="op-atm-levels" role="group" aria-label="Premium PDH PDL and FIB controls"><button data-atm-level="PDL" type="button" aria-pressed="true">↓ PDL</button><button data-atm-level="PDH" type="button" aria-pressed="false">↑ PDH</button><button data-atm-level="FIB" type="button" aria-pressed="false">FIB R3–S3</button><button data-atm-open-fib type="button" aria-label="Open detailed FIB ladder">FIB detail ↗</button><small id="op-atm-level-note">Select multiple levels together · FIB HOLD needs verified same-contract observations.</small></div><div id="op-atm-status" role="status">Awaiting exact expiry inventory</div><div id="op-atm-pairs" class="op-atm-columns"><p>Waiting for fresh subscribed options.</p></div><p class="op-one-note">ATM strike is selected separately for each exact expiry from available matched CE/PE strikes. Not every calendar week is guaranteed in the Kite subscription. BANKNIFTY remains monthly observation.</p></details><p class="op-one-note">One shared stream; exact expiry and source timestamps. PCR and wall values appear only for a complete, current full-chain snapshot. BANKNIFTY = monthly observation. Read-only evidence, not a trading signal.</p></section>${COMMODITY_CARD_HTML}`;
+const LEGACY_WORKSPACE_NAV_HTML=`<aside id="op-workspace-nav" aria-label="Dashboard chapters"><div class="op-rail-inner"><a class="op-logo" href="/">OP<span>OptionPilot <b>PRO</b></span></a><div class="op-rail-label">YOUR MARKET WORKSPACE</div><div id="op-chapter-links"></div><details id="op-customize"><summary>＋ Choose my chapters</summary><div id="op-chapter-options"></div><button id="op-show-chapters" type="button">Show all chapters</button></details><div class="op-rail-foot">NIFTY · SENSEX<br><span>BANKNIFTY · monthly observation</span></div></div></aside><div id="op-workspace-top"><strong>OptionPilot</strong><button id="op-open-commodities" type="button" aria-controls="op-commodities" aria-expanded="false">10 · Commodities</button><div id="op-workspace-feed" role="status">Connecting to market feed</div></div><section id="op-one-stop" aria-label="One-stop market evidence"><div class="op-one-title"><div><span class="op-kicker">ONE CARD / ONE STOP</span><h2>Market command card</h2></div><div id="op-one-status" role="status" aria-live="polite">Waiting for connected live evidence</div></div><div id="op-one-actions" role="group" aria-label="Open existing market tools"><button type="button" data-op-one="LIVE">Live detail</button><button type="button" data-op-one="LADDER">CE / PE ladder</button><button type="button" data-op-one="MULTIDAY">Multi-day research</button><button type="button" data-op-one="RAG">Ask RAG</button><button type="button" data-op-one="RECORDED">Open recorded ladder</button></div><details id="op-command-index"><summary>All numbered chapters · Show / hide</summary><nav id="op-command-chapters" aria-label="Command card chapter shortcuts"></nav></details><details id="op-summary-panel" open><summary>Three-index summary · Show / hide</summary><div class="op-one-scroll"><table aria-label="Verified latest Kite market readings"><thead><tr><th>Index / expiry</th><th>Spot</th><th>Future</th><th>CE ₹</th><th>PE ₹</th><th>Full PCR</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody id="op-one-rows"><tr><td colspan="8">Waiting for actual Kite stream · unavailable is not zero</td></tr></tbody></table></div></details><details id="op-atm-weeklies" aria-label="ATM CE and PE by expiry date"><summary>ATM CE / PE · all expiries · Show / hide</summary><div class="op-atm-head"><div><strong>ATM CE × ATM PE · expiry by expiry</strong><small>Actual listed expiry dates — not DTE 0–4</small></div><div class="op-atm-settings"><label>Index <select id="op-atm-index" aria-label="ATM ladder index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><div id="op-atm-modes" role="group" aria-label="ATM CE PE display"><button type="button" data-atm-mode="BOTH" aria-pressed="true">CE + PE</button><button type="button" data-atm-mode="CE" aria-pressed="false">CE only</button><button type="button" data-atm-mode="PE" aria-pressed="false">PE only</button></div></div></div><div id="op-atm-levels" role="group" aria-label="Premium PDH PDL and FIB controls"><button data-atm-level="PDL" type="button" aria-pressed="true">↓ PDL</button><button data-atm-level="PDH" type="button" aria-pressed="false">↑ PDH</button><button data-atm-level="PDC" type="button" aria-pressed="false">PDC</button><button data-atm-level="FIB" type="button" aria-pressed="false">FIB R3–S3</button><button data-atm-open-fib type="button" aria-label="Open detailed FIB ladder">FIB detail ↗</button><small id="op-atm-level-note">Select multiple levels together · FIB HOLD needs verified same-contract observations.</small></div><div id="op-atm-status" role="status">Awaiting exact expiry inventory</div><div id="op-atm-pairs" class="op-atm-columns"><p>Waiting for fresh subscribed options.</p></div><p class="op-one-note">ATM strike is selected separately for each exact expiry from available matched CE/PE strikes. Not every calendar week is guaranteed in the Kite subscription. BANKNIFTY remains monthly observation.</p></details><p class="op-one-note">One shared stream; exact expiry and source timestamps. PCR and wall values appear only for a complete, current full-chain snapshot. BANKNIFTY = monthly observation. Read-only evidence, not a trading signal.</p></section>${COMMODITY_CARD_HTML}`;
+
+// Preserve exact-contract ATM controls while replacing the old command-table card.
+const oneStart=LEGACY_WORKSPACE_NAV_HTML.indexOf('<section id="op-one-stop"');
+const oneEnd=LEGACY_WORKSPACE_NAV_HTML.indexOf('<details id="op-commodities"');
+const atmStart=LEGACY_WORKSPACE_NAV_HTML.indexOf('<details id="op-atm-weeklies"');
+const atmEnd=LEGACY_WORKSPACE_NAV_HTML.indexOf('</details><p class="op-one-note">One shared stream',atmStart)+10;
+const actualAtm=LEGACY_WORKSPACE_NAV_HTML.slice(atmStart,atmEnd).replace('<details id="op-atm-weeklies"','<details id="op-atm-weeklies" open');
+export const WORKSPACE_NAV_HTML=LEGACY_WORKSPACE_NAV_HTML.slice(0,oneStart)+renderOneShotCard(actualAtm)+LEGACY_WORKSPACE_NAV_HTML.slice(oneEnd);
 
 export const WORKSPACE_TICKER_HTML=`<details id="op-ticker-tools"><summary>Market ticker</summary><div id="op-workspace-ticker" aria-label="Market snapshot"></div></details>`;
 
@@ -136,6 +145,7 @@ body[data-op-workspace] .mb-scope{margin:6px 0;padding:4px 8px;font-size:13px}
 body[data-op-workspace] .mb-detail-toolbar{margin:4px 0}body[data-op-workspace] #mb-page .mb-chapter-head{margin-bottom:8px;padding-bottom:6px}
 body[data-op-workspace] #mb-page .mb-chapter-head h2{margin:3px 0;font-size:23px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+${ONE_SHOT_CSS}
 `;
 
 export function installDashboardWorkspace(api:any){
@@ -246,8 +256,8 @@ export function installDashboardWorkspace(api:any){
      const ref=isLive?atmReference(atmSelected,r.expiry,r.strike,side,snap.tradeDate,q.observedAt):{pdh:null,pdl:null};
      const event=isLive?atmObservedEvent(atmSelected,r.expiry,r.strike,side,q,ref,serverMs,snap.tradeDate):null;
      const price=isLive?q.price:null;
-     const notes=(['PDH','PDL'] as const).filter(level=>atmLayers.has(level)).map(level=>{
-      const value=ref[level.toLowerCase() as 'pdh'|'pdl'];
+     const notes=(['PDH','PDC','PDL'] as const).filter(level=>atmLayers.has(level)).map(level=>{
+      const value=level==='PDC'?(typeof q?.pdc==='number'&&Number.isFinite(q.pdc)&&q.pdc>0?q.pdc:null):ref[level.toLowerCase() as 'pdh'|'pdl'];
       const position=price===null||value===null?'':price>value?'↑ above':price<value?'↓ below':'at';
       return '<small class="op-atm-levelnote" data-level="'+level+'">'+level+' '+(value===null?'— / source unavailable':'₹'+oneFmt(value)+' · '+position)+'</small>';
      });
@@ -264,7 +274,8 @@ export function installDashboardWorkspace(api:any){
      }
      const dayOpenHigh=isLive&&typeof q.dayOpen==='number'&&q.dayOpen>0&&typeof q.dayHigh==='number'&&Math.abs(q.dayOpen-q.dayHigh)<.000001;
      const [yy,mm,dd]=r.expiry.split('-');
-     const main='<tr><td title="'+esc(r.expiry)+'">'+dd+'/'+mm+'/'+yy.slice(2)+'</td><td>'+oneFmt(r.strike,0)+'</td><td><strong>'+esc(v.value)+'</strong><small>'+esc(v.time)+'</small>'+notes.join('')+(dayOpenHigh?'<small>DAY O=H ✓</small>':'')+'</td></tr>';
+     const calendarDte=Math.round((Date.parse(r.expiry+'T00:00:00Z')-Date.parse(snap.tradeDate+'T00:00:00Z'))/86400000);
+     const main='<tr><td title="'+esc(r.expiry)+'">'+dd+'/'+mm+'/'+yy.slice(2)+'<small class="os-expiry-dte">'+calendarDte+' calendar days</small></td><td>'+oneFmt(r.strike,0)+'</td><td><strong>'+esc(v.value)+'</strong><small>'+esc(v.time)+'</small>'+notes.join('')+(dayOpenHigh?'<small>DAY O=H ✓</small>':'')+'</td></tr>';
      if(!event)return main;
      const down=event.kind==='PDL',direction=down?'↓':'↑',stamp=oneTime(event.at);
      const ohlc=down&&event.openHigh?'DAY O=H + ':'';
@@ -281,14 +292,14 @@ export function installDashboardWorkspace(api:any){
    const target=$('op-premium-workspace');if(target&&typeof target.scrollIntoView==='function')target.scrollIntoView({block:'start',behavior:'auto'});return;
   }
   const level=e.target.closest?.('[data-atm-level]')?.dataset?.atmLevel;
-  if(!['PDH','PDL','FIB'].includes(level))return;
+  if(!['PDH','PDC','PDL','FIB'].includes(level))return;
   if(atmLayers.has(level))atmLayers.delete(level);else atmLayers.add(level);
-  atmLevelNote.textContent='Combined '+(['PDH','PDL','FIB'].filter(v=>atmLayers.has(v)).join(' + ')||'No level')+
+  atmLevelNote.textContent='Combined '+(['PDH','PDC','PDL','FIB'].filter(v=>atmLayers.has(v)).join(' + ')||'No level')+
    ' · FIB shows sourced nearest / observed retest only · not a trading signal';
   $('op-atm-levels').querySelectorAll('[data-atm-level]').forEach((b:any)=>b.setAttribute('aria-pressed',String(atmLayers.has(b.dataset.atmLevel))));
   paintAtm(atmLast);
  };
- $('op-atm-index').onchange=(e:any)=>{if(!['NIFTY','SENSEX','BANKNIFTY'].includes(e.target.value))return;atmSelected=e.target.value;paintAtm(atmLast);};
+ $('op-atm-index').onchange=(e:any)=>{if(!['NIFTY','SENSEX','BANKNIFTY'].includes(e.target.value))return;atmSelected=e.target.value;paintAtm(atmLast);oneShot?.select(atmSelected);};
  $('op-atm-modes').onclick=(e:any)=>{const mode=e.target.closest?.('[data-atm-mode]')?.dataset?.atmMode;if(!['BOTH','CE','PE'].includes(mode))return;atmMode=mode;
   $('op-atm-modes').querySelectorAll('[data-atm-mode]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.atmMode===mode)));paintAtm(atmLast);
  };
@@ -316,15 +327,19 @@ export function installDashboardWorkspace(api:any){
    day(received)===d.snapshot.tradeDate&&server-observed>=-5000&&
    server-observed<=30000&&server-received>=0&&server-received<=30000;
  };
+ const oneShot=typeof installOneShotLiveCard==='function'?installOneShotLiveCard({
+  getState:api.getState,getModels:api.getModels,validEnvelope:freshEnvelope,validQuote:freshQuote,
+  derivePcr:deriveLiveThreeIndexPcr,chooseIndex:(symbol:string)=>{atmSelected=symbol;$('op-atm-index').value=symbol;paintAtm(atmLast);}
+ }):null;
  // PR3: reuse the strict three-index full-PCR verifier; render from the existing stream only.
  const paintOne=(d:any)=>{
   if(!oneStatus||!oneRows)return;
   const connected=freshEnvelope(d);oneState=String(d?.connectionState||'');
   paintAtm(connected?d:null); // stale source revokes ATM and summary together
   const snap=d?.snapshot;
-  if(!connected){const closed=oneState==='MARKET_CLOSED';setText(oneStatus,closed?'MARKET CLOSED · Open recorded ladder for saved observations':'LIVE unavailable · '+String(d?.connectionState||'stale source'));
+  if(!connected){oneShot?.update(d);const closed=oneState==='MARKET_CLOSED';setText(oneStatus,closed?'MARKET CLOSED · Open recorded ladder for saved observations':'LIVE unavailable · '+String(d?.connectionState||'stale source'));
    setHtml(oneRows,closed?'<tr><td colspan="8">Market closed · saved observations are available through Open recorded ladder.</td></tr>':'<tr><td colspan="8">No fresh verified Kite snapshot · values withheld</td></tr>');oneLast=0;return;}
-  if(Date.now()-oneLast<500)return;oneLast=Date.now();
+  if(Date.now()-oneLast<500)return;oneLast=Date.now();oneShot?.update(d);
   const finite=(v:any)=>typeof v==='number'&&Number.isFinite(v);
   const verified=(q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>
    freshQuote(d,q,role,symbol,expiry,side,strike);
@@ -380,9 +395,9 @@ export function installDashboardWorkspace(api:any){
   const action=e.target.closest?.('[data-op-one]')?.dataset?.opOne;
   let target:any=null;
   if(action==='LIVE'){$('mb-tools').open=true;$('op-feed-detail').open=true;target=$('op-feed-detail');}
-  else if(action==='LADDER'){openChapter(7);premium?.openLadder({source:'LIVE'});target=$('op-premium-workspace');}
-  else if(action==='RECORDED'){openChapter(7);premium?.openLadder({source:'RECORDED'});target=$('op-premium-workspace');}
-  else if(action==='MULTIDAY'){openChapter(7);premium?.openLadder({source:'RECORDED'});target=$('mi-shell');if(target)target.open=true;}
+  else if(action==='LADDER'){openChapter(7);premium?.openLadder({source:'LIVE',symbol:atmSelected});target=$('op-premium-workspace');}
+  else if(action==='RECORDED'){openChapter(7);premium?.openLadder({source:'RECORDED',symbol:atmSelected});target=$('op-premium-workspace');}
+  else if(action==='MULTIDAY'){openChapter(7);premium?.openLadder({source:'RECORDED',symbol:atmSelected});target=$('mi-shell');if(target)target.open=true;}
   else if(action==='RAG'){$('mb-tools').open=true;target=$('rag-evidence-card');if(target)target.open=true;}
   if(target&&typeof target.scrollIntoView==='function')target.scrollIntoView({block:'start',behavior:'auto'});
  };
@@ -407,5 +422,5 @@ export function installDashboardWorkspace(api:any){
   }).join('');
   setHtml($('op-workspace-ticker'),tickerHtml);
  }) as EventListener);
- return {render(){if(active!==api.page())draw();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
+ return {render(){if(active!==api.page())draw();oneShot?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
 }

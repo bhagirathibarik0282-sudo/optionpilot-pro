@@ -8,6 +8,17 @@ const symbols=['NIFTY','SENSEX','BANKNIFTY'],expiries=['2026-10-20','2026-10-22'
 function fixture(offset=0,values=[1,1.2,1.4],periodMs=60000){
  const at=iso(start+offset);return {connected:true,source:'KITE_WEBSOCKET_FULL',serverTime:at,snapshot:{runtimeId:'test-runtime',tradeDate:'2026-10-16',asOf:at,indices:symbols.map((symbol,i)=>({symbol,expiry:expiries[i],expiries:[expiries[i]]}))},pcrDisplay:Object.fromEntries(symbols.map((s,i)=>[s,{source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'COMPLETE',expiry:expiries[i],periodMs,cycleStartedAt:at,checkedAt:at,sourceMinAt:at,sourceMaxAt:at,fullPcr:values[i],ceTotal:1000,peTotal:values[i]*1000,coverage:{complete:true,expected:100,freshOi:100,sourceSkewMs:0}}]))} as any;
 }
+test('incomplete PCR explains actual coverage without inventing a ratio or retaining stale diagnostics',()=>{
+ const p=fixture();delete p.pcrDisplay.NIFTY;
+ p.snapshot.indices[0].pcrSnapshot={source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'INCOMPLETE',checkedAt:iso(start),coverage:{expected:208,freshOi:201,stale:7,missing:0,invalid:0}};
+ const v=derive(p);assert.equal(v.rows[0].value,null);assert.equal(v.rows[0].direction,'WAIT');
+ const untouched=fixture();assert.equal(derive(untouched).rows[0].value,1,'diagnostics cannot gate an otherwise valid PCR');
+ assert(render(v).includes('OI 201/208 · stale 7 · missing 0 · invalid 0'));
+ assert(render(v).includes('checked 09:30:00 IST'));
+ for(const mutate of [(p:any)=>p.connected=false,(p:any)=>p.snapshot.indices[0].pcrSnapshot.source='UNKNOWN',(p:any)=>p.snapshot.indices[0].pcrSnapshot.checkedAt=iso(start-90001),(p:any)=>p.snapshot.indices[0].pcrSnapshot.checkedAt=iso(start+1),(p:any)=>p.snapshot.indices[0].pcrSnapshot.coverage.stale=-1,(p:any)=>p.snapshot.indices[0].pcrSnapshot.expiry='WRONG',(p:any)=>p.snapshot.indices.push({...p.snapshot.indices[0]})]){
+  const x=structuredClone(p);mutate(x);assert.equal((derive(x).rows[0] as any).coverageInfo,null);assert(!render(derive(x)).includes('OI 201/208'));
+ }
+});
 test('all three exact-expiry full PCR values require two qualified cycles for arrows and alignment',()=>{
  const first=derive(fixture(),null,100);assert.equal(first.alignment,'WAIT');assert(first.rows.every(r=>r.direction==='WAIT'&&r.current&&r.blinkUntil===0));
  const p=fixture(60000,[1.1,1.3,1.5]),before=structuredClone(p);const next=derive(p,first,200);assert.equal(next.alignment,'ALL_UP');assert(next.rows.every(r=>r.direction==='UP'&&r.blinkUntil===2000));assert.deepEqual(p,before);

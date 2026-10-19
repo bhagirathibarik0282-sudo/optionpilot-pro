@@ -1,5 +1,5 @@
 import { installPremiumWorkspace } from './premium-workspace-view.js';
-export const WORKSPACE_NAV_HTML=`<aside id="op-workspace-nav" aria-label="Dashboard chapters"><div class="op-rail-inner"><a class="op-logo" href="/">OP<span>OptionPilot <b>PRO</b></span></a><div class="op-rail-label">YOUR MARKET WORKSPACE</div><div id="op-chapter-links"></div><details id="op-customize"><summary>＋ Choose my chapters</summary><div id="op-chapter-options"></div><button id="op-show-chapters" type="button">Show all chapters</button></details><div class="op-rail-foot">NIFTY · SENSEX<br><span>BANKNIFTY · monthly observation</span></div></div></aside><div id="op-workspace-top"><strong>OptionPilot</strong><div id="op-workspace-feed" role="status">Connecting to market feed</div></div>`;
+export const WORKSPACE_NAV_HTML=`<aside id="op-workspace-nav" aria-label="Dashboard chapters"><div class="op-rail-inner"><a class="op-logo" href="/">OP<span>OptionPilot <b>PRO</b></span></a><div class="op-rail-label">YOUR MARKET WORKSPACE</div><div id="op-chapter-links"></div><details id="op-customize"><summary>＋ Choose my chapters</summary><div id="op-chapter-options"></div><button id="op-show-chapters" type="button">Show all chapters</button></details><div class="op-rail-foot">NIFTY · SENSEX<br><span>BANKNIFTY · monthly observation</span></div></div></aside><div id="op-workspace-top"><strong>OptionPilot</strong><div id="op-workspace-feed" role="status">Connecting to market feed</div><section id="op-one-stop" aria-label="One-stop market evidence"><div class="op-one-title"><div><span class="op-kicker">ONE CARD / ONE STOP</span><h2>Market command card</h2></div><div id="op-one-status" role="status" aria-live="polite">Waiting for connected live evidence</div></div><div id="op-one-actions" role="group" aria-label="Open existing market tools"><button type="button" data-op-one="LIVE">Live detail</button><button type="button" data-op-one="LADDER">CE / PE ladder</button><button type="button" data-op-one="MULTIDAY">Multi-day research</button><button type="button" data-op-one="RAG">Ask RAG</button></div><div class="op-one-scroll"><table aria-label="Verified latest Kite market readings"><thead><tr><th>Index / expiry</th><th>Spot</th><th>Future</th><th>CE ₹</th><th>PE ₹</th><th>Full PCR</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody id="op-one-rows"><tr><td colspan="8">Waiting for actual Kite stream · unavailable is not zero</td></tr></tbody></table></div><p class="op-one-note">One shared stream; exact expiry and source timestamps. PCR and wall values appear only for a complete, current full-chain snapshot. BANKNIFTY = monthly observation. Read-only evidence, not a trading signal.</p></section></div>`;
 
 export const WORKSPACE_TICKER_HTML=`<details id="op-ticker-tools"><summary>Market ticker</summary><div id="op-workspace-ticker" aria-label="Market snapshot"></div></details>`;
 
@@ -25,6 +25,21 @@ body[data-op-workspace] #mb-page>.mb-reading-guide{margin:0 0 12px}body[data-op-
 @media(max-width:900px){body[data-op-workspace] #market-book{padding:16px}#op-workspace-nav{position:static;width:auto;padding:0;background:none;border:0;border-radius:0}.op-rail-inner{position:static}.op-logo,.op-rail-label,.op-rail-foot{display:none}#op-chapter-links{display:flex;overflow-x:auto;gap:6px;padding-bottom:10px;scrollbar-width:thin}#market-book #op-chapter-links button{width:auto;flex:0 0 auto;padding:10px 12px;font-size:15px;min-height:44px}#op-customize{margin:0 0 14px;padding:5px 0;border:0}#op-chapter-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:600px){body[data-op-workspace] main{padding:6px}body[data-op-workspace] #market-book{padding:12px;border-radius:14px}#op-workspace-top{align-items:flex-start;gap:10px}#op-workspace-feed{max-width:130px;font-size:11px;padding:7px 9px}#op-workspace-top p{font-size:12px}#op-workspace-ticker{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.op-ticker{padding:11px}.op-ticker strong{font-size:28px}#op-chapter-options{grid-template-columns:repeat(2,minmax(0,1fr))}body[data-op-workspace] #mb-live-context-shell{display:block}}
 
+
+#op-one-stop{border:1px solid #36747a;border-radius:14px;padding:12px;background:#0c202e;margin:8px 0 12px;min-width:0}
+#op-one-stop .op-one-title{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#op-one-stop h2{font-size:21px;margin:1px 0}
+#op-one-status{font-size:12px;color:#a5cde0;max-width:380px;text-align:right}
+#op-one-actions{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}
+body[data-op-workspace] #op-one-actions button{min-height:42px;padding:7px 13px;font-size:14px;border:1px solid #447c80;background:#132f3c}
+body[data-op-workspace] #op-one-actions button:focus-visible{outline:2px solid #58e5dc}
+.op-one-scroll{overflow-x:auto;max-width:100%;border:1px solid #2a5360;border-radius:9px}
+#op-one-stop table{width:100%;min-width:810px;border-collapse:collapse;font-size:13px;white-space:nowrap}
+#op-one-stop th,#op-one-stop td{text-align:left;padding:8px 9px;border-bottom:1px solid #264758}
+#op-one-stop th{position:static;background:#123041;color:#c8e7e7}
+#op-one-stop td small{display:block;color:#9fc2d4;font-size:11px}
+#op-one-stop .op-one-note{font-size:11px;color:#a4bbca;margin:8px 0 0}
+@media(max-width:600px){#op-one-stop{padding:9px}#op-one-stop .op-one-title{display:block}#op-one-status{text-align:left;margin-top:4px}#op-one-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}body[data-op-workspace] #op-one-actions button{padding:5px;font-size:12px;min-height:44px}}
 /* One compact workspace header; optional tools never precede the chapter as separate panels. */
 body[data-op-workspace] #market-book{min-height:0}
 #op-workspace-top{margin-bottom:8px;min-height:36px}#op-workspace-top>strong{font-size:18px}
@@ -53,7 +68,53 @@ export function installDashboardWorkspace(api:any){
  $('op-show-chapters').onclick=()=>{visible=chapters.map((_,i)=>i);save();draw();};
  for(const [id,step] of [['mb-prev',-1],['mb-next',1]] as const)$(id).onclick=()=>{const at=visible.indexOf(api.page()),next=(at+step+visible.length)%visible.length;api.turn(visible[next]);};
  if(!visible.includes(api.page()))Promise.resolve().then(()=>api.turn(visible[0]));
+
+ // Reuse the already-running shared Kite stream: no new source, query, timer or snapshot.
+ const oneStatus=$('op-one-status'),oneRows=$('op-one-rows');
+ const oneFmt=(v:any,d=2)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-IN',{maximumFractionDigits:d}):'—';
+ const oneTime=(v:any)=>v&&Number.isFinite(Date.parse(v))?new Date(v).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';
+ let oneLast=0;
+ const paintOne=(d:any)=>{
+  if(!oneStatus||!oneRows)return;
+  const connected=d?.connected===true&&d?.snapshot&&Array.isArray(d.snapshot.indices);
+  if(!connected){oneStatus.textContent='LIVE unavailable · '+String(d?.connectionState||'waiting');oneRows.innerHTML='<tr><td colspan="8">No fresh Kite stream · values withheld</td></tr>';oneLast=0;return;}
+  if(Date.now()-oneLast<500)return;oneLast=Date.now();
+  const snap=d.snapshot,serverMs=Date.parse(d.serverTime||'');
+  const valid=(q:any)=>q?.state==='LIVE'&&typeof q.price==='number'&&Number.isFinite(q.price);
+  const quote=(q:any)=>valid(q)?oneFmt(q.price):'—';
+  const pcr=(a:any)=>{
+   const p=d.pcrDisplay?.[a.symbol],at=Date.parse(p?.checkedAt||'');
+   return p&&p.expiry===a.expiry&&p.coverage?.complete===true&&p.coverage?.expected>0&&
+    Number.isFinite(serverMs)&&Number.isFinite(at)&&at<=serverMs&&serverMs-at<=(p.periodMs||60000)+30000&&
+    typeof p.fullPcr==='number'&&Number.isFinite(p.fullPcr)?p:null;
+  };
+  const order=['NIFTY','SENSEX','BANKNIFTY'];
+  oneRows.innerHTML=order.map(symbol=>{
+   const a=snap.indices.find((r:any)=>r.symbol===symbol),p=a?pcr(a):null;
+   if(!a)return '<tr><th scope="row">'+symbol+'</th><td colspan="7">Not supplied</td></tr>';
+   const c=(q:any)=>'<td>'+quote(q)+'</td>';
+   const ceStrike=a.ce?.identity?.strike,peStrike=a.pe?.identity?.strike;
+   return '<tr><th scope="row">'+symbol+'<small>'+esc(a.expiry||'Expiry unavailable')+'</small></th>'+
+    c(a.spot)+c(a.future)+
+    '<td>'+quote(a.ce)+'<small>CE '+oneFmt(ceStrike,0)+'</small></td>'+
+    '<td>'+quote(a.pe)+'<small>PE '+oneFmt(peStrike,0)+'</small></td>'+
+    '<td>'+(p?oneFmt(p.fullPcr,4):'—')+'<small>'+(p?'checked '+oneTime(p.checkedAt):'Incomplete / stale OI')+'</small></td>'+
+    '<td>'+(p?oneFmt(p.callWall?.strike,0):'—')+'</td>'+
+    '<td>'+(p?oneFmt(p.putWall?.strike,0):'—')+'</td></tr>';
+  }).join('');
+  oneStatus.textContent='Kite stream · '+oneTime(d.serverTime)+' IST · India VIX '+(valid(snap.vix)?oneFmt(snap.vix.price):'—')+' · — means unavailable';
+ };
+ const oneActions=$('op-one-actions');
+ if(oneActions)oneActions.onclick=(e:any)=>{
+  const action=e.target.closest?.('[data-op-one]')?.dataset?.opOne;
+  let target:any=null;
+  if(action==='LIVE'){$('mb-tools').open=true;$('op-feed-detail').open=true;target=$('op-feed-detail');}
+  else if(action==='LADDER'){api.turn(7);premium?.openLadder({source:'LIVE'});target=$('op-premium-workspace');}
+  else if(action==='MULTIDAY'){api.turn(7);premium?.openLadder({source:'RECORDED'});target=$('mi-shell');if(target)target.open=true;}
+  else if(action==='RAG'){$('mb-tools').open=true;target=$('rag-evidence-card');if(target)target.open=true;}
+  if(target&&typeof target.scrollIntoView==='function')target.scrollIntoView({block:'start',behavior:'auto'});
+ };
  let lastTicker=0;
- window.addEventListener('optionpilot:live-context',((e:any)=>{const d=e.detail,on=d?.connected&&d?.snapshot;$('op-workspace-feed').textContent=on?'● LIVE · Kite':String(d?.connectionState||'OFFLINE').replaceAll('_',' ');$('op-workspace-feed').classList.toggle('op-feed-on',!!on);if(Date.now()-lastTicker<250&&on)return;lastTicker=Date.now();const fmt=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-IN',{maximumFractionDigits:2}):'—',time=(v:any)=>v?new Date(v).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false}):'—';const quotes=[...(d?.snapshot?.indices||[]).map((r:any)=>({label:r.symbol,q:r.spot})),{label:'INDIA VIX',q:d?.snapshot?.vix}];$('op-workspace-ticker').innerHTML=quotes.map((r:any)=>'<div class="op-ticker"><span>'+esc(r.label)+'</span><strong>'+fmt(on?r.q?.price:null)+'</strong><small class="'+(on&&r.q?.changePct>0?'op-positive':on&&r.q?.changePct<0?'op-negative':'')+'">'+(on&&typeof r.q?.changePct==='number'?fmt(r.q.changePct)+'%':'—')+' · '+esc(time(r.q?.observedAt))+'</small></div>').join('');}) as EventListener);
+ window.addEventListener('optionpilot:live-context',((e:any)=>{const d=e.detail,on=d?.connected&&d?.snapshot;paintOne(d);$('op-workspace-feed').textContent=on?'● LIVE · Kite':String(d?.connectionState||'OFFLINE').replaceAll('_',' ');$('op-workspace-feed').classList.toggle('op-feed-on',!!on);if(Date.now()-lastTicker<250&&on)return;lastTicker=Date.now();const fmt=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('en-IN',{maximumFractionDigits:2}):'—',time=(v:any)=>v?new Date(v).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false}):'—';const quotes=[...(d?.snapshot?.indices||[]).map((r:any)=>({label:r.symbol,q:r.spot})),{label:'INDIA VIX',q:d?.snapshot?.vix}];$('op-workspace-ticker').innerHTML=quotes.map((r:any)=>'<div class="op-ticker"><span>'+esc(r.label)+'</span><strong>'+fmt(on?r.q?.price:null)+'</strong><small class="'+(on&&r.q?.changePct>0?'op-positive':on&&r.q?.changePct<0?'op-negative':'')+'">'+(on&&typeof r.q?.changePct==='number'?fmt(r.q.changePct)+'%':'—')+' · '+esc(time(r.q?.observedAt))+'</small></div>').join('');}) as EventListener);
  return {render(){if(active!==api.page())draw();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
 }

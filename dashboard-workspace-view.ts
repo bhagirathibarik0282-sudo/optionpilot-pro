@@ -1,5 +1,5 @@
 import { installPremiumWorkspace } from './premium-workspace-view.js';
-export const WORKSPACE_NAV_HTML=`<aside id="op-workspace-nav" aria-label="Dashboard chapters"><div class="op-rail-inner"><a class="op-logo" href="/">OP<span>OptionPilot <b>PRO</b></span></a><div class="op-rail-label">YOUR MARKET WORKSPACE</div><div id="op-chapter-links"></div><details id="op-customize"><summary>＋ Choose my chapters</summary><div id="op-chapter-options"></div><button id="op-show-chapters" type="button">Show all chapters</button></details><div class="op-rail-foot">NIFTY · SENSEX<br><span>BANKNIFTY · monthly observation</span></div></div></aside><div id="op-workspace-top"><strong>OptionPilot</strong><div id="op-workspace-feed" role="status">Connecting to market feed</div></div><section id="op-one-stop" aria-label="One-stop market evidence"><div class="op-one-title"><div><span class="op-kicker">ONE CARD / ONE STOP</span><h2>Market command card</h2></div><div id="op-one-status" role="status" aria-live="polite">Waiting for connected live evidence</div></div><div id="op-one-actions" role="group" aria-label="Open existing market tools"><button type="button" data-op-one="LIVE">Live detail</button><button type="button" data-op-one="LADDER">CE / PE ladder</button><button type="button" data-op-one="MULTIDAY">Multi-day research</button><button type="button" data-op-one="RAG">Ask RAG</button></div><div class="op-one-scroll"><table aria-label="Verified latest Kite market readings"><thead><tr><th>Index / expiry</th><th>Spot</th><th>Future</th><th>CE ₹</th><th>PE ₹</th><th>Full PCR</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody id="op-one-rows"><tr><td colspan="8">Waiting for actual Kite stream · unavailable is not zero</td></tr></tbody></table></div><section id="op-atm-weeklies" aria-label="ATM CE and PE by expiry date"><div class="op-atm-head"><div><strong>ATM CE × ATM PE · expiry by expiry</strong><small>Actual listed expiry dates — not DTE 0–4</small></div><div class="op-atm-settings"><label>Index <select id="op-atm-index" aria-label="ATM ladder index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><div id="op-atm-modes" role="group" aria-label="ATM CE PE display"><button type="button" data-atm-mode="BOTH" aria-pressed="true">CE + PE</button><button type="button" data-atm-mode="CE" aria-pressed="false">CE only</button><button type="button" data-atm-mode="PE" aria-pressed="false">PE only</button></div></div></div><div id="op-atm-levels" role="group" aria-label="Premium PDH PDL and FIB controls"><button data-atm-level="PDL" type="button" aria-pressed="true">↓ PDL</button><button data-atm-level="PDH" type="button" aria-pressed="false">↑ PDH</button><button data-atm-level="FIB" type="button" aria-pressed="false">FIB R3–S3 ↗</button><small id="op-atm-level-note">Exact-contract recorded PDH / PDL only. FIB opens existing sourced ladder.</small></div><div id="op-atm-status" role="status">Awaiting exact expiry inventory</div><div id="op-atm-pairs" class="op-atm-columns"><p>Waiting for fresh subscribed options.</p></div><p class="op-one-note">ATM strike is selected separately for each exact expiry from available matched CE/PE strikes. Not every calendar week is guaranteed in the Kite subscription. BANKNIFTY remains monthly observation.</p></section><p class="op-one-note">One shared stream; exact expiry and source timestamps. PCR and wall values appear only for a complete, current full-chain snapshot. BANKNIFTY = monthly observation. Read-only evidence, not a trading signal.</p></section>`;
+export const WORKSPACE_NAV_HTML=`<aside id="op-workspace-nav" aria-label="Dashboard chapters"><div class="op-rail-inner"><a class="op-logo" href="/">OP<span>OptionPilot <b>PRO</b></span></a><div class="op-rail-label">YOUR MARKET WORKSPACE</div><div id="op-chapter-links"></div><details id="op-customize"><summary>＋ Choose my chapters</summary><div id="op-chapter-options"></div><button id="op-show-chapters" type="button">Show all chapters</button></details><div class="op-rail-foot">NIFTY · SENSEX<br><span>BANKNIFTY · monthly observation</span></div></div></aside><div id="op-workspace-top"><strong>OptionPilot</strong><div id="op-workspace-feed" role="status">Connecting to market feed</div></div><section id="op-one-stop" aria-label="One-stop market evidence"><div class="op-one-title"><div><span class="op-kicker">ONE CARD / ONE STOP</span><h2>Market command card</h2></div><div id="op-one-status" role="status" aria-live="polite">Waiting for connected live evidence</div></div><div id="op-one-actions" role="group" aria-label="Open existing market tools"><button type="button" data-op-one="LIVE">Live detail</button><button type="button" data-op-one="LADDER">CE / PE ladder</button><button type="button" data-op-one="MULTIDAY">Multi-day research</button><button type="button" data-op-one="RAG">Ask RAG</button></div><div class="op-one-scroll"><table aria-label="Verified latest Kite market readings"><thead><tr><th>Index / expiry</th><th>Spot</th><th>Future</th><th>CE ₹</th><th>PE ₹</th><th>Full PCR</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody id="op-one-rows"><tr><td colspan="8">Waiting for actual Kite stream · unavailable is not zero</td></tr></tbody></table></div><section id="op-atm-weeklies" aria-label="ATM CE and PE by expiry date"><div class="op-atm-head"><div><strong>ATM CE × ATM PE · expiry by expiry</strong><small>Actual listed expiry dates — not DTE 0–4</small></div><div class="op-atm-settings"><label>Index <select id="op-atm-index" aria-label="ATM ladder index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><div id="op-atm-modes" role="group" aria-label="ATM CE PE display"><button type="button" data-atm-mode="BOTH" aria-pressed="true">CE + PE</button><button type="button" data-atm-mode="CE" aria-pressed="false">CE only</button><button type="button" data-atm-mode="PE" aria-pressed="false">PE only</button></div></div></div><div id="op-atm-levels" role="group" aria-label="Premium PDH PDL and FIB controls"><button data-atm-level="PDL" type="button" aria-pressed="true">↓ PDL</button><button data-atm-level="PDH" type="button" aria-pressed="false">↑ PDH</button><button data-atm-level="FIB" type="button" aria-pressed="false">FIB R3–S3</button><button data-atm-open-fib type="button" aria-label="Open detailed FIB ladder">FIB detail ↗</button><small id="op-atm-level-note">Select multiple levels together · FIB HOLD needs verified same-contract observations.</small></div><div id="op-atm-status" role="status">Awaiting exact expiry inventory</div><div id="op-atm-pairs" class="op-atm-columns"><p>Waiting for fresh subscribed options.</p></div><p class="op-one-note">ATM strike is selected separately for each exact expiry from available matched CE/PE strikes. Not every calendar week is guaranteed in the Kite subscription. BANKNIFTY remains monthly observation.</p></section><p class="op-one-note">One shared stream; exact expiry and source timestamps. PCR and wall values appear only for a complete, current full-chain snapshot. BANKNIFTY = monthly observation. Read-only evidence, not a trading signal.</p></section>`;
 
 export const WORKSPACE_TICKER_HTML=`<details id="op-ticker-tools"><summary>Market ticker</summary><div id="op-workspace-ticker" aria-label="Market snapshot"></div></details>`;
 
@@ -54,12 +54,13 @@ body[data-op-workspace] #op-atm-modes button{font-size:12px;min-height:39px;padd
 #op-atm-levels button{border:1px solid #3b5970;border-radius:7px;font-weight:700;font-size:12px;padding:6px 10px;min-height:36px;cursor:pointer}
 #op-atm-levels button[data-atm-level=PDL]{color:#ff95a9}
 #op-atm-levels button[data-atm-level=PDH]{color:#78ebaa}
-#op-atm-levels button[data-atm-level=FIB]{color:#f3cf84}
+#op-atm-levels button[data-atm-level=FIB]{color:#f3cf84}#op-atm-levels button[data-atm-open-fib]{color:#9fb4c9}
 #op-atm-levels button[aria-pressed=true]{outline:1px solid currentColor;background:#1b3244}
 #op-atm-level-note{color:#a6baca;font-size:11px}
 #op-atm-pairs .op-atm-levelnote{color:#9cbac9;font-size:11px}
 #op-atm-pairs .op-atm-levelnote[data-level=PDH]{color:#78ebaa}
 #op-atm-pairs .op-atm-levelnote[data-level=PDL]{color:#ff95a9}
+#op-atm-pairs .op-atm-levelnote[data-level=FIB]{color:#f3cf84}
 #op-atm-pairs tr.op-atm-event-down td{background:#3b1529;color:#ffa0ae;font-weight:700;white-space:normal}
 #op-atm-pairs tr.op-atm-event-up td{background:#123929;color:#82f7ae;font-weight:700;white-space:normal}
 #op-atm-pairs tr.op-atm-event-down[data-flash=true] td{animation:opAtmRedFlash .95s ease-in-out infinite}
@@ -115,7 +116,7 @@ export function installDashboardWorkspace(api:any){
  // Exact-calendar-expiry ATM pairs; old source context is never used after disconnect.
  let atmSelected='NIFTY',atmMode:'BOTH'|'CE'|'PE'='BOTH',atmLast:any=null;
  const atmPairs=$('op-atm-pairs'),atmStatus=$('op-atm-status');
- const atmEvents=new Map<string,{kind:'PDH'|'PDL';at:string;openHigh:boolean;level:number}>(),atmPrevious=new Map<string,{price:number;at:string;pdh:number|null;pdl:number|null}>();let atmSession='',atmLevel:'PDH'|'PDL'='PDL';
+ const atmEvents=new Map<string,{kind:'PDH'|'PDL';at:string;openHigh:boolean;level:number}>(),atmPrevious=new Map<string,{price:number;at:string;pdh:number|null;pdl:number|null}>();let atmSession='';const atmLayers=new Set<string>(['PDL']);
  const atmLevelNote=$('op-atm-level-note');
  // Existing recorded references are selected by exact contract, same session and TRUE provenance.
  // Never derive PDH/PDL from Kite's current-day OHLC or a different strike/expiry.
@@ -182,18 +183,33 @@ export function installDashboardWorkspace(api:any){
   const safe=rows.filter((r:any)=>/^\d{4}-\d{2}-\d{2}$/.test(r?.expiry||'')&&
     r.expiry>=snap.tradeDate&&Number.isFinite(r.strike)&&r.strike>0).sort((a:any,b:any)=>a.expiry.localeCompare(b.expiry));
   const sides=(atmMode==='BOTH'?['CE','PE']:[atmMode]) as ('CE'|'PE')[];
+  const session=api.getState?.(),recordedToday=session?.date===snap.tradeDate;
   const card=(side:'CE'|'PE')=>'<article class="op-atm-side" data-atm-side="'+side+'"><h3>ATM '+side+' · '+esc(atmSelected)+'</h3>'+
     '<table><thead><tr><th>Expiry</th><th>ATM strike</th><th>LTP ₹ / time</th></tr></thead><tbody>'+
     safe.map((r:any)=>{
      const q=r[side.toLowerCase()],v=atmPrice(q,atmSelected,r.expiry,r.strike,side,serverMs),isLive=v.value!=='—';
      const ref=isLive?atmReference(atmSelected,r.expiry,r.strike,side,snap.tradeDate,q.observedAt):{pdh:null,pdl:null};
      const event=isLive?atmObservedEvent(atmSelected,r.expiry,r.strike,side,q,ref,serverMs,snap.tradeDate):null;
-     const level=atmLevel==='PDH'?ref.pdh:ref.pdl,price=isLive?q.price:null;
-     const position=price===null||level===null?'':price>level?'↑ above':price<level?'↓ below':'at';
-     const note='<small class="op-atm-levelnote" data-level="'+atmLevel+'">'+atmLevel+' '+(level===null?'— / source unavailable':'₹'+oneFmt(level)+' · '+position)+'</small>';
+     const price=isLive?q.price:null;
+     const notes=(['PDH','PDL'] as const).filter(level=>atmLayers.has(level)).map(level=>{
+      const value=ref[level.toLowerCase() as 'pdh'|'pdl'];
+      const position=price===null||value===null?'':price>value?'↑ above':price<value?'↓ below':'at';
+      return '<small class="op-atm-levelnote" data-level="'+level+'">'+level+' '+(value===null?'— / source unavailable':'₹'+oneFmt(value)+' · '+position)+'</small>';
+     });
+     if(atmLayers.has('FIB')){
+      const fib=isLive&&recordedToday?deriveAtmFibHold({symbol:atmSelected,expiry:r.expiry,strike:r.strike,side,
+       tradeDate:snap.tradeDate,price:q.price,quoteAt:q.observedAt,prior:session?.baseline?.[atmSelected]?.options,
+       observed:session?.current?.[atmSelected]?.options}):null;
+      const held=fib?.observedHold,near=fib?.nearest;
+      const fibText=held?'FIB '+held.name+' ₹'+oneFmt(held.value)+' · '+held.kind+' RETEST HOLD ('+held.observations+
+       ' saved samples) · confirmed '+oneTime(held.confirmedAt)+' IST':
+       near?'FIB nearest '+near.name+' ₹'+oneFmt(near.value)+' · '+near.position+' · HOLD unconfirmed':'FIB — source unavailable';
+      notes.push('<small class="op-atm-levelnote" data-level="FIB">'+esc(fibText)+
+       (fib?.sourceAt?'<small>Previous exact-contract close '+oneTime(fib.sourceAt)+' IST · sampled, not candle-confirmed</small>':'')+'</small>');
+     }
      const dayOpenHigh=isLive&&typeof q.dayOpen==='number'&&q.dayOpen>0&&typeof q.dayHigh==='number'&&Math.abs(q.dayOpen-q.dayHigh)<.000001;
      const [yy,mm,dd]=r.expiry.split('-');
-     const main='<tr><td title="'+esc(r.expiry)+'">'+dd+'/'+mm+'/'+yy.slice(2)+'</td><td>'+oneFmt(r.strike,0)+'</td><td><strong>'+esc(v.value)+'</strong><small>'+esc(v.time)+'</small>'+note+(dayOpenHigh?'<small>DAY O=H ✓</small>':'')+'</td></tr>';
+     const main='<tr><td title="'+esc(r.expiry)+'">'+dd+'/'+mm+'/'+yy.slice(2)+'</td><td>'+oneFmt(r.strike,0)+'</td><td><strong>'+esc(v.value)+'</strong><small>'+esc(v.time)+'</small>'+notes.join('')+(dayOpenHigh?'<small>DAY O=H ✓</small>':'')+'</td></tr>';
      if(!event)return main;
      const down=event.kind==='PDL',direction=down?'↓':'↑',stamp=oneTime(event.at);
      const ohlc=down&&event.openHigh?'DAY O=H + ':'';
@@ -205,14 +221,16 @@ export function installDashboardWorkspace(api:any){
   atmStatus.textContent=safe.length+' available expiry date(s) · Spot '+oneFmt(spot.price)+' · '+oneTime(d.serverTime)+' IST'+(missing?' · '+missing+' other expiry inventories omitted':'');
  };
  $('op-atm-levels').onclick=(e:any)=>{
-  const level=e.target.closest?.('[data-atm-level]')?.dataset?.atmLevel;
-  if(!['PDH','PDL','FIB'].includes(level))return;
-  if(level==='FIB'){atmLevelNote.textContent='FIB uses the existing sourced exact-contract Daily R3–S3 ladder. HOLD not confirmed.';
+  if(e.target.closest?.('[data-atm-open-fib]')){
    api.turn(7);premium?.openLadder({source:'LIVE',symbol:atmSelected,metric:'fib'});
    const target=$('op-premium-workspace');if(target&&typeof target.scrollIntoView==='function')target.scrollIntoView({block:'start',behavior:'auto'});return;
   }
-  atmLevel=level;atmLevelNote.textContent=level+' from TRUE recorded exact-contract references. Break times are first observed Kite timestamps.';
-  $('op-atm-levels').querySelectorAll('[data-atm-level]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.atmLevel===level)));
+  const level=e.target.closest?.('[data-atm-level]')?.dataset?.atmLevel;
+  if(!['PDH','PDL','FIB'].includes(level))return;
+  if(atmLayers.has(level))atmLayers.delete(level);else atmLayers.add(level);
+  atmLevelNote.textContent='Combined '+(['PDH','PDL','FIB'].filter(v=>atmLayers.has(v)).join(' + ')||'No level')+
+   ' · FIB shows sourced nearest / observed retest only · not a trading signal';
+  $('op-atm-levels').querySelectorAll('[data-atm-level]').forEach((b:any)=>b.setAttribute('aria-pressed',String(atmLayers.has(b.dataset.atmLevel))));
   paintAtm(atmLast);
  };
  $('op-atm-index').onchange=(e:any)=>{if(!['NIFTY','SENSEX','BANKNIFTY'].includes(e.target.value))return;atmSelected=e.target.value;paintAtm(atmLast);};

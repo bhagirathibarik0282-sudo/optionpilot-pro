@@ -79,3 +79,31 @@ test('band ATM reader reuses the exact existing spot cache and cannot refresh a 
  const store=fixture(),before=store.revision();assert.deepEqual(store.spotQuote('NIFTY',now),store.snapshot(now).indices[0].spot);assert.equal(store.revision(),before);
  assert.equal(store.spotQuote('NIFTY',now+31000).price,null);assert.equal(store.spotQuote('SENSEX',now).price,null);assert.equal(store.revision(),before);
 });
+
+test('one ATM CE/PE pair per actual listed expiry; never treat expiry dates as numbered DTE rows',()=>{
+ const other='2026-10-26';
+ const extra:LiveEntry[]=[21900,22100].flatMap((strike,i)=>[
+  {token:200+i, label:'NIFTY'+other+strike+'CE',symbol:'NIFTY' as const,role:'OPTION' as const,expiry:other,strike,side:'CE' as const},
+  {token:210+i, label:'NIFTY'+other+strike+'PE',symbol:'NIFTY' as const,role:'OPTION' as const,expiry:other,strike,side:'PE' as const}
+ ]);
+ const all=[...entries,...extra],store=new DashboardLiveStore({entries:all,missing:[],omittedExpiries:[],date});
+ store.ingest(all.map(e=>packet(e.token)),at);
+ const view=store.snapshot(now,{NIFTY:{expiry:other,strike:22100}});
+ const ladder=view.atmExpiryLadder.find(g=>g.symbol==='NIFTY')!;
+ assert.deepEqual(ladder.rows.map(r=>r.expiry),[expiry,other]);
+ assert.deepEqual(ladder.rows.map(r=>r.strike),[22000,22100]);
+ assert(ladder.rows.every(r=>r.ce?.identity?.expiry===r.expiry&&r.pe?.identity?.expiry===r.expiry));
+ assert(ladder.rows.every(r=>r.ce?.identity?.strike===r.strike&&r.pe?.identity?.strike===r.strike));
+ assert(ladder.rows.every(r=>r.ce?.price===100&&r.pe?.price===100));
+ assert(ladder.rows.every(r=>!('dte' in r)),'display identity is exact expiry, not a guessed weekly DTE');
+ assert.equal(view.indices[0].expiry,other,'selected single-expiry chart remains separate');
+ const old=store.snapshot(now+31000).atmExpiryLadder[0].rows;
+ assert(old.every(r=>r.strike===null&&r.ce===null&&r.pe===null),'stale spot cannot select an ATM strike');
+});
+test('no invented opposite premium or ATM strike without an exact same-expiry paired strike',()=>{
+ const solo:LiveEntry={token:250,label:'CE unmatched',symbol:'NIFTY',role:'OPTION',expiry:'2026-11-02',side:'CE',strike:22200};
+ const store=new DashboardLiveStore({entries:[...entries,solo],missing:[],omittedExpiries:[],date});
+ store.ingest([...entries,solo].map(e=>packet(e.token)),at);
+ const row=store.snapshot(now).atmExpiryLadder[0].rows.find(r=>r.expiry===solo.expiry)!;
+ assert.equal(row.strike,null);assert.equal(row.ce,null);assert.equal(row.pe,null);
+});

@@ -31,9 +31,23 @@ test("allows only research-eligible same snapshot quotes and rejects duplicated 
     joined("09:48"), joined("09:48")];
   const out = qualifySpreadRows(rows);
   assert.equal(out.observedBuckets, 5);
-  assert.equal(out.excludedBuckets, 4);
+  assert.equal(out.excludedBuckets, 3);
+  assert.equal(out.diagnosticBuckets, 1);
+  assert.equal(out.contextPoints.length, 2);
   assert.equal(out.points.length, 1);
   assert.equal(out.points[0].gap, 10);
+});
+test("diagnostic context retains crossovers that strict research eligibility must omit", () => {
+  const rows = [joined("11:32", { diagnostic: true }), joined("11:33")];
+  rows[0].ce_ltp = 116.95;
+  rows[1].ce_ltp = 99.05;
+  const out = qualifySpreadRows(rows);
+  assert.equal(out.points.length, 1);
+  assert.equal(out.contextPoints.length, 2);
+  const all = evaluateSpreadTheory(out.contextPoints, 1);
+  const strict = evaluateSpreadTheory(out.points, 1);
+  assert.equal(all.crossovers.total, 1);
+  assert.equal(strict.crossovers.total, 0);
 });
 test("exact cadence: a missing 3m bucket cannot imply momentum or crossover", () => {
   const result = evaluateSpreadTheory([

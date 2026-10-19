@@ -153,6 +153,7 @@ test('PR6 resumes exactly once after hidden/pagehide, still replaces stale and u
  assert.equal(h.streams.length,n+1,'explicit selection still forces reconnect');
  assert(selected.closed);
  const replacement=h.streams.at(-1);
+ h.tick();h.emit(); // The existing 4-second watchdog measures from a received packet.
  h.advance(5000);h.timers[0]();
  assert(replacement.closed,'silent stale stream replaced, not reused');
  assert.equal(h.streams.length,n+2);

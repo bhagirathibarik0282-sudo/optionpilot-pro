@@ -4,10 +4,33 @@ import type { KiteInstrumentMasterRow } from '../kite-immediate-registry-builder
 import type { KiteDecodedPacket } from '../kite-websocket-binary-decoder.js';
 import { Hono } from 'hono';import { mountDashboardLiveRoutes } from '../dashboard-live-http.js';
 import { KiteWebSocketTransport,registerKiteTickObserver } from '../kite-websocket-transport.js';
+import { deriveDashboardModelDelta } from '../dashboard-model-delta.js';
 const date='2026-10-16',at='2026-10-16T04:30:00.000Z',now=Date.parse(at),expiry='2026-10-19';
 const entries:LiveEntry[]=[{token:1,label:'NIFTY 50',symbol:'NIFTY',role:'SPOT'},{token:2,label:'FUT',symbol:'NIFTY',role:'FUTURE',expiry:'2026-10-27'},...['CE','PE'].flatMap((side,i)=>[22000,22100].map((strike,j)=>({token:10+i*2+j,label:side+strike,symbol:'NIFTY' as const,role:'OPTION' as const,expiry,strike,side:side as 'CE'|'PE'})))];
 function packet(token:number,extra:Partial<KiteDecodedPacket>={}):KiteDecodedPacket{return {mode:'full',isIndex:token===1,instrumentToken:token,lastPrice:token===1?22005:token===2?22015:100,exchangeTimestamp:at,oi:100,close:90,...extra};}
 function fixture(){const store=new DashboardLiveStore({entries,missing:[],omittedExpiries:[],date});store.ingest(entries.map(e=>packet(e.token)),at);return store;}
+test('opt-in Model Delta reuses exact cached full packets and never changes the default feed',()=>{
+ const store=fixture(),normal=store.premiums(now,{view:'ladder'});assert(normal.rows.every(r=>!('modelDelta' in r)));
+ const modeled=store.premiums(now,{view:'ladder',modelDelta:true});assert(modeled.rows.some(r=>r.modelDelta?.source==='BLACK_SCHOLES_MODEL'));
+ for(const row of modeled.rows){if(!row.modelDelta)continue;assert.equal(row.modelDelta.token,row.identity!.token);assert.equal(row.modelDelta.premium,row.price);assert.equal(row.modelDelta.annualRiskFreeRate,.05);assert.equal(row.modelDelta.annualDividendYield,0);assert.equal(Math.sign(row.modelDelta.delta),row.identity!.side==='CE'?1:-1);}
+ assert.strictEqual(store.premiums(now+1,{view:'ladder',modelDelta:true}).rows[0].modelDelta,modeled.rows[0].modelDelta,'bounded same-second computation cache');
+ assert(store.premiums(now+5001,{view:'ladder',modelDelta:true}).rows.every(r=>r.modelDelta===null));
+ assert(store.premiums(now+5001,{view:'ladder',modelDelta:true}).rows.some(r=>r.price!==null),'price remains independently live');
+ const oldSpot=fixture();oldSpot.ingest(entries.filter(e=>e.role==='OPTION').map(e=>packet(e.token,{exchangeTimestamp:new Date(now+2500).toISOString()})),new Date(now+2500).toISOString());assert(oldSpot.premiums(now+2500,{view:'ladder',modelDelta:true}).rows.every(r=>r.modelDelta===null),'Spot skew >2s cannot create a model');
+});
+test('Model Delta rejects wrong identity, stale/future/partial packets, expiry and impossible premium',()=>{
+ const entry=entries[2],spotEntry=entries[0],spot=packet(1),option=packet(entry.token);
+ assert(deriveDashboardModelDelta(entry,option,at,spotEntry,spot,at,now));
+ for(const patch of [{instrumentToken:999},{mode:'quote'},{exchangeTimestamp:null},{exchangeTimestamp:new Date(now+1).toISOString()},{lastPrice:1e9}])assert.equal(deriveDashboardModelDelta(entry,{...option,...patch} as any,at,spotEntry,spot,at,now),null);
+ assert.equal(deriveDashboardModelDelta({...entry,expiry:'2026-10-15'},option,at,spotEntry,spot,at,now),null);
+ assert.equal(deriveDashboardModelDelta(entry,option,at,{...spotEntry,symbol:'SENSEX'},spot,at,now),null);
+ assert.equal(deriveDashboardModelDelta(entry,option,at,spotEntry,{...spot,isIndex:false},at,now),null);
+});
+test('model request flag is explicit, ladder-only and rejects malformed values',async()=>{
+ const app=new Hono();mountDashboardLiveRoutes(app);
+ for(const path of ['/dashboard-live/premiums?modelDelta=1','/dashboard-live/premiums?view=ladder&modelDelta=0','/dashboard-live/premiums?view=ladder&modelDelta=true'])assert.equal((await app.request(path)).status,400);
+ assert.equal((await app.request('/dashboard-live/premiums?view=ladder&modelDelta=1')).status,200);
+});
 test('full PCR and walls require the complete exact-expiry inventory; zero OI is valid',()=>{
  const s=fixture(),a=s.snapshot(now).indices[0];assert.equal(a.fullPcr,1);assert.equal(a.ceTotal,200);assert.equal(a.peTotal,200);assert.deepEqual(a.callWall?.tiedStrikes,[22000,22100]);assert.equal(a.strike,22000);assert.equal(a.futuresBasis,10);
  s.ingest([packet(12,{oi:0})],at);assert.equal(s.snapshot(now).indices[0].fullPcr,.5);

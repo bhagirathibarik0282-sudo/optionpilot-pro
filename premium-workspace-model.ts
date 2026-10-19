@@ -27,8 +27,10 @@ export function projectLivePremiumQuote(payload:any,q:any,reference:any=null,ela
  const fresh=clock.valid&&q.state==='LIVE'&&clock.now-at>=-5000&&clock.now-at<=30000&&clock.now-received>=0&&clock.now-received<=30000&&day(at)===payload.snapshot.tradeDate&&day(received)===payload.snapshot.tradeDate;
  const n=(v:any,positive=false)=>fresh&&typeof v==='number'&&Number.isFinite(v)&&(positive?v>0:v>=0)?v:null;
  const exact=reference?.truth_verdict==='TRUE'&&reference.symbol===e.symbol&&String(reference.expiry).slice(0,10)===e.expiry&&reference.strike===e.strike&&reference.option_type===e.side&&String(reference.minute_bucket).slice(0,10)===payload?.snapshot?.tradeDate;
+ const model=q.modelDelta,modelAt=Date.parse(model?.calculatedAt||''),spotAt=Date.parse(model?.spotAt||'');
+ const modelOk=fresh&&model?.source==='BLACK_SCHOLES_MODEL'&&model.token===e.token&&model.symbol===e.symbol&&model.expiry===e.expiry&&model.strike===e.strike&&model.side===e.side&&model.premium===q.price&&model.premiumAt===q.observedAt&&model.annualRiskFreeRate===.05&&model.annualDividendYield===0&&typeof model.spot==='number'&&Number.isFinite(model.spot)&&model.spot>0&&typeof model.delta==='number'&&Number.isFinite(model.delta)&&(e.side==='CE'?model.delta>0&&model.delta<=1:model.delta<0&&model.delta>=-1)&&[at,spotAt,modelAt].every(t=>Number.isFinite(t)&&day(t)===payload.snapshot.tradeDate&&clock.now-t>=0&&clock.now-t<=5000)&&Math.abs(at-spotAt)<=2000&&modelAt>=at&&modelAt>=spotAt;
  return {symbol:e.symbol,expiry:e.expiry,strike:e.strike,option_type:e.side,minute_bucket:q.observedAt||payload.serverTime,observedAt:q.observedAt||null,receivedAt:q.receivedAt||null,
-  ltp:n(q.price,true),oi:n(q.oi),pdc:n(q.pdc,true),bid:n(q.bid,true),ask:n(q.ask,true),volume:n(q.volume),iv:null,
+  ltp:n(q.price,true),oi:n(q.oi),pdc:n(q.pdc,true),bid:n(q.bid,true),ask:n(q.ask,true),volume:n(q.volume),iv:null,delta:modelOk?model.delta:null,deltaSource:modelOk?'BLACK_SCHOLES_MODEL':null,
   truth_verdict:fresh&&n(q.price,true)!==null?'TRUE':'STALE',pdh:exact?reference.pdh:null,pdl:exact?reference.pdl:null,referenceDate:exact?String(reference.minute_bucket).slice(0,10):null};
 }
 
@@ -84,7 +86,7 @@ export function derivePremiumWorkspace(input:any){
   const dte=Math.round((Date.parse(day(last.expiry)+'T00:00:00Z')-Date.parse(input.date+'T00:00:00Z'))/86400000);
   contracts.push({key,symbol:last.symbol,expiry:day(last.expiry),strike:last.strike,type:last.option_type,dte,price,change,from,fromAt:input.minutes==='DAY'?null:baseline?.minute_bucket||null,at:last.minute_bucket,observedAt:last.observedAt||last.minute_bucket,receivedAt:last.receivedAt||null,
    pdh,pdc,pdl,reaction,eventAt,eventFrom,oi:usable(last)?count(last.oi):null,oiChange:usable(last)&&baseline&&count(last.oi)!==null&&count(baseline.oi)!==null?count(last.oi)!-count(baseline.oi)!:null,iv:usable(last)?num(last.iv):null,delta:usable(last)?num(last.delta):null,gamma:usable(last)?num(last.gamma):null,theta:usable(last)?num(last.theta):null,vega:usable(last)?num(last.vega):null,volume:usable(last)?count(last.volume):null,bid:usable(last)?num(last.bid):null,ask:usable(last)?num(last.ask):null,
-   fib,fibAt:old?.minute_bucket||null,nearest,points:series.map(r=>({at:r.minute_bucket,value:usable(r)?r.ltp:null})),state:last.truth_verdict==='CONFLICT'?'CONFLICT':price===null?'UNAVAILABLE':input.live?'LIVE':'RECORDED'});
+   deltaSource:usable(last)?last.deltaSource||null:null,fib,fibAt:old?.minute_bucket||null,nearest,points:series.map(r=>({at:r.minute_bucket,value:usable(r)?r.ltp:null})),state:last.truth_verdict==='CONFLICT'?'CONFLICT':price===null?'UNAVAILABLE':input.live?'LIVE':'RECORDED'});
  });
  const f=input.filter||{};
  const nearby=(r:any)=>{if(!f.strikeScope||f.strikeScope==='ALL'||r.type==='CE'&&f.ceStrike||r.type==='PE'&&f.peStrike)return true;const spot=num(input.spots?.[r.symbol]);if(spot===null)return false;const ks=[...new Set(contracts.filter(x=>x.symbol===r.symbol&&x.expiry===r.expiry).map(x=>x.strike))].sort((a,b)=>a-b),atm=ks.reduce((a,k)=>Math.abs(k-spot)<Math.abs(a-spot)?k:a,ks[0]);return Math.abs(ks.indexOf(r.strike)-ks.indexOf(atm))<=Math.floor(Number(f.strikeScope)/2);};
@@ -105,7 +107,7 @@ export function derivePremiumDeltaPair(rows:any[],target:number,source='RECORDED
  if(!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol)||!/^\d{4}-\d{2}-\d{2}$/.test(first.expiry)||rows.some(r=>r.symbol+'|'+r.expiry!==key||r.dte!==first.dte))return empty;
  const latest=Math.max(...rows.map(r=>Date.parse(r.at)).filter(Number.isFinite));
  const identities=new Map<string,number>();for(const r of rows)identities.set(r.key,(identities.get(r.key)||0)+1);
- const usable=rows.filter(r=>identities.get(r.key)===1&&r.state===source&&validNumber(r.price)&&r.price>0&&validNumber(r.delta)&&Math.abs(r.delta)>0&&Math.abs(r.delta)<=1&&(r.type==='CE'?r.delta>0:r.type==='PE'&&r.delta<0)&&Math.abs(Math.abs(r.delta)-target)<=.050000000001&&Number.isFinite(Date.parse(r.at))&&(source==='RECORDED'?Date.parse(r.at)===latest:latest-Date.parse(r.at)<=5000));
+ const usable=rows.filter(r=>identities.get(r.key)===1&&r.state===source&&(source!=='LIVE'||r.deltaSource==='BLACK_SCHOLES_MODEL')&&validNumber(r.price)&&r.price>0&&validNumber(r.delta)&&Math.abs(r.delta)>0&&Math.abs(r.delta)<=1&&(r.type==='CE'?r.delta>0:r.type==='PE'&&r.delta<0)&&Math.abs(Math.abs(r.delta)-target)<=.050000000001&&Number.isFinite(Date.parse(r.at))&&(source==='RECORDED'?Date.parse(r.at)===latest:latest-Date.parse(r.at)<=5000));
  let best:any=null;
  for(const CE of usable.filter(r=>r.type==='CE'))for(const PE of usable.filter(r=>r.type==='PE')){
   const ceAt=Date.parse(CE.observedAt),peAt=Date.parse(PE.observedAt),gap=Math.abs(CE.delta+PE.delta);

@@ -23,6 +23,16 @@ test('rejects overnight, future, source skew, invalid OI and duplicate identitie
  assert.equal(measurePcrSnapshot([...entries,entries[0]],quotes(),date,at).fullPcr,null);
  assert.equal(measurePcrSnapshot(entries,quotes(),date,at+86400000).fullPcr,null);
 });
+test('each unavailable PCR has an exact bounded reason and diagnostics do not create a ratio',async()=>{
+ const q=quotes();delete q['NFO:OPTIONPE'];
+ assert.equal(measurePcrSnapshot(entries,q,date,at).reason,'MISSING_QUOTES');
+ const stale=quotes();stale['NFO:OPTIONPE'].timestamp='2026-10-16 09:59:00';assert.equal(measurePcrSnapshot(entries,stale,date,at).reason,'STALE_OI_TIMESTAMPS');
+ const zero=quotes();zero['NFO:OPTIONCE'].oi=0;assert.equal(measurePcrSnapshot(entries,zero,date,at).reason,'CE_OI_ZERO');
+ let now=at;const logs:any[]=[];const sampler=new DashboardPcrSampler({entries,date,missing:[],omittedExpiries:[]},{now:()=>now,active:()=>true,wait:async()=>{},fetchQuotes:async()=>q,onDiagnostic:row=>logs.push(row)});
+ await sampler.tick();assert.equal(logs.length,1);assert.equal(logs[0].rows[0].coverage.missing,1);assert.equal(sampler.read('NIFTY','2026-10-19')?.fullPcr,null);
+ now+=60000;await sampler.tick();assert.equal(logs.length,2,'freshness changed, so the reason changes from missing-only to missing/stale');
+ assert(!JSON.stringify(logs).includes('Authorization'));assert(logs.every(x=>x.rows[0].unavailable.length<=2));
+});
 test('one process polls once per minute, never overlaps, stops on account error, and invalidates old result',async()=>{
  let now=at,calls=0,active=true,fail=false,release:()=>void=()=>{};
  let pending:Promise<void>|null=new Promise(resolve=>release=resolve);

@@ -24,6 +24,14 @@ test('all three exact-expiry full PCR values require two qualified cycles for ar
  const p=fixture(60000,[1.1,1.3,1.5]),before=structuredClone(p);const next=derive(p,first,200);assert.equal(next.alignment,'ALL_UP');assert(next.rows.every(r=>r.direction==='UP'&&r.blinkUntil===2000));assert.deepEqual(p,before);
  const html=render(next,200);assert.equal((html.match(/data-pcr-index=/g)||[]).length,3);assert.equal((html.match(/class="mb-pcr-blink"/g)||[]).length,3);assert(html.includes('BANKNIFTY'));assert(html.includes(expiries[2]+' · M'));
 });
+test('PCR reasons and bounded contract examples require fresh exact-expiry proof',()=>{
+ const p=fixture();delete p.pcrDisplay.NIFTY;
+ p.snapshot.indices[0].pcrSnapshot={source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'INCOMPLETE',checkedAt:iso(start),reason:'MISSING_QUOTES',fetchState:'RATE_LIMITED',coverage:{expected:20,freshOi:15,stale:0,missing:5,invalid:0},unavailable:Array.from({length:8},(_,i)=>({identity:'NIFTY|2026-10-20|24000|'+i,reason:'MISSING'}))};
+ let row:any=derive(p).rows[0];assert.equal(row.pcrStatus,'RATE_LIMITED');assert.equal(row.value,null);assert.equal(row.coverageInfo.unavailable.length,3);
+ p.snapshot.indices[0].pcrSnapshot.fetchState='arbitrary broker text';p.snapshot.indices[0].pcrSnapshot.reason='arbitrary broker text';
+ row=derive(p).rows[0];assert.equal(row.pcrStatus,'MISSING_QUOTES');assert(!JSON.stringify(row).includes('arbitrary broker text'));
+ p.snapshot.indices[0].pcrSnapshot.expiry='2026-10-27';row=derive(p).rows[0];assert.equal(row.coverageInfo,null);assert.equal(row.pcrStatus,'WAITING_FOR_FRESH_PCR');
+});
 test('same sample does not restart blinking, later live ticks preserve finite expiry and flat never blinks',()=>{
  const first=derive(fixture(),null,0),next=derive(fixture(60000,[1.1,1.3,1.5]),first,200);
  const tick=fixture(60000,[1.1,1.3,1.5]);tick.serverTime=iso(start+60500);tick.snapshot.asOf=tick.serverTime;

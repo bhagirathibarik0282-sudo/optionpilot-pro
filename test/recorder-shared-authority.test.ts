@@ -20,7 +20,7 @@ function harness(resolve: () => Promise<any>) {
     // Both legacy paths contain a locally unexpired, superseded token.
     sessions: new Map([['old-browser', session('superseded-browser')]]),
     phase62RestoredKiteAuthority: session('superseded-cache'),
-    resolveKiteAuthoritySession: resolve,
+    resolveVerifiedKiteAuthoritySession: resolve,
     refreshMarketSnapshot: async (s: any) => { used.push(s); return { NIFTY: {}, BANKNIFTY: {}, SENSEX: {} }; },
     computeTruthReport: () => ({ overallVerdict: 'TRUE' }),
     recordH1FromRuntimeSnapshot: async (...args: any[]) => { saved.push(args); },

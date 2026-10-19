@@ -23,6 +23,7 @@ import { ensureH1DerivedSchema } from "./h1-derived-db.js";
 import { recordH1FromRuntimeSnapshot } from "./h1-runtime-bridge.js";
 import { collectH1LiveSelectorDecisions } from "./h1-live-selector-registry.js";
 import { persistKiteAuthoritySession, resolveKiteAuthoritySession, getKiteAuthorityPublicStatus, kiteSessionIdMatchesFingerprint, type KiteAuthorityResolvedSession } from "./kite-session-authority.js";
+import { resolveVerifiedKiteAuthoritySession, markKiteBrokerSessionRejected, readKiteBrokerSessionCheck, isKiteBrokerSessionRejected } from './kite-broker-session-guard.js';
 import { revokeKiteAuthoritySession } from "./kite-session-authority-revoke.js";
 import { KeyedSingleFlight, marketAuthorityKey } from "./market-refresh-singleflight.js";
 import { evaluateFuturesVwapAcceptance } from "./futures-vwap-acceptance.js";
@@ -2113,7 +2114,7 @@ async function captureRecorderSnapshot(reason: string, observationOnly = false):
     // superseded by a later login even while its local expiresAt is in the future.
     // Never fall back to either when the authority is unavailable/revoked.
     // The ephemeral object is not added to browser sessions or order authority.
-    const resolvedAuthority = await resolveKiteAuthoritySession();
+    const resolvedAuthority = await resolveVerifiedKiteAuthoritySession();
     const authority = resolvedAuthority.status.active ? resolvedAuthority.session : null;
     const activeSession: KiteSession | undefined = authority && authority.expiresAt > Date.now()
       ? {
@@ -2132,6 +2133,7 @@ async function captureRecorderSnapshot(reason: string, observationOnly = false):
         tradingDate: today,
         observedAt: new Date().toISOString(),
         reason: "KITE_AUTHORITY_UNAVAILABLE",
+        authorityStatus: resolvedAuthority.status.code,
       }).catch(() => {});
       return;
     }
@@ -5473,6 +5475,7 @@ async function fetchKiteQuote(
   symbols: string[],
   retriesLeft = 2
 ): Promise<any> {
+  if(isKiteBrokerSessionRejected(KITE_API_KEY,accessToken))return null;
   try {
     // Build query string with repeated i parameters
     const params = new URLSearchParams();
@@ -5506,6 +5509,7 @@ async function fetchKiteQuote(
 
     if (!response.ok) {
       const errorText = await response.text();
+      if(response.status===401||response.status===403)markKiteBrokerSessionRejected(KITE_API_KEY,accessToken);
       console.error(
         `[KITE] Quote fetch failed: HTTP ${response.status}`,
         `symbols: ${symbols.join(",")}`,
@@ -24243,7 +24247,7 @@ app.post("/api/kite/logout", async (c) => {
 app.get("/api/system/kite-session-authority", async (c) => {
   const session = getSession(c);
   if (!session) return c.json({ error: "UNAUTHORIZED" }, 401);
-  return c.json(await getKiteAuthorityPublicStatus());
+  return c.json({...await getKiteAuthorityPublicStatus(),brokerSession:readKiteBrokerSessionCheck()});
 });
 
 // Kite Status - Returns connection status and user info (NEVER exposes tokens)

@@ -1,11 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+const evaluate=(code:string,context:any)=>vm.runInNewContext(code,{__name:(fn:any)=>fn,...context});
 import { readFileSync } from 'node:fs';
 import { WORKSPACE_NAV_HTML, WORKSPACE_CSS, installDashboardWorkspace } from '../dashboard-workspace-view.js';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
 import { deriveAtmFibHold } from '../premium-workspace-model.js';
 import { deriveLiveThreeIndexPcr } from '../live-three-index-pcr.js';
+
+test('command shortcuts restore hidden chapters and Recorded opens only the saved ladder',()=>{
+ const nodes=new Map<string,any>(),listeners:any={},calls:any[]=[];let page=0;
+ const el=(id:string)=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',value:'NIFTY',setAttribute(){},classList:{toggle(){}},querySelectorAll(){return [];},scrollIntoView(){}});return nodes.get(id);};
+ const installer=evaluate('('+installDashboardWorkspace.toString()+')',{
+  document:{body:{dataset:{}},getElementById:el,querySelectorAll(){return [];}},
+  window:{addEventListener(n:string,fn:any){listeners[n]=fn;}},
+  localStorage:{getItem(){return '[0]';},setItem(){}},deriveAtmFibHold,deriveLiveThreeIndexPcr,
+  installPremiumWorkspace(){return {openLadder(v:any){calls.push(v);},setVisible(){},refreshRecorded(){}};}
+ });
+ const controller=installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>page,turn(i:number){page=i;},getState:()=>({})});
+ controller.render();
+ assert.equal((el('op-command-chapters').innerHTML.match(/data-op-chapter=/g)||[]).length,13);
+ assert(el('op-command-chapters').innerHTML.includes('13 · Chapter 12'));
+ el('op-command-chapters').onclick({target:{closest:()=>({dataset:{opChapter:'8'}})}});controller.render();
+ assert.equal(page,8);assert(el('op-chapter-links').innerHTML.includes('data-op-chapter="8"'));
+ el('op-one-actions').onclick({target:{closest:()=>({dataset:{opOne:'RECORDED'}})}});controller.render();
+ assert.equal(page,7);assert.equal(calls.at(-1).source,'RECORDED');
+ assert(el('op-chapter-links').innerHTML.includes('data-op-chapter="7"'));
+ listeners['optionpilot:live-context']({detail:{connected:false,connectionState:'MARKET_CLOSED',snapshot:null}});
+ assert.match(el('op-one-status').textContent,/MARKET CLOSED/);
+ assert.match(el('op-one-rows').innerHTML,/Open recorded ladder/);
+ listeners['optionpilot:live-context']({detail:{connected:false,connectionState:'SESSION_REQUIRED',snapshot:null}});
+ assert.match(el('op-one-status').textContent,/SESSION_REQUIRED/);
+ assert(!el('op-one-status').textContent.includes('MARKET CLOSED'));
+ const html=renderBusinessDashboardV1Html({} as any);
+ assert.match(html,/<details id="op-summary-panel" open>/);
+ assert.match(html,/<details id="op-atm-weeklies" aria-label=/);
+ assert(!html.includes('<details id="op-atm-weeklies" open'));
+});
 
 test('one-stop card is a single top-level workspace panel, not hidden inside feed/settings',()=>{
  const html=renderBusinessDashboardV1Html({} as any);
@@ -16,17 +47,17 @@ test('one-stop card is a single top-level workspace panel, not hidden inside fee
  assert.match(WORKSPACE_NAV_HTML, /<\/div><\/div><section id="op-one-stop"/);
  assert.match(WORKSPACE_CSS, /\.op-one-scroll\{overflow-x:auto/);
 });
-test('one-stop exposes exactly four existing destinations and never requests or executes a trade',()=>{
+test('one-stop exposes existing destinations including explicit recorded access and never requests or executes a trade',()=>{
  const buttons=[...WORKSPACE_NAV_HTML.matchAll(/data-op-one="([^"]+)"/g)].map(m=>m[1]);
- assert.deepEqual(buttons,['LIVE','LADDER','MULTIDAY','RAG']);
- const installer=installDashboardWorkspace.toString();
+ assert.deepEqual(buttons,['LIVE','LADDER','MULTIDAY','RAG','RECORDED']);
+ const installer=readFileSync(new URL('../dashboard-workspace-view.ts',import.meta.url),'utf8');
  assert.match(installer,/openLadder\(\{source:'LIVE'\}\)/);
  assert.match(installer,/openLadder\(\{source:'RECORDED'\}\)/);
  assert.match(installer,/rag-evidence-card/);
  assert.doesNotMatch(installer,/new EventSource|fetch\(|placeOrder|sendOrder|orderSubmit/);
 });
 test('one-stop withholds disconnected, stale and incomplete values',()=>{
- const installer=installDashboardWorkspace.toString();
+ const installer=readFileSync(new URL('../dashboard-workspace-view.ts',import.meta.url),'utf8');
  assert.match(installer,/d\?\.connected===true/);
  assert.match(installer,/q\?\.state==='LIVE'/);
  assert.match(installer,/deriveLiveThreeIndexPcr/);
@@ -49,7 +80,7 @@ test('weekly expiry ATM design uses real date rows, CE/PE side-by-side and indiv
  assert.match(html,/id="op-atm-index"/);
  assert.match(html,/Actual listed expiry dates — not DTE 0–4/);
  assert.deepEqual([...html.matchAll(/data-atm-mode="(BOTH|CE|PE)"/g)].map(m=>m[1]),['BOTH','CE','PE']);
- const code=installDashboardWorkspace.toString();
+ const code=readFileSync(new URL('../dashboard-workspace-view.ts',import.meta.url),'utf8');
  assert.match(code,/snap\.atmExpiryLadder/);
  assert.match(code,/a\.expiry\.localeCompare\(b\.expiry\)/);
  assert.match(code,/id\?\.expiry!==expiry/);
@@ -64,7 +95,7 @@ test('ATM weekly expiry rows render two sides, switch individually and clear on 
  const document:any={body:{dataset:{}},hidden:false,getElementById:el,querySelectorAll(){return [];}};
  const window:any={addEventListener(name:string,fn:any){listeners[name]=fn;}};
  const localStorage:any={getItem(){return null},setItem(){}};
- const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+ const installer=evaluate('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
   deriveLiveThreeIndexPcr,
   installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}});
  installer({chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {};}});
@@ -107,7 +138,7 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
  const current={NIFTY:{options:['CE','PE'].map(side=>({symbol:'NIFTY',expiry,strike:22000,option_type:side,
   minute_bucket:iso(-12000),truth_verdict:'TRUE',pdh:125,pdl:95}))}};
  const api:any={chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {date:day,current};}};
- const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+ const installer=evaluate('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
   deriveAtmFibHold,
   deriveLiveThreeIndexPcr,
   installPremiumWorkspace(){return {openLadder(d:any){opened.push(d);},setVisible(){},refreshRecorded(){}};}});
@@ -152,7 +183,7 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
  assert.doesNotMatch(el('op-atm-pairs').innerHTML,/PDL BREAK|PDH BREAK/);
 });
 test('PDH/PDL flash guards require same expiry/strike/day evidence and actual Kite FULL daily O=H',()=>{
- const code=installDashboardWorkspace.toString();
+ const code=readFileSync(new URL('../dashboard-workspace-view.ts',import.meta.url),'utf8');
  assert.match(code,/String\(r\.expiry\)\.slice\(0,10\)===expiry&&r\.strike===strike&&r\.option_type===side/);
  assert.match(code,/truth_verdict==='TRUE'/);
  assert.match(code,/old\.price>=level\.pdl&&q\.price<level\.pdl/);
@@ -169,7 +200,7 @@ test('multi-select ATM layer buttons keep independent PDH, PDL and sourced FIB p
  assert.match(html,/data-atm-level="PDL"/);
  assert.match(html,/data-atm-level="FIB"/);
  assert.match(html,/data-atm-open-fib/);
- const code=installDashboardWorkspace.toString();
+ const code=readFileSync(new URL('../dashboard-workspace-view.ts',import.meta.url),'utf8');
  assert.match(code,/atmLayers=new Set(?:<string>)?\(\['PDL'\]\)/);
  assert.match(code,/atmLayers\.has\('FIB'\)/);
  assert.match(code,/atmLayers\.delete\(level\)/);
@@ -203,7 +234,7 @@ test('PR3 one-stop displays only verified Kite ticks and never upgrades partial 
  const document:any={body:{dataset:{}},hidden:false,getElementById:el,querySelectorAll(){return [];}};
  const window:any={addEventListener(n:string,fn:any){listeners[n]=fn;}};
  const localStorage:any={getItem(){return null},setItem(){}};
- const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+ const installer=evaluate('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
   deriveAtmFibHold,deriveLiveThreeIndexPcr,installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}});
  installer({chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {};}});
  const now=Date.now(),at=new Date(now).toISOString(),date=new Date(now+19800000).toISOString().slice(0,10),expiry='2026-10-26';
@@ -240,7 +271,7 @@ test('PR4 narrow cards use compact metric grid without hiding exact expiry ATM C
  assert.match(WORKSPACE_CSS,/@media\(max-width:600px\)[\s\S]*?\.op-one-scroll\{overflow-x:visible/);
  assert.match(WORKSPACE_CSS,/#op-one-stop tbody tr\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
  assert.match(WORKSPACE_CSS,/#op-atm-pairs\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\);overflow-x:visible/);
- const code=installDashboardWorkspace.toString();
+ const code=readFileSync(new URL('../dashboard-workspace-view.ts',import.meta.url),'utf8');
  assert.match(code,/data-metric="Full PCR"/);
  assert.match(code,/data-metric="CE wall"/);
  assert.match(code,/data-metric="PE wall"/);
@@ -255,7 +286,7 @@ test('PR4 verified ticker, card and ATM revoke connected but stale, forged or wr
  const document:any={body:{dataset:{}},hidden:false,getElementById:el,querySelectorAll(){return [];}};
  const window:any={addEventListener(n:string,fn:any){listeners[n]=fn;}};
  const localStorage:any={getItem(){return null},setItem(){}};
- const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+ const installer=evaluate('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
   deriveAtmFibHold,deriveLiveThreeIndexPcr,installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}});
  installer({chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {};}});
  const at=new Date().toISOString(),date=new Date(Date.now()+19800000).toISOString().slice(0,10);
@@ -302,7 +333,7 @@ test('PR5 repeated live packets preserve ATM DOM and flashing; new premium, disc
  const document:any={body:{dataset:{}},hidden:false,getElementById:el,querySelectorAll(){return [];}};
  const window:any={addEventListener(n:string,fn:any){listeners[n]=fn;}};
  const localStorage:any={getItem(){return null},setItem(){}};
- const installer=vm.runInNewContext('('+installDashboardWorkspace.toString()+')',{
+ const installer=evaluate('('+installDashboardWorkspace.toString()+')',{
   document,window,localStorage,Date:Clock,deriveLiveThreeIndexPcr,deriveAtmFibHold,
   installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}
  });

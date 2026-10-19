@@ -12,6 +12,25 @@ function fixture(){
  return {connected:true,source:'KITE_WEBSOCKET_FULL',serverTime:at,snapshot:{asOf:at,tradeDate:'2026-10-16',indices,vix:quote('VIX',''),participation:[quote('STOCK','',{label:'HDFC'}),quote('SECTOR','',{label:'BANK'})]}} as any;
 }
 const kinds=(html:string)=>[...html.matchAll(/data-live-kind="([^"]+)"/g)].map(m=>m[1]);
+test('top-five participation ranks use fresh unique quotes, correct order and actual source times',()=>{
+ const p=fixture();const base=p.snapshot.participation[0];
+ p.snapshot.participation=Array.from({length:8},(_,i)=>({...base,price:100+i,changePct:i+1,identity:{role:'STOCK',label:'Stock '+i,token:100+i}}));
+ p.snapshot.participation.push({...base,price:90,changePct:-4,identity:{role:'STOCK',label:'Loss <A>',token:200}},
+  {...base,price:99,changePct:-1,identity:{role:'STOCK',label:'Loss B',token:201}},
+  {...base,state:'STALE',changePct:999,identity:{role:'STOCK',label:'Stale leader',token:202}},
+  {...base,price:0,changePct:998,identity:{role:'STOCK',label:'Zero price',token:203}},
+  {...base,changePct:997,identity:{role:'STOCK',label:'Duplicate',token:204}},
+  {...base,changePct:996,identity:{role:'STOCK',label:'Duplicate',token:204}});
+ const html=live(p,'NIFTY',8);
+ const gain=html.match(/<table aria-label="Heavyweight quote subset top gainers">[\s\S]*?<\/table>/)![0];
+ assert.equal((gain.match(/<tr><th scope=/g)||[]).length,5);
+ assert(gain.indexOf('Stock 7')<gain.indexOf('Stock 6'));assert(!gain.includes('Stock 2'));
+ for(const label of ['Stale leader','Zero price','Duplicate'])assert(!gain.includes(label));
+ const loss=html.match(/<table aria-label="Heavyweight quote subset top losers">[\s\S]*?<\/table>/)![0];
+ assert(loss.indexOf('Loss &lt;A&gt;')<loss.indexOf('Loss B'));assert(loss.includes('-4%'));
+ assert(gain.includes('16 Oct'));assert(html.includes('not verified index weight or point contribution'));
+ assert(!live({...p,connected:false},'NIFTY',8).includes('Stock 7'));
+});
 test('all chapters project only the relevant existing live fields and keep historical exceptions explicit',()=>{
  const p=fixture(),before=structuredClone(p);
  for(let page=0;page<13;page++){const html=live(p,'NIFTY',page);assert(!html.includes('undefined'));assert(!html.includes('NaN'));if([3,6,7,10].includes(page))assert.equal(html,'');else assert(html.includes('Kite feed'));}

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { readFileSync } from 'node:fs';
 import { WORKSPACE_NAV_HTML, WORKSPACE_CSS, installDashboardWorkspace } from '../dashboard-workspace-view.js';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
 import { deriveAtmFibHold } from '../premium-workspace-model.js';
@@ -175,4 +176,19 @@ test('multi-select ATM layer buttons keep independent PDH, PDL and sourced FIB p
  assert.match(code,/held\.name/);
  assert.match(code,/HOLD unconfirmed/);
  assert.doesNotMatch(code,/new EventSource|fetch\(|orderSubmit/);
+});
+
+test('PR2 historical replay does not auto-fetch all three indices on every minute; manual refresh stays',()=>{
+ const code=readFileSync(new URL('../business-dashboard-v1-view.ts',import.meta.url),'utf8');
+ const begin=code.indexOf('function resumeRefresh(){'),end=code.indexOf('function restoreRefreshPreference',begin);
+ assert(begin>=0&&end>begin);
+ const block=code.slice(begin,end);
+ assert.match(block,/!document\.hidden/);
+ assert.match(block,/!completedReplayLoaded\(\)/);
+ assert.match(block,/const today=new Date\(Date\.now\(\)\+19800000\)\.toISOString\(\)\.slice\(0,10\)/);
+ assert.match(block,/if\(\$\('date'\)\.value===today\)load\(\)/,'auto replay restricted to current India market date');
+ assert.match(code,/\$\('data-form'\)\.onsubmit=load/,'historical recorded sessions still load on explicit user action');
+ assert.match(code,/setInterval\(resumeRefresh,60000\)/,'the recorder UI cadence was not changed');
+ assert.match(block,/refreshQuoteSnapshots\(\)/,'separate quote context still refreshed as before');
+ assert.match(block,/loadCashContext\(\)/,'saved FII DII still refreshed as before');
 });

@@ -509,7 +509,14 @@ function syncFreshnessLabels(){
 function refreshQuoteSnapshots(){if(!$('auto').checked||document.hidden||liveBusy||lastQuoteRefreshStartedAt!==null&&Date.now()-lastQuoteRefreshStartedAt<60000)return;return live();}
 function initialRecordedDate(dates,now=Date.now()){const today=new Date(now+19800000).toISOString().slice(0,10);return [...new Set(dates)].filter(d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&Number.isFinite(Date.parse(d+'T00:00:00Z'))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d&&d<=today).sort().at(-1)||today;}
 function completedReplayLoaded(){const end=Date.parse((loadedScope.date||'')+'T'+(loadedScope.to||'')+':00+05:30');return Number.isFinite(end)&&end<Date.now()-360000&&symbols.every(s=>indexLoadState[s]?.state==='LOADED'&&['market','options','chain'].every(kind=>(data[s]?.[kind]||[]).some(r=>r.truth_verdict==='TRUE'&&Date.parse(r.minute_bucket)>=end-180000&&Date.parse(r.minute_bucket)<=end)));}
-function resumeRefresh(){renderSourceHealth();if($('auto').checked&&!document.hidden&&!completedReplayLoaded()){load();refreshQuoteSnapshots();loadCashContext();renderGiftContext();}}
+function resumeRefresh(){renderSourceHealth();if($('auto').checked&&!document.hidden&&!completedReplayLoaded()){
+ // Historical archive scopes are immutable for this session. Only the current
+ // trading date merits automatic three-index replay polling; the Load button
+ // still permits an explicit refresh of any archived date or custom range.
+ const today=new Date(Date.now()+19800000).toISOString().slice(0,10);
+ if($('date').value===today)load();
+ refreshQuoteSnapshots();loadCashContext();renderGiftContext();
+}}
 function restoreRefreshPreference(){try{$('auto').checked=window.localStorage.getItem('optionpilot.dashboard.autoRefresh')!=='off';}catch{$('auto').checked=true;}}
 function rememberRefreshPreference(){try{window.localStorage.setItem('optionpilot.dashboard.autoRefresh',$('auto').checked?'on':'off');}catch{}resumeRefresh();}
 

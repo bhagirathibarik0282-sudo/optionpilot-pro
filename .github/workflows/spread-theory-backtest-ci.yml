@@ -3,8 +3,10 @@ on:
   pull_request:
     paths:
       - 'spread-theory-backtest.ts'
+      - 'spread-delta-theory-backtest.ts'
       - 'premium-spread-comparison.ts'
       - 'test/spread-theory-backtest.test.ts'
+      - 'test/spread-delta-theory-backtest.test.ts'
       - '.github/workflows/spread-theory-backtest-ci.yml'
   workflow_dispatch:
 jobs:
@@ -22,4 +24,4 @@ jobs:
       - name: Focused no-broker read-only regression tests
         env:
           NODE_ENV: test
-        run: node --import tsx --test test/spread-theory-backtest.test.ts test/premium-spread-comparison.test.ts
+        run: node --import tsx --test test/spread-theory-backtest.test.ts test/spread-delta-theory-backtest.test.ts test/premium-spread-comparison.test.ts

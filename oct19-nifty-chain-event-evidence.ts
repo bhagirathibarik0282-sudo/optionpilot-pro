@@ -19,6 +19,14 @@ const round = (x: number) => Number(x.toFixed(3));
 const stamp = (v: unknown) => Date.parse(String(v ?? ""));
 const iso = (t: number) => new Date(t).toISOString();
 const bucketAt = (hm:string) => new Date(DATE+"T"+hm+":00+05:30").getTime();
+// PostgreSQL DATE may arrive as a Date object in the in-process query;
+// JSON replay serializes the very same value as an ISO date string.
+// Normalize both, without accepting unrelated locale-formatted strings.
+export function recordedExpiryDay(value: unknown): string | null {
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString().slice(0,10) : null;
+  if (typeof value !== "string") return null;
+  return /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(value) ? value.slice(0,10) : null;
+}
 function identity(r: Row) {return [r.strike,r.option_type].join("|");}
 function quoteOk(q:Row,market:Row,t:number):boolean {
   const at=stamp(q.quote_timestamp),age=num(q.quote_age_seconds),delta=num(q.delta);
@@ -32,7 +40,7 @@ function quoteOk(q:Row,market:Row,t:number):boolean {
 function eligible(rows:Row[],market:Row,t:number) {
   // Different expiries can reuse the same strike/side. Count ambiguity
   // only within the selected expiry, never across unrelated DTEs.
-  const scoped=rows.filter(r=>String(r.expiry).slice(0,10)===EXPIRY);
+  const scoped=rows.filter(r=>recordedExpiryDay(r.expiry)===EXPIRY);
   const eligibleRows:Row[]=[];
   const seen=new Map<string,number>();
   for(const r of scoped) seen.set(identity(r),(seen.get(identity(r))??0)+1);
@@ -70,7 +78,7 @@ export function summarizeOct19Evidence(r:H1ReplayHttpResult,hm:string) {
   if(!cur||cur.truth_verdict!=="TRUE"||!pos(cur.spot_ltp))
     return {timeIst:hm,status:"MARKET_TRUTH_NOT_PROVEN",marketRows:atRows(r.market,t).length};
   const chainAt=(t0:number)=>{
-    const set=atRows(r.chain,t0).filter(q=>String(q.expiry).slice(0,10)===EXPIRY&&q.truth_verdict==="TRUE");
+    const set=atRows(r.chain,t0).filter(q=>recordedExpiryDay(q.expiry)===EXPIRY&&q.truth_verdict==="TRUE");
     return set.length===1?set[0]:null;
   };
   const chain=chainAt(t),pc=chainAt(prev);

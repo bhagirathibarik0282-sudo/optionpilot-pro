@@ -19,33 +19,20 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import json, urllib.request, urllib.parse, collections, datetime
-          base='https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay'
-          for time in ['10:33','11:33']:
-              qs=urllib.parse.urlencode({'symbol':'NIFTY','date':'2026-10-19','from':time,'to':time,'scope':'FULL','format':'compact'})
-              req=urllib.request.Request(base+'?'+qs,headers={'Accept':'application/json','User-Agent':'OptionPilot-ReadOnly-DataQuality/1'})
-              with urllib.request.urlopen(req,timeout=75) as resp:
-                  d=json.load(resp)
-              def rows(key):
-                  x=d.get(key) or {}
-                  return [dict(zip(x.get('columns',[]),r)) for r in x.get('rows',[])]
-              market=rows('market'); chain=rows('chain'); option=rows('options')
-              print('TIME',time,'MODE',d.get('mode'),'OK',d.get('ok'),'COUNTS',d.get('counts'),'QUALITY',d.get('continuity'))
-              print('MARKET',[(m.get('minute_bucket'),m.get('truth_verdict'),m.get('snapshot_id'),m.get('spot_ltp')) for m in market][:3])
-              print('CHAIN',[(c.get('expiry'),c.get('truth_verdict'),c.get('validation_status'),c.get('full_chain_oi_pcr'),c.get('call_wall_strike'),c.get('put_wall_strike'),c.get('atm_strike')) for c in chain][:15])
-              groups=collections.defaultdict(list)
-              for o in option:groups[str(o.get('expiry'))[:10]].append(o)
-              for exp,opts in sorted(groups.items()):
-                  m=market[0] if len(market)==1 else {}
-                  print('EXP',time,exp,'rows',len(opts),'dte',list(set(str(x.get('dte')) for x in opts)), 'truth',dict(collections.Counter(x.get('truth_verdict') for x in opts)), 'validations',dict(collections.Counter(x.get('validation_status') for x in opts)),
-                   'deltaNumeric',sum(isinstance(x.get('delta'),(int,float)) for x in opts),
-                   'gammaNumeric',sum(isinstance(x.get('gamma'),(int,float)) for x in opts),
-                   'volNumeric',sum(isinstance(x.get('volume'),(int,float)) for x in opts),
-                   'oiNumeric',sum(isinstance(x.get('oi'),(int,float)) for x in opts),
-                   'matchedMarketSnapshot',sum(x.get('snapshot_id')==m.get('snapshot_id') for x in opts),
-                   'ageLE30',sum(isinstance(x.get('quote_age_seconds'),(int,float)) and 0<=x.get('quote_age_seconds')<=30 for x in opts))
-                  for side,target in [('CE',0.5),('PE',-0.5)]:
-                      valid=[x for x in opts if x.get('option_type')==side and isinstance(x.get('delta'),(int,float))]
-                      top=sorted(valid,key=lambda x:abs(x['delta']-target))[:3]
-                      print('GREEK_SAMPLE',time,exp,side,[{k:x.get(k) for k in ['strike','delta','validation_status','quote_age_seconds','quote_timestamp']} for x in top])
+          import json, urllib.request
+          url='https://optionpilot-pro-v2-production.up.railway.app/api/research/premium-spread/oct19-nifty-chain-evidence'
+          req=urllib.request.Request(url,headers={'Accept':'application/json','User-Agent':'OptionPilot-PostFix-ReadOnly/1'})
+          with urllib.request.urlopen(req,timeout=105) as response:
+              d=json.load(response)
+              print("HTTP",response.status)
+          print("MODE",d.get("mode"),"OK",d.get("ok"),"TIMES",d.get("observationTimesIst"))
+          for x in d.get("observations",[]):
+              fields=['timeIst','status','spot','future','indiaVix','reportedFullChainPcr','atmStrike','ceWallStrike','peWallStrike','atmMovedOneMinute','ceWallMovedOneMinute','peWallMovedOneMinute']
+              print('MARKET_AND_CHAIN',json.dumps({k:x.get(k) for k in fields},separators=(',',':')))
+              print('QUALITY',json.dumps({k:x.get('quality',{}).get(k) for k in ['selectedExpiryChainRowPresent','validOptionRows','allRecordedOptionsAtMinute','previousMarketPresent']},separators=(',',':')))
+              print('DELTA_OI',json.dumps(x.get('deltaWeightedOiObservedOnly'),separators=(',',':')))
+              for p in x.get('sameDeltaPairs',[]):
+                  keys=['target','status','ceStrike','peStrike','ceDelta','peDelta','ceLtp','peLtp','ceMinusPe','oneMinuteSpotChange','oneMinuteSpreadChange','oneMinuteDeltaAdjustedResidual','ceOneMinuteOiChange','peOneMinuteOiChange']
+                  print('PAIR',json.dumps({k:p.get(k) for k in keys},separators=(',',':')))
+          assert d.get("ok") is True and len(d.get("observations",[]))==5
           PY

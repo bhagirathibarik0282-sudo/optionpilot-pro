@@ -1,0 +1,25 @@
+name: Oct19 Oct27 exact 1m premium spread vs volume historical audit
+on:
+  pull_request:
+    paths:
+      - 'scripts/oct19-oct27-premium-volume-spread-audit.py'
+      - '.github/workflows/oct19-oct27-volume-spread-evidence.yml'
+permissions:
+  contents: read
+jobs:
+  historical-volume-spread:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile audit script
+        run: python3 -m py_compile scripts/oct19-oct27-premium-volume-spread-audit.py
+      - name: Compare recorded expiry-specific fixed premium spread and cumulative volume changes
+        run: python3 scripts/oct19-oct27-premium-volume-spread-audit.py
+      - name: Archive read-only evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oct19-oct27-volume-spread-exact-1m-evidence
+          path: oct19_oct27_spread_volume_observations.json
+          retention-days: 7

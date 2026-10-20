@@ -34,7 +34,7 @@ test('top-five participation ranks use fresh unique quotes, correct order and ac
 test('all chapters project only the relevant existing live fields and keep historical exceptions explicit',()=>{
  const p=fixture(),before=structuredClone(p);
  for(let page=0;page<13;page++){const html=live(p,'NIFTY',page);assert(!html.includes('undefined'));assert(!html.includes('NaN'));if([3,6,7,10].includes(page))assert.equal(html,'');else assert(html.includes('Kite feed'));}
- assert.deepEqual(kinds(live(p,'NIFTY',4)),['future','futureOi','futureVolume','basis']);
+ assert.deepEqual(kinds(live(p,'NIFTY',4)),['future','futureLevels','futureOi','futureVolume','basis']);
  assert.deepEqual(kinds(live(p,'NIFTY',5)),['ceOi','peOi','pcr','callWall','putWall']);
  assert.equal(kinds(live(p,'NIFTY',9)).filter(k=>k==='pcr').length,3);
  assert(live(p,'NIFTY',2).includes('NIFTY · 2026-10-19 · 23000 · CE'));
@@ -96,6 +96,25 @@ test('wheel breadth keeps missing quotes grey and never substitutes index weight
  assert(html.includes('1 up, 0 down, 0 unchanged, 1 unavailable'));assert(html.includes('not index-weight contribution'));assert(!html.includes('99%'));assert(!html.includes('Sector quotes'));
  const empty=fixture();empty.snapshot.participation=[];assert(!live(empty,'NIFTY',8,false,{wheel:true,metric:'stocks'}).includes('NaN'));assert(!live(empty,'NIFTY',8,false,{wheel:true,metric:'stocks'}).includes('mb-breadth-wheel'));
 });
+test('Futures live PDH/PDC/PDL uses broker previous close and never invents high/low',()=>{
+ const p=fixture();
+ for(const symbol of ['NIFTY','BANKNIFTY','SENSEX']){
+  const html=live(p,symbol,4,false,{metric:'futureLevels'});
+  assert.deepEqual(kinds(html),['futureLevels']);
+  assert(html.includes('— / 120 / —'));
+  assert(html.includes('same-contract futures PDH / PDL unavailable'));
+ }
+ p.snapshot.indices[2].future.pdc=987.65;
+ p.snapshot.indices[2].future.pdh=12345;p.snapshot.indices[2].future.pdl=23456;
+ const good=live(p,'BANKNIFTY',4,false,{metric:'futureLevels'});
+ assert(good.includes('— / 987.65 / —'));
+ assert(!good.includes('12345'));assert(!good.includes('23456'));
+ p.snapshot.indices[2].future.state='STALE';
+ const stale=live(p,'BANKNIFTY',4,false,{metric:'futureLevels'});
+ assert(stale.includes('— / — / —'));
+ assert(!stale.includes('987.65'));
+});
+
 test('Futures metric buttons reuse qualified live projection and withhold stale source',()=>{
  const p=fixture();for(const key of ['future','futureOi','futureVolume','basis'])assert.deepEqual(kinds(live(p,'NIFTY',4,false,{metric:key})),[key]);
  p.snapshot.indices[0].future.state='STALE';const html=live(p,'NIFTY',4,false,{metric:'futureVolume'});assert(!html.includes('123.45'));assert(html.includes('WITHHELD'));

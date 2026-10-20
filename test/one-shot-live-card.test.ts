@@ -55,6 +55,36 @@ test('new radar, PCR, VIX and source walls render verified values and revoke the
  assert(h.el('os-future-response').innerHTML.includes('no stale comparison'));
 });
 
+test('three-index level radar and futures chapter show PDH/PDC/PDL with exact source gates',()=>{
+ const h=harness(),p=h.payload();
+ for(const a of p.snapshot.indices){
+   a.future.pdc=a.symbol==='NIFTY'?23123.45:a.symbol==='SENSEX'?74789.12:55912.34;
+   a.future.pdh=999999;a.future.pdl=888888; // forged / unsupported futures H/L must never display
+ }
+ h.send(p);
+ const radar=h.el('os-market-radar').innerHTML,levels=h.el('os-future-response').innerHTML;
+ for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){
+  const card=radar.split('data-os-index="'+symbol+'"')[1].split('</button>')[0];
+  assert(card.includes('SPOT · PDH / PDC / PDL'));
+  assert(card.includes('FUT '));
+  assert(card.includes('PDH / PDC / PDL'));
+  assert(card.includes('101'));assert(card.includes('90'));
+  assert(levels.includes(symbol));
+ }
+ for(const value of ['23,123.45','74,789.12','55,912.34']){
+  assert(radar.includes(value),'all futures PDC visible in compact radar');
+  assert(levels.includes(value),'all futures PDC visible in chapter 04');
+ }
+ assert(!radar.includes('999,999'));assert(!radar.includes('888,888'));
+ assert(!levels.includes('999,999'));assert(!levels.includes('888,888'));
+ assert(levels.includes('same-contract previous-session high/low source unavailable'));
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});
+ for(const value of ['23,123.45','74,789.12','55,912.34']){
+  assert(!h.el('os-market-radar').innerHTML.includes(value));
+  assert(!h.el('os-future-response').innerHTML.includes(value));
+ }
+});
+
 test('index choice drives exact expiry ATM selection; malformed identities and partial PCR stay unavailable',()=>{
  const h=harness();h.send(h.payload());
  h.el('os-market-radar').onclick({target:{closest:()=>({dataset:{osIndex:'SENSEX'}})}});

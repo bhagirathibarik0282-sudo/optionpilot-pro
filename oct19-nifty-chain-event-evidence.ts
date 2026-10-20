@@ -88,7 +88,18 @@ export function summarizeOct19Evidence(r:H1ReplayHttpResult,hm:string) {
     const spotMove=comparable?Number(cur.spot_ltp)-Number(earlier!.spot_ltp):null;
     const gapMove=previousGap!==null?gap-previousGap:null;
     const hedgeBeta=comparable?Number(cePrev!.delta)-Number(pePrev!.delta):null;
+    const change=(now:unknown,prior:unknown,monotonic=false)=>{
+      const a=num(now),b=num(prior);
+      return comparable&&a!==null&&b!==null&&a>=0&&b>=0&&(!monotonic||a>=b)?a-b:null;
+    };
     return { target, status:"VERIFIED_RECORDED_PAIR",
+      ceOi:num(ce.oi),peOi:num(pe.oi),
+      ceRecordedVolume:num(ce.volume),peRecordedVolume:num(pe.volume),
+      ceOneMinuteOiChange:change(ce.oi,cePrev?.oi),
+      peOneMinuteOiChange:change(pe.oi,pePrev?.oi),
+      ceOneMinuteVolumeChangeIfCumulative:change(ce.volume,cePrev?.volume,true),
+      peOneMinuteVolumeChangeIfCumulative:change(pe.volume,pePrev?.volume,true),
+      volumeWarning:"Interval volume only if archived field is cumulative in matching units",
       ceStrike:Number(ce.strike),peStrike:Number(pe.strike),
       ceDelta:Number(ce.delta),peDelta:Number(pe.delta),
       ceLtp:Number(ce.ltp),peLtp:Number(pe.ltp),

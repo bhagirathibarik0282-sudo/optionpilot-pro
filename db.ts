@@ -400,6 +400,10 @@ export async function dbUpsertOptionSnapshot1m(row: OptionSnapshot1mRow): Promis
   const p = getPool();
   if (!p) return;
   try {
+    // Match market_snapshot_1m precedence for this exact contract/minute.
+    // Retain the whole evaluated H1 option row, not its ID on Storage values.
+    // Same-source invalidation and standalone Storage contracts remain allowed;
+    // mismatched/missing endpoints still fail the unchanged CAS snapshot guard.
     await p.query(`
       WITH prior AS (
         SELECT oi, minute_bucket
@@ -450,6 +454,8 @@ export async function dbUpsertOptionSnapshot1m(row: OptionSnapshot1mRow): Promis
         quote_timestamp=EXCLUDED.quote_timestamp, quote_age_seconds=EXCLUDED.quote_age_seconds,
         liquidity_status=EXCLUDED.liquidity_status, validation_status=EXCLUDED.validation_status,
         calculation_version=EXCLUDED.calculation_version
+      WHERE option_snapshot_1m.calculation_version IS DISTINCT FROM 'H1_RUNTIME_BRIDGE_V1'
+         OR EXCLUDED.calculation_version IS DISTINCT FROM 'STORAGE_V3_PHASE1'
     `, [
       row.symbol,row.minuteBucket,row.snapshotId ?? null,row.expiry,row.expiryBucket ?? null,row.dte ?? null,row.strike,row.optionType,row.atmOffset ?? null,
       row.isCandidate ?? false,row.isWall ?? false,row.ltp ?? null,row.bid ?? null,row.ask ?? null,row.spread ?? null,row.volume ?? null,row.oi ?? null,row.oiChange ?? null,

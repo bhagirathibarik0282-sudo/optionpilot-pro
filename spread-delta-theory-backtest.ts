@@ -53,7 +53,7 @@ export function selectRecordedDeltaAnchor(rows: Raw[], symbol: string, expiry: s
         key: [symbol, expiry, r.strike, side].join("|"),
         symbol, expiry, dte: number(r.dte), strike: number(r.strike),
         type: side, at: new Date(bucketTime).toISOString(),
-        observedAt: new Date(quoteAt).toISOString(),
+        observedAt: Number.isFinite(quoteAt) ? new Date(quoteAt).toISOString() : null,
         state: valid ? "RECORDED" : "WITHHELD",
         price: valid ? p : null, delta: valid ? d : null,
         snapshotId: r.snapshot_id,
@@ -137,11 +137,11 @@ async function runDay(symbol: string, date: string, target: number) {
     [...scope, pair.expiry, pair.ceStrike, pair.peStrike]);
   const { points, contextPoints, excludedBuckets, diagnosticBuckets, observedBuckets } = qualifySpreadRows(trajectory);
   const cadence = date >= "2026-10-19" ? 1 : 3;
-  const raw = evaluateSpreadTheory(points, cadence);
-  const diagnostic = evaluateSpreadTheory(contextPoints, cadence);
+  const accepted = points.filter(p => p.minute >= pair.anchorBucket);
+  const raw = evaluateSpreadTheory(accepted, cadence);
+  const diagnostic = evaluateSpreadTheory(contextPoints.filter(p => p.minute >= pair.anchorBucket), cadence);
   // Anchor is selected from the first valid pair. Do not use earlier prices
   // or choose a better-performing anchor with knowledge of future outcomes.
-  const accepted = points.filter(p => p.minute >= pair.anchorBucket);
   const anchor = accepted[0];
   const beta = pair.ceDelta - pair.peDelta; // ≈1 for |Delta| matched CE-minus-PE.
   const residual = anchor ? accepted.map(p => ({

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summarizeOct19Evidence } from "../oct19-nifty-chain-event-evidence.js";
+import { summarizeOct19Evidence, recordedExpiryDay } from "../oct19-nifty-chain-event-evidence.js";
 import type { H1ReplayHttpResult } from "../h1-replay-http.js";
 const date="2026-10-19",expiry=date,symbol="NIFTY";
 const iso=(hm:string,seconds=0)=>new Date(date+"T"+hm+":"+String(seconds).padStart(2,"0")+"+05:30").toISOString();
@@ -88,4 +88,26 @@ test("same strike/side on OTHER expiry cannot suppress selected-expiry delta pai
    assert.equal(y.deltaWeightedOiObservedOnly.qualifiedCE,0);
    assert.equal(y.sameDeltaPairs.find(p=>p.target===0.5)?.status,"NO_VERIFIED_PAIR");
  }
+});
+
+test("Postgres DATE objects and JSON ISO dates identify the SAME selected expiry",()=>{
+ const expiryDate = new Date("2026-10-19T00:00:00.000Z");
+ assert.equal(recordedExpiryDay(expiryDate),"2026-10-19");
+ assert.equal(recordedExpiryDay(expiryDate.toISOString()),"2026-10-19");
+ assert.equal(recordedExpiryDay("2026-10-19"),"2026-10-19");
+ assert.equal(recordedExpiryDay("Mon Oct 19 2026"),null);
+ const x=mock([
+   {...opt("11:33","CE",0.5,161),expiry:expiryDate},
+   {...opt("11:33","PE",-0.5,142),expiry:expiryDate}
+ ]);
+ x.chain=x.chain!.map(r=>({...r,expiry:expiryDate}));
+ const v=summarizeOct19Evidence(x,"11:33");
+ assert.equal(v.status,"RECORDED_MARKET_READ");
+ if(v.status!=="RECORDED_MARKET_READ")return;
+ assert.equal(v.quality.selectedExpiryChainRowPresent,true);
+ assert.equal(v.atmStrike,23050);
+ assert.equal(v.ceWallStrike,23200);
+ assert.equal(v.reportedFullChainPcr,1.2);
+ assert.equal(v.quality.validOptionRows,2);
+ assert.equal(v.sameDeltaPairs.find(p=>p.target===0.5)?.status,"VERIFIED_RECORDED_PAIR");
 });

@@ -209,4 +209,54 @@ result={"ok":True,"readOnly":True,"date":DAY,
         "jointNearSpotPdhExamples":[x for x in synchronous if sum(x["spotPdhNear"].values())>=2][:12]}
 print("SUMMARY",json.dumps({k:v for k,v in result.items() if k not in ("topSynchronousFutureMinutes","fullTripleFutureAlignedExamples","jointNearSpotPdhExamples")},separators=(",",":")),flush=True)
 print("SYNC",json.dumps({"top":syncExamples,"aligned":minuteResult,"near":result["jointNearSpotPdhExamples"]},separators=(",",":")),flush=True)
+
+# Independently anchor BEFORE the 09:38 Spot PDH event; do not back-project
+# 10:33-selected contracts onto earlier prices.
+opening={}
+for sym in SYMBOLS:
+    opening[sym]={}
+    for expiry in inventory[sym]["recordedExpiries"][:2]:
+        match=None
+        for t in (timestamp("09:35"),timestamp("09:36")):
+            if match or not chain(sym,t,expiry):continue
+            legs={}
+            for side in ("CE","PE"):
+                possible=[]
+                for row in raw[sym]["o"].get(t,[]):
+                    d=n(row.get("delta"));strike=n(row.get("strike"))
+                    if date(row.get("expiry"))!=expiry or row.get("option_type")!=side or d is None or strike is None:continue
+                    if not(0.2<=d<=0.8 if side=="CE" else -0.8<=d<=-0.2):continue
+                    if opt(sym,t,expiry,side,strike): possible.append((abs(abs(d)-.5),strike,d))
+                if possible:
+                    _,k,d=sorted(possible,key=lambda q:(q[0],q[1]))[0]
+                    legs[side]={"strike":k,"anchorDelta":round(d,5)}
+            if len(legs)==2:match={"anchor":clock(t),"pairs":legs}
+        timeline=[]
+        if match:
+            for clockString in ("09:36","09:37","09:38","09:39","09:40","09:41","09:42"):
+                t=timestamp(clockString)
+                mm=market(sym,t)
+                levels={}
+                for side in ("CE","PE"):
+                    strike=match["pairs"][side]["strike"]
+                    p=opt(sym,t,expiry,side,strike)
+                    prev=opt(sym,t-dt.timedelta(minutes=1),expiry,side,strike)
+                    ltp=n(p.get("ltp")) if p else None
+                    pdh=n(p.get("pdh")) if p else None
+                    levels[side]={"strike":strike,"ltp":ltp,
+                                  "ownPremiumPdh":pdh,
+                                  "vsOwnPremiumPdh":("AT_OR_ABOVE" if ltp>=pdh else "BELOW") if ltp is not None and pdh is not None and pdh>0 else None,
+                                  "dPremium1m":round(ltp-n(prev.get("ltp")),4) if ltp is not None and prev else None}
+                ft=future_move(sym,t)
+                relation=("CE_UP_PE_DOWN" if levels["CE"]["dPremium1m"] is not None and levels["PE"]["dPremium1m"] is not None and
+                          levels["CE"]["dPremium1m"]>0 and levels["PE"]["dPremium1m"]<0
+                          else "CE_DOWN_PE_UP" if levels["CE"]["dPremium1m"] is not None and levels["PE"]["dPremium1m"] is not None and
+                          levels["CE"]["dPremium1m"]<0 and levels["PE"]["dPremium1m"]>0 else "UNVERIFIABLE_OR_MIXED")
+                timeline.append({"at":clockString,"spot":n(mm.get("spot_ltp")) if mm else None,
+                                 "spotPdh":n(mm.get("pdh")) if mm else None,
+                                 "futureMove1m":ft,"legs":levels,"premiumMoveRelation":relation})
+        opening[sym][expiry]={"selectedPriorToPDH":match,"timeline":timeline}
+print("OPENING_PDH_PREMIUM",json.dumps(opening,separators=(",",":")),flush=True)
+result["openingPriorToEventFixedPremiums"]=opening
+
 with open("oct19_three_index_futures_spot_pdh_premium.json","w") as f:json.dump(result,f,indent=2)

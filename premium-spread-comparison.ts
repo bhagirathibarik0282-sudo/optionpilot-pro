@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { runSpreadTheoryBacktest } from "./spread-theory-backtest.js";
+import { runDeltaSpreadBacktest } from "./spread-delta-theory-backtest.js";
 import { parseH1FixedContractJourneyRequest, runH1FixedContractJourneyHttp, type H1FixedContractJourneyResult } from "./h1-fixed-contract-journey-http.js";
 import { renderPremiumSpreadView } from "./premium-spread-view.js";
 
@@ -122,9 +123,14 @@ export async function readPremiumSpread(q: Record<string, string | undefined>) {
 export function mountPremiumSpreadRoutes(router: Hono): void {
   router.get("/premium-spread/theory-backtest", async c => {
     c.header("Cache-Control", "no-store");
-    const { status, json } = await runSpreadTheoryBacktest({
-      symbol: c.req.query("symbol"), dates: c.req.query("dates"),
-    });
+    const mode = (c.req.query("mode") ?? "MATCH_DELTA_AT_START").toUpperCase();
+    if (mode !== "MATCH_DELTA_AT_START" && mode !== "SAME_STRIKE_BASELINE") {
+      return c.json({ ok: false, reason: "INVALID_RESEARCH_MODE" }, 400);
+    }
+    const scope = { symbol: c.req.query("symbol"), dates: c.req.query("dates") };
+    const { status, json } = mode === "SAME_STRIKE_BASELINE"
+      ? await runSpreadTheoryBacktest(scope)
+      : await runDeltaSpreadBacktest({ ...scope, target: c.req.query("target") });
     return c.json(json, status);
   });
   router.get("/premium-spread/view", c => {

@@ -128,7 +128,8 @@ test('ATM weekly expiry rows render two sides, switch individually and clear on 
  assert.match(el('op-atm-pairs').innerHTML,/LIVE unavailable/);
 });
 
-test('exact CE/PE PDH PDL crosses flash below their expiry row with observed time; FIB button reuses ladder',()=>{
+for(const at0 of [Date.parse('2026-10-19T04:00:00Z'),Date.parse('2026-10-19T20:01:00Z')])
+test('exact CE/PE PDH PDL crosses use the IST session across UTC midnight: '+new Date(at0).toISOString(),()=>{
  const nodes=new Map<string,any>(),listeners:any={},opened:any[]=[];
  const el=(id:string)=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',value:'NIFTY',
   setAttribute(){},classList:{toggle(){}},querySelectorAll(){return ['PDL','PDH','FIB'].map(atmLevel=>({dataset:{atmLevel},setAttribute(){}}));},
@@ -136,11 +137,13 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
  const document:any={body:{dataset:{}},hidden:false,getElementById:el,querySelectorAll(){return [];}};
  const window:any={addEventListener(n:string,fn:any){listeners[n]=fn;}};
  const localStorage:any={getItem(){return null},setItem(){}};
- const at0=Date.now(),iso=(v:number)=>new Date(at0+v).toISOString(),day=iso(0).slice(0,10),expiry='2026-10-26';
+ class FixedDate extends Date {constructor(value?:string|number){super(value===undefined?at0:value);}static now(){return at0;}}
+ const iso=(v:number)=>new Date(at0+v).toISOString(),day=new Date(at0+19800000).toISOString().slice(0,10),expiry='2026-10-26';
  const current={NIFTY:{options:['CE','PE'].map(side=>({symbol:'NIFTY',expiry,strike:22000,option_type:side,
   minute_bucket:iso(-12000),truth_verdict:'TRUE',pdh:125,pdl:95}))}};
  const api:any={chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {date:day,current};}};
  const installer=evaluate('('+installDashboardWorkspace.toString()+')',{document,window,localStorage,
+  Date:FixedDate,
   deriveAtmFibHold,
   deriveLiveThreeIndexPcr,
   installPremiumWorkspace(){return {openLadder(d:any){opened.push(d);},setVisible(){},refreshRecorded(){}};}});
@@ -156,6 +159,12 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
  let html=el('op-atm-pairs').innerHTML;
  assert.doesNotMatch(html,/PDL BREAK|PDH BREAK/,'first reading below/above level cannot fabricate event');
  assert.match(html,/DAY O=H/);
+ if(iso(0).slice(0,10)!==day){
+  assert.match(html,/PDL — \/ source unavailable/,'a previous UTC-date reference is not invented as a current-session level');
+  snap.tradeDate=iso(0).slice(0,10);send();
+  assert.match(el('op-atm-pairs').innerHTML,/LIVE unavailable/,'the original UTC-day fixture must fail the IST session guard');
+  return;
+ }
  assert.match(html,/PDL ₹95/);
  snap.atmExpiryLadder[0].rows[0].ce=q('CE',94,-2000,120,120);
  snap.atmExpiryLadder[0].rows[0].pe=q('PE',130,-2000,105,130);
@@ -183,6 +192,8 @@ test('exact CE/PE PDH PDL crosses flash below their expiry row with observed tim
  // Disconnection cannot resurrect an old crossing if reconnect starts below PDL.
  send(true);
  assert.doesNotMatch(el('op-atm-pairs').innerHTML,/PDL BREAK|PDH BREAK/);
+ snap.tradeDate='2026-10-18';send();
+ assert.match(el('op-atm-pairs').innerHTML,/LIVE unavailable/,'wrong IST session still fails closed');
 });
 test('PDH/PDL flash guards require same expiry/strike/day evidence and actual Kite FULL daily O=H',()=>{
  const code=readFileSync(new URL('../dashboard-workspace-view.ts',import.meta.url),'utf8');

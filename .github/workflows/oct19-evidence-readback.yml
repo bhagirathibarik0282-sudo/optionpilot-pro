@@ -1,0 +1,40 @@
+name: Oct19 NIFTY Evidence Readback - one time
+on:
+  push:
+    branches:
+      - research/oct19-evidence-readback-20261020
+    paths:
+      - .github/workflows/oct19-evidence-readback.yml
+permissions:
+  contents: read
+jobs:
+  read-verified-recorded-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: One bounded read-only call to existing production evidence endpoint
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error, sys
+          url='https://optionpilot-pro-v2-production.up.railway.app/api/research/premium-spread/oct19-nifty-chain-evidence'
+          try:
+              req=urllib.request.Request(url, headers={'Accept':'application/json','User-Agent':'OptionPilot-ReadOnly-Historical-Audit/1'})
+              with urllib.request.urlopen(req,timeout=105) as resp:
+                  print('HTTP status',resp.status)
+                  raw=resp.read(2_000_000)
+                  data=json.loads(raw)
+          except Exception as e:
+              print('READBACK_UNAVAILABLE',type(e).__name__,str(e)[:450])
+              sys.exit(1)
+          print('MODE',data.get('mode'),'OK',data.get('ok'),'DATE',data.get('date'))
+          print('SCOPE',data.get('source'),'SAFETY',data.get('safety'))
+          for o in data.get('observations',[]):
+              print('OBS',json.dumps({k:o.get(k) for k in ['timeIst','status','reason','spot','future','futureOi','indiaVix','expiry','atmStrike','atmMovedOneMinute','ceWallStrike','peWallStrike','ceWallMovedOneMinute','peWallMovedOneMinute','reportedFullChainPcr']},separators=(',',':')))
+              print('COVERAGE',json.dumps(o.get('quality'),separators=(',',':')))
+              print('DELTA_OBSERVED_ONLY',json.dumps(o.get('deltaWeightedOiObservedOnly'),separators=(',',':')))
+              for p in o.get('sameDeltaPairs',[]):
+                  print('PAIR',json.dumps({k:p.get(k) for k in ['target','status','ceStrike','peStrike','ceDelta','peDelta','ceLtp','peLtp','ceMinusPe','oneMinuteSpotChange','oneMinuteSpreadChange','oneMinuteDeltaAdjustedResidual','ceOneMinuteOiChange','peOneMinuteOiChange','ceOneMinuteVolumeChangeIfCumulative','peOneMinuteVolumeChangeIfCumulative']},separators=(',',':')))
+          if not data.get('ok') or len(data.get('observations',[]))!=5:
+              sys.exit(2)
+          PY

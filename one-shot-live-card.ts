@@ -73,6 +73,17 @@ export function installOneShotLiveCard(api:any){
    opening.at===new Date(d.snapshot.tradeDate+'T09:30:00+05:30').toISOString()&&opening.fromAt===new Date(d.snapshot.tradeDate+'T09:15:00+05:30').toISOString()&&Date.parse(opening.at)<=Date.parse(q.observedAt);
   return {pdh:pdh!==null&&pdl!==null&&pdh<=pdl?null:pdh,pdl:pdh!==null&&pdl!==null&&pdh<=pdl?null:pdl,pdc:positive(q?.pdc),h15:opened?opening.high:null,l15:opened?opening.low:null};
  };
+ const futureRefs=(d:any,a:any)=>{
+  const f=a?.future,ok=!!a&&valid(d,f,'FUTURE',a.symbol);
+  // Kite FULL provides contract-specific previous close, not previous-session high/low.
+  // Never copy spot levels to the futures contract.
+  return {pdh:null,pdc:ok?positive(f.pdc):null,pdl:null,ready:ok,expiry:ok?f.identity.expiry:null};
+ };
+ const allFutureLevels=(d:any)=>table(['Futures / expiry','PDH','PDC','PDL','Source'],symbols.map(symbol=>{
+  const a=indexRow(d,symbol),r=futureRefs(d,a);
+  return [esc(symbol)+'<small>'+esc(r.expiry||'—')+'</small>',fmt(r.pdh),fmt(r.pdc),fmt(r.pdl),
+    esc(r.ready?'Kite FULL · previous close · '+time(a.future.observedAt)+' IST':'No fresh verified futures quote')];
+ }))+'<small class="os-subline">Futures PDH/PDL: same-contract previous-session high/low source unavailable. No Spot level substituted.</small>';
  const observe=(d:any,a:any)=>{
   const q=a.spot,symbol=a.symbol;if(!valid(d,q,'SPOT',symbol)){previous.delete(symbol);breaks.delete(symbol);return;}
   const r=refs(d,symbol,q),old=previous.get(symbol),at=Date.parse(q.observedAt),identity=q.identity?.token??symbol;
@@ -143,7 +154,7 @@ export function installOneShotLiveCard(api:any){
   }
   write('os-market-radar',symbols.map((symbol,i)=>{const a=live?indexRow(d,symbol):null,q=a?.spot,f=a?.future,ok=a&&valid(d,q,'SPOT',symbol),fo=a&&valid(d,f,'FUTURE',symbol),r=ok?refs(d,symbol,q):{pdh:null,pdl:null,pdc:null},v=pcr.rows.find((x:any)=>x.symbol===symbol),c=ok?change(d,q,'SPOT',symbol):null,e=breaks.get(symbol);
    const position=!ok?'Fresh quote unavailable':e?e.label+' · '+time(e.at)+' IST':r.pdh!==null&&q.price>r.pdh?'Above PDH':r.pdl!==null&&q.price<r.pdl?'Below PDL':r.pdh===null||r.pdl===null?'PDH / PDL source —':'No observed PDH / PDL break';
-   return '<button type="button" class="os-market" style="--os-accent:'+accents[i]+'" data-os-index="'+symbol+'" aria-pressed="'+(symbol===selected)+'"><span class="os-market-head">'+symbol+'<small class="'+tone(c)+'">'+pct(c)+'</small></span><strong class="os-price">'+fmt(ok?q.price:null)+'</strong><small class="os-subline">Spot · FUT '+fmt(fo?f.price:null)+'</small><span class="os-levels">'+(['pdh','pdc','pdl'] as const).map(k=>'<span>'+k.toUpperCase()+'<b>'+fmt(r[k],0)+'</b></span>').join('')+'</span><span class="os-level-state">'+esc(position)+'</span><small class="os-subline">Full PCR '+fmt(v?.value,4)+' · '+(symbol==='BANKNIFTY'?'Monthly · ':'')+(ok?time(q.observedAt)+' IST':'—')+'</small></button>';
+   return '<button type="button" class="os-market" style="--os-accent:'+accents[i]+'" data-os-index="'+symbol+'" aria-pressed="'+(symbol===selected)+'"><span class="os-market-head">'+symbol+'<small class="'+tone(c)+'">'+pct(c)+'</small></span><strong class="os-price">'+fmt(ok?q.price:null)+'</strong><small class="os-subline">Spot · FUT '+fmt(fo?f.price:null)+'</small><small class="os-subline">SPOT · PDH / PDC / PDL</small><span class="os-levels">'+(['pdh','pdc','pdl'] as const).map(k=>'<span>'+k.toUpperCase()+'<b>'+fmt(r[k],2)+'</b></span>').join('')+'</span><small class="os-subline">FUT '+esc(fo?f.identity.expiry:'—')+' · PDH / PDC / PDL</small><span class="os-levels">'+(['pdh','pdc','pdl'] as const).map(k=>'<span>'+k.toUpperCase()+'<b>'+fmt(futureRefs(d,a)[k],2)+'</b></span>').join('')+'</span><span class="os-level-state">'+esc(position)+'</span><small class="os-subline">Full PCR '+fmt(v?.value,4)+' · '+(symbol==='BANKNIFTY'?'Monthly · ':'')+(ok?time(q.observedAt)+' IST':'—')+'</small></button>';
   }).join(''));
   write('os-pulse-chart',live?graph(d):empty((payload?.connectionState==='MARKET_CLOSED'?'Market closed':'Live feed unavailable')+' · recorded charts are available in Open recorded ladder.'));
   write('os-pcr-strip',symbols.map(symbol=>{const r=pcr.rows.find((x:any)=>x.symbol===symbol);return '<div class="os-pcr"><strong>'+symbol+'</strong><b>'+fmt(r?.value,4)+'</b><small>'+esc(r?.expiry||'No verified expiry')+'</small><small>ATM ±7 '+fmt(r?.bandValue,4)+'</small><small>'+esc(r?.current?time(r.current.checked)+' IST':r?.pcrStatus?.replaceAll('_',' ')||'UNAVAILABLE')+'</small></div>';}).join(''));
@@ -160,7 +171,7 @@ export function installOneShotLiveCard(api:any){
    const state=!synced?'UNAVAILABLE':values.every(x=>x!>0)?'ALL UP':values.every(x=>x!<0)?'ALL DOWN':values.every(x=>x===0)?'FLAT':'MIXED';return badge(side+' · '+state+' · '+values.filter(x=>x!==null).length+'/'+values.length+' expiries',state==='ALL UP'?'os-up':state==='ALL DOWN'?'os-down':'');};
   write('os-dte-alignment',sideSummary('CE')+sideSummary('PE')+'<small class="os-subline">'+esc(selected)+' · day returns vs each contract previous close · timestamps within 5s · no cross-contract trade score</small>');
   write('os-events',(triple?badge('🚨 3-index same-side '+aligned[0].label,'os-alert'):'')+(events.length?events.slice(0,8).map(e=>'<div class="os-event"><div><b>'+esc(e.symbol+' · '+e.label)+'</b><small>'+esc(e.detail)+'</small></div><span>'+time(e.at)+' IST</span></div>').join(''):empty(live?'No verified level crossing observed in this browser session.':'Market closed / disconnected · live events cleared; use recorded research for saved events.')));
-  write('os-future-response',live?response(d,indexRow(d,selected),optionRows):empty('Fresh futures and premium observations required · no stale comparison.'));
+  write('os-future-response',live?allFutureLevels(d)+response(d,indexRow(d,selected),optionRows):empty('Fresh futures and premium observations required · no stale comparison.'));
   write('os-wall-ladder',table(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI'],symbols.map(symbol=>{
    const r=pcr.rows.find((x:any)=>x.symbol===symbol),a=live?indexRow(d,symbol):null,raw=r?.current?d?.pcrDisplay?.[symbol]:null,cw=raw?.callWall,pw=raw?.putWall;
    const delta=(key:string)=>r?.current&&r?.baseline?r.current[key]-r.baseline[key]:null;

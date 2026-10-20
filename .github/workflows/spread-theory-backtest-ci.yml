@@ -1,0 +1,25 @@
+name: Spread Theory Read-Only Backtest CI
+on:
+  pull_request:
+    paths:
+      - 'spread-theory-backtest.ts'
+      - 'premium-spread-comparison.ts'
+      - 'test/spread-theory-backtest.test.ts'
+      - '.github/workflows/spread-theory-backtest-ci.yml'
+  workflow_dispatch:
+jobs:
+  spread-theory-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - name: Focused no-broker read-only regression tests
+        env:
+          NODE_ENV: test
+        run: node --import tsx --test test/spread-theory-backtest.test.ts test/premium-spread-comparison.test.ts

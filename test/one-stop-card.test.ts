@@ -36,8 +36,8 @@ test('command shortcuts restore hidden chapters and Recorded opens only the save
  assert(!el('op-one-status').textContent.includes('MARKET CLOSED'));
  const html=renderBusinessDashboardV1Html({} as any);
  assert.match(html,/<details id="op-summary-panel">/);
- assert.match(html,/<details id="op-atm-weeklies" open aria-label=/);
- assert(html.includes('<details id="op-atm-weeklies" open'));
+ assert.match(html,/<details id="op-atm-weeklies" aria-label=/);
+ assert(!html.includes('<details id="op-atm-weeklies" open'));
 });
 
 test('one-stop card is a single top-level workspace panel, not hidden inside feed/settings',()=>{

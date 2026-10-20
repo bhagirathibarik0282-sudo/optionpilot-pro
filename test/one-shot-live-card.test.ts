@@ -139,3 +139,61 @@ test('forged PCR totals cannot upgrade wall/ratio readings; stale VIX is indepen
  assert(!h.el('os-pcr-strip').innerHTML.includes('3.1415'));assert(!h.el('os-vix-value').innerHTML.includes('987.65'));
  assert(h.el('os-market-radar').innerHTML.includes('Full PCR 1.2'),'other independently valid indices retain their source');
 });
+
+test('Multi-DTE awareness shows sorted actual expiries, independent CE PE and calendar DTE',()=>{
+ const h=harness(),p=h.payload(),group=p.snapshot.atmExpiryLadder[0],r=group.rows[0];
+ const later=structuredClone(r);later.expiry='2026-10-29';for(const q of [later.ce,later.pe]){q.identity.expiry=later.expiry;q.identity.token+=10;}
+ group.rows=[later,r];h.send(p);
+ const html=h.el('os-dte-radar').innerHTML;
+ assert(html.indexOf('data-expiry="2026-10-22"')<html.indexOf('data-expiry="2026-10-29"'));
+ assert(html.includes('3 calendar days'));assert(html.includes('10 calendar days'));
+ assert(html.includes('data-side="CE"'));assert(html.includes('data-side="PE"'));
+ assert(html.includes('26.32%'));assert(html.includes('-5.26%'));
+ assert(html.includes('SOURCE MATCHED'));assert(!html.includes('NaN'));
+ assert(!WORKSPACE_NAV_HTML.includes('<details id="op-atm-weeklies" open'));
+ assert(WORKSPACE_NAV_HTML.includes('Multi-DTE awareness'));
+});
+
+test('Multi-DTE rejects duplicate expiries and impossible dates without inventing a row',()=>{
+ const h=harness(),p=h.payload(),group=p.snapshot.atmExpiryLadder[0],r=group.rows[0];
+ const invalid=structuredClone(r);invalid.expiry='2026-02-30';
+ group.rows=[r,structuredClone(r),invalid];h.send(p);
+ const html=h.el('os-dte-radar').innerHTML;
+ assert(!html.includes('data-expiry='));assert(html.includes('No fresh verified expiry inventory'));
+});
+
+test('Multi-DTE stale or wrong-contract leg is withheld, and disconnect revokes all tiles',()=>{
+ const h=harness(),p=h.payload(),r=p.snapshot.atmExpiryLadder[0].rows[0];
+ r.ce.price=987.65;r.ce.state='STALE';h.send(p);
+ let html=h.el('os-dte-radar').innerHTML;
+ assert(!html.includes('987.65'));assert(html.includes('PAIR INCOMPLETE / UNSYNCED'));assert(html.includes('>90</b>'));
+ h.advance(1000);const forged=h.payload();forged.snapshot.atmExpiryLadder[0].rows[0].ce.identity.strike=101;h.send(forged);
+ html=h.el('os-dte-radar').innerHTML;assert(!html.includes('>120</b>'));
+ h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ assert(!h.el('os-dte-radar').innerHTML.includes('data-expiry='));
+});
+
+test('Multi-DTE window compares fixed contracts only and rebuilds after an ATM roll',()=>{
+ const h=harness();h.send(h.payload());
+ h.el('os-dte-metric').onclick({target:{closest:()=>({dataset:{osDteMetric:'window'}})}});
+ assert(h.el('os-dte-radar').innerHTML.includes('BUILDING MATCHED HISTORY'));
+ for(let i=1;i<=6;i++){
+  h.advance(10000);const p=h.payload();p.snapshot.atmExpiryLadder[0].rows[0].ce.price=120+i;p.snapshot.atmExpiryLadder[0].rows[0].pe.price=90-i;h.send(p);
+ }
+ let html=h.el('os-dte-radar').innerHTML;
+ assert(html.includes('SOURCE MATCHED'));assert(html.includes('5%'));assert(html.includes('-6.67%'));
+ assert(html.includes('09:45:00 → 09:46:00 IST'));assert(h.el('os-dte-context').innerHTML.includes('1m matched contracts'));
+ h.advance(1000);const roll=h.payload(),r=roll.snapshot.atmExpiryLadder[0].rows[0];r.strike=105;
+ for(const q of [r.ce,r.pe]){q.identity.strike=105;q.identity.token+=100;}
+ h.send(roll);html=h.el('os-dte-radar').innerHTML;
+ assert(html.includes('BUILDING MATCHED HISTORY'));assert(!html.includes('5%</em>'));
+});
+
+test('Multi-DTE window withholds unsynced pair changes while keeping fresh individual LTP',()=>{
+ const h=harness();h.send(h.payload());
+ for(let i=1;i<=6;i++){h.advance(10000);const p=h.payload();p.snapshot.atmExpiryLadder[0].rows[0].ce.price=120+i;h.send(p);}
+ h.el('os-dte-metric').onclick({target:{closest:()=>({dataset:{osDteMetric:'window'}})}});
+ h.advance(1000);const p=h.payload();p.snapshot.atmExpiryLadder[0].rows[0].pe.observedAt=new Date(Date.parse(h.stamp())-10000).toISOString();h.send(p);
+ const html=h.el('os-dte-radar').innerHTML;
+ assert(html.includes('PAIR INCOMPLETE / UNSYNCED'));assert(!html.includes('5%</em>'));assert(html.includes('>120</b>'));
+});

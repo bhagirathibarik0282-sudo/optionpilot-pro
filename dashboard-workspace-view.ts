@@ -20,7 +20,7 @@ const oneStart=LEGACY_WORKSPACE_NAV_HTML.indexOf('<section id="op-one-stop"');
 const oneEnd=LEGACY_WORKSPACE_NAV_HTML.indexOf('<details id="op-commodities"');
 const atmStart=LEGACY_WORKSPACE_NAV_HTML.indexOf('<details id="op-atm-weeklies"');
 const atmEnd=LEGACY_WORKSPACE_NAV_HTML.indexOf('</details><p class="op-one-note">One shared stream',atmStart)+10;
-const actualAtm=LEGACY_WORKSPACE_NAV_HTML.slice(atmStart,atmEnd).replace('<details id="op-atm-weeklies"','<details id="op-atm-weeklies" open');
+const actualAtm=LEGACY_WORKSPACE_NAV_HTML.slice(atmStart,atmEnd);
 export const WORKSPACE_NAV_HTML=LEGACY_WORKSPACE_NAV_HTML.slice(0,oneStart)+renderOneShotCard(actualAtm)+LEGACY_WORKSPACE_NAV_HTML.slice(oneEnd);
 
 export const WORKSPACE_TICKER_HTML=`<details id="op-ticker-tools"><summary>Market ticker</summary><div id="op-workspace-ticker" aria-label="Market snapshot"></div></details>`;

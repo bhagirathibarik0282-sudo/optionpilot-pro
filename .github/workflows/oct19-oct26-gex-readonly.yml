@@ -1,4 +1,4 @@
-name: Historical 19 vs 26 Oct GEX provenance contrast (read-only)
+name: Historical 19 vs 27 Oct GEX provenance contrast (read-only)
 on:
   pull_request:
     paths:
@@ -16,7 +16,7 @@ jobs:
           import json, urllib.parse, urllib.request, math, datetime
           URL="https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay"
           TIMES=("10:33","11:33","12:33","13:33","14:33")
-          EXPIRIES=("2026-10-19","2026-10-26")
+          EXPIRIES=("2026-10-19","2026-10-27")
           def n(v):
               try:
                   if v is None or v=="" or isinstance(v,bool): return None
@@ -59,7 +59,7 @@ jobs:
               m=market[0] if len(market)==1 and market[0].get("truth_verdict")=="TRUE" else None
               raw_options=table(x,"options")
               raw_chain=table(x,"chain")
-              result={"time":t,"marketTruth":bool(m),"spot":n(m.get("spot_ltp")) if m else None,"optionRows":len(raw_options),"expiries":{}}
+              result={"time":t,"marketTruth":bool(m),"spot":n(m.get("spot_ltp")) if m else None,"optionRows":len(raw_options),"recordedExpiryDays":sorted(set(day(r.get("expiry")) for r in raw_options)),"chainExpiryDays":sorted(set(day(r.get("expiry")) for r in raw_chain)),"expiries":{}}
               records[t]=(m,raw_options)
               for expiry in EXPIRIES:
                   rr=[r for r in raw_options if day(r.get("expiry"))==expiry]
@@ -83,7 +83,7 @@ jobs:
               print("AUDIT "+json.dumps(result,separators=(",",":"),allow_nan=False),flush=True)
           # Determine the 26-Oct near-.25 Delta pair at exactly 10:33, then hold strikes constant.
           m,rows=records.get("10:33",(None,[]))
-          eligible=[r for r in rows if m and day(r.get("expiry"))=="2026-10-26" and valid_leg(r,m,"10:33")]
+          eligible=[r for r in rows if m and day(r.get("expiry"))=="2026-10-27" and valid_leg(r,m,"10:33")]
           call=sorted([r for r in eligible if r.get("option_type")=="CE" and n(r.get("delta")) is not None and 0.15<=n(r.get("delta"))<=0.35],key=lambda r:abs(n(r.get("delta"))-0.25))
           put=sorted([r for r in eligible if r.get("option_type")=="PE" and n(r.get("delta")) is not None and -0.35<=n(r.get("delta"))<=-0.15],key=lambda r:abs(n(r.get("delta"))+0.25))
           if call and put:
@@ -92,11 +92,11 @@ jobs:
               journey=[]
               for t in TIMES:
                   mm,rr=records.get(t,(None,[]))
-                  ce=[r for r in rr if mm and day(r.get("expiry"))=="2026-10-26" and r.get("option_type")=="CE" and n(r.get("strike"))==identity["ceStrike"] and valid_leg(r,mm,t)]
-                  pe=[r for r in rr if mm and day(r.get("expiry"))=="2026-10-26" and r.get("option_type")=="PE" and n(r.get("strike"))==identity["peStrike"] and valid_leg(r,mm,t)]
+                  ce=[r for r in rr if mm and day(r.get("expiry"))=="2026-10-27" and r.get("option_type")=="CE" and n(r.get("strike"))==identity["ceStrike"] and valid_leg(r,mm,t)]
+                  pe=[r for r in rr if mm and day(r.get("expiry"))=="2026-10-27" and r.get("option_type")=="PE" and n(r.get("strike"))==identity["peStrike"] and valid_leg(r,mm,t)]
                   journey.append({"time":t,"spread":round(n(ce[0].get("ltp"))-n(pe[0].get("ltp")),3) if len(ce)==len(pe)==1 else None})
-              print("OCT26_FIXED_DELTA_START "+json.dumps({"identity":identity,"journey":journey},separators=(",",":")),flush=True)
-          else: print("OCT26_FIXED_DELTA_START "+json.dumps({"status":"NO_VALID_0.25_DELTA_PAIR_AT_10_33","qualifiedOptionRows":len(eligible)}),flush=True)
+              print("OCT27_FIXED_DELTA_START "+json.dumps({"identity":identity,"journey":journey},separators=(",",":")),flush=True)
+          else: print("OCT27_FIXED_DELTA_START "+json.dumps({"status":"NO_VALID_0.25_DELTA_PAIR_AT_10_33","qualifiedOptionRows":len(eligible)}),flush=True)
           print("LIMITATIONS: This is observed recorder-universe OI*Gamma, NOT certified full-chain GEX or actual dealer positioning. Do not use for selector/trading.")
           
           PY

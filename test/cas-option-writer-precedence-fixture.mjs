@@ -2,8 +2,7 @@ import { readFileSync } from 'node:fs';
 
 // Run the actual production DDL and UPSERTs against transaction-local tables.
 // No connection to production is needed or implied by this fixture.
-export function casOptionWriterPrecedenceSql() {
-  const source = readFileSync(new URL('../db.ts', import.meta.url), 'utf8');
+export function casOptionWriterPrecedenceSql(source = readFileSync(new URL('../db.ts', import.meta.url), 'utf8')) {
   function schema(table, temp) {
     const ddl = source.match(new RegExp('CREATE TABLE IF NOT EXISTS ' + table + ' \\([\\s\\S]*?\\n      \\);'))?.[0];
     if (!ddl) throw Error('Production schema not found: ' + table);
@@ -30,12 +29,14 @@ export function casOptionWriterPrecedenceSql() {
     return upsert('dbUpsertOptionSnapshot1m', ['NIFTY', at, id, expiry, 'Current Expiry', 0,
       strike, side, 0, version === h1, false, ltp, ltp == null ? null : ltp - 1,
       ltp == null ? null : ltp + 1, ltp == null ? null : 2, 500, oi, null,
-      null, .5, null, null, null, 0, ltp, 120, 80, 130, 70, at, 0, 'LIQUID', status, version]);
+      null, .5, null, null, null, 0, ltp, 120, 80, 130, 70, at, 0, 'LIQUID', status, version,
+      ltp == null ? null : version === h1 ? 10 : 100, ltp == null ? null : version === h1 ? 20 : 200]);
   }
   const check = (condition, name) => `DO $$ BEGIN IF (${condition}) IS DISTINCT FROM TRUE THEN RAISE EXCEPTION '${name}'; END IF; END $$;`;
   const coherent = `(SELECT m.snapshot_id = 'h1' AND o.snapshot_id = m.snapshot_id
     AND o.calculation_version = '${h1}' AND o.ltp = 100 AND o.bid = 99 AND o.ask = 101
     AND o.is_candidate AND o.oi = 1200 AND o.validation_status = 'RESEARCH_ELIGIBLE'
+    ${source.includes('bid_qty BIGINT') ? 'AND o.bid_qty = 10 AND o.ask_qty = 20' : ''}
     FROM cas_market_writer_test m JOIN cas_option_writer_test o USING(symbol, minute_bucket))`;
   return [
     'BEGIN;', "SET LOCAL statement_timeout = '15s';",

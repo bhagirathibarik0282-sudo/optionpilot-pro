@@ -73,8 +73,8 @@ dbSource = replaceRequired(
 );
 dbSource = replaceRequired(
   dbSource,
-  `        calculation_version=EXCLUDED.calculation_version\n    \`, [`,
-  `        calculation_version=EXCLUDED.calculation_version,\n        bid_qty=EXCLUDED.bid_qty, ask_qty=EXCLUDED.ask_qty\n    \`, [`,
+  `        calculation_version=EXCLUDED.calculation_version\n`,
+  `        calculation_version=EXCLUDED.calculation_version,\n        bid_qty=EXCLUDED.bid_qty, ask_qty=EXCLUDED.ask_qty\n`,
   "DB option conflict depth update",
 );
 dbSource = replaceRequired(

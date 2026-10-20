@@ -5,6 +5,9 @@ on:
       - research/oct19-evidence-readback-20261020
     paths:
       - .github/workflows/oct19-evidence-readback.yml
+  pull_request:
+    paths:
+      - .github/workflows/oct19-evidence-readback.yml
 permissions:
   contents: read
 jobs:

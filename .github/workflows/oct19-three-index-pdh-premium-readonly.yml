@@ -1,0 +1,25 @@
+name: Oct19 three-index futures and exact expiry premium PDH evidence read only
+on:
+  pull_request:
+    paths:
+      - 'scripts/oct19-three-index-futures-pdh-premiums-readonly.py'
+      - '.github/workflows/oct19-three-index-pdh-premium-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax verification
+        run: python3 -m py_compile scripts/oct19-three-index-futures-pdh-premiums-readonly.py
+      - name: Read-only bounded H1 replay and source integrity audit
+        run: python3 scripts/oct19-three-index-futures-pdh-premiums-readonly.py
+      - name: Archive one-time evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oct19-three-index-futures-pdh-premium-evidence
+          path: oct19_three_index_futures_spot_pdh_premium.json
+          retention-days: 7

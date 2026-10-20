@@ -1,0 +1,102 @@
+name: Historical 19 vs 26 Oct GEX provenance contrast (read-only)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/oct19-oct26-gex-readonly.yml'
+permissions:
+  contents: read
+jobs:
+  recorded-gex-provenance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read archived 19 Oct H1 at five checkpoints without writes
+        run: |
+          python3 - <<'PY'
+          import json, urllib.parse, urllib.request, math, datetime
+          URL="https://optionpilot-pro-v2-production.up.railway.app/api/research/h1-replay"
+          TIMES=("10:33","11:33","12:33","13:33","14:33")
+          EXPIRIES=("2026-10-19","2026-10-26")
+          def n(v):
+              try:
+                  if v is None or v=="" or isinstance(v,bool): return None
+                  a=float(v)
+                  return a if math.isfinite(a) else None
+              except (ValueError,TypeError): return None
+          def day(v): return str(v or "")[:10]
+          def table(x,key):
+              obj=x.get(key,{})
+              if isinstance(obj,list): return obj
+              cols=obj.get("columns",[]) if isinstance(obj,dict) else []
+              return [dict(zip(cols,r)) for r in obj.get("rows",[])] if cols else []
+          def qtime(v):
+              try: return datetime.datetime.fromisoformat(str(v).replace("Z","+00:00"))
+              except: return None
+          def valid_leg(r,m,t):
+              if r.get("truth_verdict")!="TRUE": return False
+              if r.get("snapshot_id")!=m.get("snapshot_id"): return False
+              if r.get("validation_status")!="RESEARCH_ELIGIBLE": return False
+              if n(r.get("ltp")) is None: return False
+              at=qtime(r.get("quote_timestamp"))
+              start=qtime("2026-10-19T"+t+":00+05:30")
+              age=n(r.get("quote_age_seconds"))
+              return bool(at and start and start<=at<start+datetime.timedelta(minutes=1) and age is not None and 0<=age<=30)
+          def rec(time):
+              qs=urllib.parse.urlencode({"symbol":"NIFTY","date":"2026-10-19","from":time,"to":time,"scope":"FULL","format":"compact"})
+              with urllib.request.urlopen(urllib.request.Request(URL+"?"+qs,headers={"Accept":"application/json","User-Agent":"OptionPilot-Recorded-ReadOnly-GEX-Contrast/1"}),timeout=90) as r:
+                  raw=r.read(10000001)
+                  if len(raw)>10000000: raise RuntimeError("EXCESSIVE_RESPONSE")
+                  x=json.loads(raw)
+              if not x.get("ok") or x.get("request",{}).get("tradeDate")!="2026-10-19": raise RuntimeError("H1_REPLAY_FAILED:"+str(x.get("reason")))
+              return x
+          records={}
+          for t in TIMES:
+              try: x=rec(t)
+              except Exception as e:
+                  print("AUDIT "+json.dumps({"time":t,"error":str(e)},separators=(",",":")),flush=True)
+                  continue
+              market=table(x,"market")
+              m=market[0] if len(market)==1 and market[0].get("truth_verdict")=="TRUE" else None
+              raw_options=table(x,"options")
+              raw_chain=table(x,"chain")
+              result={"time":t,"marketTruth":bool(m),"spot":n(m.get("spot_ltp")) if m else None,"optionRows":len(raw_options),"expiries":{}}
+              records[t]=(m,raw_options)
+              for expiry in EXPIRIES:
+                  rr=[r for r in raw_options if day(r.get("expiry"))==expiry]
+                  chain=[r for r in raw_chain if day(r.get("expiry"))==expiry]
+                  c=chain[0] if len(chain)==1 else None
+                  ids=[(str(r.get("strike")),str(r.get("option_type"))) for r in rr]
+                  dup=len(set(ids))!=len(ids)
+                  valid=[r for r in rr if m and valid_leg(r,m,t)]
+                  joint=[r for r in valid if (n(r.get("oi")) is not None and n(r.get("oi"))>=0) and (n(r.get("gamma")) is not None and n(r.get("gamma"))>=0)]
+                  cei=sum(n(r.get("oi"))*n(r.get("gamma")) for r in joint if r.get("option_type")=="CE")
+                  pei=sum(n(r.get("oi"))*n(r.get("gamma")) for r in joint if r.get("option_type")=="PE")
+                  complete=bool(m and not dup and len(rr)>0 and len(joint)==len(rr))
+                  res={"raw":len(rr),"validated":len(valid),"oi_present":sum(n(r.get("oi")) is not None for r in rr),"gamma_present":sum(n(r.get("gamma")) is not None for r in rr),"qualified_joint":len(joint),"duplicated":dup,"chainRows":len(chain),"pcr":n(c.get("full_chain_oi_pcr")) if c else None,"ceWall":c.get("call_wall_strike") if c else None,"peWall":c.get("put_wall_strike") if c else None,"intensityProxyStatus":"RECORDED_SUBSET_ONLY" if joint and not complete else ("RECORDED_ROWS_COMPLETE_NOT_PROVEN_FULL_CHAIN" if complete else "WITHHELD_MISSING_OI_OR_GAMMA")}
+                  if joint and not dup: res.update({"sumOIgammaCE":round(cei,5),"sumOIgammaPE":round(pei,5),"assumedSignedOIgammaCEminusPE":round(cei-pei,5)})
+                  result["expiries"][expiry]=res
+              if m:
+                  exact=[r for r in raw_options if day(r.get("expiry"))=="2026-10-19" and r.get("option_type") in ("CE","PE") and n(r.get("strike")) in (23200,22950) and valid_leg(r,m,t)]
+                  ce=[r for r in exact if r.get("option_type")=="CE" and n(r.get("strike"))==23200]
+                  pe=[r for r in exact if r.get("option_type")=="PE" and n(r.get("strike"))==22950]
+                  if len(ce)==len(pe)==1: result["oct19FixedPair"]={"ce23200":n(ce[0].get("ltp")),"pe22950":n(pe[0].get("ltp")),"spread":round(n(ce[0].get("ltp"))-n(pe[0].get("ltp")),3)}
+              print("AUDIT "+json.dumps(result,separators=(",",":"),allow_nan=False),flush=True)
+          # Determine the 26-Oct near-.25 Delta pair at exactly 10:33, then hold strikes constant.
+          m,rows=records.get("10:33",(None,[]))
+          eligible=[r for r in rows if m and day(r.get("expiry"))=="2026-10-26" and valid_leg(r,m,"10:33")]
+          call=sorted([r for r in eligible if r.get("option_type")=="CE" and n(r.get("delta")) is not None and 0.15<=n(r.get("delta"))<=0.35],key=lambda r:abs(n(r.get("delta"))-0.25))
+          put=sorted([r for r in eligible if r.get("option_type")=="PE" and n(r.get("delta")) is not None and -0.35<=n(r.get("delta"))<=-0.15],key=lambda r:abs(n(r.get("delta"))+0.25))
+          if call and put:
+              a,b=call[0],put[0]
+              identity={"ceStrike":n(a.get("strike")),"peStrike":n(b.get("strike")),"anchorCeDelta":n(a.get("delta")),"anchorPeDelta":n(b.get("delta"))}
+              journey=[]
+              for t in TIMES:
+                  mm,rr=records.get(t,(None,[]))
+                  ce=[r for r in rr if mm and day(r.get("expiry"))=="2026-10-26" and r.get("option_type")=="CE" and n(r.get("strike"))==identity["ceStrike"] and valid_leg(r,mm,t)]
+                  pe=[r for r in rr if mm and day(r.get("expiry"))=="2026-10-26" and r.get("option_type")=="PE" and n(r.get("strike"))==identity["peStrike"] and valid_leg(r,mm,t)]
+                  journey.append({"time":t,"spread":round(n(ce[0].get("ltp"))-n(pe[0].get("ltp")),3) if len(ce)==len(pe)==1 else None})
+              print("OCT26_FIXED_DELTA_START "+json.dumps({"identity":identity,"journey":journey},separators=(",",":")),flush=True)
+          else: print("OCT26_FIXED_DELTA_START "+json.dumps({"status":"NO_VALID_0.25_DELTA_PAIR_AT_10_33","qualifiedOptionRows":len(eligible)}),flush=True)
+          print("LIMITATIONS: This is observed recorder-universe OI*Gamma, NOT certified full-chain GEX or actual dealer positioning. Do not use for selector/trading.")
+          
+          PY

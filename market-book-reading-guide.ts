@@ -60,7 +60,7 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hid
  const card=(key:string,label:string,value:string,detail:string,stamp='')=>'<div data-live-kind="'+esc(key)+'"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong>'+(stamp?'<small class="mb-live-stamp">'+esc(stamp)+'</small>':'')+'<small data-mb-detail>'+esc(detail)+'</small></div>';
  const validExpiry=(expiry:any)=>typeof expiry==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(expiry)&&expiry>=snapshot.tradeDate;
  const fresh=(q:any,role:string,index?:string,side?:string,expiry?:string,strike?:number)=>q?.state==='LIVE'&&q.identity?.role===role&&(!index||q.identity.symbol===index)&&(role!=='FUTURE'||validExpiry(q.identity.expiry))&&(!side||validExpiry(expiry)&&typeof strike==='number'&&Number.isFinite(strike)&&strike>0&&q.identity.side===side&&q.identity.expiry===expiry&&q.identity.strike===strike)&&age(q.observedAt)>=-5000&&age(q.observedAt)<=30000&&age(q.receivedAt)>=0&&age(q.receivedAt)<=30000&&date(Date.parse(q.observedAt))===snapshot.tradeDate&&date(Date.parse(q.receivedAt))===snapshot.tradeDate;
- const orders:any={0:['spot','future','ce','pe','pcr','vix'],1:['spot','pdc','spotChange'],2:['ce','pe','ceOi','peOi'],4:['future','futureOi','futureVolume','basis'],5:['ceOi','peOi','pcr','callWall','putWall'],8:['stocks','sectors'],9:['spot','pcr'],11:['vix'],12:['spot','future','basis','ce','pe','pcr','vix']};
+ const orders:any={0:['spot','future','ce','pe','pcr','vix'],1:['spot','pdc','spotChange'],2:['ce','pe','ceOi','peOi'],4:['future','futureLevels','futureOi','futureVolume','basis'],5:['ceOi','peOi','pcr','callWall','putWall'],8:['stocks','sectors'],9:['spot','pcr'],11:['vix'],12:['spot','future','basis','ce','pe','pcr','vix']};
  const notes:any={1:'PDH / PDL / pivots ତଳର recorded sectionରେ reference levels; ଏହି live cards spot ଓ previous-close change ଦେଖାଏ।',12:'Live values ପ୍ରତ୍ୟେକର ନିଜ source timeରେ; ଏଠାରେ ନୂଆ agreement score ବା candidate ତିଆରି ହୁଏନି।'};
  const indices=[0,9].includes(page)?['NIFTY','SENSEX','BANKNIFTY']:[symbol];
  const blocks=indices.map(index=>{
@@ -112,6 +112,9 @@ export function renderMarketBookLiveContext(payload:any,symbol:string,page=0,hid
    spot:()=>quoteCard('spot','Spot · points',spot,flags.spot),future:()=>quoteCard('future','Futures · '+(future.identity?.expiry||'—'),future,flags.future),
    ce:()=>quoteCard('ce',contract(ce)+' · ₹',ce,flags.ce),pe:()=>quoteCard('pe',contract(pe)+' · ₹',pe,flags.pe),
    ceOi:()=>quoteCard('ceOi',contract(ce)+' · OI',ce,flags.ce,0,'oi'),peOi:()=>quoteCard('peOi',contract(pe)+' · OI',pe,flags.pe,0,'oi'),
+   futureLevels:()=>card('futureLevels','Futures PDH / PDC / PDL · '+(flags.future?future.identity.expiry:'—'),
+     '— / '+fmt(flags.future&&n(future.pdc)!==null&&future.pdc>0?future.pdc:null)+' / —',
+     detail(future,flags.future)+' · PDC is Kite FULL previous close. Prior-session same-contract futures PDH / PDL unavailable; Spot levels never reused.'),
    futureOi:()=>quoteCard('futureOi','Futures OI · '+(future.identity?.expiry||'—'),future,flags.future,0,'oi'),futureVolume:()=>quoteCard('futureVolume','Futures volume',future,flags.future,0,'volume'),
    vix:()=>quoteCard('vix','India VIX',vix,flags.vix),
    pdc:()=>card('pdc','Spot previous close · reference',fmt(flags.spot&&n(spot.pdc)!==null&&spot.pdc>0?spot.pdc:null),detail(spot,flags.spot)),

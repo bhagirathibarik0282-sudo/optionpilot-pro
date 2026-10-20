@@ -30,11 +30,14 @@ function quoteOk(q:Row,market:Row,t:number):boolean {
     (q.option_type==="CE"?delta>0:q.option_type==="PE"&&delta<0);
 }
 function eligible(rows:Row[],market:Row,t:number) {
+  // Different expiries can reuse the same strike/side. Count ambiguity
+  // only within the selected expiry, never across unrelated DTEs.
+  const scoped=rows.filter(r=>String(r.expiry).slice(0,10)===EXPIRY);
   const eligibleRows:Row[]=[];
   const seen=new Map<string,number>();
-  for(const r of rows) seen.set(identity(r),(seen.get(identity(r))??0)+1);
-  for(const r of rows){
-    if(String(r.expiry).slice(0,10)!==EXPIRY||seen.get(identity(r))!==1||!quoteOk(r,market,t))continue;
+  for(const r of scoped) seen.set(identity(r),(seen.get(identity(r))??0)+1);
+  for(const r of scoped){
+    if(seen.get(identity(r))!==1||!quoteOk(r,market,t))continue;
     eligibleRows.push(r);
   }
   return eligibleRows;

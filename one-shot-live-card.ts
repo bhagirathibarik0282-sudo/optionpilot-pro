@@ -7,7 +7,7 @@ export function renderOneShotCard(atm:string){
 <div class="os-section-head" id="os-radar"><h3>01 · 3-index market radar</h3><small>Tap an index · BANKNIFTY monthly observation</small></div><div id="os-market-radar" class="os-markets" aria-live="off"></div>
 <div class="os-main-grid"><details class="os-panel os-cyan" id="os-pulse" open><summary>02 · Spot × Full PCR pulse <small>Show / hide</small></summary><div class="os-panel-body"><div class="os-controls" id="os-window" role="group" aria-label="One Shot observation window">${[1,3,15,60].map(n=>`<button type="button" data-os-window="${n}" aria-pressed="${n===1}">${n}m</button>`).join('')}</div><div id="os-pulse-chart"></div><div id="os-pcr-strip" class="os-pcr-strip"></div><details class="os-source"><summary>Chart source</summary><p>Actual received samples, independently scaled spot and PCR axes. Missing intervals are gaps. First-15-minute H/L is shown only when verified recorded references exist; no illustrative guide.</p></details></div></details>
 <details class="os-panel os-violet" id="os-vix" open><summary>08 · VIX + agreement radar <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-vix-value"></div><div id="os-agreement" class="os-agreement"></div></div></details></div>
-<div class="os-main-grid os-ladder-grid"><article class="os-panel os-premium" id="os-premium"><div class="os-section-head"><h3>03 · Multi-expiry premium ladder</h3><small>Exact dates · current ATM CE / PE</small></div>${atm}<div id="os-dte-alignment"></div></article><details class="os-panel" id="os-memory" open><summary>09 · Notable changes / replay <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-events"></div><p class="os-caption">Saved sessions stay in Open recorded ladder / Multi-day research. Live events below describe observations in this browser session.</p></div></details></div>
+<div class="os-main-grid os-ladder-grid"><article class="os-panel os-premium" id="os-premium"><div class="os-section-head"><h3>03 · Multi-expiry premium ladder</h3><small>Exact dates · current ATM CE / PE</small></div><div class="os-section-head"><strong>Multi-DTE awareness</strong><small id="os-dte-context"></small></div><div class="os-controls" id="os-dte-metric" role="group" aria-label="Multi-DTE change comparison"><button type="button" data-os-dte-metric="day" aria-pressed="true">Day %</button><button type="button" data-os-dte-metric="window" aria-pressed="false">Selected window %</button></div><div id="os-dte-radar" class="os-dte-grid"></div><div id="os-dte-alignment"></div>${atm}</article><details class="os-panel" id="os-memory" open><summary>09 · Notable changes / replay <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-events"></div><p class="os-caption">Saved sessions stay in Open recorded ladder / Multi-day research. Live events below describe observations in this browser session.</p></div></details></div>
 <details class="os-panel" id="os-futures"><summary>04 · Futures + premium response <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-future-response"></div><p class="os-caption">Same-index futures and exact option contracts, matched observation endpoints. Same direction is descriptive co-movement, not proof that a premium follows a futures contract.</p></div></details>
 <details class="os-panel" id="os-walls"><summary>05 · OI + wall ladder <small>Show / hide</small></summary><div class="os-panel-body" id="os-wall-ladder"></div></details>
 <div class="os-rank-grid"><details class="os-panel" id="os-stocks"><summary>06 · Heavyweights · Top 5 <small>Show / hide</small></summary><div class="os-panel-body" id="os-stock-ranks"></div></details><details class="os-panel" id="os-sectors"><summary>07 · Sectors · Top 5 <small>Show / hide</small></summary><div class="os-panel-body" id="os-sector-ranks"></div></details></div>
@@ -28,6 +28,19 @@ export const ONE_SHOT_CSS=`
 #op-one-stop #op-atm-weeklies{margin:0;padding:0;background:transparent;border:0}#op-one-stop #op-atm-weeklies>summary{padding:8px 0;font-size:12px;color:#a8bfdc}#op-one-stop .op-atm-head strong{display:none}#op-one-stop .op-atm-head small,#op-one-stop .op-one-note{font-size:11px}#op-one-stop #op-atm-pairs .op-atm-side{background:linear-gradient(135deg,#13413480,#17263e);border-color:#36866c}#op-one-stop #op-atm-pairs .op-atm-side[data-atm-side=PE]{background:linear-gradient(135deg,#57293f80,#17263e);border-color:#995274}#op-one-stop #op-atm-pairs td strong{font-size:20px;font-weight:800}#op-one-stop #op-atm-pairs :is(th,td){white-space:normal;overflow-wrap:anywhere}#op-one-stop #op-atm-pairs .op-atm-levelnote{font-size:11px}#op-one-stop #op-atm-status{font-size:12px}#op-one-stop #op-atm-level-note,#op-one-stop .op-one-note{display:none}#op-one-stop #op-atm-pairs .os-expiry-dte{font-size:10px;color:#b6c9e4}
 #market-book #op-one-stop #op-atm-pairs table{display:table;table-layout:fixed;width:100%;min-width:0}#market-book #op-one-stop #op-atm-pairs thead{display:table-header-group}#market-book #op-one-stop #op-atm-pairs tbody{display:table-row-group}#market-book #op-one-stop #op-atm-pairs tbody tr{display:table-row;margin:0;padding:0;border:0}#market-book #op-one-stop #op-atm-pairs :is(th,td){display:table-cell;grid-column:auto;min-width:0;width:auto;white-space:normal;overflow-wrap:anywhere;vertical-align:top}#market-book #op-one-stop #op-atm-pairs :is(th,td):first-child{width:33%}#market-book #op-one-stop #op-atm-pairs :is(th,td):nth-child(2){width:25%}#market-book #op-one-stop #op-atm-pairs td:before{display:none;content:none}
 @media(max-width:900px){#op-one-stop .os-main-grid{grid-template-columns:1fr}#op-one-stop .os-rank-grid{grid-template-columns:1fr}}@media(max-width:600px){#market-book #op-one-stop.os-card{padding:10px;border-radius:15px}#op-one-stop .os-hero{display:block}#market-book #op-one-stop .os-hero h2{font-size:29px}#op-one-stop #op-one-status{max-width:none;font-size:12px;margin-top:8px;padding:7px 9px}#op-one-stop .os-kicker{font-size:10px;letter-spacing:1.3px}#op-one-stop .os-markets{gap:5px}#market-book #op-one-stop .os-market{padding:10px 6px;border-radius:11px}#op-one-stop .os-market-head{font-size:11px;margin-bottom:7px;display:block}#op-one-stop .os-market-head small{display:block;font-size:10px;margin-top:3px}#op-one-stop .os-price{font-size:18px;letter-spacing:-.7px}#op-one-stop .os-subline{font-size:10px}#op-one-stop .os-levels{gap:2px}#op-one-stop .os-levels>span{font-size:9px;padding:4px 1px}#op-one-stop .os-levels b{font-size:10px}#op-one-stop .os-level-state{font-size:10px}#op-one-stop .os-section-head small{font-size:11px}#op-one-stop .os-pcr{padding:7px 5px}#op-one-stop .os-pcr>strong{font-size:10px}#op-one-stop .os-pcr b{font-size:21px}#op-one-stop .os-pcr small{font-size:10px}#op-one-stop .os-chart{height:135px}#op-one-stop #op-atm-pairs td strong{font-size:17px}#op-one-stop #op-atm-pairs :is(th,td){font-size:11px}#op-one-stop .os-panel-body{padding:0 9px 10px}#op-one-stop .os-premium{padding:10px}#op-one-stop details.os-panel>summary{font-size:14px;padding:10px}#op-one-stop .os-rank-sides{gap:6px}}
+
+#op-one-stop .os-dte-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:9px 0}
+#op-one-stop .os-dte-tile{min-width:0;border:1px solid #51618a;border-radius:12px;padding:10px;background:linear-gradient(145deg,#262342,#14283b)}
+#op-one-stop .os-dte-tile h4{margin:0 0 5px;font-size:13px;color:#d5c2ff}
+#op-one-stop .os-dte-tile small{display:block;color:#b9cce3;font-size:10px;overflow-wrap:anywhere}
+#op-one-stop .os-dte-legs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
+#op-one-stop .os-dte-leg{min-width:0;padding:7px 5px;border-radius:8px;background:#103c3580;border:1px solid #34745d;font-size:11px}
+#op-one-stop .os-dte-leg[data-side=PE]{background:#49263a80;border-color:#874767}
+#op-one-stop .os-dte-leg b{display:block;font-size:17px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#op-one-stop .os-dte-leg em{display:block;font-size:12px;font-style:normal;margin:3px 0}
+@media(max-width:1100px){#op-one-stop .os-dte-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:360px){#op-one-stop .os-dte-grid{grid-template-columns:1fr}}
+
 @media(prefers-reduced-motion:reduce){#op-one-stop *{animation:none!important;transition:none!important}}
 `;
 
@@ -46,7 +59,7 @@ export function installOneShotLiveCard(api:any){
  const tone=(v:any)=>n(v)===null?'':v>0?'os-up':v<0?'os-down':'';
  const badge=(text:string,cls='')=>'<span class="os-badge '+cls+'">'+esc(text)+'</span>';
  const table=(heads:string[],rows:string[][])=>'<div class="os-table-wrap"><table class="os-table"><thead><tr>'+heads.map(s=>'<th>'+esc(s)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
- let selected='NIFTY',minutes=1,last:any=null,pcr:any=null,session='',lastPaint=0,paintedLive=false;
+ let selected='NIFTY',dteMetric='day',minutes=1,last:any=null,pcr:any=null,session='',lastPaint=0,paintedLive=false;
  const series=new Map<string,Array<{at:number;value:number}>>(),conflicts=new Map<string,number>(),pcrIds=new Map<string,string>(),previous=new Map<string,any>(),breaks=new Map<string,any>();
  const events:any[]=[];
  const valid=(d:any,q:any,role:string,symbol?:string)=>api.validQuote(d,q,role,symbol)&&Number.isInteger(q.identity?.token)&&q.identity.token>0&&
@@ -121,6 +134,31 @@ export function installOneShotLiveCard(api:any){
   return '<div class="os-rank-sides">'+side(true)+side(false)+'</div><small class="os-subline">'+usable.length+'/'+rows.length+' fresh tracked quotes · Δ % vs previous close · verified weights / index contribution unavailable</small>';
  };
  const endpoint=(key:string,target:number)=>{const rows=series.get(key)||[];return rows.filter(p=>p.at<=target&&target-p.at<=15000).at(-1);};
+ const renderDte=(d:any,rows:any[])=>{
+  write('os-dte-context',esc(selected+' · '+(dteMetric==='day'?'vs contract PDC':minutes+'m matched contracts')+(selected==='BANKNIFTY'?' · monthly observation':'')));
+  if(!d||!rows.length){write('os-dte-radar',empty('No fresh verified expiry inventory · open recorded ladder for saved sessions.'));return;}
+  const tiles=rows.map(r=>{
+   const dte=Math.round((Date.parse(r.expiry+'T00:00:00Z')-Date.parse(d.snapshot.tradeDate+'T00:00:00Z'))/86400000);
+   const legs=['CE','PE'].map(side=>{
+    const q=r[side.toLowerCase()],ok=valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side;
+    const key=ok?selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side:'';
+    const base=ok?endpoint(key,Date.parse(q.observedAt)-minutes*60000):null;
+    const delta=ok?(dteMetric==='day'?change(d,q,'OPTION',selected):base?(q.price/base.value-1)*100:null):null;
+    return {side,q,ok,base,delta};
+   });
+   // Pair window changes require matching baseline AND current source times.
+   const synced=legs.every(l=>l.ok)&&Math.abs(Date.parse(legs[0].q.observedAt)-Date.parse(legs[1].q.observedAt))<=5000;
+   const matched=synced&&legs.every(l=>l.base)&&Math.abs(legs[0].base!.at-legs[1].base!.at)<=5000;
+   const status=!synced?'PAIR INCOMPLETE / UNSYNCED':dteMetric==='window'&&!matched?'BUILDING MATCHED HISTORY':'SOURCE MATCHED';
+   return '<article class="os-dte-tile" data-expiry="'+esc(r.expiry)+'"><h4>'+esc(r.expiry)+'</h4><small>'+dte+' calendar days · ATM '+fmt(r.strike,0)+'</small><div class="os-dte-legs">'+legs.map(l=>{
+    const value=dteMetric==='window'&&!matched?null:l.delta;
+    const stamp=!l.ok?'Not verified':dteMetric==='window'&&matched?time(l.base!.at)+' → '+time(l.q.observedAt)+' IST':time(l.q.observedAt)+' IST';
+    return '<div class="os-dte-leg" data-side="'+l.side+'">'+l.side+' ₹<b>'+fmt(l.ok?l.q.price:null)+'</b><em class="'+tone(value)+'">'+pct(value)+'</em><small>'+esc(stamp)+'</small></div>';
+   }).join('')+'</div><small>'+status+'</small></article>';
+  });
+  const omitted=(d.snapshot.omittedExpiries||[]).filter((x:any)=>typeof x==='string'&&x.startsWith(selected+'|')).length;
+  write('os-dte-radar',tiles.join('')+'<small class="os-subline">'+rows.length+' subscribed expiry date(s)'+(omitted?' · '+omitted+' omitted inventories':'')+' · '+(dteMetric==='day'?'Each leg % vs its own previous close; LTP times shown separately.':'Window % requires the same token / expiry / strike / side at both endpoints; up to 15s baseline tolerance, CE/PE source times within 5s. ATM rolls build new history.')+'</small>');
+ };
  const response=(d:any,a:any,optionRows:any[])=>{
   if(!a||!valid(d,a.future,'FUTURE',selected))return empty('Fresh exact '+selected+' futures contract unavailable.');
   const f=a.future,fat=Date.parse(f.observedAt),fk=selected+'|FUTURE|'+f.identity.token+'|'+f.identity.expiry,fb=endpoint(fk,fat-minutes*60000);
@@ -141,7 +179,7 @@ export function installOneShotLiveCard(api:any){
   pcr=api.derivePcr(d,pcr,Date.now());
   const groups=live&&Array.isArray(d.snapshot.atmExpiryLadder)?d.snapshot.atmExpiryLadder:[];
   const matching=groups.filter((g:any)=>g.symbol===selected),group=matching.length===1?matching[0]:null;
-  const optionRows=group&&valid(d,group.spot,'SPOT',selected)&&Array.isArray(group.rows)?group.rows.filter((r:any)=>/^\d{4}-\d{2}-\d{2}$/.test(r.expiry||'')&&r.expiry>=d.snapshot.tradeDate&&positive(r.strike)!==null&&group.rows.filter((x:any)=>x.expiry===r.expiry).length===1).slice(0,4):[];
+  const optionRows=group&&valid(d,group.spot,'SPOT',selected)&&Array.isArray(group.rows)?group.rows.filter((r:any)=>/^\d{4}-\d{2}-\d{2}$/.test(r?.expiry||'')&&Number.isFinite(Date.parse(r.expiry+'T00:00:00Z'))&&new Date(r.expiry+'T00:00:00Z').toISOString().slice(0,10)===r.expiry&&r.expiry>=d.snapshot.tradeDate&&positive(r.strike)!==null&&group.rows.filter((x:any)=>x?.expiry===r.expiry).length===1).sort((a:any,b:any)=>a.expiry.localeCompare(b.expiry)).slice(0,4):[];
   if(live){
    for(const symbol of symbols){const a=indexRow(d,symbol);if(!a)continue;
     observe(d,a);if(valid(d,a.spot,'SPOT',symbol))sample(symbol+'|SPOT',Date.parse(a.spot.observedAt),a.spot.price);else series.delete(symbol+'|SPOT');
@@ -152,6 +190,7 @@ export function installOneShotLiveCard(api:any){
    }
    for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side)sample(selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side,Date.parse(q.observedAt),q.price);}
   }
+  renderDte(d,optionRows);
   write('os-market-radar',symbols.map((symbol,i)=>{const a=live?indexRow(d,symbol):null,q=a?.spot,f=a?.future,ok=a&&valid(d,q,'SPOT',symbol),fo=a&&valid(d,f,'FUTURE',symbol),r=ok?refs(d,symbol,q):{pdh:null,pdl:null,pdc:null},v=pcr.rows.find((x:any)=>x.symbol===symbol),c=ok?change(d,q,'SPOT',symbol):null,e=breaks.get(symbol);
    const position=!ok?'Fresh quote unavailable':e?e.label+' · '+time(e.at)+' IST':r.pdh!==null&&q.price>r.pdh?'Above PDH':r.pdl!==null&&q.price<r.pdl?'Below PDL':r.pdh===null||r.pdl===null?'PDH / PDL source —':'No observed PDH / PDL break';
    return '<button type="button" class="os-market" style="--os-accent:'+accents[i]+'" data-os-index="'+symbol+'" aria-pressed="'+(symbol===selected)+'"><span class="os-market-head">'+symbol+'<small class="'+tone(c)+'">'+pct(c)+'</small></span><strong class="os-price">'+fmt(ok?q.price:null)+'</strong><small class="os-subline">Spot · FUT '+fmt(fo?f.price:null)+'</small><small class="os-subline">SPOT · PDH / PDC / PDL</small><span class="os-levels">'+(['pdh','pdc','pdl'] as const).map(k=>'<span>'+k.toUpperCase()+'<b>'+fmt(r[k],2)+'</b></span>').join('')+'</span><small class="os-subline">FUT '+esc(fo?f.identity.expiry:'—')+' · PDH / PDC / PDL</small><span class="os-levels">'+(['pdh','pdc','pdl'] as const).map(k=>'<span>'+k.toUpperCase()+'<b>'+fmt(futureRefs(d,a)[k],2)+'</b></span>').join('')+'</span><span class="os-level-state">'+esc(position)+'</span><small class="os-subline">Full PCR '+fmt(v?.value,4)+' · '+(symbol==='BANKNIFTY'?'Monthly · ':'')+(ok?time(q.observedAt)+' IST':'—')+'</small></button>';
@@ -184,6 +223,7 @@ export function installOneShotLiveCard(api:any){
  };
  $('os-navigation').onclick=(e:any)=>{const id=e.target.closest?.('[data-os-go]')?.dataset?.osGo;if(!['radar','pulse','premium','futures','walls','stocks','sectors','vix','memory','tools'].includes(id))return;const target=$('os-'+id);if(target){if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView?.({block:'start',behavior:'auto'});}root.querySelectorAll?.('[data-os-go]').forEach((b:any)=>{if(b.dataset.osGo===id)b.setAttribute('aria-current','location');else b.removeAttribute?.('aria-current');});};
  $('os-market-radar').onclick=(e:any)=>{const next=e.target.closest?.('[data-os-index]')?.dataset?.osIndex;if(!symbols.includes(next))return;selected=next;api.chooseIndex(next);update(last,true);};
+ $('os-dte-metric').onclick=(e:any)=>{const mode=e.target.closest?.('[data-os-dte-metric]')?.dataset?.osDteMetric;if(!['day','window'].includes(mode))return;dteMetric=mode;$('os-dte-metric').querySelectorAll?.('[data-os-dte-metric]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.osDteMetric===mode)));update(last,true);};
  $('os-window').onclick=(e:any)=>{const next=Number(e.target.closest?.('[data-os-window]')?.dataset?.osWindow);if(![1,3,15,60].includes(next))return;minutes=next;$('os-window').querySelectorAll?.('[data-os-window]').forEach((b:any)=>b.setAttribute('aria-pressed',String(Number(b.dataset.osWindow)===minutes)));update(last,true);};
  for(const id of ['os-stocks','os-sectors'])if($(id))$(id).ontoggle=()=>{if($(id).open)update(last,true);else write(id==='os-stocks'?'os-stock-ranks':'os-sector-ranks','');};
  update(null,true);

@@ -1,0 +1,23 @@
+name: Oct19 NIFTY full-minute read-only event timeline
+on:
+  pull_request:
+    paths:
+      - 'scripts/oct19-nifty-readonly-one-minute-timeline.py'
+      - '.github/workflows/oct19-nifty-one-minute-evidence.yml'
+permissions:
+  contents: read
+jobs:
+  historical-read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recorded H1 1m windows; no broker/order/write
+        run: python3 scripts/oct19-nifty-readonly-one-minute-timeline.py
+      - name: Attach entire observed event timeline as CI artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oct19-nifty-recorded-1m-event-evidence
+          path: oct19_nifty_observed_timeline.json
+          retention-days: 7

@@ -291,9 +291,10 @@ def simple(s):
     return round(s,4) if s is not None else None
 
 results={}
+all_pair_points={}
 for expiry in PAIRS:
     points={}
-    curr=start
+    curr=dt.datetime.fromisoformat(DAY+"T"+PAIRS[expiry]["anchorIst"]+":00+05:30")
     rejected=collections.Counter()
     rawVolumeCounterFound=collections.Counter()
     while curr<=end:
@@ -315,12 +316,15 @@ for expiry in PAIRS:
                "ceOi":n(ce.get("oi")),"peOi":n(pe.get("oi")),
                "ceDelta":n(ce.get("delta")),"peDelta":n(pe.get("delta")),
                "ceGamma":n(ce.get("gamma")),"peGamma":n(pe.get("gamma")),
+               "marketExchangeTimestamp":m.get("exchange_timestamp"),
+               "marketFreshnessStatus":m.get("freshness_status"),
                "snapshotId":m.get("snapshot_id"),
                "marketVersion":m.get("calculation_version"),
                "chainVersion":c.get("calculation_version")
             }
         else:rejected["missingQualification"]+=1
         curr+=dt.timedelta(minutes=1)
+    all_pair_points[expiry]=points
     increments=[];validPointPairs=[];volumeNegatives=collections.Counter()
     for t,p in points.items():
         prev=points.get(t-dt.timedelta(minutes=1))
@@ -413,3 +417,86 @@ summary["recorderExpiryList"]=list(PAIRS)
 summary["sameMinuteCrossExpirySpotSpreadOverlap"]=len(overlap)
 OUT.write_text(json.dumps(summary,indent=2,default=str),encoding="utf-8")
 print("AUDIT_COMPLETE",OUT,flush=True)
+
+# Devil Check 2: ONLY after 10:33 Delta anchor, BEFORE late-session
+# repeatedly stamped Spot. Retrospective decomposition, never a trade rule.
+strict={}
+for expiry,pts in all_pair_points.items():
+    rows=[]
+    exclusions=collections.Counter()
+    for t,p in sorted(pts.items()):
+        prev=pts.get(t-dt.timedelta(minutes=1))
+        if not prev: continue
+        if ist(t)>"15:00":
+            exclusions["AFTER_15_00_LATE_SPOT_SOURCE_REPEATS_NOT_CHECKED"]+=1
+            continue
+        ex0=dtime(prev.get("marketExchangeTimestamp"));ex1=dtime(p.get("marketExchangeTimestamp"))
+        if ex0 is None or ex1 is None:
+            exclusions["SPOT_SOURCE_TIMESTAMP_MISSING"]+=1
+            continue
+        if not ex1>ex0:
+            exclusions["SPOT_SOURCE_TIMESTAMP_NOT_ADVANCING"]+=1
+            continue
+        cv0=prev.get("ceVolumeCounter");pv0=prev.get("peVolumeCounter")
+        cv1=p.get("ceVolumeCounter");pv1=p.get("peVolumeCounter")
+        if None in (cv0,pv0,cv1,pv1):
+            exclusions["VOLUME_COUNTER_MISSING"]+=1
+            continue
+        if cv1<cv0 or pv1<pv0:
+            exclusions["VOLUME_COUNTER_DECREASE"]+=1
+            continue
+        if None in (prev.get("ceDelta"),prev.get("peDelta")):
+            exclusions["ARCHIVED_DELTA_MISSING"]+=1
+            continue
+        dSpot=p["spot"]-prev["spot"];dSpread=p["spread"]-prev["spread"]
+        beta=prev["ceDelta"]-prev["peDelta"]
+        residue=dSpread-beta*dSpot
+        gammaCe=prev.get("ceGamma");gammaPe=prev.get("peGamma")
+        gammaResidual=(residue-0.5*(gammaCe-gammaPe)*dSpot*dSpot
+                       if gammaCe is not None and gammaPe is not None else None)
+        ceVolume=cv1-cv0;peVolume=pv1-pv0
+        if ceVolume+peVolume<=0:
+            exclusions["NO_RECORDED_INCREMENT"]+=1
+            continue
+        row={"timeIst":ist(t),"spot":p["spot"],"dSpot":round(dSpot,3),
+             "spread":p["spread"],"dSpread":round(dSpread,3),
+             "ceVolInc":round(ceVolume,3),"peVolInc":round(peVolume,3),
+             "totalVolInc":round(ceVolume+peVolume,3),
+             "peVolShare":round(peVolume/(ceVolume+peVolume),4),
+             "rawDeltaAdjustedResidual":round(residue,4),
+             "gammaDeltaAdjustedResidual":round(gammaResidual,4) if gammaResidual is not None else None,
+             "betaFromPriorGreeks":round(beta,4),
+             "sourceTimeBefore":prev["marketExchangeTimestamp"],
+             "sourceTimeAt":p["marketExchangeTimestamp"],
+             "sourceFreshnessAt":p["marketFreshnessStatus"],
+             "rawDirectionMatchesVolumeSide":(
+                (dSpread<0 and peVolume>ceVolume) or (dSpread>0 and ceVolume>peVolume)),
+             "residualDirectionMatchesVolumeSide":(
+                (residue<0 and peVolume>ceVolume) or (residue>0 and ceVolume>peVolume))}
+        rows.append(row)
+    if len(rows)>=20:
+        changeThreshold=percentile([abs(r["dSpread"]) for r in rows],0.75)
+        volumeThreshold=percentile([r["totalVolInc"] for r in rows],0.75)
+        joint=[r for r in rows if abs(r["dSpread"])>=changeThreshold and r["totalVolInc"]>=volumeThreshold]
+    else:
+        changeThreshold=volumeThreshold=None
+        joint=[]
+    summaryStrict={
+      "expiry":expiry,"fixedPair":PAIRS[expiry],"fullPriceMinuteCoverage":results[expiry]["qualifiedMinutePricePairs"],
+      "strictSourceFreshExactMinuteVolumePairsAfter1033Before1500":len(rows),
+      "exclusions":dict(exclusions),
+      "thresholdAbsSpreadP75":simple(changeThreshold),
+      "thresholdVolumeIncrementP75":simple(volumeThreshold),
+      "rawSpreadAbsVsVolumeCorrelation":pearson([r["totalVolInc"] for r in rows],[abs(r["dSpread"]) for r in rows]),
+      "residualAbsVsVolumeCorrelation":pearson([r["totalVolInc"] for r in rows],[abs(r["rawDeltaAdjustedResidual"]) for r in rows]),
+      "rawSpreadVsSpotCorrelation":pearson([r["dSpot"] for r in rows],[r["dSpread"] for r in rows]),
+      "retrospectiveHighVolumeHighSpreadCoincidences":len(joint),
+      "dominantVolumeDirectionMatchesRaw":sum(r["rawDirectionMatchesVolumeSide"] for r in joint),
+      "dominantVolumeDirectionMatchesDeltaResidual":sum(r["residualDirectionMatchesVolumeSide"] for r in joint),
+      "topVerifiedJointEvents":sorted(joint,key=lambda r:abs(r["dSpread"]),reverse=True)[:15],
+      "largestDeltaAdjustedOutliersWithVolume":sorted(rows,key=lambda r:abs(r["rawDeltaAdjustedResidual"]),reverse=True)[:10],
+      "quality":"NO_STATISTICAL_EDGE_OR_CAUSALITY; COUNTER_UNIT_SEMANTICS_UNVERIFIED"}
+    strict[expiry]=summaryStrict
+    print("STRICT_POST_ANCHOR_RESULT",json.dumps(summaryStrict,separators=(",",":"),allow_nan=False),flush=True)
+summary["strictPostAnchorSpotSourceVerified"]=strict
+OUT.write_text(json.dumps(summary,indent=2,default=str),encoding="utf-8")

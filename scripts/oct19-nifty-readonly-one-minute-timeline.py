@@ -90,10 +90,9 @@ def accepted(t):
         return None
     if not c or c.get("truth_verdict")!="TRUE":
         return None
-    # Chain has no market snapshot id; same-bucket marker and comparable
-    # calculation version are usable recorded indicators, not independent proof.
-    if c.get("calculation_version")!=m.get("calculation_version"):
-        return None
+    # Chain has no market snapshot id; both truth-marked same-minute rows are
+    # recorded evidence, but differing calculation versions are independently
+    # flagged; NEVER silently treat them as one coherent calculation cycle.
     return m,c
 def option(t,strike,side):
     v=[o for o in options.get(t,[]) if n(o.get("strike"))==strike and o.get("option_type")==side]
@@ -197,6 +196,21 @@ while t<=end:
         prev=(t,x)
     t+=dt.timedelta(minutes=1)
 
+# Explicit data-quality transparency: version conflict is NOT zero data.
+for label in ["10:33","11:33","12:33","13:33","14:33"]:
+    sample=dt.datetime.fromisoformat(DAY+"T"+label+":00+05:30")
+    mm=singular(market.get(sample,[]))
+    cc=singular(chain.get(sample,[]))
+    print("PROVENANCE",label,
+        "marketRows",len(market.get(sample,[])),"chainRows",len(chain.get(sample,[])),
+        "marketTruth",mm.get("truth_verdict") if mm else None,
+        "chainTruth",cc.get("truth_verdict") if cc else None,
+        "marketVersion",mm.get("calculation_version") if mm else None,
+        "chainVersion",cc.get("calculation_version") if cc else None,flush=True)
+quality["calculationVersionMismatchMinutes"]=sum(
+    1 for mm,cc in (pair for t in market for pair in [accepted(t)] if pair is not None)
+    if mm.get("calculation_version")!=cc.get("calculation_version"))
+
 # Four-hour fixed-contract price and OI/volume journey, never switch identities.
 fixed=[{"timeIst":hm} for hm in ["10:33","11:33","12:33","13:33","14:33"]]
 for obj in fixed:
@@ -219,7 +233,8 @@ summary={
     "Recorded PCR source not independently certified as full chain",
     "Volume is archived contract counter; interval difference is valid only when cumulative units/source verified",
     "Outcome fields are RETROSPECTIVE, not predictive proof",
-    "No synthetic missing buckets, no timestamp interpolation or cross-contract return stitching"],
+    "No synthetic missing buckets, no timestamp interpolation or cross-contract return stitching",
+    "Market/chain calculation-version mismatches are counted separately; source coherency NOT independently proven"],
  "fixedStartMatchedDelta025PairJourney":fixed,
  "events":events,
 }

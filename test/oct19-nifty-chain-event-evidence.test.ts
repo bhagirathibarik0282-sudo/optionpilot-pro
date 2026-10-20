@@ -66,3 +66,26 @@ test("market without trusted truth marker is explicitly withheld",()=>{
  v.market![1].truth_verdict="FALSE";
  assert.equal(summarizeOct19Evidence(v,"11:33").status,"MARKET_TRUTH_NOT_PROVEN");
 });
+
+test("same strike/side on OTHER expiry cannot suppress selected-expiry delta pair",()=>{
+ const rows=[
+   opt("11:33","CE",0.5,161),opt("11:33","PE",-0.5,142),
+   opt("11:33","CE",0.7,80,{expiry:"2026-10-27"}),
+   opt("11:33","PE",-0.3,90,{expiry:"2026-10-27"}),
+ ];
+ const x=summarizeOct19Evidence(mock(rows),"11:33");
+ assert.equal(x.status,"RECORDED_MARKET_READ");
+ if(x.status!=="RECORDED_MARKET_READ") return;
+ assert.equal(x.quality.allRecordedOptionsAtMinute,4);
+ assert.equal(x.quality.validOptionRows,2);
+ assert.equal(x.deltaWeightedOiObservedOnly.qualifiedCE,1);
+ assert.equal(x.deltaWeightedOiObservedOnly.qualifiedPE,1);
+ assert.equal(x.sameDeltaPairs.find(p=>p.target===0.5)?.status,"VERIFIED_RECORDED_PAIR");
+ // Two truly duplicate rows of the SELECTED expiry still withhold the CE.
+ const y=summarizeOct19Evidence(mock([...rows,rows[0]]),"11:33");
+ assert.equal(y.status,"RECORDED_MARKET_READ");
+ if(y.status==="RECORDED_MARKET_READ") {
+   assert.equal(y.deltaWeightedOiObservedOnly.qualifiedCE,0);
+   assert.equal(y.sameDeltaPairs.find(p=>p.target===0.5)?.status,"NO_VERIFIED_PAIR");
+ }
+});

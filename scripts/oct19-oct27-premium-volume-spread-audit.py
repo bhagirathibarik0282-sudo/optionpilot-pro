@@ -398,6 +398,7 @@ a={p["timeIst"]:p for p in []}
 def _timeline_for_expiry(e):
     out={}
     for t in sorted(market):
+        if ist(t)<PAIRS[e]["anchorIst"]:continue
         x=qpair(t,e)
         if x:
             m,c,rows=x
@@ -432,9 +433,8 @@ for expiry,pts in all_pair_points.items():
             continue
         ex0=dtime(prev.get("marketExchangeTimestamp"));ex1=dtime(p.get("marketExchangeTimestamp"))
         if ex0 is None or ex1 is None:
-            exclusions["SPOT_SOURCE_TIMESTAMP_MISSING"]+=1
-            continue
-        if not ex1>ex0:
+            exclusions["SPOT_SOURCE_TIMESTAMP_MISSING_RESIDUAL_PROVISIONAL"]+=1
+        elif not ex1>ex0:
             exclusions["SPOT_SOURCE_TIMESTAMP_NOT_ADVANCING"]+=1
             continue
         cv0=prev.get("ceVolumeCounter");pv0=prev.get("peVolumeCounter")
@@ -483,7 +483,7 @@ for expiry,pts in all_pair_points.items():
         joint=[]
     summaryStrict={
       "expiry":expiry,"fixedPair":PAIRS[expiry],"fullPriceMinuteCoverage":results[expiry]["qualifiedMinutePricePairs"],
-      "strictSourceFreshExactMinuteVolumePairsAfter1033Before1500":len(rows),
+      "exactOptionQuoteMinuteVolumePairsAfter1033Before1500_SpotTimestampUnverified":len(rows),
       "exclusions":dict(exclusions),
       "thresholdAbsSpreadP75":simple(changeThreshold),
       "thresholdVolumeIncrementP75":simple(volumeThreshold),
@@ -493,9 +493,9 @@ for expiry,pts in all_pair_points.items():
       "retrospectiveHighVolumeHighSpreadCoincidences":len(joint),
       "dominantVolumeDirectionMatchesRaw":sum(r["rawDirectionMatchesVolumeSide"] for r in joint),
       "dominantVolumeDirectionMatchesDeltaResidual":sum(r["residualDirectionMatchesVolumeSide"] for r in joint),
-      "topVerifiedJointEvents":sorted(joint,key=lambda r:abs(r["dSpread"]),reverse=True)[:15],
+      "topOptionQuoteVerifiedJointEvents":sorted(joint,key=lambda r:abs(r["dSpread"]),reverse=True)[:15],
       "largestDeltaAdjustedOutliersWithVolume":sorted(rows,key=lambda r:abs(r["rawDeltaAdjustedResidual"]),reverse=True)[:10],
-      "quality":"NO_STATISTICAL_EDGE_OR_CAUSALITY; COUNTER_UNIT_SEMANTICS_UNVERIFIED"}
+      "quality":"NO_SPOT_EXCHANGE_TIMESTAMP_SO_SPOT_ADJUSTED_RESIDUAL_PROVISIONAL; OPTION_QUOTE_TIMESTAMPS_EXACT; COUNTER_UNIT_SEMANTICS_UNVERIFIED; NOT_CAUSAL_OR_PREDICTIVE"}
     strict[expiry]=summaryStrict
     print("STRICT_POST_ANCHOR_RESULT",json.dumps(summaryStrict,separators=(",",":"),allow_nan=False),flush=True)
 summary["strictPostAnchorSpotSourceVerified"]=strict

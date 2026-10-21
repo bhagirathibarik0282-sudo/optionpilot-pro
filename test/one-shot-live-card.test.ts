@@ -5,7 +5,7 @@ import {installOneShotLiveCard} from '../one-shot-live-card.js';
 import {installDashboardWorkspace,WORKSPACE_NAV_HTML} from '../dashboard-workspace-view.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 import {deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr} from '../live-three-index-pcr.js';
-import {deriveAtmFibHold} from '../premium-workspace-model.js';
+import {derivePremiumWorkspace,derivePremiumSeriesInventory,deriveAtmFibHold} from '../premium-workspace-model.js';
 
 function harness(){
  let now=Date.parse('2026-10-19T04:15:00Z');
@@ -21,14 +21,15 @@ function harness(){
   indices:symbols.map(symbol=>({symbol,expiry,expiries:[expiry],strike:100,spot:quote('SPOT',symbol),future:quote('FUTURE',symbol),ce:quote('OPTION',symbol),pe:quote('OPTION',symbol,90,{identity:{role:'OPTION',symbol,expiry,strike:100,side:'PE',token:4}})})),
   atmExpiryLadder:symbols.map(symbol=>({symbol,spot:quote('SPOT',symbol),rows:[{expiry,strike:100,ce:quote('OPTION',symbol,120),pe:quote('OPTION',symbol,90,{identity:{role:'OPTION',symbol,expiry,strike:100,side:'PE',token:4}})}]})),
   vix:quote('VIX','',14,{pdc:13}),participation:[quote('STOCK','',150,{identity:{role:'STOCK',label:'HDFC <Bank>',token:99},pdc:100}),quote('SECTOR','',90,{identity:{role:'SECTOR',label:'PSU Bank',token:98},pdc:100})]}});
- let saved:any={date,current:{}};
+ let saved:any={date,current:{}},loadArgs:any=null;
  const models=Object.fromEntries(symbols.map(symbol=>[symbol,{symbol,tradeDate:date,spot:{pdh:101,pdl:90,at:stamp()}}]));
- const context:any={document:{body:{dataset:{}},getElementById:el,querySelectorAll(){return [];}},window:{addEventListener(n:string,f:any){listeners[n]=f;}},localStorage:{getItem(){return null;},setItem(){}},Date:Clock,__name:(fn:any)=>fn,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,deriveAtmFibHold,installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}};
+ const context:any={document:{body:{dataset:{}},getElementById:el,querySelectorAll(){return [];}},window:{addEventListener(n:string,f:any){listeners[n]=f;}},localStorage:{getItem(){return null;},setItem(){}},Date:Clock,__name:(fn:any)=>fn,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,deriveAtmFibHold,derivePremiumWorkspace,derivePremiumSeriesInventory,installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}};
  vm.createContext(context);vm.runInContext('var installOneShotLiveCard='+installOneShotLiveCard.toString(),context);
  const installer=vm.runInContext('('+installDashboardWorkspace.toString()+')',context);
- installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>0,turn(){},getState:()=>saved,getModels:()=>models});
+ installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>0,turn(){},getState:()=>saved,getModels:()=>models,setDate:async(date:string,options:any)=>{loadArgs={date,options};saved={...saved,date,scope:options.scope};}});
+ el('os-chart-cadence').onchange({target:{value:'0'}});
  const send=(p:any)=>listeners['optionpilot:live-context']({detail:p});
- return {el,payload,send,writes,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
+ return {el,payload,send,writes,loadArgs:()=>loadArgs,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
 }
 
 test('production HTML mounts the real new design once, with ten categories and existing real controls',()=>{
@@ -52,7 +53,8 @@ test('new radar, PCR, VIX and source walls render verified values and revoke the
  assert(!h.el('os-pulse-chart').innerHTML.includes('<path'));
  h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
  for(const id of ['os-market-radar','os-pcr-strip','os-vix-value','os-wall-ladder'])assert(!h.el(id).innerHTML.includes('1.2'));
- assert(h.el('os-pulse-chart').innerHTML.includes('Market closed'));
+ assert(h.el('os-pulse-chart').innerHTML.includes('RECORDED'));
+ assert.equal(h.el('op-one-stop').dataset.osSource,'RECORDED');
  assert(h.el('os-future-response').innerHTML.includes('no stale comparison'));
 });
 
@@ -291,3 +293,100 @@ test('a fresh verified live PCR takes precedence without relabelling recorded da
  assert.equal((html.match(/OI 4\/4 verified/g)||[]).length,3);
 });
 
+
+function recordedSession(){
+ const date='2026-10-19',expiries=['2026-10-22','2026-10-29'];
+ return {date,scope:'CORE',current:Object.fromEntries(['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>[symbol,{
+  market:['04:14:00','04:15:00'].map((t,i)=>({symbol,minute_bucket:date+'T'+t+'Z',spot_ltp:100+i,truth_verdict:'TRUE'})),
+  options:expiries.flatMap(expiry=>['CE','PE'].flatMap(option_type=>['04:14:00','04:15:00'].map((t,i)=>({symbol,expiry,option_type,strike:100,minute_bucket:date+'T'+t+'Z',truth_verdict:'TRUE',ltp:(option_type==='CE'?120:90)+i,pdc:95,pdh:125,pdl:85})))),
+  chain:expiries.flatMap(expiry=>['04:14:00','04:15:00'].map((t,i)=>({symbol,expiry,minute_bucket:date+'T'+t+'Z',truth_verdict:'TRUE',full_pcr_source:'Exact archived full-chain source',full_chain_oi_pcr:1.5+i/10})))
+ }]))};
+}
+
+test('closed market opens four recorded slots with exact saved prices and three PCR readings',()=>{
+ const h=harness();h.setSaved(recordedSession());h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ const html=h.el('os-dte-radar').innerHTML;
+ assert.equal((html.match(/class="os-dte-tile/g)||[]).length,4);
+ assert.equal((html.match(/data-recorded-expiry=/g)||[]).length,2);
+ assert(html.includes('>121</b>'));assert(html.includes('>91</b>'));assert(html.includes('PDH 125'));
+ assert(html.includes('Saved 09:45:00 IST'));assert(html.includes('No recorded inventory'));
+ assert(h.el('os-dte-context').innerHTML.includes('RECORDED · 2026-10-19'));
+ assert.equal((h.el('os-pcr-strip').innerHTML.match(/RECORDED · Full OI PCR/g)||[]).length,3);
+ assert.equal((h.el('os-pcr-strip').innerHTML.match(/1.6000/g)||[]).length,3);
+ assert(h.el('os-pulse-chart').innerHTML.includes('stroke="#ff8ed9"'));
+ assert(!h.el('os-agreement').innerHTML.includes('3/3 verified'));
+ assert(h.el('os-expiry-clock').innerHTML.includes('3 calendar days as of 2026-10-19'));
+});
+
+test('Live only refuses recorded substitution and changing back restores recorded panels',()=>{
+ const h=harness();h.setSaved(recordedSession());h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ h.el('os-source').onchange({target:{value:'LIVE'}});
+ assert(!h.el('os-dte-radar').innerHTML.includes('>121</b>'));assert(!h.el('os-pcr-strip').innerHTML.includes('1.6000'));
+ h.el('os-source').onchange({target:{value:'RECORDED'}});
+ assert(h.el('os-dte-radar').innerHTML.includes('>121</b>'));
+ h.send(h.payload());assert(h.el('os-dte-context').innerHTML.includes('RECORDED'));
+ h.el('os-source').onchange({target:{value:'LIVE'}});
+ assert(h.el('os-dte-context').innerHTML.includes('vs contract PDC'));
+ assert(!h.el('os-dte-radar').innerHTML.includes('data-recorded-expiry='));
+});
+
+test('recorded side and index controls filter all expiries without crossing index identity',()=>{
+ const h=harness(),s=recordedSession();s.current.SENSEX.options.forEach(r=>r.ltp+=1000);h.setSaved(s);
+ h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ h.el('os-sides').onclick({target:{closest:()=>({dataset:{osSide:'PE'}})}});
+ assert(!h.el('os-dte-radar').innerHTML.includes('data-side="CE"'));
+ assert.equal((h.el('os-dte-radar').innerHTML.match(/data-side="PE"/g)||[]).length,2);
+ h.el('os-index').onchange({target:{value:'SENSEX'}});
+ assert(h.el('os-dte-radar').innerHTML.includes('1,091'));assert.equal(h.el('op-atm-index').value,'SENSEX');
+ assert(h.el('os-dte-context').innerHTML.includes('SENSEX'));
+});
+
+test('recorded conflicting latest premium and missing Spot anchor fail closed',()=>{
+ for(const failure of ['conflict','spot','wrongday','future']){
+  const h=harness(),s=recordedSession(),data=s.current.NIFTY;
+  if(failure==='conflict')data.options.push({...data.options[1],ltp:98765});
+  if(failure==='spot')data.market.forEach(r=>r.truth_verdict='FALSE');
+  if(failure==='wrongday')data.options.forEach(r=>r.minute_bucket='2026-10-18T04:15:00Z');
+  if(failure==='future'){data.options.forEach(r=>{r.minute_bucket='2026-10-19T04:16:00Z';r.ltp=98765;});data.chain.forEach(r=>r.minute_bucket='2026-10-19T04:16:00Z');}
+  h.setSaved(s);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+  const html=h.el('os-dte-radar').innerHTML;
+  assert(!html.includes('98,765'));if(failure==='spot'||failure==='wrongday')assert(!html.includes('>121</b>'));
+  if(failure==='future')assert(!h.el('os-pcr-strip').innerHTML.split('data-pcr-index="NIFTY"')[1].split('data-pcr-index="SENSEX"')[0].includes('1.6000'));
+ }
+});
+
+test('recorded window requires matching pair endpoints and source change preserves no live event',()=>{
+ const h=harness(),s=recordedSession();s.current.NIFTY.options=s.current.NIFTY.options.filter(r=>!(r.option_type==='PE'&&r.minute_bucket.includes('04:14')));
+ h.setSaved(s);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ h.el('os-dte-metric').onclick({target:{closest:()=>({dataset:{osDteMetric:'window'}})}});
+ const html=h.el('os-dte-radar').innerHTML;assert(!html.includes('0.83%'));assert(html.includes('Incomplete pair'));
+ assert(!h.el('os-events').innerHTML.includes('PDH BREAK'));
+});
+
+test('full-session action reuses existing loader and selects Recorded after completion',async()=>{
+ const h=harness();h.setSaved(recordedSession());h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ h.el('os-recorded-date').value='2026-10-19';await h.el('os-load-recorded').onclick();
+ assert.equal(h.loadArgs().date,'2026-10-19');assert.equal(h.loadArgs().options.scope,'FULL');assert.equal(h.loadArgs().options.fullSession,true);
+ assert.equal(h.el('os-source').value,'RECORDED');assert.equal(h.el('os-load-recorded').disabled,false);
+ assert(h.el('os-dte-alignment').innerHTML.includes('full session loaded'));
+});
+
+test('3-minute chart custom throttles painting while manual refresh and invalid source revoke immediately',()=>{
+ const h=harness();h.el('os-chart-cadence').onchange({target:{value:'180000'}});h.send(h.payload());
+ const count=h.writes.get('os-pulse-chart');
+ h.advance(10000);h.send(h.payload());const firstSampleCount=h.writes.get('os-pulse-chart');
+ h.advance(10000);h.send(h.payload());assert.equal(h.writes.get('os-pulse-chart'),firstSampleCount);
+ h.el('os-chart-refresh').onclick();assert(h.el('os-pulse-chart').innerHTML.includes('stroke="#3be6ff"'));
+ h.el('os-chart-series').onchange({target:{value:'PCR'}});assert(!h.el('os-pulse-chart').innerHTML.includes('stroke="#3be6ff"'));
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-pulse-chart').innerHTML.includes('<path'));
+ assert(count!==undefined);
+});
+
+
+test('a historically stale option quote is withheld without rolling ATM to another contract',()=>{
+ const h=harness(),s=recordedSession();
+ s.current.NIFTY.options.forEach((r:any)=>{if(r.option_type==='CE'){r.quote_timestamp='2026-10-19T04:00:00Z';r.quote_age_seconds=900;r.ltp=12345;}});
+ h.setSaved(s);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ assert(!h.el('os-dte-radar').innerHTML.includes('12,345'));assert(h.el('os-dte-radar').innerHTML.includes('ATM 100'));
+ assert(h.el('os-dte-radar').innerHTML.includes('>91</b>'));
+});

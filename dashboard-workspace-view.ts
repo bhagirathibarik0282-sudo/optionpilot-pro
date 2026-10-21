@@ -329,7 +329,7 @@ export function installDashboardWorkspace(api:any){
    server-observed<=30000&&server-received>=0&&server-received<=30000;
  };
  const oneShot=typeof installOneShotLiveCard==='function'?installOneShotLiveCard({
-  getState:api.getState,getModels:api.getModels,validEnvelope:freshEnvelope,validQuote:freshQuote,
+  getState:api.getState,getModels:api.getModels,setDate:api.setDate,derivePremium:typeof derivePremiumWorkspace==='function'?derivePremiumWorkspace:undefined,validEnvelope:freshEnvelope,validQuote:freshQuote,
   derivePcr:deriveLiveThreeIndexPcr,deriveRecordedPcr:typeof deriveRecordedThreeIndexPcr==='function'?deriveRecordedThreeIndexPcr:undefined,chooseIndex:(symbol:string)=>{atmSelected=symbol;$('op-atm-index').value=symbol;paintAtm(atmLast);}
  }):null;
  // PR3: reuse the strict three-index full-PCR verifier; render from the existing stream only.

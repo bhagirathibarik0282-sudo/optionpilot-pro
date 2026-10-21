@@ -197,3 +197,39 @@ test('Multi-DTE window withholds unsynced pair changes while keeping fresh indiv
  const html=h.el('os-dte-radar').innerHTML;
  assert(html.includes('PAIR INCOMPLETE / UNSYNCED'));assert(!html.includes('5%</em>'));assert(html.includes('>120</b>'));
 });
+
+test('preface switches pages without interrupting shared feed or losing index selection',()=>{
+ const h=harness();h.send(h.payload());
+ h.el('os-market-radar').onclick({target:{closest:()=>({dataset:{osIndex:'SENSEX'}})}});
+ assert.equal(h.el('os-preface').hidden,true);assert.equal(h.el('os-dashboard').hidden,false);
+ h.el('os-open-preface').onclick();
+ assert.equal(h.el('os-preface').hidden,false);assert.equal(h.el('os-dashboard').hidden,true);
+ assert.equal(h.el('os-open-preface').attrs['aria-expanded'],'true');
+ h.advance(1000);const p=h.payload();p.snapshot.indices[1].spot.price=103;h.send(p);
+ assert(h.el('os-market-radar').innerHTML.includes('>103</strong>'));
+ h.el('os-open-dashboard').onclick();
+ assert.equal(h.el('os-dashboard').hidden,false);assert.equal(h.el('os-preface').hidden,true);
+ assert.equal(h.el('op-atm-index').value,'SENSEX');
+ assert.equal(h.el('os-open-dashboard').attrs['aria-pressed'],'true');
+ assert.equal((WORKSPACE_NAV_HTML.match(/id="os-pcr-strip"/g)||[]).length,1);
+ assert(WORKSPACE_NAV_HTML.indexOf('id="os-pcr-strip"')<WORKSPACE_NAV_HTML.indexOf('id="os-pulse"'));
+});
+
+test('all three PCR cards distinguish complete full ratio, band and comparable arrows',()=>{
+ const h=harness();h.send(h.payload());
+ let html=h.el('os-pcr-strip').innerHTML;
+ for(const symbol of ['NIFTY','SENSEX','BANKNIFTY'])assert(html.includes('data-pcr-index="'+symbol+'"'));
+ assert.equal((html.match(/1\.2000/g)||[]).length,3);
+ assert(html.includes('ATM ±7 band: —'));assert(html.includes('waiting for comparable snapshot'));
+ h.advance(60000);h.newCycle();const p=h.payload();
+ p.pcrDisplay.NIFTY.peTotal=130;p.pcrDisplay.NIFTY.fullPcr=1.3;
+ p.pcrDisplay.SENSEX.peTotal=110;p.pcrDisplay.SENSEX.fullPcr=1.1;
+ p.pcrDisplay.BANKNIFTY.coverage.complete=false;h.send(p);
+ html=h.el('os-pcr-strip').innerHTML;
+ assert(html.includes('1.3000'));assert(html.includes('PCR up">↑'));
+ assert(html.includes('1.1000'));assert(html.includes('PCR down">↓'));
+ const bank=html.split('data-pcr-index="BANKNIFTY"')[1];
+ assert(!bank.includes('1.2000'));assert(bank.includes('Full expiry OI not verified'));
+ assert(html.includes('09:45:00 → 09:46:00 IST'));
+});
+

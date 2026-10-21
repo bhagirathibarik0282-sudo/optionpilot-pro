@@ -9,7 +9,7 @@ export function renderOneShotCard(atm:string){
 <article><h4>01 · Spot / PDH / PDL</h4><p>PDH = ପୂର୍ବ sessionର High; PDL = Low; PDC = Close। Spot, Futures ଓ option premiumର ନିଜସ୍ୱ level ଅଲଗା। “Above” ମାନେ ବର୍ତ୍ତମାନ ଉପରେ; “BREAK” ପାଇଁ crossing ଦେଖାଯିବା ଦରକାର।</p></article>
 <article><h4>02 · Full PCR · ତିନି Index</h4><p>PE OI ÷ CE OI। Full PCR ସମ୍ପୂର୍ଣ୍ଣ expiryର; ATM ±7 କେବଳ 15 strikeର band। ↑ ↓ ratio ବଦଳୁଛି; ଏହା Spot direction ବା buy/sell signal ନୁହେଁ। ପ୍ରତ୍ୟେକ Indexର expiry ଓ checked time ପଢ଼ନ୍ତୁ।</p></article>
 <article><h4>03 · Colourful premium ladder</h4><p><span class="os-ce-label">CE · Call</span> <span class="os-pe-label">PE · Put</span></p><p>ପ୍ରତି cardରେ expiry → calendar DTE → ATM strike → ₹ LTP → % change → quote time। Day % ନିଜ contractର PDC ସହ; Window % ଏକେ contractର ଦୁଇ ସମୟ ସହ। ସବୁଜ/ଲାଲ % ହେଉଛି premium change।</p></article>
-<article><h4>04 · Live / Recorded / —</h4><p>LIVE ପାଇଁ verified fresh source ଦରକାର। — ମାନେ ତଥ୍ୟ ମିଳିନାହିଁ, zero ନୁହେଁ। Quote time ଓ PCR checked time ଅଲଗା ହୋଇପାରେ। ପୁରୁଣା session ପାଇଁ Open recorded ladder / Multi-day research ଖୋଲନ୍ତୁ।</p></article>
+<article><h4>04 · Live / Recorded / —</h4><p>LIVE ପାଇଁ verified fresh source ଦରକାର। — ମାନେ ତଥ୍ୟ ମିଳିନାହିଁ, zero ନୁହେଁ। Quote time ଓ PCR checked time ଅଲଗା ହୋଇପାରେ। PCR cardର RECORDED ସଂଖ୍ୟା saved observation; ତାହାର date/time ପଢ଼ନ୍ତୁ। ପୁରୁଣା session ପାଇଁ Open recorded ladder / Multi-day research ଖୋଲନ୍ତୁ।</p></article>
 <article><h4>05 · FII/DII + Memory</h4><p>FII/DII chapterର dated EOD data ପଢ଼ନ୍ତୁ। Live notable changes ଏହି browser sessionର observation; saved history Recorded / Multi-dayରେ। RAG explanationକୁ ତାହାର source date ସହ ପଢ଼ନ୍ତୁ।</p></article>
 <article><h4>06 · ନିଜ ଭାବରେ ଦେଖନ୍ତୁ</h4><p>Index tap କରନ୍ତୁ → Day % ବା Selected window % ବାଛନ୍ତୁ → detailed ladderରେ CE / PE / BOTH। Numbered section tap କରି ଯାଆନ୍ତୁ; Show / hideରେ section ବନ୍ଦ କରନ୍ତୁ।</p></article>
 </div><p class="os-caption">Reading guide · 21 October 2026 · ଉପରେ Live dashboard → tap କରି readingsକୁ ଫେରନ୍ତୁ।</p></section>
@@ -42,17 +42,18 @@ export const ONE_SHOT_CSS=`
 #market-book #op-one-stop #op-atm-pairs table{display:table;table-layout:fixed;width:100%;min-width:0}#market-book #op-one-stop #op-atm-pairs thead{display:table-header-group}#market-book #op-one-stop #op-atm-pairs tbody{display:table-row-group}#market-book #op-one-stop #op-atm-pairs tbody tr{display:table-row;margin:0;padding:0;border:0}#market-book #op-one-stop #op-atm-pairs :is(th,td){display:table-cell;grid-column:auto;min-width:0;width:auto;white-space:normal;overflow-wrap:anywhere;vertical-align:top}#market-book #op-one-stop #op-atm-pairs :is(th,td):first-child{width:33%}#market-book #op-one-stop #op-atm-pairs :is(th,td):nth-child(2){width:25%}#market-book #op-one-stop #op-atm-pairs td:before{display:none;content:none}
 @media(max-width:900px){#op-one-stop .os-main-grid{grid-template-columns:1fr}#op-one-stop .os-rank-grid{grid-template-columns:1fr}}@media(max-width:600px){#market-book #op-one-stop.os-card{padding:10px;border-radius:15px}#op-one-stop .os-hero{display:block}#market-book #op-one-stop .os-hero h2{font-size:29px}#op-one-stop #op-one-status{max-width:none;font-size:12px;margin-top:8px;padding:7px 9px}#op-one-stop .os-kicker{font-size:10px;letter-spacing:1.3px}#op-one-stop .os-markets{gap:5px}#market-book #op-one-stop .os-market{padding:10px 6px;border-radius:11px}#op-one-stop .os-market-head{font-size:11px;margin-bottom:7px;display:block}#op-one-stop .os-market-head small{display:block;font-size:10px;margin-top:3px}#op-one-stop .os-price{font-size:18px;letter-spacing:-.7px}#op-one-stop .os-subline{font-size:10px}#op-one-stop .os-levels{gap:2px}#op-one-stop .os-levels>span{font-size:9px;padding:4px 1px}#op-one-stop .os-levels b{font-size:10px}#op-one-stop .os-level-state{font-size:10px}#op-one-stop .os-section-head small{font-size:11px}#op-one-stop .os-pcr{padding:7px 5px}#op-one-stop .os-pcr>strong{font-size:10px}#op-one-stop .os-pcr b{font-size:21px}#op-one-stop .os-pcr small{font-size:10px}#op-one-stop .os-chart{height:135px}#op-one-stop #op-atm-pairs td strong{font-size:17px}#op-one-stop #op-atm-pairs :is(th,td){font-size:11px}#op-one-stop .os-panel-body{padding:0 9px 10px}#op-one-stop .os-premium{padding:10px}#op-one-stop details.os-panel>summary{font-size:14px;padding:10px}#op-one-stop .os-rank-sides{gap:6px}}
 
-#op-one-stop .os-dte-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:9px 0}
+#op-one-stop .os-ladder-grid{grid-template-columns:minmax(0,1fr);align-items:start}
+#op-one-stop .os-dte-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:8px;margin:9px 0}
+#op-one-stop .os-dte-grid>.os-subline{grid-column:1/-1}
 #op-one-stop .os-dte-tile{min-width:0;border:1px solid #51618a;border-radius:12px;padding:10px;background:linear-gradient(145deg,#262342,#14283b)}
 #op-one-stop .os-dte-tile h4{margin:0 0 5px;font-size:13px;color:#d5c2ff}
 #op-one-stop .os-dte-tile small{display:block;color:#b9cce3;font-size:10px;overflow-wrap:anywhere}
 #op-one-stop .os-dte-legs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
 #op-one-stop .os-dte-leg{min-width:0;padding:7px 5px;border-radius:8px;background:#103c3580;border:1px solid #34745d;font-size:11px}
 #op-one-stop .os-dte-leg[data-side=PE]{background:#49263a80;border-color:#874767}
-#op-one-stop .os-dte-leg b{display:block;font-size:17px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#op-one-stop .os-dte-leg b{display:block;font-size:17px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow-wrap:normal;overflow-x:auto}
 #op-one-stop .os-dte-leg em{display:block;font-size:12px;font-style:normal;margin:3px 0}
-@media(max-width:1100px){#op-one-stop .os-dte-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:360px){#op-one-stop .os-dte-grid{grid-template-columns:1fr}}
+
 
 #op-one-stop [hidden]{display:none!important}
 #op-one-stop .os-preface{padding:18px;border:1px solid #7665a2;border-radius:15px;background:linear-gradient(145deg,#242340,#112b39);line-height:1.7}
@@ -67,6 +68,8 @@ export const ONE_SHOT_CSS=`
 #op-one-stop .os-pcr-overview{padding:12px;border:1px solid #3e859c;border-radius:14px;background:linear-gradient(120deg,#123544,#202640);margin:12px 0}
 #op-one-stop .os-pcr-strip{margin-top:7px}
 #op-one-stop .os-pcr b span{font-size:22px}
+#op-one-stop .os-pcr-recorded{margin-top:8px;padding-top:8px;border-top:1px dashed #7c69a5;color:#dac9ff}
+#op-one-stop .os-pcr-recorded>strong{display:block;font-size:20px;color:#dac9ff;font-variant-numeric:tabular-nums}
 #op-one-stop .os-dte-leg{border-top:3px solid #56e6ab}
 #op-one-stop .os-dte-leg[data-side=PE]{border-top-color:#ff85ae}
 #op-one-stop #op-atm-pairs .op-atm-side h4{color:#9fffd0}
@@ -227,10 +230,16 @@ export function installOneShotLiveCard(api:any){
    return '<button type="button" class="os-market" style="--os-accent:'+accents[i]+'" data-os-index="'+symbol+'" aria-pressed="'+(symbol===selected)+'"><span class="os-market-head">'+symbol+'<small class="'+tone(c)+'">'+pct(c)+'</small></span><strong class="os-price">'+fmt(ok?q.price:null)+'</strong><small class="os-subline">Spot · FUT '+fmt(fo?f.price:null)+'</small><small class="os-subline">SPOT · PDH / PDC / PDL</small><span class="os-levels">'+(['pdh','pdc','pdl'] as const).map(k=>'<span>'+k.toUpperCase()+'<b>'+fmt(r[k],2)+'</b></span>').join('')+'</span><small class="os-subline">FUT '+esc(fo?f.identity.expiry:'—')+' · PDH / PDC / PDL</small><span class="os-levels">'+(['pdh','pdc','pdl'] as const).map(k=>'<span>'+k.toUpperCase()+'<b>'+fmt(futureRefs(d,a)[k],2)+'</b></span>').join('')+'</span><span class="os-level-state">'+esc(position)+'</span><small class="os-subline">Full PCR '+fmt(v?.value,4)+' · '+(symbol==='BANKNIFTY'?'Monthly · ':'')+(ok?time(q.observedAt)+' IST':'—')+'</small></button>';
   }).join(''));
   write('os-pulse-chart',live?graph(d):empty((payload?.connectionState==='MARKET_CLOSED'?'Market closed':'Live feed unavailable')+' · recorded charts are available in Open recorded ladder.'));
+  // Saved PCR is a separately labelled observation, never a substitute for live OI.
+  // Use only today's already-loaded archive, at/before source time and exact live expiry.
+  const recordedState=api.getState?.(),recorded=live&&recordedState?.date===d.snapshot.tradeDate&&typeof api.deriveRecordedPcr==='function'&&pcr.rows.some((r:any)=>r.value===null)?api.deriveRecordedPcr(recordedState,d.serverTime,null,Date.now()):null;
   write('os-pcr-strip',symbols.map(symbol=>{
    const r=pcr.rows.find((x:any)=>x.symbol===symbol),direction=r?.direction||'WAIT',arrow=direction==='UP'?'↑':direction==='DOWN'?'↓':direction==='FLAT'?'→':'—';
    const colour=direction==='UP'?'os-up':direction==='DOWN'?'os-down':'';
-   return '<div class="os-pcr" data-pcr-index="'+symbol+'"><strong>'+symbol+(symbol==='BANKNIFTY'?' · M':'')+'</strong><small>Full OI PCR</small><b>'+ (n(r?.value)!==null?r.value.toFixed(4):'—')+' <span class="'+colour+'" aria-label="PCR '+direction.toLowerCase()+'">'+arrow+'</span></b><small>Expiry '+esc(r?.expiry||'unavailable')+'</small><small>ATM ±7 band: '+fmt(r?.bandValue,4)+'</small><small>'+esc(r?.current?'Checked '+time(r.current.checked)+' IST · '+r.current.period/60000+'m snapshots':r?.pcrStatus?.replaceAll('_',' ')||'UNAVAILABLE')+'</small><small>'+esc(r?.baseline?'Compared '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':r?.current?'Arrow: waiting for comparable snapshot':'Full expiry OI not verified')+'</small></div>';
+   const c=r?.coverageInfo,coverage=r?.current?'OI '+r.current.expected+'/'+r.current.expected+' verified':c&&c.fresh+c.stale+c.missing+c.invalid===c.expected?'OI '+c.fresh+'/'+c.expected+' fresh · stale '+c.stale+' · missing '+c.missing+' · invalid '+c.invalid:'';
+   const saved=recorded?.rows.find((x:any)=>x.symbol===symbol&&x.expiry===r?.expiry&&x.current&&n(x.value)!==null);
+   const savedHtml=r?.value===null&&saved?'<div class="os-pcr-recorded"><small>RECORDED · Full PCR</small><strong>'+saved.value.toFixed(4)+'</strong><small>'+esc(recordedState.date)+' · '+time(saved.current.checked)+' IST</small><small>Expiry '+esc(saved.expiry)+' · saved full-chain source</small></div>':'';
+   return '<div class="os-pcr" data-pcr-index="'+symbol+'"><strong>'+symbol+(symbol==='BANKNIFTY'?' · M':'')+'</strong><small>LIVE · Full OI PCR</small><b>'+ (n(r?.value)!==null?r.value.toFixed(4):'—')+' <span class="'+colour+'" aria-label="PCR '+direction.toLowerCase()+'">'+arrow+'</span></b><small>Expiry '+esc(r?.expiry||'unavailable')+'</small><small>ATM ±7 band: '+fmt(r?.bandValue,4)+'</small><small>'+esc(r?.current?'Checked '+time(r.current.checked)+' IST · '+r.current.period/60000+'m snapshots':r?.pcrStatus?.replaceAll('_',' ')||'UNAVAILABLE')+'</small>'+(coverage?'<small>'+esc(coverage)+(c&&!r?.current?' · checked '+time(c.checked)+' IST':'')+'</small>':'')+'<small>'+esc(r?.baseline?'Compared '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':r?.current?'Arrow: waiting for comparable snapshot':'Full expiry OI not verified')+'</small>'+savedHtml+'</div>';
   }).join(''));
   const v=live?d.snapshot.vix:null,vo=live&&valid(d,v,'VIX');
   write('os-vix-value','<small class="os-subline">INDIA VIX · '+(vo?time(v.observedAt)+' IST':'SOURCE UNAVAILABLE')+'</small><div class="os-vix-number">'+fmt(vo?v.price:null)+'</div><span class="'+tone(vo?change(d,v,'VIX'):null)+'">'+pct(vo?change(d,v,'VIX'):null)+' vs previous close</span>');
@@ -261,7 +270,7 @@ export function installOneShotLiveCard(api:any){
   $('os-open-preface').setAttribute('aria-expanded',String(show));$('os-open-dashboard').setAttribute('aria-pressed',String(!show));
   if(focus)(show?$('os-preface-title'):$('os-open-dashboard')).focus?.();
  };
- $('os-open-preface').onclick=()=>showPreface(true,true);
+ $('os-open-preface').onclick=()=>showPreface($('os-preface').hidden,true);
  $('os-open-dashboard').onclick=()=>showPreface(false,true);
  showPreface(false);
  $('os-navigation').onclick=(e:any)=>{const id=e.target.closest?.('[data-os-go]')?.dataset?.osGo;if(!['radar','pulse','premium','futures','walls','stocks','sectors','vix','memory','tools'].includes(id))return;const target=$('os-'+id);if(target){if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView?.({block:'start',behavior:'auto'});}root.querySelectorAll?.('[data-os-go]').forEach((b:any)=>{if(b.dataset.osGo===id)b.setAttribute('aria-current','location');else b.removeAttribute?.('aria-current');});};

@@ -2,17 +2,30 @@
 export function renderOneShotCard(atm:string){
  return `<section id="op-one-stop" class="os-card" data-os-version="ONE_SHOT_LIVE_V1" aria-label="One Shot live market command centre">
 <div class="os-hero"><div><span class="os-kicker">OPTIONPILOT PRO · ONE SHOT / ONE STOP</span><h2>Read the entire market.<br><span>One glance.</span></h2></div><div id="op-one-status" role="status" aria-live="polite">Waiting for verified Kite data</div></div>
+<div class="os-controls" aria-label="Dashboard pages"><button type="button" id="os-open-preface" aria-controls="os-preface" aria-expanded="false">00 · ପ୍ରଥମେ ପଢ଼ନ୍ତୁ / Preface</button><button type="button" id="os-open-dashboard" aria-controls="os-dashboard" aria-pressed="true">Live dashboard →</button></div>
+<section id="os-preface" class="os-preface" aria-label="Dashboard reading preface" hidden>
+<h3 tabindex="-1" id="os-preface-title">00 · ଡ୍ୟାଶବୋର୍ଡ କେମିତି ପଢ଼ିବେ</h3><p>ଏହି କ୍ରମରେ ପଢ଼ନ୍ତୁ: <strong>Spot + PDH/PDL → ତିନି Index PCR → Expiry + CE/PE → Source time</strong></p>
+<div class="os-guide-grid">
+<article><h4>01 · Spot / PDH / PDL</h4><p>PDH = ପୂର୍ବ sessionର High; PDL = Low; PDC = Close। Spot, Futures ଓ option premiumର ନିଜସ୍ୱ level ଅଲଗା। “Above” ମାନେ ବର୍ତ୍ତମାନ ଉପରେ; “BREAK” ପାଇଁ crossing ଦେଖାଯିବା ଦରକାର।</p></article>
+<article><h4>02 · Full PCR · ତିନି Index</h4><p>PE OI ÷ CE OI। Full PCR ସମ୍ପୂର୍ଣ୍ଣ expiryର; ATM ±7 କେବଳ 15 strikeର band। ↑ ↓ ratio ବଦଳୁଛି; ଏହା Spot direction ବା buy/sell signal ନୁହେଁ। ପ୍ରତ୍ୟେକ Indexର expiry ଓ checked time ପଢ଼ନ୍ତୁ।</p></article>
+<article><h4>03 · Colourful premium ladder</h4><p><span class="os-ce-label">CE · Call</span> <span class="os-pe-label">PE · Put</span></p><p>ପ୍ରତି cardରେ expiry → calendar DTE → ATM strike → ₹ LTP → % change → quote time। Day % ନିଜ contractର PDC ସହ; Window % ଏକେ contractର ଦୁଇ ସମୟ ସହ। ସବୁଜ/ଲାଲ % ହେଉଛି premium change।</p></article>
+<article><h4>04 · Live / Recorded / —</h4><p>LIVE ପାଇଁ verified fresh source ଦରକାର। — ମାନେ ତଥ୍ୟ ମିଳିନାହିଁ, zero ନୁହେଁ। Quote time ଓ PCR checked time ଅଲଗା ହୋଇପାରେ। ପୁରୁଣା session ପାଇଁ Open recorded ladder / Multi-day research ଖୋଲନ୍ତୁ।</p></article>
+<article><h4>05 · FII/DII + Memory</h4><p>FII/DII chapterର dated EOD data ପଢ଼ନ୍ତୁ। Live notable changes ଏହି browser sessionର observation; saved history Recorded / Multi-dayରେ। RAG explanationକୁ ତାହାର source date ସହ ପଢ଼ନ୍ତୁ।</p></article>
+<article><h4>06 · ନିଜ ଭାବରେ ଦେଖନ୍ତୁ</h4><p>Index tap କରନ୍ତୁ → Day % ବା Selected window % ବାଛନ୍ତୁ → detailed ladderରେ CE / PE / BOTH। Numbered section tap କରି ଯାଆନ୍ତୁ; Show / hideରେ section ବନ୍ଦ କରନ୍ତୁ।</p></article>
+</div><p class="os-caption">Reading guide · 21 October 2026 · ଉପରେ Live dashboard → tap କରି readingsକୁ ଫେରନ୍ତୁ।</p></section>
+<div id="os-dashboard">
 <div id="op-one-actions" role="group" aria-label="Open existing market tools"><button type="button" data-op-one="LIVE">Live detail</button><button type="button" data-op-one="LADDER">CE / PE ladder</button><button type="button" data-op-one="MULTIDAY">Multi-day research</button><button type="button" data-op-one="RAG">Ask RAG</button><button type="button" data-op-one="RECORDED">Open recorded ladder</button></div>
 <nav class="os-nav" id="os-navigation" aria-label="One Shot numbered categories">${[['radar','Market radar'],['pulse','Spot × PCR'],['premium','Premium ladder'],['futures','Futures response'],['walls','OI + walls'],['stocks','Heavyweights'],['sectors','Sectors'],['vix','VIX + alignment'],['memory','Memory / replay'],['tools','Sources / tools']].map(([id,label],i)=>`<button type="button" data-os-go="${id}">${String(i+1).padStart(2,'0')} · ${label}</button>`).join('')}</nav>
 <div class="os-section-head" id="os-radar"><h3>01 · 3-index market radar</h3><small>Tap an index · BANKNIFTY monthly observation</small></div><div id="os-market-radar" class="os-markets" aria-live="off"></div>
-<div class="os-main-grid"><details class="os-panel os-cyan" id="os-pulse" open><summary>02 · Spot × Full PCR pulse <small>Show / hide</small></summary><div class="os-panel-body"><div class="os-controls" id="os-window" role="group" aria-label="One Shot observation window">${[1,3,15,60].map(n=>`<button type="button" data-os-window="${n}" aria-pressed="${n===1}">${n}m</button>`).join('')}</div><div id="os-pulse-chart"></div><div id="os-pcr-strip" class="os-pcr-strip"></div><details class="os-source"><summary>Chart source</summary><p>Actual received samples, independently scaled spot and PCR axes. Missing intervals are gaps. First-15-minute H/L is shown only when verified recorded references exist; no illustrative guide.</p></details></div></details>
+<section class="os-pcr-overview" aria-label="All three index PCR"><div class="os-section-head"><h3>Full PCR · NIFTY / SENSEX / BANKNIFTY</h3><small>PE OI ÷ CE OI · arrows show ratio change</small></div><div id="os-pcr-strip" class="os-pcr-strip"></div></section>
+<div class="os-main-grid"><details class="os-panel os-cyan" id="os-pulse" open><summary>02 · Spot × Full PCR pulse <small>Show / hide</small></summary><div class="os-panel-body"><div class="os-controls" id="os-window" role="group" aria-label="One Shot observation window">${[1,3,15,60].map(n=>`<button type="button" data-os-window="${n}" aria-pressed="${n===1}">${n}m</button>`).join('')}</div><div id="os-pulse-chart"></div><details class="os-source"><summary>Chart source</summary><p>Actual received samples, independently scaled spot and PCR axes. Missing intervals are gaps. First-15-minute H/L is shown only when verified recorded references exist; no illustrative guide.</p></details></div></details>
 <details class="os-panel os-violet" id="os-vix" open><summary>08 · VIX + agreement radar <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-vix-value"></div><div id="os-agreement" class="os-agreement"></div></div></details></div>
-<div class="os-main-grid os-ladder-grid"><article class="os-panel os-premium" id="os-premium"><div class="os-section-head"><h3>03 · Multi-expiry premium ladder</h3><small>Exact dates · current ATM CE / PE</small></div><div class="os-section-head"><strong>Multi-DTE awareness</strong><small id="os-dte-context"></small></div><div class="os-controls" id="os-dte-metric" role="group" aria-label="Multi-DTE change comparison"><button type="button" data-os-dte-metric="day" aria-pressed="true">Day %</button><button type="button" data-os-dte-metric="window" aria-pressed="false">Selected window %</button></div><div id="os-dte-radar" class="os-dte-grid"></div><div id="os-dte-alignment"></div>${atm}</article><details class="os-panel" id="os-memory" open><summary>09 · Notable changes / replay <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-events"></div><p class="os-caption">Saved sessions stay in Open recorded ladder / Multi-day research. Live events below describe observations in this browser session.</p></div></details></div>
+<div class="os-main-grid os-ladder-grid"><article class="os-panel os-premium" id="os-premium"><div class="os-section-head"><h3>03 · Multi-expiry premium ladder</h3><small>Exact dates · current ATM CE / PE</small></div><div class="os-section-head"><strong>Multi-DTE awareness</strong><small id="os-dte-context"></small></div><p class="os-ladder-key"><span class="os-ce-label">CE · Call</span> <span class="os-pe-label">PE · Put</span> Expiry → DTE → ATM strike → ₹ LTP → % change → time</p><div class="os-controls" id="os-dte-metric" role="group" aria-label="Multi-DTE change comparison"><button type="button" data-os-dte-metric="day" aria-pressed="true">Day %</button><button type="button" data-os-dte-metric="window" aria-pressed="false">Selected window %</button></div><div id="os-dte-radar" class="os-dte-grid"></div><div id="os-dte-alignment"></div>${atm}</article><details class="os-panel" id="os-memory" open><summary>09 · Notable changes / replay <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-events"></div><p class="os-caption">Saved sessions stay in Open recorded ladder / Multi-day research. Live events below describe observations in this browser session.</p></div></details></div>
 <details class="os-panel" id="os-futures"><summary>04 · Futures + premium response <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-future-response"></div><p class="os-caption">Same-index futures and exact option contracts, matched observation endpoints. Same direction is descriptive co-movement, not proof that a premium follows a futures contract.</p></div></details>
 <details class="os-panel" id="os-walls"><summary>05 · OI + wall ladder <small>Show / hide</small></summary><div class="os-panel-body" id="os-wall-ladder"></div></details>
 <div class="os-rank-grid"><details class="os-panel" id="os-stocks"><summary>06 · Heavyweights · Top 5 <small>Show / hide</small></summary><div class="os-panel-body" id="os-stock-ranks"></div></details><details class="os-panel" id="os-sectors"><summary>07 · Sectors · Top 5 <small>Show / hide</small></summary><div class="os-panel-body" id="os-sector-ranks"></div></details></div>
 <details class="os-panel" id="os-tools"><summary>10 · Sources / tools <small>Show / hide</small></summary><div class="os-panel-body"><details id="op-command-index"><summary>All numbered chapters · Show / hide</summary><nav id="op-command-chapters" aria-label="Command card chapter shortcuts"></nav></details><details id="op-summary-panel"><summary>Three-index summary · Show / hide</summary><div class="op-one-scroll"><table aria-label="Verified latest Kite market readings"><thead><tr><th>Index / expiry</th><th>Spot</th><th>Future</th><th>CE ₹</th><th>PE ₹</th><th>Full PCR</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody id="op-one-rows"><tr><td colspan="8">Waiting for actual Kite stream · unavailable is not zero</td></tr></tbody></table></div></details><p class="os-caption">One shared stream; exact expiry and source timestamps. — means unavailable. No simulated prices, synthetic history or execution controls. Weight / index-point contribution requires a verified weight source.</p></div></details>
-</section>`;
+</div></section>`;
 }
 
 export const ONE_SHOT_CSS=`
@@ -41,6 +54,24 @@ export const ONE_SHOT_CSS=`
 @media(max-width:1100px){#op-one-stop .os-dte-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:360px){#op-one-stop .os-dte-grid{grid-template-columns:1fr}}
 
+#op-one-stop [hidden]{display:none!important}
+#op-one-stop .os-preface{padding:18px;border:1px solid #7665a2;border-radius:15px;background:linear-gradient(145deg,#242340,#112b39);line-height:1.7}
+#op-one-stop .os-preface h3{font-size:22px;margin:0 0 9px;color:#bdefff}
+#op-one-stop .os-guide-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+#op-one-stop .os-guide-grid article{padding:14px;border:1px solid #526580;border-radius:12px;background:#112138}
+#op-one-stop .os-guide-grid h4{margin:0 0 8px;color:#d3c2ff;font-size:16px}
+#op-one-stop .os-guide-grid p{font-size:14px;margin:6px 0;color:#e1eaf7}
+#op-one-stop .os-ce-label,#op-one-stop .os-pe-label{display:inline-block;padding:4px 9px;border:1px solid #4bcfa0;border-radius:7px;color:#a0ffce;background:#124436;font-weight:750}
+#op-one-stop .os-pe-label{border-color:#ef85aa;color:#ffd0df;background:#54283e}
+#op-one-stop .os-ladder-key{font-size:12px;line-height:1.8;color:#c6d6ed}
+#op-one-stop .os-pcr-overview{padding:12px;border:1px solid #3e859c;border-radius:14px;background:linear-gradient(120deg,#123544,#202640);margin:12px 0}
+#op-one-stop .os-pcr-strip{margin-top:7px}
+#op-one-stop .os-pcr b span{font-size:22px}
+#op-one-stop .os-dte-leg{border-top:3px solid #56e6ab}
+#op-one-stop .os-dte-leg[data-side=PE]{border-top-color:#ff85ae}
+#op-one-stop #op-atm-pairs .op-atm-side h4{color:#9fffd0}
+#op-one-stop #op-atm-pairs .op-atm-side[data-atm-side=PE] h4{color:#ffd0df}
+@media(max-width:600px){#op-one-stop .os-guide-grid{grid-template-columns:1fr}#op-one-stop .os-preface{padding:12px}#op-one-stop .os-pcr-overview{padding:8px}#op-one-stop .os-pcr b span{font-size:16px}}
 @media(prefers-reduced-motion:reduce){#op-one-stop *{animation:none!important;transition:none!important}}
 `;
 
@@ -153,7 +184,7 @@ export function installOneShotLiveCard(api:any){
    return '<article class="os-dte-tile" data-expiry="'+esc(r.expiry)+'"><h4>'+esc(r.expiry)+'</h4><small>'+dte+' calendar days · ATM '+fmt(r.strike,0)+'</small><div class="os-dte-legs">'+legs.map(l=>{
     const value=dteMetric==='window'&&!matched?null:l.delta;
     const stamp=!l.ok?'Not verified':dteMetric==='window'&&matched?time(l.base!.at)+' → '+time(l.q.observedAt)+' IST':time(l.q.observedAt)+' IST';
-    return '<div class="os-dte-leg" data-side="'+l.side+'">'+l.side+' ₹<b>'+fmt(l.ok?l.q.price:null)+'</b><em class="'+tone(value)+'">'+pct(value)+'</em><small>'+esc(stamp)+'</small></div>';
+    return '<div class="os-dte-leg" data-side="'+l.side+'">'+l.side+' · LTP ₹<b>'+fmt(l.ok?l.q.price:null)+'</b><em class="'+tone(value)+'">'+pct(value)+'</em><small>'+(dteMetric==='day'?'vs own PDC':minutes+'m window')+'</small><small>'+esc(stamp)+'</small></div>';
    }).join('')+'</div><small>'+status+'</small></article>';
   });
   const omitted=(d.snapshot.omittedExpiries||[]).filter((x:any)=>typeof x==='string'&&x.startsWith(selected+'|')).length;
@@ -196,7 +227,11 @@ export function installOneShotLiveCard(api:any){
    return '<button type="button" class="os-market" style="--os-accent:'+accents[i]+'" data-os-index="'+symbol+'" aria-pressed="'+(symbol===selected)+'"><span class="os-market-head">'+symbol+'<small class="'+tone(c)+'">'+pct(c)+'</small></span><strong class="os-price">'+fmt(ok?q.price:null)+'</strong><small class="os-subline">Spot · FUT '+fmt(fo?f.price:null)+'</small><small class="os-subline">SPOT · PDH / PDC / PDL</small><span class="os-levels">'+(['pdh','pdc','pdl'] as const).map(k=>'<span>'+k.toUpperCase()+'<b>'+fmt(r[k],2)+'</b></span>').join('')+'</span><small class="os-subline">FUT '+esc(fo?f.identity.expiry:'—')+' · PDH / PDC / PDL</small><span class="os-levels">'+(['pdh','pdc','pdl'] as const).map(k=>'<span>'+k.toUpperCase()+'<b>'+fmt(futureRefs(d,a)[k],2)+'</b></span>').join('')+'</span><span class="os-level-state">'+esc(position)+'</span><small class="os-subline">Full PCR '+fmt(v?.value,4)+' · '+(symbol==='BANKNIFTY'?'Monthly · ':'')+(ok?time(q.observedAt)+' IST':'—')+'</small></button>';
   }).join(''));
   write('os-pulse-chart',live?graph(d):empty((payload?.connectionState==='MARKET_CLOSED'?'Market closed':'Live feed unavailable')+' · recorded charts are available in Open recorded ladder.'));
-  write('os-pcr-strip',symbols.map(symbol=>{const r=pcr.rows.find((x:any)=>x.symbol===symbol);return '<div class="os-pcr"><strong>'+symbol+'</strong><b>'+fmt(r?.value,4)+'</b><small>'+esc(r?.expiry||'No verified expiry')+'</small><small>ATM ±7 '+fmt(r?.bandValue,4)+'</small><small>'+esc(r?.current?time(r.current.checked)+' IST':r?.pcrStatus?.replaceAll('_',' ')||'UNAVAILABLE')+'</small></div>';}).join(''));
+  write('os-pcr-strip',symbols.map(symbol=>{
+   const r=pcr.rows.find((x:any)=>x.symbol===symbol),direction=r?.direction||'WAIT',arrow=direction==='UP'?'↑':direction==='DOWN'?'↓':direction==='FLAT'?'→':'—';
+   const colour=direction==='UP'?'os-up':direction==='DOWN'?'os-down':'';
+   return '<div class="os-pcr" data-pcr-index="'+symbol+'"><strong>'+symbol+(symbol==='BANKNIFTY'?' · M':'')+'</strong><small>Full OI PCR</small><b>'+ (n(r?.value)!==null?r.value.toFixed(4):'—')+' <span class="'+colour+'" aria-label="PCR '+direction.toLowerCase()+'">'+arrow+'</span></b><small>Expiry '+esc(r?.expiry||'unavailable')+'</small><small>ATM ±7 band: '+fmt(r?.bandValue,4)+'</small><small>'+esc(r?.current?'Checked '+time(r.current.checked)+' IST · '+r.current.period/60000+'m snapshots':r?.pcrStatus?.replaceAll('_',' ')||'UNAVAILABLE')+'</small><small>'+esc(r?.baseline?'Compared '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':r?.current?'Arrow: waiting for comparable snapshot':'Full expiry OI not verified')+'</small></div>';
+  }).join(''));
   const v=live?d.snapshot.vix:null,vo=live&&valid(d,v,'VIX');
   write('os-vix-value','<small class="os-subline">INDIA VIX · '+(vo?time(v.observedAt)+' IST':'SOURCE UNAVAILABLE')+'</small><div class="os-vix-number">'+fmt(vo?v.price:null)+'</div><span class="'+tone(vo?change(d,v,'VIX'):null)+'">'+pct(vo?change(d,v,'VIX'):null)+' vs previous close</span>');
   const futureCount=live?symbols.filter(symbol=>{const a=indexRow(d,symbol);return a&&valid(d,a.future,'FUTURE',symbol);}).length:0;
@@ -221,6 +256,14 @@ export function installOneShotLiveCard(api:any){
   if($('os-stocks')?.open||!live)write('os-stock-ranks',live?rank(d,'STOCK'):empty('Fresh heavyweight quotes unavailable.'));
   if($('os-sectors')?.open||!live)write('os-sector-ranks',live?rank(d,'SECTOR'):empty('Fresh sector quotes unavailable.'));
  };
+ const showPreface=(show:boolean,focus=false)=>{
+  $('os-preface').hidden=!show;$('os-dashboard').hidden=show;
+  $('os-open-preface').setAttribute('aria-expanded',String(show));$('os-open-dashboard').setAttribute('aria-pressed',String(!show));
+  if(focus)(show?$('os-preface-title'):$('os-open-dashboard')).focus?.();
+ };
+ $('os-open-preface').onclick=()=>showPreface(true,true);
+ $('os-open-dashboard').onclick=()=>showPreface(false,true);
+ showPreface(false);
  $('os-navigation').onclick=(e:any)=>{const id=e.target.closest?.('[data-os-go]')?.dataset?.osGo;if(!['radar','pulse','premium','futures','walls','stocks','sectors','vix','memory','tools'].includes(id))return;const target=$('os-'+id);if(target){if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView?.({block:'start',behavior:'auto'});}root.querySelectorAll?.('[data-os-go]').forEach((b:any)=>{if(b.dataset.osGo===id)b.setAttribute('aria-current','location');else b.removeAttribute?.('aria-current');});};
  $('os-market-radar').onclick=(e:any)=>{const next=e.target.closest?.('[data-os-index]')?.dataset?.osIndex;if(!symbols.includes(next))return;selected=next;api.chooseIndex(next);update(last,true);};
  $('os-dte-metric').onclick=(e:any)=>{const mode=e.target.closest?.('[data-os-dte-metric]')?.dataset?.osDteMetric;if(!['day','window'].includes(mode))return;dteMetric=mode;$('os-dte-metric').querySelectorAll?.('[data-os-dte-metric]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.osDteMetric===mode)));update(last,true);};
@@ -229,3 +272,4 @@ export function installOneShotLiveCard(api:any){
  update(null,true);
  return {update,select(symbol:string){if(symbols.includes(symbol)){selected=symbol;update(last,true);}},refresh(){update(last,true);}};
 }
+

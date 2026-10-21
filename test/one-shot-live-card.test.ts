@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {installOneShotLiveCard} from '../one-shot-live-card.js';
 import {installDashboardWorkspace,WORKSPACE_NAV_HTML} from '../dashboard-workspace-view.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
-import {deriveLiveThreeIndexPcr} from '../live-three-index-pcr.js';
+import {deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr} from '../live-three-index-pcr.js';
 import {deriveAtmFibHold} from '../premium-workspace-model.js';
 
 function harness(){
@@ -21,13 +21,14 @@ function harness(){
   indices:symbols.map(symbol=>({symbol,expiry,expiries:[expiry],strike:100,spot:quote('SPOT',symbol),future:quote('FUTURE',symbol),ce:quote('OPTION',symbol),pe:quote('OPTION',symbol,90,{identity:{role:'OPTION',symbol,expiry,strike:100,side:'PE',token:4}})})),
   atmExpiryLadder:symbols.map(symbol=>({symbol,spot:quote('SPOT',symbol),rows:[{expiry,strike:100,ce:quote('OPTION',symbol,120),pe:quote('OPTION',symbol,90,{identity:{role:'OPTION',symbol,expiry,strike:100,side:'PE',token:4}})}]})),
   vix:quote('VIX','',14,{pdc:13}),participation:[quote('STOCK','',150,{identity:{role:'STOCK',label:'HDFC <Bank>',token:99},pdc:100}),quote('SECTOR','',90,{identity:{role:'SECTOR',label:'PSU Bank',token:98},pdc:100})]}});
+ let saved:any={date,current:{}};
  const models=Object.fromEntries(symbols.map(symbol=>[symbol,{symbol,tradeDate:date,spot:{pdh:101,pdl:90,at:stamp()}}]));
- const context:any={document:{body:{dataset:{}},getElementById:el,querySelectorAll(){return [];}},window:{addEventListener(n:string,f:any){listeners[n]=f;}},localStorage:{getItem(){return null;},setItem(){}},Date:Clock,__name:(fn:any)=>fn,deriveLiveThreeIndexPcr,deriveAtmFibHold,installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}};
+ const context:any={document:{body:{dataset:{}},getElementById:el,querySelectorAll(){return [];}},window:{addEventListener(n:string,f:any){listeners[n]=f;}},localStorage:{getItem(){return null;},setItem(){}},Date:Clock,__name:(fn:any)=>fn,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,deriveAtmFibHold,installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}};
  vm.createContext(context);vm.runInContext('var installOneShotLiveCard='+installOneShotLiveCard.toString(),context);
  const installer=vm.runInContext('('+installDashboardWorkspace.toString()+')',context);
- installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>0,turn(){},getState:()=>({date,current:{}}),getModels:()=>models});
+ installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>0,turn(){},getState:()=>saved,getModels:()=>models});
  const send=(p:any)=>listeners['optionpilot:live-context']({detail:p});
- return {el,payload,send,writes,advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
+ return {el,payload,send,writes,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
 }
 
 test('production HTML mounts the real new design once, with ten categories and existing real controls',()=>{
@@ -211,6 +212,8 @@ test('preface switches pages without interrupting shared feed or losing index se
  assert.equal(h.el('os-dashboard').hidden,false);assert.equal(h.el('os-preface').hidden,true);
  assert.equal(h.el('op-atm-index').value,'SENSEX');
  assert.equal(h.el('os-open-dashboard').attrs['aria-pressed'],'true');
+ h.el('os-open-preface').onclick();h.el('os-open-preface').onclick();
+ assert.equal(h.el('os-preface').hidden,true);assert.equal(h.el('os-dashboard').hidden,false);
  assert.equal((WORKSPACE_NAV_HTML.match(/id="os-pcr-strip"/g)||[]).length,1);
  assert(WORKSPACE_NAV_HTML.indexOf('id="os-pcr-strip"')<WORKSPACE_NAV_HTML.indexOf('id="os-pulse"'));
 });
@@ -231,5 +234,56 @@ test('all three PCR cards distinguish complete full ratio, band and comparable a
  const bank=html.split('data-pcr-index="BANKNIFTY"')[1];
  assert(!bank.includes('1.2000'));assert(bank.includes('Full expiry OI not verified'));
  assert(html.includes('09:45:00 → 09:46:00 IST'));
+});
+
+function savedPcrState(patch:any={}){
+ const date='2026-10-19',expiry='2026-10-22';
+ return {date,current:Object.fromEntries(['NIFTY','SENSEX','BANKNIFTY'].map((symbol,i)=>[symbol,{chain:[{symbol,expiry,minute_bucket:date+'T04:14:00Z',truth_verdict:'TRUE',full_pcr_source:'Exact archived full-chain source',full_chain_oi_pcr:1.8765+i,...patch}],market:[]}]))};
+}
+
+test('incomplete live PCR explains exact coverage and separately shows verified same-expiry archive',()=>{
+ const h=harness(),p=h.payload();h.setSaved(savedPcrState());
+ for(const a of p.snapshot.indices){
+  const raw=structuredClone(p.pcrDisplay[a.symbol]);raw.state='INCOMPLETE';raw.reason='STALE_OI_TIMESTAMPS';
+  Object.assign(raw.coverage,{complete:false,freshOi:2,stale:2,missing:0,invalid:0});
+  a.pcrSnapshot=raw;p.pcrDisplay[a.symbol]=raw;
+ }
+ h.send(p);const html=h.el('os-pcr-strip').innerHTML;
+ assert.equal((html.match(/RECORDED · Full PCR/g)||[]).length,3);
+ for(const value of ['1.8765','2.8765','3.8765'])assert(html.includes(value));
+ assert(html.includes('OI 2/4 fresh · stale 2 · missing 0 · invalid 0'));
+ assert(html.includes('checked 09:45:00 IST'));
+ assert(html.includes('2026-10-19 · 09:44:00 IST'));
+ assert(html.includes('LIVE · Full OI PCR'));
+ assert(!html.includes('PCR up">↑'));
+ assert(!h.el('os-wall-ladder').innerHTML.includes('1.8765'));
+ assert(!h.el('os-pulse-chart').innerHTML.includes('stroke="#ff8ed9"'));
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});
+ assert(!h.el('os-pcr-strip').innerHTML.includes('1.8765'));
+});
+
+test('recorded PCR refuses wrong date, expiry, future, duplicate, false or unverified sources',()=>{
+ for(const kind of ['date','expiry','future','duplicate','false','source']){
+  const h=harness(),p=h.payload(),state=savedPcrState();
+  if(kind==='date')state.date='2026-10-18';
+  for(const a of p.snapshot.indices){
+   p.pcrDisplay[a.symbol].coverage.complete=false;
+   const chain=state.current[a.symbol].chain;
+   if(kind==='expiry')chain[0].expiry='2026-10-29';
+   if(kind==='future')chain[0].minute_bucket='2026-10-19T04:16:00Z';
+   if(kind==='duplicate')chain.push({...chain[0]});
+   if(kind==='false')chain[0].truth_verdict='FALSE';
+   if(kind==='source')chain[0].full_pcr_source='ATM band';
+  }
+  h.setSaved(state);h.send(p);
+  assert(!h.el('os-pcr-strip').innerHTML.includes('RECORDED · Full PCR'),kind);
+ }
+});
+
+test('a fresh verified live PCR takes precedence without relabelling recorded data as live',()=>{
+ const h=harness();h.setSaved(savedPcrState());h.send(h.payload());
+ const html=h.el('os-pcr-strip').innerHTML;
+ assert(!html.includes('1.8765'));assert(!html.includes('RECORDED · Full PCR'));
+ assert.equal((html.match(/OI 4\/4 verified/g)||[]).length,3);
 });
 

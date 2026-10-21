@@ -1,6 +1,6 @@
 import { renderOneShotCard, ONE_SHOT_CSS, installOneShotLiveCard } from './one-shot-live-card.js';
 import { installPremiumWorkspace } from './premium-workspace-view.js';
-import { deriveLiveThreeIndexPcr } from './live-three-index-pcr.js';
+import { deriveLiveThreeIndexPcr, deriveRecordedThreeIndexPcr } from './live-three-index-pcr.js';
 
 const COMMODITY_CARD_HTML=`<details id="op-commodities" aria-label="10 Commodities command card">
 <summary><strong>10 · Commodities</strong><span>Crude Oil · Natural Gas</span><small>Feed not connected · Show / hide</small></summary>
@@ -330,7 +330,7 @@ export function installDashboardWorkspace(api:any){
  };
  const oneShot=typeof installOneShotLiveCard==='function'?installOneShotLiveCard({
   getState:api.getState,getModels:api.getModels,validEnvelope:freshEnvelope,validQuote:freshQuote,
-  derivePcr:deriveLiveThreeIndexPcr,chooseIndex:(symbol:string)=>{atmSelected=symbol;$('op-atm-index').value=symbol;paintAtm(atmLast);}
+  derivePcr:deriveLiveThreeIndexPcr,deriveRecordedPcr:typeof deriveRecordedThreeIndexPcr==='function'?deriveRecordedThreeIndexPcr:undefined,chooseIndex:(symbol:string)=>{atmSelected=symbol;$('op-atm-index').value=symbol;paintAtm(atmLast);}
  }):null;
  // PR3: reuse the strict three-index full-PCR verifier; render from the existing stream only.
  const paintOne=(d:any)=>{
@@ -425,3 +425,4 @@ export function installDashboardWorkspace(api:any){
  }) as EventListener);
  return {render(){if(active!==api.page())draw();oneShot?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
 }
+

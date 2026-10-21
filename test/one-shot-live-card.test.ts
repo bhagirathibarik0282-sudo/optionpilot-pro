@@ -28,6 +28,7 @@ function harness(){
  const installer=vm.runInContext('('+installDashboardWorkspace.toString()+')',context);
  installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>0,turn(){},getState:()=>saved,getModels:()=>models,setDate:async(date:string,options:any)=>{loadArgs={date,options};saved={...saved,date,scope:options.scope};}});
  el('os-chart-cadence').onchange({target:{value:'0'}});
+ el('os-window').onclick({target:{closest:()=>({dataset:{osWindow:'1'}})}});
  const send=(p:any)=>listeners['optionpilot:live-context']({detail:p});
  return {el,payload,send,writes,loadArgs:()=>loadArgs,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
 }
@@ -389,4 +390,17 @@ test('a historically stale option quote is withheld without rolling ATM to anoth
  h.setSaved(s);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
  assert(!h.el('os-dte-radar').innerHTML.includes('12,345'));assert(h.el('os-dte-radar').innerHTML.includes('ATM 100'));
  assert(h.el('os-dte-radar').innerHTML.includes('>91</b>'));
+});
+
+
+test('the default 3m window renders historical 3m observations without interpolation',()=>{
+ assert(WORKSPACE_NAV_HTML.includes('data-os-window="3" aria-pressed="true"'));
+ assert(WORKSPACE_NAV_HTML.includes('data-os-window="1" aria-pressed="false"'));
+ const h=harness(),s=recordedSession();s.date='2026-10-16';
+ for(const data of Object.values(s.current))for(const key of ['market','options','chain'])data[key].forEach((r:any)=>{r.minute_bucket=r.minute_bucket.replace('2026-10-19','2026-10-16').replace('04:14:00','04:12:00');});
+ h.setSaved(s);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ assert(!h.el('os-pulse-chart').innerHTML.includes('<path'));
+ h.el('os-window').onclick({target:{closest:()=>({dataset:{osWindow:'3'}})}});
+ assert(h.el('os-pulse-chart').innerHTML.includes('stroke="#3be6ff"'));
+ assert(h.el('os-pulse-chart').innerHTML.includes('stroke="#ff8ed9"'));
 });

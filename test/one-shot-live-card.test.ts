@@ -120,6 +120,10 @@ test('rank panels stay lazy, escape labels, and revoke rows immediately when dis
  h.el('os-stocks').open=true;h.el('os-stocks').ontoggle();
  assert(h.el('os-stock-ranks').innerHTML.includes('HDFC &lt;Bank&gt;'));
  assert(h.el('os-stock-ranks').innerHTML.includes('+50%'));
+ assert(h.el('os-stock-ranks').innerHTML.includes('₹ 150'));
+ h.el('os-sectors').open=true;h.el('os-sectors').ontoggle();
+ assert(h.el('os-sector-ranks').innerHTML.includes('Index points 90'));
+ assert(!h.el('os-sector-ranks').innerHTML.includes('₹ 90'));
  h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});
  assert(!h.el('os-stock-ranks').innerHTML.includes('+50%'));
  h.el('os-stocks').open=false;h.el('os-stocks').ontoggle();assert.equal(h.el('os-stock-ranks').innerHTML,'');

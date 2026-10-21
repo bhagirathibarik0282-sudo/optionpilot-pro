@@ -42,17 +42,18 @@ export const ONE_SHOT_CSS=`
 #market-book #op-one-stop #op-atm-pairs table{display:table;table-layout:fixed;width:100%;min-width:0}#market-book #op-one-stop #op-atm-pairs thead{display:table-header-group}#market-book #op-one-stop #op-atm-pairs tbody{display:table-row-group}#market-book #op-one-stop #op-atm-pairs tbody tr{display:table-row;margin:0;padding:0;border:0}#market-book #op-one-stop #op-atm-pairs :is(th,td){display:table-cell;grid-column:auto;min-width:0;width:auto;white-space:normal;overflow-wrap:anywhere;vertical-align:top}#market-book #op-one-stop #op-atm-pairs :is(th,td):first-child{width:33%}#market-book #op-one-stop #op-atm-pairs :is(th,td):nth-child(2){width:25%}#market-book #op-one-stop #op-atm-pairs td:before{display:none;content:none}
 @media(max-width:900px){#op-one-stop .os-main-grid{grid-template-columns:1fr}#op-one-stop .os-rank-grid{grid-template-columns:1fr}}@media(max-width:600px){#market-book #op-one-stop.os-card{padding:10px;border-radius:15px}#op-one-stop .os-hero{display:block}#market-book #op-one-stop .os-hero h2{font-size:29px}#op-one-stop #op-one-status{max-width:none;font-size:12px;margin-top:8px;padding:7px 9px}#op-one-stop .os-kicker{font-size:10px;letter-spacing:1.3px}#op-one-stop .os-markets{gap:5px}#market-book #op-one-stop .os-market{padding:10px 6px;border-radius:11px}#op-one-stop .os-market-head{font-size:11px;margin-bottom:7px;display:block}#op-one-stop .os-market-head small{display:block;font-size:10px;margin-top:3px}#op-one-stop .os-price{font-size:18px;letter-spacing:-.7px}#op-one-stop .os-subline{font-size:10px}#op-one-stop .os-levels{gap:2px}#op-one-stop .os-levels>span{font-size:9px;padding:4px 1px}#op-one-stop .os-levels b{font-size:10px}#op-one-stop .os-level-state{font-size:10px}#op-one-stop .os-section-head small{font-size:11px}#op-one-stop .os-pcr{padding:7px 5px}#op-one-stop .os-pcr>strong{font-size:10px}#op-one-stop .os-pcr b{font-size:21px}#op-one-stop .os-pcr small{font-size:10px}#op-one-stop .os-chart{height:135px}#op-one-stop #op-atm-pairs td strong{font-size:17px}#op-one-stop #op-atm-pairs :is(th,td){font-size:11px}#op-one-stop .os-panel-body{padding:0 9px 10px}#op-one-stop .os-premium{padding:10px}#op-one-stop details.os-panel>summary{font-size:14px;padding:10px}#op-one-stop .os-rank-sides{gap:6px}}
 
-#op-one-stop .os-dte-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:9px 0}
+#op-one-stop .os-ladder-grid{grid-template-columns:minmax(0,1fr);align-items:start}
+#op-one-stop .os-dte-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:8px;margin:9px 0}
+#op-one-stop .os-dte-grid>.os-subline{grid-column:1/-1}
 #op-one-stop .os-dte-tile{min-width:0;border:1px solid #51618a;border-radius:12px;padding:10px;background:linear-gradient(145deg,#262342,#14283b)}
 #op-one-stop .os-dte-tile h4{margin:0 0 5px;font-size:13px;color:#d5c2ff}
 #op-one-stop .os-dte-tile small{display:block;color:#b9cce3;font-size:10px;overflow-wrap:anywhere}
 #op-one-stop .os-dte-legs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
 #op-one-stop .os-dte-leg{min-width:0;padding:7px 5px;border-radius:8px;background:#103c3580;border:1px solid #34745d;font-size:11px}
 #op-one-stop .os-dte-leg[data-side=PE]{background:#49263a80;border-color:#874767}
-#op-one-stop .os-dte-leg b{display:block;font-size:17px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#op-one-stop .os-dte-leg b{display:block;font-size:17px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow-wrap:normal;overflow-x:auto}
 #op-one-stop .os-dte-leg em{display:block;font-size:12px;font-style:normal;margin:3px 0}
-@media(max-width:1100px){#op-one-stop .os-dte-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:360px){#op-one-stop .os-dte-grid{grid-template-columns:1fr}}
+
 
 #op-one-stop [hidden]{display:none!important}
 #op-one-stop .os-preface{padding:18px;border:1px solid #7665a2;border-radius:15px;background:linear-gradient(145deg,#242340,#112b39);line-height:1.7}

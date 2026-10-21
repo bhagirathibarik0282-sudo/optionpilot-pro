@@ -417,8 +417,20 @@ async function get(label,url){
  try{for(let attempt=0;attempt<2;attempt++){
   const c=new AbortController(),timer=setTimeout(()=>c.abort(),20000);
   try{const r=await fetch(url,{signal:c.signal,cache:'no-store',credentials:'same-origin'});let j;try{j=await r.json();}catch{const err=new Error(r.status===401||r.status===403?'Authentication required; open the app and check your session.':'Server returned an unreadable response (HTTP '+r.status+').');err.status=r.status;err.unreadableSuccess=r.ok;throw err;}
-   if(!r.ok||j.ok===false){const err=new Error(r.status===401||r.status===403?'Authentication required; open the app and check your session.':j.error||j.reason||'HTTP '+r.status);err.status=r.status;throw err;}
-   sources[label]={url,status:'HTTP '+r.status+(j.background?' · '+j.status+' · '+j.freshness:''),receivedAt:new Date().toISOString(),counts:j.counts||null,attempts:attempt+1};return j;
+   // A stale readiness response can still contain complete, dated EOD context.
+   // This exception is display-only and restricted to this exact official cash endpoint.
+   const cashDate=v=>typeof v==='string'&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
+   const storedCash=label==='Saved FII/DII cash context'&&url==='/api/research/fii-dii/production-readiness'&&r.status===503&&j.ok===false&&j.ready===false&&
+    j.mode==='READ_ONLY_FII_DII_PRODUCTION_READINESS_V1'&&j.version==='CANONICAL_FII_DII_PRODUCTION_READINESS_V1'&&j.source==='OFFICIAL_NSE'&&j.sourceMode==='PRODUCTION_DB_READBACK'&&
+    j.readOnly===true&&j.contextOnly===true&&j.failClosed===true&&j.mutatesData===false&&j.grantsDirectionalSupport===false&&
+    ['affectsVerdict','affectsCandidate','affectsTelegram','affectsExecution'].every(k=>j[k]===false)&&j.freshAgainstLatestRecordedMarketSession===false&&
+    cashDate(j.latestStoredSessionDate)&&cashDate(j.expectedMarketSessionDate)&&j.latestStoredSessionDate<j.expectedMarketSessionDate&&Number.isInteger(j.storedSessionCount)&&j.storedSessionCount>0&&
+    Array.isArray(j.blockers)&&j.blockers.length===1&&j.blockers[0]==='FII_DII_OFFICIAL_SESSION_BEHIND_MARKET:'+j.latestStoredSessionDate+'<'+j.expectedMarketSessionDate&&
+    Array.isArray(j.windows)&&j.windows.length===4&&new Set(j.windows.map(w=>w.window)).size===4&&j.windows.every(w=>['1D','3D','5D','20D'].includes(w.window)&&w.ready===true&&w.state==='READY'&&
+     Number.isInteger(w.availableSessions)&&Number.isInteger(w.requiredSessions)&&w.requiredSessions>0&&w.availableSessions>=w.requiredSessions&&w.availableSessions<=j.storedSessionCount&&
+     ['fiiNetCrore','diiNetCrore','combinedNetCrore'].every(k=>typeof w[k]==='number'&&Number.isFinite(w[k]))&&Math.abs(w.fiiNetCrore+w.diiNetCrore-w.combinedNetCrore)<=1e-8*Math.max(1,Math.abs(w.combinedNetCrore)));
+   if((!r.ok||j.ok===false)&&!storedCash){const err=new Error(r.status===401||r.status===403?'Authentication required; open the app and check your session.':j.error||j.reason||'HTTP '+r.status);err.status=r.status;throw err;}
+   sources[label]={url,status:'HTTP '+r.status+(storedCash?' · STORED EOD '+j.latestStoredSessionDate+' · latest pending':'')+(j.background?' · '+j.status+' · '+j.freshness:''),receivedAt:new Date().toISOString(),counts:j.counts||null,attempts:attempt+1};return j;
   }catch(e){const transient=e.unreadableSuccess||e.name==='AbortError'||e.status===429||e.status>=500||e.status===undefined;if(attempt===0&&transient){sources[label].status='Retrying once';await new Promise(resolve=>setTimeout(resolve,400));continue;}sources[label]={url,status:e.name==='AbortError'?'Timed out after retry':e.message,receivedAt:new Date().toISOString(),attempts:attempt+1};throw e;
   }finally{clearTimeout(timer);}
  }}finally{$('sources').innerHTML=Object.entries(sources).map(([k,s])=>'<p><a href="'+esc(s.url)+'" target="_blank" rel="noopener">'+esc(k)+'</a> · '+esc(s.status)+' · '+esc(when(s.receivedAt))+'</p>').join('');$('source-meta').textContent=JSON.stringify(sources,null,2);}
@@ -767,4 +779,5 @@ selectDashboardTab('observations');
 get('Recorded dates','/api/research/h1-theory-dates').then(d=>{datesLoading=false;const dates=[...new Set((d.dates||[]).map(r=>r.tradeDate))].sort();recordedDates=dates;if(!dates.length){$('status').textContent='No recorded dates returned. Choose dates to check manually.';book?.render();return;}const selected=initialRecordedDate(dates);$('date').value=selected;$('to').value=observationSessionClose(selected);$('baseline').value=dates.filter(d=>d<selected).at(-1)||'';load();}).catch(e=>{datesLoading=false;$('status').textContent='Recorded dates unavailable: '+e.message;book?.render();});live();setInterval(()=>{renderSourceHealth();},10000);
 setInterval(resumeRefresh,60000);document.addEventListener('visibilitychange',resumeRefresh);window.addEventListener('online',resumeRefresh);window.addEventListener('pageshow',resumeRefresh);$('auto').onchange=rememberRefreshPreference;
 })();`;
+
 

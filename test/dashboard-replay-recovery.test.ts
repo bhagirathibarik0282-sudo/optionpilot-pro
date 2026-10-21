@@ -18,6 +18,38 @@ const unreadable=(status=200)=>({status,ok:status>=200&&status<300,json:async()=
 const response=(body:any,status=200)=>({status,ok:status>=200&&status<300,json:async()=>body});
 const replay=(time:string,value:number)=>({ok:true,market:{columns:['symbol','minute_bucket','spot_ltp'],rows:[['NIFTY',time,value]]},options:{columns:[],rows:[]},chain:{columns:[],rows:[]},canonical:{columns:[],rows:[]}});
 
+function storedCash(){
+ return {ok:false,mode:'READ_ONLY_FII_DII_PRODUCTION_READINESS_V1',version:'CANONICAL_FII_DII_PRODUCTION_READINESS_V1',ready:false,
+  expectedMarketSessionDate:'2026-10-21',latestStoredSessionDate:'2026-10-19',storedSessionCount:20,freshAgainstLatestRecordedMarketSession:false,
+  windows:[1,3,5,20].map(n=>({window:n+'D',ready:true,availableSessions:n,requiredSessions:n,fiiNetCrore:-10,diiNetCrore:20,combinedNetCrore:10,state:'READY'})),
+  blockers:['FII_DII_OFFICIAL_SESSION_BEHIND_MARKET:2026-10-19<2026-10-21'],source:'OFFICIAL_NSE',sourceMode:'PRODUCTION_DB_READBACK',
+  readOnly:true,contextOnly:true,failClosed:true,mutatesData:false,grantsDirectionalSupport:false,
+  affectsVerdict:false,affectsCandidate:false,affectsTelegram:false,affectsExecution:false};
+}
+
+test('stale official cash readiness retains dated complete EOD context without upgrading readiness',async()=>{
+ let calls=0;const h=harness(async()=>{calls++;return response(storedCash(),503);});
+ const d=await h.get('Saved FII/DII cash context','/api/research/fii-dii/production-readiness');
+ assert.equal(calls,1);assert.equal(d.ready,false);assert.equal(d.ok,false);
+ assert.equal(d.latestStoredSessionDate,'2026-10-19');assert.equal(d.affectsVerdict,false);
+ assert(h.sources['Saved FII/DII cash context'].status.includes('HTTP 503 · STORED EOD 2026-10-19 · latest pending'));
+});
+
+test('cash display exception rejects other endpoints, auth errors and incomplete or inconsistent context',async()=>{
+ for(const kind of ['url','label','auth','source','date','blocker','missing-window','invalid-total','non-finite','authority']){
+  const body=storedCash();
+  if(kind==='source')body.source='UNVERIFIED';
+  if(kind==='date')body.latestStoredSessionDate='2026-02-30';
+  if(kind==='blocker')body.blockers.push('DATABASE_FAILED');
+  if(kind==='missing-window')body.windows.pop();
+  if(kind==='invalid-total')body.windows[0].combinedNetCrore=999;
+  if(kind==='non-finite')body.windows[0].fiiNetCrore=NaN;
+  if(kind==='authority')body.affectsVerdict=true;
+  const h=harness(async()=>response(body,kind==='auth'?401:503));
+  await assert.rejects(()=>h.get(kind==='label'?'Other':'Saved FII/DII cash context',kind==='url'?'/other':'/api/research/fii-dii/production-readiness'),kind);
+ }
+});
+
 test('an unreadable HTTP 200 gets exactly one retry and can recover',async()=>{
  let calls=0;
  const h=harness(async()=>++calls===1?unreadable():response({ok:true}));
@@ -84,3 +116,4 @@ test('FULL archive scope survives chunking and recursive recovery without changi
  await h.getReplay('archive','NIFTY','2026-10-12','09:15','11:15','FULL');assert(calls.length>1);assert(calls.every(u=>u.searchParams.get('scope')==='FULL'));
  calls.length=0;await h.getReplay('focused','NIFTY','2026-10-12','09:15','09:18');assert(calls.every(u=>u.searchParams.get('scope')==='CORE'));
 });
+

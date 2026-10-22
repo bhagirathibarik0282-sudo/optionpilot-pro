@@ -1,3 +1,4 @@
+import { findOrCreateArchiveDriveFolder } from './drive-archive-folder.js';
 import { mountSellerResearchRoutes } from './seller-research-http.js';
 import { resolveIndexExpiryClock } from './index-expiry-clock.js';
 import { isClosingObservationAt } from './index-observation-session.js';
@@ -23544,14 +23545,18 @@ app.post("/api/drive/test-upload", async (c) => {
   const token = await getValidDriveAccessToken();
   if (!token) return c.json({ error: "Google Drive not connected or token refresh failed" }, 400);
 
-  const rootId = await findOrCreateDriveFolder("OptionPilot Pro Journal", null, token);
-  if (!rootId) return c.json({ error: "Could not create/find root folder" }, 500);
-
-  const testContent = JSON.stringify({ test: true, timestamp: new Date().toISOString() });
-  const result = await uploadFileToDrive("OptionPilot_TestUpload.json", "application/json", testContent, rootId, token);
-  if (!result) return c.json({ error: "Test upload failed" }, 500);
-
-  return c.json({ success: true, fileId: result.id, sizeBytes: result.size });
+  try {
+    const rootId = await findOrCreateArchiveDriveFolder("OptionPilot Pro Journal", null, token);
+    const testContent = JSON.stringify({ test: true, timestamp: new Date().toISOString() });
+    const result = await uploadFileToDrive("OptionPilot_TestUpload.json", "application/json", testContent, rootId, token);
+    if (!result) return c.json({ error: "Test upload failed" }, 500);
+    driveSession.lastError = null;
+    return c.json({ success: true, fileId: result.id, sizeBytes: result.size });
+  } catch (err) {
+    const error = err instanceof Error && err.message.startsWith('GOOGLE_DRIVE_FOLDER_') ? err.message : 'Google Drive test upload failed';
+    driveSession.lastError = error;
+    return c.json({ error }, 500);
+  }
 });
 
 async function performDriveArchive(): Promise<{ success: boolean; record: DriveArchiveRecord; error?: string }> {
@@ -23566,14 +23571,10 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const monthFolderName = `${month}-${monthNames[parseInt(month, 10) - 1]}`;
 
-    const rootId = await findOrCreateDriveFolder("OptionPilot Pro Journal", null, token);
-    if (!rootId) throw new Error("Could not create root folder");
-    const yearId = await findOrCreateDriveFolder(year, rootId, token);
-    if (!yearId) throw new Error("Could not create year folder");
-    const monthId = await findOrCreateDriveFolder(monthFolderName, yearId, token);
-    if (!monthId) throw new Error("Could not create month folder");
-    const dateId = await findOrCreateDriveFolder(tradingDate, monthId, token);
-    if (!dateId) throw new Error("Could not create date folder");
+    const rootId = await findOrCreateArchiveDriveFolder("OptionPilot Pro Journal", null, token);
+    const yearId = await findOrCreateArchiveDriveFolder(year, rootId, token);
+    const monthId = await findOrCreateArchiveDriveFolder(monthFolderName, yearId, token);
+    const dateId = await findOrCreateArchiveDriveFolder(tradingDate, monthId, token);
 
     const rawJson = JSON.stringify({ recorderSession, journalEntries, v2ShadowObservations, v2CandidateOutcomeRecords, v2DevilEvents }, null, 2);
     const rawResult = await uploadFileToDrive(`OptionPilot_${tradingDate}_Raw.json`, "application/json", rawJson, dateId, token);
@@ -23661,6 +23662,7 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
     const manifestResult = await uploadFileToDrive(`OptionPilot_${tradingDate}_ArchiveVerification.json`, "application/json", JSON.stringify(manifest, null, 2), dateId, token);
     if (manifestResult) record.fileIds.manifest = manifestResult.id;
 
+    driveSession.lastError = null;
     record.status = "VERIFIED";
     record.verifiedAt = new Date().toISOString();
     driveArchives.push(record);
@@ -23670,6 +23672,7 @@ async function performDriveArchive(): Promise<{ success: boolean; record: DriveA
   } catch (err) {
     record.status = "ARCHIVE_FAILED";
     record.lastError = err instanceof Error ? err.message : "Unknown archive error";
+    driveSession.lastError = record.lastError;
     driveArchives.push(record);
     return { success: false, record, error: record.lastError };
   }

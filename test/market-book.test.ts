@@ -287,7 +287,7 @@ test('failed replay is a retryable source failure, not a claim that recordings d
 function bandEvidenceFixture(){
  const market=[0,1,2,3].map(min=>({symbol,minute_bucket:at(min),backend_timestamp:new Date(Date.parse(at(min))+20000).toISOString(),snapshot_id:'band-'+min,spot_ltp:7800+min,truth_verdict:'TRUE',india_vix:15+min/10}));
  const ce:any={7700:1823400,7800:3448575,7900:5367450},pe:any={7700:5783025,7800:4864125,7900:2559375};
- const options=market.flatMap(m=>Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({symbol,expiry,minute_bucket:m.minute_bucket,snapshot_id:m.snapshot_id,truth_verdict:'TRUE',atm_offset:i-7,strike:7450+i*50,option_type:side,oi:(side==='CE'?ce:pe)[7450+i*50]||0,quote_timestamp:new Date(Date.parse(m.minute_bucket)+19000).toISOString(),ltp:100,pdh:120,pdl:80})))).flat();
+ const options=market.flatMap(m=>Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({symbol,expiry,minute_bucket:m.minute_bucket,snapshot_id:m.snapshot_id,truth_verdict:'TRUE',atm_offset:i-7,strike:7450+i*50,option_type:side,oi:(side==='CE'?ce:pe)[7450+i*50]||0,quote_timestamp:new Date(Date.parse(m.minute_bucket)+19000).toISOString(),volume:1000+Number(m.minute_bucket===at(1)?1:m.minute_bucket===at(2)?2:m.minute_bucket===at(3)?3:0)*(side==='CE'?10:20),ltp:100,pdh:120,pdl:80})))).flat();
  const chain=market.map(m=>({symbol,expiry,minute_bucket:m.minute_bucket,truth_verdict:'TRUE',atm_strike:7800,full_chain_oi_pcr:1.1,full_pcr_source:'Exact archived full-chain source',max_pain:7900,call_wall_strike:7900,put_wall_strike:7700}));return {market,options,chain};
 }
 test('expiry context reproduces the documented payout example on the exact 15-strike band',()=>{
@@ -322,4 +322,14 @@ test('one-minute and same-expiry swing evidence require their exact recorded bas
  const prior=structuredClone(c);for(const rows of [prior.market,prior.options,prior.chain])for(const r of rows){r.minute_bucket=r.minute_bucket.replace(tradeDate,'2026-10-07');if('backend_timestamp' in r)r.backend_timestamp=String(r.backend_timestamp).replace(tradeDate,'2026-10-07');if('quote_timestamp' in r)r.quote_timestamp=String(r.quote_timestamp).replace(tradeDate,'2026-10-07');}
  b=run(c,{expiryEvidence:true,window:'1s',history:[prior]}).expiryEvidence!.band;assert.equal(b.comparable,true);assert.equal(b.differences.pcr,0);assert.equal(b.frames.length,2);
  prior.options.forEach(r=>r.expiry='2026-10-19');b=run(c,{expiryEvidence:true,window:'1s',history:[prior]}).expiryEvidence!.band;assert.equal(b.comparable,false);assert.equal(b.differences.pcr,null);
+});
+
+
+test('band OI and traded volume use independent source fields and exact per-contract window differences',()=>{
+ const c=bandEvidenceFixture();let b=run(c,{expiryEvidence:true,window:'1m'}).expiryEvidence!.band;assert.equal(b.latest.intervalCeVolume,150);assert.equal(b.latest.intervalPeVolume,300);assert.equal(b.latest.intervalVolumePcr,2);assert.equal(b.latest.ceVolume,15450);
+ b=run(c,{expiryEvidence:true,window:'3m'}).expiryEvidence!.band;assert.equal(b.latest.intervalCeVolume,450);assert.equal(b.latest.intervalPeVolume,900);
+ const missing=structuredClone(c);missing.options.find(r=>r.minute_bucket===at(3))!.volume=null as any;b=run(missing,{expiryEvidence:true,window:'1m'}).expiryEvidence!.band;assert.equal(b.latest.intervalVolumePcr,null);assert.equal(b.latest.ceVolume,null);assert.equal(b.latest.pcr,13206525/10639425,'missing volume does not alter observed OI');
+ const reset=structuredClone(c);reset.options.find(r=>r.minute_bucket===at(3)&&r.option_type==='CE')!.volume=1;b=run(reset,{expiryEvidence:true,window:'1m'}).expiryEvidence!.band;assert.equal(b.latest.intervalCeVolume,null,'one reset cannot be hidden by other contracts increasing');assert.equal(b.latest.intervalVolumePcr,null);
+ const flat=structuredClone(c);flat.options.forEach(r=>{r.volume=1000;});b=run(flat,{expiryEvidence:true,window:'1m'}).expiryEvidence!.band;assert.equal(b.latest.intervalCeVolume,0);assert.equal(b.latest.intervalPeVolume,0);assert.equal(b.latest.intervalVolumePcr,null);
+ const gap=structuredClone(c);gap.market=gap.market.filter(r=>r.minute_bucket!==at(2));b=run(gap,{expiryEvidence:true,window:'1m'}).expiryEvidence!.band;assert.equal(b.latest.intervalVolumePcr,null);
 });

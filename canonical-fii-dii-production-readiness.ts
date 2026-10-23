@@ -79,6 +79,26 @@ export function evaluateFiiDiiProductionReadiness(input: {
   if (view && !view.ready) blockers.push(...view.blockers);
 
   const ready = blockers.length === 0 && Boolean(view?.ready);
+  // Bounded display history reuses the same DB read. An old EOD date is allowed,
+  // but malformed identity, provenance, duplicates or arithmetic are never shown.
+  const historyValid = Boolean(view?.ready) && mapped.blockers.length === 0 &&
+    new Set(input.storedRows.map(r => r.trade_date)).size === input.storedRows.length &&
+    input.storedRows.every(r => {
+      const date = r.trade_date;
+      const v = [r.fii_buy,r.fii_sell,r.fii_net,r.dii_buy,r.dii_sell,r.dii_net];
+      return /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date+'T00:00:00Z')) &&
+        new Date(date+'T00:00:00Z').toISOString().slice(0,10) === date &&
+        v.every(x => x !== null && x !== undefined && typeof x !== 'boolean' && String(x).trim() !== '' && Number.isFinite(Number(x))) &&
+        [r.fii_buy,r.fii_sell,r.dii_buy,r.dii_sell].every(x => Number(x) >= 0) &&
+        Math.abs(Number(r.fii_buy)-Number(r.fii_sell)-Number(r.fii_net)) <= 0.02 &&
+        Math.abs(Number(r.dii_buy)-Number(r.dii_sell)-Number(r.dii_net)) <= 0.02;
+    });
+  const dailyHistory = historyValid ? input.storedRows.slice(-20).map(r => ({
+    date:r.trade_date, fiiNetCrore:Number(r.fii_net), diiNetCrore:Number(r.dii_net),
+    combinedNetCrore:Number(r.fii_net)+Number(r.dii_net), fetchedAt:r.fetched_at,
+    source:r.source, sourceUrl:r.source_url,
+  })) : [];
+
   const participant = input.participantSnapshot ?? {
     latestObservedTradeDate: null,
     latestObservedRowCount: 0,
@@ -107,6 +127,8 @@ export function evaluateFiiDiiProductionReadiness(input: {
     storedSessionCount: input.storedRows.length,
     freshAgainstLatestRecordedMarketSession: Boolean(latestStoredSessionDate && latestStoredSessionDate >= input.expectedMarketSessionDate),
     windows: view?.windows ?? [],
+    dailyHistory,
+    dailyHistoryState: historyValid ? "VERIFIED_STORED_EOD" as const : "UNAVAILABLE" as const,
     warnings: view?.warnings ?? [],
     blockers: [...new Set(blockers)],
     participantDbReadback,

@@ -73,8 +73,10 @@ Sources. Preserve real zero PE OI. Fresh readings take priority. Reported values
 do not create fresh arrows, blinking or synchronized alignment. Failed,
 expired, mismatched and disconnected payloads revoke the display.
 
-This changes presentation only. It introduces no broker calls, provider,
-database, recorder, selector, Telegram or execution changes. It does not repair
+The reported-PCR repair changes presentation. The subsequent requested Band
+card also projects exact membership and cumulative volume totals from the same
+existing quote batch. It introduces no broker calls, provider, database,
+recorder, selector, Telegram or execution changes. It does not repair
 upstream old quotes or promise that complete same-session reported data will
 always exist.
 
@@ -100,3 +102,29 @@ always exist.
 The outcome can be an honestly labelled complete broker-reported Full PCR with
 source ages; continuously synchronized fresh Full PCR for every illiquid strike
 cannot be guaranteed from the available evidence.
+
+
+## Requested ATM ±7 / OI / volume card
+
+The same Premium card now has vertically stacked Full PCR / ATM ±7 PCR buttons
+and 1m / 3m comparison buttons. The existing collector remains one minute. The
+three-index view shows exact expiry, band ATM and range, OI CE/PE totals,
+cumulative day volume, volume PCR, endpoint OI changes and window volume. A
+short chart uses up to eight actual one-minute samples received while the view
+is open. Recorded research remains separate.
+
+Band scope requires all 15 strikes and all 30 unique option identities with
+valid fresh OI. Membership is verified independently of unavailable outer
+strikes. Missing volume withholds volume without deleting otherwise valid OI.
+OI and volume PCR remain distinct. A real zero survives; a zero CE-volume
+denominator has no Volume PCR. Window volume subtracts two cumulative endpoints
+only for unchanged identities and nondecreasing counts. ATM, membership,
+expiry, runtime, scope/period change, gaps, failed checks and disconnect reset
+comparisons. Reported mixed-time full PCR cannot create fresh comparisons.
+
+Validation: 75 focused tests and all 419 Business Dashboard V1 regression tests
+passed. Tests cover band membership, fresh band despite stale outer quotes,
+1m/3m endpoint arithmetic, cumulative-volume corrections, missing and zero data,
+source-time rejection, repeated/mutated samples and button behavior with no
+extra fetches. Live-session acceptance remains pending while the market is
+closed.

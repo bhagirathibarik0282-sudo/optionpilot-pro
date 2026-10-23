@@ -321,6 +321,7 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
           AND ($5::text = 'FULL' OR o.atm_offset BETWEEN -7 AND 7)
         ORDER BY o.minute_bucket ASC, o.expiry ASC, o.strike ASC, o.option_type ASC`, [...tableParams, request.scope]),
       timedRows<Record<string, unknown>>("canonical", `
+        ${canonicalPcrOnly ? "WITH replay_archive AS MATERIALIZED (" : ""}
         SELECT
           (payload->>'minuteBucket')::timestamptz AS minute_bucket,
           payload->>'symbol' AS symbol,
@@ -328,7 +329,7 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
           payload->>'truthVerdict' AS truth_verdict,
           payload->>'sourceTimestamp' AS source_timestamp,
           payload->>'calculationVersion' AS calculation_version,
-          ${canonicalPcrOnly ? canonicalPcrProjectionSql() : "payload->'market'"} AS market
+          ${canonicalPcrOnly ? "payload->'market' AS raw_market" : "payload->'market' AS market"}
         FROM app_state_log
         WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'
           AND payload->>'symbol' = $1
@@ -337,6 +338,9 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
           AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
           AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
         ORDER BY (payload->>'minuteBucket')::timestamptz ASC
+        ${canonicalPcrOnly ? `) SELECT minute_bucket, symbol, snapshot_id, truth_verdict,
+          source_timestamp, calculation_version, ${canonicalPcrProjectionSql('raw_market')} AS market
+          FROM replay_archive ORDER BY minute_bucket ASC` : ''}
       `, params),
     ]);
 

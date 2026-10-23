@@ -127,3 +127,23 @@ test('replay queue bounds concurrent HTTP work and releases slots after failures
  await Promise.all(pending);assert.equal(active,0);assert.equal(peak,2);
  const failed=harness(async()=>response({ok:false,reason:'auth'},401));await assert.rejects(()=>failed.getReplayWindow('failed','NIFTY','2026-10-23','09:15','09:18'));await assert.rejects(()=>failed.getReplayWindow('next','NIFTY','2026-10-23','09:15','09:18'));
 });
+
+test('progress callbacks publish latest returned windows before older history, in chronological merged order',async()=>{
+ const calls:string[]=[],progress:any[]=[];
+ const h=harness(async(url:string)=>{const u=new URL(url,'https://test.invalid'),from=u.searchParams.get('from')!;calls.push(from);return response(replay('2026-10-12T'+from+':00+05:30',Number(from.slice(0,2))));});
+ const r=await h.getReplay('session','NIFTY','2026-10-12','09:15','11:15','CORE',(part:any)=>{progress.push(structuredClone(part));assert.equal(calls.length,progress.length,'publish before next HTTP request');});
+ assert.deepEqual(calls,['10:15','09:15']);assert.equal(progress[0].loadingProgress.completed,1);assert.equal(progress[0].loadingProgress.total,2);assert.equal(progress[0].market.rows.length,1);assert.equal(progress[1].market.rows[0][1],'2026-10-12T09:15:00+05:30');assert.equal(r.counts.market,2);
+});
+
+test('failed older history rejects completion but keeps previously published real observations',async()=>{
+ const progress:any[]=[];const h=harness(async(url:string)=>new URL(url,'https://test.invalid').searchParams.get('from')==='09:15'?response({ok:false,error:'OLDER_INTERVAL_FAILED'},400):response(replay('2026-10-12T04:45:00Z',10)));
+ await assert.rejects(()=>h.getReplay('session','NIFTY','2026-10-12','09:15','11:15','CORE',(p:any)=>progress.push(p)),/OLDER_INTERVAL_FAILED/);assert.equal(progress.length,1);assert.equal(progress[0].market.rows[0][2],10);assert.equal(progress[0].loadingProgress.completed,1);
+});
+
+test('canonical chunk merging preserves ambiguous same-minute evidence and exact duplicate multiplicity',async()=>{
+ for(const compact of [false,true]){
+  const time='2026-10-12T04:15:00Z',a={minute_bucket:time,snapshot_id:'A'},b={minute_bucket:time,snapshot_id:'B'};
+  const h=harness(async(url:string)=>{const first=new URL(url,'https://test.invalid').searchParams.get('from')==='09:15',d:any=replay(time,1),rows=first?[a,a,b]:[a,b];d.canonical=compact?{columns:['minute_bucket','snapshot_id'],rows:rows.map(r=>[r.minute_bucket,r.snapshot_id])}:rows;return response(d);});
+  const r=await h.getReplay('session','NIFTY','2026-10-12','09:15','11:15');const rows=compact?r.canonical.rows:r.canonical;assert.equal(rows.length,3);assert.equal(rows.filter((r:any)=>compact?r[1]==='A':r.snapshot_id==='A').length,2);assert.equal(r.counts.canonical,3);
+ }
+});

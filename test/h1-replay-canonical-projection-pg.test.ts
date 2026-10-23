@@ -15,6 +15,7 @@ test('PostgreSQL dashboard projection equals the existing JS projection, includi
    const payload=market===undefined?{}:{market};const expected=JSON.parse(JSON.stringify(projectCanonicalPcrRows([{market}])))[0].market??null;
    const res=await client.query('SELECT '+canonicalPcrProjectionSql()+' AS market FROM (SELECT $1::jsonb AS payload) AS source',[JSON.stringify(payload)]);
    assert.deepEqual(res.rows[0].market,expected,JSON.stringify(market));
+   const materialized=await client.query('WITH replay_archive AS MATERIALIZED (SELECT ($1::jsonb)->\'market\' AS raw_market) SELECT '+canonicalPcrProjectionSql('raw_market')+' AS market FROM replay_archive',[JSON.stringify(payload)]);assert.deepEqual(materialized.rows[0].market,expected);
   }
   // Deterministic variations cover absent vs null fields, false/zero and ordering.
   for(let i=0;i<40;i++){const market:any={symbol:i%2?'NIFTY':null,expiries:[{expiry:'Current Expiry',ceStrikes:[{...leg,lastPrice:i%3?i:null},...(i%2?[leg]:[])],peStrikes:[]}],gapScore:i%4?{fullChainPcr:i/10}:null};if(i%5===0)delete market.expiries[0].ceStrikes[0].pdc;

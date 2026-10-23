@@ -261,7 +261,7 @@ test('incomplete live PCR explains exact coverage and separately shows verified 
  assert(html.includes('OI 2/4 fresh · stale 2 · missing 0 · invalid 0'));
  assert(html.includes('checked 09:45:00 IST'));
  assert(html.includes('2026-10-19 · 09:44:00 IST'));
- assert(html.includes('LIVE · Full OI PCR'));
+ assert(html.includes('UNAVAILABLE · Fresh Full PCR'));assert(!html.includes('LIVE · Full OI PCR'));
  assert(!html.includes('PCR up">↑'));
  assert(!h.el('os-wall-ladder').innerHTML.includes('1.8765'));
  assert(!h.el('os-pulse-chart').innerHTML.includes('stroke="#ff8ed9"'));
@@ -403,4 +403,20 @@ test('the default 3m window renders historical 3m observations without interpola
  h.el('os-window').onclick({target:{closest:()=>({dataset:{osWindow:'3'}})}});
  assert(h.el('os-pulse-chart').innerHTML.includes('stroke="#3be6ff"'));
  assert(h.el('os-pulse-chart').innerHTML.includes('stroke="#ff8ed9"'));
+});
+
+
+test('reported full-chain PCR stays labelled apart from fresh values, charts and alignment',()=>{
+ const h=harness(),p=h.payload();
+ for(const a of p.snapshot.indices){
+  const raw:any=structuredClone(p.pcrDisplay[a.symbol]);raw.state='INCOMPLETE';raw.fetchState='OK';raw.reason='STALE_OI_TIMESTAMPS';
+  Object.assign(raw.coverage,{complete:false,freshOi:2,stale:2,missing:0,invalid:0});
+  raw.reportedPcr={basis:'LATEST_REPORTED_MIXED_TIMESTAMPS',symbol:a.symbol,expiry:a.expiry,value:1.3333,ceTotal:10000,peTotal:13333,expected:4,reported:4,olderThan30s:2,sourceMinAt:'2026-10-19T04:10:00Z',sourceMaxAt:raw.checkedAt,checkedAt:raw.checkedAt};
+  a.pcrSnapshot=raw;delete p.pcrDisplay[a.symbol];
+ }
+ h.send(p);const html=h.el('os-pcr-strip').innerHTML;
+ assert.equal((html.match(/Full-chain reported PCR/g)||[]).length,3);assert.equal((html.match(/1.3333/g)||[]).length,3);
+ assert(html.includes('4/4 contracts · 2 older than 30s'));assert(html.includes('Source 09:40:00 → 09:45:00 IST'));
+ assert(!html.includes('LIVE · Full OI PCR'));assert(!h.el('os-wall-ladder').innerHTML.includes('1.3333'));assert(!h.el('os-pulse-chart').innerHTML.includes('1.3333'));
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-pcr-strip').innerHTML.includes('1.3333'));
 });

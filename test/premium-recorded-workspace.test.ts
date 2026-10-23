@@ -1,3 +1,5 @@
+import { derivePremiumPcrPanel } from '../premium-pcr-panel.js';
+import { measurePcrSnapshot } from '../dashboard-pcr-sampler.js';
 import { installMarketInvestigation } from '../market-investigation.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,12 +16,63 @@ function harness(saved:any=null){
  const row=(t:string,ltp:number,option_type='CE')=>({symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type,minute_bucket:'2026-10-13T'+t+':00.000Z',quote_timestamp:'2026-10-13T'+t+':22.000Z',truth_verdict:'TRUE',ltp,pdh:110,pdl:90,oi:200,pdc:100,day_high:120,day_low:80});
  const data={market:[{minute_bucket:'2026-10-13T04:00:00.000Z',spot_ltp:22000}],options:[row('04:00',100),row('04:03',105),row('04:06',111),row('04:00',150,'PE'),row('04:03',145,'PE'),row('04:06',140,'PE')]};
  const api={getState:()=>state,setDate:async(date:string,options:any)=>{calls.push({date,options});state={...state,date,scope:options.scope,current:date==='2026-10-13'?{NIFTY:data}:{}};}};
- const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(name:string,fn:Function){listeners[name]=fn;},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},installMarketInvestigation,derivePremiumDeltaPair,derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,api});
+ const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(name:string,fn:Function){listeners[name]=fn;},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},installMarketInvestigation,derivePremiumDeltaPair,derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,derivePremiumPcrPanel,api});
  vm.runInContext('globalThis.view=('+installPremiumWorkspace.toString()+')(api);',context);
  const node=(id:string)=>nodes.get(id),click=(id:string,dataset:any={})=>node('op-premium-workspace').onclick({target:{closest:()=>({id,dataset})}}),change=(id:string,value:string)=>node('op-premium-workspace').onchange({target:{id,value}});
  return {emitContext:(payload:any)=>listeners['optionpilot:live-context']?.({detail:payload}),respond:(payload:any)=>{livePayload=payload;context.fetch=async(url:string)=>{requests.push(url);return {ok:true,json:async()=>structuredClone(livePayload)};};},focus:(id:string)=>context.document.activeElement=node(id),node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
 }
 const settle=async()=>{await Promise.resolve();await Promise.resolve();};
+function reportedPcrFixture(){
+ const date='2026-10-23',stamp=date+'T04:30:00.000Z',older=date+'T04:28:00.000Z',expiry='2026-10-27';
+ return {connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:stamp,snapshot:{runtimeId:'reported-pcr-fixture',tradeDate:date,asOf:stamp,indices:['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>({symbol,expiry,expiries:[expiry],spot:{identity:{role:'SPOT',symbol},state:'LIVE',price:22000,observedAt:stamp,receivedAt:stamp},pcrSnapshot:{source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'INCOMPLETE',reason:'STALE_OI_TIMESTAMPS',fetchState:'OK',checkedAt:stamp,cycleStartedAt:stamp,coverage:{expected:4,freshOi:3,stale:1,missing:0,invalid:0,complete:false},reportedPcr:{basis:'LATEST_REPORTED_MIXED_TIMESTAMPS',symbol,expiry,value:1.2345,ceTotal:10000,peTotal:12345,expected:4,reported:4,olderThan30s:1,sourceMinAt:older,sourceMaxAt:stamp,checkedAt:stamp}}}))}};
+}
+test('stacked Full/Band and 1m/3m buttons switch one live card with exact band OI, day volume and observed charts',async()=>{
+ const at=Date.parse('2026-10-23T04:30:00Z'),date='2026-10-23',expiry='2026-10-27';
+ const packet=(minute:number)=>{const stamp=new Date(at+minute*60000).toISOString();return {connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:stamp,snapshot:{runtimeId:'band-ui',tradeDate:date,asOf:stamp,indices:['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>{
+  const es:any[]=Array.from({length:17},(_,i)=>['CE','PE'].map((side,j)=>({token:100+i*2+j,exchange:'NFO',label:symbol+i+side,symbol,expiry,role:'OPTION',strike:22600+i*50,side}))).flat();
+  const qs=Object.fromEntries(es.map(e=>[e.exchange+':'+e.label,{instrument_token:e.token,oi:e.side==='CE'?100+minute:200+minute*3,volume:e.side==='CE'?1000+10*minute:2000+20*minute,timestamp:stamp}]));qs[es[0].exchange+':'+es[0].label].timestamp=new Date(at+minute*60000-31000).toISOString();
+  const spot={identity:{role:'SPOT',symbol},state:'LIVE',price:23000,observedAt:stamp,receivedAt:stamp};return {symbol,expiry,expiries:[expiry],spot,pcrSnapshot:{...measurePcrSnapshot(es,qs,date,at+minute*60000,at+minute*60000,spot),fetchState:'OK'}};
+ })}};};
+ const h=harness();h.respond({connected:true,connectionState:'OPEN',serverTime:packet(0).serverTime,snapshot:{rows:[],series:[]}});h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');h.emitContext(packet(0));const requests=h.requests.length;
+ let html=h.node('pw-chain-pcr').innerHTML;assert.match(html,/data-pw-pcr-scope="FULL"[\s\S]*data-pw-pcr-scope="BAND"/);assert.match(html,/data-pw-pcr-period="60000"[\s\S]*data-pw-pcr-period="180000"/);
+ h.click('',{pwPcrScope:'BAND'});html=h.node('pw-chain-pcr').innerHTML;assert.match(html,/ATM ±7 OI PCR/);assert.equal((html.match(/30\/30/g)||[]).length,3);assert.match(html,/OI · CE 1,500 \/ PE 3,000/);assert.match(html,/Day volume · CE 15,000 \/ PE 30,000/);
+ h.emitContext(packet(1));html=h.node('pw-chain-pcr').innerHTML;assert.equal((html.match(/<svg class="pw-pcr-spark"/g)||[]).length,3);assert.match(html,/Window volume · CE 150 \/ PE 300/);
+ h.click('',{pwPcrPeriod:'180000'});assert.match(h.node('pw-chain-pcr').innerHTML,/Collect 1m · compare 3m/);for(let minute=2;minute<=4;minute++)h.emitContext(packet(minute));assert.match(h.node('pw-chain-pcr').innerHTML,/Window volume · CE 450 \/ PE 900/);assert.equal(h.requests.length,requests,'scope and period buttons cannot add fetches');
+ h.emitContext({connected:false,connectionState:'DISCONNECTED',snapshot:null});html=h.node('pw-chain-pcr').innerHTML;assert.doesNotMatch(html,/30\/30|<svg class="pw-pcr-spark"/);assert.match(html,/OI · CE — \/ PE —/);
+});
+test('Premium PCR renders the validated complete reported ratio without fresh arrows or alignment',async()=>{
+ const h=harness(),payload=reportedPcrFixture();h.respond({connected:true,connectionState:'OPEN',serverTime:payload.serverTime,snapshot:{rows:[],series:[]}});
+ h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');h.emitContext(payload);
+ const html=h.node('pw-chain-pcr').innerHTML,visible=html.split('<details class="pw-pcr-audit"')[0];
+ assert.equal((visible.match(/1\.2345/g)||[]).length,3);
+ assert.equal((visible.match(/Reported · mixed times/g)||[]).length,3);
+ assert.equal((visible.match(/Checked 10:00:00 IST/g)||[]).length,3);
+ assert.match(html,/4\/4 contracts · 1 older than 30s/);assert.match(html,/Source 09:58:00 → 10:00:00 IST/);
+ assert.doesNotMatch(visible,/pw-chain-pulse|ALL RISING|ALL FALLING|SYNC ✓|1\.2345 [↑↓]/);
+ assert.equal(h.calls.length,0);assert.equal(h.requests.filter(x=>x.includes('/quote')).length,0);
+ h.emitContext({...payload,connected:false,connectionState:'DISCONNECTED',snapshot:null});assert.doesNotMatch(h.node('pw-chain-pcr').innerHTML,/1\.2345|Reported · mixed times/);
+});
+test('reported Premium PCR is revoked for invalid provenance and preserves real zero put OI',async()=>{
+ const h=harness(),payload=reportedPcrFixture();h.respond({connected:true,connectionState:'OPEN',serverTime:payload.serverTime,snapshot:{rows:[],series:[]}});
+ h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');
+ for(const mutate of [
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.fetchState='RATE_LIMITED'),
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.coverage.missing=1),
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.reportedPcr.expiry='2026-11-03'),
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.reportedPcr.sourceMinAt='2026-10-22T09:59:00.000Z'),
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.reportedPcr.value=9),
+  (p:any)=>p.serverTime='2026-10-23T04:31:31.000Z'
+ ]){const p=structuredClone(payload);mutate(p);h.emitContext(p);assert.doesNotMatch(h.node('pw-chain-pcr').innerHTML,/1\.2345|Reported · mixed times/);}
+ h.emitContext(null); // A disconnected context clears the previous, later server clock.
+ const zero=structuredClone(payload);zero.snapshot.indices.forEach(a=>Object.assign(a.pcrSnapshot.reportedPcr,{value:0,peTotal:0}));h.emitContext(zero);
+ const visible=h.node('pw-chain-pcr').innerHTML.split('<details class="pw-pcr-audit"')[0];assert.equal((visible.match(/<strong>0 —<\/strong>/g)||[]).length,3);assert.match(visible,/Reported · mixed times/);
+});
+test('fresh Premium Full PCR takes precedence over reported context',async()=>{
+ const h=harness(),payload:any=reportedPcrFixture();h.respond({connected:true,connectionState:'OPEN',serverTime:payload.serverTime,snapshot:{rows:[],series:[]}});
+ payload.pcrDisplay={};for(const a of payload.snapshot.indices){const q=a.pcrSnapshot;Object.assign(q,{state:'COMPLETE',reason:'COMPLETE',fullPcr:1.5,ceTotal:10000,peTotal:15000,sourceMinAt:payload.serverTime,sourceMaxAt:payload.serverTime,periodMs:60000});Object.assign(q.coverage,{complete:true,freshOi:4,stale:0,sourceSkewMs:0});Object.assign(q.reportedPcr,{value:1.5,peTotal:15000,olderThan30s:0,sourceMinAt:payload.serverTime});payload.pcrDisplay[a.symbol]={...q,expiry:a.expiry};}
+ h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');h.emitContext(payload);
+ const html=h.node('pw-chain-pcr').innerHTML,visible=html.split('<details class="pw-pcr-audit"')[0];assert.equal((visible.match(/<strong>1\.5 —<\/strong>/g)||[]).length,3);assert.doesNotMatch(html,/Reported · mixed times|MIXED SOURCE TIMES/);
+});
 test('closed-market live ladder explains the missing values and opens the existing recorded archive explicitly',async()=>{
  const h=harness();h.respond({connected:false,connectionState:'MARKET_CLOSED',serverTime:new Date().toISOString(),snapshot:null});
  h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');await settle();await settle();

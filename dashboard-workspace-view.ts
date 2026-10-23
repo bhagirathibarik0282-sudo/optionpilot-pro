@@ -146,6 +146,23 @@ body[data-op-workspace] .mb-scope{margin:6px 0;padding:4px 8px;font-size:13px}
 body[data-op-workspace] .mb-detail-toolbar{margin:4px 0}body[data-op-workspace] #mb-page .mb-chapter-head{margin-bottom:8px;padding-bottom:6px}
 body[data-op-workspace] #mb-page .mb-chapter-head h2{margin:3px 0;font-size:23px}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+/* Shared chapter density: retain readable values and 44px touch controls. */
+body[data-op-workspace] #market-book:not([data-chapter="1"]) #op-one-stop{display:none}
+body[data-op-workspace] #market-book .mb-chapter-head h2{display:none}
+body[data-op-workspace] #market-book .mb-turn{display:flex;align-items:center;gap:5px;margin:4px 0;padding:4px 0}
+body[data-op-workspace] #market-book .mb-current-chapter{display:flex;align-items:center;gap:5px;min-width:0}
+body[data-op-workspace] #market-book #mb-page-count{display:none}
+body[data-op-workspace] #market-book .mb-turn :is(button,select){font-size:14px;min-height:44px;padding:6px;border-radius:8px}
+body[data-op-workspace] #market-book .mb-turn>button{flex:0 0 36px}
+body[data-op-workspace] #market-book .mb-detail-toolbar{margin:0;flex:0 0 auto}
+body[data-op-workspace] #market-book #mb-details-toggle{font-size:12px;white-space:nowrap}
+body[data-op-workspace] #market-book .mb-scope{font-size:13px;line-height:1.35;margin:3px 0 6px;padding:3px 6px}
+body[data-op-workspace] #market-book #mb-page.mb-renovated>h3{font-size:20px;margin:12px 0 7px}
+body[data-op-workspace] #market-book #mb-page.mb-renovated .mb-box{padding:10px;border-radius:10px}
+body[data-op-workspace] #market-book #mb-page.mb-renovated .mb-event{margin:7px 0;padding:8px 10px}
+body[data-op-workspace] #market-book .mb-reading-guide{margin:6px 0;padding:8px}
+body[data-op-workspace] #market-book .mb-chapter-head{padding-bottom:6px;margin-bottom:6px;gap:5px}
+body[data-op-workspace] #market-book .mb-chapter-head .mb-eyebrow{display:none}
 ${ONE_SHOT_CSS}
 `;
 

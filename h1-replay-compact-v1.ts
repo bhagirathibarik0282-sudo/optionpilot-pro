@@ -61,7 +61,8 @@ export function projectCanonicalPcrRows(rows: Record<string, unknown>[]): Record
       gapScore: { fullChainPcr: market.gapScore?.fullChainPcr },
       expiries: Array.isArray(market.expiries)
         ? market.expiries.map((expiry: any) => expiry && typeof expiry === "object"
-          ? { expiry: expiry.expiry, expiryDate: expiry.expiryDate } : expiry)
+          ? { expiry: expiry.expiry, expiryDate: expiry.expiryDate,
+              ...Object.fromEntries(['ceStrikes','peStrikes'].filter(side=>Array.isArray(expiry[side])).map(side=>[side,expiry[side].map((q:any)=>q&&typeof q==='object'?{strike:q.strike,optionType:q.optionType,expiryDate:q.expiryDate,lastPrice:q.lastPrice,quoteTimestamp:q.quoteTimestamp,pdc:q.pdc}:q)])) } : expiry)
         : market.expiries,
     } };
   });

@@ -1,4 +1,5 @@
 import { findOrCreateArchiveDriveFolder } from './drive-archive-folder.js';
+import { checkDriveFilePermission } from './drive-permission-check.js';
 import { mountSellerResearchRoutes } from './seller-research-http.js';
 import { resolveIndexExpiryClock } from './index-expiry-clock.js';
 import { isClosingObservationAt } from './index-observation-session.js';
@@ -9702,8 +9703,8 @@ app.get("/", (c) => {
         return html;
       }
       const d = driveStatusData;
-      if (!d.connected) {
-        html += '<div style="color:var(--muted); font-size:0.8rem; margin-bottom:8px;">Not connected</div>';
+      if (!d.connected || d.reconnectRequired) {
+        html += '<div style="color:var(--muted); font-size:0.8rem; margin-bottom:8px;">' + (d.reconnectRequired ? 'Drive permission required. Reconnect and allow access to files created by this app.' : 'Not connected') + '</div>';
         html += '<a href="/api/drive/connect" style="display:inline-block; background:var(--gold); color:#1a1a2e; font-weight:700; padding:8px 14px; border-radius:6px; text-decoration:none; font-size:0.8rem;">Connect Google Drive</a>';
         html += '<div class="timestamp">Opens Google\u2019s consent screen in your browser. Only the minimum Drive scope (files this app creates) is requested \u2014 never full Drive access. Refresh token is encrypted at rest.</div>';
         html += '</div>';
@@ -23267,6 +23268,13 @@ app.get("/api/drive/callback", async (c) => {
       return c.redirect("/?drive=error");
     }
 
+    // Google can grant email while Drive consent is declined. Do not report a
+    // successful archive connection or replace the saved session in that case.
+    const permission = await checkDriveFilePermission(tokenJson.access_token);
+    if (!permission.ready) {
+      driveSession.lastError = permission.reason;
+      return c.redirect('/?drive=permission-required');
+    }
     driveSession.accessToken = tokenJson.access_token;
     driveSession.accessTokenExpiresAt = Date.now() + (tokenJson.expires_in || 3600) * 1000;
     if (tokenJson.refresh_token) {
@@ -23387,12 +23395,22 @@ async function uploadFileToDrive(name: string, mimeType: string, content: string
   return { id: json.id, size: parseInt(json.size || "0", 10) };
 }
 
+app.get('/api/drive/permission-check', async (c) => {
+  const token = await getValidDriveAccessToken();
+  if (!token) return c.json({ ready: false, state: 'RECONNECT_REQUIRED', reason: 'GOOGLE_DRIVE_SESSION_REQUIRED', reconnectUrl: '/api/drive/connect' });
+  const result = await checkDriveFilePermission(token);
+  if (!result.ready) driveSession.lastError = result.reason;
+  else if (/insufficientPermissions|GOOGLE_DRIVE_PERMISSION_REQUIRED|GOOGLE_DRIVE_SESSION_REJECTED/.test(driveSession.lastError || '')) driveSession.lastError = null;
+  return c.json({ ...result, reconnectUrl: result.ready ? null : '/api/drive/connect', writesPerformed: false });
+});
+
 app.get("/api/drive/status", (c) => {
   return c.json({
     connected: !!driveSession.refreshTokenEncrypted,
     connectedEmail: driveSession.connectedEmail,
     connectedAt: driveSession.connectedAt,
     lastError: driveSession.lastError,
+    reconnectRequired: /insufficientPermissions|GOOGLE_DRIVE_PERMISSION_REQUIRED|GOOGLE_DRIVE_SESSION_REJECTED/.test(driveSession.lastError || ''),
     targetFolder: "OptionPilot Pro Journal/Year/Month/Trading Date",
     lastArchive: driveArchives.length > 0 ? driveArchives[driveArchives.length - 1] : null,
     autoArchive: { scheduledAfter: "15:35 IST (5 min after market close)", lastAutoArchiveDate },

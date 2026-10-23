@@ -77,3 +77,20 @@ test("dashboard PCR projection preserves duplicate, mismatched and unavailable e
     assert.equal(resolveRecordedFullPcr(projected)[0].full_chain_oi_pcr, null);
   }
 });
+
+test('compact archive restores exact broker PDC and refuses ambiguous or mismatched quotes', async()=>{
+ const {deriveObservationData}=await import('../business-dashboard-v1-view.js');
+ const at='2026-10-23T03:56:00.000Z',quote='2026-10-23T03:56:19.000Z';
+ const row={symbol:'NIFTY',minute_bucket:at,snapshot_id:'snapshot-1',calculation_version:'H1_RUNTIME_BRIDGE_V1',truth_verdict:'TRUE',expiry:'2026-10-27',strike:22750,option_type:'CE',ltp:184,quote_timestamp:quote};
+ const q={strike:22750,optionType:'CE',expiryDate:'2026-10-27',lastPrice:184,quoteTimestamp:quote,pdc:130.3,secretUnrelated:'excluded'};
+ const source:any={ok:false,request:null,options:[row],canonical:[{...row,source_timestamp:quote,market:{symbol:'NIFTY',expiries:[{expiry:'Current Expiry',expiryDate:row.expiry,ceStrikes:[q],peStrikes:[]}]}}]};
+ const read=(s:any)=>deriveObservationData(compactH1Replay(s,true)).options[0];
+ assert.equal(read(source).pdc,130.3);assert.equal(read(source).pdc_source,'EXACT_ARCHIVED_KITE_OHLC_CLOSE');
+ assert.deepEqual(deriveObservationData(compactH1Replay(source,true)),deriveObservationData(compactH1Replay(source)));
+ assert(!JSON.stringify(compactH1Replay(source,true)).includes('secretUnrelated'));
+ const cases=[(s:any)=>s.canonical.push(structuredClone(s.canonical[0])),(s:any)=>s.canonical[0].snapshot_id='wrong',(s:any)=>s.options[0].truth_verdict='FALSE',(s:any)=>s.canonical[0].truth_verdict='FALSE',(s:any)=>s.canonical[0].source_timestamp='2026-10-23T03:57:00Z',
+  ...['strike','optionType','expiryDate','lastPrice','quoteTimestamp','pdc'].map(k=>(s:any)=>{s.canonical[0].market.expiries[0].ceStrikes[0][k]=k==='pdc'?0:'wrong';}),
+  (s:any)=>s.canonical[0].market.expiries[0].ceStrikes.push(structuredClone(q)),(s:any)=>s.canonical[0].market.expiries.push(structuredClone(s.canonical[0].market.expiries[0]))];
+ for(const mutate of cases){const s=structuredClone(source);mutate(s);assert.equal(read(s).pdc,undefined);}
+ assert.equal(source.options[0].pdc,undefined,'source archive is unchanged');
+});

@@ -7,6 +7,8 @@ on:
       - 'eod-archive-job.ts'
       - 'eod-drive-upload.ts'
       - 'drive-archive-folder.ts'
+      - 'drive-permission-check.ts'
+      - 'test/drive-permission-check.test.ts'
       - 'test/drive-archive-folder.test.ts'
       - 'drive-connected-session.ts'
       - 'server.ts'
@@ -41,7 +43,7 @@ jobs:
           node-version: '22'
       - run: npm install --no-audit --no-fund
       - name: EOD core tests
-        run: NODE_ENV=test node --import tsx --test test/drive-archive-folder.test.ts test/eod-archive-core.test.ts test/eod-drive-readback.test.ts test/eod-archive-memory-persistence.test.ts test/drive-connected-session.test.ts
+        run: NODE_ENV=test node --import tsx --test test/drive-archive-folder.test.ts test/drive-permission-check.test.ts test/eod-archive-core.test.ts test/eod-drive-readback.test.ts test/eod-archive-memory-persistence.test.ts test/drive-connected-session.test.ts
         env:
           EOD_ARCHIVE_TEST_DATABASE_URL: postgres://eod_test:eod_test@127.0.0.1:5432/eod_test
       - name: Import Drive uploader

@@ -466,9 +466,17 @@ function mergeReplayParts(parts,request){
  for(const field of ['market','options','chain','canonical']){const values=parts.map(p=>p?.[field]).filter(Boolean);if(!values.length){merged[field]=[];continue;}if(Array.isArray(values[0])){const rows=[...new Map(values.flat().map(r=>[replayRowKey(r),r])).values()];rows.sort((a,b)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket));merged[field]=rows;continue;}const populated=values.filter(v=>(v.rows||[]).length),schema=populated[0]||values.find(v=>(v.columns||[]).length)||{columns:[],rows:[]},columns=schema.columns||[];if(populated.some(v=>JSON.stringify(v.columns||[])!==JSON.stringify(columns)))throw Error('Replay chunk schema mismatch for '+field+'.');const timeIndex=columns.indexOf('minute_bucket'),rows=[...new Map(populated.flatMap(v=>v.rows||[]).map(r=>[replayRowKey(r,columns),r])).values()];if(timeIndex>=0)rows.sort((a,b)=>Date.parse(a[timeIndex])-Date.parse(b[timeIndex]));merged[field]={columns,rows};}
  const countRows=field=>Array.isArray(merged[field])?merged[field].length:(merged[field]?.rows||[]).length;merged.counts={market:countRows('market'),options:countRows('options'),chain:countRows('chain'),markers:countRows('market'),canonical:countRows('canonical')};return merged;
 }
+// A replay request expands into several DB reads. Queue before starting its
+// network deadline; baseline/history reads must not flood the shared pool.
+let replayReadActive=0;const replayReadWaiters=[];
+async function readReplay(label,url){
+ await new Promise(resolve=>{replayReadWaiters.push({resolve,priority:label.includes('swing baseline')?1:0});replayReadWaiters.sort((a,b)=>a.priority-b.priority);pumpReplayReads();});
+ try{return await get(label,url);}finally{replayReadActive--;pumpReplayReads();}
+}
+function pumpReplayReads(){while(replayReadActive<2&&replayReadWaiters.length){replayReadActive++;replayReadWaiters.shift().resolve();}}
 async function getReplayWindow(label,symbol,date,from,to,depth=0,replayScope='CORE'){
  const url='/api/research/h1-replay?symbol='+symbol+'&date='+date+'&from='+from+'&to='+to+'&scope='+replayScope+'&format=compact&canonical=pcr-provenance';
- try{return await get(label,url);}catch(error){
+ try{return await readReplay(label,url);}catch(error){
   const start=minuteNumber(from),end=minuteNumber(to);
   if(!error.unreadableSuccess||start===null||end===null||end-start<=3||depth>=5)throw error;
   sources[label].status+=' Smaller replay windows requested.';

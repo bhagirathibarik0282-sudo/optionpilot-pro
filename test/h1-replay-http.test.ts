@@ -208,5 +208,5 @@ test('required raw gap read failure remains fail closed', async () => {
 
 test('only the explicit dashboard projection changes the canonical SQL; default research remains raw',async()=>{
  const request={symbol:'NIFTY',tradeDate:'2026-10-23',fromTime:'09:15',toTime:'09:15',scope:'CORE'} as const;
- for(const projected of [false,true]){const sqls:string[]=[];const r=await runH1ReplayRead(request,async(sql:string)=>{sqls.push(sql);return [] as any;},projected);assert.equal(r.ok,true);const canonical=sqls.find(s=>s.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'"))!;assert.equal(canonical.includes('jsonb_array_elements'),projected);if(!projected)assert(canonical.includes("payload->'market' AS market"));}
+ for(const projected of [false,true]){const sqls:string[]=[];const r=await runH1ReplayRead(request,async(sql:string)=>{sqls.push(sql);return [] as any;},projected);assert.equal(r.ok,true);const canonical=sqls.find(s=>s.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'"))!;assert.equal(canonical.includes('jsonb_array_elements'),projected);assert.equal(canonical.includes('AS MATERIALIZED'),projected);if(!projected)assert(canonical.includes("payload->'market' AS market"));}
 });

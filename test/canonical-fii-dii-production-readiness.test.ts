@@ -112,3 +112,24 @@ test("partial participant DB state is visible but does not fabricate a verified 
   assert.equal(out.participantDbReadback.latestVerifiedTradeDate, null);
   assert.equal(out.participantDbReadback.verifiedCompleteSnapshotAvailable, false);
 });
+
+
+test("dated daily history remains available when cash is behind market, without changing readiness", () => {
+  const out=evaluateFiiDiiProductionReadiness({expectedMarketSessionDate:"2026-10-23",storedRows:[row("2026-10-21"),row("2026-10-22")]});
+  assert.equal(out.ready,false);assert.equal(out.dailyHistoryState,"VERIFIED_STORED_EOD");
+  assert.deepEqual(out.dailyHistory.map(r=>r.date),["2026-10-21","2026-10-22"]);
+  assert.equal(out.dailyHistory[1].combinedNetCrore,5);assert.equal(out.dailyHistory[1].source,"NSE_FII_DII");
+  assert.equal(out.affectsVerdict,false);assert.equal(out.mutatesData,false);
+});
+test("daily history withholds malformed, duplicate, unofficial or arithmetically invalid rows", () => {
+  for(const bad of [{source:"UNKNOWN"},{trade_date:"2026-02-30"},{fii_net:999},{fii_net:null},{dii_buy:-1},{fii_buy:""}]){
+    const out=evaluateFiiDiiProductionReadiness({expectedMarketSessionDate:"2026-10-22",storedRows:[{...row("2026-10-22"),...bad} as any]});
+    assert.deepEqual(out.dailyHistory,[],JSON.stringify(bad));assert.equal(out.dailyHistoryState,"UNAVAILABLE");
+  }
+  const out=evaluateFiiDiiProductionReadiness({expectedMarketSessionDate:"2026-10-22",storedRows:[row("2026-10-22"),row("2026-10-22")]});assert.deepEqual(out.dailyHistory,[]);
+});
+test("real zero institutional net stays zero in date-wise history", () => {
+  const zero={...row("2026-10-22"),fii_buy:125,fii_net:0,dii_buy:120,dii_net:0};
+  const out=evaluateFiiDiiProductionReadiness({expectedMarketSessionDate:"2026-10-22",storedRows:[zero]});
+  assert.equal(out.dailyHistory[0].fiiNetCrore,0);assert.equal(out.dailyHistory[0].combinedNetCrore,0);
+});

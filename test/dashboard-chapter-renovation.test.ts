@@ -147,3 +147,21 @@ test('cold-start loading is visible in compact chapters and never reports missin
  h.state.loading=true;h.state.archiveLoading=true;h.state.loadingDate='2026-10-16';assert.match(h.turn(0),/22,010/,'successful recorded values remain visible during refresh');
  h.state.loading=false;h.state.archiveLoading=false;h.state.current={};assert.match(h.turn(0),/NO RECORDING/);assert.equal(h.nodes.get('mb-load-status').hidden,true);
 });
+
+
+test('Flow cash card connects dated history and compares only actual stored sessions',()=>{
+ const h=harness(false,s=>{s.cash={...s.cash,ready:false,dailyHistoryState:'VERIFIED_STORED_EOD',dailyHistory:[
+  {date:'2026-10-06',fiiNetCrore:-120,diiNetCrore:150,combinedNetCrore:30},
+  {date:'2026-10-07',fiiNetCrore:0,diiNetCrore:200,combinedNetCrore:200,fetchedAt:'2026-10-07T14:00:00Z',sourceUrl:'https://www.nseindia.com/api/fiidiiTradeReact'}],
+  windows:[{window:'1D',availableSessions:1,requiredSessions:1,fiiNetCrore:0,diiNetCrore:200,combinedNetCrore:200,state:'READY'}]};});
+ const html=h.turn(10);assert.match(html,/Previous-session context · not an intraday feed/);
+ assert.match(html,/Date-wise history · 2 stored sessions/);assert.match(html,/2026-10-06 → 2026-10-07/);
+ assert.match(html,/FII \+120 \/ DII \+50/);assert.match(html,/<td[^>]*>0<\/td>/);
+ assert.match(html,/<details class="mb-event" data-event-key="cash-history">/);assert(!html.includes('cash-history" open'));
+ assert.match(html,/Latest recorded market session has no matching cash report yet/);assert.deepEqual(h.state,h.before);
+});
+test('missing cash history and refresh failure remain explicit without invented daily values',()=>{
+ const h=harness(false,s=>{s.cash=null;s.cashError='Saved cash request failed';});
+ const html=h.turn(10);assert.match(html,/Saved cash request failed/);assert.match(html,/0 stored sessions/);
+ assert(!html.includes('mb-cash-change'));assert(!html.includes('NaN'));assert(!html.includes('undefined'));
+});

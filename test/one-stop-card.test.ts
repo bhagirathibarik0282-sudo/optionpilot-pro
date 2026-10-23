@@ -8,7 +8,7 @@ import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js'
 import { deriveAtmFibHold } from '../premium-workspace-model.js';
 import { deriveLiveThreeIndexPcr } from '../live-three-index-pcr.js';
 
-test('command shortcuts restore hidden chapters and Recorded opens only the saved ladder',()=>{
+test('four chapters ignore old hidden preferences and Recorded opens the Replay ladder',()=>{
  const nodes=new Map<string,any>(),listeners:any={},calls:any[]=[];let page=0;
  const el=(id:string)=>{if(!nodes.has(id))nodes.set(id,{innerHTML:'',textContent:'',value:'NIFTY',setAttribute(){},classList:{toggle(){}},querySelectorAll(){return [];},scrollIntoView(){}});return nodes.get(id);};
  const installer=evaluate('('+installDashboardWorkspace.toString()+')',{
@@ -19,13 +19,22 @@ test('command shortcuts restore hidden chapters and Recorded opens only the save
  });
  const controller=installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>page,turn(i:number){page=i;},getState:()=>({})});
  controller.render();
- assert.equal((el('op-command-chapters').innerHTML.match(/data-op-chapter=/g)||[]).length,13);
- assert(el('op-command-chapters').innerHTML.includes('13 · Chapter 12'));
- el('op-command-chapters').onclick({target:{closest:()=>({dataset:{opChapter:'8'}})}});controller.render();
- assert.equal(page,8);assert(el('op-chapter-links').innerHTML.includes('data-op-chapter="8"'));
+ assert.equal((el('op-command-chapters').innerHTML.match(/data-op-group=/g)||[]).length,4);
+ assert(el('op-command-chapters').innerHTML.includes('Replay'));
+ assert.equal((el('mb-chapter').innerHTML.match(/<option/g)||[]).length,4);
+ el('op-command-chapters').onclick({target:{closest:()=>({dataset:{opGroup:'2'}})}});controller.render();
+ assert.equal(page,10);assert(el('op-view-links').innerHTML.includes('data-op-view="8"'));
  el('op-one-actions').onclick({target:{closest:()=>({dataset:{opOne:'RECORDED'}})}});controller.render();
  assert.equal(page,7);assert.equal(calls.at(-1).source,'RECORDED');
- assert(el('op-chapter-links').innerHTML.includes('data-op-chapter="7"'));
+ assert(el('op-view-links').innerHTML.includes('Recorded ladder'));
+ assert(el('op-chapter-links').innerHTML.includes('data-op-group="3" aria-current="page"'));
+ el('mb-next').onclick();controller.render();assert.equal(page,0);
+ el('mb-prev').onclick();controller.render();assert.equal(page,7);assert.equal(calls.at(-1).source,'RECORDED');
+ el('mb-chapter').value='1';el('mb-chapter').onchange();controller.render();assert.equal(page,7);assert.equal(calls.at(-1).source,'LIVE');
+ el('op-view-links').onclick({target:{closest:()=>({dataset:{opView:'2'}})}});controller.render();assert.equal(page,2);
+ el('op-chapter-links').onclick({target:{closest:()=>({dataset:{opGroup:'0'}})}});
+ el('op-chapter-links').onclick({target:{closest:()=>({dataset:{opGroup:'1'}})}});controller.render();assert.equal(page,2);
+ assert.equal((el('op-chapter-links').innerHTML.match(/data-op-group=/g)||[]).length,4);
  listeners['optionpilot:live-context']({detail:{connected:false,connectionState:'MARKET_CLOSED',snapshot:null}});
  assert.match(el('op-one-status').textContent,/MARKET CLOSED/);
  assert.equal(el('op-workspace-feed').textContent,'MARKET CLOSED');
@@ -46,7 +55,7 @@ test('one-stop card is a single top-level workspace panel, not hidden inside fee
  const head=html.indexOf('id="op-workspace-top"'),one=html.indexOf('id="op-one-stop"');
  const tools=html.indexOf('id="mb-tools"');
  assert(head>=0&&one>head&&tools>one);
- assert.match(WORKSPACE_NAV_HTML, /<\/div><\/div><section id="op-one-stop"/);
+ assert.match(WORKSPACE_NAV_HTML, /<nav id="op-view-links"[^>]*><\/nav><section id="op-one-stop"/);
  assert.match(WORKSPACE_CSS, /\.op-one-scroll\{overflow-x:auto/);
 });
 test('one-stop exposes existing destinations including explicit recorded access and never requests or executes a trade',()=>{

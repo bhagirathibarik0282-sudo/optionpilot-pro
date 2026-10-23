@@ -8,16 +8,16 @@ import { derivePremiumDeltaPair, derivePremiumWorkspace, premiumLiveClock, proje
 
 function harness(saved:any=null){
  let stored=saved?JSON.stringify(saved):null;const requests:string[]=[];let livePayload:any=null;
- const nodes=new Map<string,any>(),events:any[]=[],timers:Function[]=[],calls:any[]=[];
+ const nodes=new Map<string,any>(),events:any[]=[],timers:Function[]=[],calls:any[]=[],listeners:any={};
  for(const [,id] of PREMIUM_WORKSPACE_HTML.matchAll(/id="([^"]+)"/g))nodes.set(id,{id,innerHTML:'',textContent:'',value:'',disabled:false,hidden:false,options:[],scrollLeft:0,querySelectorAll:()=>[],scrollIntoView(){},setAttribute(){}});
  let state:any={date:'2026-10-17',scope:'CORE',recordedDates:['2026-10-12','2026-10-13','2026-10-16'],current:{},baseline:{},loading:false};
  const row=(t:string,ltp:number,option_type='CE')=>({symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type,minute_bucket:'2026-10-13T'+t+':00.000Z',quote_timestamp:'2026-10-13T'+t+':22.000Z',truth_verdict:'TRUE',ltp,pdh:110,pdl:90,oi:200,pdc:100,day_high:120,day_low:80});
  const data={market:[{minute_bucket:'2026-10-13T04:00:00.000Z',spot_ltp:22000}],options:[row('04:00',100),row('04:03',105),row('04:06',111),row('04:00',150,'PE'),row('04:03',145,'PE'),row('04:06',140,'PE')]};
  const api={getState:()=>state,setDate:async(date:string,options:any)=>{calls.push({date,options});state={...state,date,scope:options.scope,current:date==='2026-10-13'?{NIFTY:data}:{}};}};
- const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(){},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},installMarketInvestigation,derivePremiumDeltaPair,derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,api});
+ const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(name:string,fn:Function){listeners[name]=fn;},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},installMarketInvestigation,derivePremiumDeltaPair,derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,api});
  vm.runInContext('globalThis.view=('+installPremiumWorkspace.toString()+')(api);',context);
  const node=(id:string)=>nodes.get(id),click=(id:string,dataset:any={})=>node('op-premium-workspace').onclick({target:{closest:()=>({id,dataset})}}),change=(id:string,value:string)=>node('op-premium-workspace').onchange({target:{id,value}});
- return {respond:(payload:any)=>{livePayload=payload;context.fetch=async(url:string)=>{requests.push(url);return {ok:true,json:async()=>structuredClone(livePayload)};};},focus:(id:string)=>context.document.activeElement=node(id),node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
+ return {emitContext:(payload:any)=>listeners['optionpilot:live-context']?.({detail:payload}),respond:(payload:any)=>{livePayload=payload;context.fetch=async(url:string)=>{requests.push(url);return {ok:true,json:async()=>structuredClone(livePayload)};};},focus:(id:string)=>context.document.activeElement=node(id),node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
 }
 const settle=async()=>{await Promise.resolve();await Promise.resolve();};
 test('closed-market live ladder explains the missing values and opens the existing recorded archive explicitly',async()=>{
@@ -204,4 +204,20 @@ test('serialized live ladder displays labelled Model Delta pairs and revokes a m
 test('live redraw preserves a focused custom Delta value until the user commits it',async()=>{
  const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();h.click('',{pwLayout:'ladder'});h.change('pw-pairing','DELTA');
  h.focus('pw-delta-target');h.node('pw-delta-target').value='0.99';h.click('',{pwMetric:'delta'});assert.equal(h.node('pw-delta-target').value,'0.99');h.change('pw-delta-target','0.99');assert.equal(h.stored().deltaTarget,'0.99');
+});
+
+
+test('compact PCR keeps three-index readings visible and audits collapsed; an opened audit survives live repaint',async()=>{
+ const h=harness(),now=new Date(),stamp=now.toISOString(),date=new Date(now.getTime()+19800000).toISOString().slice(0,10),expiry='2099-10-27';
+ const raw={source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'INCOMPLETE',reason:'STALE_OI_TIMESTAMPS',fetchState:'OK',checkedAt:stamp,cycleStartedAt:stamp,coverage:{expected:430,freshOi:354,stale:76,missing:0,invalid:0},unavailable:[{identity:'BFO:EXACT-CONTRACT',reason:'STALE_TIMESTAMP'}]};
+ const payload={connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:stamp,snapshot:{runtimeId:'compact-test',tradeDate:date,asOf:stamp,indices:['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>({symbol,expiry,expiries:[expiry],spot:{identity:{role:'SPOT',symbol},state:'LIVE',price:22000,observedAt:stamp,receivedAt:stamp},pcrSnapshot:raw}))}};
+ h.respond({connected:true,connectionState:'OPEN',serverTime:stamp,snapshot:{rows:[],series:[]}});
+ h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');h.emitContext(payload);
+ const html=h.node('pw-chain-pcr').innerHTML,visible=html.split('<details class="pw-pcr-audit"')[0];
+ for(const symbol of ['NIFTY','SENSEX','BANKNIFTY'])assert(visible.includes(symbol));
+ assert(visible.includes('Spot 22,000'));assert(visible.includes('Stale OI'));assert(!visible.includes('OI 354/430'));assert(!visible.includes('EXACT-CONTRACT'));
+ assert(html.includes('OI 354/430'));assert(html.includes('EXACT-CONTRACT'));assert(html.includes('<details class="pw-pcr-audit">'));
+ h.node('pw-chain-pcr').querySelector=()=>({open:true});h.emitContext({...payload,serverTime:new Date(now.getTime()+1000).toISOString()});
+ assert(h.node('pw-chain-pcr').innerHTML.includes('<details class="pw-pcr-audit" open>'));
+ h.emitContext({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.node('pw-chain-pcr').innerHTML.includes('22,000'));
 });

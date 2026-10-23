@@ -49,6 +49,29 @@ export const PREMIUM_WORKSPACE_CSS=`${MARKET_INVESTIGATION_CSS}
 #market-book .pw-chain-table .pw-chain-reaction.op-negative{color:#ff738b!important}
 #market-book .pw-chain-table .pw-chain-atm{padding:4px 1px;font-size:12px}
 #market-book .pw-chain-table details>summary{padding:4px 0;line-height:1.3}
+/* Extend the chapter compact mode to the premium workspace's separate shell. */
+#market-book #op-premium-workspace .pw-heading{display:inline-flex;vertical-align:middle;flex-direction:row;gap:0;margin:4px 5px 4px 0}
+#op-premium-workspace .pw-heading>div:first-child{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%)}
+#market-book #op-premium-workspace .pw-source{padding:2px;gap:3px;border-radius:8px}
+#market-book #op-premium-workspace .pw-source button{font-size:14px;min-width:0;min-height:44px;padding:6px 9px}
+#market-book #op-premium-workspace .pw-layout-tabs{display:inline-flex;vertical-align:middle;margin:4px 0;gap:3px}
+#market-book #op-premium-workspace .pw-layout-tabs button{font-size:12px;min-height:44px;padding:6px;border-radius:7px}
+#market-book #pw-chain-pcr{position:static;padding:7px;margin:4px 0}
+#market-book #pw-chain-pcr .pw-chain-pcr-grid{margin:4px 0;align-items:start}
+#market-book #pw-chain-pcr .pw-chain-pcr-grid article{padding:3px;line-height:1.3}
+#market-book #pw-chain-pcr .pw-chain-pcr-grid strong{font-size:21px;white-space:nowrap}
+#market-book #pw-chain-pcr .pw-chain-pcr-grid .pw-chain-spot{font-size:13px;white-space:nowrap}
+#market-book #pw-chain-pcr .pw-chain-pcr-grid small{font-size:11px;line-height:1.35}
+#market-book #pw-chain-pcr .pw-pcr-expiry{white-space:nowrap}
+#market-book #pw-chain-pcr .pw-pcr-audit{border-top:1px solid #284660;margin-top:4px}
+#market-book #pw-chain-pcr .pw-pcr-audit>summary{font-size:12px;min-height:44px;padding:8px 0;cursor:pointer}
+#market-book #pw-chain-pcr .pw-pcr-audit>div{padding:6px 0;font-size:13px}
+#market-book #pw-chain-pcr .pw-pcr-audit small{display:block;font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+#market-book #op-premium-workspace :is(.pw-filter-settings,#pw-status,#pw-summary,.pw-expiry-row){margin-block:7px}
+#market-book #op-premium-workspace :is(.pw-card,.pw-empty,#pw-chart-shell,.pw-definitions){padding:10px}
+#market-book #op-premium-workspace .pw-price-row{margin:9px 0}
+#market-book #op-premium-workspace .pw-contract{margin:7px 0 3px}
+
 `;
 
 /** One bounded read-only watch request at a time. Controls and open details survive updates. */
@@ -148,7 +171,9 @@ export function installPremiumWorkspace(api:any){
    return '<small>OI '+c.fresh+'/'+c.expected+' · M '+c.missing+' / stale '+c.stale+' / invalid '+c.invalid+'</small>'+(r.value===null?'<small>'+esc(c.reason.replaceAll('_',' '))+'</small>':'')+(c.unavailable?.length?'<details><summary>Why unavailable</summary>'+c.unavailable.map((x:any)=>'<small>'+esc(x.identity)+' · '+esc(x.reason.replaceAll('_',' '))+'</small>').join('')+'</details>':'');
   };
   const glyph:any={UP:'↑',DOWN:'↓',FLAT:'→',WAIT:'—'};
-  sameWrite('pw-chain-pcr','<div class="pw-chain-pcr-title">FULL PCR · '+esc(sourceLabel)+'<small>'+esc(cfg.source==='LIVE'&&!feed.active?'LIVE PAUSED':pcrView.alignment==='SYNC'?'SYNC ✓':pcrView.alignment?.replaceAll('_',' ')||'WAIT')+'</small></div>'+feedNotice+'<div class="pw-chain-pcr-grid">'+pcrView.rows.map((r:any)=>{const until=r.blinkUntil||0,remaining=Math.max(0,until-now),pulse=remaining>0&&remaining<=1800;return '<article data-direction="'+esc(r.direction)+'"><span>'+esc(r.symbol)+'</span><b class="pw-chain-spot">Spot '+fmt(r.spotValue,2)+'</b><small>Spot · '+time(r.spotAt)+'</small><strong'+(pulse?' class="pw-chain-pulse" style="animation-delay:-'+Math.floor(1800-remaining)+'ms"':'')+'>'+fmt(r.value,4)+' '+glyph[r.direction]+'</strong><small>'+time(r.current?.checked?new Date(r.current.checked).toISOString():null)+'</small>'+pcrDiagnostic(r)+'<small>'+esc(r.expiry||(cfg.source==='LIVE'&&feed.closed?'Market closed':'Unavailable'))+'</small></article>';}).join('')+'</div>');
+  const pcrAuditOpen=$('pw-chain-pcr').querySelector?.('.pw-pcr-audit')?.open===true;
+  const shortStatus=(r:any)=>r.value!==null?'':r.pcrStatus==='STALE_OI_TIMESTAMPS'?'Stale OI':r.pcrStatus==='MISSING_QUOTES'?'Missing OI':r.pcrStatus==='RATE_LIMITED'?'Rate limited':cfg.source==='LIVE'&&!feed.active?'Feed paused':'Unavailable';
+  sameWrite('pw-chain-pcr','<div class="pw-chain-pcr-title">FULL PCR · '+esc(sourceLabel)+'<small>'+esc(cfg.source==='LIVE'&&!feed.active?'LIVE PAUSED':pcrView.alignment==='SYNC'?'SYNC ✓':pcrView.alignment?.replaceAll('_',' ')||'WAIT')+'</small></div>'+feedNotice+'<div class="pw-chain-pcr-grid">'+pcrView.rows.map((r:any)=>{const until=r.blinkUntil||0,remaining=Math.max(0,until-now),pulse=remaining>0&&remaining<=1800;return '<article data-direction="'+esc(r.direction)+'"><span>'+esc(r.symbol)+'</span><b class="pw-chain-spot">Spot '+fmt(r.spotValue,2)+'</b><small>Spot '+time(r.spotAt)+'</small><strong'+(pulse?' class="pw-chain-pulse" style="animation-delay:-'+Math.floor(1800-remaining)+'ms"':'')+'>'+fmt(r.value,4)+' '+glyph[r.direction]+'</strong><small>'+esc(shortStatus(r))+'</small><small class="pw-pcr-expiry">'+esc(r.expiry||(cfg.source==='LIVE'&&feed.closed?'Market closed':'Unavailable'))+'</small></article>';}).join('')+'</div><details class="pw-pcr-audit"'+(pcrAuditOpen?' open':'')+'><summary>Sources / OI coverage</summary>'+pcrView.rows.map((r:any)=>'<div><b>'+esc(r.symbol)+'</b><small>PCR checked '+time(r.current?.checked?new Date(r.current.checked).toISOString():r.coverageInfo?.checked?new Date(r.coverageInfo.checked).toISOString():null)+' IST</small>'+pcrDiagnostic(r)+'</div>').join('')+'</details>');
   const series=cfg.source==='LIVE'?live?.snapshot?.series||[]:result.series||[],available=new Set(series.filter((r:any)=>cfg.symbol==='ALL'||r.symbol===cfg.symbol).map((r:any)=>r.dte));
   sameWrite('pw-chain-dtes',[1,2,3,4,0].map(d=>'<button type="button" data-pw-dte="'+d+'" aria-pressed="'+(cfg.dte===String(d))+'"'+(!available.has(d)||cfg.watch?' disabled':'')+'>DTE '+d+'</button>').join('')+'<button type="button" data-pw-dte="ALL" aria-pressed="'+(cfg.dte==='ALL')+'"'+(cfg.watch?' disabled':'')+'>All / More</button>');
   $('pw-chain-symbol').value=cfg.symbol;$('pw-chain-range').value=cfg.strikeScope;

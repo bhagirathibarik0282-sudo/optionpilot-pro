@@ -27,6 +27,23 @@ export function quoteTime(value:unknown):number {
  const at=/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)?value.replace(' ','T')+'+05:30':value;
  return /(?:Z|[+-]\d{2}:\d{2})$/.test(at)?Date.parse(at):NaN;
 }
+/** Latest reported OI from one complete REST attempt. Mixed exchange times are
+ * explicit; this is never the fresh/synchronised Full PCR or an alignment input. */
+export function measureReportedPcr(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number){
+ const first=entries[0],times:number[]=[],tokens=new Set<number>(),keys=new Set<string>(),ids=new Set<string>();
+ let ce=0,pe=0,calls=0,puts=0;
+ if(!first||day(now)!==date||!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol||'')||!/^\d{4}-\d{2}-\d{2}$/.test(first.expiry||'')||String(first.expiry)<date||!Number.isFinite(Date.parse(first.expiry+'T00:00:00Z'))||new Date(first.expiry+'T00:00:00Z').toISOString().slice(0,10)!==first.expiry)return null;
+ const open=Date.parse(date+'T09:15:00+05:30');
+ for(const e of entries){
+  const key=e.exchange+':'+e.label,q=quotes[key],at=quoteTime(q?.timestamp),id=e.strike+'|'+e.side;
+  if(e.role!=='OPTION'||e.symbol!==first.symbol||e.expiry!==first.expiry||!e.exchange||!e.label||!Number.isInteger(e.token)||e.token<=0||!finite(e.strike)||e.strike<=0||!['CE','PE'].includes(e.side||'')||tokens.has(e.token)||keys.has(key)||ids.has(id)||q?.instrument_token!==e.token||!finite(q.oi)||q.oi<0||!Number.isFinite(at)||at<open||day(at)!==date||at>now+5000)return null;
+  tokens.add(e.token);keys.add(key);ids.add(id);times.push(at);
+  if(e.side==='CE'){ce+=q.oi;calls++;}else{pe+=q.oi;puts++;}
+ }
+ if(!calls||!puts||!finite(ce)||ce<=0||!finite(pe)||!finite(pe/ce))return null;
+ const lo=Math.min(...times),hi=Math.max(...times);
+ return {basis:'LATEST_REPORTED_MIXED_TIMESTAMPS',symbol:first.symbol,expiry:first.expiry,value:pe/ce,ceTotal:ce,peTotal:pe,expected:entries.length,reported:times.length,olderThan30s:times.filter(t=>now-t>30000).length,sourceMinAt:new Date(lo).toISOString(),sourceMaxAt:new Date(hi).toISOString(),checkedAt:new Date(now).toISOString()};
+}
 export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number,cycleStartedAt=now,spot?:any){
  let ce=0,pe=0;const times:number[]=[],missing:string[]=[],stale:string[]=[],invalid:string[]=[],calls:LiveEntry[]=[],puts:LiveEntry[]=[];
  const seen=new Set<string>();
@@ -70,7 +87,7 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
   return {symbol:e.symbol,expiry:e.expiry,strike:e.strike,side:e.side,token:e.token,oi:q.oi,sourceAt:new Date(quoteTime(q.timestamp)).toISOString(),price:priceOk?q.last_price:null,priceAt:priceOk?new Date(tradeAt).toISOString():null};
  }):[];
  const reason=!entries.length?'NO_OPTION_INVENTORY':invalid.length?'INVALID_IDENTITY_OR_OI':missing.length?'MISSING_QUOTES':stale.length?'STALE_OI_TIMESTAMPS':skew!==null&&skew>30000?'OI_TIME_SKEW':ce<=0?'CE_OI_ZERO':complete?'COMPLETE':'INCOMPLETE';
- return {state:complete&&ce>0?'COMPLETE':'INCOMPLETE',reason,fullPcr:complete&&ce>0?pe/ce:null,ceTotal:complete?ce:null,peTotal:complete?pe:null,bandPcr,strikeRows,callWall:wall(calls),putWall:wall(puts),coverage:{expected:entries.length,freshOi:times.length,complete,sourceSkewMs:skew,missing:missing.length,stale:stale.length,invalid:invalid.length},
+ return {state:complete&&ce>0?'COMPLETE':'INCOMPLETE',reason,reportedPcr:measureReportedPcr(entries,quotes,date,now),fullPcr:complete&&ce>0?pe/ce:null,ceTotal:complete?ce:null,peTotal:complete?pe:null,bandPcr,strikeRows,callWall:wall(calls),putWall:wall(puts),coverage:{expected:entries.length,freshOi:times.length,complete,sourceSkewMs:skew,missing:missing.length,stale:stale.length,invalid:invalid.length},
   // Bounded diagnostics, no credentials or raw broker responses.
   unavailable:[...missing.map(identity=>({identity,reason:'MISSING'})),...stale.map(identity=>({identity,reason:'STALE_TIMESTAMP'})),...invalid.map(identity=>({identity,reason:'INVALID_IDENTITY_OR_OI'}))].slice(0,12),
   sourceMinAt:times.length?new Date(Math.min(...times)).toISOString():null,sourceMaxAt:times.length?new Date(Math.max(...times)).toISOString():null,checkedAt:new Date(now).toISOString(),cycleStartedAt:new Date(cycleStartedAt).toISOString(),source:'KITE_REST_FULL_EXPIRY_SNAPSHOT'};
@@ -118,7 +135,7 @@ export class DashboardPcrSampler {
      const measured=measurePcrSnapshot(group,quotes,this.inventory.date,completedAt.get(key)??at,now,spot);
      // A later failed batch invalidates the entire attempt; never publish
      // an earlier expiry from a partially failed REST cycle.
-     const result=fetchState==='OK'?measured:{...measured,state:'INCOMPLETE',reason:'INCOMPLETE',fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...measured.coverage,complete:false}};
+     const result=fetchState==='OK'?measured:{...measured,state:'INCOMPLETE',reason:'INCOMPLETE',reportedPcr:null,fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...measured.coverage,complete:false}};
      // No network errors are surfaced verbatim (credentials and URLs are excluded).
      this.results.set(key,{...result,fetchState,batchesRequested,batchesCompleted});
     }
@@ -135,7 +152,7 @@ export class DashboardPcrSampler {
  }
  read(symbol:string,expiry:string|null){
   const result=this.results.get(symbol+'|'+expiry);if(!result)return null;
-  if(this.deps.now()-Date.parse(result.checkedAt)>90_000||day(this.deps.now())!==this.inventory.date)return {...result,state:'STALE',reason:'PCR_SNAPSHOT_STALE',fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...result.coverage,complete:false}};
+  if(this.deps.now()-Date.parse(result.checkedAt)>90_000||day(this.deps.now())!==this.inventory.date)return {...result,state:'STALE',reason:'PCR_SNAPSHOT_STALE',reportedPcr:null,fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...result.coverage,complete:false}};
   return result;
  }
  version(){return this.revision;}

@@ -200,3 +200,36 @@ test('fresh 30-leg band survives stale outer OI; every inner identity and source
  for(const patch of [{timestamp:new Date(at-31000).toISOString()},{instrument_token:999},{oi:null}]){const bad=structuredClone(qs);Object.assign(bad[inner.exchange+':'+inner.label],patch);assert.equal(measurePcrSnapshot(es,bad,date,at,at,spot).bandPcr.value,null);}
  const bad=structuredClone(qs);delete bad[inner.exchange+':'+inner.label];assert.equal(measurePcrSnapshot(es,bad,date,at,at,spot).bandPcr.value,null);
 });
+
+test('reported full-chain OI survives an inactive same-session outer quote without promoting fresh PCR',async()=>{
+ const {deriveLiveThreeIndexPcr,renderLiveThreeIndexPcr}=await import('../live-three-index-pcr.js');
+ for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){
+  const {es,qs}=wideChain();for(const e of es)e.symbol=symbol as any;
+  qs[es[0].exchange+':'+es[0].label].timestamp=new Date(at-120000).toISOString();
+  const raw={...measurePcrSnapshot(es,qs,date,at),fetchState:'OK'};
+  assert.equal(raw.fullPcr,null);assert.equal(raw.coverage.stale,1);
+  assert.equal(raw.reportedPcr?.value,7100/4100);assert.equal(raw.reportedPcr?.reported,82);assert.equal(raw.reportedPcr?.olderThan30s,1);
+  const payload:any={connected:true,source:'KITE_WEBSOCKET_FULL',serverTime:new Date(at).toISOString(),snapshot:{runtimeId:'test',tradeDate:date,asOf:new Date(at).toISOString(),indices:[{symbol,expiry:'2026-10-19',expiries:['2026-10-19'],pcrSnapshot:raw}]}};
+  const view=deriveLiveThreeIndexPcr(payload),r:any=view.rows.find(r=>r.symbol===symbol);
+  assert.equal(r.reportedPcr.value,7100/4100);assert.equal(r.value,null);assert.equal(r.current,null);assert.equal(r.direction,'WAIT');assert.equal(view.alignment,'WAIT');
+  assert(renderLiveThreeIndexPcr(view).includes('MIXED SOURCE TIMES'));
+  for(const mutate of [(p:any)=>p.connected=false,(p:any)=>p.snapshot.asOf=new Date(at-5000).toISOString(),(p:any)=>p.snapshot.indices[0].expiry='2026-10-27',(p:any)=>p.snapshot.indices[0].pcrSnapshot.fetchState='RATE_LIMITED',(p:any)=>p.snapshot.indices[0].pcrSnapshot.reportedPcr.value=5,(p:any)=>p.snapshot.indices[0].pcrSnapshot.reportedPcr.sourceMinAt=new Date(at-86400000).toISOString(),(p:any)=>p.snapshot.indices[0].pcrSnapshot.reportedPcr.reported=81,(p:any)=>p.snapshot.indices[0].pcrSnapshot.coverage.missing=1]){
+   const p=structuredClone(payload);mutate(p);assert.equal((deriveLiveThreeIndexPcr(p).rows.find(r=>r.symbol===symbol) as any).reportedPcr,null);
+  }
+ }
+});
+test('reported PCR refuses incomplete identities, previous-session quotes and failed or expired attempts',async()=>{
+ const {measureReportedPcr}=await import('../dashboard-pcr-sampler.js');
+ for(const patch of [{timestamp:'2026-10-15 15:30:00'},{timestamp:'2026-10-16 09:14:59'},{timestamp:new Date(at+6000).toISOString()},{oi:null},{oi:-1},{oi:Infinity},{instrument_token:999}]){
+  const q=quotes();Object.assign(q['NFO:OPTIONPE'],patch);assert.equal(measureReportedPcr(entries,q,date,at),null);
+ }
+ const q=quotes();delete q['NFO:OPTIONPE'];assert.equal(measureReportedPcr(entries,q,date,at),null);
+ for(const patch of [{symbol:'SENSEX'},{expiry:'2026-10-27'},{role:'SPOT'},{token:10},{strike:0}]){const es=structuredClone(entries);Object.assign(es[1],patch);assert.equal(measureReportedPcr(es,quotes(),date,at),null);}
+ assert.equal(measureReportedPcr([...entries,entries[0]],quotes(),date,at),null);
+ const zero=quotes();zero['NFO:OPTIONPE'].oi=0;assert.equal(measureReportedPcr(entries,zero,date,at)?.value,0);zero['NFO:OPTIONCE'].oi=0;assert.equal(measureReportedPcr(entries,zero,date,at),null);
+ let now=at,fail=false;const sampler=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{now:()=>now,active:()=>true,wait:async()=>{},fetchQuotes:async()=>{if(fail)throw Error('PCR_QUOTE_HTTP_429');return Object.fromEntries(Object.entries(quotes()).map(([k,q])=>[k,{...q,timestamp:new Date(now).toISOString()}]));}});
+ await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr?.value,2);
+ now+=90001;assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr,null);
+ fail=true;await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr,null);
+ now+=60000;fail=false;await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr?.value,2);
+});

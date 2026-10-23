@@ -138,17 +138,17 @@ test('OI ladder entry reuses the premium workspace and exact watch remains locke
 test('recorded bigint OI and volume render as counts without accepting unsafe or malformed values',async()=>{
  const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
  for(const r of h.state().current.NIFTY.options){r.oi='7215260';r.volume='12345';}
- h.click('',{pwLayout:'ladder'});assert.match(h.node('pw-results').innerHTML,/72.15/);assert.match(h.node('pw-results').innerHTML,/<span>OI \(L\)<\/span><b>72.1526/);
+ h.click('',{pwLayout:'ladder'});assert.match(h.node('pw-results').innerHTML,/72.15/);assert.match(h.node('pw-results').innerHTML,/title="OI 72,15,260[^"]*"><b>72.15 L/);
  h.click('',{pwMetric:'volume'});assert.match(h.node('pw-results').innerHTML,/12,345/);
  for(const bad of ['',' 12','1e6','-1','9007199254740992','NaN']){
   for(const r of h.state().current.NIFTY.options){r.oi=bad;r.volume=bad;}
-  h.change('pw-minutes','3');assert.match(h.node('pw-results').innerHTML,/<span>OI \(L\)<\/span><b>—/);
+  h.change('pw-minutes','3');assert.match(h.node('pw-results').innerHTML,/class="pw-chain-oi-cell"[^>]*><b>—/);
  }
 });
 
 test('ladder previous-day switch shows exact PDC and missing FIB never invents holding',async()=>{
  const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
- assert.match(h.node('pw-results').innerHTML,/data-pw-level="PDH"/);assert.match(h.node('pw-results').innerHTML,/PDC <b>₹100/);assert.match(h.node('pw-results').innerHTML,/data-pw-level="PDL"/);
+ h.click('',{pwMetric:'levels'});assert.match(h.node('pw-results').innerHTML,/data-pw-level="PDH"/);assert.match(h.node('pw-results').innerHTML,/PDC <b>₹100/);assert.match(h.node('pw-results').innerHTML,/data-pw-level="PDL"/);
  h.click('',{pwMetric:'fib'});assert.match(h.node('pw-results').innerHTML,/Daily FIB/);assert.doesNotMatch(h.node('pw-results').innerHTML,/data-pw-position/);
 });
 
@@ -164,7 +164,7 @@ test('mixed ladder metrics stay under each price, selected ATM ±7 displays all 
  for(let i=-7;i<=7;i++)for(const side of ['CE','PE'])input.options.push({...template,strike:22000+i*50,option_type:side,ltp:100+i,volume:1234,bid:99,ask:101});
  h.change('pw-chain-range','15');h.click('',{pwMetric:'volume'});h.click('',{pwMetric:'bid'});h.click('',{pwMetric:'ask'});h.click('',{pwMetric:'spread'});
  const html=h.node('pw-results').innerHTML;assert.equal((html.match(/class="pw-pair-grid"/g)||[]).length,15);assert.equal((html.match(/class="pw-chain-price"/g)||[]).length,30);assert.equal(h.node('pw-pagination').hidden,true);
- assert.match(html,/pw-chain-price[\s\S]*pw-chain-facts[\s\S]*Volume/);assert.match(html,/<span>Spread ₹<\/span><b>2/);assert.match(html,/data-pw-level="PDH"/);assert.match(html,/data-pw-level="PDL"/);
+ h.click('',{pwMetric:'levels'});const withLevels=h.node('pw-results').innerHTML;assert.match(html,/pw-chain-price[\s\S]*pw-chain-facts[\s\S]*Volume/);assert.match(html,/<span>Spread ₹<\/span><b>2/);assert.match(withLevels,/data-pw-level="PDH"/);assert.match(withLevels,/data-pw-level="PDL"/);
  h.click('',{pwMetric:'volume'});assert.doesNotMatch(h.node('pw-results').innerHTML,/<span>Volume<\/span>/);assert.match(h.node('pw-results').innerHTML,/<span>Bid ₹/);
  h.click('',{pwLayout:'cards'});assert.equal(h.node('pw-pagination').hidden,false);
 });
@@ -220,4 +220,27 @@ test('compact PCR keeps three-index readings visible and audits collapsed; an op
  h.node('pw-chain-pcr').querySelector=()=>({open:true});h.emitContext({...payload,serverTime:new Date(now.getTime()+1000).toISOString()});
  assert(h.node('pw-chain-pcr').innerHTML.includes('<details class="pw-pcr-audit" open>'));
  h.emitContext({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.node('pw-chain-pcr').innerHTML.includes('22,000'));
+});
+
+
+test('option-chain card has five symmetric columns, exact-expiry chips and saved preferred controls',async()=>{
+ const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
+ const html=h.node('pw-results').innerHTML;
+ assert.match(html,/CE OI[\s\S]*CE ₹[\s\S]*STRIKE[\s\S]*PE ₹[\s\S]*PE OI/);assert.match(html,/pw-chain-five/);assert.match(html,/Δ% \/ ΔOI: 3m/);
+ assert.match(h.node('pw-chain-expiry-chips').innerHTML,/data-pw-expiry="2026-10-19"/);
+ for(const row of h.state().current.NIFTY.options){row.dayOpen=120;row.dayHigh=120;row.dayLow=80;}
+ h.click('',{pwMetric:'openHigh'});h.click('',{pwMetric:'openLow'});
+ assert.match(h.node('pw-results').innerHTML,/<span>O = H<\/span><b>YES/);assert.match(h.node('pw-results').innerHTML,/<span>O = L<\/span><b>NO/);
+ assert(h.stored().ladderMetrics.includes('openHigh'));
+ for(const row of h.state().current.NIFTY.options){delete row.dayOpen;}
+ h.change('pw-minutes','3');assert.doesNotMatch(h.node('pw-results').innerHTML,/<span>O = H<\/span><b>YES/);
+ h.click('',{pwIndex:'SENSEX'});assert.equal(h.node('pw-symbol').value,'SENSEX');assert.doesNotMatch(h.node('pw-results').innerHTML,/₹111/);
+});
+
+
+test('strike PCR is separate from Full PCR and refuses asynchronous recorded legs',async()=>{
+ const h=harness();h.view.setVisible(true);h.view.openLadder({source:'RECORDED',symbol:'NIFTY'});await settle();h.change('pw-date','2026-10-13');await settle();
+ assert.match(h.node('pw-results').innerHTML,/separate from Full PCR">PCR 1/);
+ h.state().current.NIFTY.options=h.state().current.NIFTY.options.filter((r:any)=>!(r.option_type==='PE'&&r.minute_bucket.endsWith('04:06:00.000Z')));
+ h.change('pw-minutes','3');assert.match(h.node('pw-results').innerHTML,/separate from Full PCR">PCR —/);
 });

@@ -30,7 +30,7 @@ export function projectLivePremiumQuote(payload:any,q:any,reference:any=null,ela
  const model=q.modelDelta,modelAt=Date.parse(model?.calculatedAt||''),spotAt=Date.parse(model?.spotAt||'');
  const modelOk=fresh&&model?.source==='BLACK_SCHOLES_MODEL'&&model.token===e.token&&model.symbol===e.symbol&&model.expiry===e.expiry&&model.strike===e.strike&&model.side===e.side&&model.premium===q.price&&model.premiumAt===q.observedAt&&model.annualRiskFreeRate===.05&&model.annualDividendYield===0&&typeof model.spot==='number'&&Number.isFinite(model.spot)&&model.spot>0&&typeof model.delta==='number'&&Number.isFinite(model.delta)&&(e.side==='CE'?model.delta>0&&model.delta<=1:model.delta<0&&model.delta>=-1)&&[at,spotAt,modelAt].every(t=>Number.isFinite(t)&&day(t)===payload.snapshot.tradeDate&&clock.now-t>=0&&clock.now-t<=5000)&&Math.abs(at-spotAt)<=2000&&modelAt>=at&&modelAt>=spotAt;
  return {symbol:e.symbol,expiry:e.expiry,strike:e.strike,option_type:e.side,minute_bucket:q.observedAt||payload.serverTime,observedAt:q.observedAt||null,receivedAt:q.receivedAt||null,
-  ltp:n(q.price,true),oi:n(q.oi),pdc:n(q.pdc,true),bid:n(q.bid,true),ask:n(q.ask,true),volume:n(q.volume),iv:null,delta:modelOk?model.delta:null,deltaSource:modelOk?'BLACK_SCHOLES_MODEL':null,
+  dayOpen:n(q.dayOpen,true),dayHigh:n(q.dayHigh,true),dayLow:n(q.dayLow,true),ltp:n(q.price,true),oi:n(q.oi),pdc:n(q.pdc,true),bid:n(q.bid,true),ask:n(q.ask,true),volume:n(q.volume),iv:null,delta:modelOk?model.delta:null,deltaSource:modelOk?'BLACK_SCHOLES_MODEL':null,
   truth_verdict:fresh&&n(q.price,true)!==null?'TRUE':'STALE',pdh:exact?reference.pdh:null,pdl:exact?reference.pdl:null,referenceDate:exact?String(reference.minute_bucket).slice(0,10):null};
 }
 
@@ -59,7 +59,7 @@ export function derivePremiumWorkspace(input:any){
   // Quarantine contradictory duplicates at the same source timestamp.
   const byTime=new Map<string,any[]>();for(const r of items){if(!byTime.has(r.minute_bucket))byTime.set(r.minute_bucket,[]);byTime.get(r.minute_bucket)!.push(r);}
   const series=[...byTime.values()].map(rs=>{
-   const r=rs[0],conflict=rs.some(x=>['ltp','oi','pdh','pdl','pdc','iv','delta'].some(k=>x[k]!==r[k]));
+   const r=rs[0],conflict=rs.some(x=>['ltp','oi','pdh','pdl','pdc','iv','delta','dayOpen','dayHigh','dayLow'].some(k=>x[k]!==r[k]));
    return conflict?{...r,ltp:null,oi:null,iv:null,truth_verdict:'CONFLICT'}:r;
   }).sort((a,b)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket));
   const last=series.at(-1),usable=(r:any)=>r?.truth_verdict==='TRUE'&&num(r.ltp)!==null&&r.ltp>0;
@@ -85,7 +85,7 @@ export function derivePremiumWorkspace(input:any){
   const nearest=price===null?null:Object.entries(fib).sort((a:any,b:any)=>Math.abs(price-a[1])-Math.abs(price-b[1]))[0]||null;
   const dte=Math.round((Date.parse(day(last.expiry)+'T00:00:00Z')-Date.parse(input.date+'T00:00:00Z'))/86400000);
   contracts.push({key,symbol:last.symbol,expiry:day(last.expiry),strike:last.strike,type:last.option_type,dte,price,change,from,fromAt:input.minutes==='DAY'?null:baseline?.minute_bucket||null,at:last.minute_bucket,observedAt:last.observedAt||last.minute_bucket,receivedAt:last.receivedAt||null,
-   pdh,pdc,pdl,reaction,eventAt,eventFrom,oi:usable(last)?count(last.oi):null,oiChange:usable(last)&&baseline&&count(last.oi)!==null&&count(baseline.oi)!==null?count(last.oi)!-count(baseline.oi)!:null,iv:usable(last)?num(last.iv):null,delta:usable(last)?num(last.delta):null,gamma:usable(last)?num(last.gamma):null,theta:usable(last)?num(last.theta):null,vega:usable(last)?num(last.vega):null,volume:usable(last)?count(last.volume):null,bid:usable(last)?num(last.bid):null,ask:usable(last)?num(last.ask):null,
+   dayOpen:usable(last)?num(last.dayOpen):null,dayHigh:usable(last)?num(last.dayHigh):null,dayLow:usable(last)?num(last.dayLow):null,pdh,pdc,pdl,reaction,eventAt,eventFrom,oi:usable(last)?count(last.oi):null,oiChange:usable(last)&&baseline&&count(last.oi)!==null&&count(baseline.oi)!==null?count(last.oi)!-count(baseline.oi)!:null,iv:usable(last)?num(last.iv):null,delta:usable(last)?num(last.delta):null,gamma:usable(last)?num(last.gamma):null,theta:usable(last)?num(last.theta):null,vega:usable(last)?num(last.vega):null,volume:usable(last)?count(last.volume):null,bid:usable(last)?num(last.bid):null,ask:usable(last)?num(last.ask):null,
    deltaSource:usable(last)?last.deltaSource||null:null,fib,fibAt:old?.minute_bucket||null,nearest,points:series.map(r=>({at:r.minute_bucket,value:usable(r)?r.ltp:null})),state:last.truth_verdict==='CONFLICT'?'CONFLICT':price===null?'UNAVAILABLE':input.live?'LIVE':'RECORDED'});
  });
  const f=input.filter||{};

@@ -230,3 +230,12 @@ test('PR2 coalesces unchanged ladder DOM redraw while retaining 1s REST polling 
  assert.equal(premiumLiveClock(connected,3001).valid,false,'stale timeout continues invalidating cached live prices');
  assert.equal(premiumLiveClock({...connected,connected:false},1).valid,false,'disconnect remains fail-closed');
 });
+
+
+test('open high low fields retain the exact fresh quote and clear on source failure',()=>{
+ const at='2026-10-23T04:30:00Z',p:any={connected:true,serverTime:at,snapshot:{tradeDate:'2026-10-23'}};
+ const q:any={identity:{role:'OPTION',symbol:'NIFTY',side:'CE',strike:22500,expiry:'2026-10-27'},state:'LIVE',price:100,dayOpen:120,dayHigh:120,dayLow:80,observedAt:at,receivedAt:at};
+ const row=projectLivePremiumQuote(p,q);assert.equal(row.dayOpen,120);assert.equal(row.dayHigh,120);assert.equal(row.dayLow,80);
+ for(const patch of [{state:'STALE'},{observedAt:'2026-10-22T04:30:00Z'}]){const r=projectLivePremiumQuote(p,{...q,...patch});assert.equal(r.dayOpen,null);assert.equal(r.dayHigh,null);assert.equal(r.dayLow,null);}
+ assert.equal(projectLivePremiumQuote(p,q,null,3001).dayOpen,null);
+});

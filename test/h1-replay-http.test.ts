@@ -1,6 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildH1ReplayContinuity, buildH1ReplayMarkerGapEvidence, parseH1ReplayRequest } from "../h1-replay-http.js";
+import { buildH1ReplayContinuity, buildH1ReplayMarkerGapEvidence, parseH1ReplayRequest, runH1ReplayRead } from "../h1-replay-http.js";
+
+test('replay freezes one latest-marker lookup for all normalized tables and exposes read timings',async()=>{
+ const request={symbol:'NIFTY',tradeDate:'2026-10-23',fromTime:'09:15',toTime:'09:15',scope:'CORE'} as const;
+ const calls:{sql:string;params:unknown[]}[]=[],markers=[{minute_bucket:new Date('2026-10-23T03:45:00Z'),truth_verdict:'STALE'}];
+ const read=async(sql:string,params:unknown[])=>{calls.push({sql,params});return (sql.includes("kind = 'H1_TRUTH_MARKER'")?markers:sql.includes('jsonb_to_recordset')?[{symbol:'NIFTY',minute_bucket:markers[0].minute_bucket,truth_verdict:'STALE'}]:[]) as any;};
+ const r=await runH1ReplayRead(request,read);assert.equal(r.ok,true);assert.equal(calls.filter(c=>c.sql.includes("kind = 'H1_TRUTH_MARKER'")).length,1);
+ const tableCalls=calls.filter(c=>c.sql.includes('jsonb_to_recordset'));assert.equal(tableCalls.length,3);
+ for(const c of tableCalls){assert.equal(c.params[0],'NIFTY');assert.equal(c.params[1],JSON.stringify(markers));assert.equal(c.params[2],'2026-10-23T09:15:00+05:30');assert.equal(c.params[3],'2026-10-23T09:15:00+05:30');assert(c.sql.includes('JOIN markers'));assert(c.sql.includes('minute_bucket <= $4::timestamptz'));}
+ assert(tableCalls.find(c=>c.sql.includes('option_snapshot_1m'))!.sql.includes('atm_offset BETWEEN -7 AND 7'));assert.equal(r.market?.[0].truth_verdict,'STALE');assert.equal(r.continuity?.truthCounts.STALE,1);assert.equal(r.counts?.markers,1);assert('markers' in r.queryTimingsMs!);
+});
+
+test('no markers never exposes unmarked normalized prices; failed reads remain failed with timings',async()=>{
+ const request={symbol:'SENSEX',tradeDate:'2026-10-23',fromTime:'09:15',toTime:'09:15',scope:'FULL'} as const;const calls:string[]=[];
+ const r=await runH1ReplayRead(request,async(sql:string)=>{calls.push(sql);return [] as any;});assert.equal(r.ok,true);assert.deepEqual(r.market,[]);assert(!calls.some(s=>s.includes('jsonb_to_recordset')));assert.equal(r.continuity?.complete,false);assert.equal(r.queryTimingsMs?.market,0);
+ const bad=await runH1ReplayRead(request,async()=>{throw Error('read failed');});assert.equal(bad.ok,false);assert.equal(bad.reason,'read failed');assert(!bad.market);assert('markers' in bad.queryTimingsMs!);
+});
 
 test("accepts bounded NIFTY full-session replay request", () => {
   const parsed = parseH1ReplayRequest({

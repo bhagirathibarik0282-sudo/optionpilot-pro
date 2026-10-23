@@ -117,3 +117,13 @@ test('FULL archive scope survives chunking and recursive recovery without changi
  calls.length=0;await h.getReplay('focused','NIFTY','2026-10-12','09:15','09:18');assert(calls.every(u=>u.searchParams.get('scope')==='CORE'));
 });
 
+
+test('replay queue bounds concurrent HTTP work and releases slots after failures',async()=>{
+ let active=0,peak=0;const releases:Function[]=[];
+ const h=harness(async()=>{active++;peak=Math.max(peak,active);await new Promise<void>(r=>releases.push(r));active--;return response({ok:true,market:[],options:[],chain:[],canonical:[]});});
+ const pending=Array.from({length:6},(_,i)=>h.getReplayWindow('queue '+i,'NIFTY','2026-10-23','09:15','09:18'));
+ for(let i=0;i<12;i++)await Promise.resolve();assert.equal(peak,2);assert.equal(releases.length,2);
+ while(releases.length){releases.shift()!();for(let i=0;i<12;i++)await Promise.resolve();}
+ await Promise.all(pending);assert.equal(active,0);assert.equal(peak,2);
+ const failed=harness(async()=>response({ok:false,reason:'auth'},401));await assert.rejects(()=>failed.getReplayWindow('failed','NIFTY','2026-10-23','09:15','09:18'));await assert.rejects(()=>failed.getReplayWindow('next','NIFTY','2026-10-23','09:15','09:18'));
+});

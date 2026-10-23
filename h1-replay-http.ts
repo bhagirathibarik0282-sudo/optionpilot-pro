@@ -247,18 +247,38 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
     };
   }
 
+  return runH1ReplayRead(request, rows);
+}
+
+/** One truth-marker read per request, frozen for all three normalized tables.
+ * The injectable reader is used by tests, never accepted from an HTTP caller.
+ * No result cache, source-time substitution, schema change or write authority.
+ */
+export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof rows): Promise<H1ReplayHttpResult> {
   const params = [request.symbol, request.tradeDate, request.fromTime, request.toTime];
-  const cte = markerCte();
   const queryTimingsMs: Record<string, number> = {};
   const timedRows = async <T extends Record<string, unknown>>(label: string, sql: string, values: unknown[]): Promise<T[]> => {
     const started = performance.now();
-    try { return await rows<T>(sql, values); }
+    try { return await read<T>(sql, values); }
     finally { queryTimingsMs[label] = Math.round((performance.now() - started) * 10) / 10; }
   };
 
   try {
-    const [market, chain, options, markerRows, canonical] = await Promise.all([
-      timedRows("market", `${cte}
+    const markerRows = await timedRows<{ minute_bucket: unknown; truth_verdict: unknown }>("markers",
+      `${markerCte()} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`, params);
+    const cte = `WITH markers AS (
+      SELECT $1::text AS symbol, r.minute_bucket, r.truth_verdict
+      FROM jsonb_to_recordset($2::jsonb) AS r(minute_bucket timestamptz, truth_verdict text)
+    )`;
+    const tableParams = [request.symbol, JSON.stringify(markerRows),
+      request.tradeDate+'T'+request.fromTime+':00+05:30', request.tradeDate+'T'+request.toTime+':00+05:30'];
+    const normalized = <T extends Record<string, unknown>>(label: string, sql: string, values: unknown[]) => {
+      if (markerRows.length) return timedRows<T>(label, sql, values);
+      queryTimingsMs[label] = 0;
+      return Promise.resolve([] as T[]);
+    };
+    const [market, chain, options, canonical] = await Promise.all([
+      normalized("market", `${cte}
         SELECT
           m.symbol, m.minute_bucket, h.truth_verdict,
           m.snapshot_id, m.exchange_timestamp, m.backend_timestamp, m.freshness_status,
@@ -268,8 +288,9 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
           m.india_vix, m.india_vix_change, m.calculation_version
         FROM market_snapshot_1m m
         JOIN markers h ON h.symbol = m.symbol AND h.minute_bucket = m.minute_bucket
-        ORDER BY m.minute_bucket ASC`, params),
-      timedRows("chain", `${cte}
+        WHERE m.symbol = $1 AND m.minute_bucket >= $3::timestamptz AND m.minute_bucket <= $4::timestamptz
+        ORDER BY m.minute_bucket ASC`, tableParams),
+      normalized("chain", `${cte}
         SELECT
           c.symbol, c.minute_bucket, h.truth_verdict,
           c.expiry, c.expiry_bucket, c.atm_strike,
@@ -280,8 +301,9 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
           c.validation_status, c.calculation_version
         FROM chain_state_1m c
         JOIN markers h ON h.symbol = c.symbol AND h.minute_bucket = c.minute_bucket
-        ORDER BY c.minute_bucket ASC, c.expiry ASC`, params),
-      timedRows("options", `${cte}
+        WHERE c.symbol = $1 AND c.minute_bucket >= $3::timestamptz AND c.minute_bucket <= $4::timestamptz
+        ORDER BY c.minute_bucket ASC, c.expiry ASC`, tableParams),
+      normalized("options", `${cte}
         SELECT
           o.symbol, o.minute_bucket, h.truth_verdict,
           o.snapshot_id, o.expiry, o.expiry_bucket, o.dte,
@@ -294,12 +316,9 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
           o.liquidity_status, o.validation_status, o.calculation_version
         FROM option_snapshot_1m o
         JOIN markers h ON h.symbol = o.symbol AND h.minute_bucket = o.minute_bucket
-        WHERE ($5::text = 'FULL' OR o.atm_offset BETWEEN -7 AND 7)
-        ORDER BY o.minute_bucket ASC, o.expiry ASC, o.strike ASC, o.option_type ASC`, [...params, request.scope]),
-      timedRows<{ minute_bucket: unknown; truth_verdict: unknown }>("markers",
-        `${cte} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`,
-        params,
-      ),
+        WHERE o.symbol = $1 AND o.minute_bucket >= $3::timestamptz AND o.minute_bucket <= $4::timestamptz
+          AND ($5::text = 'FULL' OR o.atm_offset BETWEEN -7 AND 7)
+        ORDER BY o.minute_bucket ASC, o.expiry ASC, o.strike ASC, o.option_type ASC`, [...tableParams, request.scope]),
       timedRows<Record<string, unknown>>("canonical", `
         SELECT
           (payload->>'minuteBucket')::timestamptz AS minute_bucket,
@@ -377,6 +396,7 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
       mode: "READ_ONLY_H1_3M_REPLAY",
       productionImpact: "NONE",
       request,
+      queryTimingsMs,
       reason: err instanceof Error ? err.message : "H1_REPLAY_FAILED",
     };
   }

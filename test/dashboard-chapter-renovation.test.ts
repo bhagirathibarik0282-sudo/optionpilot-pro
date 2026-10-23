@@ -165,3 +165,12 @@ test('missing cash history and refresh failure remain explicit without invented 
  const html=h.turn(10);assert.match(html,/Saved cash request failed/);assert.match(html,/0 stored sessions/);
  assert(!html.includes('mb-cash-change'));assert(!html.includes('NaN'));assert(!html.includes('undefined'));
 });
+
+
+test('four-chapter workspace keeps paused commodities hidden and cash totals in one row',()=>{
+ const html=renderBusinessDashboardV1Html({} as any);
+ assert.match(html,/<details id="op-commodities" hidden/);assert.match(html,/<button id="op-open-commodities" hidden/);
+ assert(html.includes('.mb-cash-card .mb-glance-grid{grid-template-columns:repeat(3,minmax(0,1fr))'));
+ const h=harness(),cash=h.turn(10);assert.match(cash,/mb-controls mb-cash-actions/);
+ assert.equal((cash.match(/id="mb-cash-refresh"/g)||[]).length,1);
+});

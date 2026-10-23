@@ -252,3 +252,28 @@ test('individual chart controls isolate index and series, survive refresh, and r
  current.NIFTY.chain.splice(2,1);vm.runInContext('installed.render()',ctx);assert(!charts(body)[0].includes('PCR 15m H'));assert(charts(body)[0].includes('Spot 15m H'));assert(body.innerHTML.includes('Missing, invalid or conflicting opening'));
  nodes.get('mb-window').value='1s';nodes.get('mb-window').onchange();assert(!charts(body).some(c=>c.includes('data-opening-series')));assert(body.innerHTML.includes('Unavailable in swing endpoint view'));assert.equal(requests,0);
 });
+
+
+test('PCR-only expiry observations retain exact chain identity without inventing a premium ladder',()=>{
+ const c=fixture(),next='2026-10-19';c.chain.push(...c.chain.map(r=>({...r,expiry:next,full_chain_oi_pcr:2})));const b=run(c,{observationExpiry:next});
+ assert.equal(b.expiry,next);assert.equal(b.pcr.value,2);assert.equal(b.pcr.from,2);assert.equal(b.ce.value,null);assert.deepEqual(b.expiries,[expiry]);assert.deepEqual(b.recordedPcrExpiries,[expiry,next]);
+ assert.equal(run(c,{observationExpiry:'2026-12-31'}).expiry,expiry);
+ const noOptions={...c,options:[]};assert.equal(run(noOptions).expiry,expiry);assert.equal(run(noOptions,{observationExpiry:next}).pcr.value,2);
+ const prior=structuredClone(c);prior.chain.forEach(r=>r.minute_bucket=r.minute_bucket.replace(tradeDate,'2026-10-07'));assert.equal(run(fixture(),{history:[prior],observationExpiry:next}).expiry,expiry);
+});
+
+test('selected and next recorded PCR charts stack on one time domain and withhold unsynchronized spreads',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1],nodes=new Map<string,any>();
+ for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0,open:false,showModal(){this.open=true;},close(){this.open=false;}});
+ const c=fixture(),next='2026-10-19';c.chain.forEach((r,i)=>r.full_chain_oi_pcr=1+i/100);c.chain.push(...c.chain.slice(2).map((r,i)=>({...r,expiry:next,full_chain_oi_pcr:2+i/100})));
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
+ let requests=0;const state:any={date:tradeDate,recordedDates,current:{NIFTY:c},history:{},baseline:{},health:{}};ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;}};
+ vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'9'}})}});const page=nodes.get('mb-page');
+ assert(page.innerHTML.includes('Selected expiry · full PCR '+expiry));assert(page.innerHTML.includes('Next recorded expiry · full PCR '+next));assert(page.innerHTML.includes('B − A PCR · ratio points'));assert(page.innerHTML.includes('>0.98<'));assert(page.innerHTML.includes('No later exact-expiry chain recording'));
+ const charts=()=>[...page.innerHTML.matchAll(/<svg\b[\s\S]*?<\/svg>/g)].map(m=>m[0]).filter(s=>s.includes('independent left PCR'));let cs=charts();assert.equal(cs.length,2);
+ const labels=(s:string)=>[...s.matchAll(/y="318"[^>]*>([^<]+)</g)].map(m=>m[1]);assert.deepEqual(labels(cs[0]),labels(cs[1]));
+ for(const mode of ['NORMALIZED','RECORDED']){page.onchange({target:{id:'mb-local-NIFTY-mode',value:mode}});const xs=[...page.innerHTML.split('data-event-key="spot-pcr-selected-detail"')[0].matchAll(/<svg\b[\s\S]*?<\/svg>/g)].map(m=>m[0]).filter(s=>s.includes(mode==='NORMALIZED'?'percentage overlay':'spot above full PCR'));assert.equal(xs.length,2);const timeLabels=(s:string)=>[...s.matchAll(/y="(?:267|378)"[^>]*>([^<]+)</g)].map(m=>m[1]);assert.deepEqual(timeLabels(xs[0]),timeLabels(xs[1]));}page.onchange({target:{id:'mb-local-NIFTY-mode',value:'DUAL'}});
+ const ids=[...page.innerHTML.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);assert.equal(new Set(ids).size,ids.length);
+ c.chain=c.chain.filter(r=>!(r.expiry===next&&r.minute_bucket===at(18)));vm.runInContext('installed.render()',ctx);assert(page.innerHTML.includes('Compare the two expiries · Missing / unsynchronized'));assert(!page.innerHTML.includes('>0.98<'));cs=charts();assert.deepEqual(labels(cs[0]),labels(cs[1]));
+ c.chain.filter(r=>r.expiry===next).forEach(r=>r.full_pcr_source='Unverified');vm.runInContext('installed.render()',ctx);assert(page.innerHTML.includes('Next recorded expiry · full PCR '+next));assert(!page.innerHTML.includes('Compare the two expiries · Exact buckets aligned'));assert.equal(requests,0);
+});

@@ -20,6 +20,43 @@ function harness(saved:any=null){
  return {emitContext:(payload:any)=>listeners['optionpilot:live-context']?.({detail:payload}),respond:(payload:any)=>{livePayload=payload;context.fetch=async(url:string)=>{requests.push(url);return {ok:true,json:async()=>structuredClone(livePayload)};};},focus:(id:string)=>context.document.activeElement=node(id),node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
 }
 const settle=async()=>{await Promise.resolve();await Promise.resolve();};
+function reportedPcrFixture(){
+ const date='2026-10-23',stamp=date+'T04:30:00.000Z',older=date+'T04:28:00.000Z',expiry='2026-10-27';
+ return {connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:stamp,snapshot:{runtimeId:'reported-pcr-fixture',tradeDate:date,asOf:stamp,indices:['NIFTY','SENSEX','BANKNIFTY'].map(symbol=>({symbol,expiry,expiries:[expiry],spot:{identity:{role:'SPOT',symbol},state:'LIVE',price:22000,observedAt:stamp,receivedAt:stamp},pcrSnapshot:{source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'INCOMPLETE',reason:'STALE_OI_TIMESTAMPS',fetchState:'OK',checkedAt:stamp,cycleStartedAt:stamp,coverage:{expected:4,freshOi:3,stale:1,missing:0,invalid:0,complete:false},reportedPcr:{basis:'LATEST_REPORTED_MIXED_TIMESTAMPS',symbol,expiry,value:1.2345,ceTotal:10000,peTotal:12345,expected:4,reported:4,olderThan30s:1,sourceMinAt:older,sourceMaxAt:stamp,checkedAt:stamp}}}))}};
+}
+test('Premium PCR renders the validated complete reported ratio without fresh arrows or alignment',async()=>{
+ const h=harness(),payload=reportedPcrFixture();h.respond({connected:true,connectionState:'OPEN',serverTime:payload.serverTime,snapshot:{rows:[],series:[]}});
+ h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');h.emitContext(payload);
+ const html=h.node('pw-chain-pcr').innerHTML,visible=html.split('<details class="pw-pcr-audit"')[0];
+ assert.equal((visible.match(/1\.2345/g)||[]).length,3);
+ assert.equal((visible.match(/Reported · mixed times/g)||[]).length,3);
+ assert.equal((visible.match(/Checked 10:00:00 IST/g)||[]).length,3);
+ assert.match(html,/4\/4 contracts · 1 older than 30s/);assert.match(html,/Source 09:58:00 → 10:00:00 IST/);
+ assert.doesNotMatch(visible,/pw-chain-pulse|ALL RISING|ALL FALLING|SYNC ✓|1\.2345 [↑↓]/);
+ assert.equal(h.calls.length,0);assert.equal(h.requests.filter(x=>x.includes('/quote')).length,0);
+ h.emitContext({...payload,connected:false,connectionState:'DISCONNECTED',snapshot:null});assert.doesNotMatch(h.node('pw-chain-pcr').innerHTML,/1\.2345|Reported · mixed times/);
+});
+test('reported Premium PCR is revoked for invalid provenance and preserves real zero put OI',async()=>{
+ const h=harness(),payload=reportedPcrFixture();h.respond({connected:true,connectionState:'OPEN',serverTime:payload.serverTime,snapshot:{rows:[],series:[]}});
+ h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');
+ for(const mutate of [
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.fetchState='RATE_LIMITED'),
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.coverage.missing=1),
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.reportedPcr.expiry='2026-11-03'),
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.reportedPcr.sourceMinAt='2026-10-22T09:59:00.000Z'),
+  (p:any)=>p.snapshot.indices.forEach((a:any)=>a.pcrSnapshot.reportedPcr.value=9),
+  (p:any)=>p.serverTime='2026-10-23T04:31:31.000Z'
+ ]){const p=structuredClone(payload);mutate(p);h.emitContext(p);assert.doesNotMatch(h.node('pw-chain-pcr').innerHTML,/1\.2345|Reported · mixed times/);}
+ h.emitContext(null); // A disconnected context clears the previous, later server clock.
+ const zero=structuredClone(payload);zero.snapshot.indices.forEach(a=>Object.assign(a.pcrSnapshot.reportedPcr,{value:0,peTotal:0}));h.emitContext(zero);
+ const visible=h.node('pw-chain-pcr').innerHTML.split('<details class="pw-pcr-audit"')[0];assert.equal((visible.match(/<strong>0 —<\/strong>/g)||[]).length,3);assert.match(visible,/Reported · mixed times/);
+});
+test('fresh Premium Full PCR takes precedence over reported context',async()=>{
+ const h=harness(),payload:any=reportedPcrFixture();h.respond({connected:true,connectionState:'OPEN',serverTime:payload.serverTime,snapshot:{rows:[],series:[]}});
+ payload.pcrDisplay={};for(const a of payload.snapshot.indices){const q=a.pcrSnapshot;Object.assign(q,{state:'COMPLETE',reason:'COMPLETE',fullPcr:1.5,ceTotal:10000,peTotal:15000,sourceMinAt:payload.serverTime,sourceMaxAt:payload.serverTime,periodMs:60000});Object.assign(q.coverage,{complete:true,freshOi:4,stale:0,sourceSkewMs:0});Object.assign(q.reportedPcr,{value:1.5,peTotal:15000,olderThan30s:0,sourceMinAt:payload.serverTime});payload.pcrDisplay[a.symbol]={...q,expiry:a.expiry};}
+ h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');h.emitContext(payload);
+ const html=h.node('pw-chain-pcr').innerHTML,visible=html.split('<details class="pw-pcr-audit"')[0];assert.equal((visible.match(/<strong>1\.5 —<\/strong>/g)||[]).length,3);assert.doesNotMatch(html,/Reported · mixed times|MIXED SOURCE TIMES/);
+});
 test('closed-market live ladder explains the missing values and opens the existing recorded archive explicitly',async()=>{
  const h=harness();h.respond({connected:false,connectionState:'MARKET_CLOSED',serverTime:new Date().toISOString(),snapshot:null});
  h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');await settle();await settle();

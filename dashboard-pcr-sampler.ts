@@ -46,18 +46,20 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
  // Anchor is frozen with this completed OI snapshot, never moved by later ticks.
  const bandPcr:any={state:'INCOMPLETE',value:null,halfWidth:7,strikeCount:15,anchorStrike:null,fromStrike:null,toStrike:null,ceTotal:null,peTotal:null,expected:30,freshOi:0,anchorAt:null};
  const spotAt=quoteTime(spot?.observedAt),receipt=quoteTime(spot?.receivedAt);
- const spotOk=complete&&spot?.state==='LIVE'&&spot.identity?.role==='SPOT'&&spot.identity.symbol===entries[0]?.symbol&&finite(spot.price)&&spot.price>0&&Number.isFinite(spotAt)&&day(spotAt)===date&&now-spotAt>=-5000&&now-spotAt<=30000&&Number.isFinite(receipt)&&day(receipt)===date&&now-receipt>=0&&now-receipt<=30000&&Math.max(...times,spotAt)-Math.min(...times,spotAt)<=30000;
+ const spotOk=day(now)===date&&spot?.state==='LIVE'&&spot.identity?.role==='SPOT'&&spot.identity.symbol===entries[0]?.symbol&&finite(spot.price)&&spot.price>0&&Number.isFinite(spotAt)&&day(spotAt)===date&&now-spotAt>=-5000&&now-spotAt<=30000&&Number.isFinite(receipt)&&day(receipt)===date&&now-receipt>=0&&now-receipt<=30000;
  if(spotOk){
-  const strikes=[...new Set(entries.map(e=>e.strike!))].sort((a,b)=>a-b);
+  const strikes=[...new Set(entries.map(e=>e.strike!).filter(k=>finite(k)&&k>0))].sort((a,b)=>a-b);
   const anchor=strikes.reduce((best,k)=>Math.abs(k-spot.price)<Math.abs(best-spot.price)?k:best,strikes[0]),index=strikes.indexOf(anchor);
   bandPcr.anchorStrike=anchor;bandPcr.anchorAt=new Date(spotAt).toISOString();
   if(index>=7&&index+7<strikes.length){
    const allowed=new Set(strikes.slice(index-7,index+8)),band=entries.filter(e=>allowed.has(e.strike!));
    const bandCe=band.filter(e=>e.side==='CE'),bandPe=band.filter(e=>e.side==='PE');
-   const sum=(xs:LiveEntry[])=>xs.reduce((total,e)=>total+quotes[e.exchange+':'+e.label].oi,0);
+   const sum=(xs:LiveEntry[])=>xs.reduce((total,e)=>total+(quotes[e.exchange+':'+e.label]?.oi??NaN),0);
    const ceTotal=sum(bandCe),peTotal=sum(bandPe);
-   if(band.length===30&&bandCe.length===15&&bandPe.length===15&&finite(ceTotal)&&ceTotal>0&&finite(peTotal)&&peTotal>=0){
-    Object.assign(bandPcr,{state:'COMPLETE',value:peTotal/ceTotal,fromStrike:strikes[index-7],toStrike:strikes[index+7],ceTotal,peTotal,freshOi:30});
+   const bandTimes=band.map(e=>quoteTime(quotes[e.exchange+':'+e.label]?.timestamp));
+   const validBand=band.every(e=>{const q=quotes[e.exchange+':'+e.label],t=quoteTime(q?.timestamp);return e.role==='OPTION'&&e.symbol===entries[0]?.symbol&&e.expiry===entries[0]?.expiry&&q?.instrument_token===e.token&&finite(q.oi)&&q.oi>=0&&Number.isFinite(t)&&day(t)===date&&now-t>=-5000&&now-t<=30000;});
+   if(band.length===30&&bandCe.length===15&&bandPe.length===15&&new Set(band.map(e=>e.strike+'|'+e.side)).size===30&&new Set(band.map(e=>e.token)).size===30&&validBand&&Math.max(...bandTimes,spotAt)-Math.min(...bandTimes,spotAt)<=30000&&finite(ceTotal)&&ceTotal>0&&finite(peTotal)&&peTotal>=0){
+    Object.assign(bandPcr,{state:'COMPLETE',value:peTotal/ceTotal,fromStrike:strikes[index-7],toStrike:strikes[index+7],ceTotal,peTotal,freshOi:30,sourceMinAt:new Date(Math.min(...bandTimes)).toISOString(),sourceMaxAt:new Date(Math.max(...bandTimes)).toISOString()});
    }
   }
  }

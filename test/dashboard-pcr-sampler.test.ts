@@ -74,10 +74,10 @@ test('edge bands, missing opposite contracts and zero CE denominator never prete
  for(const e of es)if(e.side==='CE'&&Math.abs(e.strike!-23000)<=350)qs[e.exchange+':'+e.label].oi=0;
  assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).bandPcr.value,null);
 });
-test('zero put OI survives in the band, while an unavailable outer full-chain quote revokes the band',()=>{
+test('zero put OI survives in the band, while an unavailable outer full-chain quote revokes only full PCR',()=>{
  const {es,qs,spot}=wideChain();for(const e of es)if(e.side==='PE'&&Math.abs(e.strike!-23000)<=350)qs[e.exchange+':'+e.label].oi=0;
  assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).bandPcr.value,0);
- delete qs[es[0].exchange+':'+es[0].label];assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).fullPcr,null);assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).bandPcr.value,null);
+ delete qs[es[0].exchange+':'+es[0].label];assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).fullPcr,null);assert.equal(measurePcrSnapshot(es,qs,date,at,at,spot).bandPcr.value,0);
 });
 test('ATM is frozen once per OI snapshot; later price ticks do not silently change the band or add requests',async()=>{
  const {es,qs,spot}=wideChain();let now=at,calls=0,reads=0;
@@ -185,4 +185,18 @@ test('a failed later quote batch revokes earlier completed PCR rather than commi
  assert.equal(first?.coverage.complete,false);
  assert.equal(first?.callWall,null);
  assert.equal(sampler.read('SENSEX','2026-10-22')?.fullPcr,null);
+});
+
+test('fresh 30-leg band survives stale outer OI; every inner identity and source clock remains mandatory',async()=>{
+ const {deriveLiveThreeIndexPcr}=await import('../live-three-index-pcr.js');
+ const {es,qs,spot}=wideChain();qs[es[0].exchange+':'+es[0].label].timestamp=new Date(at-120000).toISOString();
+ const measured=measurePcrSnapshot(es,qs,date,at,at,spot);
+ assert.equal(measured.state,'INCOMPLETE');assert.equal(measured.fullPcr,null);assert.equal(measured.bandPcr.value,3);
+ const payload:any={connected:true,source:'KITE_WEBSOCKET_FULL',serverTime:new Date(at).toISOString(),snapshot:{runtimeId:'same-runtime',tradeDate:date,asOf:new Date(at).toISOString(),indices:[{symbol:'NIFTY',expiry:'2026-10-19',expiries:['2026-10-19'],spot,pcrSnapshot:{...measured,fetchState:'OK'}}]}};
+ const read=(p:any)=>deriveLiveThreeIndexPcr(p).rows[0];
+ assert.equal(read(payload).value,null);assert.equal(read(payload).bandValue,3);assert.equal(read(payload).direction,'WAIT');assert.equal(read(payload).current,null);
+ for(const mutate of [(p:any)=>p.connected=false,(p:any)=>p.snapshot.indices[0].pcrSnapshot.fetchState='RATE_LIMITED',(p:any)=>p.snapshot.indices[0].pcrSnapshot.bandPcr.value=5,(p:any)=>p.snapshot.indices[0].pcrSnapshot.bandPcr.sourceMinAt=new Date(at-31000).toISOString(),(p:any)=>p.snapshot.indices[0].expiry='wrong',(p:any)=>p.snapshot.asOf=new Date(at-5000).toISOString()]){const p=structuredClone(payload);mutate(p);assert.equal(read(p).bandValue,null);}
+ const inner=es.find(e=>e.strike===23000&&e.side==='PE')!;
+ for(const patch of [{timestamp:new Date(at-31000).toISOString()},{instrument_token:999},{oi:null}]){const bad=structuredClone(qs);Object.assign(bad[inner.exchange+':'+inner.label],patch);assert.equal(measurePcrSnapshot(es,bad,date,at,at,spot).bandPcr.value,null);}
+ const bad=structuredClone(qs);delete bad[inner.exchange+':'+inner.label];assert.equal(measurePcrSnapshot(es,bad,date,at,at,spot).bandPcr.value,null);
 });

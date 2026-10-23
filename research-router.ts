@@ -368,7 +368,7 @@ researchRouter.get("/h1-replay", async (c) => {
       reason: parsed.reason,
     }, 400);
   }
-  const result = await runH1ReplayHttp(parsed.value);
+  const result = await runH1ReplayHttp(parsed.value, (c.req.query('format') ?? '').trim().toLowerCase() === 'compact' && c.req.query('canonical') === 'pcr-provenance');
   if (result.queryTimingsMs) {
     c.header("Server-Timing", Object.entries(result.queryTimingsMs).map(([name, ms]) => `${name};dur=${ms}`).join(", "));
   }

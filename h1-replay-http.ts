@@ -1,3 +1,4 @@
+import { canonicalPcrProjectionSql } from './h1-replay-canonical-projection.js';
 import { dbIsConfigured, dbQuerySafe } from "./db.js";
 import { standardIndexObservationClose } from './index-observation-session.js';
 
@@ -236,7 +237,7 @@ function markerCte(): string {
   )`;
 }
 
-export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1ReplayHttpResult> {
+export async function runH1ReplayHttp(request: H1ReplayRequest, canonicalPcrOnly = false): Promise<H1ReplayHttpResult> {
   if (!dbIsConfigured()) {
     return {
       ok: false,
@@ -247,14 +248,14 @@ export async function runH1ReplayHttp(request: H1ReplayRequest): Promise<H1Repla
     };
   }
 
-  return runH1ReplayRead(request, rows);
+  return runH1ReplayRead(request, rows, canonicalPcrOnly);
 }
 
 /** One truth-marker read per request, frozen for all three normalized tables.
  * The injectable reader is used by tests, never accepted from an HTTP caller.
  * No result cache, source-time substitution, schema change or write authority.
  */
-export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof rows): Promise<H1ReplayHttpResult> {
+export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof rows, canonicalPcrOnly = false): Promise<H1ReplayHttpResult> {
   const params = [request.symbol, request.tradeDate, request.fromTime, request.toTime];
   const queryTimingsMs: Record<string, number> = {};
   const timedRows = async <T extends Record<string, unknown>>(label: string, sql: string, values: unknown[]): Promise<T[]> => {
@@ -327,7 +328,7 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
           payload->>'truthVerdict' AS truth_verdict,
           payload->>'sourceTimestamp' AS source_timestamp,
           payload->>'calculationVersion' AS calculation_version,
-          payload->'market' AS market
+          ${canonicalPcrOnly ? canonicalPcrProjectionSql() : "payload->'market'"} AS market
         FROM app_state_log
         WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'
           AND payload->>'symbol' = $1

@@ -135,7 +135,8 @@ export function installMarketBook(api:any) {
  let page=0,win='3m',symbol='NIFTY',expiry='',opposite='',strike:number|undefined,compareStrike:number|null=null,legacy=false,notableFilter='ALL',behaviourFilter='ALL',models:any={},cache:any={},chartRecords=new Map<string,any>(),expandedChart:string|null=null,showPivots=false,showOpening=false,showPremiumLevels=true,date='';
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const n=(v:any)=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v);
- const fmt=(v:any,d=2)=>n(v)===null?'Unavailable':Number(v).toLocaleString('en-IN',{maximumFractionDigits:d});
+ const numberFormats=new Map<number,Intl.NumberFormat>();
+ const fmt=(v:any,d=2)=>{if(n(v)===null)return 'Unavailable';let f=numberFormats.get(d);if(!f){f=new Intl.NumberFormat('en-IN',{maximumFractionDigits:d});numberFormats.set(d,f);}return f.format(Number(v));};
  const sign=(v:any,d=2)=>n(v)===null?'Unavailable':(v>0?'+':'')+fmt(v,d);
  const pct=(v:any)=>n(v)===null?'Unavailable':sign(v)+'%';
  const when=(v:any)=>v&&Number.isFinite(Date.parse(v))?new Date(v).toLocaleString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})+' IST':'Unavailable';

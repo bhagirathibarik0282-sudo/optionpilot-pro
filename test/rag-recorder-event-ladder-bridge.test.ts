@@ -67,3 +67,20 @@ test('recorder entry is a single explicit guarded user action with exact identit
  assert.match(src,/cursor/);
  assert.match(src,/option_type/);
 });
+
+test('15:30 final recorder bucket remains available at actual 15:30:25 receipt',()=>{
+ const raw=snapshot();
+ const final={...raw.beforeAndAt[1],timeIst:'15:30',offset:0,
+   bucketAt:when('15:30'),receiptAt:when('15:30',25),
+   pair:{
+    ce:{...raw.beforeAndAt[1].pair.ce,quoteAt:when('15:30',20),receiptAt:when('15:30',25)},
+    pe:{...raw.beforeAndAt[1].pair.pe,quoteAt:when('15:30',21),receiptAt:when('15:30',25)}
+   }};
+ raw.event.timeIst='15:30';
+ raw.event.availableAt=when('15:30',25);
+ raw.beforeAndAt=[final];
+ raw.outcomes=[];
+ const result=projectRecordedRagLadder(raw);
+ assert.equal(result.ok,true);
+ if(result.ok)assert.equal(result.lanes.find(x=>x.offsetMinutes===0)?.cells.some(x=>x.family==='PREMIUM'),true);
+});

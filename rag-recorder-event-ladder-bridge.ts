@@ -75,7 +75,15 @@ function verifiedInput(raw:RagEvidence,includeOutcomes:boolean):ContextInput|nul
 export function projectRecordedRagLadder(raw:RagEvidence,includeOutcomes=true){
  const input=verifiedInput(raw,includeOutcomes);
  if(!input)return {ok:false,reason:'EXACT_RAG_SOURCE_OR_EVENT_KNOWN_AT_UNAVAILABLE',mode:'READ_ONLY_EVENT_CONTEXT_LADDER_V1',safety:SAFETY};
- return buildEventContextLadder(input);
+ const projected=buildEventContextLadder(input);
+ if(!projected.ok)return projected;
+ // An event cannot be called accepted merely because prior spot/PCR rows exist:
+ // require the exact selected side's LTP at the event itself.
+ const at=projected.lanes.find(l=>l.offsetMinutes===0);
+ if(!at?.cells.some(c=>c.family==='PREMIUM'&&c.metric==='LTP'&&
+      c.entity===input.event.strike+' '+input.event.side))
+   return {ok:false,reason:'EVENT_PREMIUM_SOURCE_NOT_ADMITTED',mode:'READ_ONLY_EVENT_CONTEXT_LADDER_V1',safety:SAFETY};
+ return projected;
 }
 export function renderRecordedRagLadderPage(html:string,status=200){
  const title='OptionPilot Pro · Recorder Event Context';

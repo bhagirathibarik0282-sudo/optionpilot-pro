@@ -106,3 +106,55 @@ Acceptance: a reproducible event record, honest exclusion reasons, identical res
 - NSE India VIX: https://www.nseindia.com/static/products-services/indices-indiavix-index
 - Bailey et al., The Probability of Backtest Overfitting: https://www.davidhbailey.com/dhbpapers/backtest-prob.pdf
 These support definitions and research safeguards, not profitability of this proposed scanner.
+
+## Revision 2: define the opportunity before ranking filters
+
+This revision supersedes the order of the earlier phases where necessary. Status remains design-only.
+
+### Define the fish
+Each run must freeze an outcome contract: target (trend continuation, reversal, or fixed-premium expansion), observation horizon, minimum move and units, adverse-movement limit if used, event-anchor rule, and episode-termination rule. These are research settings, not established profitable thresholds. Do not pool different targets into one success rate.
+An independent spot-move catalogue is a Phase 1 dependency, not an optional final scorecard feature. Without this denominator, the system cannot tell how many qualifying moves it missed.
+
+### Distinguish detection, timing and executability
+Use separate result dimensions:
+- Detection/timing: EARLY, LATE, FALSE_ALARM, MISSED, UNRESOLVED_TIMING, NOT_EVALUABLE.
+- Tradability: QUALIFIED_QUOTES_AVAILABLE, INSUFFICIENT_EXECUTION_EVIDENCE, NO_CONFIGURED_TRADE_TEST.
+EARLY/LATE requires a predeclared market-episode anchor and lead window. Neither automatically means profitable. Measure the fixed premium's subsequent sampled favorable/adverse path from actual detection, not from the eventual day's best price. Do not pick a different winning contract after seeing outcomes.
+A trend can be correctly identified while the selected option has poor net returns. Conversely, a premium expansion does not by itself establish a spot trend. Keep the two research objectives separate.
+
+### Do not count echoes as independent evidence
+CE strengthening, PE weakening, spot rising and several expiries moving together can be related manifestations of the same underlying exposure. Same-strike/same-expiry put-call relationships are a particular reason not to turn these into arbitrary independent votes. Do not label a count of aligned fields as probability of profit.
+Mandatory comparison: option-based rule versus a simple spot-only continuation baseline, on the same eligible index/session/DTE/time observations. Add PCR, OI, volume or next-expiry response individually and report the change in catches, false alarms, missed moves, detection timing and coverage. Also show the parent rule on its full eligible universe so context missingness cannot hide lost opportunities.
+Removing a condition is a sensitivity test; it does not prove that condition caused a market move. Report contradictory evidence rather than constructing a confirming story.
+
+### Three user tasks, one Replay workspace
+1. Study a move: select an actual date and interval; inspect all eligible evidence before, during and after it. Retrospective best-response contracts are explicitly hindsight analysis.
+2. Scan records: run one named filter or all predefined filters independently, across selected/all recorded dates.
+3. Test my rule: lock settings and replay forward without exposing future candles, later premium highs, outcome-colored event labels or future-selected contracts. Record each decision before revealing later data. This manual test remains separate from automated rule evaluation.
+All three use the same exact identities and event record. Keep controls compact; detailed parameters and source diagnostics expand only on request.
+
+### Two clocks and an expiry-aware session boundary
+Store/report the source observation interval and the earliest recorded time when every required confirmation was available. A rule requiring additional samples cannot enter at the original unconfirmed break. Quote-packet time, last-trade time and capture/receipt time are different concepts; do not use whichever timestamp makes apparent lead strongest. If field-time evidence is insufficient, label timing unresolved.
+Recording availability is not a trading-session definition. Apply authoritative, date- and exchange-specific calendars and contract-expiry cutoffs before trade simulation. Closing-auction observations may have different semantics from continuous spot trading. The current standardIndexObservationClose helper explicitly provides recording bounds, not order eligibility. Do not discard 15:30–15:40 mechanically, and do not accept every recording in that range as an executable opportunity without the relevant session/contract proof.
+
+### Failure review and rule simplification
+A Missed/Late event must show why: required price behavior absent, threshold not reached, confirmation arrived late, optional context disagreed, exact contract missing, or source evidence unavailable. Show the observed reason; a hypothetical alternate rule is a separately versioned experiment.
+Compare broad and stricter versions on equal observations. A stricter rule may reduce false alarms while delaying detection and missing more moves. Present this trade-off, not a single maximum-win-rate winner.
+Group adjacent detections into independently defined market episodes. Show events and sessions separately; one long trend appearing on many strikes/expiries is not many independent successful trades.
+
+### Evidence maturity rather than stars
+A rule progresses through DRAFT -> EXPLORATORY -> LOCKED_FOR_VALIDATION -> VALIDATION_REVIEWED. These are research process states, not trade permissions. Keep INSUFFICIENT_COVERAGE and INSUFFICIENT_SAMPLE explicit. Display which sessions contribute most of the measured gains and whether removing one session changes the conclusion. Report interval uncertainty at the session/episode level where estimable; do not bootstrap correlated strikes as independent trades.
+Track every tested variation, including failed versions. Preserve chronological validation and embargo outcomes spanning its boundary. An inspected/tuned-on date cannot be relabelled untouched. Do not promote a rule from a maximum historical percentage on this small inventory.
+
+### Practical first delivery
+- First: outcome settings, coverage matrix, independent move catalogue, F01/F02/F03, one complete event record with failure reasons. Validate 19 October only from qualified available recordings; missing opening data remains unavailable.
+- Next: bounded all-date/all-filter runs plus caught/late/false/missed views and spot-only baseline comparison.
+- Then: add one positioning/expiry context at a time, followed by blind manual replay and locked chronological evaluation.
+- Last: separately configured quote/cost-aware trade simulation when execution evidence supports it.
+Do not add weighted AI scores, automated condition search or more dashboard chapters before the simpler tests establish value. A shallow first scan and deeper event inspection may be implemented only if the existing source endpoints preserve all required trigger evidence; do not claim a cheap scan already exists or drop required fields to make it faster.
+
+Additional primary references:
+- Put-call linkage: https://zerodha.com/varsity/chapter/synthetic-long-arbitrage/
+- Quote versus last-trade timestamps: https://kite.trade/docs/connect/v3/market-quotes/
+- Multiple-testing inflation: https://www.davidhbailey.com/dhbpapers/deflated-sharpe.pdf
+- Exchange session context: https://www.nseindia.com/static/products-services/closing-auction-session

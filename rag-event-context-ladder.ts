@@ -121,10 +121,27 @@ export function buildEventContextLadder(input:ContextInput){
     if(new Set(items.map(fingerprint)).size!==1){blocked.push('CONFLICTING_OBSERVATIONS:'+k);continue;}
     unique.set(k,items[0]);
   }
+  // Δ% is permitted only from two admitted observations of the SAME metric,
+  // EXACT option identity and adjacent 3-minute buckets. No nearest neighbor,
+  // interpolation, missing-window fill, or retrospective future baseline.
+  const seriesKey=(o:ContextObservation)=>[o.family,o.entity,o.metric,o.expiry??'',o.strike??'',o.side??''].join('|');
+  const admitted=new Map<string,ContextObservation>();
+  for(const o of unique.values())if(o.family!=='FII_DII')admitted.set(seriesKey(o)+'|'+o.bucketAt,o);
+  const measuredCell=(o:ContextObservation):ContextCell=>{
+    const c=cell(o);
+    if(c.changePct!==null||!['LTP','OI','OI PCR'].includes(o.metric))return c;
+    const t=utc(o.bucketAt);
+    if(t===null)return c;
+    const before=admitted.get(seriesKey(o)+'|'+new Date(t-180000).toISOString());
+    const baseline=n(before?.value),current=n(o.value);
+    if(baseline!==null&&baseline>0&&current!==null)
+      c.changePct=Math.round((current/baseline-1)*1000000)/10000;
+    return c;
+  };
   const lanes:ContextLane[]=offsets.filter(x=>input.includeOutcomes||x<=0).map(offset=>{
     const target=new Date(at+offset*60000).toISOString();
     const cells=[...unique.values()].filter(o=>o.family!=='FII_DII'&&o.bucketAt===target)
-      .map(cell).sort((a,b)=>a.family.localeCompare(b.family)||a.entity.localeCompare(b.entity)||a.metric.localeCompare(b.metric));
+      .map(measuredCell).sort((a,b)=>a.family.localeCompare(b.family)||a.entity.localeCompare(b.entity)||a.metric.localeCompare(b.metric));
     return {phase:offset<0?'BEFORE' as const:offset===0?'EVENT' as const:'AFTER' as const,
       offsetMinutes:offset,timeIst:ist(at+offset*60000),cells};
   });
@@ -146,6 +163,7 @@ export function buildEventContextLadder(input:ContextInput){
       'After-event checkpoints are retrospective only; not decision-time inputs.',
       'FII/DII is previous-published official context, not an intraday stream.',
       'Weightage and contribution need separately verified provenance.',
+      'Delta percentages are computed only from two qualified adjacent 3-minute same-metric/contract observations; missing baselines show a dash.',
       'EventKnownAt is an actual accepted receipt time; late-arriving records cannot enter event-time evidence.',
       'Late-arriving records cannot enter the event-time signature; outcomes remain separate.',
       'Upstream observation truth checks remain mandatory; no confidence, prediction or P&L.']};

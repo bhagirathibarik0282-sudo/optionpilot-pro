@@ -154,3 +154,10 @@ test('post-event-known late quote cannot contaminate before/event features',()=>
    assert.equal(result.lanes.find(x=>x.offsetMinutes===0)?.cells[0]?.value,99);
  }
 });
+
+test('future exchange-source timestamp cannot enter an event-time signature even with receipt-clock skew',()=>{
+ const futureSource=observation('09:36',{sourceAt:iso('09:36',33),availableAt:iso('09:36',30)});
+ const r=run([futureSource]);
+ assert.equal(r.ok,true);
+ if(r.ok){assert.equal(r.coverage.rejected,1);assert.equal(r.coverage.accepted,0);}
+});

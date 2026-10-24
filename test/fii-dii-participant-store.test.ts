@@ -128,7 +128,7 @@ test("rejects empty participant batches", async () => {
 test("central DB bootstrap initializes existing FII/DII schema without coupling failure to core persistence", async () => {
   const source = await readFile(new URL("../db.ts", import.meta.url), "utf8");
   assert.match(source, /import \{ ensureFiiDiiSchema \} from "\.\/fii-dii-store\.js";/);
-  assert.match(source, /await ensureFiiDiiSchema\(p\);/);
+  assert.match(source, /withStartupDatabaseClient\(p, client => ensureFiiDiiSchema\(client\)\)/);
   assert.match(source, /\[DB\] FII\/DII schema ready/);
   assert.match(source, /FII\/DII schema init failed -- core persistence remains available/);
 });

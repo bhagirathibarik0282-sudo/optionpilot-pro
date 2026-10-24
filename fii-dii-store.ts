@@ -84,7 +84,7 @@ export async function withFiiDiiDb<T>(fn: (pool: InstanceType<typeof Pool>) => P
   }
 }
 
-export async function ensureFiiDiiSchema(pool: InstanceType<typeof Pool>): Promise<void> {
+export async function ensureFiiDiiSchema(pool: Pick<InstanceType<typeof Pool>, "query">): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS fii_dii_cash_daily (
       trade_date DATE PRIMARY KEY,

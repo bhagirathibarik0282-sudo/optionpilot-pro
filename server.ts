@@ -35730,7 +35730,7 @@ async function restorePersistedState(): Promise<void> {
   // Bootstrap the user's existing volume session for the separate EOD cron.
   // No token is returned by any API or written into environment variables.
   if (driveSession.refreshTokenEncrypted) {
-    await persistConnectedDriveSession(driveSession.refreshTokenEncrypted, driveSession.connectedAt)
+    void persistConnectedDriveSession(driveSession.refreshTokenEncrypted, driveSession.connectedAt)
       .then(ok => console.log(`[DRIVE-AUTH] startup shared session readback=${ok}`))
       .catch(() => console.error("[DRIVE-AUTH] startup shared session persistence unavailable"));
   }
@@ -35749,7 +35749,7 @@ async function restorePersistedState(): Promise<void> {
     // Journal entries -- same-day only. An old day's entries would seed
     // deriveRollingVerdict/combineVerdicts with cross-day data those
     // functions were never designed to see.
-    const journalRows = await dbLoadRecent<JournalEntry>("journal_entry", JOURNAL_MAX_ENTRIES);
+    const journalRows = await dbLoadRecent<JournalEntry>("journal_entry", JOURNAL_MAX_ENTRIES, true);
     const todaysJournal = journalRows.filter((e) => istDateOf(e.timestamp) === today);
     journalEntries.push(...todaysJournal);
     if (todaysJournal.length > 0) console.log(`[DB] restored ${todaysJournal.length} journal entries for ${today}`);
@@ -35760,7 +35760,7 @@ async function restorePersistedState(): Promise<void> {
     // today -- on a fresh boot tradingDate starts as "", so without this
     // restore its very first call on an intra-day restart would silently
     // discard everything already recorded today.
-    const snapshotRows = await dbLoadRecent<RecorderSnapshot>("recorder_snapshot", RECORDER_MAX_SNAPSHOTS);
+    const snapshotRows = await dbLoadRecent<RecorderSnapshot>("recorder_snapshot", RECORDER_MAX_SNAPSHOTS, true);
     const todaysSnapshots = snapshotRows.filter((s) => istDateOf(s.backendTimestamp) === today);
     if (todaysSnapshots.length > 0) {
       recorderSession = {
@@ -35776,7 +35776,7 @@ async function restorePersistedState(): Promise<void> {
 
     // Rollover history -- one shared DB "kind" across all 3 symbols; split
     // back out per symbol and same-day-filtered for the same reason as above.
-    const rolloverRows = await dbLoadRecent<V2RolloverSnapshot>("rollover_snapshot", RECORDER_MAX_SNAPSHOTS * 3);
+    const rolloverRows = await dbLoadRecent<V2RolloverSnapshot>("rollover_snapshot", RECORDER_MAX_SNAPSHOTS * 3, true);
     const todaysRollover = rolloverRows.filter((r) => istDateOf(r.timestamp) === today);
     let restoredRolloverCount = 0;
     for (const snap of todaysRollover) {
@@ -35791,7 +35791,7 @@ async function restorePersistedState(): Promise<void> {
     // a same-day feed like the three above), so no date filter. Keep only
     // the LATEST row per date in case an upsert was saved more than once
     // across restarts, matching the app's own upsert-by-date behavior.
-    const fiiDiiRows = await dbLoadRecent<FiiDiiEntry>("fii_dii_entry", FII_DII_MAX_ENTRIES * 3);
+    const fiiDiiRows = await dbLoadRecent<FiiDiiEntry>("fii_dii_entry", FII_DII_MAX_ENTRIES * 3, true);
     const byDate = new Map<string, FiiDiiEntry>();
     for (const e of fiiDiiRows) byDate.set(e.date, e); // rows arrive oldest-first -- last write wins per date
     const dedupedFiiDii = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).slice(-FII_DII_MAX_ENTRIES);

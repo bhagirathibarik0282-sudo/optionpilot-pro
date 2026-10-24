@@ -68,3 +68,5 @@ Core and cash schema bootstrap and four startup-only history reads now use Postg
 Compact presentation must keep exact selected/next expiry headings and partial-history status visible. These use semantic headings/status elements outside the optional explanatory-note class. Hiding Details cannot hide incomplete requested coverage or expiry identity.
 
 OI/volume chart axes use clearly labelled lakh source units to fit mobile labels; exact counts remain in the table and point details. Nonnegative source series keep nonnegative axis bounds. This changes presentation only.
+
+Progressive window publication uses the renderer's normal input-identity invalidation rather than its forced full-cache reset. Only changed index/baseline inputs rebuild models, including lazy expiry context; explicit final refresh keeps its prior behavior. No displayed value is cached past its current input identity.

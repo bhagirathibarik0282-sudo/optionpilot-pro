@@ -47,12 +47,19 @@ function verifiedInput(raw:RagEvidence,includeOutcomes:boolean):ContextInput|nul
      add('SPOT',field==='vix'?'INDIA VIX':e.symbol,label,p.context?.[field],receipt,receipt,
        'market marker receipt; spot exchange-source time independently unverified');
    const q=p.pair?.[e.side.toLowerCase()];
-   if(q&&iso(q.quoteAt)&&iso(q.receiptAt)&&q.snapshotId){
-     add('PREMIUM',e.strike+' '+e.side,'LTP',q.price,iso(q.quoteAt)!,iso(q.receiptAt)!,
+   const quoteAt=iso(q?.quoteAt),quoteReceipt=iso(q?.receiptAt);
+   // The upstream H1 reader permits quotes stamped up to five seconds AFTER
+   // the market receipt. Such a quote cannot be known at receipt time:
+   // admission must use the LATER of those two timestamps. All selected
+   // premium points must also share the exact market marker receipt.
+   if(q&&quoteAt&&quoteReceipt&&quoteReceipt===receipt&&
+     typeof q.snapshotId==='string'&&q.snapshotId.trim()){
+     const quoteKnownAt=new Date(Math.max(Date.parse(quoteAt),Date.parse(quoteReceipt))).toISOString();
+     add('PREMIUM',e.strike+' '+e.side,'LTP',q.price,quoteAt,quoteKnownAt,
        'exact side/strike/expiry quote, snapshot '+String(q.snapshotId),{
          expiry:e.expiry,strike:e.strike,side:e.side
        });
-     add('PREMIUM',e.strike+' '+e.side,'OI',q.oi,iso(q.quoteAt)!,iso(q.receiptAt)!,
+     add('PREMIUM',e.strike+' '+e.side,'OI',q.oi,quoteAt,quoteKnownAt,
        'archived quote OI; not proof of OI-change time',{
          expiry:e.expiry,strike:e.strike,side:e.side
        });

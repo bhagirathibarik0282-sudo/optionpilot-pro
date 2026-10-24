@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Hono} from 'hono';
 import {projectRecordedRagLadder,mountRecorderEventContextLadderRoute} from '../rag-recorder-event-ladder-bridge.js';
+import {renderEventContextLadder} from '../rag-event-context-ladder-view.js';
 import {RECORDED_REPLAY_HTML,installRecordedReplay} from '../recorded-replay-view.js';
 const when=(t:string,seconds=0)=>new Date(Date.parse('2026-10-19T'+t+':00+05:30')+seconds*1000).toISOString();
 function snapshot(){
@@ -119,4 +120,15 @@ test('normalized PCR source alone never becomes canonical full-chain evidence',(
  const cr=projectRecordedRagLadder(canonical);
  assert.equal(cr.ok,true);
  if(cr.ok)assert.equal(cr.lanes.find(x=>x.offsetMinutes===0)?.cells.some(c=>c.family==='PCR_OI'),true);
+});
+
+test('one-click pinned recorder sample must not be labelled a detected event or cross-day similar-event retrieval',()=>{
+ const verified=projectRecordedRagLadder(snapshot());
+ assert.equal(verified.ok,true);
+ const html=renderEventContextLadder(verified);
+ assert.match(html,/Recorder → Selected snapshot evidence/);
+ assert.match(html,/Selected snapshot/);
+ assert.match(html,/NOT a detected PDH\/PDL, OI wall or PCR event/);
+ assert.match(html,/Similar-event retrieval is NOT performed/);
+ assert.doesNotMatch(html,/Event-wise RAG evidence/);
 });

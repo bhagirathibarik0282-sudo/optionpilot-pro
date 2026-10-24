@@ -70,3 +70,5 @@ Compact presentation must keep exact selected/next expiry headings and partial-h
 OI/volume chart axes use clearly labelled lakh source units to fit mobile labels; exact counts remain in the table and point details. Nonnegative source series keep nonnegative axis bounds. This changes presentation only.
 
 Progressive window publication uses the renderer's normal input-identity invalidation rather than its forced full-cache reset. Only changed index/baseline inputs rebuild models, including lazy expiry context; explicit final refresh keeps its prior behavior. No displayed value is cached past its current input identity.
+
+Indian number formatters are reused by precision within the renderer, instead of constructing locale-formatting options for every SVG point label. This caches formatter objects only; prices, OI, volume and source clocks remain input-derived.

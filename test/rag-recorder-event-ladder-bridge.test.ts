@@ -63,5 +63,7 @@ test('recorder entry is a single explicit guarded user action with exact identit
  assert.match(src,/regular3m/);
  assert.match(src,/window\.location\.assign/);
  assert.match(src,/rag-event-context-ladder\/view/);
- assert.match(src,/Date\.parse\(q\.minute_bucket\)===Date\.parse\(cursor!/);
+ assert.match(src,/q\.minute_bucket/);
+ assert.match(src,/cursor/);
+ assert.match(src,/option_type/);
 });

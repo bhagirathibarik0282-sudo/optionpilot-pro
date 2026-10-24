@@ -44,3 +44,20 @@ test('error rendering does not fabricate a market result',()=>{
  assert.match(html,/Evidence unavailable/);
  assert.ok(!html.includes('▼'));
 });
+
+test('before -> event -> after ordering follows time, not alphabetical phase names, and arrows reflect exact deltas',()=>{
+ const r=buildEventContextLadder({event,asOf:at('10:00'),
+   eventKnownAt:new Date(Date.parse(at('09:36'))+30000).toISOString(),
+   includeOutcomes:true,observations:[
+     o('PREMIUM','23150 PE','LTP',100,'09:33'),
+     o('PREMIUM','23150 PE','LTP',107,'09:36'),
+     o('PREMIUM','23150 PE','LTP',112,'09:39')
+   ]});
+ assert.equal(r.ok,true);
+ const html=renderEventContextLadder(r);
+ const section=html.split('CE/PE • exact contract')[1].split('</details>')[0];
+ assert.ok(section.indexOf('Before -3m')<section.indexOf('Event'));
+ assert.ok(section.indexOf('Event')<section.indexOf('After +3m'));
+ assert.match(section,/▲ \+7%/);
+ assert.match(section,/▲ \+4\.6729%/);
+});

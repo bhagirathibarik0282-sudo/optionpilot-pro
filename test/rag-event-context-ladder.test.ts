@@ -161,3 +161,21 @@ test('future exchange-source timestamp cannot enter an event-time signature even
  assert.equal(r.ok,true);
  if(r.ok){assert.equal(r.coverage.rejected,1);assert.equal(r.coverage.accepted,0);}
 });
+
+test('delta arrows require exact adjacent admitted 3m baseline, same source family and same option contract',()=>{
+ const exact=run([observation('09:33',{value:100}),observation('09:36',{value:107}),
+   observation('09:39',{value:112})],{includeOutcomes:true});
+ assert.equal(exact.ok,true);
+ if(exact.ok){
+   assert.equal(exact.lanes.find(x=>x.offsetMinutes===-3)?.cells[0]?.changePct,null);
+   assert.equal(exact.lanes.find(x=>x.offsetMinutes===0)?.cells[0]?.changePct,7);
+   assert.equal(exact.lanes.find(x=>x.offsetMinutes===3)?.cells[0]?.changePct,4.6729);
+ }
+ const mismatch=run([observation('09:33',{value:100,strike:23000}),
+   observation('09:36',{value:107})]);
+ assert.equal(mismatch.ok,true);
+ if(mismatch.ok)assert.equal(mismatch.lanes.find(x=>x.offsetMinutes===0)?.cells[0]?.changePct,null);
+ const missing=run([observation('09:30',{value:100}),observation('09:36',{value:107})]);
+ assert.equal(missing.ok,true);
+ if(missing.ok)assert.equal(missing.lanes.find(x=>x.offsetMinutes===0)?.cells[0]?.changePct,null);
+});

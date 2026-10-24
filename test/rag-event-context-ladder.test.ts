@@ -179,3 +179,13 @@ test('delta arrows require exact adjacent admitted 3m baseline, same source fami
  assert.equal(missing.ok,true);
  if(missing.ok)assert.equal(missing.lanes.find(x=>x.offsetMinutes===0)?.cells[0]?.changePct,null);
 });
+
+test('PCR ratio arrow is withheld when exact expiry remains but chain provenance changes',()=>{
+ const baseline=observation('09:33',{family:'PCR_OI',entity:'FULL PCR',metric:'OI PCR',
+   strike:undefined,side:undefined,expiry:'2026-10-19',value:1.0,provenance:'normalized-full-chain-A'});
+ const later=observation('09:36',{family:'PCR_OI',entity:'FULL PCR',metric:'OI PCR',
+   strike:undefined,side:undefined,expiry:'2026-10-19',value:1.2,provenance:'canonical-full-chain-B'});
+ const result=run([baseline,later]);
+ assert.equal(result.ok,true);
+ if(result.ok)assert.equal(result.lanes.find(x=>x.offsetMinutes===0)?.cells[0]?.changePct,null);
+});

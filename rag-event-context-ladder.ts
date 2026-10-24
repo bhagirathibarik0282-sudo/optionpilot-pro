@@ -129,7 +129,11 @@ export function buildEventContextLadder(input:ContextInput){
   for(const o of unique.values())if(o.family!=='FII_DII')admitted.set(seriesKey(o)+'|'+o.bucketAt,o);
   const measuredCell=(o:ContextObservation):ContextCell=>{
     const c=cell(o);
-    if(c.changePct!==null||!['LTP','OI','OI PCR'].includes(o.metric))return c;
+    // A supplied percentage is not proof of an admitted adjacent baseline.
+    // Recompute from qualified observations; never let caller-provided arrows
+    // bypass missing-data, contract or PCR source-continuity gates.
+    c.changePct=null;
+    if(!['LTP','OI','OI PCR'].includes(o.metric))return c;
     const t=utc(o.bucketAt);
     if(t===null)return c;
     const before=admitted.get(seriesKey(o)+'|'+new Date(t-180000).toISOString());

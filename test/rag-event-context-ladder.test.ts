@@ -189,3 +189,24 @@ test('PCR ratio arrow is withheld when exact expiry remains but chain provenance
  assert.equal(result.ok,true);
  if(result.ok)assert.equal(result.lanes.find(x=>x.offsetMinutes===0)?.cells[0]?.changePct,null);
 });
+
+test('caller-supplied delta cannot fill a missing baseline or override exact measured change',()=>{
+ const injected=observation('09:36',{value:107,changePct:999});
+ const missing=run([injected]);
+ assert.equal(missing.ok,true);
+ if(missing.ok)assert.equal(missing.lanes.find(l=>l.offsetMinutes===0)?.cells[0]?.changePct,null);
+ const measured=run([observation('09:33',{value:100}),injected]);
+ assert.equal(measured.ok,true);
+ if(measured.ok)assert.equal(measured.lanes.find(l=>l.offsetMinutes===0)?.cells[0]?.changePct,7);
+ const switched=run([
+   observation('09:33',{family:'PCR_OI',entity:'FULL PCR',metric:'OI PCR',value:1,
+     strike:undefined,side:undefined,provenance:'scope-A'}),
+   observation('09:36',{family:'PCR_OI',entity:'FULL PCR',metric:'OI PCR',value:1.1,
+     strike:undefined,side:undefined,provenance:'scope-B',changePct:10})
+ ]);
+ assert.equal(switched.ok,true);
+ if(switched.ok)assert.equal(switched.lanes.find(l=>l.offsetMinutes===0)?.cells[0]?.changePct,null);
+ const unsupported=run([observation('09:36',{metric:'OTHER_METRIC',changePct:123})]);
+ assert.equal(unsupported.ok,true);
+ if(unsupported.ok)assert.equal(unsupported.lanes.find(l=>l.offsetMinutes===0)?.cells[0]?.changePct,null);
+});

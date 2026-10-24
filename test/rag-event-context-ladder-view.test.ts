@@ -17,7 +17,7 @@ test('compact mobile ladder renders each family separately and preserves event t
   o('PCR_OI','FULL PCR','RATIO',1.1)
  ]});
  assert.equal(r.ok,true);const html=renderEventContextLadder(r);
- for(const word of ['Spot • PDH/PDL/PDC','CE/PE • exact contract','Full/Band PCR','Heavyweights','Sectors','FII/DII','Before -3m','After +3m','09:36','23150'])assert.ok(html.includes(word),word);
+ for(const word of ['Spot • PDH/PDL/PDC','CE/PE • exact contract','Full PCR','Heavyweights','Sectors','FII/DII','Before -3m','After +3m','09:36','23150'])assert.ok(html.includes(word),word);
  assert.match(html,/rcl-pdh/);
  assert.match(html,/No verified recorded observations for this event and family/);
  assert.match(html,/Each family is separate/);

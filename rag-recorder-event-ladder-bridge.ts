@@ -57,10 +57,14 @@ function verifiedInput(raw:RagEvidence,includeOutcomes:boolean):ContextInput|nul
          expiry:e.expiry,strike:e.strike,side:e.side
        });
    }
-   // Only explicitly resolved full-chain provenance, never a band substitute.
-   if(['Exact archived full-chain source','Normalized full-chain source','Exact canonical full-chain source'].includes(p.context?.fullPcrSource)){
-     add('PCR_OI','FULL PCR','OI PCR',p.context.fullPcr,receipt,receipt,
-       p.context.fullPcrSource+'; chain source exchange-age independently unverified',{expiry:e.expiry});
+   // A normalized chain label alone does NOT establish full-chain coverage,
+   // identical chain snapshot time, or synchronous OI source freshness. Only
+   // the upstream exact canonical scoped branch is admitted, and even that
+   // retains an explicit chain quote-age limitation in the evidence ledger.
+   if(p.context?.fullPcrSource==='Exact canonical full-chain source'){
+     add('PCR_OI','CANONICAL PCR','OI PCR',p.context.fullPcr,receipt,receipt,
+       'Canonical source/expiry identity corroborated upstream; chain quote-age independently unverified',
+       {expiry:e.expiry});
    }
    // Futures expiry/continuity, historical sector weights and intra-session
    // institutional flow are not validated by this particular replay response.

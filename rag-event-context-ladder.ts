@@ -31,6 +31,9 @@ export type ContextCell = {
 export type ContextLane = { phase: ContextPhase; offsetMinutes: number; timeIst: string; cells: ContextCell[] };
 export type ContextInput = {
   event: EventIdentity; observations: ContextObservation[]; asOf: string;
+  // When the triggering event was first OBSERVED/ACCEPTED, not its minute bucket.
+  // Mandatory to exclude quotes arriving after the event became known.
+  eventKnownAt: string;
   includeOutcomes?: boolean; offsets?: readonly number[];
 };
 const SAFETY = {readOnly:true,writesPerformed:false,brokerRequests:false,newDatabase:false,
@@ -65,18 +68,19 @@ function cell(o:ContextObservation):ContextCell {
     bucketAt:o.bucketAt,sourceAt:o.sourceAt,availableAt:o.availableAt,provenance:o.provenance};
 }
 export function buildEventContextLadder(input:ContextInput){
-  const at=eventMs(input.event),asOf=utc(input.asOf);
+  const at=eventMs(input.event),asOf=utc(input.asOf),knownAt=utc(input.eventKnownAt);
   const offsets=input.offsets??DEFAULT_OFFSETS;
   const fail=(reason:string)=>({ok:false,reason,mode:'READ_ONLY_EVENT_CONTEXT_LADDER_V1',safety:SAFETY});
-  if(at===null||asOf===null||asOf<at||!input.event.kind?.trim())return fail('INVALID_EVENT_OR_ASOF');
+  if(at===null||asOf===null||knownAt===null||knownAt<at||knownAt>=at+60000||asOf<knownAt||!input.event.kind?.trim())return fail('INVALID_EVENT_OR_ASOF');
   if(!Array.isArray(offsets)||!offsets.length||offsets.length>12||
     new Set(offsets).size!==offsets.length||offsets.some(x=>!VALID_OFFSETS.has(x)))return fail('INVALID_OFFSETS');
   if(!['NIFTY','SENSEX','BANKNIFTY'].includes(input.event.index))return fail('INVALID_INDEX');
   const sessionOpen=Date.parse(input.event.date+'T09:15:00+05:30');
   const sessionClose=Date.parse(input.event.date+'T15:30:00+05:30');
-  // A historical event match must not use evidence only received after its own
-  // minute. Retrospective +N outcomes are handled separately below.
-  const eventKnowledgeCutoff=Math.min(asOf,at+60000);
+  // A historical event match must use only observations known when the event
+  // actually became visible. Its bucket START is not a decision timestamp.
+  // Retrospective +N outcomes remain a separate opt-in lane.
+  const eventKnowledgeCutoff=knownAt;
   const blocked:string[]=[];
   const groups=new Map<string,ContextObservation[]>();
   let rejected=0;
@@ -142,6 +146,7 @@ export function buildEventContextLadder(input:ContextInput){
       'After-event checkpoints are retrospective only; not decision-time inputs.',
       'FII/DII is previous-published official context, not an intraday stream.',
       'Weightage and contribution need separately verified provenance.',
+      'EventKnownAt is an actual accepted receipt time; late-arriving records cannot enter event-time evidence.',
       'Late-arriving records cannot enter the event-time signature; outcomes remain separate.',
       'Upstream observation truth checks remain mandatory; no confidence, prediction or P&L.']};
 }

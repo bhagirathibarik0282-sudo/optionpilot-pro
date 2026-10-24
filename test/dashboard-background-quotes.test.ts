@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DashboardBackgroundQuoteCollector, QUOTE_SYMBOLS, buildBackgroundQuotes, backgroundQuoteFreshness, type BackgroundQuotes, type BackgroundQuoteDependencies } from '../dashboard-background-quotes.js';
+import { DashboardBackgroundQuoteCollector, coalesceBackgroundQuoteReads, QUOTE_SYMBOLS, buildBackgroundQuotes, backgroundQuoteFreshness, type BackgroundQuotes, type BackgroundQuoteDependencies } from '../dashboard-background-quotes.js';
 
 function fixture(overrides: Partial<BackgroundQuoteDependencies> = {}) {
   let now = new Date('2026-10-09T05:50:00Z'), calls = 0;
@@ -99,4 +99,45 @@ test('public dashboard read needs no browser Kite session and cannot trigger bro
     assert.equal(invalid.status, 400);
     assert.equal(externalCalls, 0);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('overlapping quote fallback reads use one DB attempt, never a cached market value', async () => {
+  let calls = 0, release!: (value: number | null) => void;
+  const read = coalesceBackgroundQuoteReads(() => {
+    calls++;
+    return new Promise<number | null>(resolve => { release = resolve; });
+  });
+  const a = read(), b = read(), c = read();
+  assert.equal(a, b);
+  assert.equal(b, c);
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  release(0);
+  assert.equal(await a, 0);
+  assert.equal(await c, 0);
+  const next = read();
+  await Promise.resolve();
+  assert.equal(calls, 2);
+  release(null);
+  assert.equal(await next, null);
+  const afterEmpty = read();
+  await Promise.resolve();
+  assert.equal(calls, 3);
+  release(4);
+  assert.equal(await afterEmpty, 4);
+});
+
+test('failed coalesced quote read releases its slot for a later retry', async () => {
+  let calls = 0;
+  const read = coalesceBackgroundQuoteReads(async () => {
+    calls++;
+    if (calls === 1) throw new Error('temporary-storage-failure');
+    return { receivedAt: '2026-10-23T04:15:00Z' };
+  });
+  const first = read(), simultaneous = read();
+  assert.equal(first, simultaneous);
+  await assert.rejects(first, /temporary-storage-failure/);
+  const second = await read();
+  assert.equal(calls, 2);
+  assert.equal(second.receivedAt, '2026-10-23T04:15:00Z');
 });

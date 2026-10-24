@@ -67,7 +67,9 @@ function verifiedInput(raw:RagEvidence,includeOutcomes:boolean):ContextInput|nul
    // Keep those family panels missing rather than manufacturing a row.
  }
  const end=e.date+'T15:30:00+05:30';
- return {event:identity,observations,asOf:end,eventKnownAt:available,includeOutcomes,
+ // Market-close 15:30 bucket may be received seconds after the bucket starts.
+ // Retrospective as-of allows that final minute, but never changes eventKnownAt.
+ return {event:identity,observations,asOf:new Date(Date.parse(end)+60000).toISOString(),eventKnownAt:available,includeOutcomes,
    offsets:[-30,-15,-3,0,3,15,30]};
 }
 export function projectRecordedRagLadder(raw:RagEvidence,includeOutcomes=true){

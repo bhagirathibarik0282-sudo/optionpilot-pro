@@ -1,6 +1,6 @@
 # Recorder → event-wise context ladder (draft integration contract)
 
-**Status:** isolated read-only adapter and tests in a draft branch. **Not wired into the dashboard, not a deployed feature, and not tested against real historical sector/constituent feeds.** No new database, upstream fetch, broker call, timer, selector, candidate, Telegram, seller or order authority.
+**Status (2026-10-24):** The read-only adapter, a Recorder **Open Event Context Ladder** click handler, Hono GET route and compact HTML view are all on draft PR #799. **It is not merged or deployed, and real historical sector/constituent time-series coverage and on-device/browser acceptance remain unverified.** No new database, upstream fetch, broker call, timer, selector, candidate, Telegram, seller or order authority.
 
 ## Scope
 
@@ -20,12 +20,12 @@ The existing saved-session / exact-premium RAG / market-investigation tools rema
 
 ## Important acceptance boundary
 
-The current component uses an injected verified evidence array and `eventKnownAt`; it does not yet implement a real event detector, extract a verified event acceptance time from stored snapshots, connect the recorder to this component, or claim fully validated RAG retrieval. If the existing event source cannot prove `eventKnownAt`, keep the event unavailable rather than filling with the minute end.
+The current Recorder button passes an exact recorded date/index/expiry/strike/side/3m cursor to a read-only RAG snapshot route. It extracts `eventKnownAt` from the existing snapshot's verified selected premium quote. It does **not** detect a PDH/PDL, OI-wall or PCR event; it does **not** retrieve similar events from other days and has **not** passed real production H1 snapshot or browser acceptance. If the existing event source cannot prove `eventKnownAt`, keep the event unavailable rather than filling with the minute end.
 
-## Suggested existing dashboard wiring (future, not included here)
+## Recorder wiring and remaining future work
 
-1. In Recorder: use existing **Open recorded day** navigation; do not add another recorder process. The same recorded cursor/date/index should be available to the event selection.
-2. At the selected PDH/PDL, wall, PCR or spread event, add a **Compare similar recorded events** action.
+1. **Implemented on draft:** A guarded **Open Event Context Ladder** button uses the existing Recorder cursor, date, index, expiry, strike and side, then opens the read-only route. It is deliberately a **selected snapshot**, not a detected market event.
+2. **Not yet implemented:** At a separately verified PDH/PDL, wall, PCR or spread event, add a **Compare similar recorded events** action. This must not be confused with the current selected-snapshot view.
 3. Use existing multi-day event matcher to **retrieve** matching event types and direction patterns, with verified exact index/expiry/contract source checks. Retrieve *separately* for Market, Premium, PCR/OI, Sector, Heavyweights and published FII/DII, showing per-family coverage. The first implementation can use deterministic filters; semantic retrieval only after a vetted evidence boundary.
 4. For each matched historical event, call an adapter that projects verified before/event/after checkpoints. Do **not** concatenate all days into one blended historical row.
 5. Render a compact column ladder: Timestamp | family | exact source | before | event | after | delta | note. Show absent source as unavailable with the reason. PDH red, PDC yellow, PDL green are **level labels**, not implicit price-direction predictions.
@@ -42,10 +42,10 @@ The current component uses an injected verified evidence array and `eventKnownAt
 - Draft PR #693: separate RAG retrieval-boundary contract (review integration rather than duplicating it).
 - Draft PR #777: option-leg freshness hardening (review before relaxing any evidence gate).
 
-## Validation command (not yet executed against repository CI)
+## Validation command (included in GitHub PR CI)
 
 \`\`\`bash
-NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts
+NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts test/rag-event-context-ladder-view.test.ts test/rag-recorder-event-ladder-bridge.test.ts test/rag-recorded-spread-source-audit.test.ts test/recorded-replay-view.test.ts
 \`\`\`
 
-The pure adapter runs without database or broker setup, but a successful isolated test does not prove live-market availability, existing RAG route integration, or the fidelity of absent historical constituent data.
+CI fixtures exercise route identity, snapshot labelling and safety, but a passing isolated test does not prove live-market availability, actual production H1 response identity, mobile browser behavior, or fidelity of absent historical constituent data.

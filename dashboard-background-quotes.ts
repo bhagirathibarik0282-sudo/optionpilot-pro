@@ -38,6 +38,22 @@ export function backgroundQuoteFreshness(snapshot: BackgroundQuotes | null, now:
   return snapshot && snapshot.tradingDate === indianTradingDateAt(now) && ageMs >= 0 && ageMs <= 6 * 60_000
     ? 'RECENT_RECEIPT' : snapshot ? 'STALE' : 'UNAVAILABLE';
 }
+// Coalesce simultaneous fallback reads without caching quotes across requests.
+// A settled success, empty result or failure always permits a new source read.
+export function coalesceBackgroundQuoteReads<T>(read: () => Promise<T>): () => Promise<T> {
+  let inFlight: Promise<T> | null = null;
+  return () => {
+    if (inFlight) return inFlight;
+    const current = Promise.resolve().then(read);
+    inFlight = current;
+    void current.then(
+      () => { if (inFlight === current) inFlight = null; },
+      () => { if (inFlight === current) inFlight = null; },
+    );
+    return current;
+  };
+}
+
 export interface BackgroundQuoteDependencies {
   now(): Date;
   authority(): Promise<{ accessToken: string; expiresAt: number } | null>;

@@ -209,4 +209,15 @@ test('caller-supplied delta cannot fill a missing baseline or override exact mea
  const unsupported=run([observation('09:36',{metric:'OTHER_METRIC',changePct:123})]);
  assert.equal(unsupported.ok,true);
  if(unsupported.ok)assert.equal(unsupported.lanes.find(l=>l.offsetMinutes===0)?.cells[0]?.changePct,null);
+ const publication=run([observation('09:36',{
+   family:'FII_DII',entity:'FII',metric:'NET_CRORE',source:'OFFICIAL_FII_DII',
+   sessionDate:'2026-10-16',publishedAt:'2026-10-16T12:05:00Z',
+   sourceAt:'2026-10-16T12:00:00Z',availableAt:'2026-10-16T12:05:00Z',
+   value:-500,changePct:999,expiry:undefined,strike:undefined,side:undefined
+ })]);
+ assert.equal(publication.ok,true);
+ if(publication.ok){
+   assert.equal(publication.institutionalContext.length,1);
+   assert.equal(publication.institutionalContext[0].changePct,null);
+ }
 });

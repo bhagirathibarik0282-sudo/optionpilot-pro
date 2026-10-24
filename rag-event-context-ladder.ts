@@ -62,7 +62,9 @@ function cell(o:ContextObservation):ContextCell {
   const weight= n(o.weightPct);
   const contribution=n(o.contribution);
   return {family:o.family,entity:o.entity,metric:o.metric,value:n(o.value),
-    changePct:n(o.changePct),
+    // No publication or intraday cell may inherit an unproven caller arrow.
+    // Intraday deltas are filled only by measuredCell's admitted 3m baseline.
+    changePct:null,
     weightPct:weight!==null && weight>=0 && weight<=100 && !!o.weightSource?.trim()?weight:null,
     contribution:contribution!==null && !!o.contributionSource?.trim()?contribution:null,
     bucketAt:o.bucketAt,sourceAt:o.sourceAt,availableAt:o.availableAt,provenance:o.provenance};
@@ -132,7 +134,6 @@ export function buildEventContextLadder(input:ContextInput){
     // A supplied percentage is not proof of an admitted adjacent baseline.
     // Recompute from qualified observations; never let caller-provided arrows
     // bypass missing-data, contract or PCR source-continuity gates.
-    c.changePct=null;
     if(!['LTP','OI','OI PCR'].includes(o.metric))return c;
     const t=utc(o.bucketAt);
     if(t===null)return c;

@@ -1,6 +1,6 @@
 import { dbQuerySafe } from './db.js';
 import { resolveKiteAuthoritySession } from './kite-session-authority.js';
-import { DashboardBackgroundQuoteCollector, backgroundQuoteFreshness, type BackgroundQuotes, type QuoteMap } from './dashboard-background-quotes.js';
+import { DashboardBackgroundQuoteCollector, backgroundQuoteFreshness, coalesceBackgroundQuoteReads, type BackgroundQuotes, type QuoteMap } from './dashboard-background-quotes.js';
 
 const KIND = 'DASHBOARD_BACKGROUND_QUOTES_V1';
 const collector = new DashboardBackgroundQuoteCollector({
@@ -34,13 +34,21 @@ export function startDashboardBackgroundQuotes(): void {
   void run();
 }
 
+// One in-flight persisted snapshot read across simultaneous symbol requests.
+// Values are not cached between requests, and unsuccessful reads are retryable.
+const readPersistedSnapshot = coalesceBackgroundQuoteReads(async (): Promise<BackgroundQuotes | null> => {
+  const result = await dbQuerySafe<{ payload: BackgroundQuotes }>('SELECT payload FROM app_state_log WHERE kind=$1 ORDER BY created_at DESC,id DESC LIMIT 1', [KIND]);
+  return result?.rows[0]?.payload ?? null;
+});
+
 // Reading the dashboard never causes a broker request. Only public market
 // observations are returned; no account, session, token or order data.
 export async function readDashboardBackgroundQuotes() {
   let snapshot = collector.snapshot;
   if (!snapshot) {
-    const result = await dbQuerySafe<{ payload: BackgroundQuotes }>('SELECT payload FROM app_state_log WHERE kind=$1 ORDER BY created_at DESC,id DESC LIMIT 1', [KIND]);
-    snapshot = result?.rows[0]?.payload ?? null;
+    snapshot = await readPersistedSnapshot();
+    // Prefer an observation recorded while the persisted fallback was pending.
+    snapshot = collector.snapshot ?? snapshot;
   }
   return { snapshot, status: collector.status, lastAttemptAt: collector.lastAttemptAt,
     freshness: backgroundQuoteFreshness(snapshot, new Date()),

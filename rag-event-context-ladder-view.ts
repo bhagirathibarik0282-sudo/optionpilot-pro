@@ -27,12 +27,12 @@ function row(c:ContextCell,phase:string,time:string):string{
 export const EVENT_CONTEXT_LADDER_CSS=`#event-context-ladder{max-width:100%}.rcl-card{background:#0b1524;color:#f0f7ff;border:1px solid #33546b;border-radius:12px;padding:10px;font:14px/1.5 system-ui}.rcl-card h3{margin:0 0 6px;font-size:18px}.rcl-meta{color:#caedff;font-weight:600;overflow-wrap:anywhere}.rcl-note,.rcl-unavailable{color:#b8c9d8;font-size:12px}.rcl-card details{border-top:1px solid #284157;padding:8px 0}.rcl-card summary{cursor:pointer;min-height:40px;color:#81daf7;font-weight:650}.rcl-card summary span{float:right;color:#b8c9d8;font-weight:400}.rcl-scroll{overflow-x:auto;max-width:100%}.rcl-card table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:12px}.rcl-card th,.rcl-card td{padding:6px 7px;border-bottom:1px solid #284157;white-space:nowrap;text-align:left}.rcl-card td:last-child{white-space:normal;min-width:150px;overflow-wrap:anywhere}.rcl-card td small{display:block;color:#a9bed0;font-size:10px}.rcl-number{font-weight:650}.rcl-up,.rcl-pdl{color:#3fe099}.rcl-down,.rcl-pdh{color:#ff6d78}.rcl-flat,.rcl-pdc{color:#ffd34d}@media(max-width:500px){.rcl-card{padding:8px}.rcl-card th,.rcl-card td{padding:6px 5px}}@media(prefers-reduced-motion:reduce){.rcl-card *{animation:none!important}}`;
 export function renderEventContextLadder(result:LadderResult):string{
  if(!result.ok) return '<section class="rcl-card"><h3>Recorder → Event Context</h3><p role="status">Evidence unavailable · '+esc(result.reason)+'</p></section>';
- const sourceRows=result.lanes.flatMap(l=>l.cells.map(c=>({phase:l.phase==='BEFORE'?'Before '+l.offsetMinutes+'m':l.phase==='EVENT'?'Event':'After +'+l.offsetMinutes+'m',time:l.timeIst,c})));
+ const sourceRows=result.lanes.flatMap(l=>l.cells.map(c=>({phase:l.phase==='BEFORE'?'Before '+l.offsetMinutes+'m':l.phase==='EVENT'?'Event':'After +'+l.offsetMinutes+'m',order:l.offsetMinutes,time:l.timeIst,c})));
  const head='<thead><tr><th>IST</th><th>Entity</th><th>Parameter</th><th>Value</th><th>Δ%</th><th>Weight%</th><th>Contribution</th><th>Source time / evidence</th></tr></thead>';
  const sections=FAMILIES.map(f=>{
-   const arr=f==='FII_DII'?result.institutionalContext.map(c=>({phase:'Published '+c.sessionDate,time:c.publishedAt,c})):
+   const arr=f==='FII_DII'?result.institutionalContext.map(c=>({phase:'Published '+c.sessionDate,order:0,time:c.publishedAt,c})):
      sourceRows.filter(x=>x.c.family===f);
-   const items=arr.sort((a,b)=>a.phase.localeCompare(b.phase)||((b.c.weightPct??-1)-(a.c.weightPct??-1))||a.c.entity.localeCompare(b.c.entity));
+   const items=arr.sort((a,b)=>a.order-b.order||((b.c.weightPct??-1)-(a.c.weightPct??-1))||a.c.entity.localeCompare(b.c.entity)||a.c.metric.localeCompare(b.c.metric));
    const contents=items.length?'<div class="rcl-scroll"><table>'+head+'<tbody>'+
     items.map(x=>row(x.c,x.phase,x.time)).join('')+'</tbody></table></div>':
     '<p class="rcl-unavailable">No verified recorded observations for this event and family. Not neutral or zero.</p>';

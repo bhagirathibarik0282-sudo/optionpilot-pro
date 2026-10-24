@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -20,4 +22,4 @@ jobs:
       - name: Run event-wise context and publication-cutoff regressions
         run: NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts
       - name: Verify patch whitespace
-        run: git diff --check HEAD^ HEAD
+        run: git diff --check origin/main...HEAD

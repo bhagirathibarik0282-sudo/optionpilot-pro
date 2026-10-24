@@ -139,7 +139,10 @@ export function installMarketBook(api:any) {
  const fmt=(v:any,d=2)=>{if(n(v)===null)return 'Unavailable';let f=numberFormats.get(d);if(!f){f=new Intl.NumberFormat('en-IN',{maximumFractionDigits:d});numberFormats.set(d,f);}return f.format(Number(v));};
  const sign=(v:any,d=2)=>n(v)===null?'Unavailable':(v>0?'+':'')+fmt(v,d);
  const pct=(v:any)=>n(v)===null?'Unavailable':sign(v)+'%';
- const when=(v:any)=>v&&Number.isFinite(Date.parse(v))?new Date(v).toLocaleString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false})+' IST':'Unavailable';
+ // Reuse locale configuration, never formatted market values or source clocks.
+ const dateFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+ const clockFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false});
+ const when=(v:any)=>v&&Number.isFinite(Date.parse(v))?dateFormat.format(new Date(v))+' IST':'Unavailable';
  const note=(v:any,explanation=false)=>'<p class="mb-note"'+(explanation?' data-op-explanation':'')+'>'+esc(v)+'</p>';
  const empty=(v:any)=>'<div class="mb-empty">'+esc(v)+'</div>';
  const metric=(m:any,label:string,d=2)=>'<span class="mb-label">'+esc(label)+'</span><strong class="mb-number">'+fmt(m.value,d)+'</strong>'+(m.day?spotChanges(m):'<div class="mb-value">'+fmt(m.from,d)+' → '+fmt(m.value,d)+' · Δ '+sign(m.delta,d)+' · '+pct(m.percent)+'</div>'+note(when(m.fromAt)+' → '+when(m.at)+' · '+m.reason));
@@ -197,7 +200,7 @@ export function installMarketBook(api:any) {
   const series=[{m:a.pcr,key:'pcr',name:'FULL PCR · ratio',color:'#ff9f89'},{m:a.spot,key:'spot',name:'SPOT · points',color:'#49f4ff'}];
   const pts=series.flatMap(s=>(s.m.points||[]).filter((p:any)=>n(p.value)!==null&&Number.isFinite(Date.parse(p.at))&&Date.parse(p.at)>=from));
   if(!pts.length)return empty('Spot / full PCR observations unavailable for this chart range.');
-  const chartTime=(at:number)=>new Date(at).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hour12:false})+' IST';
+  const chartTime=(at:number)=>clockFormat.format(new Date(at))+' IST';
   const start=frame?.start??Math.min(...pts.map((p:any)=>Date.parse(p.at))),end=frame?.end??Math.max(...pts.map((p:any)=>Date.parse(p.at))),x=(at:string)=>82+(Date.parse(at)-start)/Math.max(end-start,1)*294;
   let svg='<svg class="mb-chart mb-dual-chart" viewBox="0 0 480 330" role="img" aria-label="'+esc(a.symbol+' actual spot and full PCR; independent left PCR and right spot axes')+'">';
   series.forEach((s,i)=>{

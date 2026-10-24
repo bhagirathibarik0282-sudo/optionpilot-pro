@@ -333,3 +333,23 @@ test('band OI and traded volume use independent source fields and exact per-cont
  const flat=structuredClone(c);flat.options.forEach(r=>{r.volume=1000;});b=run(flat,{expiryEvidence:true,window:'1m'}).expiryEvidence!.band;assert.equal(b.latest.intervalCeVolume,0);assert.equal(b.latest.intervalPeVolume,0);assert.equal(b.latest.intervalVolumePcr,null);
  const gap=structuredClone(c);gap.market=gap.market.filter(r=>r.minute_bucket!==at(2));b=run(gap,{expiryEvidence:true,window:'1m'}).expiryEvidence!.band;assert.equal(b.latest.intervalVolumePcr,null);
 });
+
+test('replay reuses presentation formatters while reading changed source values and times',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1],nodes=new Map<string,any>();
+ for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ let dates=0,numbers=0;
+ const intl={DateTimeFormat:function(...args:any[]){dates++;return Reflect.construct(Intl.DateTimeFormat,args);},NumberFormat:function(...args:any[]){numbers++;return Reflect.construct(Intl.NumberFormat,args);}};
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Intl:intl,Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
+ const current=fixture(),state={date:tradeDate,recordedDates,current:{NIFTY:current},history:{},baseline:{},health:{}};
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state};vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);
+ nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'9'}})}});
+ const page=nodes.get('mb-page'),before=page.innerHTML,formats={dates,numbers};
+ assert(before.includes('22,018'));assert(before.includes('09:33 IST'));
+ vm.runInContext('installed.render(true)',ctx);
+ assert.equal(page.innerHTML,before);assert.deepEqual({dates,numbers},formats,'force redraw creates no per-point formatters');
+ current.market.at(-1)!.spot_ltp=22018.25;
+ current.market.at(-1)!.minute_bucket=at(19);
+ vm.runInContext('installed.render(true)',ctx);
+ assert(page.innerHTML.includes('22,018.25'));assert(page.innerHTML.includes('09:34 IST'));assert.notEqual(page.innerHTML,before,'formatted market values and times are never cached');
+ assert.deepEqual({dates,numbers},formats);
+});

@@ -25,7 +25,7 @@ test('recorded snapshot source returns separate observed spot/premium/full PCR l
  assert.equal(projected.ok,true);if(!projected.ok)return;
  assert.equal(projected.lanes.find(x=>x.offsetMinutes===0)?.cells.some(x=>x.family==='PREMIUM'&&x.value===107),true);
  assert.equal(projected.lanes.find(x=>x.offsetMinutes===3)?.cells.some(x=>x.family==='PREMIUM'&&x.value===112),true);
- assert.equal(projected.lanes.find(x=>x.offsetMinutes===0)?.cells.some(x=>x.family==='PCR_OI'),true);
+ assert.equal(projected.lanes.find(x=>x.offsetMinutes===0)?.cells.some(x=>x.family==='PCR_OI'),false); // normalized source is insufficient
  assert.equal(projected.lanes.some(x=>x.cells.some(c=>c.family==='FUTURES'||c.family==='SECTOR'||c.family==='HEAVYWEIGHT')),false);
  assert.equal(projected.institutionalContext.length,0);
 });
@@ -106,4 +106,17 @@ test('an absent event-time exact premium must block the entire event page, even 
  const projected=projectRecordedRagLadder(raw);
  assert.equal(projected.ok,false);
  if(!projected.ok)assert.equal(projected.reason,'EVENT_PREMIUM_SOURCE_NOT_ADMITTED');
+});
+
+test('normalized PCR source alone never becomes canonical full-chain evidence',()=>{
+ const normalized=snapshot();
+ const nr=projectRecordedRagLadder(normalized);
+ assert.equal(nr.ok,true);
+ if(nr.ok)assert.equal(nr.lanes.every(x=>x.cells.every(c=>c.family!=='PCR_OI')),true);
+ const canonical=snapshot();
+ for(const p of [...canonical.beforeAndAt,...canonical.outcomes])
+   p.context.fullPcrSource='Exact canonical full-chain source';
+ const cr=projectRecordedRagLadder(canonical);
+ assert.equal(cr.ok,true);
+ if(cr.ok)assert.equal(cr.lanes.find(x=>x.offsetMinutes===0)?.cells.some(c=>c.family==='PCR_OI'),true);
 });

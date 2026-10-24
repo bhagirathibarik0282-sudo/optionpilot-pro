@@ -91,3 +91,46 @@ test('invalid offset and malformed availableAt fail closed; read-only safety is 
   if(r.ok){assert.equal(r.coverage.rejected,1);assert.equal(r.safety.createsOrders,false);
     assert.equal(r.safety.newDatabase,false);}
 });
+
+test('event signature cannot leak a late-delivered observation even with a later as-of',()=>{
+  const late=observation('09:36',{availableAt:iso('09:38')});
+  const r=run([late],{asOf:iso('10:10')});
+  assert.equal(r.ok,true);
+  if(r.ok){assert.equal(r.status,'NO_ACCEPTED_EVIDENCE');assert.equal(r.coverage.accepted,0);}
+});
+test('quotes after bucket minute or outside regular session are never retrofitted',()=>{
+  const r=run([observation('09:36',{availableAt:iso('09:37')}),
+    observation('09:36',{sourceAt:iso('09:37')}),
+    observation('09:06')],{offsets:[-30,-15,-3,0]});
+  assert.equal(r.ok,true);
+  if(r.ok)assert.equal(r.coverage.accepted,0);
+});
+test('PCR/OI for another expiry cannot be attributed to the selected premium',()=>{
+  const r=run([
+    observation('09:36',{family:'PCR_OI',entity:'Full PCR',metric:'RATIO',expiry:'2026-10-26',strike:undefined,side:undefined}),
+    observation('09:36',{family:'PCR_OI',entity:'Full PCR',metric:'RATIO',expiry:'2026-10-19',strike:undefined,side:undefined,value:1.1})
+  ]);
+  assert.equal(r.ok,true);
+  if(r.ok){assert.equal(r.coverage.accepted,1);assert.equal(r.coverage.rejected,1);}
+});
+test('weights greater than 100 percent and blank provenance are withheld',()=>{
+  const r=run([
+    observation('09:36',{family:'HEAVYWEIGHT',entity:'RELIANCE',metric:'CHANGE_PCT',
+      weightPct:101,weightSource:'official',contribution:7,contributionSource:' '})
+  ]);
+  assert.equal(r.ok,true);
+  if(r.ok) {
+    const c=r.lanes.find(x=>x.offsetMinutes===0)?.cells[0];
+    assert.equal(c?.weightPct,null);
+    assert.equal(c?.contribution,null);
+  }
+});
+test('FII publication chronology must be internally consistent',()=>{
+  const r=run([observation('09:36',{
+    family:'FII_DII',entity:'FII',metric:'NET_CRORE',source:'OFFICIAL_FII_DII',
+    sessionDate:'2026-10-16',sourceAt:'2026-10-16T12:06:00Z',
+    publishedAt:'2026-10-16T12:05:00Z',availableAt:'2026-10-16T12:07:00Z'
+  })]);
+  assert.equal(r.ok,true);
+  if(r.ok)assert.equal(r.institutionalContext.length,0);
+});

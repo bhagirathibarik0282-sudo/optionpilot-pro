@@ -64,13 +64,17 @@ function verifiedInput(raw:RagEvidence,includeOutcomes:boolean):ContextInput|nul
          expiry:e.expiry,strike:e.strike,side:e.side
        });
    }
-   // A normalized chain label alone does NOT establish full-chain coverage,
-   // identical chain snapshot time, or synchronous OI source freshness. Only
-   // the upstream exact canonical scoped branch is admitted, and even that
-   // retains an explicit chain quote-age limitation in the evidence ledger.
-   if(p.context?.fullPcrSource==='Exact canonical full-chain source'){
-     add('PCR_OI','CANONICAL PCR','OI PCR',p.context.fullPcr,receipt,receipt,
-       'Canonical source/expiry identity corroborated upstream; chain quote-age independently unverified',
+   // Source label is NOT temporal proof. Canonical evidence must carry its
+   // verified source timestamp from the upstream exact H1 snapshot. Receipt
+   // at the market marker cannot predate this source (look-ahead guard).
+   // Even with the timestamp, individual chain-leg quote ages are unverified.
+   const pcrAt=iso(p.context?.fullPcrCanonicalSourceAt);
+   if(p.context?.fullPcrSource==='Exact canonical full-chain source'&&
+     pcrAt&&Date.parse(pcrAt)>=Date.parse(bucket)&&
+     Date.parse(pcrAt)<Date.parse(bucket)+60000){
+     const pcrKnownAt=new Date(Math.max(Date.parse(pcrAt),Date.parse(receipt))).toISOString();
+     add('PCR_OI','CANONICAL PCR','OI PCR',p.context.fullPcr,pcrAt,pcrKnownAt,
+       'Exact canonical source time corroborated upstream; individual chain quote-age remains unverified',
        {expiry:e.expiry});
    }
    // Futures expiry/continuity, historical sector weights and intra-session

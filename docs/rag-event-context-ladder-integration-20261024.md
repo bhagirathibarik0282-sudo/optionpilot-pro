@@ -49,3 +49,38 @@ NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts tes
 \`\`\`
 
 CI fixtures exercise route identity, snapshot labelling and safety, but a passing isolated test does not prove live-market availability, actual production H1 response identity, mobile browser behavior, or fidelity of absent historical constituent data.
+
+## Read-only query-plan diagnostic (25 Oct 2026)
+
+The independently observed one-minute 19 Oct 10:45 NIFTY request reported
+26,033.1ms for the canonical read and 5,809.6ms for markers. These durations
+identify a measured bottleneck, not a verified query plan or root cause.
+
+In an already authorized environment with its existing `DATABASE_URL`, run:
+
+```bash
+node --import tsx scripts/inspect-h1-replay-plan.ts
+```
+
+This manual diagnostic captures the marker and canonical SQL from the actual
+`runH1ReplayRead` builder using an empty injected reader, then sends only those
+two `EXPLAIN (FORMAT JSON, COSTS TRUE)` statements in a `BEGIN READ ONLY`
+transaction. It uses a 5s statement timeout, 1s lock timeout and always rolls
+back. It does **not** use `ANALYZE`, execute the archive SELECTs, expose an HTTP
+endpoint, change schema/indexes, deploy, or print credentials/raw DB errors.
+It is not wired into application startup or any scheduled job. Provider TLS
+configuration is left to the existing connection URL, without disabling
+certificate verification in this script.
+
+Inspect the returned scan/index nodes, filter placement and estimated rows
+before selecting an optimization. A created-at fence is not automatically
+equivalent to a source-time filter: it can omit late-imported records. Any
+proposed rewrite must preserve source time, snapshot identity, duplicates,
+truth-marker semantics and late imports before performance is claimed.
+
+**Execution status:** code and mocked regression tests are available; the live
+database plan has **not** been obtained. The current Railway OAuth connector
+returns variable names only and exposes no SQL-execution operation; the local
+runtime has no existing database credential. This is an access limitation,
+not evidence that the SQL plan or database is broken. Do not claim that local
+tests, captured SQL or a fixture plan establish a production speedup.

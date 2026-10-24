@@ -12,6 +12,10 @@ on:
       - 'test/rag-recorded-spread-source-audit.test.ts'
       - 'recorded-replay-view.ts'
       - 'research-router.ts'
+      - 'h1-replay-http.ts'
+      - 'h1-replay-plan-audit.ts'
+      - 'scripts/inspect-h1-replay-plan.ts'
+      - 'test/h1-replay-plan-audit.test.ts'
       - '.github/workflows/rag-event-context-ladder-ci.yml'
 permissions:
   contents: read
@@ -28,6 +32,6 @@ jobs:
       - name: Install existing dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Run event-wise context and publication-cutoff regressions
-        run: NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts test/rag-event-context-ladder-view.test.ts test/rag-recorder-event-ladder-bridge.test.ts test/rag-recorded-spread-source-audit.test.ts test/recorded-replay-view.test.ts
+        run: NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts test/rag-event-context-ladder-view.test.ts test/rag-recorder-event-ladder-bridge.test.ts test/rag-recorded-spread-source-audit.test.ts test/recorded-replay-view.test.ts test/h1-replay-plan-audit.test.ts
       - name: Verify patch whitespace
         run: git diff --check origin/main...HEAD

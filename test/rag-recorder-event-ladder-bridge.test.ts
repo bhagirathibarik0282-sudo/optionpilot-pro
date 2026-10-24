@@ -174,4 +174,39 @@ test('real H1 RAG builder output projects into Recorder ladder without mocking R
  assert.equal(projected.institutionalContext.length,0);
  assert.equal(projected.lanes.every(l=>l.cells.every(c=>c.family!=='FUTURES'&&
    c.family!=='HEAVYWEIGHT'&&c.family!=='SECTOR'&&c.family!=='FII_DII')),true);
+ // The existing H1 quote validator allows -5s quote age. A quote stamped 4s
+ // AFTER market receipt must be available no earlier than its quote timestamp.
+ const selectedQuote=options.find(q=>q.option_type==='PE'&&
+   q.minute_bucket===new Date('2026-10-13T09:36:00+05:30').toISOString());
+ assert.ok(selectedQuote);
+ selectedQuote.quote_timestamp=new Date(Date.parse(selectedQuote.quote_timestamp)+4000).toISOString();
+ const late=buildRagPremiumSnapshot(picked.value,current,previous);
+ assert.equal(late.ok,true);
+ const lateProjection=projectRecordedRagLadder(late);
+ assert.equal(lateProjection.ok,true);
+ if(lateProjection.ok){
+   const cell=lateProjection.lanes.find(l=>l.offsetMinutes===0)?.cells.find(c=>c.family==='PREMIUM'&&c.metric==='LTP');
+   assert.equal(cell?.sourceAt,selectedQuote.quote_timestamp);
+   assert.equal(cell?.availableAt,selectedQuote.quote_timestamp);
+ }
+});
+
+test('selected premium is never admitted before quote timestamp or across marker receipts',()=>{
+ const source=snapshot();
+ source.beforeAndAt[1].pair.pe.quoteAt=when('09:36',29);
+ source.event.availableAt=when('09:36',29);
+ const projected=projectRecordedRagLadder(source);
+ assert.equal(projected.ok,true);
+ if(projected.ok){
+   const premium=projected.lanes.find(l=>l.offsetMinutes===0)?.cells.find(c=>c.family==='PREMIUM'&&c.metric==='LTP');
+   assert.equal(premium?.availableAt,when('09:36',29));
+ }
+ const premature=snapshot();
+ premature.beforeAndAt[1].pair.pe.quoteAt=when('09:36',29);
+ assert.equal(projectRecordedRagLadder(premature).ok,false,
+   'a 09:36:29 quote must not be usable at an event known at 09:36:25');
+ const mismatched=snapshot();
+ mismatched.beforeAndAt[1].pair.pe.receiptAt=when('09:36',26);
+ assert.equal(projectRecordedRagLadder(mismatched).ok,false,
+   'selected premium receipt must match its exact H1 market marker');
 });

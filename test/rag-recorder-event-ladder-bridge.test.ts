@@ -20,7 +20,7 @@ function snapshot(){
   outcomes:[point('09:39',3,112)]
  };
 }
-test('recorded snapshot source returns separate observed spot/premium/full PCR lanes without inventing futures and sector history',()=>{
+test('recorded snapshot keeps spot/premium lanes separate, withholds normalized PCR and sector history',()=>{
  const projected=projectRecordedRagLadder(snapshot());
  assert.equal(projected.ok,true);if(!projected.ok)return;
  assert.equal(projected.lanes.find(x=>x.offsetMinutes===0)?.cells.some(x=>x.family==='PREMIUM'&&x.value===107),true);

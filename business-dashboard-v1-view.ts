@@ -489,7 +489,10 @@ async function getReplayWindow(label,symbol,date,from,to,depth=0,replayScope='CO
  }
 }
 async function getReplay(label,symbol,date,from,to,replayScope='CORE',onPart=null){
+ // Completed CORE sessions amortize archive-read overhead without adding concurrency.
+ // Live-day, FULL research and baseline reads keep their existing one-hour bound.
  const today=new Date(Date.now()+19800000).toISOString().slice(0,10),now=new Date(Date.now()+19800000),nowMinute=now.getUTCHours()*60+now.getUTCMinutes(),requestedTo=minuteNumber(to),effectiveTo=date===today&&requestedTo!==null&&requestedTo>nowMinute?minuteText(nowMinute):to,windows=replayWindows(from,effectiveTo);if(!windows.length)throw Error('No completed replay minute exists in the selected window yet.');
+ if(onPart&&date<today&&replayScope==='CORE'&&windows.length>2){const newest=windows.pop();windows.splice(0,windows.length,...replayWindows(from,newest[0],120),newest);}
  if(onPart)windows.reverse();const parts=[],request={symbol,tradeDate:date,fromTime:from,toTime:effectiveTo,requestedToTime:to,scope:replayScope};
  for(const [a,b] of windows){const suffix=windows.length>1?' '+a+'–'+b:'';parts.push(await getReplayWindow(label+suffix,symbol,date,a,b,0,replayScope));if(onPart)onPart({...mergeReplayParts(parts,request),loadingProgress:{completed:parts.length,total:windows.length}});}
  return mergeReplayParts(parts,request);

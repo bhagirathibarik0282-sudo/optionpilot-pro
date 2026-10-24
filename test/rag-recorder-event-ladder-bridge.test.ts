@@ -99,3 +99,11 @@ test('even a well-formed RAG snapshot for a different selected contract fails cl
  assert.match(html,/REQUEST_RESPONSE_CONTRACT_IDENTITY_MISMATCH/);
  assert.ok(!html.includes('23120'));
 });
+
+test('an absent event-time exact premium must block the entire event page, even if spot exists',()=>{
+ const raw=snapshot();
+ raw.beforeAndAt=[raw.beforeAndAt[0]];
+ const projected=projectRecordedRagLadder(raw);
+ assert.equal(projected.ok,false);
+ if(!projected.ok)assert.equal(projected.reason,'EVENT_PREMIUM_SOURCE_NOT_ADMITTED');
+});

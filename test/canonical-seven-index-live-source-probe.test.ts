@@ -63,3 +63,39 @@ test("fails closed on HTTP or network failure", async () => {
   assert.ok(result.blockers.some((value) => value.includes("HTTP_403")));
   assert.ok(result.blockers.some((value) => value.includes("FETCH_FAILED")));
 });
+
+test("bounds stalled headers and body reads, aborts them and preserves seven-index order", async () => {
+  const signals: AbortSignal[] = [];
+  const stalled = new Promise<never>(() => {});
+  const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
+    signals.push(init!.signal!);
+    const name = new URL(String(input)).searchParams.get('Iname');
+    if (name === 'Nifty 50') return stalled;
+    if (name === 'Nifty Next 50') return { ok: true, status: 200, text: () => stalled } as Response;
+    return new Response(`Index Movers ${name}`, { status: 200 });
+  };
+  const result = await probeOfficialSevenIndexPages(fetchImpl as typeof fetch, 25);
+  assert.equal(result.ready, false);
+  assert.deepEqual(result.rows.map(row => row.indexId), [...CANONICAL_SEVEN_INDEX_SCOPE]);
+  assert.deepEqual(result.blockers, [
+    'SEVEN_INDEX_SOURCE_TIMEOUT:NIFTY_50',
+    'SEVEN_INDEX_SOURCE_TIMEOUT:NIFTY_NEXT_50',
+  ]);
+  assert.equal(result.rows.filter(row => row.ok).length, 5);
+  assert.equal(signals.length, 7);
+  assert.ok(signals.every(signal => signal.aborted));
+});
+
+test("starts every fixed page check before waiting for any response", async () => {
+  const releases: Array<() => void> = [];
+  const fetchImpl = (input: string | URL | Request) => new Promise<Response>(resolve => {
+    const name = new URL(String(input)).searchParams.get('Iname');
+    releases.push(() => resolve(new Response(`Index Movers ${name}`, { status: 200 })));
+  });
+  const pending = probeOfficialSevenIndexPages(fetchImpl as typeof fetch);
+  assert.equal(releases.length, 7);
+  for (const release of [...releases].reverse()) release();
+  const result = await pending;
+  assert.equal(result.ready, true);
+  assert.deepEqual(result.rows.map(row => row.indexId), [...CANONICAL_SEVEN_INDEX_SCOPE]);
+});

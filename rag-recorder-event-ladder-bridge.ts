@@ -97,7 +97,16 @@ export function mountRecorderEventContextLadderRoute(
      '<section role="alert">Invalid exact recorded selection: '+esc(parsed.reason)+'</section>',400),400);
    try {
      const evidence=await read(parsed.value);
-     const projected=projectRecordedRagLadder(evidence,true);
+     // Defend the request/response boundary: even a well-formed snapshot for
+     // ANOTHER contract must never be shown for the chosen recorder selection.
+     const identity=(evidence as RagEvidence)?.identity;
+     const matched=identity?.symbol===parsed.value.symbol&&
+       identity?.date===parsed.value.date&&identity?.expiry===parsed.value.expiry&&
+       identity?.strike===parsed.value.strike&&identity?.side===parsed.value.side&&
+       (evidence as RagEvidence)?.event?.timeIst===parsed.value.time;
+     const projected=matched?projectRecordedRagLadder(evidence,true):
+       {ok:false,reason:'REQUEST_RESPONSE_CONTRACT_IDENTITY_MISMATCH',
+        mode:'READ_ONLY_EVENT_CONTEXT_LADDER_V1',safety:SAFETY};
      const code=projected.ok?200:422;
      return c.html(renderRecordedRagLadderPage(renderEventContextLadder(projected),code),code);
    }catch{

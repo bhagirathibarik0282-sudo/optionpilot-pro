@@ -6,7 +6,7 @@
 
 The existing saved-session / exact-premium RAG / market-investigation tools remain the data authority. The adapter in \`rag-event-context-ladder.ts\` accepts **already verified** observations for **one selected event** and produces distinct Before / Event / After lanes. It does not search the archive or claim semantic/embedding-based retrieval. It does not choose market direction or generate percentage probabilities.
 
-- Event identity: one index, IST session date/time, event kind; exact expiry + strike + CE/PE side when displaying premium.
+- Event identity: one index, IST session date/time, event kind; exact expiry + strike + CE/PE side when displaying premium. **The caller must supply `eventKnownAt`: verified acceptance/receipt timestamp within that event minute.** A bucket label alone is not a valid information-availability cutoff; events without the accepted timestamp fail closed.
 - Families stay independent: Spot, Futures, Premium, PCR/OI, Heavyweight, Sector, and institutional FII/DII context.
 - Each cell preserves source time, available time, observation bucket, value, source provenance and optional change %, independently verified weight % and contribution.
 - Default checkpoints: -30/-15/-3/0 minutes. Forward +3/+15/+30 is **explicitly opt-in retrospective research**.
@@ -15,8 +15,12 @@ The existing saved-session / exact-premium RAG / market-investigation tools rema
 - Index constituent and sector weightage **must have a verified, dated independent source**. Do not present a tracked price-change subset as index-weight ranking. A contribution needs separately verified calculation/source.
 - FII/DII: official **published daily context** only. On an intraday event, an EOD report published after that event is excluded, even when the historical chart shows the whole day. Never call cash institutional totals an intraday flow.
 - Missing historical sector or heavyweight interval series means "not available for this event", **not neutral**.
-- After-event responses are not evidence available at event time; isolate them from the match signature to prevent look-ahead.
+- Before/Event context is restricted to observations available no later than verified `eventKnownAt`; later-arriving rows cannot contaminate an earlier event signature even during subsequent historical replay. After-event responses are not evidence available at event time; isolate them from the match signature to prevent look-ahead.
 - Full-chain PCR remains separate from an ATM ±7 subset, as in existing strict PCR documentation. Do not introduce an artificial combined prediction or probability score.
+
+## Important acceptance boundary
+
+The current component uses an injected verified evidence array and `eventKnownAt`; it does not yet implement a real event detector, extract a verified event acceptance time from stored snapshots, connect the recorder to this component, or claim fully validated RAG retrieval. If the existing event source cannot prove `eventKnownAt`, keep the event unavailable rather than filling with the minute end.
 
 ## Suggested existing dashboard wiring (future, not included here)
 

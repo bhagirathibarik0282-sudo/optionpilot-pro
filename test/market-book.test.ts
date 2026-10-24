@@ -337,13 +337,15 @@ test('band OI and traded volume use independent source fields and exact per-cont
 test('replay reuses presentation formatters while reading changed source values and times',()=>{
  const html=renderBusinessDashboardV1Html({} as any),script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1],nodes=new Map<string,any>();
  for(const id of [...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]))nodes.set(id,{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
- let dates=0,numbers=0;
- const intl={DateTimeFormat:function(...args:any[]){dates++;return Reflect.construct(Intl.DateTimeFormat,args);},NumberFormat:function(...args:any[]){numbers++;return Reflect.construct(Intl.NumberFormat,args);}};
+ let dates=0,numbers=0;const dateOptions:any[]=[];
+ const intl={DateTimeFormat:function(...args:any[]){dates++;dateOptions.push(args[1]);return Reflect.construct(Intl.DateTimeFormat,args);},NumberFormat:function(...args:any[]){numbers++;return Reflect.construct(Intl.NumberFormat,args);}};
  const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Intl:intl,Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);vm.runInContext(script,ctx);
  const current=fixture(),state={date:tradeDate,recordedDates,current:{NIFTY:current},history:{},baseline:{},health:{}};
  ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state};vm.runInContext('globalThis.installed=installMarketBook(api)',ctx);
  nodes.get('mb-nav').onclick({target:{closest:()=>({dataset:{page:'9'}})}});
  const page=nodes.get('mb-page'),before=page.innerHTML,formats={dates,numbers};
+ assert(dateOptions.some(o=>o?.month==='short'&&o?.day==='2-digit'),'shared chart date formatter');
+ assert.equal(dateOptions.filter(o=>o?.hour==='2-digit'&&!o?.day&&!o?.second).length,1,'one shared chart clock formatter');
  assert(before.includes('22,018'));assert(before.includes('09:33 IST'));
  vm.runInContext('installed.render(true)',ctx);
  assert.equal(page.innerHTML,before);assert.deepEqual({dates,numbers},formats,'force redraw creates no per-point formatters');

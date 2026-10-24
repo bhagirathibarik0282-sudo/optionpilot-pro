@@ -4,7 +4,7 @@ type LadderResult=ReturnType<typeof buildEventContextLadder>;
 const FAMILIES:readonly ContextFamily[]=['SPOT','FUTURES','PREMIUM','PCR_OI','HEAVYWEIGHT','SECTOR','FII_DII'];
 const TITLES:Record<ContextFamily,string>={
  SPOT:'Spot • PDH/PDL/PDC',FUTURES:'Futures • OI / basis',PREMIUM:'CE/PE • exact contract',
- PCR_OI:'Full/Band PCR • OI walls',HEAVYWEIGHT:'Heavyweights • verified weights',
+ PCR_OI:'Full PCR • scoped recorded evidence',HEAVYWEIGHT:'Heavyweights • verified weights',
  SECTOR:'Sectors • verified weights',FII_DII:'FII/DII • last published daily context'
 };
 const esc=(v:unknown)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));

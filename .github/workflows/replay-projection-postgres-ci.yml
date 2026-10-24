@@ -3,6 +3,11 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - 'db-startup-query.ts'
+      - 'db.ts'
+      - 'server.ts'
+      - 'fii-dii-store.ts'
+      - 'test/db-startup-query.test.ts'
       - 'h1-replay-canonical-projection.ts'
       - 'h1-replay-http.ts'
       - 'h1-replay-compact-v1.ts'
@@ -32,6 +37,6 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/h1-replay-canonical-projection-pg.test.ts test/h1-replay-compact-v1.test.ts test/h1-replay-http.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/db-startup-query.test.ts test/h1-replay-canonical-projection-pg.test.ts test/h1-replay-compact-v1.test.ts test/h1-replay-http.test.ts
         env:
           TEST_REPLAY_DATABASE_URL: postgres://replay_test:local_test_only@localhost:5432/replay_test

@@ -1,4 +1,5 @@
 import pg from "pg";
+import { withStartupDatabaseClient } from "./db-startup-query.js";
 import { ensureFiiDiiSchema } from "./fii-dii-store.js";
 
 const { Pool } = pg;
@@ -17,6 +18,7 @@ function getPool(): InstanceType<typeof Pool> | null {
     pool = new Pool({
       connectionString: url,
       max: 5,
+      connectionTimeoutMillis: 5000,
       ssl: isLocal ? undefined : { rejectUnauthorized: false },
     });
     pool.on("error", (err: Error) => {
@@ -127,7 +129,7 @@ export async function dbInit(): Promise<void> {
     return;
   }
   try {
-    await p.query(`
+    await withStartupDatabaseClient(p, client => client.query(`
       CREATE TABLE IF NOT EXISTS app_state_log (
         id BIGSERIAL PRIMARY KEY,
         kind TEXT NOT NULL,
@@ -321,17 +323,16 @@ export async function dbInit(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
       CREATE INDEX IF NOT EXISTS idx_trade_event_history_plan_time ON trade_event_history (plan_id, event_at DESC);
-    `);
+    `));
     try {
-      await ensureFiiDiiSchema(p);
+      await withStartupDatabaseClient(p, client => ensureFiiDiiSchema(client));
       console.log("[DB] FII/DII schema ready");
     } catch (err) {
       console.error("[DB] FII/DII schema init failed -- core persistence remains available:", err instanceof Error ? err.message : err);
     }
     console.log("[DB] connected, schema ready");
   } catch (err) {
-    console.error("[DB] schema init failed -- persistence disabled for this run:", err instanceof Error ? err.message : err);
-    pool = null;
+    console.error("[DB] schema init incomplete -- existing persistence pool retained; reads/writes retain their own failure gates:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -345,11 +346,14 @@ export async function dbInsert(kind: string, payload: unknown): Promise<void> {
   }
 }
 
-export async function dbLoadRecent<T>(kind: string, limit: number): Promise<T[]> {
+export async function dbLoadRecent<T>(kind: string, limit: number, startupOnly = false): Promise<T[]> {
   const p = getPool();
   if (!p) return [];
   try {
-    const res = await p.query("SELECT payload FROM app_state_log WHERE kind = $1 ORDER BY created_at DESC LIMIT $2", [kind, limit]);
+    const sql="SELECT payload FROM app_state_log WHERE kind = $1 ORDER BY created_at DESC LIMIT $2";
+    const res = startupOnly
+      ? await withStartupDatabaseClient(p, client => client.query(sql, [kind, limit]))
+      : await p.query(sql, [kind, limit]);
     return res.rows.map((r: { payload: T }) => r.payload).reverse();
   } catch (err) {
     console.error(`[DB] load failed for kind="${kind}" (falling back to empty -- app starts as if no history existed):`, err instanceof Error ? err.message : err);

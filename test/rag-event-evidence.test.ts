@@ -205,3 +205,21 @@ test('RAG snapshot does not infer multi-DTE for non-3m windows',()=>{
  assert.ok(r.ok);
  assert.equal(r.multiDte,null);
 });
+
+test('RAG snapshot excludes later cross-expiry quotes from event-time direction agreement',()=>{
+ const current=fixture('2026-10-13');
+ const eventBucket=new Date('2026-10-13T09:36:00+05:30').toISOString();
+ const other=current.options!.filter((o:any)=>o.option_type==='PE'&&
+   ['09:33','09:36'].some(t=>o.minute_bucket===new Date('2026-10-13T'+t+':00+05:30').toISOString()))
+   .map((o:any)=>({...o,expiry:'2026-10-20'}));
+ const late=other.find((o:any)=>o.minute_bucket===eventBucket);
+ assert.ok(late);
+ late.quote_timestamp=new Date(Date.parse(late.quote_timestamp)+2000).toISOString();
+ current.options!.push(...other);
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',lookback:'3'}),current,fixture('2026-10-12'));
+ assert.equal(r.ok,true);
+ assert.equal(r.event.availableAt,new Date(Date.parse(eventBucket)+24000).toISOString());
+ assert.deepEqual(r.multiDte?.accepted.map((x:any)=>x.expiry),['2026-10-13']);
+ assert.equal(r.multiDte?.blocked.find((x:any)=>x.expiry==='2026-10-20')?.reason,'UNVERIFIED_OR_AFTER_CUTOFF');
+ assert.equal(r.multiDte?.direction.agreement,'NOT_ESTABLISHED');
+});

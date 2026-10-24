@@ -34,7 +34,9 @@ export async function inspectH1ReplayPlans(client:PlanAuditClient){
     for(const source of queries){
       const result=await client.query('EXPLAIN (FORMAT JSON, COSTS TRUE) '+source.sql,source.params);
       const plan=result.rows[0]?.['QUERY PLAN'];
-      if(!Array.isArray(plan)||!plan.length)throw new Error('EXPLAIN_PLAN_UNAVAILABLE');
+      if(!Array.isArray(plan)||plan.length!==1||!plan[0]?.Plan||
+        typeof plan[0].Plan['Node Type']!=='string'||!plan[0].Plan['Node Type'].trim())
+        throw new Error('EXPLAIN_PLAN_UNAVAILABLE');
       plans.push({kind:source.kind,plan});
     }
     return {ok:true,mode:'READ_ONLY_H1_REPLAY_PLAN_AUDIT_V1',request:{...H1_PLAN_AUDIT_REQUEST},

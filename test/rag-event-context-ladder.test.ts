@@ -12,7 +12,7 @@ function observation(clock:string,overrides:Partial<ContextObservation>={}):Cont
     ...overrides};
 }
 const run=(observations:ContextObservation[],opts:Record<string,unknown>={})=>
-  buildEventContextLadder({event,asOf:iso('10:10'),observations,...opts});
+  buildEventContextLadder({event,asOf:iso('10:10'),eventKnownAt:iso('09:36',30),observations,...opts});
 test('one button context keeps exact before/event/after lanes distinct, and outcomes opt in only',()=>{
   const observations=[observation('09:33',{value:107}),observation('09:36',{value:100}),
     observation('09:39',{value:94})];
@@ -133,4 +133,24 @@ test('FII publication chronology must be internally consistent',()=>{
   })]);
   assert.equal(r.ok,true);
   if(r.ok)assert.equal(r.institutionalContext.length,0);
+});
+
+test('eventKnownAt is mandatory and must be within its event bucket',()=>{
+ const input={event,asOf:iso('10:10'),observations:[observation('09:36')]};
+ assert.equal(buildEventContextLadder({...input,eventKnownAt:undefined as any}).ok,false);
+ assert.equal(buildEventContextLadder({...input,eventKnownAt:iso('09:35',59)}).ok,false);
+ assert.equal(buildEventContextLadder({...input,eventKnownAt:iso('09:37')}).ok,false);
+ assert.equal(buildEventContextLadder({...input,eventKnownAt:iso('09:36',30),asOf:iso('09:36',29)}).ok,false);
+});
+test('post-event-known late quote cannot contaminate before/event features',()=>{
+ const lateBefore=observation('09:33',{availableAt:iso('09:36',31)});
+ const lateEvent=observation('09:36',{availableAt:iso('09:36',40)});
+ const accepted=observation('09:36',{value:99,availableAt:iso('09:36',24)});
+ const result=run([lateBefore,lateEvent,accepted],{asOf:iso('10:10')});
+ assert.equal(result.ok,true);
+ if(result.ok){
+   assert.equal(result.coverage.accepted,1);
+   assert.equal(result.coverage.rejected,2);
+   assert.equal(result.lanes.find(x=>x.offsetMinutes===0)?.cells[0]?.value,99);
+ }
 });

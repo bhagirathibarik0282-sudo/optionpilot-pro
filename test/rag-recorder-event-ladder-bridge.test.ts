@@ -210,3 +210,56 @@ test('selected premium is never admitted before quote timestamp or across marker
  assert.equal(projectRecordedRagLadder(mismatched).ok,false,
    'selected premium receipt must match its exact H1 market marker');
 });
+
+test('production-response-derived Oct19 10:45 PE preserves exact 3m evidence and keeps later DTE out',()=>{
+ // Narrow regression derived from the actual read-only Railway H1 RAG JSON
+ // supplied on 25 Oct. This is recorded evidence, not an independently
+ // fetched production response, a trading signal, or a synthetic price series.
+ const receipt=(t:string)=>when(t);
+ const point=(t:string,offset:number,pe:number|null,quoteAt:string|null,spot:number,pcr:number)=>({
+   offset,timeIst:t,bucketAt:receipt(t),receiptAt:receipt(t),
+   pair:{pe:pe===null?null:{
+     price:pe,oi:t==='10:42'?7352215:t==='10:45'?6991790:6954610,
+     quoteAt:quoteAt!,receiptAt:receipt(t),
+     snapshotId:t==='10:42'?'NIFTY-1792386720645-9ac979c5':
+       t==='10:45'?'NIFTY-1792386900667-952059c7':'NIFTY-1792387080608-74f42005'},
+     ce:null},
+   context:{spot,pdh:23149.85,pdc:23146.15,pdl:22913.8,
+     fullPcr:pcr,fullPcrSource:'Exact canonical full-chain source'}
+ });
+ const actual={
+   ok:true,status:'PARTIAL',mode:'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1',
+   source:'EXISTING_POSTGRES_H1_REPLAY',
+   safety:{readOnly:true,writesPerformed:false,affectsSelector:false,
+     affectsVerdict:false,affectsTelegram:false,affectsExecution:false,createsOrders:false},
+   identity:{symbol:'NIFTY',date:'2026-10-19',expiry:'2026-10-19',strike:23150,side:'PE',dte:0},
+   event:{timeIst:'10:45',flags:[],before:153.85,after:137.1,availableAt:when('10:45')},
+   provenance:{selectedEvidenceSha256:'4d8f5fad96e6cc12f731b857252f07b74bc278933355a9982e52a8b8296645df'},
+   beforeAndAt:[
+     point('10:30',-15,null,null,23103.9,1.0690753702372393),
+     point('10:42',-3,153.85,when('10:42',1),23025,1.0575949072190616),
+     point('10:45',0,137.1,when('10:45'),23048.2,1.0269832238052774)],
+   outcomes:[point('10:48',3,142.9,when('10:48',1),23038.7,1.0424468102274012)],
+   multiDte:{accepted:[
+     {expiry:'2026-10-19',quoteAt:when('10:45')},
+     // Present in upstream retrospective alignment, but 2s after 10:45:00.
+     {expiry:'2026-10-27',quoteAt:when('10:45',2)}]}
+ };
+ const projected=projectRecordedRagLadder(actual);
+ assert.equal(projected.ok,true);
+ if(!projected.ok)return;
+ const at=(offset:number,family:string,metric:string)=>projected.lanes
+   .find(l=>l.offsetMinutes===offset)?.cells.find(c=>c.family===family&&c.metric===metric);
+ assert.equal(at(-3,'PREMIUM','LTP')?.value,153.85);
+ assert.equal(at(-3,'PREMIUM','LTP')?.availableAt,when('10:42',1));
+ assert.equal(at(0,'PREMIUM','LTP')?.value,137.1);
+ assert.equal(at(0,'PREMIUM','LTP')?.changePct,-10.8872);
+ assert.equal(at(3,'PREMIUM','LTP')?.value,142.9);
+ assert.equal(at(3,'PREMIUM','LTP')?.availableAt,when('10:48',1));
+ assert.equal(at(0,'SPOT','LTP')?.value,23048.2);
+ assert.equal(at(0,'PCR_OI','OI PCR')?.value,1.0269832238052774);
+ assert.match(at(0,'PCR_OI','OI PCR')?.provenance??'',/quote-age independently unverified/);
+ assert.equal(at(-15,'PREMIUM','LTP'),undefined,'absent 10:30 PE cannot be invented');
+ assert.equal(projected.lanes.some(l=>l.cells.some(c=>c.family==='PREMIUM'&&c.entity.includes('2026-10-27'))),false);
+ assert.equal(projected.institutionalContext.length,0);
+});

@@ -133,6 +133,9 @@ export function buildEventContextLadder(input:ContextInput){
     const t=utc(o.bucketAt);
     if(t===null)return c;
     const before=admitted.get(seriesKey(o)+'|'+new Date(t-180000).toISOString());
+    // Expiry-matched PCR is still not comparable when the full-chain
+    // source scope/provenance has switched across samples.
+    if(o.family==='PCR_OI'&&before?.provenance!==o.provenance)return c;
     const baseline=n(before?.value),current=n(o.value);
     if(baseline!==null&&baseline>0&&current!==null)
       c.changePct=Math.round((current/baseline-1)*1000000)/10000;

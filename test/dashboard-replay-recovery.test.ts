@@ -8,7 +8,8 @@ function harness(fetch: any) {
  const body=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]).find(s=>s.includes('async function get(label,url)'))!;
  const source=body.slice(body.indexOf('async function get(label,url)'),body.indexOf('function latestObservedAt('));
  const nodes=new Map(['sources','source-meta'].map(id=>[id,{innerHTML:'',textContent:''}]));
- const ctx:any={fetch,Date,URL,AbortController,console,setTimeout:(fn:any,ms:number)=>setTimeout(fn,ms===400?0:ms),clearTimeout};
+ const clock=class extends Date {static now(){return Date.parse('2026-10-24T12:00:00Z');}};
+ const ctx:any={fetch,Date:clock,URL,AbortController,console,setTimeout:(fn:any,ms:number)=>setTimeout(fn,ms===400?0:ms),clearTimeout};
  vm.createContext(ctx);
  ctx.nodes=nodes;
  vm.runInContext("const sources={};const $=id=>nodes.get(id),esc=String,when=String;"+source+"globalThis.api={get,getReplayWindow,getReplay,sources};",ctx);
@@ -131,13 +132,13 @@ test('replay queue bounds concurrent HTTP work and releases slots after failures
 test('progress callbacks publish latest returned windows before older history, in chronological merged order',async()=>{
  const calls:string[]=[],progress:any[]=[];
  const h=harness(async(url:string)=>{const u=new URL(url,'https://test.invalid'),from=u.searchParams.get('from')!;calls.push(from);return response(replay('2026-10-12T'+from+':00+05:30',Number(from.slice(0,2))));});
- const r=await h.getReplay('session','NIFTY','2026-10-12','09:15','11:15','CORE',(part:any)=>{progress.push(structuredClone(part));assert.equal(calls.length,progress.length,'publish before next HTTP request');});
- assert.deepEqual(calls,['10:15','09:15']);assert.equal(progress[0].loadingProgress.completed,1);assert.equal(progress[0].loadingProgress.total,2);assert.equal(progress[0].market.rows.length,1);assert.equal(progress[1].market.rows[0][1],'2026-10-12T09:15:00+05:30');assert.equal(r.counts.market,2);
+ const r=await h.getReplay('session','NIFTY','2026-10-12','09:15','13:15','CORE',(part:any)=>{progress.push(structuredClone(part));assert.equal(calls.length,progress.length,'publish before next HTTP request');});
+ assert.deepEqual(calls,['12:15','11:15','09:15']);assert.equal(progress[0].loadingProgress.completed,1);assert.equal(progress[0].loadingProgress.total,3);assert.equal(progress[0].market.rows.length,1);assert.equal(progress[2].market.rows[0][1],'2026-10-12T09:15:00+05:30');assert.equal(r.counts.market,3);
 });
 
 test('failed older history rejects completion but keeps previously published real observations',async()=>{
  const progress:any[]=[];const h=harness(async(url:string)=>new URL(url,'https://test.invalid').searchParams.get('from')==='09:15'?response({ok:false,error:'OLDER_INTERVAL_FAILED'},400):response(replay('2026-10-12T04:45:00Z',10)));
- await assert.rejects(()=>h.getReplay('session','NIFTY','2026-10-12','09:15','11:15','CORE',(p:any)=>progress.push(p)),/OLDER_INTERVAL_FAILED/);assert.equal(progress.length,1);assert.equal(progress[0].market.rows[0][2],10);assert.equal(progress[0].loadingProgress.completed,1);
+ await assert.rejects(()=>h.getReplay('session','NIFTY','2026-10-12','09:15','13:15','CORE',(p:any)=>progress.push(p)),/OLDER_INTERVAL_FAILED/);assert.equal(progress.length,2);assert.equal(progress[0].market.rows[0][2],10);assert.equal(progress[0].loadingProgress.completed,1);
 });
 
 test('canonical chunk merging preserves ambiguous same-minute evidence and exact duplicate multiplicity',async()=>{
@@ -146,4 +147,40 @@ test('canonical chunk merging preserves ambiguous same-minute evidence and exact
   const h=harness(async(url:string)=>{const first=new URL(url,'https://test.invalid').searchParams.get('from')==='09:15',d:any=replay(time,1),rows=first?[a,a,b]:[a,b];d.canonical=compact?{columns:['minute_bucket','snapshot_id'],rows:rows.map(r=>[r.minute_bucket,r.snapshot_id])}:rows;return response(d);});
   const r=await h.getReplay('session','NIFTY','2026-10-12','09:15','11:15');const rows=compact?r.canonical.rows:r.canonical;assert.equal(rows.length,3);assert.equal(rows.filter((r:any)=>compact?r[1]==='A':r.snapshot_id==='A').length,2);assert.equal(r.counts.canonical,3);
  }
+});
+
+test('larger completed CORE windows preserve all rows, gaps and conflicting canonical evidence',async()=>{
+ const read=async(url:string)=>{
+  const u=new URL(url,'https://test.invalid'),start=Date.parse('2026-10-23T'+u.searchParams.get('from')+':00+05:30'),end=Date.parse('2026-10-23T'+u.searchParams.get('to')+':00+05:30');
+  const d:any=replay('',0);d.market.rows=[];d.canonical={columns:['minute_bucket','snapshot_id','truth_verdict'],rows:[]};
+  for(let t=start;t<=end;t+=60000){const at=new Date(t).toISOString(),minute=(t-Date.parse('2026-10-23T03:45:00Z'))/60000;if(minute===10||minute===100)continue;
+   d.market.rows.push(['NIFTY',at,minute===20?null:minute]);d.canonical.rows.push([at,'A','TRUE']);
+   if(minute===120)d.canonical.rows.push([at,'A','TRUE'],[at,'B','STALE']);
+  }
+  return response(d);
+ };
+ const normal=harness(read),calls:URL[]=[],progress:any[]=[],larger=harness(async(url:string)=>{calls.push(new URL(url,'https://test.invalid'));return read(url);});
+ const a=await normal.getReplay('baseline behavior','NIFTY','2026-10-23','09:15','15:30','CORE');
+ const b=await larger.getReplay('progressive','NIFTY','2026-10-23','09:15','15:30','CORE',(p:any)=>progress.push(p));
+ assert.equal(calls.length,4);assert.equal(calls[0].searchParams.get('from'),'15:15','same small newest window appears first');
+ for(const field of ['market','options','chain','canonical','counts'])assert.deepEqual(JSON.parse(JSON.stringify(b[field])),JSON.parse(JSON.stringify(a[field])),field);
+ assert.equal(b.market.rows.length,374);assert.equal(b.canonical.rows.length,376);assert.equal(progress.length,4);assert.equal(progress[0].loadingProgress.total,4);
+});
+
+test('live day, FULL research and nonprogressive reads retain one-hour windows',async()=>{
+ for(const [date,scope,progressive]of [['2026-10-24','CORE',true],['2026-10-23','FULL',true],['2026-10-23','CORE',false]] as const){
+  const calls:URL[]=[],h=harness(async(url:string)=>{calls.push(new URL(url,'https://test.invalid'));return response(replay('2026-10-23T03:45:00Z',1));});
+  await h.getReplay('existing scope','NIFTY',date,'09:15','15:30',scope,progressive?()=>{}:null);
+  assert.equal(calls.length,7,date+' '+scope+' '+progressive);
+ }
+});
+
+test('unreadable larger CORE window still falls back to exact smaller intervals',async()=>{
+ const calls:URL[]=[],h=harness(async(url:string)=>{const u=new URL(url,'https://test.invalid');calls.push(u);
+  if(u.searchParams.get('from')==='09:15'&&u.searchParams.get('to')==='11:15')return unreadable();
+  return response(replay('2026-10-23T'+u.searchParams.get('from')+':00+05:30',1));
+ });
+ const progress:any[]=[],result=await h.getReplay('recovery','NIFTY','2026-10-23','09:15','12:15','CORE',(p:any)=>progress.push(p));
+ assert.deepEqual(calls.map(u=>[u.searchParams.get('from'),u.searchParams.get('to')]),[['11:15','12:15'],['09:15','11:15'],['09:15','11:15'],['09:15','10:15'],['10:15','11:15']]);
+ assert.equal(progress.length,2);assert.equal(result.counts.market,3);
 });

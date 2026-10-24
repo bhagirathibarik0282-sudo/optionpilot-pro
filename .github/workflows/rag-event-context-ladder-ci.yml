@@ -8,6 +8,8 @@ on:
       - 'test/rag-event-context-ladder-view.test.ts'
       - 'rag-recorder-event-ladder-bridge.ts'
       - 'test/rag-recorder-event-ladder-bridge.test.ts'
+      - 'rag-recorded-spread-source-audit.ts'
+      - 'test/rag-recorded-spread-source-audit.test.ts'
       - 'recorded-replay-view.ts'
       - 'research-router.ts'
       - '.github/workflows/rag-event-context-ladder-ci.yml'
@@ -26,6 +28,6 @@ jobs:
       - name: Install existing dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Run event-wise context and publication-cutoff regressions
-        run: NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts test/rag-event-context-ladder-view.test.ts test/rag-recorder-event-ladder-bridge.test.ts test/recorded-replay-view.test.ts
+        run: NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts test/rag-event-context-ladder-view.test.ts test/rag-recorder-event-ladder-bridge.test.ts test/rag-recorded-spread-source-audit.test.ts test/recorded-replay-view.test.ts
       - name: Verify patch whitespace
         run: git diff --check origin/main...HEAD

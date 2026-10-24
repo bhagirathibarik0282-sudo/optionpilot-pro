@@ -57,6 +57,7 @@ test('mixed-version chain recovers only snapshot-matched canonical current-expir
  for(const row of c.chain!)Object.assign(row,{call_wall_strike:22500,put_wall_strike:22300});
  const run=()=>{const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),c,fixture('2026-10-12'));assert.ok(r.ok);return r.beforeAndAt.at(-1)!.context;};
  assert.equal(run().fullPcr,1.23);assert.equal(run().fullPcrSource,'Exact canonical full-chain source');
+ assert.equal(run().fullPcrCanonicalSourceAt,new Date(Date.parse('2026-10-13T09:36:00+05:30')+24000).toISOString());
  assert.equal(run().ceWall,null);assert.equal(run().peWall,null);
  const target=c.canonical.find(row=>row.minute_bucket==='2026-10-13T04:06:00.000Z')!;
  const original=structuredClone(target);
@@ -71,7 +72,7 @@ test('mixed-version chain recovers only snapshot-matched canonical current-expir
   (v:any)=>v.market.gapScore.fullChainPcr=-1,
   (v:any)=>v.source_timestamp='2026-10-13T04:07:01Z',
   (v:any)=>v.source_timestamp='2026-10-13T04:05:59Z',
- ]){Object.assign(target,structuredClone(original));mutate(target);assert.equal(run().fullPcr,null);}
+ ]){Object.assign(target,structuredClone(original));mutate(target);assert.equal(run().fullPcr,null);assert.equal(run().fullPcrCanonicalSourceAt,null);}
  Object.assign(target,structuredClone(original));
  const cutoff=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',asOf:'2026-10-13T09:36:25'}),c,fixture('2026-10-12'));
  assert.ok(cutoff.ok);target.source_timestamp='2026-10-13T04:06:26Z';

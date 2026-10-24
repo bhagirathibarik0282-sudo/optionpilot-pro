@@ -111,7 +111,7 @@ export function buildEventContextLadder(input:ContextInput){
       bucket<sessionOpen||bucket>sessionClose||source<bucket-60000||source>=bucket+60000){rejected++;continue;}
     const minutes=(bucket-at)/60000;
     if(!offsets.includes(minutes)||(!input.includeOutcomes&&minutes>0)||
-      (minutes<=0&&available>eventKnowledgeCutoff)){rejected++;continue;}
+      (minutes<=0&&(available>eventKnowledgeCutoff||source>eventKnowledgeCutoff))){rejected++;continue;}
     // Historical outcomes remain separate and never enter the event-time lane.
     const k=key(o);
     groups.set(k,[...(groups.get(k)??[]),o]);

@@ -84,3 +84,18 @@ test('15:30 final recorder bucket remains available at actual 15:30:25 receipt',
  assert.equal(result.ok,true);
  if(result.ok)assert.equal(result.lanes.find(x=>x.offsetMinutes===0)?.cells.some(x=>x.family==='PREMIUM'),true);
 });
+
+test('even a well-formed RAG snapshot for a different selected contract fails closed',async()=>{
+ const app=new Hono();
+ mountRecorderEventContextLadderRoute(app,(async()=>{
+   const data=snapshot();
+   data.identity.symbol='SENSEX';
+   return data;
+ }) as any);
+ const route='/rag-event-context-ladder/view?symbol=NIFTY&date=2026-10-19&expiry=2026-10-19&strike=23150&side=PE&time=09%3A36';
+ const result=await app.request(route);
+ assert.equal(result.status,422);
+ const html=await result.text();
+ assert.match(html,/REQUEST_RESPONSE_CONTRACT_IDENTITY_MISMATCH/);
+ assert.ok(!html.includes('23120'));
+});

@@ -4,6 +4,8 @@ on:
     paths:
       - 'rag-event-context-ladder.ts'
       - 'test/rag-event-context-ladder.test.ts'
+      - 'rag-event-context-ladder-view.ts'
+      - 'test/rag-event-context-ladder-view.test.ts'
       - '.github/workflows/rag-event-context-ladder-ci.yml'
 permissions:
   contents: read
@@ -20,6 +22,6 @@ jobs:
       - name: Install existing dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Run event-wise context and publication-cutoff regressions
-        run: NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts
+        run: NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts test/rag-event-context-ladder-view.test.ts
       - name: Verify patch whitespace
         run: git diff --check origin/main...HEAD

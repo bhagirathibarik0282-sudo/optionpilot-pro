@@ -117,6 +117,10 @@ function evidenceCheckpoint(r:RagEventRequest,current:H1ReplayHttpResult,eventMs
       context:{spot:num(market.spot_ltp),pdc:num(market.spot_prev_close),pdh:num(market.pdh),pdl:num(market.pdl),vix:num(market.india_vix),
         futures:num(market.future_ltp),futuresOi:num(market.future_oi),fullPcr:normalizedPcr??canonicalPcr,
         fullPcrSource:normalizedPcr!==null?chain?.full_pcr_source:canonicalPcr!==null?'Exact canonical full-chain source':chain?.full_pcr_source??null,
+        // Optional Recorder-RAG provenance: only the independently reconciled
+        // canonical branch has a trustworthy source time. A normalized label
+        // alone cannot authorize event-time PCR evidence.
+        fullPcrCanonicalSourceAt:normalizedPcr===null&&canonicalPcr!==null?sourceAt:null,
         ceWall:num(chain?.call_wall_strike)??ceWall?.strike??null,peWall:num(chain?.put_wall_strike)??peWall?.strike??null,
         ceWallOi:num(chain?.call_wall_oi)??ceWall?.oi??null,peWallOi:num(chain?.put_wall_oi)??peWall?.oi??null,
         wallEvidence:{CE:ceWall,PE:peWall}}};

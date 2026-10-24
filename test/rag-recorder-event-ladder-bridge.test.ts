@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Hono} from 'hono';
+import {parseRagEventRequest,buildRagPremiumSnapshot} from '../rag-event-evidence.js';
+import type {H1ReplayHttpResult} from '../h1-replay-http.js';
 import {projectRecordedRagLadder,mountRecorderEventContextLadderRoute} from '../rag-recorder-event-ladder-bridge.js';
 import {renderEventContextLadder} from '../rag-event-context-ladder-view.js';
 import {RECORDED_REPLAY_HTML,installRecordedReplay} from '../recorded-replay-view.js';
@@ -131,4 +133,45 @@ test('one-click pinned recorder sample must not be labelled a detected event or 
  assert.match(html,/NOT a detected PDH\/PDL, OI wall or PCR event/);
  assert.match(html,/Similar-event retrieval is NOT performed/);
  assert.doesNotMatch(html,/Event-wise RAG evidence/);
+});
+
+test('real H1 RAG builder output projects into Recorder ladder without mocking RAG response shape',()=>{
+ const picked=parseRagEventRequest({symbol:'NIFTY',date:'2026-10-13',
+   expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36',
+   kind:'SNAPSHOT',lookback:'3',includeOutcomes:'true'});
+ assert.equal(picked.ok,true);if(!picked.ok)return;
+ const market:any[]=[],options:any[]=[];
+ const date='2026-10-13';
+ for(const [i,hm] of ['09:33','09:36','09:39'].entries()){
+   const bucket=new Date(date+'T'+hm+':00+05:30').toISOString();
+   const ms=Date.parse(bucket),receipt=new Date(ms+24000).toISOString();
+   const snapshot_id=date+hm;
+   market.push({symbol:'NIFTY',minute_bucket:bucket,backend_timestamp:receipt,
+     truth_verdict:'TRUE',snapshot_id,spot_ltp:22484+i,calculation_version:'STORAGE_V3_PHASE1'});
+   for(const side of ['CE','PE'])
+     options.push({symbol:'NIFTY',minute_bucket:bucket,expiry:'2026-10-13',strike:22300,
+       option_type:side,snapshot_id,truth_verdict:'TRUE',ltp:side==='PE'?100+i*7:120-i*3,
+       oi:1000+i*100,quote_timestamp:receipt,day_high:150,day_low:90});
+ }
+ const current:H1ReplayHttpResult={ok:true,mode:'READ_ONLY_H1_3M_REPLAY',
+   productionImpact:'NONE',request:{symbol:'NIFTY',tradeDate:date,fromTime:'09:15',toTime:'09:39',scope:'FULL'},
+   market,options,chain:[]};
+ const previous:H1ReplayHttpResult={ok:false,mode:'READ_ONLY_H1_3M_REPLAY',
+   productionImpact:'NONE',request:{symbol:'NIFTY',tradeDate:'2026-10-12',
+    fromTime:'09:15',toTime:'15:30',scope:'FULL'}};
+ const upstream=buildRagPremiumSnapshot(picked.value,current,previous);
+ assert.equal(upstream.ok,true);
+ const projected=projectRecordedRagLadder(upstream);
+ assert.equal(projected.ok,true);
+ if(!projected.ok)return;
+ const before=projected.lanes.find(l=>l.offsetMinutes===-3);
+ const currentLane=projected.lanes.find(l=>l.offsetMinutes===0);
+ const after=projected.lanes.find(l=>l.offsetMinutes===3);
+ assert.equal(before?.cells.find(c=>c.family==='PREMIUM'&&c.metric==='LTP')?.value,100);
+ assert.equal(currentLane?.cells.find(c=>c.family==='PREMIUM'&&c.metric==='LTP')?.value,107);
+ assert.equal(after?.cells.find(c=>c.family==='PREMIUM'&&c.metric==='LTP')?.value,114);
+ assert.equal(currentLane?.cells.find(c=>c.family==='PREMIUM'&&c.metric==='LTP')?.changePct,7);
+ assert.equal(projected.institutionalContext.length,0);
+ assert.equal(projected.lanes.every(l=>l.cells.every(c=>c.family!=='FUTURES'&&
+   c.family!=='HEAVYWEIGHT'&&c.family!=='SECTOR'&&c.family!=='FII_DII')),true);
 });

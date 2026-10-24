@@ -116,9 +116,18 @@ test('normalized PCR source alone never becomes canonical full-chain evidence',(
  const nr=projectRecordedRagLadder(normalized);
  assert.equal(nr.ok,true);
  if(nr.ok)assert.equal(nr.lanes.every(x=>x.cells.every(c=>c.family!=='PCR_OI')),true);
- const canonical=snapshot();
- for(const p of [...canonical.beforeAndAt,...canonical.outcomes])
+ const mislabeled=snapshot();
+ for(const p of [...mislabeled.beforeAndAt,...mislabeled.outcomes])
    p.context.fullPcrSource='Exact canonical full-chain source';
+ const denied=projectRecordedRagLadder(mislabeled);
+ assert.equal(denied.ok,true);
+ if(denied.ok)assert.equal(denied.lanes.every(x=>x.cells.every(c=>c.family!=='PCR_OI')),true,
+   'a canonical label without independently checked source time is not enough');
+ const canonical=snapshot();
+ for(const p of [...canonical.beforeAndAt,...canonical.outcomes]){
+   p.context.fullPcrSource='Exact canonical full-chain source';
+   p.context.fullPcrCanonicalSourceAt=when(p.timeIst,25);
+ }
  const cr=projectRecordedRagLadder(canonical);
  assert.equal(cr.ok,true);
  if(cr.ok)assert.equal(cr.lanes.find(x=>x.offsetMinutes===0)?.cells.some(c=>c.family==='PCR_OI'),true);
@@ -257,9 +266,39 @@ test('production-response-derived Oct19 10:45 PE preserves exact 3m evidence and
  assert.equal(at(3,'PREMIUM','LTP')?.value,142.9);
  assert.equal(at(3,'PREMIUM','LTP')?.availableAt,when('10:48',1));
  assert.equal(at(0,'SPOT','LTP')?.value,23048.2);
- assert.equal(at(0,'PCR_OI','OI PCR')?.value,1.0269832238052774);
- assert.match(at(0,'PCR_OI','OI PCR')?.provenance??'',/quote-age independently unverified/);
+ assert.equal(at(0,'PCR_OI','OI PCR'),undefined,
+   'real Oct19 response has a canonical PCR label but no independent canonical source timestamp');
+ assert.equal(at(-3,'PCR_OI','OI PCR'),undefined,
+   'earlier PCR source time also cannot be inferred from quote or bucket time');
  assert.equal(at(-15,'PREMIUM','LTP'),undefined,'absent 10:30 PE cannot be invented');
  assert.equal(projected.lanes.some(l=>l.cells.some(c=>c.family==='PREMIUM'&&c.entity.includes('2026-10-27'))),false);
  assert.equal(projected.institutionalContext.length,0);
+});
+
+test('canonical PCR cannot leak past exact event-known receipt even with verified source-time metadata',()=>{
+ const afterEvent=snapshot();
+ for(const p of [...afterEvent.beforeAndAt,...afterEvent.outcomes]){
+   p.context.fullPcrSource='Exact canonical full-chain source';
+   p.context.fullPcrCanonicalSourceAt=when(p.timeIst,25);
+ }
+ afterEvent.beforeAndAt[1].context.fullPcrCanonicalSourceAt=when('09:36',27);
+ const denied=projectRecordedRagLadder(afterEvent);
+ assert.equal(denied.ok,true);
+ if(denied.ok){
+   assert.equal(denied.lanes.find(l=>l.offsetMinutes===0)?.cells.some(c=>c.family==='PCR_OI'),false);
+   assert.equal(denied.lanes.find(l=>l.offsetMinutes===-3)?.cells.some(c=>c.family==='PCR_OI'),true);
+ }
+ afterEvent.beforeAndAt[1].context.fullPcrCanonicalSourceAt=when('09:35',59);
+ const previousBucket=projectRecordedRagLadder(afterEvent);
+ assert.equal(previousBucket.ok,true);
+ if(previousBucket.ok)assert.equal(previousBucket.lanes.find(l=>l.offsetMinutes===0)?.cells.some(c=>c.family==='PCR_OI'),false);
+ afterEvent.beforeAndAt[1].context.fullPcrCanonicalSourceAt=when('09:36',25);
+ const admitted=projectRecordedRagLadder(afterEvent);
+ assert.equal(admitted.ok,true);
+ if(admitted.ok){
+   const pcr=admitted.lanes.find(l=>l.offsetMinutes===0)?.cells.find(c=>c.family==='PCR_OI');
+   assert.equal(pcr?.value,1.2145);
+   assert.equal(pcr?.sourceAt,when('09:36',25));
+   assert.equal(pcr?.availableAt,when('09:36',25));
+ }
 });

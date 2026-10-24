@@ -181,7 +181,11 @@ export function buildRagPremiumSnapshot(r:RagEventRequest,current:H1ReplayHttpRe
   const reaction=(side:string,q:Row|null,p:Row|null,delta:number|null)=>side+' '+(q?'₹'+q.price.toFixed(2):'ଅନୁପଲବ୍ଧ')+'; '+lookback+'m '+(p&&q?'₹'+p.price.toFixed(2)+' → ₹'+q.price.toFixed(2)+' ('+(delta!>0?'+':'')+delta!.toFixed(2)+'%)':'exact baseline ଅନୁପଲବ୍ଧ');
   const point=beforeAndAt.at(-1),pairComplete=beforeAndAt.every(p=>p?.pair.ce&&p?.pair.pe)&&outcomes.every(p=>p?.pair.ce&&p?.pair.pe);
   const sourceRows={beforeAndAt,outcomes,previous:referenceResult.ok?referenceResult.referenceRows:[]};
-  const multiDte=lookback===3?alignRecordedRagDte(current,{symbol:r.symbol,date:r.date,strike:r.strike,side:r.side,timeIst:r.time},r.asOf):null;
+  // A selected snapshot's cross-expiry comparison is EVENT-TIME evidence:
+  // never use a different expiry quote acquired after the selected premium
+  // was first known, even if the replay reader later contains that quote.
+  const selectedKnownAt=Math.max(Date.parse(selected.receiptAt),Date.parse(selected.quoteAt));
+  const multiDte=lookback===3?alignRecordedRagDte(current,{symbol:r.symbol,date:r.date,strike:r.strike,side:r.side,timeIst:r.time},Math.min(r.asOf,selectedKnownAt)):null;
   return {ok:true,status:pairComplete&&reference?'COMPLETE':'PARTIAL',mode:'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1',source:'EXISTING_POSTGRES_H1_REPLAY',safety:SAFETY,
     identity:{symbol:r.symbol,date:r.date,expiry:r.expiry,strike:r.strike,side:r.side,dte:Math.round((Date.parse(r.expiry)-Date.parse(r.date))/86400000)},
     event:{timeIst:r.time,flags:[],before:before?.price??null,after:selected.price,availableAt:new Date(Math.max(Date.parse(selected.receiptAt),Date.parse(selected.quoteAt))).toISOString()},

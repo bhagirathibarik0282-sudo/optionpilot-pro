@@ -60,8 +60,8 @@ function cell(o:ContextObservation):ContextCell {
   const contribution=n(o.contribution);
   return {family:o.family,entity:o.entity,metric:o.metric,value:n(o.value),
     changePct:n(o.changePct),
-    weightPct:weight!==null && weight>=0 && !!o.weightSource?weight:null,
-    contribution:contribution!==null && !!o.contributionSource?contribution:null,
+    weightPct:weight!==null && weight>=0 && weight<=100 && !!o.weightSource?.trim()?weight:null,
+    contribution:contribution!==null && !!o.contributionSource?.trim()?contribution:null,
     bucketAt:o.bucketAt,sourceAt:o.sourceAt,availableAt:o.availableAt,provenance:o.provenance};
 }
 export function buildEventContextLadder(input:ContextInput){
@@ -72,6 +72,11 @@ export function buildEventContextLadder(input:ContextInput){
   if(!Array.isArray(offsets)||!offsets.length||offsets.length>12||
     new Set(offsets).size!==offsets.length||offsets.some(x=>!VALID_OFFSETS.has(x)))return fail('INVALID_OFFSETS');
   if(!['NIFTY','SENSEX','BANKNIFTY'].includes(input.event.index))return fail('INVALID_INDEX');
+  const sessionOpen=Date.parse(input.event.date+'T09:15:00+05:30');
+  const sessionClose=Date.parse(input.event.date+'T15:30:00+05:30');
+  // A historical event match must not use evidence only received after its own
+  // minute. Retrospective +N outcomes are handled separately below.
+  const eventKnowledgeCutoff=Math.min(asOf,at+60000);
   const blocked:string[]=[];
   const groups=new Map<string,ContextObservation[]>();
   let rejected=0;
@@ -82,20 +87,27 @@ export function buildEventContextLadder(input:ContextInput){
       const p=o.publishedAt?utc(o.publishedAt):null;
       const available=utc(o.availableAt),source=utc(o.sourceAt);
       if(o.source!=='OFFICIAL_FII_DII'||!o.verified||!o.provenance||!o.sessionDate||
-        o.sessionDate>input.event.date||p===null||available===null||source===null||
-        p>at||p>asOf||available>at||available>asOf||!o.entity||!o.metric) {rejected++;continue;}
+        o.sessionDate>input.event.date||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(o.sessionDate)||
+        p===null||available===null||source===null||
+        source>p||p>available||source>at||p>eventKnowledgeCutoff||
+        available>at||available>asOf||!o.entity?.trim()||!o.metric?.trim()) {rejected++;continue;}
       const k='PUBLISHED|'+o.entity+'|'+o.metric+'|'+o.sessionDate;
       groups.set(k,[...(groups.get(k)??[]),o]);continue;
     }
     if(o.index!==input.event.index||o.source!=='EXISTING_RECORDED'||!o.verified||
       !o.provenance||!o.entity||!o.metric) {rejected++;continue;}
-    if(o.family==='PREMIUM' && (o.expiry!==input.event.expiry||
-      o.strike!==input.event.strike||o.side!==input.event.side)){rejected++;continue;}
+    if(o.family==='PREMIUM' && (!/^\d{4}-\d{2}-\d{2}$/.test(input.event.expiry??'')||
+      !Number.isInteger(input.event.strike)||!(input.event.strike!>0)||
+      !['CE','PE'].includes(input.event.side??'')||
+      o.expiry!==input.event.expiry||o.strike!==input.event.strike||o.side!==input.event.side)){rejected++;continue;}
+    if(o.family==='PCR_OI'&&input.event.expiry&&o.expiry!==input.event.expiry){rejected++;continue;}
     const bucket=utc(o.bucketAt),source=utc(o.sourceAt),available=utc(o.availableAt);
     if(bucket===null||source===null||available===null||source>available+5000||
-      available>asOf||available<bucket||source<bucket-60000||source>=bucket+60000){rejected++;continue;}
+      available>asOf||available<bucket||available>=bucket+60000||
+      bucket<sessionOpen||bucket>sessionClose||source<bucket-60000||source>=bucket+60000){rejected++;continue;}
     const minutes=(bucket-at)/60000;
-    if(!offsets.includes(minutes)||(!input.includeOutcomes&&minutes>0)){rejected++;continue;}
+    if(!offsets.includes(minutes)||(!input.includeOutcomes&&minutes>0)||
+      (minutes<=0&&available>eventKnowledgeCutoff)){rejected++;continue;}
     // Historical outcomes remain separate and never enter the event-time lane.
     const k=key(o);
     groups.set(k,[...(groups.get(k)??[]),o]);
@@ -121,7 +133,7 @@ export function buildEventContextLadder(input:ContextInput){
     const k=o.entity+'|'+o.metric;if(latestPerEntityMetric.has(k))return false;
     latestPerEntityMetric.add(k);return true;
   }).map(o=>({...cell(o),sessionDate:o.sessionDate!,publishedAt:o.publishedAt!}));
-  return {ok:true,status:blocked.length?'PARTIAL':'RECORDED',mode:'READ_ONLY_EVENT_CONTEXT_LADDER_V1',
+  return {ok:true,status:blocked.length?'PARTIAL':unique.size===0?'NO_ACCEPTED_EVIDENCE':'RECORDED',mode:'READ_ONLY_EVENT_CONTEXT_LADDER_V1',
     event:input.event,asOf:input.asOf,lanes,institutionalContext,
     coverage:{accepted:[...unique.values()].filter(x=>x.family!=='FII_DII').length,
       institutional:institutionalContext.length,rejected,conflicts:blocked.length},
@@ -130,5 +142,6 @@ export function buildEventContextLadder(input:ContextInput){
       'After-event checkpoints are retrospective only; not decision-time inputs.',
       'FII/DII is previous-published official context, not an intraday stream.',
       'Weightage and contribution need separately verified provenance.',
+      'Late-arriving records cannot enter the event-time signature; outcomes remain separate.',
       'Upstream observation truth checks remain mandatory; no confidence, prediction or P&L.']};
 }

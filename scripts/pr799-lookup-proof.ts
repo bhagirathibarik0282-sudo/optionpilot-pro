@@ -8,7 +8,8 @@ const enabled=process.env.PR799_LOOKUP_PROOF==='QUALIFY_AND_COMPARE_READ_ONLY';
 const url=process.env.DATABASE_URL?.trim();
 if(!enabled||!url){console.error(JSON.stringify({ok:false,phase:'guard',reason:'LOOKUP_PROOF_NOT_ENABLED_OR_DB_UNAVAILABLE'}));process.exitCode=2;}
 else{
- let client:pg.Client|undefined,result:any,failed=false,phase='connect';
+ let client:pg.Client|undefined,result:any,failed=false,phase='connect',sqlState:string|null=null;
+ const completed:Record<string,unknown>={};
  const deadline=setTimeout(()=>{console.error(JSON.stringify({ok:false,phase,reason:'LOOKUP_PROOF_DEADLINE'}));process.exit(1);},150000);
  try{
    client=new pg.Client({connectionString:url,connectionTimeoutMillis:5000,query_timeout:50000,
@@ -27,14 +28,17 @@ else{
        COUNT(*) FILTER(WHERE symbol IS NULL OR symbol NOT IN ('NIFTY','SENSEX','BANKNIFTY'))::integer AS unexpected_symbols,
        MAX(octet_length(kind)+COALESCE(octet_length(symbol),0))::integer AS max_key_bytes
      FROM keys GROUP BY kind ORDER BY kind`)).rows;
+   completed.metadata=metadata;
    const indexes=(await client.query(`SELECT c.relname AS name,i.indisvalid AS valid,i.indisready AS ready,
        pg_relation_size(c.oid)::text AS bytes,pg_get_indexdef(c.oid) AS definition
      FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
      WHERE i.indrelid='public.app_state_log'::regclass ORDER BY c.relname`)).rows;
+   completed.indexes=indexes;
    const storage=(await client.query(`SELECT pg_database_size(current_database())::text AS database_bytes,
      pg_total_relation_size('public.app_state_log')::text AS relation_bytes,
      (SELECT COUNT(*)::integer FROM pg_stat_progress_create_index WHERE relid='public.app_state_log'::regclass) AS active_index_builds,
      (SELECT COUNT(*)::integer FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND xact_start<now()-interval '5 minutes') AS older_transactions`)).rows[0];
+   completed.storage=storage;
    const captured=JSON.parse(readFileSync(new URL('../docs/audits/pr799-paired-query-plan-20261025.json',import.meta.url),'utf8'));
    const old=captured.queries.find((q:any)=>q.kind==='canonical');
    const candidate=canonicalReplayReadSql(false,true);
@@ -59,8 +63,8 @@ else{
      comparison:'Same REPEATABLE READ snapshot; baseline first. Cache/order effects are uncontrolled.',
      limits:{statementMs:45000,lockMs:1000,processMs:150000,tempFileLimitKiB:65536}};
    phase='rollback';await client.query('ROLLBACK');
- }catch{failed=true;}
+ }catch(error){failed=true;const code=(error as any)?.code;if(typeof code==='string'&&/^[0-9A-Z]{5}$/.test(code))sqlState=code;}
  finally{try{await client?.end();}catch{failed=true;}clearTimeout(deadline);}
- if(failed||!result){console.error(JSON.stringify({ok:false,phase,reason:'READ_ONLY_LOOKUP_PROOF_FAILED'}));process.exitCode=1;}
+ if(failed||!result){console.error(JSON.stringify({ok:false,phase,sqlState,completed,reason:'READ_ONLY_LOOKUP_PROOF_FAILED'}));process.exitCode=1;}
  else console.log(JSON.stringify(result));
 }

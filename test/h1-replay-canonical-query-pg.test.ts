@@ -51,6 +51,12 @@ test('raw-symbol pushdown preserves complete paired rows and matches the propose
        (SELECT * FROM old_rows EXCEPT ALL SELECT * FROM new_rows)
        UNION ALL (SELECT * FROM new_rows EXCEPT ALL SELECT * FROM old_rows)) AS diff`,baseline.params);
    assert.equal(differences.rows[0].n,0,'SQL multiset parity retains duplicates and JSON null versus SQL NULL');
+   const fingerprint=async(sql:string)=>(await client.query(`SELECT COUNT(*)::integer AS rows,
+     COUNT(*) FILTER(WHERE market IS NULL)::integer AS sql_null_markets,
+     md5(string_agg(digest,',' ORDER BY digest)) AS fingerprint FROM (
+       SELECT market,md5((CASE WHEN market IS NULL THEN 'SQLNULL:' ELSE 'JSON:' END)||to_jsonb(r)::text) AS digest
+       FROM (${sql}) AS r) AS evidence`,baseline.params)).rows[0];
+   assert.deepEqual(await fingerprint(after),await fingerprint(before),'real diagnostic SQL must execute and preserve full evidence fingerprints');
    // Forced access proves expression compatibility only; it is not a speed test.
    await client.query('SET LOCAL enable_seqscan=off');
    const explained=await client.query('EXPLAIN (FORMAT JSON) '+after,baseline.params);

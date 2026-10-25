@@ -6,6 +6,7 @@ import {runH1ReplayPairRead} from '../h1-replay-http.js';
 import {parseRagEventRequest,readRagEventEvidence} from '../rag-event-evidence.js';
 import {projectRecordedRagLadder} from '../rag-recorder-event-ladder-bridge.js';
 import {PR799_PREVIEW_SELECTION} from '../pr799-recorder-preview.js';
+import {buildPr799BrowserCapture} from '../pr799-browser-capture.js';
 
 // Manual archive capture only. No server, application startup, broker, writes or retry.
 async function main(){
@@ -41,21 +42,7 @@ async function main(){
    try{await pool.end();}catch{failed=true;}finally{clearTimeout(deadline);}
  }
  assert.equal(failed,false);
- // Only three actual current-session markers and the selected exact PE are
- // transported. Do not serialize raw canonical payloads, credentials or other contracts.
- const buckets=new Set(['10:42','10:45','10:48'].map(t=>new Date('2026-10-19T'+t+':00+05:30').toISOString()));
- const pick=(r:any,keys:string[])=>Object.fromEntries(keys.filter(k=>Object.hasOwn(r,k)).map(k=>[k,r[k]]));
- const mk=['symbol','minute_bucket','truth_verdict','snapshot_id','backend_timestamp','spot_ltp','india_vix','spot_pdh','spot_pdl','spot_pdc','calculation_version'];
- const ok=['symbol','minute_bucket','truth_verdict','snapshot_id','expiry','strike','option_type','ltp','oi','quote_timestamp','day_high','day_low'];
- const inWindow=(r:any)=>r.symbol==='NIFTY'&&buckets.has(new Date(r.minute_bucket).toISOString());
- const market=pair[0].market.filter(inWindow).map((r:any)=>pick(r,mk));
- const options=pair[0].options.filter((r:any)=>inWindow(r)&&String(r.expiry).slice(0,10)==='2026-10-19'&&Number(r.strike)===23150&&r.option_type==='PE').map((r:any)=>pick(r,ok));
- assert.equal(market.length,3);assert.equal(options.length,3);
- const evidence=pick(raw,['ok','status','mode','source','safety','identity','event','provenance','beforeAndAt','outcomes']);
- const capture={mode:'PR799_ACTUAL_ARCHIVE_BROWSER_CAPTURE_V1',capturedAt:new Date().toISOString(),
-   scope:'Three actual Recorder markers and exact PE; full admitted RAG lanes; no baseline or full session',
-   readOnly:true,writesPerformed:false,selectedEvidenceSha256:raw.provenance.selectedEvidenceSha256,
-   state:{date:'2026-10-19',recordedDates:['2026-10-19'],current:{NIFTY:{market,options,chain:[]}},baseline:{},history:{}},evidence};
+ const capture=buildPr799BrowserCapture(pair,raw,new Date().toISOString());
  const json=JSON.stringify(capture);assert(Buffer.byteLength(json)<250000);
  const encoded=gzipSync(json).toString('base64');assert(encoded.length<100000);
  const chunks=encoded.match(/.{1,3000}/g)!;

@@ -20,6 +20,9 @@ const day = (ms:number) => new Date(ms+19800000).toISOString().slice(0,10);
 const expiry = (r:Row) => iso(r.expiry)?.slice(0,10);
 const hash = (rows:unknown) => createHash('sha256').update(JSON.stringify(rows)).digest('hex');
 function one(rows:Row[]):Row|null {
+  // A single exact recorded row has no duplicate ambiguity. Avoid serializing
+  // its entire archived market JSON; retain full comparisons for multiple rows.
+  if(rows.length===1)return rows[0];
   const unique=new Map(rows.map(r=>[JSON.stringify(r),r]));
   return unique.size===1?[...unique.values()][0]:null;
 }

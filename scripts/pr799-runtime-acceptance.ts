@@ -39,15 +39,18 @@ if(!enabled||!url){
        client.release(broken);
      }
    };
-   const reads:unknown[]=[];let evidence:any;
+   const reads:unknown[]=[];let evidence:any,sourceStartedAt=0,sourceEndedAt=0,evidenceEndedAt=0;
    const app=new Hono();
    mountRecorderEventContextLadderRoute(app,async request=>{
      evidence=await readRagEventEvidence(request,undefined,async requests=>{
+       sourceStartedAt=performance.now();
        const pair=await runH1ReplayPairRead(requests,read);
+       sourceEndedAt=performance.now();
        pair.forEach((replay,i)=>reads.push({request:requests[i],ok:replay.ok,reason:replay.reason??null,counts:replay.counts,
          queryTimingsMs:replay.queryTimingsMs}));
        return pair;
      });
+     evidenceEndedAt=performance.now();
      return evidence;
    });
    const start=performance.now();
@@ -72,6 +75,9 @@ if(!enabled||!url){
      elapsedMs,scope:'DEPLOYED_PROCESS_IN_PROCESS_HTTP_HANDLER_WITH_REAL_DB_EXCLUDES_PUBLIC_EDGE_AND_BROWSER',
      identity:evidence.identity,event:evidence.event,selectedEvidenceSha256:evidence.provenance.selectedEvidenceSha256,
      premiums:{before3m:premium(-3),event:premium(0),after3m:premium(3)},reads,sourceScanCounts,
+     stageTimingsMs:{sources:Math.round((sourceEndedAt-sourceStartedAt)*10)/10,
+       evidenceBuild:Math.round((evidenceEndedAt-sourceEndedAt)*10)/10,
+       renderAndResponse:Math.round((performance.now()-evidenceEndedAt)*10)/10},
      safety:{transactionReadOnlyVerified:true,writesPerformed:false,publicListener:false,brokerRequests:false},
      limits:{processMs:120000,statementMs:45000,lockMs:1000,poolMax:5},
      limitations:['One sample; no universal latency claim.','Shared archive timings overlap and must not be added.','Diagnostic pool uses explicit read-only transactions and deadlines.',

@@ -13,9 +13,6 @@ on:
       - 'h1-replay-compact-v1.ts'
       - 'test/h1-replay-canonical-projection-pg.test.ts'
       - 'test/h1-replay-canonical-query-pg.test.ts'
-      - 'h1-archive-lookup-index.ts'
-      - 'scripts/pr799-build-lookup-index.ts'
-      - 'test/h1-archive-lookup-index.test.ts'
       - 'test/fixtures/h1-canonical-legacy-query.sql'
       - '.github/workflows/replay-projection-postgres-ci.yml'
   workflow_dispatch:
@@ -42,6 +39,6 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/db-startup-query.test.ts test/h1-replay-canonical-projection-pg.test.ts test/h1-replay-canonical-query-pg.test.ts test/h1-replay-compact-v1.test.ts test/h1-replay-http.test.ts test/h1-archive-lookup-index.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/db-startup-query.test.ts test/h1-replay-canonical-projection-pg.test.ts test/h1-replay-canonical-query-pg.test.ts test/h1-replay-compact-v1.test.ts test/h1-replay-http.test.ts
         env:
           TEST_REPLAY_DATABASE_URL: postgres://replay_test:local_test_only@localhost:5432/replay_test

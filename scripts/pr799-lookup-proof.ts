@@ -58,12 +58,24 @@ else{
    phase='baseline_fingerprint';const baseline=await fingerprint(old.sql);
    phase='candidate_fingerprint';const current=await fingerprint(candidate);
    assert.deepEqual({...current,elapsedMs:0},{...baseline,elapsedMs:0});
+   phase='original_sorted_plan';
+   let originalSortedPlan:any=null,originalSortedLimit:any=null;
+   await client.query('SAVEPOINT original_sort_probe');
+   try{
+     originalSortedPlan=(await client.query('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE, TIMING FALSE, FORMAT JSON) '+old.sql,old.params)).rows[0]['QUERY PLAN'];
+   }catch(error){
+     if((error as any)?.code!=='53400'||!/temporary file size exceeds temp_file_limit/.test(String((error as any)?.message)))throw error;
+     originalSortedLimit={sqlState:'53400',reason:'ORIGINAL_SORT_EXCEEDS_64MIB_DIAGNOSTIC_TEMP_BUDGET'};
+   }finally{
+     await client.query('ROLLBACK TO SAVEPOINT original_sort_probe');
+     await client.query('RELEASE SAVEPOINT original_sort_probe');
+   }
    phase='baseline_actual_plan';
    const baselinePlan=(await client.query('EXPLAIN (ANALYZE TRUE, BUFFERS TRUE, TIMING FALSE, FORMAT JSON) '+scanOnly(old.sql),old.params)).rows[0]['QUERY PLAN'];
    phase='candidate_plan';
-   const candidatePlan=(await client.query('EXPLAIN (FORMAT JSON, COSTS TRUE) '+candidate,old.params)).rows[0]['QUERY PLAN'];
+   const candidatePlan=(await client.query('EXPLAIN (FORMAT JSON, COSTS TRUE) '+canonicalReplayReadSql(false,true,true),old.params)).rows[0]['QUERY PLAN'];
    result={ok:true,mode:'PR799_READ_ONLY_LOOKUP_ROOT_CAUSE_PROOF',readOnly:true,writesPerformed:false,
-     metadata,indexes,storage,baseline,current,baselinePlan,candidatePlan,
+     metadata,indexes,storage,baseline,current,originalSortedPlan,originalSortedLimit,baselinePlan,candidatePlan,
      baselineActualPlanScope:'Original predicates/projection without ORDER BY; bounded scan diagnosis, not whole-handler timing.',
      comparison:'Same REPEATABLE READ snapshot; baseline first. Cache/order effects are uncontrolled.',
      limits:{statementMs:45000,lockMs:1000,processMs:150000,tempFileLimitKiB:65536}};

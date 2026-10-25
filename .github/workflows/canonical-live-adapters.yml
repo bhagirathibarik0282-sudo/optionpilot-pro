@@ -5,8 +5,11 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  constituent-registry:
+  remaining-adapter-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -36,7 +39,6 @@ jobs:
       - run: node --import tsx --test test/canonical-fii-dii-production-readiness.test.ts
       - run: node --import tsx --test test/canonical-seven-index-intelligence-freeze.test.ts
       - run: node --import tsx --test test/canonical-seven-index-live-source-probe.test.ts
-      - run: node --import tsx --test test/canonical-seven-index-live-source-practical-probe.test.ts
       - run: node --import tsx --test test/canonical-seven-index-market-value-parser.test.ts
       - run: node --import tsx --test test/canonical-seven-index-market-value-live-practical.test.ts
       - run: node --import tsx --test test/canonical-market-dna-context.test.ts
@@ -53,3 +55,30 @@ jobs:
       - run: node --import tsx --test test/canonical-constituent-tick-store.test.ts
       - run: node --import tsx --test test/h1-live-exact-readonly-websocket-service.test.ts
       - run: node --import tsx --test test/canonical-shadow-snapshot-assembler.test.ts
+
+  official-nse-reachability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: node --import tsx --test test/canonical-seven-index-live-source-practical-probe.test.ts
+
+  # Preserve the original check identity AND its source-availability requirement.
+  # Splitting execution must not silently relax an existing required status.
+  constituent-registry:
+    needs: [remaining-adapter-checks, official-nse-reachability]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Require both adapter checks and official source availability
+        env:
+          ADAPTER_RESULT: ${{ needs['remaining-adapter-checks'].result }}
+          NSE_RESULT: ${{ needs['official-nse-reachability'].result }}
+        run: |
+          test "$ADAPTER_RESULT" = success
+          test "$NSE_RESULT" = success

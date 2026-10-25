@@ -1,0 +1,725 @@
+{
+  "date": "2026-10-25",
+  "finalCodeCommit": "d6cb533e99b1e3cc488460fb3d811114ff3134fc",
+  "finalDeploymentId": "6420a8eb-4a96-4be0-aabc-b2b81fe719e8",
+  "serviceId": "8db59b5b-25b0-4cd0-b92d-fb584c1a89d4",
+  "rootProofDeploymentId": "40bce57f-cb37-4537-a82d-4c5b93cec062",
+  "rootProofCodeCommit": "958a37f70ca869ccd631b3f10aa7554da54955f9",
+  "rootProof": {
+    "ok": true,
+    "mode": "PR799_READ_ONLY_LOOKUP_ROOT_CAUSE_PROOF",
+    "readOnly": true,
+    "writesPerformed": false,
+    "metadata": [
+      {
+        "kind": "H1_CANONICAL_MARKET_ARCHIVE",
+        "rows": 12195,
+        "non_string_symbols": 0,
+        "unexpected_symbols": 0,
+        "max_key_bytes": 36
+      },
+      {
+        "kind": "H1_TRUTH_MARKER",
+        "rows": 13326,
+        "non_string_symbols": 0,
+        "unexpected_symbols": 0,
+        "max_key_bytes": 24
+      }
+    ],
+    "indexes": [
+      {
+        "name": "app_state_log_pkey",
+        "valid": true,
+        "ready": true,
+        "bytes": "25862144",
+        "definition": "CREATE UNIQUE INDEX app_state_log_pkey ON public.app_state_log USING btree (id)"
+      },
+      {
+        "name": "idx_app_state_log_kind_created",
+        "valid": true,
+        "ready": true,
+        "bytes": "67624960",
+        "definition": "CREATE INDEX idx_app_state_log_kind_created ON public.app_state_log USING btree (kind, created_at DESC)"
+      }
+    ],
+    "storage": {
+      "database_bytes": "3142031039",
+      "relation_bytes": "1631887360",
+      "active_index_builds": 0,
+      "older_transactions": 0
+    },
+    "baseline": {
+      "rows": 185,
+      "sql_null_markets": 0,
+      "fingerprint": "a8807b83ef37523a173c08bff3cbb2ff",
+      "elapsedMs": 6253.2
+    },
+    "current": {
+      "rows": 185,
+      "sql_null_markets": 0,
+      "fingerprint": "a8807b83ef37523a173c08bff3cbb2ff",
+      "elapsedMs": 6532.6
+    },
+    "originalSortedPlan": [
+      {
+        "Plan": {
+          "Node Type": "Sort",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 14965.08,
+          "Total Cost": 14977.33,
+          "Plan Rows": 4900,
+          "Plan Width": 200,
+          "Actual Rows": 185,
+          "Actual Loops": 1,
+          "Disabled": false,
+          "Sort Key": [
+            "((p.\"minuteBucket\")::timestamp with time zone)"
+          ],
+          "Sort Method": "external merge",
+          "Sort Space Used": 29344,
+          "Sort Space Type": "Disk",
+          "Shared Hit Blocks": 131939,
+          "Shared Read Blocks": 47906,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 3668,
+          "Temp Written Blocks": 3675,
+          "Plans": [
+            {
+              "Node Type": "Nested Loop",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Join Type": "Inner",
+              "Startup Cost": 0.43,
+              "Total Cost": 14664.74,
+              "Plan Rows": 4900,
+              "Plan Width": 200,
+              "Actual Rows": 185,
+              "Actual Loops": 1,
+              "Disabled": false,
+              "Inner Unique": false,
+              "Shared Hit Blocks": 131937,
+              "Shared Read Blocks": 47905,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Scan Direction": "Forward",
+                  "Index Name": "idx_app_state_log_kind_created",
+                  "Relation Name": "app_state_log",
+                  "Alias": "app_state_log",
+                  "Startup Cost": 0.42,
+                  "Total Cost": 14150.24,
+                  "Plan Rows": 4900,
+                  "Plan Width": 1565,
+                  "Actual Rows": 12195,
+                  "Actual Loops": 1,
+                  "Disabled": false,
+                  "Index Cond": "(kind = 'H1_CANONICAL_MARKET_ARCHIVE'::text)",
+                  "Rows Removed by Index Recheck": 0,
+                  "Index Searches": 1,
+                  "Shared Hit Blocks": 620,
+                  "Shared Read Blocks": 6609,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                },
+                {
+                  "Node Type": "Function Scan",
+                  "Parent Relationship": "Inner",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Function Name": "jsonb_to_record",
+                  "Alias": "p",
+                  "Startup Cost": 0.01,
+                  "Total Cost": 0.1,
+                  "Plan Rows": 1,
+                  "Plan Width": 192,
+                  "Actual Rows": 0.02,
+                  "Actual Loops": 12195,
+                  "Disabled": false,
+                  "Filter": "((\"minuteBucket\" IS NOT NULL) AND (symbol = 'NIFTY'::text) AND ((((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-19'::date) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '10:15:00'::time without time zone) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '11:15:00'::time without time zone)) OR (((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-16'::date) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '09:15:00'::time without time zone) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '15:30:00'::time without time zone))))",
+                  "Rows Removed by Filter": 1,
+                  "Shared Hit Blocks": 129906,
+                  "Shared Read Blocks": 41296,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                }
+              ]
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 1,
+          "Shared Read Blocks": 4,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.249,
+        "Triggers": [],
+        "Execution Time": 2601.496
+      }
+    ],
+    "originalSortedLimit": null,
+    "baselinePlan": [
+      {
+        "Plan": {
+          "Node Type": "Nested Loop",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Join Type": "Inner",
+          "Startup Cost": 0.43,
+          "Total Cost": 14664.74,
+          "Plan Rows": 4900,
+          "Plan Width": 200,
+          "Actual Rows": 185,
+          "Actual Loops": 1,
+          "Disabled": false,
+          "Inner Unique": false,
+          "Shared Hit Blocks": 131901,
+          "Shared Read Blocks": 47941,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "idx_app_state_log_kind_created",
+              "Relation Name": "app_state_log",
+              "Alias": "app_state_log",
+              "Startup Cost": 0.42,
+              "Total Cost": 14150.24,
+              "Plan Rows": 4900,
+              "Plan Width": 1565,
+              "Actual Rows": 12195,
+              "Actual Loops": 1,
+              "Disabled": false,
+              "Index Cond": "(kind = 'H1_CANONICAL_MARKET_ARCHIVE'::text)",
+              "Rows Removed by Index Recheck": 0,
+              "Index Searches": 1,
+              "Shared Hit Blocks": 620,
+              "Shared Read Blocks": 6609,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            {
+              "Node Type": "Function Scan",
+              "Parent Relationship": "Inner",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Function Name": "jsonb_to_record",
+              "Alias": "p",
+              "Startup Cost": 0.01,
+              "Total Cost": 0.1,
+              "Plan Rows": 1,
+              "Plan Width": 192,
+              "Actual Rows": 0.02,
+              "Actual Loops": 12195,
+              "Disabled": false,
+              "Filter": "((\"minuteBucket\" IS NOT NULL) AND (symbol = 'NIFTY'::text) AND ((((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-19'::date) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '10:15:00'::time without time zone) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '11:15:00'::time without time zone)) OR (((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-16'::date) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '09:15:00'::time without time zone) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '15:30:00'::time without time zone))))",
+              "Rows Removed by Filter": 1,
+              "Shared Hit Blocks": 129870,
+              "Shared Read Blocks": 41332,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.209,
+        "Triggers": [],
+        "Execution Time": 2767.562
+      }
+    ],
+    "candidatePlan": [
+      {
+        "Plan": {
+          "Node Type": "Nested Loop",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Join Type": "Inner",
+          "Startup Cost": 0.43,
+          "Total Cost": 14177.68,
+          "Plan Rows": 24,
+          "Plan Width": 232,
+          "Disabled": false,
+          "Inner Unique": false,
+          "Plans": [
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "idx_app_state_log_kind_created",
+              "Relation Name": "app_state_log",
+              "Alias": "app_state_log",
+              "Startup Cost": 0.42,
+              "Total Cost": 14174.74,
+              "Plan Rows": 24,
+              "Plan Width": 1565,
+              "Disabled": false,
+              "Index Cond": "(kind = 'H1_CANONICAL_MARKET_ARCHIVE'::text)",
+              "Filter": "((payload ->> 'symbol'::text) = 'NIFTY'::text)"
+            },
+            {
+              "Node Type": "Function Scan",
+              "Parent Relationship": "Inner",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Function Name": "jsonb_to_record",
+              "Alias": "p",
+              "Startup Cost": 0.01,
+              "Total Cost": 0.1,
+              "Plan Rows": 1,
+              "Plan Width": 192,
+              "Disabled": false,
+              "Filter": "((\"minuteBucket\" IS NOT NULL) AND (symbol = 'NIFTY'::text) AND ((((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-19'::date) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '10:15:00'::time without time zone) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '11:15:00'::time without time zone)) OR (((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-16'::date) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '09:15:00'::time without time zone) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '15:30:00'::time without time zone))))"
+            }
+          ]
+        }
+      }
+    ],
+    "baselineActualPlanScope": "Original predicates/projection without ORDER BY; bounded scan diagnosis, not whole-handler timing.",
+    "comparison": "Same REPEATABLE READ snapshot; baseline first. Cache/order effects are uncontrolled.",
+    "limits": {
+      "statementMs": 45000,
+      "lockMs": 1000,
+      "processMs": 150000,
+      "tempFileLimitKiB": 65536
+    }
+  },
+  "earlierSamples": [
+    {
+      "evidence": "pr799-real-db-handler-20261025.json",
+      "handlerElapsedMs": 33779.8
+    },
+    {
+      "evidence": "pr799-paired-scan-handler-20261025.json",
+      "handlerElapsedMs": 26182.5
+    },
+    {
+      "codeCommit": "cce78ea48bfd6da0d44d75e32711a84ec7e830f1",
+      "deploymentId": "e4b0db15-433e-433f-9d57-78da42516be6",
+      "ok": true,
+      "mode": "ONE_SHOT_REAL_DB_RAG_HANDLER_ACCEPTANCE",
+      "httpStatus": 200,
+      "elapsedMs": 7165.5,
+      "scope": "DEPLOYED_PROCESS_IN_PROCESS_HTTP_HANDLER_WITH_REAL_DB_EXCLUDES_PUBLIC_EDGE_AND_BROWSER",
+      "identity": {
+        "symbol": "NIFTY",
+        "date": "2026-10-19",
+        "expiry": "2026-10-19",
+        "strike": 23150,
+        "side": "PE",
+        "dte": 0
+      },
+      "event": {
+        "timeIst": "10:45",
+        "flags": [],
+        "before": 153.85,
+        "after": 137.1,
+        "availableAt": "2026-10-19T05:15:00.000Z"
+      },
+      "selectedEvidenceSha256": "118a0e2d0c07691435358d41088f4658b8deeeb1f4acf81f539d59eb41b3fc82",
+      "premiums": {
+        "before3m": 153.85,
+        "event": 137.1,
+        "after3m": 142.9
+      },
+      "reads": [
+        {
+          "request": {
+            "symbol": "NIFTY",
+            "tradeDate": "2026-10-19",
+            "fromTime": "10:15",
+            "toTime": "11:15",
+            "scope": "FULL"
+          },
+          "ok": true,
+          "reason": null,
+          "counts": {
+            "market": 61,
+            "options": 5618,
+            "chain": 183,
+            "markers": 61,
+            "canonical": 61
+          },
+          "queryTimingsMs": {
+            "markers": 155.2,
+            "market": 27.4,
+            "chain": 190.3,
+            "options": 863.3,
+            "canonical": 2742.6,
+            "raw_gaps": 0
+          }
+        },
+        {
+          "request": {
+            "symbol": "NIFTY",
+            "tradeDate": "2026-10-16",
+            "fromTime": "09:15",
+            "toTime": "15:30",
+            "scope": "FULL"
+          },
+          "ok": true,
+          "reason": null,
+          "counts": {
+            "market": 124,
+            "options": 11357,
+            "chain": 372,
+            "markers": 124,
+            "canonical": 124
+          },
+          "queryTimingsMs": {
+            "markers": 155.1,
+            "market": 26.6,
+            "chain": 236.5,
+            "options": 1407.2,
+            "canonical": 2742.4,
+            "raw_gaps": 31.1
+          }
+        }
+      ],
+      "sourceScanCounts": {
+        "markers": 1,
+        "canonical": 1
+      },
+      "safety": {
+        "transactionReadOnlyVerified": true,
+        "writesPerformed": false,
+        "publicListener": false,
+        "brokerRequests": false
+      },
+      "limits": {
+        "processMs": 120000,
+        "statementMs": 45000,
+        "lockMs": 1000,
+        "poolMax": 5
+      },
+      "limitations": [
+        "One sample; no universal latency claim.",
+        "Shared archive timings overlap and must not be added.",
+        "Diagnostic pool uses explicit read-only transactions and deadlines.",
+        "Public HTTP edge, Recorder browser click-through and mobile visual acceptance remain unverified.",
+        "Recorded canonical PCR does not prove complete fresh full-chain inventory."
+      ]
+    },
+    {
+      "codeCommit": "958a37f70ca869ccd631b3f10aa7554da54955f9",
+      "deploymentId": "40bce57f-cb37-4537-a82d-4c5b93cec062",
+      "ok": true,
+      "mode": "ONE_SHOT_REAL_DB_RAG_HANDLER_ACCEPTANCE",
+      "httpStatus": 200,
+      "elapsedMs": 5901.5,
+      "scope": "DEPLOYED_PROCESS_IN_PROCESS_HTTP_HANDLER_WITH_REAL_DB_EXCLUDES_PUBLIC_EDGE_AND_BROWSER",
+      "identity": {
+        "symbol": "NIFTY",
+        "date": "2026-10-19",
+        "expiry": "2026-10-19",
+        "strike": 23150,
+        "side": "PE",
+        "dte": 0
+      },
+      "event": {
+        "timeIst": "10:45",
+        "flags": [],
+        "before": 153.85,
+        "after": 137.1,
+        "availableAt": "2026-10-19T05:15:00.000Z"
+      },
+      "selectedEvidenceSha256": "118a0e2d0c07691435358d41088f4658b8deeeb1f4acf81f539d59eb41b3fc82",
+      "premiums": {
+        "before3m": 153.85,
+        "event": 137.1,
+        "after3m": 142.9
+      },
+      "reads": [
+        {
+          "request": {
+            "symbol": "NIFTY",
+            "tradeDate": "2026-10-19",
+            "fromTime": "10:15",
+            "toTime": "11:15",
+            "scope": "FULL"
+          },
+          "ok": true,
+          "reason": null,
+          "counts": {
+            "market": 61,
+            "options": 5618,
+            "chain": 183,
+            "markers": 61,
+            "canonical": 61
+          },
+          "queryTimingsMs": {
+            "markers": 642.8,
+            "market": 27.6,
+            "chain": 242.3,
+            "options": 993.4,
+            "canonical": 3002.1,
+            "raw_gaps": 0
+          }
+        },
+        {
+          "request": {
+            "symbol": "NIFTY",
+            "tradeDate": "2026-10-16",
+            "fromTime": "09:15",
+            "toTime": "15:30",
+            "scope": "FULL"
+          },
+          "ok": true,
+          "reason": null,
+          "counts": {
+            "market": 124,
+            "options": 11357,
+            "chain": 372,
+            "markers": 124,
+            "canonical": 124
+          },
+          "queryTimingsMs": {
+            "markers": 642.8,
+            "market": 43.3,
+            "chain": 524.7,
+            "options": 1473.9,
+            "canonical": 3002,
+            "raw_gaps": 21.8
+          }
+        }
+      ],
+      "sourceScanCounts": {
+        "markers": 1,
+        "canonical": 1
+      },
+      "stageTimingsMs": {
+        "sources": 3670.3,
+        "evidenceBuild": 2181.4,
+        "renderAndResponse": 18.2
+      },
+      "safety": {
+        "transactionReadOnlyVerified": true,
+        "writesPerformed": false,
+        "publicListener": false,
+        "brokerRequests": false
+      },
+      "limits": {
+        "processMs": 120000,
+        "statementMs": 45000,
+        "lockMs": 1000,
+        "poolMax": 5
+      },
+      "limitations": [
+        "One sample; no universal latency claim.",
+        "Shared archive timings overlap and must not be added.",
+        "Diagnostic pool uses explicit read-only transactions and deadlines.",
+        "Public HTTP edge, Recorder browser click-through and mobile visual acceptance remain unverified.",
+        "Recorded canonical PCR does not prove complete fresh full-chain inventory."
+      ]
+    }
+  ],
+  "finalHandler": {
+    "ok": true,
+    "mode": "ONE_SHOT_REAL_DB_RAG_HANDLER_ACCEPTANCE",
+    "httpStatus": 200,
+    "elapsedMs": 4884.9,
+    "scope": "DEPLOYED_PROCESS_IN_PROCESS_HTTP_HANDLER_WITH_REAL_DB_EXCLUDES_PUBLIC_EDGE_AND_BROWSER",
+    "identity": {
+      "symbol": "NIFTY",
+      "date": "2026-10-19",
+      "expiry": "2026-10-19",
+      "strike": 23150,
+      "side": "PE",
+      "dte": 0
+    },
+    "event": {
+      "timeIst": "10:45",
+      "flags": [],
+      "before": 153.85,
+      "after": 137.1,
+      "availableAt": "2026-10-19T05:15:00.000Z"
+    },
+    "selectedEvidenceSha256": "118a0e2d0c07691435358d41088f4658b8deeeb1f4acf81f539d59eb41b3fc82",
+    "premiums": {
+      "before3m": 153.85,
+      "event": 137.1,
+      "after3m": 142.9
+    },
+    "reads": [
+      {
+        "request": {
+          "symbol": "NIFTY",
+          "tradeDate": "2026-10-19",
+          "fromTime": "10:15",
+          "toTime": "11:15",
+          "scope": "FULL"
+        },
+        "ok": true,
+        "reason": null,
+        "counts": {
+          "market": 61,
+          "options": 5618,
+          "chain": 183,
+          "markers": 61,
+          "canonical": 61
+        },
+        "queryTimingsMs": {
+          "markers": 2028.9,
+          "market": 16.1,
+          "chain": 33.4,
+          "options": 315.6,
+          "canonical": 2284.4,
+          "raw_gaps": 0
+        }
+      },
+      {
+        "request": {
+          "symbol": "NIFTY",
+          "tradeDate": "2026-10-16",
+          "fromTime": "09:15",
+          "toTime": "15:30",
+          "scope": "FULL"
+        },
+        "ok": true,
+        "reason": null,
+        "counts": {
+          "market": 124,
+          "options": 11357,
+          "chain": 372,
+          "markers": 124,
+          "canonical": 124
+        },
+        "queryTimingsMs": {
+          "markers": 2029,
+          "market": 16.8,
+          "chain": 25.6,
+          "options": 232.6,
+          "canonical": 2284.2,
+          "raw_gaps": 95.3
+        }
+      }
+    ],
+    "sourceScanCounts": {
+      "markers": 1,
+      "canonical": 1
+    },
+    "stageTimingsMs": {
+      "sources": 4412.6,
+      "evidenceBuild": 439.6,
+      "renderAndResponse": 9.5
+    },
+    "safety": {
+      "transactionReadOnlyVerified": true,
+      "writesPerformed": false,
+      "publicListener": false,
+      "brokerRequests": false
+    },
+    "limits": {
+      "processMs": 120000,
+      "statementMs": 45000,
+      "lockMs": 1000,
+      "poolMax": 5
+    },
+    "limitations": [
+      "One sample; no universal latency claim.",
+      "Shared archive timings overlap and must not be added.",
+      "Diagnostic pool uses explicit read-only transactions and deadlines.",
+      "Public HTTP edge, Recorder browser click-through and mobile visual acceptance remain unverified.",
+      "Recorded canonical PCR does not prove complete fresh full-chain inventory."
+    ]
+  },
+  "fixes": [
+    "Raw canonical rows use a private exact PostgreSQL microsecond epoch key; application sorts row references and strips the key before evidence/HTTP output, avoiding wide database JSON sorting.",
+    "An exact single row bypasses unnecessary duplicate-check JSON serialization; full comparisons remain for multiple rows.",
+    "Prior-session point checks share one exact selected-contract working view; source inventory, duplicates, marker identity and coverage are preserved."
+  ],
+  "diagnosticCorrection": {
+    "initialFingerprintProbeFailed": true,
+    "sqlState": "53400",
+    "phase": "baseline_fingerprint",
+    "explanation": "The full-row fingerprint wrapper unnecessarily preserved source ORDER BY under a 64MiB temporary-file budget. It was changed to a multiset digest without that redundant wide sort; the limit was not raised. A separate actual EXPLAIN ANALYZE of the original sorted source succeeded and recorded an external merge sort using 29344kB of disk. The diagnostic-wrapper failure is not reported as an application outage."
+  },
+  "validation": {
+    "selectedEvidenceFingerprintUnchanged": true,
+    "before3m": 153.85,
+    "event": 137.1,
+    "after3m": 142.9,
+    "bothSessionCountsUnchanged": true,
+    "liveIndexCreated": false,
+    "schemaWrites": false,
+    "marketDataWrites": false,
+    "publicBrowserAcceptance": false
+  },
+  "limitations": [
+    "Samples were taken at different times; cache, process warmup, order and load are uncontrolled. No universal/cold-cache latency guarantee.",
+    "Timings cover a deployed in-process Hono handler with real DB reads, excluding public HTTP edge and browser.",
+    "Sources and evidenceBuild stage timings are direct; renderAndResponse also includes diagnostic assertions after response capture and is not a pure render benchmark.",
+    "Kind-only physical lookup remains a possible scaling concern; no optional index proposal was applied.",
+    "Full-chain inventory/freshness claims remain unverified; existing partial/missing source gates are unchanged."
+  ]
+}

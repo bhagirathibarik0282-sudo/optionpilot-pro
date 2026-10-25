@@ -110,3 +110,18 @@ modes. One repeatable-read real-archive benchmark matched result count and
 fingerprint, observing 36.73s legacy versus 10.64s candidate. Cache/order effects
 and other windows are unverified. See the blocker register and benchmark JSON;
 this is a draft repair, not production performance acceptance.
+# Raw archive latency repair — 25 Oct 2026
+
+Raw canonical reads now return a private exact PostgreSQL microsecond epoch key
+and sort row references in the application. The private key is stripped before
+coverage, RAG evidence or HTTP output. This avoids database sorting of wide raw
+market JSON while preserving timestamp/offset precision and duplicate rows.
+Explicit compact/projection reads retain their existing SQL ordering.
+
+Prior-session reference validation creates one exact-contract working view
+before checking each historical timestamp. All duplicate, snapshot, quote-age,
+receipt and range-consistency guards remain; original source arrays/coverage
+are unchanged. No live index or schema write was used. Actual sampled handler
+latency was 4.8849s with the unchanged selected-evidence fingerprint; public
+Recorder/mobile acceptance and broad/cold-cache latency guarantees are not
+claimed. See `docs/audits/pr799-archive-root-cause-20261025.json`.

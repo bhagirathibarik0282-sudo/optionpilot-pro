@@ -1,7 +1,16 @@
 # PR #799 archive lookup proposal — not applied
 
-The latest actual handler sample still takes 26.18s. This document prepares the
-next candidate; it does not authorize or execute an index build, change a query,
+**Status update:** the actual sampled handler was repaired to 4.88s with code
+changes only (wide JSON sort removed from raw SQL; prior reference lookups
+scoped once). No live index build was needed or performed. This document is an
+optional future scaling proposal, not a release prerequisite. Exact SQL/index
+compatibility and predicate parity now pass isolated PostgreSQL CI; actual
+source metadata is qualified (12,195 canonical rows, 13,326 markers, no
+unexpected/non-string symbols). Live build headroom/impact remain unverified.
+See `pr799-archive-root-cause-20261025.json` for the final repair evidence.
+
+The historical 26.18s handler sample motivated this proposal. It does not
+authorize or execute an index build, change a query,
 promise a latency target, or count browser/mobile acceptance as complete.
 
 ## What the actual paired plan proves
@@ -71,6 +80,8 @@ a timestamp-expression index by declaring a session-dependent parser immutable.
    unchanged selected-evidence fingerprints and measure bounded runtime reads.
    Public edge and Recorder/browser/mobile acceptance still follow separately.
 
-At present the plan observation is complete, while candidate predicate parity,
-index size/build headroom and runtime benefit are unverified. Main application
-and database schema remain unchanged by this proposal.
+Plan observation, isolated predicate parity/index compatibility and source-key
+qualification are complete. Live index size/build headroom and benefit remain
+unverified because no live build was performed. The sampled code-only repair
+returned the handler in 4.88s. Main application and live database schema remain
+unchanged by this proposal; it is not a prerequisite for that code repair.

@@ -2,6 +2,25 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildH1ReplayContinuity, buildH1ReplayMarkerGapEvidence, parseH1ReplayRequest, runH1ReplayRead, runH1ReplayPairRead } from "../h1-replay-http.js";
 
+test('raw canonical read avoids wide database sort and retains exact microsecond row order privately',async()=>{
+ const request={symbol:'NIFTY',tradeDate:'2026-10-19',fromTime:'10:45',toTime:'10:45',scope:'FULL'} as const;
+ const input=[
+   {minute_bucket:new Date('2026-10-19T05:15:00Z'),snapshot_id:'later',__h1_source_order_us:'1792386900000002',market:{value:2}},
+   {minute_bucket:new Date('2026-10-19T05:15:00Z'),snapshot_id:'earlier',__h1_source_order_us:'1792386900000001',market:{value:1}},
+   {minute_bucket:new Date('2026-10-19T05:15:00Z'),snapshot_id:'earlier',__h1_source_order_us:'1792386900000001',market:{value:1}}];
+ const result=await runH1ReplayRead(request,async(sql:string)=>{
+   if(sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'")){
+     assert.doesNotMatch(sql,/ORDER BY/);assert.match(sql,/EXTRACT\(EPOCH/);return input as any;
+   }
+   return [] as any;
+ });
+ assert.equal(result.ok,true);assert.deepEqual(result.canonical?.map(r=>r.snapshot_id),['earlier','earlier','later']);
+ assert(result.canonical?.every(r=>!('__h1_source_order_us' in r)));
+ assert.equal(result.canonical?.[0].market,input[1].market,'large JSON object is retained by reference');
+ assert.equal(result.counts?.canonical,3);
+ assert.equal(input[0].snapshot_id,'later','source array is not reordered');
+});
+
 test('paired sessions share two archive scans while preserving all rows, joins and coverage',async()=>{
  const requests=[{symbol:'NIFTY',tradeDate:'2026-10-19',fromTime:'10:42',toTime:'10:48',scope:'FULL'},
    {symbol:'NIFTY',tradeDate:'2026-10-16',fromTime:'09:15',toTime:'15:30',scope:'FULL'}] as const;

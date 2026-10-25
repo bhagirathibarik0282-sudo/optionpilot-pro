@@ -230,12 +230,14 @@ function archiveWindowSql(bucket:string,paired=false):string {
   return paired?`((${window(2,3,4)}) OR (${window(5,6,7)}))`:window(2,3,4);
 }
 
-export function canonicalReplayReadSql(canonicalPcrOnly=false,paired=false):string {
+export function canonicalReplayReadSql(canonicalPcrOnly=false,paired=false,applicationOrder=false):string {
+  const clientOrder=applicationOrder&&!canonicalPcrOnly;
   return `${canonicalPcrOnly?'WITH replay_archive AS MATERIALIZED (':''}
     SELECT p."minuteBucket"::timestamptz AS minute_bucket,
       p.symbol AS symbol, p."snapshotId" AS snapshot_id,
       p."truthVerdict" AS truth_verdict, p."sourceTimestamp" AS source_timestamp,
       p."calculationVersion" AS calculation_version,
+      ${clientOrder?'((EXTRACT(EPOCH FROM p."minuteBucket"::timestamptz)*1000000)::bigint)::text AS __h1_source_order_us,':''}
       ${canonicalPcrOnly?"payload->'market' AS raw_market":"payload->'market' AS market"}
     FROM app_state_log
     CROSS JOIN LATERAL jsonb_to_record(
@@ -246,10 +248,24 @@ export function canonicalReplayReadSql(canonicalPcrOnly=false,paired=false):stri
       AND payload->>'symbol' = $1
       AND p.symbol = $1 AND p."minuteBucket" IS NOT NULL
       AND ${archiveWindowSql('p."minuteBucket"',paired)}
-    ORDER BY p."minuteBucket"::timestamptz ASC
+    ${clientOrder?'':'ORDER BY p."minuteBucket"::timestamptz ASC'}
     ${canonicalPcrOnly?`) SELECT minute_bucket, symbol, snapshot_id, truth_verdict,
       source_timestamp, calculation_version, ${canonicalPcrProjectionSql('raw_market')} AS market
       FROM replay_archive ORDER BY minute_bucket ASC`:''}`;
+}
+
+/** Sort references rather than spilling wide raw JSON in PostgreSQL. The private
+ * numeric epoch key retains PostgreSQL's microsecond ordering across offsets;
+ * it is removed before any HTTP response, coverage calculation or evidence use.
+ * Equal-time peers keep their input order; SQL never promised a peer tie order.
+ */
+function orderCanonicalRows(rows:Record<string,unknown>[]){
+  return rows.map(source=>{
+    const {__h1_source_order_us,...row}=source;
+    const ms=Date.parse(String(row.minute_bucket));
+    const key=__h1_source_order_us===undefined?(Number.isFinite(ms)?BigInt(ms)*1000n:null):BigInt(String(__h1_source_order_us));
+    return {row,key};
+  }).sort((a,b)=>a.key===null||b.key===null?0:a.key<b.key?-1:a.key>b.key?1:0).map(x=>x.row);
 }
 
 function markerCte(paired=false): string {
@@ -293,7 +309,7 @@ export async function runH1ReplayPairRead(requests:readonly [H1ReplayRequest,H1R
   if(a.symbol!==b.symbol||a.tradeDate===b.tradeDate)
     return Promise.all(requests.map(q=>runH1ReplayRead(q,read))) as Promise<[H1ReplayHttpResult,H1ReplayHttpResult]>;
   const singleMarker=`${markerCte()} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`;
-  const singleCanonical=canonicalReplayReadSql();
+  const singleCanonical=canonicalReplayReadSql(false,false,true);
   const params=[a.symbol,a.tradeDate,a.fromTime,a.toTime,b.tradeDate,b.fromTime,b.toTime];
   const pending=new Map<string,Promise<Record<string,unknown>[]>>();
   const belongs=(row:Record<string,unknown>,q:H1ReplayRequest)=>{
@@ -304,7 +320,7 @@ export async function runH1ReplayPairRead(requests:readonly [H1ReplayRequest,H1R
   const forSession=(q:H1ReplayRequest):typeof rows=>async<T extends Record<string,unknown>>(sql:string,values:unknown[]):Promise<T[]>=>{
     if(sql!==singleMarker&&sql!==singleCanonical)return read<T>(sql,values);
     if(!pending.has(sql)){
-      const combined=sql===singleMarker?`${markerCte(true)} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`:canonicalReplayReadSql(false,true);
+      const combined=sql===singleMarker?`${markerCte(true)} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`:canonicalReplayReadSql(false,true,true);
       pending.set(sql,Promise.resolve().then(()=>read(combined,params)));
     }
     try{return (await pending.get(sql)!).filter(row=>belongs(row,q)) as T[];}
@@ -345,7 +361,7 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
       queryTimingsMs[label] = 0;
       return Promise.resolve([] as T[]);
     };
-    const [market, chain, options, canonical] = await Promise.all([
+    const [market, chain, options, canonicalRows] = await Promise.all([
       normalized("market", `${cte}
         SELECT
           m.symbol, m.minute_bucket, h.truth_verdict,
@@ -387,8 +403,10 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
         WHERE o.symbol = $1 AND o.minute_bucket >= $3::timestamptz AND o.minute_bucket <= $4::timestamptz
           AND ($5::text = 'FULL' OR o.atm_offset BETWEEN -7 AND 7)
         ORDER BY o.minute_bucket ASC, o.expiry ASC, o.strike ASC, o.option_type ASC`, [...tableParams, request.scope]),
-      timedRows<Record<string, unknown>>("canonical", canonicalReplayReadSql(canonicalPcrOnly), params),
+      timedRows<Record<string, unknown>>("canonical", canonicalReplayReadSql(canonicalPcrOnly,false,!canonicalPcrOnly), params),
     ]);
+
+    const canonical=canonicalPcrOnly?canonicalRows:orderCanonicalRows(canonicalRows);
 
     const continuity = buildH1ReplayContinuity(request, markerRows, canonical);
     // Raw normalized counts are only observable for missing marker buckets.

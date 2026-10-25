@@ -32,6 +32,28 @@ export function withCanonicalFixture(sql:string){
   ) SELECT * FROM (${query}) AS result`;
 }
 const normalize=(rows:any[])=>rows.map(r=>JSON.stringify(r)).sort();
+test('application ordering equals PostgreSQL timestamp order through microseconds and offsets',
+ {skip:!process.env.TEST_REPLAY_DATABASE_URL},async()=>{
+ const client=new pg.Client({connectionString:process.env.TEST_REPLAY_DATABASE_URL});await client.connect();
+ try{
+   const base=(canonicalQueryFixtures()[0].payload as any);
+   const row=(minuteBucket:string,snapshotId:string)=>({kind:'H1_CANONICAL_MARKET_ARCHIVE',payload:{...base,minuteBucket,snapshotId}});
+   const fixtures=[row('2026-10-19T05:15:00.000002Z','later'),
+     row('2026-10-19T10:45:00.000001+05:30','earlier'),
+     row('2026-10-19T10:45:00.000001+05:30','earlier'),row('2026-10-19T05:18:00Z','end')];
+   const request={symbol:'NIFTY',tradeDate:'2026-10-19',fromTime:'10:45',toTime:'10:48',scope:'FULL'} as const;
+   const params=['NIFTY','2026-10-19','10:45','10:48',JSON.stringify(fixtures)];
+   const original=(await client.query(withCanonicalFixture(legacyCanonicalSql),params)).rows;
+   const result=await runH1ReplayRead(request,async(sql:string,values:unknown[])=>{
+     if(!sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'"))return [] as any;
+     assert.doesNotMatch(sql,/ORDER BY/);
+     return (await client.query(withCanonicalFixture(sql),[...values,JSON.stringify(fixtures)])).rows as any;
+   });
+   assert.equal(result.ok,true);assert.deepEqual(result.canonical,original);
+   assert.deepEqual(result.canonical?.map(r=>r.snapshot_id),['earlier','earlier','later','end']);
+   assert(result.canonical?.every(r=>!('__h1_source_order_us' in r)));
+ }finally{await client.end();}
+});
 test('raw-symbol pushdown preserves complete paired rows and matches the proposed index',
  {skip:!process.env.TEST_REPLAY_DATABASE_URL},async()=>{
  const client=new pg.Client({connectionString:process.env.TEST_REPLAY_DATABASE_URL});await client.connect();

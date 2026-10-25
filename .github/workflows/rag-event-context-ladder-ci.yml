@@ -14,6 +14,9 @@ on:
       - 'pr799-recorder-preview.ts'
       - 'scripts/pr799-recorder-preview.ts'
       - 'test/pr799-recorder-preview.test.ts'
+      - 'pr799-browser-capture.ts'
+      - 'scripts/pr799-browser-capture.ts'
+      - 'test/pr799-browser-capture.test.ts'
       - 'research-router.ts'
       - 'h1-replay-http.ts'
       - 'h1-replay-plan-audit.ts'
@@ -37,6 +40,6 @@ jobs:
       - name: Run event-wise context and publication-cutoff regressions
         run: NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts test/rag-event-context-ladder-view.test.ts test/rag-recorder-event-ladder-bridge.test.ts test/rag-recorded-spread-source-audit.test.ts test/recorded-replay-view.test.ts test/h1-replay-plan-audit.test.ts
       - name: Verify isolated archived Recorder preview guards
-        run: NODE_ENV=test node --import tsx --test test/pr799-recorder-preview.test.ts
+        run: NODE_ENV=test node --import tsx --test test/pr799-recorder-preview.test.ts test/pr799-browser-capture.test.ts
       - name: Verify patch whitespace
         run: git diff --check origin/main...HEAD

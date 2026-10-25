@@ -243,6 +243,7 @@ export function canonicalReplayReadSql(canonicalPcrOnly=false,paired=false):stri
     ) AS p("minuteBucket" text, symbol text, "snapshotId" text,
       "truthVerdict" text, "sourceTimestamp" text, "calculationVersion" text)
     WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'
+      AND payload->>'symbol' = $1
       AND p.symbol = $1 AND p."minuteBucket" IS NOT NULL
       AND ${archiveWindowSql('p."minuteBucket"',paired)}
     ORDER BY p."minuteBucket"::timestamptz ASC

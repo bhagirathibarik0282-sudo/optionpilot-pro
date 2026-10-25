@@ -32,6 +32,41 @@ export function withCanonicalFixture(sql:string){
   ) SELECT * FROM (${query}) AS result`;
 }
 const normalize=(rows:any[])=>rows.map(r=>JSON.stringify(r)).sort();
+test('raw-symbol pushdown preserves complete paired rows and matches the proposed index',
+ {skip:!process.env.TEST_REPLAY_DATABASE_URL},async()=>{
+ const client=new pg.Client({connectionString:process.env.TEST_REPLAY_DATABASE_URL});await client.connect();
+ try{
+   await client.query('BEGIN');
+   await client.query('CREATE TEMP TABLE h1_lookup_compat (kind text,payload jsonb,created_at timestamptz) ON COMMIT DROP');
+   await client.query(`INSERT INTO h1_lookup_compat SELECT kind,payload,created_at
+     FROM jsonb_to_recordset($1::jsonb) AS r(kind text,payload jsonb,created_at timestamptz)`,[JSON.stringify(canonicalQueryFixtures())]);
+   await client.query(`CREATE INDEX h1_lookup_kind_symbol_idx ON h1_lookup_compat(kind,(payload->>'symbol'))
+     WHERE kind IN ('H1_TRUTH_MARKER','H1_CANONICAL_MARKET_ARCHIVE')`);
+   const captured=JSON.parse(readFileSync(new URL('../docs/audits/pr799-paired-query-plan-20261025.json',import.meta.url),'utf8'));
+   const baseline=captured.queries.find((q:any)=>q.kind==='canonical');
+   const before=baseline.sql.replace('FROM app_state_log','FROM h1_lookup_compat');
+   const after=canonicalReplayReadSql(false,true).replace('FROM app_state_log','FROM h1_lookup_compat');
+   const differences=await client.query(`WITH old_rows AS (${before}),new_rows AS (${after})
+     SELECT COUNT(*)::integer AS n FROM (
+       (SELECT * FROM old_rows EXCEPT ALL SELECT * FROM new_rows)
+       UNION ALL (SELECT * FROM new_rows EXCEPT ALL SELECT * FROM old_rows)) AS diff`,baseline.params);
+   assert.equal(differences.rows[0].n,0,'SQL multiset parity retains duplicates and JSON null versus SQL NULL');
+   // Forced access proves expression compatibility only; it is not a speed test.
+   await client.query('SET LOCAL enable_seqscan=off');
+   const explained=await client.query('EXPLAIN (FORMAT JSON) '+after,baseline.params);
+   const nodes=(p:any):any[]=>[p,...(p.Plans??[]).flatMap(nodes)];
+   const accesses=nodes(explained.rows[0]['QUERY PLAN'][0].Plan);
+   assert(accesses.some(p=>p['Index Name']==='h1_lookup_kind_symbol_idx'&&/symbol/.test(p['Index Cond']??'')),
+     'symbol must be an actual index condition, not only a later Function Scan filter');
+   const malformed=JSON.stringify({symbol:'NIFTY',minuteBucket:'invalid-source-time',market:{}});
+   await client.query('INSERT INTO h1_lookup_compat(kind,payload) VALUES ($1,$2::jsonb)',['H1_CANONICAL_MARKET_ARCHIVE',malformed]);
+   for(const sql of [before,after]){
+     await client.query('SAVEPOINT malformed');
+     await assert.rejects(()=>client.query(sql,baseline.params));
+     await client.query('ROLLBACK TO SAVEPOINT malformed');
+   }
+ }finally{await client.query('ROLLBACK');await client.end();}
+});
 test('candidate has one metadata decoder and preserves raw market, filters and all rows',()=>{
   const sql=canonicalReplayReadSql();
   assert.equal((sql.match(/jsonb_to_record\(/g)||[]).length,1);

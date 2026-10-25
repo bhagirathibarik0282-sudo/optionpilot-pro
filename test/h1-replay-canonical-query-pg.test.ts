@@ -78,7 +78,9 @@ test('PostgreSQL paired archive scans equal independent sessions, including late
      Date.parse(String(all[i-1].minute_bucket))<=Date.parse(String(row.minute_bucket))));
    assert.equal(paired[0].continuity?.truthCounts.STALE,1);
    assert.equal(paired[1].continuity?.truthCounts.TRUE,1,'15:30:01 source must stay outside 15:30 upper bound');
-   assert.equal(paired[1].canonical?.length,2,'offset aliases remain duplicate canonical rows');
+   assert.equal(paired[1].canonical?.length,3,'original earlier fixture row and both closing aliases remain');
+   assert.equal(paired[1].canonical?.filter(row=>Date.parse(String(row.minute_bucket))===
+     Date.parse('2026-10-16T10:00:00Z')).length,2,'offset aliases remain duplicate canonical rows');
  }finally{await client.end();}
 });
 test('PostgreSQL candidate equals frozen legacy SQL across duplicates, offsets, late imports and nulls',

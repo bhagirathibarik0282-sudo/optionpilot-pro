@@ -3,7 +3,7 @@ import { deriveRecordedPremiumResponse } from './premium-response-evidence.js';
 import { alignRecordedRagDte } from './rag-dte-replay-adapter.js';
 import type { Hono } from 'hono';
 import { parseH1FixedContractJourneyRequest } from './h1-fixed-contract-journey-http.js';
-import { parseH1ReplayRequest, runH1ReplayHttp, type H1ReplayHttpResult, type H1ReplayRequest } from './h1-replay-http.js';
+import { parseH1ReplayRequest, runH1ReplayHttp, runH1ReplayPairHttp, type H1ReplayHttpResult, type H1ReplayRequest } from './h1-replay-http.js';
 import { isCasTradingDate } from './cas-closing-memory.js';
 import { prepareMemoryData } from './intraday-observation-memory.js';
 
@@ -196,13 +196,16 @@ export function buildRagPremiumSnapshot(r:RagEventRequest,current:H1ReplayHttpRe
     answer:r.date+' '+r.symbol+' '+r.strike+' · expiry '+r.expiry+' · '+r.time+' IST: '+reaction(r.side,selected,before,selectedChange)+'। Opposite '+reaction(otherSide,opposite,otherBefore,oppositeChange)+'। '+(reference?'Previous-session PDH ₹'+reference.pdh.toFixed(2)+' / PDL ₹'+reference.pdl.toFixed(2)+'।':'Previous-session PDH/PDL reference ଅନୁପଲବ୍ଧ।')+(point?.context.fullPcr!==null&&point?.context.fullPcr!==undefined?' Full PCR '+point.context.fullPcr.toFixed(4)+'।':''),
     limitations:['Structured retrieval and deterministic answer; no embeddings or LLM call.','Snapshot describes recorded endpoints; no crossing or causality claim.','Missing endpoints remain unavailable; no interpolated 1/5-minute response.']};
 }
-export async function readRagEventEvidence(r:RagEventRequest,read=runH1ReplayHttp) {
+export async function readRagEventEvidence(r:RagEventRequest,read?:typeof runH1ReplayHttp,readPair=runH1ReplayPairHttp) {
   const previous=previousRagSession(r.date)!;
   const eventMs=at(r.date,r.time),toMs=Math.min(at(r.date,'15:30'),eventMs+(r.includeOutcomes?30:0)*60000,r.asOf);
   if(toMs<eventMs)return {ok:false,status:'BLOCKED',reason:'EVENT_AFTER_CUTOFF',safety:SAFETY};
-  const [currentRead,priorRead]=await Promise.allSettled([
-    read({symbol:r.symbol,tradeDate:r.date,fromTime:clock(Math.max(at(r.date,'09:15'),eventMs-Math.max(30,r.kind==='SNAPSHOT'?(r.lookback??3):30)*60000)),toTime:clock(toMs),scope:'FULL'}),
-    read({symbol:r.symbol,tradeDate:previous,fromTime:'09:15',toTime:'15:30',scope:'FULL'})]);
+  const requests:readonly [H1ReplayRequest,H1ReplayRequest]=[
+    {symbol:r.symbol,tradeDate:r.date,fromTime:clock(Math.max(at(r.date,'09:15'),eventMs-Math.max(30,r.kind==='SNAPSHOT'?(r.lookback??3):30)*60000)),toTime:clock(toMs),scope:'FULL'},
+    {symbol:r.symbol,tradeDate:previous,fromTime:'09:15',toTime:'15:30',scope:'FULL'}];
+  const paired=read?null:readPair(requests);
+  const [currentRead,priorRead]=await Promise.allSettled(read?requests.map(q=>read(q)):
+    [paired!.then(values=>values[0]),paired!.then(values=>values[1])]);
   const unavailable:H1ReplayHttpResult={ok:false,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request:null};
   const current=currentRead.status==='fulfilled'?currentRead.value:unavailable,prior=priorRead.status==='fulfilled'?priorRead.value:unavailable;
   return r.kind==='SNAPSHOT'?buildRagPremiumSnapshot(r,current,prior):buildRagEventEvidence(r,current,prior);

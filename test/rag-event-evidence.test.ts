@@ -115,6 +115,17 @@ test('read wrapper calls only existing replay twice with bounded windows',async(
  assert.equal(r.premiumResponse.status,'MEASURED');assert.equal(r.premiumResponse.change!.price,r.premiumResponse.current!.price-r.premiumResponse.before!.price);
  assert.equal(r.premiumResponse.change!.spot,r.premiumResponse.current!.spot-r.premiumResponse.before!.spot);assert.equal(r.premiumResponse.modelAttribution.status,'UNAVAILABLE');assert.equal(calls.length,2);assert.equal(calls[0].fromTime,'09:15');assert.equal(calls[0].toTime,'09:36');assert.equal(calls[1].tradeDate,'2026-10-12');
 });
+test('default RAG path uses one request-scoped paired reader without changing evidence',async()=>{
+ let pairs=0;
+ const r=request({kind:'SNAPSHOT'});
+ const result=await readRagEventEvidence(r,undefined,async qs=>{
+   pairs++;assert.equal(qs.length,2);assert.equal(qs[0].tradeDate,r.date);
+   assert.equal(qs[1].tradeDate,'2026-10-12');assert(qs.every(q=>q.scope==='FULL'));
+   return [fixture(qs[0].tradeDate),fixture(qs[1].tradeDate)];
+ });
+ assert.equal(pairs,1);
+ assert.deepEqual(result,buildRagPremiumSnapshot(r,fixture(r.date),fixture('2026-10-12')));
+});
 test('GET route validates, catches unavailable sources, never offers POST',async()=>{
  const app=new Hono();mountRagEventEvidenceRoute(app,async r=>result());
  assert.equal((await app.request('/rag-event-evidence?'+new URLSearchParams(query))).status,200);

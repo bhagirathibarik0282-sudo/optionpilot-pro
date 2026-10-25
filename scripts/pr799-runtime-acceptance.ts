@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import pg from 'pg';
 import {Hono} from 'hono';
-import {runH1ReplayRead} from '../h1-replay-http.js';
+import {runH1ReplayPairRead} from '../h1-replay-http.js';
 import {readRagEventEvidence} from '../rag-event-evidence.js';
 import {mountRecorderEventContextLadderRoute,projectRecordedRagLadder} from '../rag-recorder-event-ladder-bridge.js';
 
@@ -23,7 +23,10 @@ if(!enabled||!url){
      query_timeout:50000,application_name:'pr799-readonly-runtime-acceptance',
      options:'-c default_transaction_read_only=on -c statement_timeout=45000 -c lock_timeout=1000'});
    pool.on('error',()=>{failed=true;});
+   const sourceScanCounts={markers:0,canonical:0};
    const read=async<T extends Record<string,unknown>>(sql:string,params:unknown[]):Promise<T[]>=>{
+     if(sql.includes("kind = 'H1_TRUTH_MARKER'"))sourceScanCounts.markers++;
+     if(sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'"))sourceScanCounts.canonical++;
      const client=await pool!.connect();
      let begun=false,broken=false;
      try{
@@ -39,11 +42,11 @@ if(!enabled||!url){
    const reads:unknown[]=[];let evidence:any;
    const app=new Hono();
    mountRecorderEventContextLadderRoute(app,async request=>{
-     evidence=await readRagEventEvidence(request,async q=>{
-       const replay=await runH1ReplayRead(q,read);
-       reads.push({request:q,ok:replay.ok,reason:replay.reason??null,counts:replay.counts,
-         queryTimingsMs:replay.queryTimingsMs});
-       return replay;
+     evidence=await readRagEventEvidence(request,undefined,async requests=>{
+       const pair=await runH1ReplayPairRead(requests,read);
+       pair.forEach((replay,i)=>reads.push({request:requests[i],ok:replay.ok,reason:replay.reason??null,counts:replay.counts,
+         queryTimingsMs:replay.queryTimingsMs}));
+       return pair;
      });
      return evidence;
    });
@@ -57,6 +60,8 @@ if(!enabled||!url){
    assert.equal(evidence.identity.strike,23150);assert.equal(evidence.identity.side,'PE');
    assert.equal(evidence.event.timeIst,'10:45');assert.equal(evidence.event.after,137.1);
    assert.equal(evidence.safety.writesPerformed,false);
+   assert.equal(evidence.provenance.selectedEvidenceSha256,'118a0e2d0c07691435358d41088f4658b8deeeb1f4acf81f539d59eb41b3fc82');
+   assert.equal(sourceScanCounts.markers,1);assert.equal(sourceScanCounts.canonical,1);
    const projected=projectRecordedRagLadder(evidence);assert.equal(projected.ok,true);
    if(!projected.ok)throw new Error('projection blocked');
    const premium=(offset:number)=>projected.lanes.find(l=>l.offsetMinutes===offset)?.cells
@@ -66,10 +71,10 @@ if(!enabled||!url){
    result={ok:true,mode:'ONE_SHOT_REAL_DB_RAG_HANDLER_ACCEPTANCE',httpStatus:response.status,
      elapsedMs,scope:'DEPLOYED_PROCESS_IN_PROCESS_HTTP_HANDLER_WITH_REAL_DB_EXCLUDES_PUBLIC_EDGE_AND_BROWSER',
      identity:evidence.identity,event:evidence.event,selectedEvidenceSha256:evidence.provenance.selectedEvidenceSha256,
-     premiums:{before3m:premium(-3),event:premium(0),after3m:premium(3)},reads,
+     premiums:{before3m:premium(-3),event:premium(0),after3m:premium(3)},reads,sourceScanCounts,
      safety:{transactionReadOnlyVerified:true,writesPerformed:false,publicListener:false,brokerRequests:false},
      limits:{processMs:120000,statementMs:45000,lockMs:1000,poolMax:5},
-     limitations:['One sample; no universal latency claim.','Diagnostic pool uses explicit read-only transactions and deadlines.',
+     limitations:['One sample; no universal latency claim.','Shared archive timings overlap and must not be added.','Diagnostic pool uses explicit read-only transactions and deadlines.',
        'Public HTTP edge, Recorder browser click-through and mobile visual acceptance remain unverified.',
        'Recorded canonical PCR does not prove complete fresh full-chain inventory.']};
  }catch{

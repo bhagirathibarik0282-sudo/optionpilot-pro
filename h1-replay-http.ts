@@ -223,7 +223,14 @@ export function buildH1ReplayMarkerGapEvidence(
  * JSON is extracted only for selected rows, retaining absent vs explicit null.
  * No created_at fence, new index, deduplication or source-time substitution.
  */
-export function canonicalReplayReadSql(canonicalPcrOnly=false):string {
+function archiveWindowSql(bucket:string,paired=false):string {
+  const window=(date:number,from:number,to:number)=>`((${bucket}::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $${date}::date)
+      AND ((${bucket}::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $${from}::time)
+      AND ((${bucket}::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $${to}::time)`;
+  return paired?`((${window(2,3,4)}) OR (${window(5,6,7)}))`:window(2,3,4);
+}
+
+export function canonicalReplayReadSql(canonicalPcrOnly=false,paired=false):string {
   return `${canonicalPcrOnly?'WITH replay_archive AS MATERIALIZED (':''}
     SELECT p."minuteBucket"::timestamptz AS minute_bucket,
       p.symbol AS symbol, p."snapshotId" AS snapshot_id,
@@ -237,16 +244,14 @@ export function canonicalReplayReadSql(canonicalPcrOnly=false):string {
       "truthVerdict" text, "sourceTimestamp" text, "calculationVersion" text)
     WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'
       AND p.symbol = $1 AND p."minuteBucket" IS NOT NULL
-      AND ((p."minuteBucket"::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
-      AND ((p."minuteBucket"::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
-      AND ((p."minuteBucket"::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+      AND ${archiveWindowSql('p."minuteBucket"',paired)}
     ORDER BY p."minuteBucket"::timestamptz ASC
     ${canonicalPcrOnly?`) SELECT minute_bucket, symbol, snapshot_id, truth_verdict,
       source_timestamp, calculation_version, ${canonicalPcrProjectionSql('raw_market')} AS market
       FROM replay_archive ORDER BY minute_bucket ASC`:''}`;
 }
 
-function markerCte(): string {
+function markerCte(paired=false): string {
   return `WITH markers AS (
     SELECT DISTINCT ON (payload->>'symbol', date_trunc('minute', (payload->>'minuteBucket')::timestamptz))
       payload->>'symbol' AS symbol,
@@ -257,9 +262,7 @@ function markerCte(): string {
     WHERE kind = 'H1_TRUTH_MARKER'
       AND payload->>'symbol' = $1
       AND payload->>'minuteBucket' IS NOT NULL
-      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
-      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
-      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+      AND ${archiveWindowSql("(payload->>'minuteBucket')",paired)}
     ORDER BY payload->>'symbol', date_trunc('minute', (payload->>'minuteBucket')::timestamptz), created_at DESC
   )`;
 }
@@ -276,6 +279,42 @@ export async function runH1ReplayHttp(request: H1ReplayRequest, canonicalPcrOnly
   }
 
   return runH1ReplayRead(request, rows, canonicalPcrOnly);
+}
+
+/** Two different sessions of the same index share only their archive scans.
+ * Each session retains its original normalized joins, coverage and error result.
+ * No cache survives this one request. A failed combined scan falls back once to
+ * each original query, so malformed/unavailable prior data cannot block current
+ * snapshot evidence that the old independent reader could still return.
+ */
+export async function runH1ReplayPairRead(requests:readonly [H1ReplayRequest,H1ReplayRequest],read:typeof rows):Promise<[H1ReplayHttpResult,H1ReplayHttpResult]> {
+  const [a,b]=requests;
+  if(a.symbol!==b.symbol||a.tradeDate===b.tradeDate)
+    return Promise.all(requests.map(q=>runH1ReplayRead(q,read))) as Promise<[H1ReplayHttpResult,H1ReplayHttpResult]>;
+  const singleMarker=`${markerCte()} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`;
+  const singleCanonical=canonicalReplayReadSql();
+  const params=[a.symbol,a.tradeDate,a.fromTime,a.toTime,b.tradeDate,b.fromTime,b.toTime];
+  const pending=new Map<string,Promise<Record<string,unknown>[]>>();
+  const belongs=(row:Record<string,unknown>,q:H1ReplayRequest)=>{
+    const ms=Date.parse(String(row.minute_bucket));
+    return Number.isFinite(ms)&&ms>=Date.parse(q.tradeDate+'T'+q.fromTime+':00+05:30')&&
+      ms<=Date.parse(q.tradeDate+'T'+q.toTime+':00+05:30');
+  };
+  const forSession=(q:H1ReplayRequest):typeof rows=>async<T extends Record<string,unknown>>(sql:string,values:unknown[]):Promise<T[]>=>{
+    if(sql!==singleMarker&&sql!==singleCanonical)return read<T>(sql,values);
+    if(!pending.has(sql)){
+      const combined=sql===singleMarker?`${markerCte(true)} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`:canonicalReplayReadSql(false,true);
+      pending.set(sql,Promise.resolve().then(()=>read(combined,params)));
+    }
+    try{return (await pending.get(sql)!).filter(row=>belongs(row,q)) as T[];}
+    catch{return read<T>(sql,values);}
+  };
+  return Promise.all(requests.map(q=>runH1ReplayRead(q,forSession(q)))) as Promise<[H1ReplayHttpResult,H1ReplayHttpResult]>;
+}
+
+export async function runH1ReplayPairHttp(requests:readonly [H1ReplayRequest,H1ReplayRequest]):Promise<[H1ReplayHttpResult,H1ReplayHttpResult]> {
+  if(!dbIsConfigured())return Promise.all(requests.map(q=>runH1ReplayHttp(q))) as Promise<[H1ReplayHttpResult,H1ReplayHttpResult]>;
+  return runH1ReplayPairRead(requests,rows);
 }
 
 /** One truth-marker read per request, frozen for all three normalized tables.

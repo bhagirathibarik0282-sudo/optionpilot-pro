@@ -219,6 +219,33 @@ export function buildH1ReplayMarkerGapEvidence(
   };
 }
 
+/** Canonical archive reader: decode metadata once per archive row. Raw market
+ * JSON is extracted only for selected rows, retaining absent vs explicit null.
+ * No created_at fence, new index, deduplication or source-time substitution.
+ */
+export function canonicalReplayReadSql(canonicalPcrOnly=false):string {
+  return `${canonicalPcrOnly?'WITH replay_archive AS MATERIALIZED (':''}
+    SELECT p."minuteBucket"::timestamptz AS minute_bucket,
+      p.symbol AS symbol, p."snapshotId" AS snapshot_id,
+      p."truthVerdict" AS truth_verdict, p."sourceTimestamp" AS source_timestamp,
+      p."calculationVersion" AS calculation_version,
+      ${canonicalPcrOnly?"payload->'market' AS raw_market":"payload->'market' AS market"}
+    FROM app_state_log
+    CROSS JOIN LATERAL jsonb_to_record(
+      CASE WHEN jsonb_typeof(payload)='object' THEN payload ELSE '{}'::jsonb END
+    ) AS p("minuteBucket" text, symbol text, "snapshotId" text,
+      "truthVerdict" text, "sourceTimestamp" text, "calculationVersion" text)
+    WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'
+      AND p.symbol = $1 AND p."minuteBucket" IS NOT NULL
+      AND ((p."minuteBucket"::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
+      AND ((p."minuteBucket"::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
+      AND ((p."minuteBucket"::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+    ORDER BY p."minuteBucket"::timestamptz ASC
+    ${canonicalPcrOnly?`) SELECT minute_bucket, symbol, snapshot_id, truth_verdict,
+      source_timestamp, calculation_version, ${canonicalPcrProjectionSql('raw_market')} AS market
+      FROM replay_archive ORDER BY minute_bucket ASC`:''}`;
+}
+
 function markerCte(): string {
   return `WITH markers AS (
     SELECT DISTINCT ON (payload->>'symbol', date_trunc('minute', (payload->>'minuteBucket')::timestamptz))
@@ -320,28 +347,7 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
         WHERE o.symbol = $1 AND o.minute_bucket >= $3::timestamptz AND o.minute_bucket <= $4::timestamptz
           AND ($5::text = 'FULL' OR o.atm_offset BETWEEN -7 AND 7)
         ORDER BY o.minute_bucket ASC, o.expiry ASC, o.strike ASC, o.option_type ASC`, [...tableParams, request.scope]),
-      timedRows<Record<string, unknown>>("canonical", `
-        ${canonicalPcrOnly ? "WITH replay_archive AS MATERIALIZED (" : ""}
-        SELECT
-          (payload->>'minuteBucket')::timestamptz AS minute_bucket,
-          payload->>'symbol' AS symbol,
-          payload->>'snapshotId' AS snapshot_id,
-          payload->>'truthVerdict' AS truth_verdict,
-          payload->>'sourceTimestamp' AS source_timestamp,
-          payload->>'calculationVersion' AS calculation_version,
-          ${canonicalPcrOnly ? "payload->'market' AS raw_market" : "payload->'market' AS market"}
-        FROM app_state_log
-        WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'
-          AND payload->>'symbol' = $1
-          AND payload->>'minuteBucket' IS NOT NULL
-          AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
-          AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
-          AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
-        ORDER BY (payload->>'minuteBucket')::timestamptz ASC
-        ${canonicalPcrOnly ? `) SELECT minute_bucket, symbol, snapshot_id, truth_verdict,
-          source_timestamp, calculation_version, ${canonicalPcrProjectionSql('raw_market')} AS market
-          FROM replay_archive ORDER BY minute_bucket ASC` : ''}
-      `, params),
+      timedRows<Record<string, unknown>>("canonical", canonicalReplayReadSql(canonicalPcrOnly), params),
     ]);
 
     const continuity = buildH1ReplayContinuity(request, markerRows, canonical);

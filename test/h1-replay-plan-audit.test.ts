@@ -10,7 +10,7 @@ test('captures the exact two source SQL statements without reading a database',a
   for(const q of queries){
     assert.deepEqual(q.params,['NIFTY','2026-10-19','10:45','10:45']);
     assert.match(q.sql,/app_state_log/);
-    assert.match(q.sql,/payload->>'symbol' = \$1/);
+    assert.match(q.sql,q.kind==='markers'?/payload->>'symbol' = \$1/:/p\.symbol = \$1/);
     assert.match(q.sql,/Asia\/Kolkata/);
   }
 });

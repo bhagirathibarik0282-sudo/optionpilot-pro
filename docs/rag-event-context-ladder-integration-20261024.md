@@ -95,3 +95,18 @@ filters. Catalog readback found only that index and the primary-key index on
 removed, scan runtime or speedup is established by EXPLAIN alone. The slow-query
 repair remains open. The OAuth connector still does not expose direct SQL, but
 the existing diagnostic runner resolves the execution-access blocker.
+
+### Canonical metadata read optimization (draft)
+
+The canonical reader now extracts metadata with one lateral `jsonb_to_record`
+call per archive row. Raw market JSON still uses the original JSON operator to
+preserve explicit JSON null. The same source-time filters, timestamp casts,
+snapshot fields, row multiplicity and projection wrapper remain; marker and
+normalized reads are unchanged. A frozen legacy SQL fixture is retained solely
+for differential tests.
+
+Actual read-only synthetic PostgreSQL fixtures matched in raw and projected
+modes. One repeatable-read real-archive benchmark matched result count and
+fingerprint, observing 36.73s legacy versus 10.64s candidate. Cache/order effects
+and other windows are unverified. See the blocker register and benchmark JSON;
+this is a draft repair, not production performance acceptance.

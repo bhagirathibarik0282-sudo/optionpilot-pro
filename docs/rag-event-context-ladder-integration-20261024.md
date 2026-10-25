@@ -78,9 +78,20 @@ equivalent to a source-time filter: it can omit late-imported records. Any
 proposed rewrite must preserve source time, snapshot identity, duplicates,
 truth-marker semantics and late imports before performance is claimed.
 
-**Execution status:** code and mocked regression tests are available; the live
-database plan has **not** been obtained. The current Railway OAuth connector
-returns variable names only and exposes no SQL-execution operation; the local
-runtime has no existing database credential. This is an access limitation,
-not evidence that the SQL plan or database is broken. Do not claim that local
-tests, captured SQL or a fixture plan establish a production speedup.
+**Execution status, updated 25 Oct:** the live database plan has now been
+obtained through the existing `postgres-catalog-inspect` one-off service, using
+its existing DB reference without revealing credentials. The first reuse-build
+redeploy ran its old temporary-table test; its logs were not accepted as plan
+proof. A fresh diagnostic deployment then confirmed transaction read-only mode,
+returned both EXPLAIN JSON plans and printed the completion sentinel. No index
+or persistent database data was changed. The main dashboard service stayed on
+commit `1c8fd373` (PR #798); PR #799 remains draft/unmerged.
+
+Actual evidence is in `docs/audits/pr799-h1-real-explain-20261025.json` and
+`docs/audits/pr799-h1-catalog-20261025.json`. Both plans use the existing
+kind/created-at index for `kind` only, with source symbol/date/time as residual
+filters. Catalog readback found only that index and the primary-key index on
+`app_state_log`. These are estimated plans, without ANALYZE; no actual rows
+removed, scan runtime or speedup is established by EXPLAIN alone. The slow-query
+repair remains open. The OAuth connector still does not expose direct SQL, but
+the existing diagnostic runner resolves the execution-access blocker.

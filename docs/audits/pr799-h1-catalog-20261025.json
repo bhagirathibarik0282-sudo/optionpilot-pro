@@ -1,0 +1,24 @@
+{
+  "deploymentId": "4c2453a1-184e-482d-9dac-d8c7b3b321aa",
+  "readOnlyConfirmed": true,
+  "complete": true,
+  "indexes": [
+    {
+      "name": "app_state_log_pkey",
+      "definition": "CREATE UNIQUE INDEX app_state_log_pkey ON public.app_state_log USING btree (id)"
+    },
+    {
+      "name": "idx_app_state_log_kind_created",
+      "definition": "CREATE INDEX idx_app_state_log_kind_created ON public.app_state_log USING btree (kind, created_at DESC)"
+    }
+  ],
+  "totalBytes": 1631887360,
+  "heapBytes": 1194328064,
+  "indexBytes": 93487104,
+  "stats": {
+    "liveEstimate": 645413,
+    "deadEstimate": 0,
+    "lastAnalyze": "2026-10-08T13:17:44.264279+00:00",
+    "lastAutoAnalyze": "2026-10-08T13:16:06.921109+00:00"
+  }
+}

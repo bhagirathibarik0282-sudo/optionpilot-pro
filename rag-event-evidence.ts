@@ -133,10 +133,15 @@ function reconciledReference(r:RagEventRequest,prior:H1ReplayHttpResult){
   const fail=(reason:string)=>({ok:false as const,reason});const previous=previousRagSession(r.date);
   if(!prior.ok)return fail('REPLAY_SOURCE_UNAVAILABLE');
   if(prior.request?.symbol!==r.symbol||prior.request.tradeDate!==previous)return fail('REPLAY_SOURCE_IDENTITY_MISMATCH');
-  const end=at(previous!,'15:30'),terminal=quoteAt(prior,r,end,r.side,r.asOf);
+  // Repeated prior-session checkpoints need only this exact contract. Retain
+  // every duplicate/invalid quote for the existing point-level guards, but do
+  // not re-parse every unrelated strike/expiry for each historical timestamp.
+  const contractRows=(prior.options??[]).filter(o=>o.symbol===r.symbol&&expiry(o)===r.expiry&&num(o.strike)===r.strike&&o.option_type===r.side);
+  const contractView={...prior,options:contractRows};
+  const end=at(previous!,'15:30'),terminal=quoteAt(contractView,r,end,r.side,r.asOf);
   if(!terminal||terminal.dayHigh===null||terminal.dayLow===null||terminal.dayLow<=0||terminal.dayHigh<terminal.dayLow)return fail('PREVIOUS_REFERENCE_UNAVAILABLE');
-  const priorTimes=[...new Set((prior.options??[]).filter(o=>o.symbol===r.symbol&&expiry(o)===r.expiry&&num(o.strike)===r.strike&&o.option_type===r.side).map(o=>iso(o.minute_bucket)))].filter((s):s is string=>s!==null);
-  const referenceRows=priorTimes.filter(s=>day(Date.parse(s))===previous).map(s=>quoteAt(prior,r,Date.parse(s),r.side,r.asOf)).filter((q):q is Row=>q!==null);
+  const priorTimes=[...new Set(contractRows.map(o=>iso(o.minute_bucket)))].filter((s):s is string=>s!==null);
+  const referenceRows=priorTimes.filter(s=>day(Date.parse(s))===previous).map(s=>quoteAt(contractView,r,Date.parse(s),r.side,r.asOf)).filter((q):q is Row=>q!==null);
   if(referenceRows.some(q=>q.dayHigh===null||q.dayLow===null||q.dayLow<=0||q.dayHigh<q.dayLow)||
     Math.max(...referenceRows.map(q=>q.dayHigh))!==terminal.dayHigh||Math.min(...referenceRows.map(q=>q.dayLow))!==terminal.dayLow)return fail('PREVIOUS_REFERENCE_INCONSISTENT');
   return {ok:true as const,terminal:terminal!,referenceRows,previous};

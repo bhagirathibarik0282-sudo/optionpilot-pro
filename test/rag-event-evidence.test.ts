@@ -19,6 +19,27 @@ function fixture(date:string):H1ReplayHttpResult {
  return {ok:true,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request:{symbol:'NIFTY',tradeDate:date,fromTime:'09:15',toTime:'15:30',scope:'CORE'},market,options,chain};
 }
 const result=(extra:Record<string,string>={})=>buildRagEventEvidence(request(extra),fixture('2026-10-13'),fixture('2026-10-12'));
+test('prior reference work stays bounded with many unrelated strikes and still rejects conflicting duplicates',()=>{
+ const prior=fixture('2026-10-12'),market=prior.market![0],quote=prior.options!.find(o=>o.option_type==='PE')!;
+ prior.market=[];prior.options=[];
+ let expiryReads=0;
+ const instrumentedExpiry={toString(){expiryReads++;return '2026-10-13';}};
+ for(let i=0;i<126;i++){
+   const bucket=new Date(Date.parse('2026-10-12T09:15:00+05:30')+i*180000).toISOString();
+   const receipt=new Date(Date.parse(bucket)+24000).toISOString(),snapshot_id='prior-'+i;
+   prior.market.push({...market,minute_bucket:bucket,backend_timestamp:receipt,snapshot_id});
+   for(let k=0;k<101;k++)prior.options.push({...quote,expiry:instrumentedExpiry,strike:22300+k*50,
+     minute_bucket:bucket,backend_timestamp:receipt,quote_timestamp:receipt,snapshot_id,ltp:20,day_high:73.85,day_low:11.6});
+ }
+ const out=buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),fixture('2026-10-13'),prior);
+ assert.ok(out.ok);assert.equal(out.reference?.pdh,73.85);assert.equal(out.reference?.pdl,11.6);
+ assert(expiryReads<100000,'do not re-parse the full unrelated option inventory for every prior checkpoint');
+ assert.equal(prior.options.length,12726,'source inventory must not be mutated or clipped');
+ const terminal=prior.options.find(o=>o.strike===22300&&o.minute_bucket==='2026-10-12T10:00:00.000Z')!;
+ prior.options.push({...terminal,ltp:999});
+ const conflict=buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),fixture('2026-10-13'),prior);
+ assert.ok(conflict.ok);assert.equal(conflict.reference,null);assert.equal(conflict.referenceUnavailableReason,'PREVIOUS_REFERENCE_UNAVAILABLE');
+});
 test('mixed-version loaded OI maxima require exact canonical corroboration, including alias conflicts',()=>{
  const c=fixture('2026-10-13');
  for(const m of c.market!)m.calculation_version='H1_RUNTIME_BRIDGE_V1';

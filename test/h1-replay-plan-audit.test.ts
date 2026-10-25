@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {collectH1ReplayPlanQueries,inspectH1ReplayPlans} from '../h1-replay-plan-audit.js';
+import {parseRagEventRequest,readRagEventEvidence} from '../rag-event-evidence.js';
 
 test('captures the exact two source SQL statements without reading a database',async()=>{
   const queries=await collectH1ReplayPlanQueries();
@@ -13,6 +14,38 @@ test('captures the exact two source SQL statements without reading a database',a
     assert.match(q.sql,q.kind==='markers'?/payload->>'symbol' = \$1/:/p\.symbol = \$1/);
     assert.match(q.sql,/Asia\/Kolkata/);
   }
+});
+
+test('paired capture uses the actual Recorder RAG windows and only one query per source',async()=>{
+ const queries=await collectH1ReplayPlanQueries(true);
+ assert.deepEqual(queries.map(q=>q.kind),['markers','canonical']);
+ for(const q of queries){
+   assert.deepEqual(q.params,['NIFTY','2026-10-19','10:15','11:15','2026-10-16','09:15','15:30']);
+   assert.match(q.sql,/\$5::date/);assert.match(q.sql,/\$7::time/);
+ }
+ const parsed=parseRagEventRequest({symbol:'NIFTY',date:'2026-10-19',expiry:'2026-10-19',strike:'23150',side:'PE',time:'10:45',kind:'SNAPSHOT',includeOutcomes:'true',lookback:'3'});
+ assert(parsed.ok);if(!parsed.ok)return;
+ let checked=false;
+ await readRagEventEvidence(parsed.value,undefined,async requests=>{
+   checked=true;
+   assert.deepEqual([requests[0].symbol,requests[0].tradeDate,requests[0].fromTime,requests[0].toTime,
+     requests[1].tradeDate,requests[1].fromTime,requests[1].toTime],queries[0].params);
+   return requests.map(request=>({ok:false,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request})) as any;
+ });
+ assert.equal(checked,true);
+});
+
+test('paired audit explains exact captured queries and never executes their SELECT',async()=>{
+ const calls:{sql:string;params?:unknown[]}[]=[];
+ const result=await inspectH1ReplayPlans({query:async(sql,params)=>{
+   calls.push({sql,params});return {rows:sql.startsWith('EXPLAIN ')?[{'QUERY PLAN':[{Plan:{'Node Type':'Nested Loop'}}]}]:[]};
+ }},true);
+ assert.equal(result.mode,'READ_ONLY_PAIRED_H1_REPLAY_PLAN_AUDIT_V1');
+ assert.equal(result.request,null);assert.equal(result.requests?.length,2);
+ const explains=calls.filter(c=>c.sql.startsWith('EXPLAIN '));
+ assert.equal(explains.length,2);assert(explains.every(c=>c.params?.length===7));
+ assert(calls.every(c=>c.sql==='BEGIN READ ONLY'||c.sql==='ROLLBACK'||c.sql.startsWith('SET LOCAL ')||c.sql.startsWith('EXPLAIN (FORMAT JSON, COSTS TRUE) ')));
+ assert.equal(calls.at(-1)?.sql,'ROLLBACK');
 });
 
 test('only EXPLAIN is sent under read-only transaction with timeouts and rollback',async()=>{

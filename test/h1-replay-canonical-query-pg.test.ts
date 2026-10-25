@@ -70,8 +70,12 @@ test('PostgreSQL paired archive scans equal independent sessions, including late
    assert(independent.every(r=>r.ok));assert.equal(scans,4);scans=0;
    const paired=await runH1ReplayPairRead(requests,read);
    assert.equal(scans,2);assert(paired.every(r=>r.ok));
-   const stable=({queryTimingsMs,...value}:any)=>value;
+   // SQL orders by bucket only: equal-time peers have no promised tie order.
+   // Compare complete canonical multisets, retaining every duplicate and value.
+   const stable=({queryTimingsMs,canonical,...value}:any)=>({...value,canonical:normalize(canonical)});
    assert.deepEqual(paired.map(stable),independent.map(stable));
+   for(const replay of paired)assert(replay.canonical!.every((row,i,all)=>i===0||
+     Date.parse(String(all[i-1].minute_bucket))<=Date.parse(String(row.minute_bucket))));
    assert.equal(paired[0].continuity?.truthCounts.STALE,1);
    assert.equal(paired[1].continuity?.truthCounts.TRUE,1,'15:30:01 source must stay outside 15:30 upper bound');
    assert.equal(paired[1].canonical?.length,2,'offset aliases remain duplicate canonical rows');

@@ -1,0 +1,223 @@
+{
+  "deploymentId": "0634ed3d-aaab-4311-a2fe-eeebedc142c7",
+  "commit": "68608269f732f85b463541f8a959a7d6c2cebd08",
+  "serviceId": "8db59b5b-25b0-4cd0-b92d-fb584c1a89d4",
+  "ok": true,
+  "mode": "READ_ONLY_PAIRED_H1_REPLAY_PLAN_AUDIT_V1",
+  "request": null,
+  "requests": [
+    {
+      "symbol": "NIFTY",
+      "tradeDate": "2026-10-19",
+      "fromTime": "10:15",
+      "toTime": "11:15",
+      "scope": "FULL"
+    },
+    {
+      "symbol": "NIFTY",
+      "tradeDate": "2026-10-16",
+      "fromTime": "09:15",
+      "toTime": "15:30",
+      "scope": "FULL"
+    }
+  ],
+  "readOnly": true,
+  "analyze": false,
+  "archiveQueryExecuted": false,
+  "writesPerformed": false,
+  "plans": [
+    {
+      "kind": "markers",
+      "plan": [
+        {
+          "Plan": {
+            "Node Type": "Subquery Scan",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Alias": "markers",
+            "Startup Cost": 18183.18,
+            "Total Cost": 18183.2,
+            "Plan Rows": 1,
+            "Plan Width": 40,
+            "Disabled": false,
+            "Plans": [
+              {
+                "Node Type": "Unique",
+                "Parent Relationship": "Subquery",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Startup Cost": 18183.18,
+                "Total Cost": 18183.19,
+                "Plan Rows": 1,
+                "Plan Width": 80,
+                "Disabled": false,
+                "Plans": [
+                  {
+                    "Node Type": "Sort",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Startup Cost": 18183.18,
+                    "Total Cost": 18183.19,
+                    "Plan Rows": 1,
+                    "Plan Width": 80,
+                    "Disabled": false,
+                    "Sort Key": [
+                      "(date_trunc('minute'::text, ((app_state_log.payload ->> 'minuteBucket'::text))::timestamp with time zone))",
+                      "app_state_log.created_at DESC"
+                    ],
+                    "Plans": [
+                      {
+                        "Node Type": "Index Scan",
+                        "Parent Relationship": "Outer",
+                        "Parallel Aware": false,
+                        "Async Capable": false,
+                        "Scan Direction": "Forward",
+                        "Index Name": "idx_app_state_log_kind_created",
+                        "Relation Name": "app_state_log",
+                        "Alias": "app_state_log",
+                        "Startup Cost": 0.42,
+                        "Total Cost": 18183.17,
+                        "Plan Rows": 1,
+                        "Plan Width": 80,
+                        "Disabled": false,
+                        "Index Cond": "(kind = 'H1_TRUTH_MARKER'::text)",
+                        "Filter": "(((payload ->> 'minuteBucket'::text) IS NOT NULL) AND ((payload ->> 'symbol'::text) = 'NIFTY'::text) AND (((((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-19'::date) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '10:15:00'::time without time zone) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '11:15:00'::time without time zone)) OR ((((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-16'::date) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '09:15:00'::time without time zone) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '15:30:00'::time without time zone))))"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "kind": "canonical",
+      "plan": [
+        {
+          "Plan": {
+            "Node Type": "Sort",
+            "Parallel Aware": false,
+            "Async Capable": false,
+            "Startup Cost": 14965.08,
+            "Total Cost": 14977.33,
+            "Plan Rows": 4900,
+            "Plan Width": 200,
+            "Disabled": false,
+            "Sort Key": [
+              "((p.\"minuteBucket\")::timestamp with time zone)"
+            ],
+            "Plans": [
+              {
+                "Node Type": "Nested Loop",
+                "Parent Relationship": "Outer",
+                "Parallel Aware": false,
+                "Async Capable": false,
+                "Join Type": "Inner",
+                "Startup Cost": 0.43,
+                "Total Cost": 14664.74,
+                "Plan Rows": 4900,
+                "Plan Width": 200,
+                "Disabled": false,
+                "Inner Unique": false,
+                "Plans": [
+                  {
+                    "Node Type": "Index Scan",
+                    "Parent Relationship": "Outer",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Scan Direction": "Forward",
+                    "Index Name": "idx_app_state_log_kind_created",
+                    "Relation Name": "app_state_log",
+                    "Alias": "app_state_log",
+                    "Startup Cost": 0.42,
+                    "Total Cost": 14150.24,
+                    "Plan Rows": 4900,
+                    "Plan Width": 1565,
+                    "Disabled": false,
+                    "Index Cond": "(kind = 'H1_CANONICAL_MARKET_ARCHIVE'::text)"
+                  },
+                  {
+                    "Node Type": "Function Scan",
+                    "Parent Relationship": "Inner",
+                    "Parallel Aware": false,
+                    "Async Capable": false,
+                    "Function Name": "jsonb_to_record",
+                    "Alias": "p",
+                    "Startup Cost": 0.01,
+                    "Total Cost": 0.1,
+                    "Plan Rows": 1,
+                    "Plan Width": 192,
+                    "Disabled": false,
+                    "Filter": "((\"minuteBucket\" IS NOT NULL) AND (symbol = 'NIFTY'::text) AND ((((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-19'::date) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '10:15:00'::time without time zone) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '11:15:00'::time without time zone)) OR (((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-16'::date) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '09:15:00'::time without time zone) AND ((((\"minuteBucket\")::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '15:30:00'::time without time zone))))"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "kind": "markers",
+      "sql": "WITH markers AS (\n    SELECT DISTINCT ON (payload->>'symbol', date_trunc('minute', (payload->>'minuteBucket')::timestamptz))\n      payload->>'symbol' AS symbol,\n      date_trunc('minute', (payload->>'minuteBucket')::timestamptz) AS minute_bucket,\n      payload->>'truthVerdict' AS truth_verdict,\n      created_at\n    FROM app_state_log\n    WHERE kind = 'H1_TRUTH_MARKER'\n      AND payload->>'symbol' = $1\n      AND payload->>'minuteBucket' IS NOT NULL\n      AND (((((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $2::date)\n      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)\n      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)) OR ((((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $5::date)\n      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $6::time)\n      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $7::time)))\n    ORDER BY payload->>'symbol', date_trunc('minute', (payload->>'minuteBucket')::timestamptz), created_at DESC\n  ) SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC",
+      "params": [
+        "NIFTY",
+        "2026-10-19",
+        "10:15",
+        "11:15",
+        "2026-10-16",
+        "09:15",
+        "15:30"
+      ]
+    },
+    {
+      "kind": "canonical",
+      "sql": "\n    SELECT p.\"minuteBucket\"::timestamptz AS minute_bucket,\n      p.symbol AS symbol, p.\"snapshotId\" AS snapshot_id,\n      p.\"truthVerdict\" AS truth_verdict, p.\"sourceTimestamp\" AS source_timestamp,\n      p.\"calculationVersion\" AS calculation_version,\n      payload->'market' AS market\n    FROM app_state_log\n    CROSS JOIN LATERAL jsonb_to_record(\n      CASE WHEN jsonb_typeof(payload)='object' THEN payload ELSE '{}'::jsonb END\n    ) AS p(\"minuteBucket\" text, symbol text, \"snapshotId\" text,\n      \"truthVerdict\" text, \"sourceTimestamp\" text, \"calculationVersion\" text)\n    WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'\n      AND p.symbol = $1 AND p.\"minuteBucket\" IS NOT NULL\n      AND ((((p.\"minuteBucket\"::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $2::date)\n      AND ((p.\"minuteBucket\"::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)\n      AND ((p.\"minuteBucket\"::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)) OR (((p.\"minuteBucket\"::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $5::date)\n      AND ((p.\"minuteBucket\"::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $6::time)\n      AND ((p.\"minuteBucket\"::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $7::time)))\n    ORDER BY p.\"minuteBucket\"::timestamptz ASC\n    ",
+      "params": [
+        "NIFTY",
+        "2026-10-19",
+        "10:15",
+        "11:15",
+        "2026-10-16",
+        "09:15",
+        "15:30"
+      ]
+    }
+  ],
+  "storageObservation": {
+    "serviceMetrics": {
+      "service": {
+        "id": "55871ef6-c0ed-48af-8819-8f7a6c6ece0e",
+        "name": "Postgres"
+      },
+      "environment": {
+        "id": "6733fddf-f2f4-49e8-a676-e58b5d907a46",
+        "name": "production"
+      },
+      "metrics": [
+        {
+          "measurement": "DISK_USAGE_GB",
+          "current": 3.445784576,
+          "average": 3.3892963042622917,
+          "min": 0,
+          "max": 3.445784576,
+          "sampleCount": 61
+        }
+      ]
+    },
+    "attachedVolumeSizeMB": 5000,
+    "limitation": "Provider usage and configured volume capacity do not establish OS filesystem free space or safe transient index-build/WAL headroom."
+  },
+  "interpretation": {
+    "markers": "Index Cond uses kind only; symbol and both time windows are residual filters.",
+    "canonical": "Index Cond uses kind only; decoded symbol and both time windows are Function Scan filters after archive rows enter the lateral decoder.",
+    "indexCreated": false,
+    "queryChangedForIndex": false,
+    "timingMeasured": false
+  }
+}

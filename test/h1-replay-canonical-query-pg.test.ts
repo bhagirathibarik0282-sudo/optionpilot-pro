@@ -55,7 +55,7 @@ test('raw-symbol pushdown preserves complete paired rows and matches the propose
      COUNT(*) FILTER(WHERE market IS NULL)::integer AS sql_null_markets,
      md5(string_agg(digest,',' ORDER BY digest)) AS fingerprint FROM (
        SELECT market,md5((CASE WHEN market IS NULL THEN 'SQLNULL:' ELSE 'JSON:' END)||to_jsonb(r)::text) AS digest
-       FROM (${sql}) AS r) AS evidence`,baseline.params)).rows[0];
+       FROM (${sql.replace(/ORDER BY p\."minuteBucket"::timestamptz ASC\s*$/,'')}) AS r) AS evidence`,baseline.params)).rows[0];
    assert.deepEqual(await fingerprint(after),await fingerprint(before),'real diagnostic SQL must execute and preserve full evidence fingerprints');
    // Forced access proves expression compatibility only; it is not a speed test.
    await client.query('SET LOCAL enable_seqscan=off');

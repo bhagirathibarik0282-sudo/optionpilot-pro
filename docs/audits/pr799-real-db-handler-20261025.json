@@ -1,0 +1,105 @@
+{
+  "observedAt": "2026-10-25T04:56:12.293473605Z",
+  "commit": "4827b493f759e6c07405fc0482df35fe986a5adb",
+  "deploymentId": "b852b79e-64a4-4d2b-9281-49391277ed38",
+  "serviceId": "8db59b5b-25b0-4cd0-b92d-fb584c1a89d4",
+  "ok": true,
+  "mode": "ONE_SHOT_REAL_DB_RAG_HANDLER_ACCEPTANCE",
+  "httpStatus": 200,
+  "elapsedMs": 33779.8,
+  "scope": "DEPLOYED_PROCESS_IN_PROCESS_HTTP_HANDLER_WITH_REAL_DB_EXCLUDES_PUBLIC_EDGE_AND_BROWSER",
+  "identity": {
+    "symbol": "NIFTY",
+    "date": "2026-10-19",
+    "expiry": "2026-10-19",
+    "strike": 23150,
+    "side": "PE",
+    "dte": 0
+  },
+  "event": {
+    "timeIst": "10:45",
+    "flags": [],
+    "before": 153.85,
+    "after": 137.1,
+    "availableAt": "2026-10-19T05:15:00.000Z"
+  },
+  "selectedEvidenceSha256": "118a0e2d0c07691435358d41088f4658b8deeeb1f4acf81f539d59eb41b3fc82",
+  "premiums": {
+    "before3m": 153.85,
+    "event": 137.1,
+    "after3m": 142.9
+  },
+  "reads": [
+    {
+      "request": {
+        "symbol": "NIFTY",
+        "tradeDate": "2026-10-19",
+        "fromTime": "10:15",
+        "toTime": "11:15",
+        "scope": "FULL"
+      },
+      "ok": true,
+      "reason": null,
+      "counts": {
+        "market": 61,
+        "options": 5618,
+        "chain": 183,
+        "markers": 61,
+        "canonical": 61
+      },
+      "queryTimingsMs": {
+        "markers": 6389,
+        "market": 23.4,
+        "options": 627.4,
+        "chain": 807.5,
+        "canonical": 24392.7,
+        "raw_gaps": 0
+      }
+    },
+    {
+      "request": {
+        "symbol": "NIFTY",
+        "tradeDate": "2026-10-16",
+        "fromTime": "09:15",
+        "toTime": "15:30",
+        "scope": "FULL"
+      },
+      "ok": true,
+      "reason": null,
+      "counts": {
+        "market": 124,
+        "options": 11357,
+        "chain": 372,
+        "markers": 124,
+        "canonical": 124
+      },
+      "queryTimingsMs": {
+        "markers": 6382.2,
+        "market": 29.1,
+        "chain": 619.5,
+        "options": 1390.8,
+        "canonical": 24618.8,
+        "raw_gaps": 118.8
+      }
+    }
+  ],
+  "safety": {
+    "transactionReadOnlyVerified": true,
+    "writesPerformed": false,
+    "publicListener": false,
+    "brokerRequests": false
+  },
+  "limits": {
+    "processMs": 120000,
+    "statementMs": 45000,
+    "lockMs": 1000,
+    "poolMax": 5
+  },
+  "limitations": [
+    "One sample; no universal latency claim.",
+    "Diagnostic pool uses explicit read-only transactions and deadlines.",
+    "Public HTTP edge, Recorder browser click-through and mobile visual acceptance remain unverified.",
+    "Recorded canonical PCR does not prove complete fresh full-chain inventory."
+  ],
+  "conclusion": "Identity/data assertions passed for one real DB handler sample. 33.78s remains too slow for the intended smooth one-click experience; no latency repair acceptance or public/browser acceptance claimed."
+}

@@ -179,6 +179,13 @@ export const ONE_SHOT_CSS=`
 #market-book #op-one-stop .os-nav button{min-height:36px;padding:5px 8px;font-size:11px}
 @media(max-width:850px){#op-one-stop .os-terminal-head{grid-template-columns:minmax(0,1fr)}#op-one-stop .os-rag-context{margin-top:3px}}
 @media(max-width:600px){#market-book #op-one-stop.os-card{padding:7px}#op-one-stop .os-evidence-shortcuts{flex-wrap:nowrap;overflow-x:auto}#op-one-stop .os-evidence-shortcuts>span{flex:0 0 auto}#op-one-stop .os-evidence-shortcuts a{flex:0 0 auto}#op-one-stop .os-rag-context>strong{font-size:12px}#op-one-stop .os-rag-line{grid-template-columns:85px minmax(0,1fr)}#op-one-stop .os-rank-sides{grid-template-columns:minmax(0,1fr)}#op-one-stop .os-market{min-height:0}#market-book #op-one-stop .os-table{min-width:480px}}
+/* Six existing, functional destinations remain one horizontally scrolling bar on phones. */
+@media(max-width:900px){
+#market-book #op-workspace-nav{display:block;margin:0 0 5px}
+#market-book .op-rail-inner{display:block;padding:0}
+#market-book #op-chapter-links{display:flex;gap:4px;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:thin}
+#market-book #op-chapter-links button{flex:0 0 auto;width:auto;min-height:38px;padding:5px 10px;font-size:11px;white-space:nowrap}
+}
 @media(prefers-reduced-motion:reduce){#op-one-stop *{animation:none!important;transition:none!important}}
 `;
 

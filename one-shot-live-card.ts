@@ -323,11 +323,11 @@ export function installOneShotLiveCard(api:any){
   // Never copy spot levels to the futures contract.
   return {pdh:null,pdc:ok?positive(f.pdc):null,pdl:null,ready:ok,expiry:ok?f.identity.expiry:null};
  };
- const allFutureLevels=(d:any)=>table(['Instrument','LTP','Day %','PDH','PDC','PDL','15m H','15m L','OI','Basis','Source time · IST'],symbols.filter(symbol=>symbol===selected).flatMap(symbol=>{
+ const allFutureLevels=(d:any)=>table(['Instrument','LTP','Day %','PDH','PDC','PDL','15m H','15m L','OI','Basis','Source time · IST','Day Δ ₹'],symbols.filter(symbol=>symbol===selected).flatMap(symbol=>{
   const a=d?indexRow(d,symbol):null,q=a?.spot,f=a?.future,ok=!!a&&valid(d,q,'SPOT',symbol),fo=!!a&&valid(d,f,'FUTURE',symbol),r=ok?refs(d,symbol,q):{},fr=futureRefs(d,a);
   const basis=ok&&fo&&Math.abs(Date.parse(q.observedAt)-Date.parse(f.observedAt))<=5000?f.price-q.price:null;
-  return [[esc(symbol)+' Spot',fmt(ok?q.price:null),pct(ok?change(d,q,'SPOT',symbol):null),fmt(r.pdh),fmt(r.pdc),fmt(r.pdl),fmt(r.h15),fmt(r.l15),'—','—',ok?time(q.observedAt):'Unavailable'],
-   [esc(symbol)+' Fut<small>'+esc(fr.expiry||'—')+'</small>',fmt(fo?f.price:null),pct(fo?change(d,f,'FUTURE',symbol):null),fmt(fr.pdh),fmt(fr.pdc),fmt(fr.pdl),'—','—',fmt(fo&&n(f.oi)!==null&&f.oi>=0?f.oi:null,0),fmt(basis),fo?time(f.observedAt):'Unavailable']];
+  return [[esc(symbol)+' Spot',fmt(ok?q.price:null),pct(ok?change(d,q,'SPOT',symbol):null),fmt(r.pdh),fmt(r.pdc),fmt(r.pdl),fmt(r.h15),fmt(r.l15),'—','—',ok?time(q.observedAt):'Unavailable',fmt(ok&&positive(q.pdc)!==null?q.price-q.pdc:null)],
+   [esc(symbol)+' Fut<small>'+esc(fr.expiry||'—')+'</small>',fmt(fo?f.price:null),pct(fo?change(d,f,'FUTURE',symbol):null),fmt(fr.pdh),fmt(fr.pdc),fmt(fr.pdl),'—','—',fmt(fo&&n(f.oi)!==null&&f.oi>=0?f.oi:null,0),fmt(basis),fo?time(f.observedAt):'Unavailable',fmt(fo&&positive(f.pdc)!==null?f.price-f.pdc:null)]];
  }))+'<small class="os-subline">Kite FULL · previous close. Futures PDH/PDL: same-contract previous-session high/low source unavailable. Spot levels are never substituted. Basis requires source times within 5s.</small>';
  const observe=(d:any,a:any)=>{
   const q=a.spot,symbol=a.symbol;if(!valid(d,q,'SPOT',symbol)){previous.delete(symbol);breaks.delete(symbol);return;}

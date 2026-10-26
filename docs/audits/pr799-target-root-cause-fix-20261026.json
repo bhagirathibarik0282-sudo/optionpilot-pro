@@ -1,0 +1,175 @@
+{
+  "dateIst": "2026-10-26",
+  "problem": "Target Recorder snapshot unavailable during source validation",
+  "rootCause": {
+    "kind": "INCORRECT_HARDCODED_DIAGNOSTIC_TARGET",
+    "explanation": "The diagnostic assumed a 2026-10-26 expiry and reused the old 23150 strike. The actual selected event contained no 2026-10-26 expiry. Source/connection failure was not the cause of that exact-contract rejection.",
+    "diagnosticDeployment": "a862f855-73bf-49c5-bb02-491058eed7f7",
+    "diagnosticCommit": "dacff4a1b8dae2205a08599d9d2ee57c429e658c",
+    "observed": {
+      "admitted": false,
+      "reason": "EXACT_CONTRACT_NOT_RECORDED",
+      "marketRows": 1,
+      "optionRows": 120,
+      "exactExpiryRows": 0,
+      "exactSideRows": 0,
+      "exactContractRows": 0,
+      "recordedExpiries": [
+        "2026-10-27",
+        "2026-11-03",
+        "2026-11-09",
+        "2026-11-23"
+      ],
+      "expiryInventoryTruncated": false,
+      "exactSideStrikeCount": 0,
+      "minStrike": null,
+      "maxStrike": null
+    }
+  },
+  "fix": {
+    "selectionPolicy": "EARLIEST_RECORDED_EXPIRY_NEAREST_EVENT_SPOT_LOWER_STRIKE_TIE_V1",
+    "description": "Use actual earliest recorded nonexpired expiry at the same exact event time, then nearest event-spot recorded strike with lower-strike tie; select before any history/outcome read. An inadmissible chosen contract stops; no admission-based replacement.",
+    "matchingRuleChanged": false,
+    "sourceGuardsRelaxed": false,
+    "preloadedTargetReused": true,
+    "diagnosticReasonsPreserved": true
+  },
+  "verification": {
+    "deploymentId": "339dffa5-cc4d-47eb-96dc-b196c149ac13",
+    "codeCommit": "b1b0d5d8d958d72e67a04cc0fd4fd55840cada3e",
+    "deploymentStatus": "SUCCESS",
+    "result": {
+      "target": {
+        "symbol": "NIFTY",
+        "date": "2026-10-26",
+        "time": "10:24",
+        "side": "PE",
+        "expiry": "2026-10-27",
+        "strike": "22650"
+      },
+      "selectionPolicy": "EARLIEST_RECORDED_EXPIRY_NEAREST_EVENT_SPOT_LOWER_STRIKE_TIE_V1",
+      "ruleVersion": "RECORDER_PREMIUM_UP_10PCT_15M_V1",
+      "declaredAt": "2026-10-26T04:50:51.000Z",
+      "status": "UNAVAILABLE",
+      "reason": "HISTORICAL_RECORDER_SESSION_READ_INCOMPLETE",
+      "audit": {
+        "dateIndexReads": 1,
+        "replayReads": 13,
+        "selectedSessionDates": [
+          "2026-10-07",
+          "2026-10-08",
+          "2026-10-09",
+          "2026-10-12",
+          "2026-10-13",
+          "2026-10-14",
+          "2026-10-15",
+          "2026-10-16",
+          "2026-10-19",
+          "2026-10-21",
+          "2026-10-22",
+          "2026-10-23"
+        ],
+        "loadedSessionDates": [
+          "2026-10-07",
+          "2026-10-08",
+          "2026-10-09",
+          "2026-10-12",
+          "2026-10-13",
+          "2026-10-14",
+          "2026-10-15",
+          "2026-10-16",
+          "2026-10-19",
+          "2026-10-21",
+          "2026-10-22"
+        ],
+        "failedSessionDates": [
+          "2026-10-23"
+        ],
+        "recordedContracts": 16,
+        "emptyContractSessions": [
+          "2026-10-07",
+          "2026-10-08",
+          "2026-10-09",
+          "2026-10-13",
+          "2026-10-14",
+          "2026-10-15",
+          "2026-10-16",
+          "2026-10-19",
+          "2026-10-21",
+          "2026-10-22"
+        ],
+        "rejectedContracts": [
+          {
+            "date": "2026-10-12",
+            "expiry": "2026-10-13",
+            "strike": 22100,
+            "side": "PE",
+            "reason": "EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF"
+          }
+        ],
+        "targetAdmission": {
+          "admitted": true,
+          "reason": "ADMITTED",
+          "marketRows": 1,
+          "optionRows": 120,
+          "exactExpiryRows": 30,
+          "exactSideRows": 15,
+          "exactContractRows": 1,
+          "recordedExpiries": [
+            "2026-10-27",
+            "2026-11-03",
+            "2026-11-09",
+            "2026-11-23"
+          ],
+          "expiryInventoryTruncated": false,
+          "exactSideStrikeCount": 15,
+          "minStrike": 22300,
+          "maxStrike": 23000
+        }
+      },
+      "counts": null,
+      "limits": {
+        "maxSessions": 20,
+        "maxContractsPerSession": 64,
+        "concurrency": 1,
+        "retries": 0
+      },
+      "queries": 67,
+      "readOnly": true,
+      "writesPerformed": false,
+      "poolClosed": true,
+      "dashboardActivated": false,
+      "ratePublished": false
+    },
+    "targetSelectionBugFixedOnActualSource": true,
+    "fullMatchingHistoryAccepted": false,
+    "localTestsPassed": 105,
+    "ci": {
+      "head": "b1b0d5d8d958d72e67a04cc0fd4fd55840cada3e",
+      "returned": 49,
+      "success": 49,
+      "other": []
+    }
+  },
+  "remaining": {
+    "reason": "HISTORICAL_RECORDER_SESSION_READ_INCOMPLETE",
+    "failedDates": [
+      "2026-10-23"
+    ],
+    "supportEstablished": false,
+    "note": "The wrapper does not yet retain the finer historical-session failure stage. This run does not prove that the date is absent, nor permit dropping it from the denominator. Twelve selected dates include ten observed empty same-DTE contract windows; sufficient five-session matching support has not been established."
+  },
+  "cleanup": {
+    "poolClosed": true,
+    "noListener": true,
+    "startCommandRestored": "node -e 'console.log(\"PR799_ACCEPTANCE_IDLE_NO_DATABASE_QUERY\")'",
+    "restartPolicy": "NEVER",
+    "stagedChanges": 0,
+    "sourcePinned": true,
+    "newIdleStartupMarkerClaimed": false,
+    "mainDeployment": "1450e00b-a707-4dd1-a7ea-a49729943576",
+    "mainStatus": "SUCCESS",
+    "mainUnchanged": true
+  },
+  "probabilityActivated": false
+}

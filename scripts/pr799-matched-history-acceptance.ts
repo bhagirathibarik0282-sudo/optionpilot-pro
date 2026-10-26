@@ -6,6 +6,7 @@ import {listH1TheoryRecordedDates} from '../h1-theory-history.js';
 import {runH1ReplayRead} from '../h1-replay-http.js';
 import {loadRecorderMatchedHistory} from '../recorder-matched-history.js';
 import {validRecorderMatchRule} from '../recorder-matched-outcome.js';
+import {selectPr799RecordedTarget} from '../pr799-recorder-target.js';
 
 // One manually authorized, bounded source validation. No server/startup or rate publication.
 let stage='CONFIGURATION';
@@ -16,7 +17,7 @@ async function main(){
  assert.equal(createHash('sha256').update(bytes).digest('hex'),'bbcae1a2262031131805726a489bd9a8285c39b9c6ae05267fac1bffad006a0d');
  const config=JSON.parse(bytes.toString('utf8'));assert(validRecorderMatchRule(config.rule));
  assert.equal(config.activation.dashboardPercentage,false);
- const target={symbol:'NIFTY',date:'2026-10-26',expiry:'2026-10-26',strike:'23150',side:'PE',time:'10:24'};
+ let target:Record<string,string>={symbol:'NIFTY',date:'2026-10-26',side:'PE',time:'10:24'};
  assert(Date.parse(target.date+'T'+target.time+':00+05:30')>=Date.parse(config.rule.declaredAt));
  assert(Date.now()>=Date.parse(target.date+'T'+target.time+':00+05:30'));
  const timeout=setTimeout(()=>{console.error('PR799_MATCH_HISTORY_TIMEOUT_NO_RATE');process.exit(1);},120000);
@@ -36,20 +37,29 @@ async function main(){
    client.release(broken);
   }
  };
- let result:any;
+ let result:any,selectionPolicy:string|null=null;
  try{
-  stage='BOUNDED_HISTORY_READ';
-  result=await loadRecorderMatchedHistory({target,historyFrom:'2026-10-01',historyTo:'2026-10-23',rule:config.rule},{
-   listDates:()=>listH1TheoryRecordedDates(async<T>(sql:string,params:unknown[]=[])=>({rows:await read(sql,params) as T[]})),
-   read:q=>runH1ReplayRead(q,read)
-  });
+  stage='EXACT_RECORDED_TARGET_SELECTION';
+  const request={symbol:'NIFTY' as const,tradeDate:target.date,fromTime:'10:21',toTime:target.time,scope:'FULL' as const};
+  const current=await runH1ReplayRead(request,read);
+  const selection=selectPr799RecordedTarget({symbol:target.symbol,date:target.date,time:target.time,side:target.side},current);
+  selectionPolicy=selection.policy;
+  if(!selection.ok)result={status:'UNAVAILABLE',reason:selection.reason,audit:{targetAdmission:selection.admission},result:null,limits:null};
+  else{
+   target=selection.target;stage='BOUNDED_HISTORY_READ';
+   result=await loadRecorderMatchedHistory({target,historyFrom:'2026-10-01',historyTo:'2026-10-23',rule:config.rule},{
+    listDates:()=>listH1TheoryRecordedDates(async<T>(sql:string,params:unknown[]=[])=>({rows:await read(sql,params) as T[]})),
+    // Reuse only this exact request; no cache or alternate target survives the run.
+    read:q=>Object.entries(request).every(([k,v])=>(q as any)[k]===v)?Promise.resolve(current):runH1ReplayRead(q,read)
+   });
+  }
  }finally{
   try{await pool.end();}catch{failed=true;}finally{clearTimeout(timeout);}
  }
  stage='VERIFY_POOL_CLOSED';assert.equal(failed,false);
  // Allowlisted audit only. Never log raw rows, rule-selected prices, percentages or credentials.
  const audit=result.audit;
- console.log('PR799_MATCH_HISTORY_RESULT '+JSON.stringify({target,ruleVersion:config.rule.version,
+ console.log('PR799_MATCH_HISTORY_RESULT '+JSON.stringify({target,selectionPolicy,ruleVersion:config.rule.version,
   declaredAt:config.rule.declaredAt,status:result.status,reason:result.reason,
   audit,counts:result.result?.counts??null,limits:result.limits,queries,
   readOnly:true,writesPerformed:false,poolClosed:true,dashboardActivated:false,ratePublished:false}));

@@ -47,7 +47,7 @@ async function main(){
  stage='VERIFYING_POOL_CLOSED';
  assert.equal(failed,false);
  stage='BUILDING_BOUNDED_PAYLOAD';
- const capture=buildPr799BrowserCapture(pair,raw,new Date().toISOString());
+ const capture=buildPr799BrowserCapture(pair,raw,new Date().toISOString(),value=>{stage=value;});
  stage='ENCODING_BOUNDED_PAYLOAD';
  const json=JSON.stringify(capture);assert(Buffer.byteLength(json)<250000);
  const encoded=gzipSync(json).toString('base64');assert(encoded.length<100000);

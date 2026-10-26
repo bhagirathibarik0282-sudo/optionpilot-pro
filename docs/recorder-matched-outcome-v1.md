@@ -65,7 +65,7 @@ unavailable` until the real loader and support qualification are validated.
 
 ## Validation and authority
 
-Twenty tests passed: seven new core tests and thirteen existing Recorder bridge
+Twenty-four tests passed: eleven core tests and thirteen existing Recorder bridge
 tests. Synthetic fixtures exercise numerator/denominator, exclusion/matching,
 look-ahead, unsupported/missing features, duplicates, conflicting claimed hashes,
 outcome-blind session selection, missing outcomes, complete-scope requirements,
@@ -73,3 +73,18 @@ explicit rule/support, endpoint direction/horizon and interval boundaries.
 The fixtures are not historical market results or evidence of an actual match
 count. No source arrays are mutated. No DB query/write, broker call, selector,
 Telegram or execution change is introduced.
+
+## Double-check repair
+
+Adversarial tests reproduced two errors in the initial core: a mathematically
+exact 10% decrease missed an inclusive 10% threshold due to binary floating-point
+rounding, and a tiny positive premium move matched a flat case after the display
+delta rounded to zero. Outcome qualification now compares the supplied decimal
+price/threshold values with scaled BigInt arithmetic. Match direction uses the
+admitted raw endpoint prices while still requiring the existing eligible 3m
+baseline/delta guard. Display percentages do not select matches or qualify wins.
+
+Tests cover exact decimal/exponent boundaries and values just below a threshold.
+Non-finite calculated outcome changes and missing explicit no-write attestation
+also block a numeric rate. This repair remains internal; actual Recorder history
+loading, browser acceptance and numerical dashboard activation remain pending.

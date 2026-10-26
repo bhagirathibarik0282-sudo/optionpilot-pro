@@ -15,10 +15,22 @@ const dateMs=(s:unknown)=>{
  const t=Date.parse(s+'T00:00:00Z');return Number.isFinite(t)&&new Date(t).toISOString().slice(0,10)===s?t:NaN;
 };
 const finite=(v:any)=>typeof v==='number'&&Number.isFinite(v);
+// Compare the decimal values supplied by the Recorder without rounding a
+// floating-point percentage at an inclusive outcome threshold.
+function decimal(v:number):[bigint,bigint]{
+ const [coefficient,exponent='0']=v.toString().split('e');
+ const [whole,fraction='']=coefficient.split('.'),scale=fraction.length-Number(exponent);
+ const n=BigInt(whole+fraction);
+ return scale>=0?[n,10n**BigInt(scale)]:[n*10n**BigInt(-scale),1n];
+}
+function meetsMove(start:number,end:number,minimumPct:number,increase:boolean){
+ const [a,ad]=decimal(start),[b,bd]=decimal(end),[m,md]=decimal(minimumPct);
+ return (b*ad-a*bd)*(increase?1n:-1n)*100n*md>=a*bd*m;
+}
 const cell=(view:any,offset:number,family:string,metric:string)=>view.lanes?.find((l:any)=>l.offsetMinutes===offset)?.cells.find((c:any)=>c.family===family&&c.metric===metric);
 function admitted(raw:Snapshot){
  try{
-  if(!raw||!finite(dateMs(raw.identity?.date))||!finite(dateMs(raw.identity?.expiry)))return null;
+  if(!raw||raw.safety?.writesPerformed!==false||!finite(dateMs(raw.identity?.date))||!finite(dateMs(raw.identity?.expiry)))return null;
   const view=projectRecordedRagLadder(raw,false);if(!view.ok)return null;
   const price=cell(view,0,'PREMIUM','LTP'),spot=cell(view,0,'SPOT','LTP');
   const dte=(dateMs(raw.identity.expiry)-dateMs(raw.identity.date))/86400000;
@@ -32,8 +44,9 @@ function signature(a:NonNullable<ReturnType<typeof admitted>>,rule:RecorderMatch
  for(const feature of rule.features){
   if(feature==='PREMIUM_3M_DIRECTION'){
    // Existing projection admits a delta only for exact adjacent comparable endpoints.
-   if(!finite(a.price.changePct))return null;
-   values.push(Math.sign(a.price.changePct));
+   const baseline=cell(a.view,-3,'PREMIUM','LTP');
+   if(!finite(a.price.changePct)||!baseline||baseline.value<=0)return null;
+   values.push(Math.sign(a.price.value-baseline.value));
   }else if(feature==='SPOT_VS_PDC'){
    const pdc=cell(a.view,0,'SPOT','PDC');if(!pdc||pdc.value<=0)return null;
    values.push(Math.sign(a.spot.value-pdc.value));
@@ -99,8 +112,9 @@ export function computeRecorderMatchedOutcome(target:Snapshot,history:Snapshot[]
   let end:any=null;
   try{const view=projectRecordedRagLadder(a.raw,true);if(view.ok)end=cell(view,rule.horizonMinutes,'PREMIUM','LTP');}catch{}
   if(!end||end.value<=0||Date.parse(end.availableAt)>targetKnownAt){counts.missingOutcomes++;continue;}
-  const changePct=(end.value/a.price.value-1)*100;
-  const qualifies=(rule.movement==='INCREASE'?changePct:-changePct)>=rule.minimumMovePct;
+  const changePct=(end.value-a.price.value)/a.price.value*100;
+  if(!finite(changePct)){counts.missingOutcomes++;continue;}
+  const qualifies=meetsMove(a.price.value,end.value,rule.minimumMovePct,rule.movement==='INCREASE');
   counts.resolved++;if(qualifies)counts.qualifying++;
   episodes.push({recorderEventId:a.id,sourceDate:a.raw.identity.date,contract:{...a.raw.identity},
    evidenceSha256:a.raw.provenance.selectedEvidenceSha256,eventKnownAt:a.raw.event.availableAt,

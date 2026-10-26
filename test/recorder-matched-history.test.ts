@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {loadRecorderMatchedHistory as load} from '../recorder-matched-history.js';
+import {loadRecorderMatchedHistory as load,inspectRecorderReplayScope} from '../recorder-matched-history.js';
 import {buildH1ReplayContinuity,type H1ReplayRequest} from '../h1-replay-http.js';
 import type {RecorderMatchRule} from '../recorder-matched-outcome.js';
 
@@ -33,6 +33,22 @@ function harness(){
  const deps:any={listDates:async()=>{lists++;return index;},read:async(q:H1ReplayRequest)=>{reads.push(q);return replay(q);}};
  return {deps,index,reads,lists:()=>lists};
 }
+test('a historical marker gap reports exact scope evidence without promoting raw rows or a partial rate',async()=>{
+ const h=harness();h.deps.read=async(q:H1ReplayRequest)=>{
+  h.reads.push(q);const r:any=replay(q);
+  if(q.tradeDate===dates[0]){
+   const bucket=r.market[0].minute_bucket;r.continuity={...r.continuity,complete:false,missingBuckets:[bucket],observedMarkerBuckets:r.continuity.expectedBuckets-1,truthCounts:{TRUE:r.continuity.expectedBuckets-1}};
+   r.markerGapEvidence={buckets:[{minuteBucket:bucket,marketRows:1,optionRows:2,chainRows:0}]};
+  }
+  return r;
+ };
+ const result=await load(input(),h.deps);assert.equal(result.ratePct,null);
+ assert.deepEqual(result.audit.failedSessionDetails,[{date:dates[0],reason:'INCOMPLETE_SOURCE_MARKERS'}]);
+ const d=result.audit.replayDiagnostics.at(-1)!;assert.equal(d.ok,false);assert.equal(d.missingCount,1);
+ assert.equal(d.rawGapPresence[0].optionRows,2);assert.equal(d.rawGapPresenceIsAdmission,false);
+ const q=h.reads[0],r=replay(q);r.continuity.truthCounts.TRUE=0;
+ assert.equal(inspectRecorderReplayScope(q,r).reason,'INCOMPLETE_SOURCE_MARKERS');
+});
 test('existing date inventory and replay rows feed real snapshot admission and the deterministic calculator',async()=>{
  const h=harness(),r=await load(input(),h.deps);
  assert.equal(r.status,'AVAILABLE');assert.equal(r.ratePct,2/3*100);

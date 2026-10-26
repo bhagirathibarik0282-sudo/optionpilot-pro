@@ -26,4 +26,5 @@ test('reference layout retains touch navigation, source labels and responsive co
  assert.match(ONE_SHOT_CSS,/#market-book #op-chapter-links\{display:flex;gap:4px;overflow-x:auto/);
  assert.match(ONE_SHOT_CSS,/#op-one-stop \.os-evidence-shortcuts a:focus-visible/);
  assert.match(ONE_SHOT_CSS,/#market-book #op-one-stop \.os-table/);
+ assert(ONE_SHOT_CSS.includes("#market-book[data-main-chapter='1'] #op-view-links{display:flex"),'mobile Research subviews remain reachable');
 });

@@ -14,6 +14,12 @@ export function renderOneShotCard(atm:string){
 <article><h4>06 · ନିଜ ଭାବରେ ଦେଖନ୍ତୁ</h4><p>Index tap କରନ୍ତୁ → Day % ବା Selected window % ବାଛନ୍ତୁ → detailed ladderରେ CE / PE / BOTH। Numbered section tap କରି ଯାଆନ୍ତୁ; Show / hideରେ section ବନ୍ଦ କରନ୍ତୁ।</p></article>
 </div><p class="os-caption">Reading guide · 21 October 2026 · ଉପରେ Live dashboard → tap କରି readingsକୁ ଫେରନ୍ତୁ।</p></section>
 <div id="os-dashboard">
+<nav id="os-command-deck" class="os-command-deck" aria-label="Four main data views">
+<a href="#os-radar" data-os-hub="MARKET" aria-current="page"><span class="os-hub-num">01</span><span><strong>MARKET</strong><small>Spot · Futures · PCR</small></span></a>
+<a href="#os-premium" data-os-hub="OPTIONS"><span class="os-hub-num">02</span><span><strong>OPTIONS</strong><small>4 DTE · CE / PE</small></span></a>
+<a href="#os-pulse" data-os-hub="FLOW"><span class="os-hub-num">03</span><span><strong>FLOW</strong><small>Chart · OI walls</small></span></a>
+<a href="#os-memory" data-os-hub="MEMORY"><span class="os-hub-num">04</span><span><strong>MEMORY</strong><small>Replay · RAG</small></span></a>
+</nav>
 <nav id="os-evidence-shortcuts" class="os-evidence-shortcuts" aria-label="Verified evidence sections"><span>RESEARCH PARAMETERS · jump to evidence</span><a href="#os-radar">PDH / PDL</a><a href="#os-pulse">Spot × PCR</a><a href="#os-walls">OI walls</a><a href="#os-premium">Premium + spread</a><a href="#os-futures">Spot ↔ Future</a><a href="#os-notables">Events</a></nav>
 <div class="os-terminal-head"><div class="os-terminal-evidence"><div class="os-section-head" id="os-radar"><h3>01 · Spot & Futures · three-index levels</h3><small>Actual Kite/Recorder values · BANKNIFTY monthly observation</small></div><div id="os-market-radar" class="os-markets" aria-live="off"></div>
 <section class="os-pcr-overview" aria-label="All three index PCR"><div class="os-section-head"><h3>02 · Full-chain PCR & OI · all three indices</h3><small>PE OI ÷ CE OI · arrows show ratio change</small></div><div id="os-pcr-strip" class="os-pcr-strip"></div></section>
@@ -30,7 +36,7 @@ export function renderOneShotCard(atm:string){
 <details class="os-source"><summary>Recorded date / full inventory</summary><div class="os-workspace-controls"><label>Session<input type="date" id="os-recorded-date"></label><button type="button" id="os-load-recorded">Load full session</button><span id="os-load-status" role="status"></span></div></details>
 <div class="os-main-grid os-ladder-grid"><article class="os-panel os-premium" id="os-premium"><div class="os-section-head"><h3>03 · Premium Ladder · Multi-DTE</h3><span class="os-badge">FOUR EXPIRY · V2</span><small>Exact dates · current ATM CE / PE</small></div><div class="os-section-head"><strong>Multi-DTE awareness</strong><small id="os-dte-context"></small></div><p class="os-ladder-key"><span class="os-ce-label">CE · Call</span> <span class="os-pe-label">PE · Put</span> Expiry → DTE → ATM strike → ₹ LTP → % change → time</p><div class="os-controls" id="os-dte-metric" role="group" aria-label="Multi-DTE change comparison"><button type="button" data-os-dte-metric="day" aria-pressed="true">Day %</button><button type="button" data-os-dte-metric="window" aria-pressed="false">Selected window %</button></div><div id="os-expiry-clock" class="os-expiry-clock"></div><div id="os-dte-radar" class="os-dte-grid"></div><div id="os-dte-alignment"></div>${atm}</article></div>
 <div id="op-one-actions" role="group" aria-label="Open existing market tools"><button type="button" data-op-one="LIVE">Live detail</button><button type="button" data-op-one="LADDER">CE / PE ladder</button><button type="button" data-op-one="MULTIDAY">Multi-day research</button><button type="button" data-op-one="RAG">Ask RAG</button><button type="button" data-op-one="RECORDED">Open recorded ladder</button></div>
-<nav class="os-nav" id="os-navigation" aria-label="One Shot numbered categories">${[['radar','Market radar'],['pulse','Spot × PCR'],['premium','Premium ladder'],['futures','Futures response'],['walls','OI + walls'],['stocks','Heavyweights'],['sectors','Sectors'],['vix','VIX + alignment'],['memory','Memory / replay'],['tools','Sources / tools']].map(([id,label],i)=>`<button type="button" data-os-go="${id}">${String(i+1).padStart(2,'0')} · ${label}</button>`).join('')}</nav>
+<details id="os-detailed-views" class="os-detailed-views"><summary>More detail · 10 source-backed views</summary><nav class="os-nav" id="os-navigation" aria-label="One Shot numbered categories">${[['radar','Market radar'],['pulse','Spot × PCR'],['premium','Premium ladder'],['futures','Futures response'],['walls','OI + walls'],['stocks','Heavyweights'],['sectors','Sectors'],['vix','VIX + alignment'],['memory','Memory / replay'],['tools','Sources / tools']].map(([id,label],i)=>`<button type="button" data-os-go="${id}">${String(i+1).padStart(2,'0')} · ${label}</button>`).join('')}</nav></details>
 <div class="os-main-grid"><details class="os-panel os-cyan" id="os-pulse" open><summary>02 · Spot × Full PCR pulse <small>Show / hide</small></summary><div class="os-panel-body"><div class="os-controls" id="os-window" role="group" aria-label="One Shot observation window">${[1,3,5,6,15,30,60].map(n=>`<button type="button" data-os-window="${n}" aria-pressed="${n===3}">${n}m</button>`).join('')}</div><div class="os-pulse-heading" id="os-spot-context"></div><details class="os-source"><summary>✦ Chart custom</summary><div class="os-workspace-controls"><label>Plot<select id="os-chart-series"><option value="BOTH">Spot + Full PCR</option><option value="SPOT">Spot only</option><option value="PCR">Full PCR only</option></select></label><label>Chart update<select id="os-chart-cadence"><option value="0">Shared live updates</option><option value="180000" selected>3 minutes</option><option value="MANUAL">Manual</option></select></label><button type="button" id="os-chart-refresh">Update chart</button></div></details><div id="os-pulse-chart"></div><details class="os-source"><summary>Chart source</summary><p>Actual received samples, independently scaled spot and PCR axes. Missing intervals are gaps. First-15-minute H/L is shown only when verified recorded references exist; no illustrative guide.</p></details></div></details>
 <details class="os-panel os-violet" id="os-vix"><summary>08 · VIX + agreement radar <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-vix-value"></div><div id="os-agreement" class="os-agreement"></div></div></details></div>
 <details class="os-panel" id="os-futures" open><summary>01 · Futures + premium response <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-future-response"></div><p class="os-caption">Same-index futures and exact option contracts, matched observation endpoints. Same direction is descriptive co-movement, not proof that a premium follows a futures contract.</p></div></details>
@@ -199,6 +205,36 @@ export const ONE_SHOT_CSS=`
 #market-book #op-one-stop.os-card .os-market{padding:5px 7px}
 #market-book #op-one-stop.os-card .os-market .os-levels{margin:0}
 #market-book #op-one-stop.os-card .os-market .os-subline{line-height:1.1}
+}
+/* Four data-first view hubs retain the Kite and Recorder renderers below. */
+#op-one-stop .os-command-deck{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin:5px 0 9px}
+#op-one-stop .os-command-deck a{min-width:0;display:flex;align-items:center;gap:9px;min-height:66px;padding:9px 11px;color:#e6f9ff;text-decoration:none;border:1px solid #31506e;border-top:3px solid #28d9eb;background:linear-gradient(145deg,#112d37,#111b2e);border-radius:9px;box-shadow:inset 0 1px #ffffff12}
+#op-one-stop .os-command-deck a:nth-child(2){border-top-color:#35efa5;background:linear-gradient(145deg,#12362b,#13212a)}
+#op-one-stop .os-command-deck a:nth-child(3){border-top-color:#eab45c;background:linear-gradient(145deg,#332717,#1c2130)}
+#op-one-stop .os-command-deck a:nth-child(4){border-top-color:#bc98ff;background:linear-gradient(145deg,#292043,#191c31)}
+#op-one-stop .os-command-deck a[aria-current=page]{outline:2px solid #77fcf2;outline-offset:-2px;box-shadow:0 0 15px #2ce1e83b,inset 0 1px #ffffff22}
+#op-one-stop .os-command-deck a:focus-visible{outline:3px solid #fff;outline-offset:2px}
+#op-one-stop .os-hub-num{flex:0 0 auto;font:800 22px/1 ui-monospace,monospace;color:#5deffd}
+#op-one-stop .os-command-deck a:nth-child(2) .os-hub-num{color:#6df4ae}
+#op-one-stop .os-command-deck a:nth-child(3) .os-hub-num{color:#f7be65}
+#op-one-stop .os-command-deck a:nth-child(4) .os-hub-num{color:#d0a9ff}
+#op-one-stop .os-command-deck strong{display:block;font-size:13px;letter-spacing:.5px}
+#op-one-stop .os-command-deck small{display:block;font-size:11px;line-height:1.35;color:#b6cce2;margin-top:4px}
+#op-one-stop .os-detailed-views{border:1px solid #27445a;background:#0c1a2a;border-radius:7px;margin:6px 0}
+#op-one-stop .os-detailed-views>summary{cursor:pointer;color:#a9ddf0;font-size:12px;padding:8px 10px;min-height:35px}
+#op-one-stop .os-detailed-views .os-nav{flex-wrap:wrap;overflow:visible;padding:4px 8px 9px}
+#op-one-stop #os-radar,#op-one-stop #os-premium,#op-one-stop #os-pulse,#op-one-stop #os-memory{scroll-margin-top:58px}
+@media(max-width:760px){
+#op-one-stop .os-command-deck{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+#op-one-stop .os-command-deck a{min-height:51px;padding:6px 8px;gap:7px}
+#op-one-stop .os-hub-num{font-size:19px}
+#op-one-stop .os-command-deck strong{font-size:12px}
+#op-one-stop .os-command-deck small{font-size:10px;margin-top:1px}
+#op-one-stop .os-rag-context>small{display:none}
+#op-one-stop .os-rag-context{padding:6px}
+#op-one-stop .os-rag-line{padding:4px 0}
+#op-one-stop .os-pcr b{font-size:22px}
+#op-one-stop .os-market .os-price{font-size:23px}
 }
 @media(prefers-reduced-motion:reduce){#op-one-stop *{animation:none!important;transition:none!important}}
 `;
@@ -477,7 +513,15 @@ export function installOneShotLiveCard(api:any){
   $('os-open-preface').setAttribute('aria-expanded',String(show));$('os-open-dashboard').setAttribute('aria-pressed',String(!show));
   if(focus)(show?$('os-preface-title'):$('os-open-dashboard')).focus?.();
  };
- // Reuse existing Recorder/RAG actions; no new endpoint, prediction or broker action.
+ // Four primary data hubs navigate the existing source-backed panels without a fetch.
+  if($('os-command-deck'))$('os-command-deck').onclick=(e:any)=>{
+   const link=e.target.closest?.('[data-os-hub]');if(!link)return;
+   const id=link.getAttribute('href')?.slice(1),target=id?$(id):null;if(!target)return;
+   e.preventDefault();if(target.tagName==='DETAILS')target.open=true;
+   $('os-command-deck').querySelectorAll?.('[data-os-hub]').forEach((a:any)=>{if(a===link)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
+   target.scrollIntoView?.({block:'start',behavior:'auto'});
+  };
+  // Reuse existing Recorder/RAG actions; no new endpoint, prediction or broker action.
  if($('os-rag-open'))$('os-rag-open').onclick=()=>$('op-one-actions')?.querySelector?.('[data-op-one="RAG"]')?.click?.();
  if($('os-memory-open'))$('os-memory-open').onclick=()=>$('op-one-actions')?.querySelector?.('[data-op-one="RECORDED"]')?.click?.();
  $('os-open-preface').onclick=()=>showPreface($('os-preface').hidden,true);

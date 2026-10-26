@@ -19,6 +19,26 @@ test('reference terminal reuses real source-driven views in seven numbered secti
  assert.match(installOneShotLiveCard.toString(),/data-op-one="RECORDED"/);
  assert(WORKSPACE_NAV_HTML.includes('id="op-research-open-data"'));
 });
+
+test('four prominent UI hubs navigate only already available source-backed panels',()=>{
+ const html=renderOneShotCard('<details id="op-atm-weeklies"></details>');
+ const deckStart=html.indexOf('<nav id="os-command-deck"');
+ const deck=deckStart<0?'':html.slice(deckStart,html.indexOf('</nav>',deckStart)+6);
+ assert(deck,'four-hub deck must render before data');
+ const targets=['os-radar','os-premium','os-pulse','os-memory'];
+ assert.equal((deck.match(/data-os-hub=/g)||[]).length,4);
+ for(const id of targets)assert(deck.includes('href="#'+id+'"'),'target '+id);
+ assert(html.indexOf('id="os-command-deck"')<html.indexOf('id="os-market-radar"'));
+ assert(html.includes('id="os-detailed-views"'),'all ten original views remain accessible');
+ assert.equal((html.match(/id="os-navigation"/g)||[]).length,1);
+ assert(ONE_SHOT_CSS.includes('#op-one-stop .os-command-deck{display:grid'));
+ assert(ONE_SHOT_CSS.includes('@media(max-width:760px)'));
+ const handler=installOneShotLiveCard.toString();
+ assert(handler.includes("target.scrollIntoView"),'hub clicks must navigate');
+ assert(handler.includes("target.open=true"),'hidden details become visible');
+ assert(!handler.includes('fetch('),'navigation must not cause provider requests');
+});
+
 test('reference layout retains touch navigation, source labels and responsive containment',()=>{
  assert.match(ONE_SHOT_CSS,/#op-one-stop \.os-terminal-head\{display:grid/);
  assert.match(ONE_SHOT_CSS,/@media\(max-width:850px\)\{#op-one-stop \.os-terminal-head\{grid-template-columns:minmax\(0,1fr\)/);

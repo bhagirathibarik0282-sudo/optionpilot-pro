@@ -33,10 +33,10 @@ function iso(value: string | Date | null): string | null {
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
 }
 
-export async function listH1TheoryRecordedDates(): Promise<H1TheoryDateIndexResult> {
+export async function listH1TheoryRecordedDates(read:typeof dbQuerySafe=dbQuerySafe): Promise<H1TheoryDateIndexResult> {
   const base = { mode: "READ_ONLY_H1_RECORDED_DATE_INDEX_V1" as const, productionImpact: "NONE" as const, affectsVerdict: false as const, affectsTelegram: false as const, affectsExecution: false as const };
-  if (!dbIsConfigured()) return { ...base, ok: false, dates: [], reason: "DATABASE_URL_NOT_CONFIGURED" };
-  const result = await dbQuerySafe<DateRow>(`
+  if (read===dbQuerySafe&&!dbIsConfigured()) return { ...base, ok: false, dates: [], reason: "DATABASE_URL_NOT_CONFIGURED" };
+  const result = await read<DateRow>(`
     SELECT
       ((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::date AS trade_date,
       payload->>'symbol' AS symbol,

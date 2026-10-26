@@ -1,13 +1,17 @@
 # PR799 bounded archive transport for browser acceptance
 
-Latest status, 26 Oct: two separately approved attempts ran. The second passed
-archive-read, known fingerprint, original projection and pool-close guards, then
-failed at `BUILDING_BOUNDED_PAYLOAD`. No capture payload was received. A pg DATE
-object conversion defect was reproduced offline and fixed; eleven capture/preview
-tests pass. A third capture has not run. Main remains unchanged. The diagnostic
-idle command is restored and cleanup deployment is SUCCESS. Browser/mobile
-acceptance is open. See `docs/audits/pr799-capture-retry-20261026.json` and the
-first-attempt record `docs/audits/pr799-capture-run-20261026.json`.
+Latest status, 26 Oct: the third separately approved fixed capture SUCCEEDED at
+commit `949a4f7f`, deployment `ecdbbf82-5d73-4c26-9b5c-803106151087`.
+Completion sentinel, transport SHA-256, selected-evidence fingerprint and
+original/transported projection equality passed. Captured three exact market
+markers and three 23150 PE rows, retaining 153.85 / 137.10 / 142.90 at
+10:42 / 10:45 / 10:48 IST. In-process Recorder/evidence routes returned 200;
+unauthenticated / wrong-contract / POST guards returned 401 / 422 / 405.
+No actual browser/mobile acceptance or matched-history probability is claimed.
+The diagnostic idle command is restored, restart remains NEVER, no public
+endpoint exists, and main is unchanged. See
+`docs/audits/pr799-capture-success-20261026.json`; earlier failures remain in
+their separate audit records and are not relabelled as successes.
 
 The available browser cannot reach the workspace's loopback preview (observed
 ERR_CONNECTION_REFUSED). Proposed next step: transport a fixed archive capture

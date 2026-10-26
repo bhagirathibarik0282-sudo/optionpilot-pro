@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import pg from 'pg';
 import {buildPr799BrowserCapture,PR799_CAPTURE_EVIDENCE_SHA} from '../pr799-browser-capture.js';
 
 // Guard-test fixture using the already documented prices. Not an actual DB capture.
@@ -61,4 +62,14 @@ test('Recorder transport retains the normalized previous-session reference field
  assert.equal(capture.state.current.NIFTY.market[0].pdh,23200);
  assert.equal(capture.state.current.NIFTY.market[0].pdl,22900);
  assert.equal(capture.state.current.NIFTY.market[0].spot_prev_close,23100);
+});
+test('actual pg DATE parser output is admitted without converting expiry to a locale display string',()=>{
+ const {pair,evidence}=fixture();
+ const parseDate=pg.types.getTypeParser(1082,'text');
+ for(const row of pair[0].options){row.expiry=parseDate('2026-10-19') as any;row.minute_bucket=new Date(row.minute_bucket) as any;}
+ for(const row of pair[0].market)row.minute_bucket=new Date(row.minute_bucket) as any;
+ const capture=buildPr799BrowserCapture(pair,evidence,'2026-10-26T00:00:00Z');
+ const transported=JSON.parse(JSON.stringify(capture));
+ assert.equal(transported.state.current.NIFTY.options.length,3);
+ assert(transported.state.current.NIFTY.options.every((q:any)=>q.expiry.slice(0,10)==='2026-10-19'));
 });

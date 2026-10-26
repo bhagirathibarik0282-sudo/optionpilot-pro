@@ -39,12 +39,13 @@ try {
    assert.equal(await page.locator('#recorded-replay').evaluate((n:any)=>n.open),true);
    await page.locator('#op-research-settings').click({timeout:10000});
    assert.equal(await page.locator('#mb-settings').evaluate((n:any)=>n.open),true);
-   const chapter=page.locator('#op-command-index');
-   if(!(await chapter.evaluate((n:any)=>n.open)))await page.locator('#op-command-index > summary').click();
+   // The numbered chapter panel is hidden in compact mode: exercise the
+   // visible six-destination chapter selector instead of forcing hidden clicks.
    for(let n=0;n<6;n++){
-    await page.locator('#op-command-chapters [data-op-group="'+n+'"]').click({timeout:10000});
+    await page.locator('#mb-chapter').selectOption(String(n),{timeout:10000});
+    assert.equal(await page.locator('#mb-chapter').inputValue(),String(n));
    }
-   await page.locator('#op-command-chapters [data-op-group="0"]').click();
+   await page.locator('#mb-chapter').selectOption('0',{timeout:10000});
    await page.screenshot({path:'pr799-browser-smoke-artifacts/'+label+'-absence-only.png',fullPage:true,timeout:15000});
    const dimensions=await page.evaluate(()=>({viewport:innerWidth,root:document.documentElement.scrollWidth}));
    assert(dimensions.root<=dimensions.viewport+5,JSON.stringify(dimensions));

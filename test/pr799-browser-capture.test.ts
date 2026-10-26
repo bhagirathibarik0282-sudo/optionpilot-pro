@@ -46,4 +46,19 @@ test('manual entry point without configuration exits without payload or listener
  const run=spawnSync(process.execPath,['--import','tsx','scripts/pr799-browser-capture.ts'],{env,encoding:'utf8',timeout:10000});
  assert.equal(run.status,1);assert.equal(run.stdout,'');
  assert.match(run.stderr,/PR799_CAPTURE_FAILED_NO_PAYLOAD/);
+ assert.match(run.stderr,/"stage":"CONFIGURATION"/);
+});
+test('missing checkpoint nulls are preserved instead of crashing after a successful archive read',()=>{
+ const {pair,evidence}=fixture();
+ evidence.beforeAndAt.unshift(null as any);evidence.outcomes.push(null as any);
+ const capture=buildPr799BrowserCapture(pair,evidence,'2026-10-26T00:00:00Z');
+ assert.equal(capture.evidence.beforeAndAt[0],null);assert.equal(capture.evidence.outcomes.at(-1),null);
+});
+test('Recorder transport retains the normalized previous-session reference field names',()=>{
+ const {pair,evidence}=fixture();
+ Object.assign(pair[0].market[0],{pdh:23200,pdl:22900,spot_prev_close:23100});
+ const capture=buildPr799BrowserCapture(pair,evidence,'2026-10-26T00:00:00Z');
+ assert.equal(capture.state.current.NIFTY.market[0].pdh,23200);
+ assert.equal(capture.state.current.NIFTY.market[0].pdl,22900);
+ assert.equal(capture.state.current.NIFTY.market[0].spot_prev_close,23100);
 });

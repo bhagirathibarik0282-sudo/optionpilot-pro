@@ -7,6 +7,25 @@ const symbol='NIFTY',expiry='2026-10-13',tradeDate='2026-10-08',recordedDates=['
 const at=(min:number,day=tradeDate)=>new Date(Date.parse(day+'T03:45:00Z')+min*60000).toISOString();
 function fixture(){const market=[0,3,6,9,12,15,18].map(min=>({symbol,minute_bucket:at(min),truth_verdict:'TRUE',spot_ltp:22000+min,spot_high:22050,spot_low:21950,pdh:22015,pdl:21980,future_ltp:22010+min,india_vix:15+min/100}));const options=market.flatMap(m=>['CE','PE'].map(type=>({symbol,expiry,expiry_bucket:'CURRENT',strike:22000,option_type:type,truth_verdict:'TRUE',minute_bucket:m.minute_bucket,ltp:type==='CE'?100+(m.spot_ltp-22000):100-(m.spot_ltp-22000),iv:18,oi:1000+(m.spot_ltp-22000)*10,pdh:110,pdl:90,day_high:125,day_low:75})));const chain=market.map(m=>({symbol,expiry,minute_bucket:m.minute_bucket,truth_verdict:'TRUE',full_chain_oi_pcr:1.1,full_pcr_source:'Exact archived full-chain source',call_wall_strike:22100,call_wall_oi:1000,put_wall_strike:21900,put_wall_oi:1200}));return {market,options,chain};}
 const run=(current=fixture(),extra:any={})=>book({current,symbol,tradeDate,recordedDates,window:'3m',...extra});
+test('Research tables retain separate recorded identities and missing evidence without inventing PCR or futures levels',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),script=html.match(/<script>([\s\S]*?)<\/script>/)![1];
+ const nodes=new Map<string,any>();for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};
+ vm.createContext(ctx);vm.runInContext(script,ctx);
+ const current=fixture();current.chain.forEach(r=>{r.full_chain_oi_pcr=9.8765;r.full_pcr_source='Unverified source';});
+ const state={date:tradeDate,recordedDates,current:{NIFTY:current},history:{},baseline:{},health:{},stocks:{},sectors:null,cash:null};
+ let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{requests++;}};
+ vm.runInContext('installMarketBook(api)',ctx);
+ const output=nodes.get('mb-page').innerHTML;
+ assert.equal((output.match(/class="mb-research-section"/g)||[]).length,3);
+ for(const label of ['Spot &amp; Futures · recorded levels','PCR &amp; OI walls · recorded context','Premiums · exact recorded contracts','NIFTY Spot','NIFTY Futures','SENSEX Spot','BANKNIFTY Futures','22000 CE','22000 PE',expiry,'Window endpoints · IST'])assert(output.includes(label),label);
+ const pcr=output.match(/aria-label="PCR &amp; OI walls · recorded context">([\s\S]*?)<\/section>/)![1];
+ assert(!pcr.includes('9.8765'));assert(pcr.includes('Unavailable'));assert(pcr.includes('Unverified source'));
+ const future=output.match(/<tr><td[^>]*>NIFTY Futures<\/td>([\s\S]*?)<\/tr>/)![1];
+ for(const label of ['PDH','PDC','PDL','First 15m H / L'])assert(future.includes('data-op-label="'+label+'">Unavailable'));
+ assert(output.includes('first 1 of 1 available recorded expiries'));
+ assert(!output.includes('NaN'));assert(!output.includes('undefined'));assert.equal(requests,0);
+});
 test('monthly premium board uses every recorded month expiry and preserves exact missing contracts',()=>{
  const c=fixture();const base=[...c.options];for(const expiry of ['2026-10-14','2026-10-15','2026-10-19','2026-10-27','2026-11-24'])c.options.push(...base.map(r=>({...r,expiry})));
  const b=run(c,{boardMonth:'2026-10',boardStrike:22000}).monthlyPremiumBoard;assert.equal(b.expiries.length,5);assert.equal(b.rows.length,10);assert(b.rows.every(r=>r.premium.expiry.startsWith('2026-10')));

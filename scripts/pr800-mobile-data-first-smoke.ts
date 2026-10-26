@@ -42,6 +42,11 @@ try{
    assert.equal(await levels?.evaluate((el:any)=>el===document.getElementById('os-futures')),true,'detail must preserve the same source DOM node');
    await page.locator('#os-screen-close').click();
    assert.equal(await page.locator('#os-dashboard #os-futures').count(),1,'closing restores the original source panel');
+   await page.locator('[data-screen-open="os-walls"]').click();
+   assert.equal(await page.locator('#os-screen-detail-body>#os-pcr-strip').count(),1,'PCR detail must preserve primary recorded/live PCR evidence');
+   assert.equal(await page.locator('#os-screen-detail-body>#os-walls').count(),1);
+   await page.locator('#os-screen-close').click();
+   assert.equal(await page.locator('#os-dashboard #os-pcr-strip').count(),1);
    await page.locator('#op-research-open-data').click();
    assert.equal(await page.locator('#os-screen-detail-body>#mb-tools').count(),1);
    assert.equal(await page.locator('#recorded-replay').evaluate((el:any)=>el.open),true);

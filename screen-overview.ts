@@ -104,12 +104,14 @@ export function installScreenOverview(){
  let mode='overview',active:any=null,frame=0;
  const dialog=$('os-screen-detail'),slot=$('os-screen-detail-body');
  const close=()=>{if(dialog.open)dialog.close();restore();};
- const restore=()=>{if(!active)return;const a=active;active=null;if(a.next?.parentNode===a.parent)a.parent.insertBefore(a.node,a.next);else a.parent.appendChild(a.node);if(a.open!==undefined)a.node.open=a.open;if(a.hidden!==undefined)a.node.hidden=a.hidden;a.trigger?.focus?.();refresh();};
+ const restore=()=>{if(!active)return;const a=active;active=null;for(const item of a.items){if(item.next?.parentNode===item.parent)item.parent.insertBefore(item.node,item.next);else item.parent.appendChild(item.node);if(item.open!==undefined)item.node.open=item.open;if(item.hidden!==undefined)item.node.hidden=item.hidden;}a.trigger?.focus?.();refresh();};
  const open=(id:string,trigger?:any,inner?:string)=>{
   const node=$(id);if(!node||node===dialog||node===slot)return;
   if(active){if(active.node===node){if(inner&&$(inner))$(inner).open=true;return;}close();}
-  active={node,parent:node.parentNode,next:node.nextSibling,open:node.tagName==='DETAILS'?node.open:undefined,hidden:node.hidden,trigger:trigger||document.activeElement};
-  slot.appendChild(node);node.hidden=false;if(node.tagName==='DETAILS')node.open=true;if(inner&&$(inner))$(inner).open=true;
+  const related=id==='os-futures'?['os-market-radar']:id==='os-walls'?['os-pcr-strip']:[];
+  const targets=related.map($).filter(Boolean).concat(node);
+  active={node,items:targets.map((el:any)=>({node:el,parent:el.parentNode,next:el.nextSibling,open:el.tagName==='DETAILS'?el.open:undefined,hidden:el.hidden})),trigger:trigger||document.activeElement};
+  for(const el of targets){slot.appendChild(el);el.hidden=false;if(el.tagName==='DETAILS')el.open=true;}if(inner&&$(inner))$(inner).open=true;
   $('os-screen-detail-title').textContent=node.getAttribute('aria-label')||text(node.querySelector?.('summary,h3'))||'Market evidence';
   dialog.showModal();
  };
@@ -119,8 +121,12 @@ export function installScreenOverview(){
   const selected=root.querySelector('.os-market[aria-pressed="true"]');
   $('os-screen-market').textContent=text(selected?.querySelector('.os-market-head'))+' · '+(text(selected?.querySelector('.os-price'))||'—');
   const source=text($('os-reading-status'))||'Verified data unavailable';$('os-screen-source').textContent=source;$('os-screen-source').title=source;
-  const levels=lines('os-future-response').slice(0,2);put('os-screen-levels',levels.length?levels.map(r=>row(r[0],r[1])+(r[2]&&r[2]!=='—'?note('Day '+r[2]):'')).join(''):note('Verified Spot / futures unavailable'));
-  const pcr=lines('os-wall-ladder').slice(0,3);put('os-screen-pcr',pcr.length?pcr.map(r=>row(r[0].match(/^(NIFTY|SENSEX|BANKNIFTY)/)?.[1]||r[0],r[1])).join(''):note('Verified Full PCR / OI unavailable'));
+  const levels=lines('os-future-response').slice(0,2);
+  const recorded=root.dataset.osSource==='RECORDED';
+  const savedFuture=Array.from(selected?.querySelectorAll('.os-subline')||[]).map(text).map(v=>v.match(/Futures\s+(.+)$/)?.[1]).find(Boolean);
+  put('os-screen-levels',recorded?row('Spot · recorded',text(selected?.querySelector('.os-price')))+row('Futures · saved',savedFuture||'—')+note('Saved futures expiry unavailable'):levels.length?levels.map(r=>row(r[0],r[1])+(r[2]&&r[2]!=='—'?note('Day '+r[2]):'')).join(''):note('Verified Spot / futures unavailable'));
+  const pcrCards=Array.from($('os-pcr-strip')?.querySelectorAll('.os-pcr')||[]) as any[];
+  put('os-screen-pcr',pcrCards.length?pcrCards.slice(0,3).map(card=>row(text(card.querySelector(':scope>strong')),text(card.querySelector(':scope>b')))).join(''):note('Verified Full PCR / OI unavailable'));
   const premiums=lines('os-premium-table');
   put('os-screen-premium',premiums.length?premiums.slice(0,8).map(r=>row(r[0]+' '+r[1]+' · '+r[2],r[3])).join(''):note('No verified exact-contract premiums. Open Data to select a recorded session.'));
   for(const [target,id] of [['stocks','os-stock-ranks'],['sectors','os-sector-ranks']]){
@@ -133,7 +139,7 @@ export function installScreenOverview(){
  };
  const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;refresh();});};
  const observer=new MutationObserver(schedule);
- for(const id of ['os-market-radar','os-future-response','os-wall-ladder','os-premium-table','os-stock-ranks','os-sector-ranks','os-events','os-memory','os-reading-status','os-rag-context'])if($(id))observer.observe($(id),{childList:true,subtree:true,characterData:true});
+ for(const id of ['os-market-radar','os-pcr-strip','os-future-response','os-wall-ladder','os-premium-table','os-stock-ranks','os-sector-ranks','os-events','os-memory','os-reading-status','os-rag-context'])if($(id))observer.observe($(id),{childList:true,subtree:true,characterData:true});
  observer.observe(book,{attributes:true,attributeFilter:['data-main-chapter','data-chapter']});
  observer.observe(root,{attributes:true,attributeFilter:['data-os-source']});
  board.onclick=(e:any)=>{const button=e.target.closest?.('[data-screen-open]');if(button)open(button.dataset.screenOpen,button);};

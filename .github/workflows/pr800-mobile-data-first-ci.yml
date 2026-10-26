@@ -1,0 +1,46 @@
+name: PR800 Mobile Data First UI CI
+on:
+  pull_request:
+    paths:
+      - 'one-shot-live-card.ts'
+      - 'dashboard-workspace-view.ts'
+      - 'test/mobile-data-first.test.ts'
+      - 'scripts/pr800-mobile-data-first-smoke.ts'
+      - '.github/workflows/pr800-mobile-data-first-ci.yml'
+permissions:
+  contents: read
+jobs:
+  mobile-data-first:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ''
+      KITE_API_KEY: ''
+      KITE_API_SECRET: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install existing dependencies and isolated Chromium
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --no-save --ignore-scripts --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Validate source-safe order and mobile styles
+        run: NODE_ENV=test node --import tsx --test test/mobile-data-first.test.ts test/one-stop-card.test.ts
+      - name: Test 360px and 390px mobile and desktop browser layout
+        run: node --import tsx scripts/pr800-mobile-data-first-smoke.ts
+      - name: Verify no whitespace mistakes
+        run: git diff --check origin/main...HEAD
+      - name: Keep offline no-data browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr800-mobile-data-first-no-data
+          path: pr800-mobile-ui-artifacts/
+          retention-days: 2
+          if-no-files-found: ignore

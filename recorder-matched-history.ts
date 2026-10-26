@@ -65,7 +65,8 @@ export async function loadRecorderMatchedHistory(input:Input,deps:Dependencies={
   audit.selectedSessionDates=dates;
   const current=await read(request(targetRequest.date,false));
   const target=buildRagPremiumSnapshot(targetRequest,current,noPrior);
-  if(!target.ok){audit.targetAdmission=inspectRagSnapshotAdmission(targetRequest,current);return fail('TARGET_RECORDER_SNAPSHOT_UNAVAILABLE');}
+  audit.targetAdmission=inspectRagSnapshotAdmission(targetRequest,current);
+  if(!target.ok)return fail('TARGET_RECORDER_SNAPSHOT_UNAVAILABLE');
   // Validate target rule/cutoff/features before reading any historical sessions.
   const preflight=computeRecorderMatchedOutcome(target,[],input.rule,{source:'EXISTING_POSTGRES_H1_REPLAY',sessionDates:dates,
    complete:true,truncated:false,failedSessionDates:[]});

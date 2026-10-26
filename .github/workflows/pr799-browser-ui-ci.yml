@@ -1,0 +1,40 @@
+name: PR799 Isolated Browser UI Smoke
+on:
+  pull_request:
+    paths:
+      - 'scripts/pr799-browser-ui-smoke.ts'
+      - 'business-dashboard-v1-view.ts'
+      - 'market-book-view.ts'
+      - 'dashboard-workspace-view.ts'
+      - '.github/workflows/pr799-browser-ui-ci.yml'
+permissions:
+  contents: read
+jobs:
+  chromium-desktop-mobile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ''
+      KITE_API_KEY: ''
+      KITE_API_SECRET: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install repository dependencies and CI-only browser package
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          npm install --no-save --ignore-scripts --no-audit --no-fund playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Verify desktop and mobile navigation with real Chromium
+        run: node --import tsx scripts/pr799-browser-ui-smoke.ts
+      - name: Retain isolated absence-only UI screenshots for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr799-isolated-ui-desktop-mobile
+          path: pr799-browser-smoke-artifacts/
+          if-no-files-found: ignore
+          retention-days: 3

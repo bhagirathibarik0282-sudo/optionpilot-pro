@@ -17,13 +17,20 @@ test('six reference-image destinations retain live/recorded routing and ignore o
   localStorage:{getItem(){return '[0]';},setItem(){}},deriveAtmFibHold,deriveLiveThreeIndexPcr,
   installPremiumWorkspace(){return {openLadder(v:any){calls.push(v);},setVisible(){},refreshRecorded(){}};}
  });
- const controller=installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>page,turn(i:number){page=i;},getState:()=>({})});
+ let sessionDate='2026-10-19';
+ const controller=installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>page,turn(i:number){page=i;},getState:()=>({date:sessionDate})});
  controller.render();
+ assert.equal(el('op-research-controls').hidden,false);
+ assert.match(el('op-research-session').textContent,/2026-10-19.*recorded data/);
+ el('op-research-open-data').onclick();assert.equal(el('mb-tools').open,true);assert.equal(el('recorded-replay').open,true);assert.equal(page,0);
+ el('op-research-settings').onclick();assert.equal(el('mb-settings').open,true);
+ sessionDate='2026-10-16';controller.render();assert.match(el('op-research-session').textContent,/2026-10-16/);
  assert.equal((el('op-command-chapters').innerHTML.match(/data-op-group=/g)||[]).length,6);
  assert(el('op-command-chapters').innerHTML.includes('Replay'));
  assert.equal((el('mb-chapter').innerHTML.match(/<option/g)||[]).length,6);
  el('op-command-chapters').onclick({target:{closest:()=>({dataset:{opGroup:'2'}})}});controller.render();
  assert.equal(page,4);assert(el('op-view-links').innerHTML.includes('data-op-view="1"'));
+ assert.equal(el('op-research-controls').hidden,true);
  el('op-command-chapters').onclick({target:{closest:()=>({dataset:{opGroup:'3'}})}});controller.render();
  assert.equal(page,5);assert(el('op-view-links').innerHTML.includes('data-op-view="9"'));
  el('op-command-chapters').onclick({target:{closest:()=>({dataset:{opGroup:'4'}})}});controller.render();
@@ -59,7 +66,8 @@ test('one-stop card is a single top-level workspace panel, not hidden inside fee
  const head=html.indexOf('id="op-workspace-top"'),one=html.indexOf('id="op-one-stop"');
  const tools=html.indexOf('id="mb-tools"');
  assert(head>=0&&one>head&&tools>one);
- assert.match(WORKSPACE_NAV_HTML, /<nav id="op-view-links"[^>]*><\/nav><section id="op-one-stop"/);
+ assert.match(WORKSPACE_NAV_HTML, /<nav id="op-view-links"[^>]*><\/nav><section id="op-research-controls"/);
+ assert.equal((html.match(/id="op-research-open-data"/g)||[]).length,1);
  assert.match(WORKSPACE_CSS, /\.op-one-scroll\{overflow-x:auto/);
 });
 test('one-stop exposes existing destinations including explicit recorded access and never requests or executes a trade',()=>{

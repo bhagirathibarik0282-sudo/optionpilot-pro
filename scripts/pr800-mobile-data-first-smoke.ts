@@ -35,6 +35,8 @@ try{
    assert(screen.scroll<=screen.height+2,name+' Fit page must not require document scrolling: '+JSON.stringify(screen));
    assert(screen.scrollWidth<=screen.width+2,name+' no horizontal document scroll');
    assert(screen.page.left>=screen.viewport.left-1&&screen.page.right<=screen.viewport.right+1&&screen.page.top>=screen.viewport.top-1&&screen.page.bottom<=screen.viewport.bottom+1,name+' the complete reference page must fit: '+JSON.stringify(screen));
+   const clippedHeaders=await page.evaluate(()=>Array.from(document.querySelectorAll('#rd-page table')).filter(table=>{const last=table.querySelector('thead th:last-child');return last&&last.getBoundingClientRect().right>table.closest('.rd-section')!.getBoundingClientRect().right+1;}).length);
+   assert.equal(clippedHeaders,0,name+' full table columns must remain visible');
    const premiumHeads=await page.locator('#rd-premium-table th').allTextContents();
    for(const h of ['Type','Strike','LTP','Chg','%','OI','OI Δ','Vol','Spread','IV','Delta','PDH','PDC','PDL','Trend','Note'])assert(premiumHeads.includes(h),'full premium column '+h);
    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-reference-data-page.png',fullPage:false,timeout:15000});

@@ -1,0 +1,113 @@
+{
+  "dateIst": "2026-10-26",
+  "deploymentId": "67cbcc06-4e30-47c7-8c69-afa5b49b095c",
+  "codeCommit": "ed4067e1ca1800ad2ece855a13f6969692cfac5a",
+  "completedAt": "2026-10-26T05:17:52.442607631Z",
+  "deploymentStatus": "SUCCESS",
+  "focusedWindowOnly": true,
+  "exactCause": {
+    "reason": "INCOMPLETE_SOURCE_MARKERS",
+    "date": "2026-10-23",
+    "timeIst": "10:29",
+    "missingMinute": "2026-10-23T04:59:00.000Z",
+    "expectedMinutes": 19,
+    "observedMinutes": 18,
+    "trueMarkerMinutes": 18,
+    "normalizedRowsAtMissingMinute": [
+      {
+        "minuteBucket": "2026-10-23T04:59:00.000Z",
+        "marketRows": 0,
+        "optionRows": 0,
+        "chainRows": 0
+      }
+    ]
+  },
+  "result": {
+    "scope": {
+      "ok": false,
+      "reason": "INCOMPLETE_SOURCE_MARKERS",
+      "request": {
+        "symbol": "NIFTY",
+        "tradeDate": "2026-10-23",
+        "fromTime": "10:21",
+        "toTime": "10:39",
+        "scope": "FULL"
+      },
+      "complete": false,
+      "cadenceMinutes": 1,
+      "expectedBuckets": 19,
+      "observedMarkerBuckets": 18,
+      "trueMarkerBuckets": 18,
+      "missingCount": 1,
+      "missingBuckets": [
+        "2026-10-23T04:59:00.000Z"
+      ],
+      "missingListTruncated": false,
+      "firstObserved": "2026-10-23T04:51:00.000Z",
+      "lastObserved": "2026-10-23T05:09:00.000Z",
+      "rawGapPresence": [
+        {
+          "minuteBucket": "2026-10-23T04:59:00.000Z",
+          "marketRows": 0,
+          "optionRows": 0,
+          "chainRows": 0
+        }
+      ],
+      "rawGapPresenceIsAdmission": false,
+      "rows": {
+        "market": 18,
+        "options": 2266,
+        "chain": 72,
+        "canonical": 18
+      }
+    },
+    "inventory": {
+      "expectedExpiry": "2026-10-24",
+      "side": "PE",
+      "ok": true,
+      "reason": "ADMITTED",
+      "contractCount": 0
+    },
+    "queries": 6,
+    "readOnly": true,
+    "writesPerformed": false,
+    "poolClosed": true,
+    "ratePublished": false
+  },
+  "changes": {
+    "sharedScopeInspector": true,
+    "perReplayDiagnosticsRetained": true,
+    "failedSessionReasonRetained": true,
+    "sourceGuardsRelaxed": false,
+    "rawRowsPromotedToTruth": false
+  },
+  "safeDisposition": {
+    "historyStillIncomplete": true,
+    "dataGapRepaired": false,
+    "percentageUnavailable": true,
+    "dateNotDropped": true,
+    "noInterpolation": true,
+    "noZeroFilling": true,
+    "noAutomaticRetry": true,
+    "fiveSessionSupportEstablished": false
+  },
+  "limitations": [
+    "This proves the missing truth marker and missing normalized market/option/chain rows in the inspected minute, not a broker outage or loss of the entire day.",
+    "No verified alternative source for reconstructing that minute was inspected; no historical rows were overwritten.",
+    "The inventory's ok flag validates enumeration, not existence of a same-DTE matching contract; its contractCount is zero."
+  ],
+  "validation": {
+    "localTestsPassed": 107
+  },
+  "cleanup": {
+    "poolClosed": true,
+    "noListener": true,
+    "startCommandRestored": "node -e 'console.log(\"PR799_ACCEPTANCE_IDLE_NO_DATABASE_QUERY\")'",
+    "restartPolicy": "NEVER",
+    "stagedChanges": 0,
+    "newIdleStartupMarkerClaimed": false,
+    "mainDeployment": "1450e00b-a707-4dd1-a7ea-a49729943576",
+    "mainStatus": "SUCCESS",
+    "mainUnchanged": true
+  }
+}

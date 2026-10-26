@@ -18,3 +18,9 @@ test('manual matching validation without its flag exits before database access',
  assert.equal(result.status,1);assert(result.stderr.includes('PR799_MATCH_HISTORY_FAILED_NO_RATE'));
  assert(!result.stdout.includes('PR799_MATCH_HISTORY_RESULT'));
 });
+test('focused history-window diagnostic also requires its own explicit flag before any read',()=>{
+ const env={...process.env};delete env.PR799_HISTORY_WINDOW_DIAGNOSTIC;delete env.DATABASE_URL;
+ const result=spawnSync(process.execPath,['--import','tsx','scripts/pr799-history-window-diagnostic.ts'],{env,encoding:'utf8',timeout:10000});
+ assert.equal(result.status,1);assert(result.stderr.includes('PR799_HISTORY_WINDOW_FAILED'));
+ assert(!result.stdout.includes('PR799_HISTORY_WINDOW_RESULT'));
+});

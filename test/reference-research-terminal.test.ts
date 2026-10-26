@@ -5,7 +5,7 @@ import {WORKSPACE_NAV_HTML} from '../dashboard-workspace-view.js';
 
 test('reference terminal reuses real source-driven views in seven numbered sections',()=>{
  const html=renderOneShotCard('<details id="op-atm-weeklies"></details>');
- const ordered=['id="os-radar"','id="os-market-radar"','id="os-pcr-strip"','id="os-rag-context"','id="os-index"','id="os-premium"','id="op-one-actions"','id="os-futures"','id="os-walls"','id="os-stocks"','id="os-sectors"','id="os-notables"','id="os-memory"'];
+ const ordered=['id="os-radar"','id="os-market-radar"','id="os-pcr-strip"','id="os-rag-context"','id="os-index"','id="os-futures"','id="os-walls"','id="os-premium"','id="op-one-actions"','id="os-stocks"','id="os-sectors"','id="os-notables"','id="os-memory"'];
  const indices=ordered.map(id=>html.indexOf(id));
  assert(indices.every(x=>x>=0),JSON.stringify(indices));
  assert(indices.every((x,i)=>i===0||x>indices[i-1]),'source-backed sections retain deliberate reading order');
@@ -20,22 +20,15 @@ test('reference terminal reuses real source-driven views in seven numbered secti
  assert(WORKSPACE_NAV_HTML.includes('id="op-research-open-data"'));
 });
 
-test('four prominent UI hubs navigate only already available source-backed panels',()=>{
+test('reference layout prioritizes seven sections and functional three-index controls',()=>{
  const html=renderOneShotCard('<details id="op-atm-weeklies"></details>');
- const deckStart=html.indexOf('<nav id="os-command-deck"');
- const deck=deckStart<0?'':html.slice(deckStart,html.indexOf('</nav>',deckStart)+6);
- assert(deck,'four-hub deck must render before data');
- const targets=['os-radar','os-premium','os-pulse','os-memory'];
- assert.equal((deck.match(/data-os-hub=/g)||[]).length,4);
- for(const id of targets)assert(deck.includes('href="#'+id+'"'),'target '+id);
- assert(html.indexOf('id="os-command-deck"')<html.indexOf('id="os-market-radar"'));
- assert(html.includes('id="os-detailed-views"'),'all ten original views remain accessible');
- assert.equal((html.match(/id="os-navigation"/g)||[]).length,1);
- assert(ONE_SHOT_CSS.includes('#op-one-stop .os-command-deck{display:grid'));
- assert(ONE_SHOT_CSS.includes('@media(max-width:760px)'));
+ assert(!html.includes('id="os-command-deck"'),'superseded four-hub cards must not displace the reference tables');
+ for(const id of ['os-futures','os-walls','os-premium','os-stocks','os-sectors','os-notables','os-memory'])assert(html.includes('id="'+id+'"'));
+ assert.equal((html.match(/data-os-select=/g)||[]).length,3);
+ assert(html.includes('id="os-premium-table"'));
+ assert(html.includes('id="os-detailed-views"'));
  const handler=installOneShotLiveCard.toString();
- assert(handler.includes("target.scrollIntoView"),'hub clicks must navigate');
- assert(handler.includes("target.open=true"),'hidden details become visible');
+ assert(handler.includes('os-reference-indices'));
  assert(!handler.includes('fetch('),'navigation must not cause provider requests');
 });
 

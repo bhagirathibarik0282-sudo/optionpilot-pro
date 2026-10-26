@@ -14,18 +14,14 @@ export function renderOneShotCard(atm:string){
 <article><h4>06 · ନିଜ ଭାବରେ ଦେଖନ୍ତୁ</h4><p>Index tap କରନ୍ତୁ → Day % ବା Selected window % ବାଛନ୍ତୁ → detailed ladderରେ CE / PE / BOTH। Numbered section tap କରି ଯାଆନ୍ତୁ; Show / hideରେ section ବନ୍ଦ କରନ୍ତୁ।</p></article>
 </div><p class="os-caption">Reading guide · 21 October 2026 · ଉପରେ Live dashboard → tap କରି readingsକୁ ଫେରନ୍ତୁ।</p></section>
 <div id="os-dashboard">
-<nav id="os-command-deck" class="os-command-deck" aria-label="Four main data views">
-<a href="#os-radar" data-os-hub="MARKET" aria-current="page"><span class="os-hub-num">01</span><span><strong>MARKET</strong><small>Spot · Futures · PCR</small></span></a>
-<a href="#os-premium" data-os-hub="OPTIONS"><span class="os-hub-num">02</span><span><strong>OPTIONS</strong><small>4 DTE · CE / PE</small></span></a>
-<a href="#os-pulse" data-os-hub="FLOW"><span class="os-hub-num">03</span><span><strong>FLOW</strong><small>Chart · OI walls</small></span></a>
-<a href="#os-memory" data-os-hub="MEMORY"><span class="os-hub-num">04</span><span><strong>MEMORY</strong><small>Replay · RAG</small></span></a>
-</nav>
-<nav id="os-evidence-shortcuts" class="os-evidence-shortcuts" aria-label="Verified evidence sections"><span>RESEARCH PARAMETERS · jump to evidence</span><a href="#os-radar">PDH / PDL</a><a href="#os-pulse">Spot × PCR</a><a href="#os-walls">OI walls</a><a href="#os-premium">Premium + spread</a><a href="#os-futures">Spot ↔ Future</a><a href="#os-notables">Events</a></nav>
-<div class="os-terminal-head"><div class="os-terminal-evidence"><div class="os-section-head" id="os-radar"><h3>01 · Spot & Futures · three-index levels</h3><small>Actual Kite/Recorder values · BANKNIFTY monthly observation</small></div><div id="os-market-radar" class="os-markets" aria-live="off"></div>
-<section class="os-pcr-overview" aria-label="All three index PCR"><div class="os-section-head"><h3>02 · Full-chain PCR & OI · all three indices</h3><small>PE OI ÷ CE OI · arrows show ratio change</small></div><div id="os-pcr-strip" class="os-pcr-strip"></div></section>
+
+<nav id="os-evidence-shortcuts" class="os-evidence-shortcuts" aria-label="Verified evidence sections"><span>Research Parameters · open evidence</span><a href="#os-radar">PDH / PDL</a><a href="#os-pulse">Spot × PCR</a><a href="#os-walls">OI walls</a><a href="#os-premium">Premium + spread</a><a href="#os-futures">Spot ↔ Future</a><a href="#os-notables">Events</a></nav>
+<nav id="os-reference-indices" class="os-reference-indices" aria-label="Research index">${['NIFTY','SENSEX','BANKNIFTY'].map(x=>`<button type="button" data-os-select="${x}" aria-pressed="${x==='NIFTY'}">${x}</button>`).join('')}</nav>
+<div class="os-terminal-head"><div class="os-terminal-evidence"><div class="os-section-head" id="os-radar"><h3>Market overview · selected index</h3><small>Actual Kite/Recorder values · BANKNIFTY monthly observation</small></div><div id="os-market-radar" class="os-markets" aria-live="off"></div>
+<section class="os-pcr-overview" aria-label="All three index PCR"><div class="os-section-head"><h3>Full PCR · three indices</h3><small>PE OI ÷ CE OI · arrows show ratio change</small></div><div id="os-pcr-strip" class="os-pcr-strip"></div></section>
 </div><aside id="os-rag-context" class="os-rag-context" aria-label="Recorder RAG context">
  <strong>Today's RAG Context <small>Verified Recorder only</small></strong>
- <div class="os-rag-line"><span>Historical match</span><b>Open a saved event to compare</b></div>
+ <div class="os-rag-line"><span>Market Bias</span><b>Verified match unavailable</b></div><div class="os-rag-line"><span>Sector Bias</span><b>Verified match unavailable</b></div><div class="os-rag-line"><span>Heavyweights</span><b>Verified match unavailable</b></div><div class="os-rag-line"><span>FII/DII</span><b>Open dated evidence</b></div><div class="os-rag-line"><span>Historical match</span><b>Open a saved event to compare</b></div>
  <div class="os-rag-line"><span>Probability</span><b>Unavailable · verified matches required</b></div>
  <button type="button" id="os-rag-open">Open Recorder RAG ↗</button>
  <small>No similarity percentage, market bias, sector bias or FII/DII interpretation is generated without matching recorded evidence.</small>
@@ -34,16 +30,16 @@ export function renderOneShotCard(atm:string){
 <div class="os-workspace-controls" aria-label="Four-expiry workspace controls"><label>Index<select id="os-index">${['NIFTY','SENSEX','BANKNIFTY'].map(x=>`<option>${x}</option>`).join('')}</select></label><label>Readings<select id="os-source"><option value="AUTO">Auto · recorded when closed</option><option value="LIVE">Live only</option><option value="RECORDED">Recorded session</option></select></label><div class="os-controls" id="os-sides" role="group" aria-label="Premium sides"><button data-os-side="BOTH" aria-pressed="true">CE + PE</button><button data-os-side="CE" aria-pressed="false">ALL CE</button><button data-os-side="PE" aria-pressed="false">ALL PE</button></div></div>
 <div id="os-reading-status" class="os-reading-status" role="status"></div>
 <details class="os-source"><summary>Recorded date / full inventory</summary><div class="os-workspace-controls"><label>Session<input type="date" id="os-recorded-date"></label><button type="button" id="os-load-recorded">Load full session</button><span id="os-load-status" role="status"></span></div></details>
-<div class="os-main-grid os-ladder-grid"><article class="os-panel os-premium" id="os-premium"><div class="os-section-head"><h3>03 · Premium Ladder · Multi-DTE</h3><span class="os-badge">FOUR EXPIRY · V2</span><small>Exact dates · current ATM CE / PE</small></div><div class="os-section-head"><strong>Multi-DTE awareness</strong><small id="os-dte-context"></small></div><p class="os-ladder-key"><span class="os-ce-label">CE · Call</span> <span class="os-pe-label">PE · Put</span> Expiry → DTE → ATM strike → ₹ LTP → % change → time</p><div class="os-controls" id="os-dte-metric" role="group" aria-label="Multi-DTE change comparison"><button type="button" data-os-dte-metric="day" aria-pressed="true">Day %</button><button type="button" data-os-dte-metric="window" aria-pressed="false">Selected window %</button></div><div id="os-expiry-clock" class="os-expiry-clock"></div><div id="os-dte-radar" class="os-dte-grid"></div><div id="os-dte-alignment"></div>${atm}</article></div>
+<details class="os-panel" id="os-futures" open><summary>1 · Spot & Futures (Levels) <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-future-response"></div><p class="os-caption">Same-index futures and exact option contracts, matched observation endpoints. Same direction is descriptive co-movement, not proof that a premium follows a futures contract.</p></div></details>
+<details class="os-panel" id="os-walls" open><summary>2 · PCR & OI (Ladder) <small>Show / hide</small></summary><div class="os-panel-body" id="os-wall-ladder"></div></details>
+<div class="os-main-grid os-ladder-grid"><article class="os-panel os-premium" id="os-premium"><div class="os-section-head"><h3>3 · Premium Ladder (Multi-DTE)</h3><span class="os-badge">FOUR EXPIRY · V2</span><small>Exact dates · current ATM CE / PE</small></div><div class="os-section-head"><strong>Multi-DTE awareness</strong><small id="os-dte-context"></small></div><p class="os-ladder-key"><span class="os-ce-label">CE · Call</span> <span class="os-pe-label">PE · Put</span> Expiry → DTE → ATM strike → ₹ LTP → % change → time</p><div class="os-controls" id="os-dte-metric" role="group" aria-label="Multi-DTE change comparison"><button type="button" data-os-dte-metric="day" aria-pressed="true">Day %</button><button type="button" data-os-dte-metric="window" aria-pressed="false">Selected window %</button></div><div id="os-expiry-clock" class="os-expiry-clock"></div><div id="os-premium-table"></div><details class="os-expiry-detail"><summary>Expiry cards · quote times &amp; comparison evidence</summary><div id="os-dte-radar" class="os-dte-grid"></div></details><div id="os-dte-alignment"></div>${atm}</article></div>
 <div id="op-one-actions" role="group" aria-label="Open existing market tools"><button type="button" data-op-one="LIVE">Live detail</button><button type="button" data-op-one="LADDER">CE / PE ladder</button><button type="button" data-op-one="MULTIDAY">Multi-day research</button><button type="button" data-op-one="RAG">Ask RAG</button><button type="button" data-op-one="RECORDED">Open recorded ladder</button></div>
 <details id="os-detailed-views" class="os-detailed-views"><summary>More detail · 10 source-backed views</summary><nav class="os-nav" id="os-navigation" aria-label="One Shot numbered categories">${[['radar','Market radar'],['pulse','Spot × PCR'],['premium','Premium ladder'],['futures','Futures response'],['walls','OI + walls'],['stocks','Heavyweights'],['sectors','Sectors'],['vix','VIX + alignment'],['memory','Memory / replay'],['tools','Sources / tools']].map(([id,label],i)=>`<button type="button" data-os-go="${id}">${String(i+1).padStart(2,'0')} · ${label}</button>`).join('')}</nav></details>
+<div class="os-rank-grid"><details class="os-panel" id="os-stocks" open><summary>4 · Heavyweights (Tracked Quotes) <small>Show / hide</small></summary><div class="os-panel-body" id="os-stock-ranks"></div></details><details class="os-panel" id="os-sectors" open><summary>5 · Sectors (Tracked Proxies) <small>Show / hide</small></summary><div class="os-panel-body" id="os-sector-ranks"></div></details></div>
+<details class="os-panel os-terminal-events" id="os-notables" open><summary>6 · Notable Events (Recorder / RAG) <small>Open / close</small></summary><div class="os-panel-body"><div id="os-events"></div><p class="os-caption">Live events are verified observations from this browser session; saved events remain available via Recorder. No reconstructed events.</p></div></details>
+<details class="os-panel os-terminal-memory" id="os-memory" open><summary>7 · Memory & Replay (RAG) <small>Open / close</small></summary><div class="os-panel-body"><p class="os-caption">Recorded before / event / after comparisons require exact contract and source time. Open the authorized saved-session replay for historical evidence.</p><button type="button" id="os-memory-open">Open saved Recorder & RAG</button><p class="os-caption">No historical win probability is displayed without enough independent, eligible Recorder matches.</p></div></details>
 <div class="os-main-grid"><details class="os-panel os-cyan" id="os-pulse" open><summary>02 · Spot × Full PCR pulse <small>Show / hide</small></summary><div class="os-panel-body"><div class="os-controls" id="os-window" role="group" aria-label="One Shot observation window">${[1,3,5,6,15,30,60].map(n=>`<button type="button" data-os-window="${n}" aria-pressed="${n===3}">${n}m</button>`).join('')}</div><div class="os-pulse-heading" id="os-spot-context"></div><details class="os-source"><summary>✦ Chart custom</summary><div class="os-workspace-controls"><label>Plot<select id="os-chart-series"><option value="BOTH">Spot + Full PCR</option><option value="SPOT">Spot only</option><option value="PCR">Full PCR only</option></select></label><label>Chart update<select id="os-chart-cadence"><option value="0">Shared live updates</option><option value="180000" selected>3 minutes</option><option value="MANUAL">Manual</option></select></label><button type="button" id="os-chart-refresh">Update chart</button></div></details><div id="os-pulse-chart"></div><details class="os-source"><summary>Chart source</summary><p>Actual received samples, independently scaled spot and PCR axes. Missing intervals are gaps. First-15-minute H/L is shown only when verified recorded references exist; no illustrative guide.</p></details></div></details>
 <details class="os-panel os-violet" id="os-vix"><summary>08 · VIX + agreement radar <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-vix-value"></div><div id="os-agreement" class="os-agreement"></div></div></details></div>
-<details class="os-panel" id="os-futures" open><summary>01 · Futures + premium response <small>Show / hide</small></summary><div class="os-panel-body"><div id="os-future-response"></div><p class="os-caption">Same-index futures and exact option contracts, matched observation endpoints. Same direction is descriptive co-movement, not proof that a premium follows a futures contract.</p></div></details>
-<details class="os-panel" id="os-walls" open><summary>02 · PCR & OI wall ladder <small>Show / hide</small></summary><div class="os-panel-body" id="os-wall-ladder"></div></details>
-<div class="os-rank-grid"><details class="os-panel" id="os-stocks" open><summary>04 · Heavyweights · Top 5 <small>Show / hide</small></summary><div class="os-panel-body" id="os-stock-ranks"></div></details><details class="os-panel" id="os-sectors" open><summary>05 · Sectors · Top 5 <small>Show / hide</small></summary><div class="os-panel-body" id="os-sector-ranks"></div></details></div>
-<details class="os-panel os-terminal-events" id="os-notables" open><summary>06 · Notable Events · Recorded / RAG <small>Open / close</small></summary><div class="os-panel-body"><div id="os-events"></div><p class="os-caption">Live events are verified observations from this browser session; saved events remain available via Recorder. No reconstructed events.</p></div></details>
-<details class="os-panel os-terminal-memory" id="os-memory" open><summary>07 · Memory & Replay · RAG <small>Open / close</small></summary><div class="os-panel-body"><p class="os-caption">Recorded before / event / after comparisons require exact contract and source time. Open the authorized saved-session replay for historical evidence.</p><button type="button" id="os-memory-open">Open saved Recorder & RAG</button><p class="os-caption">No historical win probability is displayed without enough independent, eligible Recorder matches.</p></div></details>
 <details class="os-panel" id="os-tools"><summary>10 · Sources / tools <small>Show / hide</small></summary><div class="os-panel-body"><details id="op-command-index"><summary>All numbered chapters · Show / hide</summary><nav id="op-command-chapters" aria-label="Command card chapter shortcuts"></nav></details><details id="op-summary-panel"><summary>Three-index summary · Show / hide</summary><div class="op-one-scroll"><table aria-label="Verified latest Kite market readings"><thead><tr><th>Index / expiry</th><th>Spot</th><th>Future</th><th>CE ₹</th><th>PE ₹</th><th>Full PCR</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody id="op-one-rows"><tr><td colspan="8">Waiting for actual Kite stream · unavailable is not zero</td></tr></tbody></table></div></details><p class="os-caption">One shared stream; exact expiry and source timestamps. — means unavailable. No simulated prices, synthetic history or execution controls. Weight / index-point contribution requires a verified weight source.</p></div></details>
 </div></section>`;
 }
@@ -236,6 +232,45 @@ export const ONE_SHOT_CSS=`
 #op-one-stop .os-pcr b{font-size:22px}
 #op-one-stop .os-market .os-price{font-size:23px}
 }
+/* Reference screenshot presentation: six top tabs and seven compact evidence tables. */
+body[data-op-workspace]{background:#03080c!important}
+body[data-op-workspace] #market-book{background:#03080c;border-color:#163a4e;border-radius:8px;padding:8px;min-height:0}
+#market-book .op-logo{font-size:0}#market-book .op-logo>span{font-size:18px;text-transform:uppercase;white-space:nowrap}#market-book .op-logo b{color:#00d9f5}
+#market-book #op-chapter-links button{border:1px solid #20465c;border-radius:5px;color:#def5ff;background:#050c12;min-height:38px;font-size:11px;text-transform:uppercase;white-space:nowrap}
+#market-book #op-chapter-links button>span{color:#ffbf16;font-size:21px}
+#market-book #op-chapter-links button[aria-current=page]{background:#005bff;color:white;border-color:#318dff;box-shadow:0 0 9px #006aff66}
+#market-book #op-research-open-data{background:linear-gradient(#a600f7,#7400e9);color:white;border-color:#cb43ff;text-transform:uppercase;box-shadow:0 0 9px #a600f744}
+#market-book #op-research-controls{background:#08080f;border-color:#624578;border-radius:6px;margin-bottom:6px}
+#market-book #op-one-stop.os-card{background:#03080c;border:0;padding:0;border-radius:0;--os-cyan:#00daed;--os-green:#00ed76;--os-red:#ff3655}
+#op-one-stop .os-reference-indices{display:flex;gap:5px;justify-content:flex-end;margin:5px 0}
+#market-book #op-one-stop .os-reference-indices button{min-height:34px;padding:4px 18px;font-size:12px;border:1px solid #20546d;background:#050c12;border-radius:5px}
+#market-book #op-one-stop .os-reference-indices button[aria-pressed=true]{background:#005bff;color:white;border-color:#318dff}
+#op-one-stop .os-terminal-head{grid-template-columns:minmax(0,2.2fr) minmax(230px,1fr)}
+#op-one-stop .os-markets{grid-template-columns:minmax(0,1fr)}
+#market-book #op-one-stop .os-market[aria-pressed=false]{display:none}
+#market-book #op-one-stop .os-market{background:#050c12;border:1px solid #26536d;padding:7px 10px;border-radius:5px}
+#op-one-stop .os-market-head{font-size:21px;color:#b0e6ff}#op-one-stop .os-price{font-size:28px}
+#op-one-stop .os-levels>span{border-radius:4px;border:1px solid #4d5d62;background:#061117;padding:4px;display:flex;justify-content:space-between;gap:4px}
+#op-one-stop .os-levels>span:nth-child(1),#op-one-stop .os-levels>span:nth-child(1) b{border-color:#a92d42;color:#ff4059}
+#op-one-stop .os-levels>span:nth-child(2),#op-one-stop .os-levels>span:nth-child(2) b{border-color:#a48815;color:#ffe633}
+#op-one-stop .os-levels>span:nth-child(3),#op-one-stop .os-levels>span:nth-child(3) b{border-color:#008951;color:#00ed76}
+#op-one-stop .os-rag-context{background:#061018;border-color:#30699b;border-radius:5px}
+#op-one-stop .os-panel{background:#040d13;border-color:#20516b;border-radius:5px;margin:5px 0}
+#op-one-stop details.os-panel>summary,#market-book #op-one-stop .os-section-head h3{color:#00d7ec;font-size:15px;font-weight:750}
+#op-one-stop details.os-panel>summary:before{content:'▸';color:#0cf139;background:#064d14;border-radius:4px;padding:2px 5px}
+#op-one-stop .os-panel-body{padding:0 3px 4px}#op-one-stop .os-premium{padding:5px 3px}
+#market-book #op-one-stop .os-table{table-layout:auto;white-space:nowrap;min-width:620px;font-family:'Arial Narrow',system-ui,sans-serif}
+#market-book #op-one-stop .os-table :is(th,td){white-space:nowrap;overflow-wrap:normal;padding:4px 6px;font-size:12px;border:1px solid #15303c;background:#030b10;line-height:1.35}
+#market-book #op-one-stop .os-table th{background:#071823;color:#deeff4;font-weight:500}
+#op-one-stop .os-up{color:#00ed76!important}#op-one-stop .os-down{color:#ff3655!important}
+#op-one-stop .os-expiry-detail{margin:4px 0;font-size:11px;color:#a8c1d0}#op-one-stop .os-expiry-detail>summary{cursor:pointer;min-height:28px;padding:5px}
+#op-one-stop .os-rank-grid{gap:0;margin:0}#op-one-stop .os-pcr-overview{background:#030b10;margin:4px 0;padding:4px;border-radius:4px}
+#op-one-stop .os-pcr{background:#06111b;border-radius:4px;padding:5px}#op-one-stop .os-pcr small{font-size:10px}
+#op-one-stop .os-workspace-controls{margin:4px 0}#op-one-stop .os-reading-status{padding:4px 6px;border-radius:4px;background:#06131a;border-color:#234957;font-size:11px}
+#market-book #op-one-stop .os-controls button[aria-pressed=true]{background:#005bff;border-color:#318dff}
+#op-one-stop .os-ladder-key{margin:3px 0;font-size:10px}#op-one-stop .os-expiry-clock{padding:4px 6px;margin:4px 0;background:#06131a;border-color:#234957;font-size:11px}
+@media(max-width:850px){#op-one-stop .os-terminal-head{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){#market-book #op-one-stop.os-card{padding:0}#op-one-stop .os-market-head{font-size:17px}#op-one-stop .os-reference-indices{justify-content:stretch}#market-book #op-one-stop .os-reference-indices button{flex:1;min-width:0;padding:4px;min-height:40px}#market-book #op-one-stop .os-table :is(th,td){font-size:11px;padding:4px 5px}#op-one-stop .os-levels>span{display:block}#op-one-stop .os-rag-context{margin-bottom:4px}}
 @media(prefers-reduced-motion:reduce){#op-one-stop *{animation:none!important;transition:none!important}}
 `;
 
@@ -287,11 +322,12 @@ export function installOneShotLiveCard(api:any){
   // Never copy spot levels to the futures contract.
   return {pdh:null,pdc:ok?positive(f.pdc):null,pdl:null,ready:ok,expiry:ok?f.identity.expiry:null};
  };
- const allFutureLevels=(d:any)=>table(['Futures / expiry','PDH','PDC','PDL','Source'],symbols.map(symbol=>{
-  const a=indexRow(d,symbol),r=futureRefs(d,a);
-  return [esc(symbol)+'<small>'+esc(r.expiry||'—')+'</small>',fmt(r.pdh),fmt(r.pdc),fmt(r.pdl),
-    esc(r.ready?'Kite FULL · previous close · '+time(a.future.observedAt)+' IST':'No fresh verified futures quote')];
- }))+'<small class="os-subline">Futures PDH/PDL: same-contract previous-session high/low source unavailable. No Spot level substituted.</small>';
+ const allFutureLevels=(d:any)=>table(['Instrument','LTP','Day %','PDH','PDC','PDL','15m H','15m L','OI','Basis','Source time · IST'],symbols.flatMap(symbol=>{
+  const a=indexRow(d,symbol),q=a?.spot,f=a?.future,ok=!!a&&valid(d,q,'SPOT',symbol),fo=!!a&&valid(d,f,'FUTURE',symbol),r=ok?refs(d,symbol,q):{},fr=futureRefs(d,a);
+  const basis=ok&&fo&&Math.abs(Date.parse(q.observedAt)-Date.parse(f.observedAt))<=5000?f.price-q.price:null;
+  return [[esc(symbol)+' Spot',fmt(ok?q.price:null),pct(ok?change(d,q,'SPOT',symbol):null),fmt(r.pdh),fmt(r.pdc),fmt(r.pdl),fmt(r.h15),fmt(r.l15),'—','—',ok?time(q.observedAt):'Unavailable'],
+   [esc(symbol)+' Fut<small>'+esc(fr.expiry||'—')+'</small>',fmt(fo?f.price:null),pct(fo?change(d,f,'FUTURE',symbol):null),fmt(fr.pdh),fmt(fr.pdc),fmt(fr.pdl),'—','—',fmt(fo&&n(f.oi)!==null&&f.oi>=0?f.oi:null,0),fmt(basis),fo?time(f.observedAt):'Unavailable']];
+ }))+'<small class="os-subline">Kite FULL · previous close. Futures PDH/PDL: same-contract previous-session high/low source unavailable. Spot levels are never substituted. Basis requires source times within 5s.</small>';
  const observe=(d:any,a:any)=>{
   const q=a.spot,symbol=a.symbol;if(!valid(d,q,'SPOT',symbol)){previous.delete(symbol);breaks.delete(symbol);return;}
   const r=refs(d,symbol,q),old=previous.get(symbol),at=Date.parse(q.observedAt),identity=q.identity?.token??symbol;
@@ -324,12 +360,19 @@ export function installOneShotLiveCard(api:any){
  const rank=(d:any,role:string)=>{
   const rows=(d?.snapshot?.participation||[]).filter((q:any)=>q?.identity?.role===role);
   const usable=rows.filter((q:any)=>valid(d,q,role)&&n(change(d,q,role))!==null&&q.identity?.token&&rows.filter((x:any)=>x.identity?.token===q.identity.token).length===1);
-  const side=(up:boolean)=>{const sorted=usable.filter((q:any)=>up?change(d,q,role)>0:change(d,q,role)<0).sort((a:any,b:any)=>(up?-1:1)*(change(d,a,role)-change(d,b,role))||String(a.identity.label).localeCompare(String(b.identity.label))).slice(0,5);
-   return '<div><strong class="'+(up?'os-up':'os-down')+'">'+(up?'▲ Gainers':'▼ Losers')+'</strong>'+(!sorted.length?empty('No fresh '+(up?'gainers':'losers')):sorted.map((q:any,i:number)=>'<div class="os-rank-item">'+(i+1)+' · '+esc(q.identity.label)+'<b class="'+tone(change(d,q,role))+'">'+pct(change(d,q,role))+'</b><small>'+(role==='STOCK'?'₹ ':'Index points ')+fmt(q.price)+' · '+time(q.observedAt)+' IST</small></div>').join(''))+'</div>';};
-  return '<div class="os-rank-sides">'+side(true)+side(false)+'</div><small class="os-subline">'+usable.length+'/'+rows.length+' fresh tracked quotes · Δ % vs previous close · verified weights / index contribution unavailable</small>';
+  const sorted=[...usable].sort((a:any,b:any)=>Math.abs(change(d,b,role))-Math.abs(change(d,a,role))).slice(0,10);
+  return table(['#',role==='STOCK'?'Stock':'Sector / proxy','Weight %','Price','Day %','Contribution','Trend','Quote time · IST','RAG / similar event'],sorted.map((q:any,i:number)=>[
+   String(i+1),esc(q.identity.label),'—',(role==='STOCK'?'₹ ':'Index points ')+fmt(q.price),'<span class="'+tone(change(d,q,role))+'">'+pct(change(d,q,role))+'</span>','—','<span class="'+tone(change(d,q,role))+'">'+(change(d,q,role)>0?'▲':change(d,q,role)<0?'▼':'→')+'</span>',time(q.observedAt),'Unmatched'
+  ]))+'<small class="os-subline">'+usable.length+'/'+rows.length+' fresh tracked quotes · ordered by absolute day change · official weight, contribution and historical matches unavailable.</small>';
+
  };
  const endpoint=(key:string,target:number)=>{const rows=series.get(key)||[];return rows.filter(p=>p.at<=target&&target-p.at<=15000).at(-1);};
+ const premiumTable=(d:any,rows:any[])=>table(['Type','Strike','Expiry','LTP ₹','Day %','OI','PDH','PDC','PDL','Source time · IST'],rows.flatMap(r=>['CE','PE'].filter(side=>sideMode==='BOTH'||sideMode===side).map(side=>{
+  const q=r[side.toLowerCase()],ok=!!d&&valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side;
+  return [side,fmt(r.strike,0),esc(r.expiry),fmt(ok?q.price:null),'<span class="'+tone(ok?change(d,q,'OPTION',selected):null)+'">'+pct(ok?change(d,q,'OPTION',selected):null)+'</span>',fmt(ok&&n(q.oi)!==null&&q.oi>=0?q.oi:null,0),'—',fmt(ok?positive(q.pdc):null),'—',ok?time(q.observedAt):'Unavailable'];
+ })))+(rows.length?'':empty('No verified exact-contract premiums. Open Data to choose a saved session.'));
  const renderDte=(d:any,rows:any[])=>{
+  write('os-premium-table',premiumTable(d,rows));
   write('os-dte-context',esc(selected+' · '+(dteMetric==='day'?'vs contract PDC':minutes+'m matched contracts')+(selected==='BANKNIFTY'?' · monthly observation':'')));
   if(!d||!rows.length){write('os-dte-radar',Array.from({length:4},(_,i)=>'<article class="os-dte-tile os-missing"><small>EXPIRY '+(i+1)+'</small><h4>Inventory unavailable</h4><small>No verified contract date · no price substituted</small></article>').join('')+empty('No fresh verified expiry inventory · choose Recorded or load a saved full session.'));write('os-expiry-clock','Expiry end · verified contract timestamp unavailable');return;}
   write('os-expiry-clock','Next listed expiry · '+esc(rows[0].expiry)+' · '+Math.round((Date.parse(rows[0].expiry+'T00:00:00Z')-Date.parse(d.snapshot.tradeDate+'T00:00:00Z'))/86400000)+' calendar days as of '+esc(d.snapshot.tradeDate)+'<small>Exact expiry-end time not supplied by this feed.</small>');
@@ -403,6 +446,12 @@ export function installOneShotLiveCard(api:any){
   if(renderedRecordedKey.length&&paintKey.every((v,i)=>v===renderedRecordedKey[i])){recordedHtml.forEach((html,id)=>write(id,html));return;}
   renderedRecordedKey=paintKey;recordedHtml.clear();const put=(id:string,html:string)=>{recordedHtml.set(id,html);write(id,html);};
   const view=recordedData(),rows=view.rows,date=view.date;
+  put('os-premium-table',table(['Type','Strike','Expiry','LTP ₹',dteMetric==='day'?'Day %':'Window %','PDH','PDC','PDL','Saved time · IST','Quote time · IST'],rows.flatMap(r=>['CE','PE'].filter(side=>sideMode==='BOTH'||sideMode===side).map(side=>{
+   const q=r[side.toLowerCase()],ok=q?.state==='RECORDED';
+   const matched=r.ce?.state==='RECORDED'&&r.pe?.state==='RECORDED'&&r.ce.at===r.pe.at&&r.ce.fromAt&&r.ce.fromAt===r.pe.fromAt;
+   const value=ok&&(dteMetric==='day'||matched)?q.change:null;
+   return [side,fmt(r.strike,0),esc(r.expiry),fmt(ok?q.price:null),'<span class="'+tone(value)+'">'+pct(value)+'</span>',fmt(ok?q.pdh:null),fmt(ok?q.pdc:null),fmt(ok?q.pdl:null),time(r.at),ok&&q.quoteAt?time(q.quoteAt):'Unavailable'];
+  })))+(rows.length?'':empty('No loaded recorded premiums · Open Data to choose a saved session.')));
   put('os-dte-context',esc(selected+' · RECORDED · '+(date||'no session loaded')+(selected==='BANKNIFTY'?' · monthly observation':'')));
   put('os-expiry-clock',rows.length?'Recorded expiry · '+esc(rows[0].expiry)+' · '+Math.round((Date.parse(rows[0].expiry+'T00:00:00Z')-Date.parse(date+'T00:00:00Z'))/86400000)+' calendar days as of '+esc(date)+'<small>Historical session clock · exact expiry-end timestamp unavailable.</small>':'Expiry clock · load a recorded session with verified contract inventory');
   const sides=sideMode==='BOTH'?['CE','PE']:[sideMode];
@@ -440,6 +489,7 @@ export function installOneShotLiveCard(api:any){
  };
 
  const update=(payload:any,force=false)=>{
+  $('os-reference-indices')?.querySelectorAll?.('[data-os-select]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.osSelect===selected)));
   const live=api.validEnvelope(payload),d=live?payload:null,key=live?d.snapshot.runtimeId+'|'+d.snapshot.tradeDate:'';last=payload;
   if(live&&paintedLive&&key===session&&!force&&Date.now()-lastPaint<500)return;lastPaint=Date.now();paintedLive=live;
   if(key!==session){session=key;series.clear();conflicts.clear();pcrIds.clear();previous.clear();breaks.clear();events.length=0;pcr=null;}
@@ -494,7 +544,7 @@ export function installOneShotLiveCard(api:any){
    const synced=values.length>0&&values.every(x=>x!==null)&&Math.max(...stamps)-Math.min(...stamps)<=5000;
    const state=!synced?'UNAVAILABLE':values.every(x=>x!>0)?'ALL UP':values.every(x=>x!<0)?'ALL DOWN':values.every(x=>x===0)?'FLAT':'MIXED';return badge(side+' · '+state+' · '+values.filter(x=>x!==null).length+'/'+values.length+' expiries',state==='ALL UP'?'os-up':state==='ALL DOWN'?'os-down':'');};
   write('os-dte-alignment',sideSummary('CE')+sideSummary('PE')+'<small class="os-subline">'+esc(selected)+' · day returns vs each contract previous close · timestamps within 5s · no cross-contract trade score</small>');
-  write('os-events',(triple?badge('🚨 3-index same-side '+aligned[0].label,'os-alert'):'')+(events.length?events.slice(0,8).map(e=>'<div class="os-event"><div><b>'+esc(e.symbol+' · '+e.label)+'</b><small>'+esc(e.detail)+'</small></div><span>'+time(e.at)+' IST</span></div>').join(''):empty(live?'No verified level crossing observed in this browser session.':'Market closed / disconnected · live events cleared; use recorded research for saved events.')));
+  write('os-events',(triple?badge('🚨 3-index same-side '+aligned[0].label,'os-alert'):'')+(events.length?table(['Time · IST','Index','Event','Verified observation'],events.slice(0,8).map(e=>[time(e.at),esc(e.symbol),esc(e.label),esc(e.detail)])):empty(live?'No verified level crossing observed in this browser session.':'Market closed / disconnected · live events cleared; use recorded research for saved events.')));
   write('os-future-response',live?allFutureLevels(d)+response(d,indexRow(d,selected),optionRows):empty('Fresh futures and premium observations required · no stale comparison.'));
   write('os-wall-ladder',table(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI'],symbols.map(symbol=>{
    const r=pcr.rows.find((x:any)=>x.symbol===symbol),a=live?indexRow(d,symbol):null,raw=r?.current?d?.pcrDisplay?.[symbol]:null,cw=raw?.callWall,pw=raw?.putWall;
@@ -536,6 +586,7 @@ export function installOneShotLiveCard(api:any){
  $('os-chart-refresh').onclick=()=>update(last,true);
  $('os-load-recorded').onclick=async()=>{const date=$('os-recorded-date').value,s=api.getState?.();if(loadBusy||s?.loading||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!api.setDate)return;loadBusy=true;$('os-load-recorded').disabled=true;write('os-load-status','Loading '+esc(date)+' full session…');try{await api.setDate(date,{scope:'FULL',fullSession:true});if(api.getState?.()?.date!==date||api.getState?.()?.scope!=='FULL')throw Error('Full session did not load; earlier selection retained');sourceMode='RECORDED';$('os-source').value='RECORDED';write('os-load-status','Loaded '+esc(date)+' · absent contracts stay unavailable');}catch(e:any){write('os-load-status','Load failed · '+esc(e?.message||'try again'));}finally{loadBusy=false;$('os-load-recorded').disabled=false;update(last,true);}};
  $('os-navigation').onclick=(e:any)=>{const id=e.target.closest?.('[data-os-go]')?.dataset?.osGo;if(!['radar','pulse','premium','futures','walls','stocks','sectors','vix','memory','tools'].includes(id))return;const target=$('os-'+id);if(target){if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView?.({block:'start',behavior:'auto'});}root.querySelectorAll?.('[data-os-go]').forEach((b:any)=>{if(b.dataset.osGo===id)b.setAttribute('aria-current','location');else b.removeAttribute?.('aria-current');});};
+ if($('os-reference-indices'))$('os-reference-indices').onclick=(e:any)=>{const next=e.target.closest?.('[data-os-select]')?.dataset?.osSelect;if(symbols.includes(next))selectIndex(next);};
  $('os-market-radar').onclick=(e:any)=>{const next=e.target.closest?.('[data-os-index]')?.dataset?.osIndex;if(!symbols.includes(next))return;selectIndex(next);};
  $('os-dte-metric').onclick=(e:any)=>{const mode=e.target.closest?.('[data-os-dte-metric]')?.dataset?.osDteMetric;if(!['day','window'].includes(mode))return;dteMetric=mode;$('os-dte-metric').querySelectorAll?.('[data-os-dte-metric]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.osDteMetric===mode)));update(last,true);};
  $('os-window').onclick=(e:any)=>{const next=Number(e.target.closest?.('[data-os-window]')?.dataset?.osWindow);if(![1,3,5,6,15,30,60].includes(next))return;minutes=next;$('os-window').querySelectorAll?.('[data-os-window]').forEach((b:any)=>b.setAttribute('aria-pressed',String(Number(b.dataset.osWindow)===minutes)));update(last,true);};

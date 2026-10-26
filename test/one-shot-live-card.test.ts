@@ -37,7 +37,7 @@ test('production HTML mounts the real new design once, with ten categories and e
  const html=renderBusinessDashboardV1Html({} as any);
  assert.equal((html.match(/data-os-version="ONE_SHOT_LIVE_V1"/g)||[]).length,1);
  assert.equal((WORKSPACE_NAV_HTML.match(/data-os-go=/g)||[]).length,10);
- for(const name of ['Spot & Futures · three-index levels','Spot × Full PCR pulse','Premium Ladder · Multi-DTE','VIX + agreement radar'])assert(WORKSPACE_NAV_HTML.includes(name));
+ for(const name of ['Market overview · selected index','Spot × Full PCR pulse','Premium Ladder (Multi-DTE)','VIX + agreement radar'])assert(WORKSPACE_NAV_HTML.includes(name));
  assert.equal((WORKSPACE_NAV_HTML.match(/id="op-atm-pairs"/g)||[]).length,1);
  assert.equal((html.match(/dashboard-live\/stream/g)||[]).length,1);
  for(const [,script] of html.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(script);
@@ -419,4 +419,17 @@ test('reported full-chain PCR stays labelled apart from fresh values, charts and
  assert(html.includes('4/4 contracts · 2 older than 30s'));assert(html.includes('Source 09:40:00 → 09:45:00 IST'));
  assert(!html.includes('LIVE · Full OI PCR'));assert(!h.el('os-wall-ladder').innerHTML.includes('1.3333'));assert(!h.el('os-pulse-chart').innerHTML.includes('1.3333'));
  h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-pcr-strip').innerHTML.includes('1.3333'));
+});
+
+test('reference premium table retains exact identities, side/index controls and revocation',()=>{
+ const h=harness(),p=h.payload();h.send(p);
+ const table=h.el('os-premium-table').innerHTML;
+ assert(table.includes('<table'));assert(table.includes('LTP ₹'));assert(table.includes('>120<'));
+ assert(!table.includes('82%'));assert(table.includes('Source time · IST'));
+ const bad=h.payload();bad.snapshot.atmExpiryLadder[0].rows[0].ce.identity.side='PE';h.advance(600);h.send(bad);
+ assert(!h.el('os-premium-table').innerHTML.includes('>120<'),'wrong-side quote must be withheld');
+ h.el('os-reference-indices').onclick({target:{closest:()=>({dataset:{osSelect:'SENSEX'}})}});
+ assert.equal(h.el('os-index').value,'SENSEX');
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});
+ assert(!h.el('os-premium-table').innerHTML.includes('>120<'),'disconnected premiums must be revoked');
 });

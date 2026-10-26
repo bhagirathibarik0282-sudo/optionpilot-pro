@@ -2,6 +2,8 @@ name: RAG Event Context Ladder CI
 on:
   pull_request:
     paths:
+      - 'recorder-matched-outcome.ts'
+      - 'test/recorder-matched-outcome.test.ts'
       - 'rag-event-context-ladder.ts'
       - 'test/rag-event-context-ladder.test.ts'
       - 'rag-event-context-ladder-view.ts'
@@ -38,7 +40,7 @@ jobs:
       - name: Install existing dependencies
         run: npm install --ignore-scripts --no-audit --no-fund
       - name: Run event-wise context and publication-cutoff regressions
-        run: NODE_ENV=test node --import tsx --test test/rag-event-context-ladder.test.ts test/rag-event-context-ladder-view.test.ts test/rag-recorder-event-ladder-bridge.test.ts test/rag-recorded-spread-source-audit.test.ts test/recorded-replay-view.test.ts test/h1-replay-plan-audit.test.ts
+        run: NODE_ENV=test node --import tsx --test test/recorder-matched-outcome.test.ts test/rag-event-context-ladder.test.ts test/rag-event-context-ladder-view.test.ts test/rag-recorder-event-ladder-bridge.test.ts test/rag-recorded-spread-source-audit.test.ts test/recorded-replay-view.test.ts test/h1-replay-plan-audit.test.ts
       - name: Verify isolated archived Recorder preview guards
         run: NODE_ENV=test node --import tsx --test test/pr799-recorder-preview.test.ts test/pr799-browser-capture.test.ts
       - name: Verify patch whitespace

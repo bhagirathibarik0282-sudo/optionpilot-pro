@@ -9,6 +9,7 @@ import {PR799_PREVIEW_SELECTION} from '../pr799-recorder-preview.js';
 import {buildPr799BrowserCapture} from '../pr799-browser-capture.js';
 
 // Manual archive capture only. No server, application startup, broker, writes or retry.
+let stage='CONFIGURATION';
 async function main(){
  assert.equal(process.env.PR799_BROWSER_CAPTURE,'NIFTY_OCT19_1045_READ_ONLY');
  assert(process.env.DATABASE_URL);
@@ -32,17 +33,22 @@ async function main(){
        client.release(broken);
      }
    };
+   stage='READING_ARCHIVE';
    raw=await readRagEventEvidence(parsed.value,undefined,async requests=>{
      pair=await runH1ReplayPairRead(requests,read);return pair;
    });
+   stage='VERIFYING_ARCHIVE_PARITY';
    assert.equal(pair.length,2);assert(pair.every(r=>r.ok));
    assert.equal(raw.provenance.selectedEvidenceSha256,'118a0e2d0c07691435358d41088f4658b8deeeb1f4acf81f539d59eb41b3fc82');
    assert.equal(projectRecordedRagLadder(raw).ok,true);
  }finally{
    try{await pool.end();}catch{failed=true;}finally{clearTimeout(deadline);}
  }
+ stage='VERIFYING_POOL_CLOSED';
  assert.equal(failed,false);
+ stage='BUILDING_BOUNDED_PAYLOAD';
  const capture=buildPr799BrowserCapture(pair,raw,new Date().toISOString());
+ stage='ENCODING_BOUNDED_PAYLOAD';
  const json=JSON.stringify(capture);assert(Buffer.byteLength(json)<250000);
  const encoded=gzipSync(json).toString('base64');assert(encoded.length<100000);
  const chunks=encoded.match(/.{1,3000}/g)!;
@@ -50,4 +56,4 @@ async function main(){
  chunks.forEach((chunk,i)=>console.log('PR799_CAPTURE_CHUNK '+i+' '+chunk));
  console.log('PR799_CAPTURE_COMPLETE_DB_CLOSED_NO_LISTENER');
 }
-main().catch(()=>{console.error('PR799_CAPTURE_FAILED_NO_PAYLOAD');process.exitCode=1;});
+main().catch(()=>{console.error('PR799_CAPTURE_FAILED_NO_PAYLOAD '+JSON.stringify({stage}));process.exitCode=1;});

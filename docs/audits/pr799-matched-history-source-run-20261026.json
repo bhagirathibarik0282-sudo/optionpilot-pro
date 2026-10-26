@@ -1,0 +1,89 @@
+{
+  "dateIst": "2026-10-26",
+  "authorization": "User explicitly instructed Ok start now for bounded read-only source validation.",
+  "deploymentId": "f9a76c72-5fd9-432f-96f5-6f2670dcc12b",
+  "codeCommit": "b74a0a3917503399237aa3ade0bae7721d05dbec",
+  "completedAt": "2026-10-26T04:58:35.526081156Z",
+  "deploymentStatus": "SUCCESS",
+  "runCompleted": true,
+  "acceptancePassed": false,
+  "result": {
+    "target": {
+      "symbol": "NIFTY",
+      "date": "2026-10-26",
+      "expiry": "2026-10-26",
+      "strike": "23150",
+      "side": "PE",
+      "time": "10:24"
+    },
+    "ruleVersion": "RECORDER_PREMIUM_UP_10PCT_15M_V1",
+    "declaredAt": "2026-10-26T04:50:51.000Z",
+    "status": "UNAVAILABLE",
+    "reason": "TARGET_RECORDER_SNAPSHOT_UNAVAILABLE",
+    "audit": {
+      "dateIndexReads": 1,
+      "replayReads": 1,
+      "selectedSessionDates": [
+        "2026-10-07",
+        "2026-10-08",
+        "2026-10-09",
+        "2026-10-12",
+        "2026-10-13",
+        "2026-10-14",
+        "2026-10-15",
+        "2026-10-16",
+        "2026-10-19",
+        "2026-10-21",
+        "2026-10-22",
+        "2026-10-23"
+      ],
+      "loadedSessionDates": [],
+      "failedSessionDates": [],
+      "recordedContracts": 0,
+      "emptyContractSessions": [],
+      "rejectedContracts": []
+    },
+    "counts": null,
+    "limits": {
+      "maxSessions": 20,
+      "maxContractsPerSession": 64,
+      "concurrency": 1,
+      "retries": 0
+    },
+    "queries": 6,
+    "readOnly": true,
+    "writesPerformed": false,
+    "poolClosed": true,
+    "dashboardActivated": false,
+    "ratePublished": false
+  },
+  "findings": {
+    "recordedDateInventoryCount": 12,
+    "targetReplayReadAttempted": true,
+    "targetSnapshotAdmitted": false,
+    "priorSessionReplayReads": 0,
+    "actualMatchingHistoryValidated": false,
+    "actualMatchCount": null,
+    "numericalRatePublished": false,
+    "targetSnapshotRejectionDetail": "The wrapper did not preserve the snapshot builder's finer rejection reason; absence, invalidity and availability failures cannot be distinguished from this run."
+  },
+  "cleanup": {
+    "poolClosed": true,
+    "listenerStarted": false,
+    "startCommandRestored": "node -e 'console.log(\"PR799_ACCEPTANCE_IDLE_NO_DATABASE_QUERY\")'",
+    "restartPolicy": "NEVER",
+    "stagedChanges": 0,
+    "publicDomains": 0,
+    "sourcePinned": true,
+    "newIdleStartupMarkerClaimed": false
+  },
+  "main": {
+    "deploymentId": "1450e00b-a707-4dd1-a7ea-a49729943576",
+    "status": "SUCCESS",
+    "unchanged": true
+  },
+  "localValidation": {
+    "testsPassed": 52
+  },
+  "next": "Inspect the exact target admission rejection with an allowlisted diagnostic before any further read; do not switch strike/time or relax the rule to manufacture a match."
+}

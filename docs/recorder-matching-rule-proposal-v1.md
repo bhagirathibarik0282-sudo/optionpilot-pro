@@ -1,7 +1,10 @@
 # First Recorder matching rule — proposal only
 
-Status: PROPOSED, not agreed, declared, active or connected to the dashboard.
-No historical percentage or profitable-trade claim is produced by this proposal.
+Status: accepted for the first research-validation step following the user's
+continuation instruction after double-check. The exact rule is declared in
+`audits/recorder-match-rule-v1-20261026.json` at its actual timestamp. It is not
+active or connected to the dashboard. No historical percentage or profitable-trade
+claim is produced. The proposal below records its scope and limitations.
 
 The first proposed endpoint research question is: among earlier Recorder
 sessions matching the selected option context, how often did that exact
@@ -21,7 +24,7 @@ The existing loader accepts at most 20 recorded dates in an explicit history
 range and 64 contracts per session. Matching the same calendar DTE may leave
 too few eligible sessions even when that scope is fully loaded.
 
-On agreement, record the rule's actual declaration timestamp. Do not backdate
+The declaration uses the actual timestamp, not an earlier event time. Do not backdate
 it to make old targets eligible. Prospective targets must become known at/after
 that declaration; earlier sessions may supply their historical matches. Old
 targets may be used for source/transport diagnostics, but cannot be represented

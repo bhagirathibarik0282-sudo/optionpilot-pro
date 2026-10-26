@@ -10,6 +10,15 @@ export type RecorderHistoryScope={
  source:'EXISTING_POSTGRES_H1_REPLAY'; sessionDates:string[]; complete:boolean;
  truncated:boolean; failedSessionDates:string[];
 };
+export function validRecorderMatchRule(rule:RecorderMatchRule):boolean{
+ return !!rule&&typeof rule.version==='string'&&!!rule.version.trim()&&
+  typeof rule.declaredAt==='string'&&/^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/.test(rule.declaredAt)&&Number.isFinite(Date.parse(rule.declaredAt))&&
+  Array.isArray(rule.features)&&rule.features.length>0&&new Set(rule.features).size===rule.features.length&&
+  rule.features.every(f=>['PREMIUM_3M_DIRECTION','SPOT_VS_PDC'].includes(f))&&
+  [3,15,30].includes(rule.horizonMinutes)&&['INCREASE','DECREASE'].includes(rule.movement)&&
+  typeof rule.minimumMovePct==='number'&&Number.isFinite(rule.minimumMovePct)&&rule.minimumMovePct>0&&
+  Number.isInteger(rule.minIndependentSessions)&&rule.minIndependentSessions>=2;
+}
 const dateMs=(s:unknown)=>{
  if(typeof s!=='string'||!/^\d{4}-\d\d-\d\d$/.test(s))return NaN;
  const t=Date.parse(s+'T00:00:00Z');return Number.isFinite(t)&&new Date(t).toISOString().slice(0,10)===s?t:NaN;
@@ -69,11 +78,7 @@ export function computeRecorderMatchedOutcome(target:Snapshot,history:Snapshot[]
    'Calendar DTE and relative strike sign are coarse matching conditions; strikes may differ across episodes.',
    'One episode per session reduces overlap; independence across sessions is not guaranteed.']};
  const unavailable=(reason:string)=>({...base,status:'UNAVAILABLE',reason,ratePct:null,confidence95Pct:null});
- if(!Array.isArray(history)||!rule||typeof rule.version!=='string'||!rule.version.trim()||
-  !Number.isFinite(Date.parse(rule.declaredAt))||!Array.isArray(rule.features)||rule.features.length<1||
-  new Set(rule.features).size!==rule.features.length||rule.features.some(f=>!['PREMIUM_3M_DIRECTION','SPOT_VS_PDC'].includes(f))||
-  ![3,15,30].includes(rule.horizonMinutes)||!['INCREASE','DECREASE'].includes(rule.movement)||
-  !finite(rule.minimumMovePct)||rule.minimumMovePct<=0||!Number.isInteger(rule.minIndependentSessions)||rule.minIndependentSessions<2)
+ if(!Array.isArray(history)||!validRecorderMatchRule(rule))
   return unavailable('MATCH_RULE_NOT_CONFIGURED');
  const chosen=admitted(target);if(!chosen)return unavailable('TARGET_RECORDER_EVIDENCE_UNAVAILABLE');
  const targetKnownAt=Date.parse(target.event.availableAt);

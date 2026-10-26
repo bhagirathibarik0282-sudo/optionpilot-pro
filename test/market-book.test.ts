@@ -13,6 +13,8 @@ test('Research tables retain separate recorded identities and missing evidence w
  const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};
  vm.createContext(ctx);vm.runInContext(script,ctx);
  const current=fixture();current.chain.forEach(r=>{r.full_chain_oi_pcr=9.8765;r.full_pcr_source='Unverified source';});
+ current.market.forEach(r=>{r.pdh=21900;r.pdl=22100;});
+ current.options.forEach(r=>{r.pdh=80;r.pdl=90;});
  const state={date:tradeDate,recordedDates,current:{NIFTY:current},history:{},baseline:{},health:{},stocks:{},sectors:null,cash:null};
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{requests++;}};
  vm.runInContext('installMarketBook(api)',ctx);
@@ -22,7 +24,11 @@ test('Research tables retain separate recorded identities and missing evidence w
  const pcr=output.match(/aria-label="PCR &amp; OI walls · recorded context">([\s\S]*?)<\/section>/)![1];
  assert(!pcr.includes('9.8765'));assert(pcr.includes('Unavailable'));assert(pcr.includes('Unverified source'));
  const future=output.match(/<tr><td[^>]*>NIFTY Futures<\/td>([\s\S]*?)<\/tr>/)![1];
- for(const label of ['PDH','PDC','PDL','First 15m H / L'])assert(future.includes('data-op-label="'+label+'">Unavailable'));
+ for(const label of ['PDH','PDC','PDL','First 15m sampled H / L'])assert(future.includes('data-op-label="'+label+'">Unavailable'));
+ const tables=output.split('<details class="mb-event" data-event-key="research-overview-cards">')[0];
+ assert(tables.includes('Recorded DTE'));assert(!tables.includes('Calendar DTE'));
+ assert(tables.includes('not exchange candle extremes'));
+ assert(!/data-op-label="PD[HL]">(?!Unavailable)/.test(tables),'contradictory spot/premium levels withheld');
  assert(output.includes('first 1 of 1 available recorded expiries'));
  assert(!output.includes('NaN'));assert(!output.includes('undefined'));assert.equal(requests,0);
 });

@@ -1,3 +1,4 @@
+import { SCREEN_OVERVIEW_CSS, installScreenOverview } from './screen-overview.js';
 import { REFERENCE_TERMINAL_CSS } from './reference-terminal-style.js';
 import { renderOneShotCard, ONE_SHOT_CSS, installOneShotLiveCard } from './one-shot-live-card.js';
 import { installPremiumWorkspace } from './premium-workspace-view.js';
@@ -201,6 +202,7 @@ body[data-op-workspace] #market-book{padding:12px;min-width:0}
 #market-book .mb-cash-card p,#market-book .mb-cash-change{font-size:12px;line-height:1.4;margin:4px 0}
 ${ONE_SHOT_CSS}
 ${REFERENCE_TERMINAL_CSS}
+${SCREEN_OVERVIEW_CSS}
 `;
 
 export function installDashboardWorkspace(api:any){
@@ -415,6 +417,7 @@ export function installDashboardWorkspace(api:any){
   getState:api.getState,getModels:api.getModels,setDate:api.setDate,derivePremium:typeof derivePremiumWorkspace==='function'?derivePremiumWorkspace:undefined,validEnvelope:freshEnvelope,validQuote:freshQuote,
   derivePcr:deriveLiveThreeIndexPcr,deriveRecordedPcr:typeof deriveRecordedThreeIndexPcr==='function'?deriveRecordedThreeIndexPcr:undefined,chooseIndex:(symbol:string)=>{atmSelected=symbol;$('op-atm-index').value=symbol;paintAtm(atmLast);}
  }):null;
+ if(typeof installScreenOverview==='function')installScreenOverview();
  // PR3: reuse the strict three-index full-PCR verifier; render from the existing stream only.
  const paintOne=(d:any)=>{
   if(!oneStatus||!oneRows)return;

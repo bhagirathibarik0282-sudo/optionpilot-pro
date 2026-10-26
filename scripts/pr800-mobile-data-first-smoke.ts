@@ -38,6 +38,7 @@ try{
    });
    assert(data.toolbar<data.radar&&data.radar<data.pcr&&data.pcr<data.ladder&&data.ladder<data.memory&&data.memory<data.advanced,
      name+' expected toolbar and seven primary sections before settings: '+JSON.stringify(data));
+   if(width===1024)await page.screenshot({path:'pr800-mobile-ui-artifacts/reference-no-market-data.png',fullPage:true,timeout:15000});
    if(width===1024)assert(data.memory<1536,'seven primary sections must fit the reference-height reading flow: '+JSON.stringify(data));
    assert(data.scrollWidth<=data.viewport+5,name+' page overflow: '+JSON.stringify(data));
    if(width<=600){

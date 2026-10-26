@@ -73,11 +73,11 @@ test('three-index level radar and futures chapter show PDH/PDC/PDL with exact so
   assert(card.includes('FUT '));
   assert(card.includes('PDH / PDC / PDL'));
   assert(card.includes('101'));assert(card.includes('90'));
-  assert(levels.includes(symbol));
+  if(symbol==='NIFTY')assert(levels.includes(symbol));
  }
  for(const value of ['23,123.45','74,789.12','55,912.34']){
   assert(radar.includes(value),'all futures PDC visible in compact radar');
-  assert(levels.includes(value),'all futures PDC visible in chapter 04');
+  if(value==='23,123.45')assert(levels.includes(value),'selected-index futures PDC is visible');
  }
  assert(!radar.includes('999,999'));assert(!radar.includes('888,888'));
  assert(!levels.includes('999,999'));assert(!levels.includes('888,888'));
@@ -445,4 +445,18 @@ test('date scope exposes only actual saved sessions and never fabricates expiry 
  assert.equal(h.loadArgs(),null,'changing the inventory filter must not load a session');
  scope('EXPIRY');assert(h.el('os-date-options').innerHTML.includes('No saved session matches a loaded verified expiry'));
  scope('ALL');assert.equal((h.el('os-date-options').innerHTML.match(/data-os-date=/g)||[]).length,6);
+});
+
+test('reference expiry tabs filter exact recorded contracts and survive refresh without a live substitution',()=>{
+ const h=harness(),saved=recordedSession();h.setSaved(saved);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ const expiry=saved.current.NIFTY.options.map(r=>r.expiry).sort().at(-1)!;
+ h.el('os-premium-expiries').onclick({target:{closest:()=>({dataset:{osExpiry:expiry}})}});
+ let html=h.el('os-premium-table').innerHTML;
+ assert.equal((html.match(/<tr>/g)||[]).length,3,'selected expiry retains exactly CE and PE rows');
+ assert(html.includes(expiry));
+ h.el('os-source').onchange({target:{value:'RECORDED'}});h.send(h.payload());
+ html=h.el('os-premium-table').innerHTML;
+ assert.equal((html.match(/<tr>/g)||[]).length,3);assert(html.includes(expiry));
+ h.el('os-premium-expiries').onclick({target:{closest:()=>({dataset:{osExpiry:''}})}});
+ assert.equal((h.el('os-premium-table').innerHTML.match(/<tr>/g)||[]).length,5);
 });

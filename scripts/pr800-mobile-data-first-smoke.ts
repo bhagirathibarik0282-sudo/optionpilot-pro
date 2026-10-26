@@ -32,7 +32,7 @@ try{
    const data=await page.evaluate(()=>{
     const rect=(id:string)=>{const n=document.getElementById(id);if(!n)throw Error('missing '+id);return n.getBoundingClientRect().top};
     return {radar:rect('os-market-radar'),pcr:rect('os-pcr-strip'),toolbar:rect('op-research-controls'),memory:rect('os-memory'),
-      ladder:rect('os-premium'),advanced:rect('op-one-actions'),scrollWidth:document.documentElement.scrollWidth,
+      ladder:rect('os-premium'),advanced:rect('os-reference-settings'),scrollWidth:document.documentElement.scrollWidth,
       viewport:innerWidth,marketCols:getComputedStyle(document.querySelector('#os-market-radar')!).gridTemplateColumns,
       mobileHero:getComputedStyle(document.querySelector('#op-one-stop .os-hero>div:first-child')!).display};
    });

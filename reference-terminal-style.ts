@@ -35,6 +35,8 @@ body[data-op-workspace] #market-book{padding:0;border:0;background:#02070b;borde
 #os-date-options{display:flex;flex-wrap:wrap;gap:5px;margin:5px 0}#os-date-options button{font-size:12px;min-height:36px;padding:5px 8px}
 #os-date-note{color:#b5cddd;font-size:11px}
 #market-book #op-one-stop.os-card{display:flex;flex-direction:column;border:0;padding:0;background:#02070b;font-family:'Arial Narrow',Arial,sans-serif}
+#op-one-stop .os-reading-actions{order:2;margin:4px 0;font-size:10px}
+#market-book #op-one-stop .os-reading-actions button{font-size:10px;min-height:26px;padding:3px 6px}
 #op-one-stop #os-dashboard{display:flex;flex-direction:column;gap:0;min-width:0}
 #market-book #op-one-stop .os-evidence-shortcuts{margin:0 0 6px;padding:4px 5px;min-height:35px;gap:9px;background:#040e16;border-color:#18536d;border-radius:5px;flex-wrap:wrap}
 #market-book #op-one-stop .os-evidence-shortcuts>span{font-size:12px;color:#00cee6;letter-spacing:0}

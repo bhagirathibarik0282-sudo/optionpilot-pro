@@ -186,6 +186,20 @@ export const ONE_SHOT_CSS=`
 #market-book #op-chapter-links{display:flex;gap:4px;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:thin}
 #market-book #op-chapter-links button{flex:0 0 auto;width:auto;min-height:38px;padding:5px 10px;font-size:11px;white-space:nowrap}
 }
+/* On the Research command page, remove duplicate mobile chrome; functionality remains in six tabs and source panel. */
+@media(max-width:600px){
+#market-book[data-main-chapter='1'] #op-view-links{display:none}
+#market-book #op-workspace-top{display:none}
+#market-book #op-workspace-nav:before{content:'OPTIONPILOT PRO';display:block;color:#a8f8fe;font-size:13px;font-weight:850;letter-spacing:.4px;padding:2px 1px 5px}
+#market-book #op-one-stop.os-card .os-hero{margin-bottom:3px}
+#market-book #op-one-stop.os-card #op-one-status{padding:4px 7px}
+#market-book #op-one-stop.os-card .os-evidence-shortcuts{margin:4px 0;padding:4px}
+#market-book #op-one-stop.os-card .os-section-head{margin:3px 0}
+#market-book #op-one-stop.os-card .os-markets{gap:3px}
+#market-book #op-one-stop.os-card .os-market{padding:5px 7px}
+#market-book #op-one-stop.os-card .os-market .os-levels{margin:0}
+#market-book #op-one-stop.os-card .os-market .os-subline{line-height:1.1}
+}
 @media(prefers-reduced-motion:reduce){#op-one-stop *{animation:none!important;transition:none!important}}
 `;
 

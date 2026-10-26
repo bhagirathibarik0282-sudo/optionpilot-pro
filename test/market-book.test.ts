@@ -19,7 +19,7 @@ test('Research tables retain separate recorded identities and missing evidence w
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{requests++;}};
  vm.runInContext('installMarketBook(api)',ctx);
  const output=nodes.get('mb-page').innerHTML;
- assert.equal((output.match(/class="mb-research-section"/g)||[]).length,6);
+ assert.equal((output.match(/class="mb-research-section"/g)||[]).length,7);
  for(const label of ['Spot &amp; Futures · recorded levels','PCR &amp; OI walls · recorded context','Premiums · exact recorded contracts','NIFTY Spot','NIFTY Futures','SENSEX Spot','BANKNIFTY Futures','22000 CE','22000 PE',expiry,'Window endpoints · IST'])assert(output.includes(label),label);
  const pcr=output.match(/aria-label="PCR &amp; OI walls · recorded context">([\s\S]*?)<\/section>/)![1];
  assert(!pcr.includes('9.8765'));assert(pcr.includes('Unavailable'));assert(pcr.includes('Unverified source'));
@@ -76,6 +76,27 @@ test('Research notable events reuse exact event contracts, filter categories and
  nodes.get('mb-page').onchange({target:{id:'mb-notable-filter',value:'OI'}});
  const filtered=section();assert(filtered.includes('OI adding'));assert(!filtered.includes('22100 CE ABOVE PDH'));assert(filtered.includes('value="OI" selected'));
  vm.runInContext('book.render()',ctx);assert(section().includes('value="OI" selected'));assert.equal(requests,0);
+});
+test('Research memory keeps exact prior contract references and opens the shared Recorder without loading or playback',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>();
+ for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ let timers=0,requests=0;
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math,setTimeout(){timers++;return 1;},clearTimeout(){}};
+ vm.createContext(ctx);vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)![1],ctx);
+ const prior=fixture();for(const kind of ['market','options','chain'] as const)prior[kind].forEach(r=>r.minute_bucket=r.minute_bucket.replace(tradeDate,'2026-10-07'));
+ prior.options=prior.options.filter(r=>r.option_type==='CE');prior.options.forEach(r=>{r.ltp=77;});
+ prior.options.push(...prior.options.map(r=>({...r,option_type:'PE',strike:22100,ltp:999})));
+ const state={date:tradeDate,recordedDates,current:{NIFTY:fixture()},history:{},baseline:{NIFTY:prior},health:{}};
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{requests++;}};
+ vm.runInContext('installMarketBook(api)',ctx);
+ const memory=nodes.get('mb-page').innerHTML.match(/aria-label="Recorder memory and replay">([\s\S]*?)<\/section>/)![1];
+ assert(memory.includes('CE · NIFTY '+expiry+' 22000'));assert(memory.includes('>77<'));assert(!memory.includes('>999<'));
+ const pe=memory.match(/<tr><td[^>]*>PE · NIFTY[^<]*<\/td>([\s\S]*?)<\/tr>/)![1];assert(pe.includes('data-op-label="Prior recorded value">Unavailable'));
+ assert(memory.includes('Historical matches / probability: unavailable.'));assert(memory.includes('not official closes or historical matches'));
+ nodes.get('mb-page').onclick({target:{closest:(selector:string)=>selector==='[data-research-replay]'?{}:null}});
+ assert.equal(nodes.get('mb-tools').open,true);assert.equal(nodes.get('recorded-replay').open,true);
+ assert(nodes.get('rr-status').textContent.includes('Paused'));assert.equal(timers,0);assert.equal(requests,0);
+ assert.equal((html.match(/id="recorded-replay"/g)||[]).length,1);
 });
 test('monthly premium board uses every recorded month expiry and preserves exact missing contracts',()=>{
  const c=fixture();const base=[...c.options];for(const expiry of ['2026-10-14','2026-10-15','2026-10-19','2026-10-27','2026-11-24'])c.options.push(...base.map(r=>({...r,expiry})));

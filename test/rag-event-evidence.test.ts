@@ -22,6 +22,7 @@ const result=(extra:Record<string,string>={})=>buildRagEventEvidence(request(ext
 test('internal rejection diagnostic follows quote admission and exposes only bounded counts/identity inventory',()=>{
  const cases:[string,(c:any)=>void][]=[
   ['ADMITTED',()=>{}],['EXACT_CONTRACT_NOT_RECORDED',c=>{c.options=c.options.filter((o:any)=>o.option_type!=='PE');}],
+  ['REPLAY_SOURCE_UNAVAILABLE',c=>{c.ok=false;}],['REPLAY_SOURCE_IDENTITY_MISMATCH',c=>{c.request.symbol='SENSEX';}],
   ['MARKET_NOT_TRUE',c=>{c.market.forEach((m:any)=>m.truth_verdict='UNKNOWN');}],
   ['QUOTE_SNAPSHOT_ID_MISMATCH',c=>{c.options.forEach((o:any)=>o.snapshot_id='wrong');}],
   ['QUOTE_STALE_AT_RECEIPT',c=>{c.options.forEach((o:any)=>o.quote_timestamp=new Date(Date.parse(o.quote_timestamp)-60000).toISOString());}],

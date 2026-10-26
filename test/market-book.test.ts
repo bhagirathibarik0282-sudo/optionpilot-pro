@@ -19,7 +19,7 @@ test('Research tables retain separate recorded identities and missing evidence w
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{requests++;}};
  vm.runInContext('installMarketBook(api)',ctx);
  const output=nodes.get('mb-page').innerHTML;
- assert.equal((output.match(/class="mb-research-section"/g)||[]).length,5);
+ assert.equal((output.match(/class="mb-research-section"/g)||[]).length,6);
  for(const label of ['Spot &amp; Futures · recorded levels','PCR &amp; OI walls · recorded context','Premiums · exact recorded contracts','NIFTY Spot','NIFTY Futures','SENSEX Spot','BANKNIFTY Futures','22000 CE','22000 PE',expiry,'Window endpoints · IST'])assert(output.includes(label),label);
  const pcr=output.match(/aria-label="PCR &amp; OI walls · recorded context">([\s\S]*?)<\/section>/)![1];
  assert(!pcr.includes('9.8765'));assert(pcr.includes('Unavailable'));assert(pcr.includes('Unverified source'));
@@ -57,6 +57,25 @@ test('Research participation loads only on click and rejects future, stale and d
  assert(!stocks.includes('>99<'));assert(!stocks.includes('>999<'));assert(output.includes('not selected-index sector weights'));
  snapshot.timestamp=at(6);click();await new Promise(resolve=>setImmediate(resolve));
  assert(!nodes.get('mb-page').innerHTML.includes('&lt;Gain&gt;'),'old receipt outside six minutes withheld');
+});
+test('Research notable events reuse exact event contracts, filter categories and retain missing forward targets',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>();
+ for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};
+ vm.createContext(ctx);vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)![1],ctx);
+ const current=fixture();current.options.push(...current.options.filter(r=>r.option_type==='CE').map(r=>({...r,strike:22100})));
+ current.chain.forEach((r,i)=>{r.full_chain_oi_pcr=1+i/10;});
+ const state={date:tradeDate,recordedDates,current:{NIFTY:current},history:{},baseline:{},health:{}};
+ let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{requests++;}};
+ vm.runInContext('globalThis.book=installMarketBook(api)',ctx);
+ const section=()=>nodes.get('mb-page').innerHTML.match(/aria-label="Recorded notable events">([\s\S]*?)<\/section>/)![1];
+ assert(section().includes('retrospective research'));assert(section().includes('latest 10 retained per category'));assert(section().includes('no O=H, RAG match or probability is inferred'));
+ nodes.get('mb-page').onchange({target:{id:'mb-notable-filter',value:'PREMIUM'}});
+ assert(section().includes('22100 CE'));assert(section().includes('NIFTY '+expiry+' 22100 CE / PE'));
+ assert(section().includes('Unavailable: event premium missing'));assert(section().includes('Unavailable: target record missing')||section().includes('Pending beyond latest recording'));
+ nodes.get('mb-page').onchange({target:{id:'mb-notable-filter',value:'OI'}});
+ const filtered=section();assert(filtered.includes('OI adding'));assert(!filtered.includes('22100 CE ABOVE PDH'));assert(filtered.includes('value="OI" selected'));
+ vm.runInContext('book.render()',ctx);assert(section().includes('value="OI" selected'));assert.equal(requests,0);
 });
 test('monthly premium board uses every recorded month expiry and preserves exact missing contracts',()=>{
  const c=fixture();const base=[...c.options];for(const expiry of ['2026-10-14','2026-10-15','2026-10-19','2026-10-27','2026-11-24'])c.options.push(...base.map(r=>({...r,expiry})));

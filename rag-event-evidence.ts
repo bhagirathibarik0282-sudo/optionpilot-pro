@@ -84,7 +84,10 @@ function quoteAt(replay:H1ReplayHttpResult,r:RagEventRequest,ms:number,side:stri
  * prices, SQL or credentials; this does not weaken or replace quote admission. */
 export function inspectRagSnapshotAdmission(r:RagEventRequest,current:H1ReplayHttpResult){
   const ms=at(r.date,r.time);let reason='UNINSPECTED';
-  const selected=quoteAt(current,r,ms,r.side,r.asOf,value=>{reason=value;});
+  let selected:Row|null=null;
+  if(!current.ok)reason='REPLAY_SOURCE_UNAVAILABLE';
+  else if(current.request?.symbol!==r.symbol||current.request.tradeDate!==r.date)reason='REPLAY_SOURCE_IDENTITY_MISMATCH';
+  else selected=quoteAt(current,r,ms,r.side,r.asOf,value=>{reason=value;});
   const marketRows=(current.market??[]).filter(m=>m.symbol===r.symbol&&iso(m.minute_bucket)===new Date(ms).toISOString());
   const rows=(current.options??[]).filter(o=>o.symbol===r.symbol&&iso(o.minute_bucket)===new Date(ms).toISOString());
   const exactExpiry=rows.filter(o=>expiry(o)===r.expiry),exactSide=exactExpiry.filter(o=>o.option_type===r.side);

@@ -25,3 +25,10 @@ actual browser/mobile visual check. Patch whitespace check passed.
 This implements three table sections, not the full seven-section reference.
 Combined heavyweight/sector, notable-event and matched-history sections remain
 unfinished. Main merge/deploy and numerical probability activation are pending.
+
+Double-check repairs: the opening-range header explicitly says sampled H/L and
+the note distinguishes recorded LTP samples from exchange candle extremes.
+The premium header says Recorded DTE because this view does not independently
+verify the source's DTE convention. Nonpositive reference levels and contradictory
+positive PDH <= PDL pairs are withheld in the new tables. The serialized
+regression covers these labels and contradictory spot/premium references.

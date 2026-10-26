@@ -20,6 +20,7 @@ on:
       - 'test/pr799-recorder-preview.test.ts'
       - 'h1-theory-history.ts'
       - 'scripts/pr799-matched-history-acceptance.ts'
+      - 'scripts/pr799-history-window-diagnostic.ts'
       - 'pr799-recorder-target.ts'
       - 'test/pr799-recorder-target.test.ts'
       - 'test/h1-recorded-date-reader.test.ts'

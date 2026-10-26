@@ -8,7 +8,7 @@ function snapshot(date:string,outcome=132,strike=23150){
  const point=(t:string,offset:number,price:number)=>({timeIst:t,offset,bucketAt:at(t,0),receiptAt:at(t),
   pair:{pe:{price,oi:1000,quoteAt:at(t,21),receiptAt:at(t),snapshotId:date+'-'+t}},
   context:{spot:23000,pdc:23100}});
- return {ok:true,mode:'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1',source:'EXISTING_POSTGRES_H1_REPLAY',safety:{readOnly:true},
+ return {ok:true,mode:'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1',source:'EXISTING_POSTGRES_H1_REPLAY',safety:{readOnly:true,writesPerformed:false},
   identity:{symbol:'NIFTY',date,expiry:date,strike,side:'PE'},event:{timeIst:'10:45',availableAt:at('10:45')},
   provenance:{selectedEvidenceSha256:'a'.repeat(64)},beforeAndAt:[point('10:42',-3,100),point('10:45',0,110)],
   outcomes:[point('10:48',3,outcome)]};
@@ -89,4 +89,34 @@ test('outcome horizon and direction are explicit, with bounded Wilson intervals 
  assert.equal(all.ratePct,100);assert(all.confidence95Pct!.low<100);assert.equal(all.confidence95Pct?.high,100);
  const down=compute(target(),dates.map(d=>snapshot(d,88)),{...rule,movement:'DECREASE'},scope);assert.equal(down.ratePct,100);
  const absent=compute(target(),history(),{...rule,horizonMinutes:15},scope);assert.equal(absent.counts.missingOutcomes,3);assert.equal(absent.ratePct,null);
+});
+
+test('an exact 10 percent decrease qualifies at the configured boundary',()=>{
+ const r=compute(target(),dates.map(d=>snapshot(d,99)),{...rule,movement:'DECREASE'},scope);
+ assert.equal(r.ratePct,100);
+});
+test('rounded display deltas cannot turn a tiny recorded increase into a flat matching signature',()=>{
+ const t=target();t.beforeAndAt[1].pair.pe.price=100.00001;
+ const h=history();for(const raw of h)raw.beforeAndAt[1].pair.pe.price=100;
+ const r=compute(t,h,rule,scope);
+ assert.equal(r.counts.unmatched,3);assert.equal(r.ratePct,null);
+});
+test('decimal and exponent thresholds are inclusive without admitting a value below the threshold',()=>{
+ const withPrices=(date:string,start:number,end:number)=>{
+  const raw=snapshot(date,end);raw.beforeAndAt[0].pair.pe.price=start/2;raw.beforeAndAt[1].pair.pe.price=start;return raw;
+ };
+ for(const [start,end,threshold] of [[0.2,0.3,50],[0.1,0.09,10],[1e-7,2e-7,100]]){
+  const r=compute(withPrices('2026-10-26',start,end),dates.map(d=>withPrices(d,start,end)),
+   {...rule,movement:end>start?'INCREASE':'DECREASE',minimumMovePct:threshold},scope);
+  assert.equal(r.ratePct,100);
+ }
+ const below=compute(target(),dates.map(d=>snapshot(d,121-1e-10)),rule,scope);
+ assert.equal(below.ratePct,0);
+});
+test('missing read-only attestation and overflowed outcome arithmetic cannot yield a number',()=>{
+ const h:any[]=history();delete h[0].safety.writesPerformed;
+ assert.equal(compute(target(),h,rule,scope).ratePct,null);
+ const extreme=(date:string)=>{const raw=snapshot(date,1e308);raw.beforeAndAt[0].pair.pe.price=.05;raw.beforeAndAt[1].pair.pe.price=.1;return raw;};
+ const r=compute(extreme('2026-10-26'),dates.map(extreme),rule,scope);
+ assert.equal(r.ratePct,null);assert.equal(r.counts.missingOutcomes,3);
 });

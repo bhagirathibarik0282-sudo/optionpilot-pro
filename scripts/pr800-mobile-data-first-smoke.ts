@@ -33,7 +33,7 @@ try{
     const rect=(id:string)=>{const n=document.getElementById(id);if(!n)throw Error('missing '+id);return n.getBoundingClientRect().top};
     return {radar:rect('os-market-radar'),pcr:rect('os-pcr-strip'),selectors:rect('os-index'),
       ladder:rect('os-premium'),advanced:rect('op-one-actions'),scrollWidth:document.documentElement.scrollWidth,
-      viewport:innerWidth,marketCols:getComputedStyle(document.querySelector('#os-market-radar + .os-markets')!).gridTemplateColumns,
+      viewport:innerWidth,marketCols:getComputedStyle(document.querySelector('#os-market-radar')!).gridTemplateColumns,
       mobileHero:getComputedStyle(document.querySelector('#op-one-stop .os-hero>div:first-child')!).display};
    });
    assert(data.radar<data.pcr&&data.pcr<data.selectors&&data.selectors<data.ladder&&data.ladder<data.advanced,

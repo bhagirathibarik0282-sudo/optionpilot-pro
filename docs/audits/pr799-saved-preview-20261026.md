@@ -18,6 +18,11 @@ Actual browser/mobile acceptance is still pending. Automatic browser approval
 review denied opening localhost because the private Recorder sample would be
 transmitted to the cloud browser without explicit disclosure authorization. No
 alternate browser, public endpoint, tunnel or indirect workaround was attempted.
-The user must explicitly authorize that fixed sample for the cloud browser before
-another attempt; such authorization does not guarantee that origin access will
-be available. VM and in-process checks remain distinct from visual acceptance.
+The user subsequently explicitly authorized that fixed sample for the cloud
+browser. On the authorized retry, the saved-capture runner reported ready on
+127.0.0.1:8789, but the cloud browser returned `net::ERR_CONNECTION_REFUSED`.
+It did not display the Recorder page. The observed blocker is now browser reachability
+to the workspace loopback; no additional disclosure authorization is pending for
+this same fixed-sample check. The listener was stopped and port closure verified.
+No database queries, Railway changes, public exposure or alternate-origin
+workaround occurred. VM and in-process checks remain distinct from visual acceptance.

@@ -5,7 +5,7 @@ import {WORKSPACE_NAV_HTML} from '../dashboard-workspace-view.js';
 
 test('reference terminal reuses real source-driven views in seven numbered sections',()=>{
  const html=renderOneShotCard('<details id="op-atm-weeklies"></details>');
- const ordered=['id="os-radar"','id="os-market-radar"','id="os-pcr-strip"','id="os-rag-context"','id="os-index"','id="os-futures"','id="os-walls"','id="os-premium"','id="op-one-actions"','id="os-stocks"','id="os-sectors"','id="os-notables"','id="os-memory"'];
+ const ordered=['id="os-radar"','id="os-market-radar"','id="os-pcr-strip"','id="os-rag-context"','id="os-futures"','id="os-walls"','id="os-premium"','id="os-stocks"','id="os-sectors"','id="os-notables"','id="os-memory"','id="os-index"','id="op-one-actions"'];
  const indices=ordered.map(id=>html.indexOf(id));
  assert(indices.every(x=>x>=0),JSON.stringify(indices));
  assert(indices.every((x,i)=>i===0||x>indices[i-1]),'source-backed sections retain deliberate reading order');
@@ -24,7 +24,7 @@ test('reference layout prioritizes seven sections and functional three-index con
  const html=renderOneShotCard('<details id="op-atm-weeklies"></details>');
  assert(!html.includes('id="os-command-deck"'),'superseded four-hub cards must not displace the reference tables');
  for(const id of ['os-futures','os-walls','os-premium','os-stocks','os-sectors','os-notables','os-memory'])assert(html.includes('id="'+id+'"'));
- assert.equal((html.match(/data-os-select=/g)||[]).length,3);
+ assert.equal((WORKSPACE_NAV_HTML.match(/data-os-select=/g)||[]).length,3);
  assert(html.includes('id="os-premium-table"'));
  assert(html.includes('id="os-detailed-views"'));
  const handler=installOneShotLiveCard.toString();

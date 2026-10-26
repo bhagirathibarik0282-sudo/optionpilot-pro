@@ -5,7 +5,7 @@ import {WORKSPACE_NAV_HTML,WORKSPACE_CSS} from '../dashboard-workspace-view.js';
 
 test('three-index Kite/Recorder radar and complete-PCR status lead the mobile workspace',()=>{
  const html=renderOneShotCard('<details id="op-atm-weeklies"></details>');
- const sequence=['id="os-market-radar"','id="os-pcr-strip"','id="os-index"','id="os-source"','id="os-premium"','id="op-one-actions"','id="os-navigation"'];
+ const sequence=['id="os-market-radar"','id="os-pcr-strip"','id="os-premium"','id="os-index"','id="os-source"','id="op-one-actions"','id="os-navigation"'];
  const positions=sequence.map(x=>html.indexOf(x));
  assert(positions.every(x=>x>=0),JSON.stringify(positions));
  assert(positions.every((v,i)=>!i||v>positions[i-1]),'source-driven radar first, four expiries before advanced controls');

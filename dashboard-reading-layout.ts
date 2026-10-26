@@ -74,7 +74,7 @@ export function installDashboardReading() {
     }
     const small:Element[]=[];
     for (const el of root.querySelectorAll('p,small,label,button,th,td,span,div')) {
-      if (el.getAttribute('data-op-small')==='true' || el.closest('#op-reading-tools,#dashboard-live,#op-one-stop,#op-premium-workspace,#op-workspace-nav,#op-workspace-top,#op-workspace-ticker,svg,script,style') || !Array.from(el.childNodes).some(n=>n.nodeType===3 && n.textContent?.trim())) continue;
+      if (el.getAttribute('data-op-small')==='true' || el.closest('#op-reading-tools,#dashboard-live,#op-one-stop,#op-premium-workspace,#op-workspace-nav,#op-workspace-top,#op-workspace-ticker,#op-research-controls,#os-date-picker,svg,script,style') || !Array.from(el.childNodes).some(n=>n.nodeType===3 && n.textContent?.trim())) continue;
       const font = Number.parseFloat(window.getComputedStyle(el).fontSize);
       if (font > 0 && font < 16) small.push(el);
     }

@@ -106,3 +106,35 @@ test('a large contract inventory fails closed instead of selecting a profitable 
  };
  const r=await load(input(),h.deps);assert.equal(r.ratePct,null);assert.deepEqual(r.audit.failedSessionDates,[dates[0]]);assert.equal(h.reads.length,2);
 });
+
+test('a missing event-time option row cannot silently remove a prior session from the rate',async()=>{
+ const h=harness();h.deps.read=async(q:H1ReplayRequest)=>{
+  h.reads.push(q);const r=replay(q);
+  if(q.tradeDate===dates[2])r.options=r.options.filter(row=>row.minute_bucket!=='2026-10-21T05:15:00.000Z');
+  return r;
+ };
+ const r=await load(input(),h.deps);
+ assert.equal(r.ratePct,null);assert.equal(r.result?.counts.rejected,1);
+ assert.equal(r.audit.emptyContractSessions.length,0);
+ assert.deepEqual(r.audit.rejectedContracts,[{date:dates[2],expiry:dates[2],strike:23150,side:'PE',reason:'EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF'}]);
+});
+test('noncanonical range and inventory dates are rejected rather than widening the history scope',async()=>{
+ for(const field of ['historyFrom','historyTo'] as const){
+  const h=harness(),x=input();x[field]=' '+x[field]+' ';
+  const r=await load(x,h.deps);assert.equal(r.reason,'INVALID_PRIOR_HISTORY_RANGE');assert.equal(h.lists(),0);
+ }
+ const h=harness();h.index.dates[0].tradeDate=' '+dates[0]+' ';
+ assert.equal((await load(input(),h.deps)).reason,'AMBIGUOUS_DATE_INVENTORY');assert.equal(h.reads.length,0);
+});
+test('malformed expiry or off-window option rows cannot certify complete source inventory',async()=>{
+ for(const mutate of [
+  (r:any)=>{r.options[0].expiry='invalid';},
+  (r:any)=>{r.options[0].minute_bucket='2026-10-19T05:19:00.000Z';}
+ ]){
+  const h=harness();h.deps.read=async(q:H1ReplayRequest)=>{
+   h.reads.push(q);const r=replay(q);if(q.tradeDate===dates[0])mutate(r);return r;
+  };
+  const r=await load(input(),h.deps);assert.equal(r.ratePct,null);assert.equal(h.reads.length,2);
+  assert.deepEqual(r.audit.failedSessionDates,[dates[0]]);
+ }
+});

@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-25",
+  "benchmarkDeployment": "fa732dae-2d24-42ed-ace9-ae70eee76b0a",
+  "fixtureDeployment": "2e6aaeff-b1ef-4b03-affe-7f4bfffbb4c1",
+  "readOnly": true,
+  "isolation": "REPEATABLE READ",
+  "request": {
+    "symbol": "NIFTY",
+    "date": "2026-10-19",
+    "from": "10:45",
+    "to": "10:45"
+  },
+  "results": {
+    "legacy": {
+      "phase": "legacy",
+      "count": 1,
+      "fingerprint": "677e406628cc6ac5a9ea74a6e85db18b",
+      "timeMs": 36726.436
+    },
+    "candidate": {
+      "phase": "candidate",
+      "count": 1,
+      "fingerprint": "677e406628cc6ac5a9ea74a6e85db18b",
+      "timeMs": 10641.171
+    }
+  },
+  "fixtures": [
+    {
+      "mode": "raw",
+      "oldCount": 10,
+      "newCount": 10,
+      "equal": true
+    },
+    {
+      "mode": "projected",
+      "oldCount": 10,
+      "newCount": 10,
+      "equal": true
+    }
+  ],
+  "limits": [
+    "One minute, one paired run, legacy first.",
+    "Cache/order effects are not controlled; no universal speedup claimed.",
+    "Times include result aggregation and multiset fingerprint; not whole HTTP request latency.",
+    "Production application still uses the old query until reviewed deployment."
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "dateIst": "2026-10-26",
+  "attempt": 2,
+  "explicitlyAuthorized": true,
+  "deploymentId": "f124d08f-306b-4f97-9659-ac136e42dda2",
+  "codeCommit": "ddcbd86ca876ae472c8cfbb40b771711ab4725cb",
+  "serviceId": "8db59b5b-25b0-4cd0-b92d-fb584c1a89d4",
+  "buildSucceeded": true,
+  "captureSucceeded": false,
+  "runtimeResult": "CRASHED_AT_BOUNDED_PAYLOAD_BUILD",
+  "log": {
+    "startedAt": "2026-10-26T03:35:53.601730428Z",
+    "failedAt": "2026-10-26T03:36:18.066415554Z",
+    "message": "PR799_CAPTURE_FAILED_NO_PAYLOAD {\"stage\":\"BUILDING_BOUNDED_PAYLOAD\"}"
+  },
+  "completedGuardsProvedByControlFlow": {
+    "pairedArchiveReadsOk": true,
+    "readOnlyTransactionsVerifiedByRunner": true,
+    "selectedEvidenceFingerprintGuardPassed": true,
+    "expectedSelectedEvidenceSha256": "118a0e2d0c07691435358d41088f4658b8deeeb1f4acf81f539d59eb41b3fc82",
+    "originalRecorderProjectionOk": true,
+    "databasePoolClosedWithoutFailure": true
+  },
+  "payloadChunksObserved": 0,
+  "completionMarkerObserved": false,
+  "offlineDiagnosis": {
+    "confirmedDefect": "pg DATE parser returns Date objects. String(expiry).slice(0,10) produces locale display text such as Mon Oct 19 and excludes the selected expiry.",
+    "reproduction": "Real installed pg.types.getTypeParser(1082, text), no database query; regression observed 0 instead of 3 selected option rows.",
+    "repair": "Normalize expiry with the same UTC date semantics used by the existing H1 RAG source. Apply in bounded capture and standalone preview.",
+    "runtimeQualification": "Defect matches the SQL DATE column, installed driver behavior and observed payload-building failure stage. The exact failed runtime assertion was not printed; successful corrected capture remains unverified.",
+    "stageDiagnostics": "Safe fixed substage labels added; no raw exception messages, SQL or credentials."
+  },
+  "localCaptureAndPreviewTests": {"passed": 11, "failed": 0, "databaseReadsPerformedByTests": false},
+  "cleanup": {
+    "deploymentId": "d4b43e72-1d55-4552-b741-4b8e8195d39e",
+    "status": "SUCCESS",
+    "startCommand": "node -e 'console.log(\"PR799_ACCEPTANCE_IDLE_NO_DATABASE_QUERY\")'",
+    "restartPolicy": "NEVER",
+    "stagedChanges": false
+  },
+  "thirdCapturePerformed": false,
+  "databaseWritesIntroduced": false,
+  "mainServiceModified": false,
+  "remaining": [
+    "Successful bounded capture and transport parity",
+    "Actual browser/mobile acceptance",
+    "Actual matching-history adapter validation; this runner validates one selected archived snapshot only",
+    "Numerical dashboard activation and main rollout remain disabled"
+  ]
+}

@@ -1,6 +1,82 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildH1ReplayContinuity, buildH1ReplayMarkerGapEvidence, parseH1ReplayRequest, runH1ReplayRead } from "../h1-replay-http.js";
+import { buildH1ReplayContinuity, buildH1ReplayMarkerGapEvidence, parseH1ReplayRequest, runH1ReplayRead, runH1ReplayPairRead } from "../h1-replay-http.js";
+
+test('raw canonical read avoids wide database sort and retains exact microsecond row order privately',async()=>{
+ const request={symbol:'NIFTY',tradeDate:'2026-10-19',fromTime:'10:45',toTime:'10:45',scope:'FULL'} as const;
+ const input=[
+   {minute_bucket:new Date('2026-10-19T05:15:00Z'),snapshot_id:'later',__h1_source_order_us:'1792386900000002',market:{value:2}},
+   {minute_bucket:new Date('2026-10-19T05:15:00Z'),snapshot_id:'earlier',__h1_source_order_us:'1792386900000001',market:{value:1}},
+   {minute_bucket:new Date('2026-10-19T05:15:00Z'),snapshot_id:'earlier',__h1_source_order_us:'1792386900000001',market:{value:1}}];
+ const result=await runH1ReplayRead(request,async(sql:string)=>{
+   if(sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'")){
+     assert.doesNotMatch(sql,/ORDER BY/);assert.match(sql,/EXTRACT\(EPOCH/);return input as any;
+   }
+   return [] as any;
+ });
+ assert.equal(result.ok,true);assert.deepEqual(result.canonical?.map(r=>r.snapshot_id),['earlier','earlier','later']);
+ assert(result.canonical?.every(r=>!('__h1_source_order_us' in r)));
+ assert.equal(result.canonical?.[0].market,input[1].market,'large JSON object is retained by reference');
+ assert.equal(result.counts?.canonical,3);
+ assert.equal(input[0].snapshot_id,'later','source array is not reordered');
+});
+
+test('paired sessions share two archive scans while preserving all rows, joins and coverage',async()=>{
+ const requests=[{symbol:'NIFTY',tradeDate:'2026-10-19',fromTime:'10:42',toTime:'10:48',scope:'FULL'},
+   {symbol:'NIFTY',tradeDate:'2026-10-16',fromTime:'09:15',toTime:'15:30',scope:'FULL'}] as const;
+ const markers=[{minute_bucket:'2026-10-19T05:12:00.000Z',truth_verdict:'TRUE'},
+   {minute_bucket:'2026-10-19T05:15:00.000Z',truth_verdict:'STALE'},
+   {minute_bucket:'2026-10-16T10:00:00.000Z',truth_verdict:'TRUE'}];
+ const canonical=markers.flatMap((m,i)=>[{...m,symbol:'NIFTY',snapshot_id:'s'+i,market:{value:i}},
+   {...m,symbol:'NIFTY',snapshot_id:'s'+i,market:{value:i}}]);
+ const calls:{sql:string;params:unknown[]}[]=[];
+ const inWindow=(r:any,date:unknown,from:unknown,to:unknown)=>Date.parse(r.minute_bucket)>=Date.parse(date+'T'+from+':00+05:30')&&Date.parse(r.minute_bucket)<=Date.parse(date+'T'+to+':00+05:30');
+ const read=async(sql:string,params:unknown[])=>{
+   calls.push({sql,params});
+   const source=sql.includes("kind = 'H1_TRUTH_MARKER'")?markers:sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'")?canonical:null;
+   if(source)return source.filter(r=>inWindow(r,params[1],params[2],params[3])||params.length===7&&inWindow(r,params[4],params[5],params[6])).sort((a,b)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket)) as any;
+   if(sql.includes('jsonb_to_recordset'))return JSON.parse(String(params[1])).map((m:any)=>({...m,symbol:params[0]}));
+   return [] as any;
+ };
+ const singles=await Promise.all(requests.map(q=>runH1ReplayRead(q,read)));calls.length=0;
+ const paired=await runH1ReplayPairRead(requests,read);
+ const stable=({queryTimingsMs,...value}:any)=>value;
+ assert.deepEqual(paired.map(stable),singles.map(stable));
+ assert.equal(calls.filter(c=>c.sql.includes("kind = 'H1_TRUTH_MARKER'")).length,1);
+ assert.equal(calls.filter(c=>c.sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'")).length,1);
+ assert.equal(paired[0].canonical?.length,4);assert.equal(paired[1].canonical?.length,2);
+ const joins=calls.filter(c=>c.sql.includes('jsonb_to_recordset'));
+ assert.equal(joins.length,6);
+ assert(joins.every(c=>JSON.parse(String(c.params[1])).every((m:any)=>inWindow(m,String(c.params[2]).slice(0,10),String(c.params[2]).slice(11,16),String(c.params[3]).slice(11,16)))));
+});
+
+test('failed combined archive scan falls back once per session and preserves prior-only failure',async()=>{
+ const requests=[{symbol:'NIFTY',tradeDate:'2026-10-19',fromTime:'10:45',toTime:'10:45',scope:'FULL'},
+   {symbol:'NIFTY',tradeDate:'2026-10-16',fromTime:'09:15',toTime:'15:30',scope:'FULL'}] as const;
+ const canonicalCalls:unknown[][]=[];
+ const read=async(sql:string,params:unknown[])=>{
+   if(sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'")){
+     canonicalCalls.push(params);
+     if(params.length===7||params[1]==='2026-10-16')throw Error('prior archive invalid');
+   }
+   return [] as any;
+ };
+ const paired=await runH1ReplayPairRead(requests,read);
+ assert.equal(paired[0].ok,true);assert.equal(paired[1].ok,false);assert.equal(paired[1].reason,'prior archive invalid');
+ assert.equal(canonicalCalls.length,3);assert.equal(canonicalCalls.filter(p=>p.length===7).length,1);
+});
+
+test('same-date or different-index requests retain original independent scans',async()=>{
+ for(const second of [{symbol:'SENSEX',tradeDate:'2026-10-16'},{symbol:'NIFTY',tradeDate:'2026-10-19'}] as const){
+   let scans=0;
+   const first={symbol:'NIFTY',tradeDate:'2026-10-19',fromTime:'10:45',toTime:'10:45',scope:'FULL'} as const;
+   const pair=await runH1ReplayPairRead([first,{...first,...second}],async(sql:string,params:unknown[])=>{
+     if(sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'")){scans++;assert.equal(params.length,4);}
+     return [] as any;
+   });
+   assert(pair.every(r=>r.ok));assert.equal(scans,2);
+ }
+});
 
 test('replay freezes one latest-marker lookup for all normalized tables and exposes read timings',async()=>{
  const request={symbol:'NIFTY',tradeDate:'2026-10-23',fromTime:'09:15',toTime:'09:15',scope:'CORE'} as const;

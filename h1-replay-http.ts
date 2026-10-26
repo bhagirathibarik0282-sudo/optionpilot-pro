@@ -219,7 +219,56 @@ export function buildH1ReplayMarkerGapEvidence(
   };
 }
 
-function markerCte(): string {
+/** Canonical archive reader: decode metadata once per archive row. Raw market
+ * JSON is extracted only for selected rows, retaining absent vs explicit null.
+ * No created_at fence, new index, deduplication or source-time substitution.
+ */
+function archiveWindowSql(bucket:string,paired=false):string {
+  const window=(date:number,from:number,to:number)=>`((${bucket}::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $${date}::date)
+      AND ((${bucket}::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $${from}::time)
+      AND ((${bucket}::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $${to}::time)`;
+  return paired?`((${window(2,3,4)}) OR (${window(5,6,7)}))`:window(2,3,4);
+}
+
+export function canonicalReplayReadSql(canonicalPcrOnly=false,paired=false,applicationOrder=false):string {
+  const clientOrder=applicationOrder&&!canonicalPcrOnly;
+  return `${canonicalPcrOnly?'WITH replay_archive AS MATERIALIZED (':''}
+    SELECT p."minuteBucket"::timestamptz AS minute_bucket,
+      p.symbol AS symbol, p."snapshotId" AS snapshot_id,
+      p."truthVerdict" AS truth_verdict, p."sourceTimestamp" AS source_timestamp,
+      p."calculationVersion" AS calculation_version,
+      ${clientOrder?'((EXTRACT(EPOCH FROM p."minuteBucket"::timestamptz)*1000000)::bigint)::text AS __h1_source_order_us,':''}
+      ${canonicalPcrOnly?"payload->'market' AS raw_market":"payload->'market' AS market"}
+    FROM app_state_log
+    CROSS JOIN LATERAL jsonb_to_record(
+      CASE WHEN jsonb_typeof(payload)='object' THEN payload ELSE '{}'::jsonb END
+    ) AS p("minuteBucket" text, symbol text, "snapshotId" text,
+      "truthVerdict" text, "sourceTimestamp" text, "calculationVersion" text)
+    WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'
+      AND payload->>'symbol' = $1
+      AND p.symbol = $1 AND p."minuteBucket" IS NOT NULL
+      AND ${archiveWindowSql('p."minuteBucket"',paired)}
+    ${clientOrder?'':'ORDER BY p."minuteBucket"::timestamptz ASC'}
+    ${canonicalPcrOnly?`) SELECT minute_bucket, symbol, snapshot_id, truth_verdict,
+      source_timestamp, calculation_version, ${canonicalPcrProjectionSql('raw_market')} AS market
+      FROM replay_archive ORDER BY minute_bucket ASC`:''}`;
+}
+
+/** Sort references rather than spilling wide raw JSON in PostgreSQL. The private
+ * numeric epoch key retains PostgreSQL's microsecond ordering across offsets;
+ * it is removed before any HTTP response, coverage calculation or evidence use.
+ * Equal-time peers keep their input order; SQL never promised a peer tie order.
+ */
+function orderCanonicalRows(rows:Record<string,unknown>[]){
+  return rows.map(source=>{
+    const {__h1_source_order_us,...row}=source;
+    const ms=Date.parse(String(row.minute_bucket));
+    const key=__h1_source_order_us===undefined?(Number.isFinite(ms)?BigInt(ms)*1000n:null):BigInt(String(__h1_source_order_us));
+    return {row,key};
+  }).sort((a,b)=>a.key===null||b.key===null?0:a.key<b.key?-1:a.key>b.key?1:0).map(x=>x.row);
+}
+
+function markerCte(paired=false): string {
   return `WITH markers AS (
     SELECT DISTINCT ON (payload->>'symbol', date_trunc('minute', (payload->>'minuteBucket')::timestamptz))
       payload->>'symbol' AS symbol,
@@ -230,9 +279,7 @@ function markerCte(): string {
     WHERE kind = 'H1_TRUTH_MARKER'
       AND payload->>'symbol' = $1
       AND payload->>'minuteBucket' IS NOT NULL
-      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
-      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
-      AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
+      AND ${archiveWindowSql("(payload->>'minuteBucket')",paired)}
     ORDER BY payload->>'symbol', date_trunc('minute', (payload->>'minuteBucket')::timestamptz), created_at DESC
   )`;
 }
@@ -249,6 +296,42 @@ export async function runH1ReplayHttp(request: H1ReplayRequest, canonicalPcrOnly
   }
 
   return runH1ReplayRead(request, rows, canonicalPcrOnly);
+}
+
+/** Two different sessions of the same index share only their archive scans.
+ * Each session retains its original normalized joins, coverage and error result.
+ * No cache survives this one request. A failed combined scan falls back once to
+ * each original query, so malformed/unavailable prior data cannot block current
+ * snapshot evidence that the old independent reader could still return.
+ */
+export async function runH1ReplayPairRead(requests:readonly [H1ReplayRequest,H1ReplayRequest],read:typeof rows):Promise<[H1ReplayHttpResult,H1ReplayHttpResult]> {
+  const [a,b]=requests;
+  if(a.symbol!==b.symbol||a.tradeDate===b.tradeDate)
+    return Promise.all(requests.map(q=>runH1ReplayRead(q,read))) as Promise<[H1ReplayHttpResult,H1ReplayHttpResult]>;
+  const singleMarker=`${markerCte()} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`;
+  const singleCanonical=canonicalReplayReadSql(false,false,true);
+  const params=[a.symbol,a.tradeDate,a.fromTime,a.toTime,b.tradeDate,b.fromTime,b.toTime];
+  const pending=new Map<string,Promise<Record<string,unknown>[]>>();
+  const belongs=(row:Record<string,unknown>,q:H1ReplayRequest)=>{
+    const ms=Date.parse(String(row.minute_bucket));
+    return Number.isFinite(ms)&&ms>=Date.parse(q.tradeDate+'T'+q.fromTime+':00+05:30')&&
+      ms<=Date.parse(q.tradeDate+'T'+q.toTime+':00+05:30');
+  };
+  const forSession=(q:H1ReplayRequest):typeof rows=>async<T extends Record<string,unknown>>(sql:string,values:unknown[]):Promise<T[]>=>{
+    if(sql!==singleMarker&&sql!==singleCanonical)return read<T>(sql,values);
+    if(!pending.has(sql)){
+      const combined=sql===singleMarker?`${markerCte(true)} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`:canonicalReplayReadSql(false,true,true);
+      pending.set(sql,Promise.resolve().then(()=>read(combined,params)));
+    }
+    try{return (await pending.get(sql)!).filter(row=>belongs(row,q)) as T[];}
+    catch{return read<T>(sql,values);}
+  };
+  return Promise.all(requests.map(q=>runH1ReplayRead(q,forSession(q)))) as Promise<[H1ReplayHttpResult,H1ReplayHttpResult]>;
+}
+
+export async function runH1ReplayPairHttp(requests:readonly [H1ReplayRequest,H1ReplayRequest]):Promise<[H1ReplayHttpResult,H1ReplayHttpResult]> {
+  if(!dbIsConfigured())return Promise.all(requests.map(q=>runH1ReplayHttp(q))) as Promise<[H1ReplayHttpResult,H1ReplayHttpResult]>;
+  return runH1ReplayPairRead(requests,rows);
 }
 
 /** One truth-marker read per request, frozen for all three normalized tables.
@@ -278,7 +361,7 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
       queryTimingsMs[label] = 0;
       return Promise.resolve([] as T[]);
     };
-    const [market, chain, options, canonical] = await Promise.all([
+    const [market, chain, options, canonicalRows] = await Promise.all([
       normalized("market", `${cte}
         SELECT
           m.symbol, m.minute_bucket, h.truth_verdict,
@@ -320,29 +403,10 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
         WHERE o.symbol = $1 AND o.minute_bucket >= $3::timestamptz AND o.minute_bucket <= $4::timestamptz
           AND ($5::text = 'FULL' OR o.atm_offset BETWEEN -7 AND 7)
         ORDER BY o.minute_bucket ASC, o.expiry ASC, o.strike ASC, o.option_type ASC`, [...tableParams, request.scope]),
-      timedRows<Record<string, unknown>>("canonical", `
-        ${canonicalPcrOnly ? "WITH replay_archive AS MATERIALIZED (" : ""}
-        SELECT
-          (payload->>'minuteBucket')::timestamptz AS minute_bucket,
-          payload->>'symbol' AS symbol,
-          payload->>'snapshotId' AS snapshot_id,
-          payload->>'truthVerdict' AS truth_verdict,
-          payload->>'sourceTimestamp' AS source_timestamp,
-          payload->>'calculationVersion' AS calculation_version,
-          ${canonicalPcrOnly ? "payload->'market' AS raw_market" : "payload->'market' AS market"}
-        FROM app_state_log
-        WHERE kind = 'H1_CANONICAL_MARKET_ARCHIVE'
-          AND payload->>'symbol' = $1
-          AND payload->>'minuteBucket' IS NOT NULL
-          AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::date = $2::date)
-          AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time >= $3::time)
-          AND (((payload->>'minuteBucket')::timestamptz AT TIME ZONE 'Asia/Kolkata')::time <= $4::time)
-        ORDER BY (payload->>'minuteBucket')::timestamptz ASC
-        ${canonicalPcrOnly ? `) SELECT minute_bucket, symbol, snapshot_id, truth_verdict,
-          source_timestamp, calculation_version, ${canonicalPcrProjectionSql('raw_market')} AS market
-          FROM replay_archive ORDER BY minute_bucket ASC` : ''}
-      `, params),
+      timedRows<Record<string, unknown>>("canonical", canonicalReplayReadSql(canonicalPcrOnly,false,!canonicalPcrOnly), params),
     ]);
+
+    const canonical=canonicalPcrOnly?canonicalRows:orderCanonicalRows(canonicalRows);
 
     const continuity = buildH1ReplayContinuity(request, markerRows, canonical);
     // Raw normalized counts are only observable for missing marker buckets.

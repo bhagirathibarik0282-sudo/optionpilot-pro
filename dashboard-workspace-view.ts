@@ -21,7 +21,8 @@ const oneEnd=LEGACY_WORKSPACE_NAV_HTML.indexOf('<details id="op-commodities"');
 const atmStart=LEGACY_WORKSPACE_NAV_HTML.indexOf('<details id="op-atm-weeklies"');
 const atmEnd=LEGACY_WORKSPACE_NAV_HTML.indexOf('</details><p class="op-one-note">One shared stream',atmStart)+10;
 const actualAtm=LEGACY_WORKSPACE_NAV_HTML.slice(atmStart,atmEnd);
-export const WORKSPACE_NAV_HTML=LEGACY_WORKSPACE_NAV_HTML.slice(0,oneStart)+'<nav id="op-view-links" aria-label="Chapter tools"></nav>'+renderOneShotCard(actualAtm)+LEGACY_WORKSPACE_NAV_HTML.slice(oneEnd);
+const RESEARCH_CONTROLS_HTML='<section id="op-research-controls" aria-label="Recorded research controls"><div><strong>Recorder Data</strong><small id="op-research-session">Saved session · unavailable</small></div><button id="op-research-open-data" type="button" aria-controls="recorded-replay">Open Data</button><button id="op-research-settings" type="button" aria-controls="mb-settings">Session / Index / Expiry</button></section>';
+export const WORKSPACE_NAV_HTML=LEGACY_WORKSPACE_NAV_HTML.slice(0,oneStart)+'<nav id="op-view-links" aria-label="Chapter tools"></nav>'+RESEARCH_CONTROLS_HTML+renderOneShotCard(actualAtm)+LEGACY_WORKSPACE_NAV_HTML.slice(oneEnd);
 
 export const WORKSPACE_TICKER_HTML=`<details id="op-ticker-tools"><summary>Market ticker</summary><div id="op-workspace-ticker" aria-label="Market snapshot"></div></details>`;
 
@@ -163,14 +164,27 @@ body[data-op-workspace] #market-book #mb-page.mb-renovated .mb-event{margin:7px 
 body[data-op-workspace] #market-book .mb-reading-guide{margin:6px 0;padding:8px}
 body[data-op-workspace] #market-book .mb-chapter-head{padding-bottom:6px;margin-bottom:6px;gap:5px}
 body[data-op-workspace] #market-book .mb-chapter-head .mb-eyebrow{display:none}
-/* Four chapters always fit the phone width; tools use one independent scroll row. */
-#market-book #op-chapter-links{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;overflow:visible}
+/* Reference-image navigation: six destinations, with touch-sized mobile rows. */
+#op-research-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px;border:1px solid #31546b;border-radius:10px;padding:8px;margin:4px 0 8px;background:#101a2a}
+#op-research-controls>div{flex:1;min-width:150px}#op-research-controls strong{color:#79f8e9}#op-research-controls small{display:block;color:var(--op-muted);overflow-wrap:anywhere}
+#market-book #op-research-controls button{min-height:44px;padding:7px 12px;font-size:14px}
+#market-book #op-research-open-data{border-color:#9569ed;color:#eadcff;background:#38215b}
+@media(max-width:600px){#op-research-controls>div{flex-basis:100%}#op-research-controls button{flex:1;min-width:0}}
+#market-book #op-chapter-links{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;overflow:visible}
 #market-book #op-chapter-links button{min-width:0;width:100%;padding:7px 3px;font-size:13px;justify-content:center;white-space:nowrap}
 #market-book #op-chapter-links button>span{font-size:10px}
 #op-view-links{display:flex;gap:5px;overflow-x:auto;max-width:100%;padding:3px 0 6px;scrollbar-width:thin}
 #market-book #op-view-links button{flex:0 0 auto;min-height:44px;font-size:13px;padding:6px 10px;white-space:nowrap}
 #op-view-links button[aria-pressed=true]{color:#79f8e9!important;border-color:#79f8e9!important;background:#17434b!important}
-@media(min-width:901px){#market-book #op-chapter-links{grid-template-columns:1fr}#market-book #op-chapter-links button{justify-content:flex-start;font-size:16px;padding:12px}}
+body[data-op-workspace] #market-book{padding:12px;min-width:0}
+#market-book #op-workspace-nav{position:static;width:auto;padding:0;margin:0 0 8px;background:transparent;border:0;border-radius:0}
+#market-book .op-rail-inner{position:static;display:grid;grid-template-columns:180px minmax(0,1fr);align-items:center;gap:10px}
+#market-book .op-rail-label,#market-book .op-rail-foot{display:none}
+#market-book .op-logo{display:flex;font-size:17px;gap:6px}
+#market-book .op-logo>span{font-size:17px}#market-book .op-logo b{display:inline;font-size:17px;letter-spacing:0;margin:0}
+@media(min-width:901px){#market-book #op-chapter-links{grid-template-columns:repeat(6,minmax(0,1fr))}}
+#market-book #op-chapter-links button{min-height:44px;white-space:normal;line-height:1.25}
+@media(max-width:900px){#market-book .op-rail-inner{display:block}#market-book .op-logo{display:none}}
 /* Dated cash context fits in a single compact card. */
 #market-book[data-chapter="11"] .mb-chapter-head,#market-book[data-chapter="11"] .mb-guide-shell{display:none}
 #market-book .mb-cash-scope{padding:6px 0;display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px}
@@ -190,34 +204,48 @@ ${ONE_SHOT_CSS}
 export function installDashboardWorkspace(api:any){
  const $=(id:string)=>document.getElementById(id) as any;if(!$('op-workspace-nav')||typeof document.querySelectorAll!=='function')return null;
  document.body.dataset.opWorkspace='true';
- // Four user-facing chapters reuse existing view IDs and source pipelines.
+ // Screenshot destinations reuse existing view IDs and source pipelines.
  // Old device chapter checkboxes cannot hide a chapter in this navigation.
  const chapters:string[]=api.chapters;let active=-1,group=0;
- const groups=[{name:'Market',views:[0,1,4,9,11,12]}, {name:'Premium',views:[7,2,3]},
-  {name:'Flow',views:[10,8,5]}, {name:'Replay',views:[7,6]}];
- const remembered=[0,7,10,7];
+ const groups=[{name:'Research',views:[0,6,12]}, {name:'Ladder',views:[7,2,3]},
+  {name:'Futures & Spot',views:[4,1]}, {name:'PCR & Flow',views:[5,9,11]},
+  {name:'Sector & Weight',views:[8,10]}, {name:'Memory & Replay',views:[7,6,10]}];
+ const replayGroup=5,remembered=[0,7,4,5,8,7];
+ // Open the existing saved-session UI; this action performs no fetch or replay.
+ const openResearchTool=(id:string)=>{
+  const tools=$('mb-tools'),target=$(id);if(!tools||!target)return;
+  tools.open=true;target.open=true;target.scrollIntoView?.({block:'start',behavior:'auto'});
+  target.querySelector?.('summary')?.focus?.();
+ };
+ if($('op-research-open-data'))$('op-research-open-data').onclick=()=>openResearchTool('recorded-replay');
+ if($('op-research-settings'))$('op-research-settings').onclick=()=>openResearchTool('mb-settings');
+ const researchScope=()=>{
+  const controls=$('op-research-controls');if(controls)controls.hidden=group!==0;
+  const label=$('op-research-session'),date=api.getState?.()?.date;
+  if(label)label.textContent=typeof date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(date)?'Saved session · '+date+' · recorded data':'Saved session · unavailable';
+ };
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const premium=installPremiumWorkspace({getState:api.getState,setDate:api.setDate,replay:api.replay});
  const resolveGroup=(page:number)=>groups[group].views.includes(page)?group:Math.max(0,groups.findIndex(g=>g.views.includes(page)));
  const draw=()=>{const page=api.page();group=resolveGroup(page);active=page;remembered[group]=page;
-  $('market-book')?.setAttribute('data-main-chapter',String(group+1));
+  $('market-book')?.setAttribute('data-main-chapter',String(group+1));researchScope();
   const buttons=groups.map((g,i)=>'<button type="button" data-op-group="'+i+'"'+(group===i?' aria-current="page"':'')+'><span>'+String(i+1).padStart(2,'0')+'</span> '+g.name+'</button>').join('');
   $('op-chapter-links').innerHTML=buttons;const command=$('op-command-chapters');if(command)command.innerHTML=buttons;
-  const tools=$('op-view-links');if(tools)tools.innerHTML=groups[group].views.map(i=>'<button type="button" data-op-view="'+i+'"'+(page===i?' aria-pressed="true"':' aria-pressed="false"')+'>'+esc(group===3&&i===7?'Recorded ladder':i===7?'Option chain':chapters[i])+'</button>').join('');
+  const tools=$('op-view-links');if(tools)tools.innerHTML=groups[group].views.map(i=>'<button type="button" data-op-view="'+i+'"'+(page===i?' aria-pressed="true"':' aria-pressed="false"')+'>'+esc(group===replayGroup&&i===7?'Recorded ladder':i===7?'Option chain':chapters[i])+'</button>').join('');
   if($('mb-chapter')){$('mb-chapter').innerHTML=groups.map((g,i)=>'<option value="'+i+'">'+String(i+1).padStart(2,'0')+' · '+g.name+'</option>').join('');$('mb-chapter').value=String(group);}
-  if($('mb-page-count'))$('mb-page-count').textContent=String(group+1).padStart(2,'0')+' / 4 · '+groups[group].name;
+  if($('mb-page-count'))$('mb-page-count').textContent=String(group+1).padStart(2,'0')+' / '+groups.length+' · '+groups[group].name;
   if($('mb-nav'))$('mb-nav').innerHTML=buttons;
  };
  const openChapter=(i:number,replay=false)=>{if(!Number.isInteger(i)||i<0||i>=chapters.length)return;
-  group=replay?3:Math.max(0,groups.findIndex(g=>g.views.includes(i)));api.turn(i);draw();};
+  group=replay?replayGroup:Math.max(0,groups.findIndex(g=>g.views.includes(i)));api.turn(i);draw();};
  const openGroup=(i:number)=>{if(!Number.isInteger(i)||i<0||i>=groups.length)return;group=i;const view=remembered[i];api.turn(view);
-  if(view===7)premium?.openLadder({source:i===3?'RECORDED':'LIVE'});draw();};
+  if(view===7)premium?.openLadder({source:i===replayGroup?'RECORDED':'LIVE'});draw();};
  const mainClick=(e:any)=>{const b=e.target.closest?.('[data-op-group]');if(b)openGroup(Number(b.dataset.opGroup));};
  $('op-chapter-links').onclick=mainClick;if($('op-command-chapters'))$('op-command-chapters').onclick=mainClick;
  if($('mb-nav'))$('mb-nav').onclick=mainClick;
- if($('op-view-links'))$('op-view-links').onclick=(e:any)=>{const b=e.target.closest?.('[data-op-view]'),i=Number(b?.dataset.opView);if(!b||!groups[group].views.includes(i))return;api.turn(i);if(i===7)premium?.openLadder({source:group===3?'RECORDED':'LIVE'});draw();};
+ if($('op-view-links'))$('op-view-links').onclick=(e:any)=>{const b=e.target.closest?.('[data-op-view]'),i=Number(b?.dataset.opView);if(!b||!groups[group].views.includes(i))return;api.turn(i);if(i===7)premium?.openLadder({source:group===replayGroup?'RECORDED':'LIVE'});draw();};
  if($('mb-chapter'))$('mb-chapter').onchange=()=>openGroup(Number($('mb-chapter').value));
- for(const [id,step] of [['mb-prev',-1],['mb-next',1]] as const)$(id).onclick=()=>openGroup((group+step+4)%4);
+ for(const [id,step] of [['mb-prev',-1],['mb-next',1]] as const)$(id).onclick=()=>openGroup((group+step+groups.length)%groups.length);
  window.addEventListener('optionpilot:open-premium-ladder',((e:any)=>{openChapter(7,e.detail?.source==='RECORDED');premium?.openLadder(e.detail);}) as EventListener);
 
  // Reuse the already-running shared Kite stream: no new source, query, timer or snapshot.
@@ -476,6 +504,6 @@ export function installDashboardWorkspace(api:any){
   }).join('');
   setHtml($('op-workspace-ticker'),tickerHtml);
  }) as EventListener);
- return {render(){if(active!==api.page())draw();oneShot?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
+ return {render(){if(active!==api.page())draw();researchScope();oneShot?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
 }
 

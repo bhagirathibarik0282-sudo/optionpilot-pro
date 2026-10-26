@@ -3,7 +3,7 @@ import { deriveRecordedPremiumResponse } from './premium-response-evidence.js';
 import { alignRecordedRagDte } from './rag-dte-replay-adapter.js';
 import type { Hono } from 'hono';
 import { parseH1FixedContractJourneyRequest } from './h1-fixed-contract-journey-http.js';
-import { parseH1ReplayRequest, runH1ReplayHttp, type H1ReplayHttpResult, type H1ReplayRequest } from './h1-replay-http.js';
+import { parseH1ReplayRequest, runH1ReplayHttp, runH1ReplayPairHttp, type H1ReplayHttpResult, type H1ReplayRequest } from './h1-replay-http.js';
 import { isCasTradingDate } from './cas-closing-memory.js';
 import { prepareMemoryData } from './intraday-observation-memory.js';
 
@@ -20,6 +20,9 @@ const day = (ms:number) => new Date(ms+19800000).toISOString().slice(0,10);
 const expiry = (r:Row) => iso(r.expiry)?.slice(0,10);
 const hash = (rows:unknown) => createHash('sha256').update(JSON.stringify(rows)).digest('hex');
 function one(rows:Row[]):Row|null {
+  // A single exact recorded row has no duplicate ambiguity. Avoid serializing
+  // its entire archived market JSON; retain full comparisons for multiple rows.
+  if(rows.length===1)return rows[0];
   const unique=new Map(rows.map(r=>[JSON.stringify(r),r]));
   return unique.size===1?[...unique.values()][0]:null;
 }
@@ -51,19 +54,50 @@ export function parseRagEventRequest(q:Record<string,string|undefined>): {ok:tru
 function marketAt(replay:H1ReplayHttpResult,r:RagEventRequest,ms:number):Row|null {
   return one((replay.market??[]).filter(m=>m.symbol===r.symbol&&iso(m.minute_bucket)===new Date(ms).toISOString()));
 }
-function quoteAt(replay:H1ReplayHttpResult,r:RagEventRequest,ms:number,side:string,cutoff=Infinity):Row|null {
+function quoteAt(replay:H1ReplayHttpResult,r:RagEventRequest,ms:number,side:string,cutoff=Infinity,diagnose?:(reason:string)=>void):Row|null {
+  const reject=(reason:string)=>{diagnose?.(reason);return null;};
   const m=marketAt(replay,r,ms);
-  if(!m||m.truth_verdict!=='TRUE'||!iso(m.backend_timestamp)||Date.parse(iso(m.backend_timestamp)!)>cutoff||ms>cutoff)return null;
+  if(!m)return reject('MARKET_RECORD_MISSING_OR_CONFLICTING');
+  if(m.truth_verdict!=='TRUE')return reject('MARKET_NOT_TRUE');
+  if(!iso(m.backend_timestamp))return reject('MARKET_RECEIPT_INVALID');
+  if(Date.parse(iso(m.backend_timestamp)!)>cutoff||ms>cutoff)return reject('MARKET_AFTER_CUTOFF');
   const rows=(replay.options??[]).filter(o=>o.symbol===r.symbol&&expiry(o)===r.expiry&&num(o.strike)===r.strike&&o.option_type===side&&iso(o.minute_bucket)===new Date(ms).toISOString());
   // Relative expiry aliases can duplicate an identical exact contract.
   const signatures=new Map(rows.map(o=>[JSON.stringify([o.ltp,o.oi,o.quote_timestamp,o.snapshot_id,o.truth_verdict,o.day_high,o.day_low]),o]));
-  if(signatures.size!==1)return null;
+  if(signatures.size!==1)return reject(rows.length?'CONFLICTING_EXACT_QUOTES':'EXACT_CONTRACT_NOT_RECORDED');
   const q=[...signatures.values()][0],qt=iso(q.quote_timestamp),price=num(q.ltp);
-  if(!qt||price===null||price<=0||q.truth_verdict!=='TRUE'||!q.snapshot_id||q.snapshot_id!==m.snapshot_id)return null;
+  if(!qt)return reject('QUOTE_TIMESTAMP_INVALID');
+  if(price===null||price<=0)return reject('PREMIUM_INVALID');
+  if(q.truth_verdict!=='TRUE')return reject('QUOTE_NOT_TRUE');
+  if(!q.snapshot_id)return reject('QUOTE_SNAPSHOT_ID_MISSING');
+  if(q.snapshot_id!==m.snapshot_id)return reject('QUOTE_SNAPSHOT_ID_MISMATCH');
   const age=(Date.parse(iso(m.backend_timestamp)!)-Date.parse(qt))/1000;
-  if(day(Date.parse(qt))!==day(ms)||age< -5||age>30||Date.parse(qt)>cutoff)return null;
+  if(day(Date.parse(qt))!==day(ms))return reject('QUOTE_WRONG_SESSION');
+  if(age< -5)return reject('QUOTE_AFTER_RECEIPT_TOLERANCE');
+  if(age>30)return reject('QUOTE_STALE_AT_RECEIPT');
+  if(Date.parse(qt)>cutoff)return reject('QUOTE_AFTER_CUTOFF');
+  diagnose?.('ADMITTED');
   return {price,oi:num(q.oi),quoteAt:qt,receiptAt:iso(m.backend_timestamp),snapshotId:q.snapshot_id,
     quoteAgeSeconds:age,dayHigh:num(q.day_high),dayLow:num(q.day_low),storedPdh:num(q.pdh),storedPdl:num(q.pdl)};
+}
+/** Internal allowlisted diagnostic using the SAME admission path. No raw rows,
+ * prices, SQL or credentials; this does not weaken or replace quote admission. */
+export function inspectRagSnapshotAdmission(r:RagEventRequest,current:H1ReplayHttpResult){
+  const ms=at(r.date,r.time);let reason='UNINSPECTED';
+  let selected:Row|null=null;
+  if(!current.ok)reason='REPLAY_SOURCE_UNAVAILABLE';
+  else if(current.request?.symbol!==r.symbol||current.request.tradeDate!==r.date)reason='REPLAY_SOURCE_IDENTITY_MISMATCH';
+  else selected=quoteAt(current,r,ms,r.side,r.asOf,value=>{reason=value;});
+  const marketRows=(current.market??[]).filter(m=>m.symbol===r.symbol&&iso(m.minute_bucket)===new Date(ms).toISOString());
+  const rows=(current.options??[]).filter(o=>o.symbol===r.symbol&&iso(o.minute_bucket)===new Date(ms).toISOString());
+  const exactExpiry=rows.filter(o=>expiry(o)===r.expiry),exactSide=exactExpiry.filter(o=>o.option_type===r.side);
+  const strikes=[...new Set(exactSide.map(o=>num(o.strike)).filter((s):s is number=>s!==null&&s>0))];
+  return {admitted:!!selected,reason,marketRows:marketRows.length,optionRows:rows.length,
+    exactExpiryRows:exactExpiry.length,exactSideRows:exactSide.length,
+    exactContractRows:exactSide.filter(o=>num(o.strike)===r.strike).length,
+    recordedExpiries:[...new Set(rows.map(o=>expiry(o)).filter(Boolean))].sort().slice(0,16),
+    expiryInventoryTruncated:new Set(rows.map(o=>expiry(o)).filter(Boolean)).size>16,
+    exactSideStrikeCount:strikes.length,minStrike:strikes.length?Math.min(...strikes):null,maxStrike:strikes.length?Math.max(...strikes):null};
 }
 // Corroborate the old writer's wall against its exact archived input. This is
 // only the maximum OI among loaded strikes, never certified exchange-wide OI.
@@ -117,6 +151,10 @@ function evidenceCheckpoint(r:RagEventRequest,current:H1ReplayHttpResult,eventMs
       context:{spot:num(market.spot_ltp),pdc:num(market.spot_prev_close),pdh:num(market.pdh),pdl:num(market.pdl),vix:num(market.india_vix),
         futures:num(market.future_ltp),futuresOi:num(market.future_oi),fullPcr:normalizedPcr??canonicalPcr,
         fullPcrSource:normalizedPcr!==null?chain?.full_pcr_source:canonicalPcr!==null?'Exact canonical full-chain source':chain?.full_pcr_source??null,
+        // Optional Recorder-RAG provenance: only the independently reconciled
+        // canonical branch has a trustworthy source time. A normalized label
+        // alone cannot authorize event-time PCR evidence.
+        fullPcrCanonicalSourceAt:normalizedPcr===null&&canonicalPcr!==null?sourceAt:null,
         ceWall:num(chain?.call_wall_strike)??ceWall?.strike??null,peWall:num(chain?.put_wall_strike)??peWall?.strike??null,
         ceWallOi:num(chain?.call_wall_oi)??ceWall?.oi??null,peWallOi:num(chain?.put_wall_oi)??peWall?.oi??null,
         wallEvidence:{CE:ceWall,PE:peWall}}};
@@ -126,10 +164,15 @@ function reconciledReference(r:RagEventRequest,prior:H1ReplayHttpResult){
   const fail=(reason:string)=>({ok:false as const,reason});const previous=previousRagSession(r.date);
   if(!prior.ok)return fail('REPLAY_SOURCE_UNAVAILABLE');
   if(prior.request?.symbol!==r.symbol||prior.request.tradeDate!==previous)return fail('REPLAY_SOURCE_IDENTITY_MISMATCH');
-  const end=at(previous!,'15:30'),terminal=quoteAt(prior,r,end,r.side,r.asOf);
+  // Repeated prior-session checkpoints need only this exact contract. Retain
+  // every duplicate/invalid quote for the existing point-level guards, but do
+  // not re-parse every unrelated strike/expiry for each historical timestamp.
+  const contractRows=(prior.options??[]).filter(o=>o.symbol===r.symbol&&expiry(o)===r.expiry&&num(o.strike)===r.strike&&o.option_type===r.side);
+  const contractView={...prior,options:contractRows};
+  const end=at(previous!,'15:30'),terminal=quoteAt(contractView,r,end,r.side,r.asOf);
   if(!terminal||terminal.dayHigh===null||terminal.dayLow===null||terminal.dayLow<=0||terminal.dayHigh<terminal.dayLow)return fail('PREVIOUS_REFERENCE_UNAVAILABLE');
-  const priorTimes=[...new Set((prior.options??[]).filter(o=>o.symbol===r.symbol&&expiry(o)===r.expiry&&num(o.strike)===r.strike&&o.option_type===r.side).map(o=>iso(o.minute_bucket)))].filter((s):s is string=>s!==null);
-  const referenceRows=priorTimes.filter(s=>day(Date.parse(s))===previous).map(s=>quoteAt(prior,r,Date.parse(s),r.side,r.asOf)).filter((q):q is Row=>q!==null);
+  const priorTimes=[...new Set(contractRows.map(o=>iso(o.minute_bucket)))].filter((s):s is string=>s!==null);
+  const referenceRows=priorTimes.filter(s=>day(Date.parse(s))===previous).map(s=>quoteAt(contractView,r,Date.parse(s),r.side,r.asOf)).filter((q):q is Row=>q!==null);
   if(referenceRows.some(q=>q.dayHigh===null||q.dayLow===null||q.dayLow<=0||q.dayHigh<q.dayLow)||
     Math.max(...referenceRows.map(q=>q.dayHigh))!==terminal.dayHigh||Math.min(...referenceRows.map(q=>q.dayLow))!==terminal.dayLow)return fail('PREVIOUS_REFERENCE_INCONSISTENT');
   return {ok:true as const,terminal:terminal!,referenceRows,previous};
@@ -177,7 +220,11 @@ export function buildRagPremiumSnapshot(r:RagEventRequest,current:H1ReplayHttpRe
   const reaction=(side:string,q:Row|null,p:Row|null,delta:number|null)=>side+' '+(q?'₹'+q.price.toFixed(2):'ଅନୁପଲବ୍ଧ')+'; '+lookback+'m '+(p&&q?'₹'+p.price.toFixed(2)+' → ₹'+q.price.toFixed(2)+' ('+(delta!>0?'+':'')+delta!.toFixed(2)+'%)':'exact baseline ଅନୁପଲବ୍ଧ');
   const point=beforeAndAt.at(-1),pairComplete=beforeAndAt.every(p=>p?.pair.ce&&p?.pair.pe)&&outcomes.every(p=>p?.pair.ce&&p?.pair.pe);
   const sourceRows={beforeAndAt,outcomes,previous:referenceResult.ok?referenceResult.referenceRows:[]};
-  const multiDte=lookback===3?alignRecordedRagDte(current,{symbol:r.symbol,date:r.date,strike:r.strike,side:r.side,timeIst:r.time},r.asOf):null;
+  // A selected snapshot's cross-expiry comparison is EVENT-TIME evidence:
+  // never use a different expiry quote acquired after the selected premium
+  // was first known, even if the replay reader later contains that quote.
+  const selectedKnownAt=Math.max(Date.parse(selected.receiptAt),Date.parse(selected.quoteAt));
+  const multiDte=lookback===3?alignRecordedRagDte(current,{symbol:r.symbol,date:r.date,strike:r.strike,side:r.side,timeIst:r.time},Math.min(r.asOf,selectedKnownAt)):null;
   return {ok:true,status:pairComplete&&reference?'COMPLETE':'PARTIAL',mode:'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1',source:'EXISTING_POSTGRES_H1_REPLAY',safety:SAFETY,
     identity:{symbol:r.symbol,date:r.date,expiry:r.expiry,strike:r.strike,side:r.side,dte:Math.round((Date.parse(r.expiry)-Date.parse(r.date))/86400000)},
     event:{timeIst:r.time,flags:[],before:before?.price??null,after:selected.price,availableAt:new Date(Math.max(Date.parse(selected.receiptAt),Date.parse(selected.quoteAt))).toISOString()},
@@ -188,13 +235,16 @@ export function buildRagPremiumSnapshot(r:RagEventRequest,current:H1ReplayHttpRe
     answer:r.date+' '+r.symbol+' '+r.strike+' · expiry '+r.expiry+' · '+r.time+' IST: '+reaction(r.side,selected,before,selectedChange)+'। Opposite '+reaction(otherSide,opposite,otherBefore,oppositeChange)+'। '+(reference?'Previous-session PDH ₹'+reference.pdh.toFixed(2)+' / PDL ₹'+reference.pdl.toFixed(2)+'।':'Previous-session PDH/PDL reference ଅନୁପଲବ୍ଧ।')+(point?.context.fullPcr!==null&&point?.context.fullPcr!==undefined?' Full PCR '+point.context.fullPcr.toFixed(4)+'।':''),
     limitations:['Structured retrieval and deterministic answer; no embeddings or LLM call.','Snapshot describes recorded endpoints; no crossing or causality claim.','Missing endpoints remain unavailable; no interpolated 1/5-minute response.']};
 }
-export async function readRagEventEvidence(r:RagEventRequest,read=runH1ReplayHttp) {
+export async function readRagEventEvidence(r:RagEventRequest,read?:typeof runH1ReplayHttp,readPair=runH1ReplayPairHttp) {
   const previous=previousRagSession(r.date)!;
   const eventMs=at(r.date,r.time),toMs=Math.min(at(r.date,'15:30'),eventMs+(r.includeOutcomes?30:0)*60000,r.asOf);
   if(toMs<eventMs)return {ok:false,status:'BLOCKED',reason:'EVENT_AFTER_CUTOFF',safety:SAFETY};
-  const [currentRead,priorRead]=await Promise.allSettled([
-    read({symbol:r.symbol,tradeDate:r.date,fromTime:clock(Math.max(at(r.date,'09:15'),eventMs-Math.max(30,r.kind==='SNAPSHOT'?(r.lookback??3):30)*60000)),toTime:clock(toMs),scope:'FULL'}),
-    read({symbol:r.symbol,tradeDate:previous,fromTime:'09:15',toTime:'15:30',scope:'FULL'})]);
+  const requests:readonly [H1ReplayRequest,H1ReplayRequest]=[
+    {symbol:r.symbol,tradeDate:r.date,fromTime:clock(Math.max(at(r.date,'09:15'),eventMs-Math.max(30,r.kind==='SNAPSHOT'?(r.lookback??3):30)*60000)),toTime:clock(toMs),scope:'FULL'},
+    {symbol:r.symbol,tradeDate:previous,fromTime:'09:15',toTime:'15:30',scope:'FULL'}];
+  const paired=read?null:readPair(requests);
+  const [currentRead,priorRead]=await Promise.allSettled(read?requests.map(q=>read(q)):
+    [paired!.then(values=>values[0]),paired!.then(values=>values[1])]);
   const unavailable:H1ReplayHttpResult={ok:false,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request:null};
   const current=currentRead.status==='fulfilled'?currentRead.value:unavailable,prior=priorRead.status==='fulfilled'?priorRead.value:unavailable;
   return r.kind==='SNAPSHOT'?buildRagPremiumSnapshot(r,current,prior):buildRagEventEvidence(r,current,prior);

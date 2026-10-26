@@ -1,0 +1,25 @@
+{
+  "status": "DECLARED_FOR_RESEARCH_VALIDATION_ONLY",
+  "continuationBasis": "User instructed Move to next after reviewing and double-checking the first rule proposal.",
+  "rule": {
+    "version": "RECORDER_PREMIUM_UP_10PCT_15M_V1",
+    "declaredAt": "2026-10-26T04:50:51.000Z",
+    "features": ["PREMIUM_3M_DIRECTION", "SPOT_VS_PDC"],
+    "horizonMinutes": 15,
+    "movement": "INCREASE",
+    "minimumMovePct": 10,
+    "minIndependentSessions": 5
+  },
+  "matching": ["same index", "same option side", "same calendar DTE", "same event minute", "same relative moneyness sign", "same exact three-minute premium-change direction", "same spot position relative to PDC"],
+  "sourceBounds": {"maxRecordedDates": 20, "maxContractsPerSession": 64, "concurrency": 1, "retries": 0},
+  "activation": {"dashboardPercentage": false, "backgroundJob": false, "telegram": false, "execution": false},
+  "validation": {"fixtureTestsPreviouslyPassed": 35, "actualMatchingHistoryValidated": false, "actualMatchCount": null, "actualOutcomeRatePct": null},
+  "limitations": [
+    "No backdating: targets must become known at or after the actual declaration timestamp.",
+    "Earlier sessions can supply historical episodes; each keeps its own fixed contract.",
+    "Five distinct sessions is a research support floor, not an accuracy guarantee or proof of independence.",
+    "No PDH/PDL crossing, O=H, PCR/wall, sector or multi-DTE matching is implemented.",
+    "Endpoint premium increase is not target-before-stop trade success or profitability.",
+    "Missing, conflicting or insufficient evidence keeps the percentage unavailable."
+  ]
+}

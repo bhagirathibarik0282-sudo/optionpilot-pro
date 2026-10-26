@@ -1,0 +1,48 @@
+name: PR799 Offline Recorder Browser Bundle
+on:
+  pull_request:
+    paths:
+      - 'scripts/pr799-saved-recorder-preview.ts'
+      - 'pr799-recorder-preview.ts'
+      - 'recorded-replay-view.ts'
+      - 'rag-recorder-event-ladder-bridge.ts'
+      - 'rag-event-context-ladder-view.ts'
+      - '.github/workflows/pr799-offline-browser-bundle-ci.yml'
+permissions:
+  contents: read
+jobs:
+  package-no-data-preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ''
+      KITE_API_KEY: ''
+      KITE_API_SECRET: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install existing dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Bundle the actual preview renderer, without source records
+        run: |
+          mkdir -p pr799-offline-browser
+          ./node_modules/.bin/esbuild scripts/pr799-saved-recorder-preview.ts --bundle --platform=node --target=node22 --format=cjs --external:pg-native --outfile=pr799-offline-browser/recorder-preview.cjs
+          test -s pr799-offline-browser/recorder-preview.cjs
+      - name: Confirm bundle fails closed without archived file and credentials
+        run: |
+          if node pr799-offline-browser/recorder-preview.cjs >pr799-offline-browser/preflight.log 2>&1; then
+            echo 'FATAL: preview started without private configuration'
+            exit 1
+          fi
+          grep -q 'PR799_SAVED_PREVIEW_FAILED_NO_SERVER_STARTED' pr799-offline-browser/preflight.log
+          rm pr799-offline-browser/preflight.log
+      - name: Save private-repository source bundle only (no market data)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr799-source-only-offline-browser-bundle
+          path: pr799-offline-browser/recorder-preview.cjs
+          if-no-files-found: error
+          retention-days: 1

@@ -56,48 +56,62 @@ function normalizeHtmlText(value: string): string {
   return value.replace(/&nbsp;/gi, " ").replace(/\s+/g, " ").toLowerCase();
 }
 
-export async function probeOfficialSevenIndexPages(fetchImpl: typeof fetch = fetch): Promise<SevenIndexSourceProbeResult> {
-  const rows: SevenIndexSourceProbeRow[] = [];
-  const blockers: string[] = [];
-  for (const indexId of CANONICAL_SEVEN_INDEX_SCOPE) {
+export async function probeOfficialSevenIndexPages(
+  fetchImpl: typeof fetch = fetch,
+  timeoutMs = 10_000,
+): Promise<SevenIndexSourceProbeResult> {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10_000)
+    throw new RangeError('Source probe timeout must be between 1 and 10000ms');
+  // Seven fixed, independent identity checks share no session state. Bound the
+  // whole request AND body read, so one stalled page cannot strand the CI job.
+  // Promise.all preserves the frozen index order; no retry or alternate source.
+  const rows = await Promise.all(CANONICAL_SEVEN_INDEX_SCOPE.map(async (indexId): Promise<SevenIndexSourceProbeRow> => {
     const officialName = SEVEN_INDEX_OFFICIAL_PAGE_NAMES[indexId];
     const sourceUrl = officialSevenIndexPageUrl(indexId);
     if (!validOfficialUrl(sourceUrl)) {
       const blocker = `SEVEN_INDEX_SOURCE_URL_INVALID:${indexId}`;
-      blockers.push(blocker);
-      rows.push({ indexId, officialName, sourceUrl, ok: false, status: null, blocker });
-      continue;
+      return { indexId, officialName, sourceUrl, ok: false, status: null, blocker };
     }
+    const controller = new AbortController();
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        reject(new Error('SEVEN_INDEX_SOURCE_TIMEOUT'));
+      }, timeoutMs);
+    });
     try {
-      const response = await fetchImpl(sourceUrl, {
+      const response = await Promise.race([fetchImpl(sourceUrl, {
+        signal: controller.signal,
         headers: {
           "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
           accept: "text/html,application/xhtml+xml",
           "accept-language": "en-US,en;q=0.9",
         },
-      });
+      }), deadline]);
       if (!response.ok) {
         const blocker = `SEVEN_INDEX_SOURCE_HTTP_${response.status}:${indexId}`;
-        blockers.push(blocker);
-        rows.push({ indexId, officialName, sourceUrl, ok: false, status: response.status, blocker });
-        continue;
+        return { indexId, officialName, sourceUrl, ok: false, status: response.status, blocker };
       }
-      const body = normalizeHtmlText(await response.text());
+      const body = normalizeHtmlText(await Promise.race([response.text(), deadline]));
       const hasIndexMovers = body.includes("index movers");
       const hasIdentity = body.includes(officialName.toLowerCase());
       if (!hasIndexMovers || !hasIdentity) {
         const blocker = `SEVEN_INDEX_SOURCE_IDENTITY_MISMATCH:${indexId}`;
-        blockers.push(blocker);
-        rows.push({ indexId, officialName, sourceUrl, ok: false, status: response.status, blocker });
-        continue;
+        return { indexId, officialName, sourceUrl, ok: false, status: response.status, blocker };
       }
-      rows.push({ indexId, officialName, sourceUrl, ok: true, status: response.status, blocker: null });
+      return { indexId, officialName, sourceUrl, ok: true, status: response.status, blocker: null };
     } catch {
-      const blocker = `SEVEN_INDEX_SOURCE_FETCH_FAILED:${indexId}`;
-      blockers.push(blocker);
-      rows.push({ indexId, officialName, sourceUrl, ok: false, status: null, blocker });
+      const blocker = `${timedOut ? 'SEVEN_INDEX_SOURCE_TIMEOUT' : 'SEVEN_INDEX_SOURCE_FETCH_FAILED'}:${indexId}`;
+      return { indexId, officialName, sourceUrl, ok: false, status: null, blocker };
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
     }
-  }
+  }));
+  const blockers = rows.flatMap(row => row.blocker ? [row.blocker] : []);
   return {
     version: CANONICAL_SEVEN_INDEX_LIVE_SOURCE_PROBE_V1,
     ready: blockers.length === 0 && rows.length === CANONICAL_SEVEN_INDEX_SCOPE.length && rows.every((row) => row.ok),

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {Hono} from 'hono';
-import {parseRagEventRequest,buildRagEventEvidence,buildRagPremiumSnapshot,readRagEventEvidence,mountRagEventEvidenceRoute} from '../rag-event-evidence.js';
+import {parseRagEventRequest,buildRagEventEvidence,buildRagPremiumSnapshot,inspectRagSnapshotAdmission,readRagEventEvidence,mountRagEventEvidenceRoute} from '../rag-event-evidence.js';
 import type {H1ReplayHttpResult} from '../h1-replay-http.js';
 const query={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
 const request=(extra:Record<string,string>={})=>{const p=parseRagEventRequest({...query,...extra});assert.ok(p.ok);return p.value;};
@@ -19,6 +19,42 @@ function fixture(date:string):H1ReplayHttpResult {
  return {ok:true,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request:{symbol:'NIFTY',tradeDate:date,fromTime:'09:15',toTime:'15:30',scope:'CORE'},market,options,chain};
 }
 const result=(extra:Record<string,string>={})=>buildRagEventEvidence(request(extra),fixture('2026-10-13'),fixture('2026-10-12'));
+test('internal rejection diagnostic follows quote admission and exposes only bounded counts/identity inventory',()=>{
+ const cases:[string,(c:any)=>void][]=[
+  ['ADMITTED',()=>{}],['EXACT_CONTRACT_NOT_RECORDED',c=>{c.options=c.options.filter((o:any)=>o.option_type!=='PE');}],
+  ['REPLAY_SOURCE_UNAVAILABLE',c=>{c.ok=false;}],['REPLAY_SOURCE_IDENTITY_MISMATCH',c=>{c.request.symbol='SENSEX';}],
+  ['MARKET_NOT_TRUE',c=>{c.market.forEach((m:any)=>m.truth_verdict='UNKNOWN');}],
+  ['QUOTE_SNAPSHOT_ID_MISMATCH',c=>{c.options.forEach((o:any)=>o.snapshot_id='wrong');}],
+  ['QUOTE_STALE_AT_RECEIPT',c=>{c.options.forEach((o:any)=>o.quote_timestamp=new Date(Date.parse(o.quote_timestamp)-60000).toISOString());}],
+  ['CONFLICTING_EXACT_QUOTES',c=>{c.options.push({...c.options.find((o:any)=>o.option_type==='PE'&&o.minute_bucket==='2026-10-13T04:06:00.000Z'),ltp:999});}]
+ ];
+ for(const [reason,mutate] of cases){const current=fixture('2026-10-13');mutate(current);const r=request({kind:'SNAPSHOT'});
+  const diagnostic=inspectRagSnapshotAdmission(r,current),snapshot=buildRagPremiumSnapshot(r,current,fixture('2026-10-12'));
+  assert.equal(diagnostic.reason,reason);assert.equal(diagnostic.admitted,snapshot.ok);assert.equal(diagnostic.admitted,reason==='ADMITTED');
+  assert(!JSON.stringify(diagnostic).includes('quote_timestamp'));assert(!JSON.stringify(diagnostic).includes('ltp'));
+ }
+});
+test('prior reference work stays bounded with many unrelated strikes and still rejects conflicting duplicates',()=>{
+ const prior=fixture('2026-10-12'),market=prior.market![0],quote=prior.options!.find(o=>o.option_type==='PE')!;
+ prior.market=[];prior.options=[];
+ let expiryReads=0;
+ const instrumentedExpiry={toString(){expiryReads++;return '2026-10-13';}};
+ for(let i=0;i<126;i++){
+   const bucket=new Date(Date.parse('2026-10-12T09:15:00+05:30')+i*180000).toISOString();
+   const receipt=new Date(Date.parse(bucket)+24000).toISOString(),snapshot_id='prior-'+i;
+   prior.market.push({...market,minute_bucket:bucket,backend_timestamp:receipt,snapshot_id});
+   for(let k=0;k<101;k++)prior.options.push({...quote,expiry:instrumentedExpiry,strike:22300+k*50,
+     minute_bucket:bucket,backend_timestamp:receipt,quote_timestamp:receipt,snapshot_id,ltp:20,day_high:73.85,day_low:11.6});
+ }
+ const out=buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),fixture('2026-10-13'),prior);
+ assert.ok(out.ok);assert.equal(out.reference?.pdh,73.85);assert.equal(out.reference?.pdl,11.6);
+ assert(expiryReads<100000,'do not re-parse the full unrelated option inventory for every prior checkpoint');
+ assert.equal(prior.options.length,12726,'source inventory must not be mutated or clipped');
+ const terminal=prior.options.find(o=>o.strike===22300&&o.minute_bucket==='2026-10-12T10:00:00.000Z')!;
+ prior.options.push({...terminal,ltp:999});
+ const conflict=buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),fixture('2026-10-13'),prior);
+ assert.ok(conflict.ok);assert.equal(conflict.reference,null);assert.equal(conflict.referenceUnavailableReason,'PREVIOUS_REFERENCE_UNAVAILABLE');
+});
 test('mixed-version loaded OI maxima require exact canonical corroboration, including alias conflicts',()=>{
  const c=fixture('2026-10-13');
  for(const m of c.market!)m.calculation_version='H1_RUNTIME_BRIDGE_V1';
@@ -57,6 +93,7 @@ test('mixed-version chain recovers only snapshot-matched canonical current-expir
  for(const row of c.chain!)Object.assign(row,{call_wall_strike:22500,put_wall_strike:22300});
  const run=()=>{const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT'}),c,fixture('2026-10-12'));assert.ok(r.ok);return r.beforeAndAt.at(-1)!.context;};
  assert.equal(run().fullPcr,1.23);assert.equal(run().fullPcrSource,'Exact canonical full-chain source');
+ assert.equal(run().fullPcrCanonicalSourceAt,new Date(Date.parse('2026-10-13T09:36:00+05:30')+24000).toISOString());
  assert.equal(run().ceWall,null);assert.equal(run().peWall,null);
  const target=c.canonical.find(row=>row.minute_bucket==='2026-10-13T04:06:00.000Z')!;
  const original=structuredClone(target);
@@ -71,7 +108,7 @@ test('mixed-version chain recovers only snapshot-matched canonical current-expir
   (v:any)=>v.market.gapScore.fullChainPcr=-1,
   (v:any)=>v.source_timestamp='2026-10-13T04:07:01Z',
   (v:any)=>v.source_timestamp='2026-10-13T04:05:59Z',
- ]){Object.assign(target,structuredClone(original));mutate(target);assert.equal(run().fullPcr,null);}
+ ]){Object.assign(target,structuredClone(original));mutate(target);assert.equal(run().fullPcr,null);assert.equal(run().fullPcrCanonicalSourceAt,null);}
  Object.assign(target,structuredClone(original));
  const cutoff=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',asOf:'2026-10-13T09:36:25'}),c,fixture('2026-10-12'));
  assert.ok(cutoff.ok);target.source_timestamp='2026-10-13T04:06:26Z';
@@ -113,6 +150,17 @@ test('read wrapper calls only existing replay twice with bounded windows',async(
  assert.ok(r.ok);
  assert.equal(r.premiumResponse.status,'MEASURED');assert.equal(r.premiumResponse.change!.price,r.premiumResponse.current!.price-r.premiumResponse.before!.price);
  assert.equal(r.premiumResponse.change!.spot,r.premiumResponse.current!.spot-r.premiumResponse.before!.spot);assert.equal(r.premiumResponse.modelAttribution.status,'UNAVAILABLE');assert.equal(calls.length,2);assert.equal(calls[0].fromTime,'09:15');assert.equal(calls[0].toTime,'09:36');assert.equal(calls[1].tradeDate,'2026-10-12');
+});
+test('default RAG path uses one request-scoped paired reader without changing evidence',async()=>{
+ let pairs=0;
+ const r=request({kind:'SNAPSHOT'});
+ const result=await readRagEventEvidence(r,undefined,async qs=>{
+   pairs++;assert.equal(qs.length,2);assert.equal(qs[0].tradeDate,r.date);
+   assert.equal(qs[1].tradeDate,'2026-10-12');assert(qs.every(q=>q.scope==='FULL'));
+   return [fixture(qs[0].tradeDate),fixture(qs[1].tradeDate)];
+ });
+ assert.equal(pairs,1);
+ assert.deepEqual(result,buildRagPremiumSnapshot(r,fixture(r.date),fixture('2026-10-12')));
 });
 test('GET route validates, catches unavailable sources, never offers POST',async()=>{
  const app=new Hono();mountRagEventEvidenceRoute(app,async r=>result());
@@ -203,4 +251,22 @@ test('RAG snapshot does not infer multi-DTE for non-3m windows',()=>{
  const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',lookback:'5'}),fixture('2026-10-13'),fixture('2026-10-12'));
  assert.ok(r.ok);
  assert.equal(r.multiDte,null);
+});
+
+test('RAG snapshot excludes later cross-expiry quotes from event-time direction agreement',()=>{
+ const current=fixture('2026-10-13');
+ const eventBucket=new Date('2026-10-13T09:36:00+05:30').toISOString();
+ const other=current.options!.filter((o:any)=>o.option_type==='PE'&&
+   ['09:33','09:36'].some(t=>o.minute_bucket===new Date('2026-10-13T'+t+':00+05:30').toISOString()))
+   .map((o:any)=>({...o,expiry:'2026-10-20'}));
+ const late=other.find((o:any)=>o.minute_bucket===eventBucket);
+ assert.ok(late);
+ late.quote_timestamp=new Date(Date.parse(late.quote_timestamp)+2000).toISOString();
+ current.options!.push(...other);
+ const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',lookback:'3'}),current,fixture('2026-10-12'));
+ assert.equal(r.ok,true);
+ assert.equal(r.event.availableAt,new Date(Date.parse(eventBucket)+24000).toISOString());
+ assert.deepEqual(r.multiDte?.accepted.map((x:any)=>x.expiry),['2026-10-13']);
+ assert.equal(r.multiDte?.blocked.find((x:any)=>x.expiry==='2026-10-20')?.reason,'UNVERIFIED_OR_AFTER_CUTOFF');
+ assert.equal(r.multiDte?.direction.agreement,'NOT_ESTABLISHED');
 });

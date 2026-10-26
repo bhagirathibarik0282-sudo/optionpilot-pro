@@ -4,6 +4,7 @@ import { mountDashboardLiveRoutes } from './dashboard-live-http.js';
 import { renderRagEvidencePage } from './rag-evidence-card.js';
 import { Hono } from "hono";
 import { mountRagEventEvidenceRoute } from './rag-event-evidence.js';
+import { mountRecorderEventContextLadderRoute } from './rag-recorder-event-ladder-bridge.js';
 import { mountSameDteHistoryRoute } from './rag-same-dte-history-http.js';
 import {
   getResearchIndexReadiness,
@@ -64,6 +65,7 @@ export const researchRouter = new Hono();
 mountPremiumSpreadRoutes(researchRouter);
 mountDashboardLiveRoutes(researchRouter);
 mountRagEventEvidenceRoute(researchRouter);
+mountRecorderEventContextLadderRoute(researchRouter);
 mountSameDteHistoryRoute(researchRouter);
 researchRouter.get('/rag-event-evidence/view',c=>{c.header('Cache-Control','no-store');return c.html(renderRagEvidencePage());});
 

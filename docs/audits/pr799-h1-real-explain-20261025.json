@@ -1,0 +1,117 @@
+{
+  "date": "2026-10-25",
+  "deploymentId": "e9c29276-4d8b-414a-b48d-25daf2a1cc26",
+  "serviceId": "80eb98a3-3b18-4256-bece-afb2f8f0c8dc",
+  "readOnlyConfirmed": true,
+  "analyze": false,
+  "archiveSelectExecuted": false,
+  "completionConfirmed": true,
+  "request": {
+    "symbol": "NIFTY",
+    "date": "2026-10-19",
+    "from": "10:45",
+    "to": "10:45"
+  },
+  "plans": {
+    "markers": [
+      {
+        "Plan": {
+          "Node Type": "Subquery Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Alias": "markers",
+          "Startup Cost": 17908.01,
+          "Total Cost": 17908.03,
+          "Plan Rows": 1,
+          "Plan Width": 40,
+          "Disabled": false,
+          "Plans": [
+            {
+              "Node Type": "Unique",
+              "Parent Relationship": "Subquery",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 17908.01,
+              "Total Cost": 17908.02,
+              "Plan Rows": 1,
+              "Plan Width": 80,
+              "Disabled": false,
+              "Plans": [
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 17908.01,
+                  "Total Cost": 17908.01,
+                  "Plan Rows": 1,
+                  "Plan Width": 80,
+                  "Disabled": false,
+                  "Sort Key": [
+                    "(date_trunc('minute'::text, ((app_state_log.payload ->> 'minuteBucket'::text))::timestamp with time zone))",
+                    "app_state_log.created_at DESC"
+                  ],
+                  "Plans": [
+                    {
+                      "Node Type": "Index Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Scan Direction": "Forward",
+                      "Index Name": "idx_app_state_log_kind_created",
+                      "Relation Name": "app_state_log",
+                      "Alias": "app_state_log",
+                      "Startup Cost": 0.42,
+                      "Total Cost": 17908,
+                      "Plan Rows": 1,
+                      "Plan Width": 80,
+                      "Disabled": false,
+                      "Index Cond": "(kind = 'H1_TRUTH_MARKER'::text)",
+                      "Filter": "(((payload ->> 'minuteBucket'::text) IS NOT NULL) AND ((payload ->> 'symbol'::text) = 'NIFTY'::text) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '10:45:00'::time without time zone) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '10:45:00'::time without time zone) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-19'::date))"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "canonical": [
+      {
+        "Plan": {
+          "Node Type": "Sort",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 14407.52,
+          "Total Cost": 14407.52,
+          "Plan Rows": 1,
+          "Plan Width": 200,
+          "Disabled": false,
+          "Sort Key": [
+            "(((payload ->> 'minuteBucket'::text))::timestamp with time zone)"
+          ],
+          "Plans": [
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "idx_app_state_log_kind_created",
+              "Relation Name": "app_state_log",
+              "Alias": "app_state_log",
+              "Startup Cost": 0.42,
+              "Total Cost": 14407.51,
+              "Plan Rows": 1,
+              "Plan Width": 200,
+              "Disabled": false,
+              "Index Cond": "(kind = 'H1_CANONICAL_MARKET_ARCHIVE'::text)",
+              "Filter": "(((payload ->> 'minuteBucket'::text) IS NOT NULL) AND ((payload ->> 'symbol'::text) = 'NIFTY'::text) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone >= '10:45:00'::time without time zone) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::time without time zone <= '10:45:00'::time without time zone) AND (((((payload ->> 'minuteBucket'::text))::timestamp with time zone AT TIME ZONE 'Asia/Kolkata'::text))::date = '2026-10-19'::date))"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

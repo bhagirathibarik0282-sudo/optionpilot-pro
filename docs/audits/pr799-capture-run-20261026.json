@@ -1,0 +1,45 @@
+{
+  "dateIst": "2026-10-26",
+  "scope": "Explicitly authorized one-shot fixed archived Recorder capture; diagnostic service only",
+  "serviceId": "8db59b5b-25b0-4cd0-b92d-fb584c1a89d4",
+  "captureDeploymentId": "b526b0fa-7339-4dd2-9d0a-c7326e97b67c",
+  "captureCommit": "87343bb138b2b354abac19d8c2bfc739dea1fd31",
+  "buildSucceeded": true,
+  "captureRuntimeResult": "CRASHED",
+  "captureSucceeded": false,
+  "runtimeLogs": [
+    {"at": "2026-10-26T03:26:29.896978306Z", "message": "Starting Container"},
+    {"at": "2026-10-26T03:26:58.744966756Z", "message": "PR799_CAPTURE_FAILED_NO_PAYLOAD"}
+  ],
+  "payloadChunksObserved": 0,
+  "completionMarkerObserved": false,
+  "actualArchiveReadCompletionProved": false,
+  "actualFailureStage": "UNKNOWN: original catch logged only a generic sentinel",
+  "captureAttempts": 1,
+  "secondCaptureRunPerformed": false,
+  "offlineRepairs": [
+    "Preserve null missing-checkpoint entries during bounded payload projection; prior helper crashed on null. Reproduced in a fixture, not proven to be this runtime's root cause.",
+    "Retain normalized market reference names pdh, pdl and spot_prev_close.",
+    "Log only a safe stage identifier on failure, without raw exception messages, SQL or credentials."
+  ],
+  "localCaptureAndPreviewTests": {"passed": 10, "failed": 0, "actualDatabaseTest": false},
+  "cleanup": {
+    "startCommandRestored": "node -e 'console.log(\"PR799_ACCEPTANCE_IDLE_NO_DATABASE_QUERY\")'",
+    "restartPolicy": "NEVER",
+    "idleRedeploymentId": "df254f05-bb82-4da2-825a-9ae1eea57bf7",
+    "reusedKnownIdleDeployment": "0450f892-348a-459f-a7e2-a49451d414fe",
+    "redeploymentStatus": "SUCCESS",
+    "expectedIdleMarkerObserved": false,
+    "notes": "Service configuration readback confirms idle start command and no staged changes; capture deployment was replaced. Idle deployment logs returned only Starting Container, so positive idle-marker execution proof is not claimed."
+  },
+  "mainDeploymentUnchanged": "1450e00b-a707-4dd1-a7ea-a49729943576",
+  "mainDeploymentStatus": "SUCCESS",
+  "mainStagedChanges": false,
+  "publicEndpointCreated": false,
+  "databaseWritesIntroduced": false,
+  "limitations": [
+    "No successful archive payload, price parity or actual Recorder match-rate validation from this attempt.",
+    "Browser/mobile acceptance remains open; no main merge or deployment occurred.",
+    "Runtime root cause remains unconfirmed until a separately authorized instrumented capture run."
+  ]
+}

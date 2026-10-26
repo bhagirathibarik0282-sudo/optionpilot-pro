@@ -19,14 +19,14 @@ and declared/versioned rule. It does not accept an LLM-selected case list.
    actual admitted snapshot, then validate target matching features/cutoff.
 4. Read prior sessions sequentially, with no retry, from event-minus-three minutes
    through the chosen outcome horizon. Require the same source/identity/marker
-   checks. Enumerate all recorded exact-side contracts at the event minute with
+   checks. Enumerate all recorded exact-side contracts across that loaded window with
    the target's calendar DTE. Refuse more than 64 contracts per session instead
    of choosing a subset. Pass each contract through the existing snapshot builder.
 5. Stop at the first failed source session and return unavailable. Never convert
    a failed read into a successful partial probability pool. Only after all
    selected reads succeed, invoke the existing deterministic matching core.
 
-Audits include selected/loaded/failed dates, read counts, enumerated contracts and
+Audits include selected/loaded/failed dates, read counts, enumerated/rejected contracts and
 sessions with no observed same-DTE contract. An empty observed contract pool is
 not counted as a zero-return outcome. This inventory is **recorded rows in a
 bounded range**, not proof of full exchange inventory or all historical sessions.
@@ -41,9 +41,25 @@ No new DB, write, index, schema, source, background job, broker call, Telegram o
 execution change. Database execution retains existing reader behavior; real
 query load, latency and source coverage have not been measured for this adapter.
 
-Validation: eight loader tests plus eleven core tests passed. Loader tests use
+Validation: eleven loader tests plus eleven core tests and thirteen Recorder
+bridge tests passed (35 total). Loader tests use
 normalized fixtures and the real snapshot admission path, covering identity,
 bounded query scope, source failure, date inventory, all-contract enumeration,
 missing outcomes and no outcome-based replacement. This is not an actual-DB
 proof. Next step is an explicitly authorized bounded real-source run and review;
 then a guarded dashboard integration with the declared rule/support criteria.
+
+## Double-check repair
+
+The initial event-only contract enumeration could drop a contract/session when
+the exact event row was missing but other window rows still identified it. A
+regression reproduced an incorrectly available rate from the remaining sessions.
+Enumeration now spans the loaded window; missing event evidence is passed to
+admission and blocks the numeric result. Contract identities and rejection
+reasons remain in the audit. Window rows only flag incomplete evidence; they
+cannot promote a future-only contract into an admitted earlier match.
+
+History range and inventory dates now require exact canonical ISO dates. Tests
+reproduced whitespace dates passing a trimming parser while widening raw string
+comparisons. Such input now fails before replay reads. Malformed expiry and
+off-window option rows also fail source qualification. No actual DB run occurred.

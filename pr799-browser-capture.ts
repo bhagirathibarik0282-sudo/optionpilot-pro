@@ -14,7 +14,7 @@ export function buildPr799BrowserCapture(pair:any[],raw:any,capturedAt:string){
  const original=projectRecordedRagLadder(raw);assert(original.ok);
  const buckets=['10:42','10:45','10:48'].map(t=>new Date('2026-10-19T'+t+':00+05:30').toISOString());
  const inWindow=(r:any)=>r.symbol==='NIFTY'&&buckets.includes(new Date(r.minute_bucket).toISOString());
- const mk=['symbol','minute_bucket','truth_verdict','snapshot_id','backend_timestamp','spot_ltp','india_vix','spot_pdh','spot_pdl','spot_pdc','calculation_version'];
+ const mk=['symbol','minute_bucket','truth_verdict','snapshot_id','backend_timestamp','spot_ltp','india_vix','pdh','pdl','spot_prev_close','calculation_version'];
  const ok=['symbol','minute_bucket','truth_verdict','snapshot_id','expiry','strike','option_type','ltp','oi','quote_timestamp','day_high','day_low'];
  const market=pair[0].market.filter(inWindow).map((r:any)=>pick(r,mk));
  const options=pair[0].options.filter((r:any)=>inWindow(r)&&String(r.expiry).slice(0,10)==='2026-10-19'&&Number(r.strike)===23150&&r.option_type==='PE').map((r:any)=>pick(r,ok));
@@ -26,7 +26,7 @@ export function buildPr799BrowserCapture(pair:any[],raw:any,capturedAt:string){
    assert.equal(m[0].truth_verdict,'TRUE');assert.equal(q[0].truth_verdict,'TRUE');
    assert.equal(q[0].ltp,[153.85,137.1,142.9][i]);
  }
- const point=(p:any)=>({...pick(p,['offset','timeIst','bucketAt','receiptAt']),
+ const point=(p:any)=>p===null?null:({...pick(p,['offset','timeIst','bucketAt','receiptAt']),
    pair:{pe:p.pair?.pe?pick(p.pair.pe,['price','oi','quoteAt','receiptAt','snapshotId']):null},
    context:pick(p.context??{},['spot','pdh','pdc','pdl','vix','fullPcr','fullPcrSource','fullPcrCanonicalSourceAt'])});
  const evidence={...pick(raw,['ok','status','mode','source']),safety:{readOnly:true,writesPerformed:false},

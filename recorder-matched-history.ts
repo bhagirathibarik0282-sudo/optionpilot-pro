@@ -12,6 +12,39 @@ const iso=(v:unknown)=>{const t=Date.parse(String(v??''));return Number.isFinite
 const minute=(t:string)=>Number(t.slice(0,2))*60+Number(t.slice(3));
 const clock=(n:number)=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
 
+/** Internal source audit shared by the loader and focused read-only diagnostics. */
+export function inspectRecorderReplayScope(q:H1ReplayRequest,r:H1ReplayHttpResult){
+ const identity=!!r?.ok&&r.mode==='READ_ONLY_H1_3M_REPLAY'&&r.productionImpact==='NONE'&&
+  !!r.request&&Object.entries(q).every(([k,v])=>(r.request as any)[k]===v)&&
+  Array.isArray(r.market)&&Array.isArray(r.options)&&Array.isArray(r.chain);
+ const c=r?.continuity,missing=Array.isArray(c?.missingBuckets)?c.missingBuckets:[];
+ const admitted=identity&&!!c?.complete&&Array.isArray(c.missingBuckets)&&!missing.length&&
+  c.observedMarkerBuckets===c.expectedBuckets&&c.truthCounts?.TRUE===c.expectedBuckets;
+ return {ok:admitted,reason:!identity?'SOURCE_READ_OR_IDENTITY_FAILED':!admitted?'INCOMPLETE_SOURCE_MARKERS':'ADMITTED',
+  request:q,complete:c?.complete===true,cadenceMinutes:c?.cadenceMinutes??null,
+  expectedBuckets:c?.expectedBuckets??null,observedMarkerBuckets:c?.observedMarkerBuckets??null,
+  trueMarkerBuckets:c?.truthCounts?.TRUE??null,missingCount:missing.length,missingBuckets:missing.slice(0,64),
+  missingListTruncated:missing.length>64,firstObserved:c?.firstObserved??null,lastObserved:c?.lastObserved??null,
+  rawGapPresence:(r?.markerGapEvidence?.buckets??[]).slice(0,64).map(b=>({minuteBucket:b.minuteBucket,marketRows:b.marketRows,optionRows:b.optionRows,chainRows:b.chainRows})),
+  rawGapPresenceIsAdmission:false,
+  rows:{market:r?.market?.length??0,options:r?.options?.length??0,chain:r?.chain?.length??0,canonical:r?.canonical?.length??0}};
+}
+export function inspectRecorderContractInventory(q:H1ReplayRequest,replay:H1ReplayHttpResult,expiry:string,side:string){
+ const contracts=new Set<number>(),fromMs=Date.parse(q.tradeDate+'T'+q.fromTime+':00+05:30'),toMs=Date.parse(q.tradeDate+'T'+q.toTime+':00+05:30');
+ const fail=(reason:string)=>({ok:false as const,reason,contracts:[] as number[]});
+ for(const row of replay.options??[]){
+  if(row.symbol!==q.symbol||row.option_type!==side)continue;
+  const contractExpiry=iso(row.expiry)?.slice(0,10);if(!contractExpiry)return fail('INVALID_RECORDED_CONTRACT_EXPIRY');
+  if(contractExpiry!==expiry)continue;
+  const stamp=iso(row.minute_bucket),ms=stamp?Date.parse(stamp):NaN;
+  if(!Number.isFinite(ms)||ms<fromMs||ms>toMs)return fail('CONTRACT_ROW_OUTSIDE_REPLAY_WINDOW');
+  const strike=Number(row.strike);if(!Number.isInteger(strike)||strike<=0)return fail('INVALID_RECORDED_CONTRACT_INVENTORY');
+  contracts.add(strike);
+ }
+ if(contracts.size>MAX_CONTRACTS_PER_SESSION)return fail('CONTRACT_INVENTORY_EXCEEDS_BOUND');
+ return {ok:true as const,reason:'ADMITTED',contracts:[...contracts].sort((a,b)=>a-b)};
+}
+
 /** Internal, explicit read-only operation. Not mounted on HTTP or app startup.
  * Enumerate every recorded contract in the selected bounded date/time scope;
  * never ask an LLM or caller to provide the matching cases. */
@@ -19,7 +52,9 @@ export async function loadRecorderMatchedHistory(input:Input,deps:Dependencies={
  const audit={dateIndexReads:0,replayReads:0,selectedSessionDates:[] as string[],loadedSessionDates:[] as string[],
   failedSessionDates:[] as string[],recordedContracts:0,emptyContractSessions:[] as string[],
   rejectedContracts:[] as {date:string;expiry:string;strike:number;side:string;reason:string}[],
-  targetAdmission:null as ReturnType<typeof inspectRagSnapshotAdmission>|null};
+  targetAdmission:null as ReturnType<typeof inspectRagSnapshotAdmission>|null,
+  replayDiagnostics:[] as ReturnType<typeof inspectRecorderReplayScope>[],
+  failedSessionDetails:[] as {date:string;reason:string}[]};
  const base={mode:'READ_ONLY_RECORDER_MATCHED_HISTORY_V1',audit,
   limits:{maxSessions:MAX_SESSIONS,maxContractsPerSession:MAX_CONTRACTS_PER_SESSION,concurrency:1,retries:0},
   safety:{readOnly:true,writesPerformed:false,newDatabase:false,affectsSelector:false,affectsTelegram:false,affectsExecution:false},
@@ -38,12 +73,8 @@ export async function loadRecorderMatchedHistory(input:Input,deps:Dependencies={
   fromTime:clock(eventMinute-3),toTime:clock(eventMinute+(outcomes?input.rule.horizonMinutes:0)),scope:'FULL'});
  const read=async(q:H1ReplayRequest)=>{
   audit.replayReads++;const r=await deps.read(q);
-  if(!r?.ok||r.mode!=='READ_ONLY_H1_3M_REPLAY'||r.productionImpact!=='NONE'||
-   !r.request||Object.entries(q).some(([k,v])=>(r.request as any)[k]!==v)||
-   !Array.isArray(r.market)||!Array.isArray(r.options)||!Array.isArray(r.chain))throw new Error('SOURCE_READ_OR_IDENTITY_FAILED');
-  const c=r.continuity;
-  if(!c?.complete||c.missingBuckets.length||c.observedMarkerBuckets!==c.expectedBuckets||
-   c.truthCounts.TRUE!==c.expectedBuckets)throw new Error('INCOMPLETE_SOURCE_MARKERS');
+  const diagnostic=inspectRecorderReplayScope(q,r);audit.replayDiagnostics.push(diagnostic);
+  if(!diagnostic.ok)throw new Error(diagnostic.reason);
   return r;
  };
  // These features deliberately do not use retrospective prior-session levels.
@@ -76,26 +107,13 @@ export async function loadRecorderMatchedHistory(input:Input,deps:Dependencies={
   for(const date of dates){
    try{
     const replay=await read(request(date,true)),expiry=new Date(day(date)+dte*DAY).toISOString().slice(0,10);
-    const contracts=new Set<number>();
-    const fromMs=Date.parse(date+'T'+clock(eventMinute-3)+':00+05:30');
-    const toMs=Date.parse(date+'T'+clock(eventMinute+input.rule.horizonMinutes)+':00+05:30');
     // Enumerate identities across the entire loaded window, not just surviving
     // event-time rows. A lost event row must become rejected evidence instead
     // of silently deleting a contract/session from the probability denominator.
-    for(const row of replay.options!){
-     if(row.symbol!==targetRequest.symbol||row.option_type!==targetRequest.side)continue;
-     const contractExpiry=iso(row.expiry)?.slice(0,10);
-     if(!contractExpiry)throw new Error('INVALID_RECORDED_CONTRACT_EXPIRY');
-     if(contractExpiry!==expiry)continue;
-     const stamp=iso(row.minute_bucket),ms=stamp?Date.parse(stamp):NaN;
-     if(!Number.isFinite(ms)||ms<fromMs||ms>toMs)throw new Error('CONTRACT_ROW_OUTSIDE_REPLAY_WINDOW');
-     const strike=Number(row.strike);
-     if(!Number.isInteger(strike)||strike<=0)throw new Error('INVALID_RECORDED_CONTRACT_INVENTORY');
-     contracts.add(strike);
-    }
-    if(contracts.size>MAX_CONTRACTS_PER_SESSION)throw new Error('CONTRACT_INVENTORY_EXCEEDS_BOUND');
-    if(!contracts.size)audit.emptyContractSessions.push(date);
-    for(const strike of [...contracts].sort((a,b)=>a-b)){
+    const inventory=inspectRecorderContractInventory(request(date,true),replay,expiry,targetRequest.side);
+    if(!inventory.ok)throw new Error(inventory.reason);
+    if(!inventory.contracts.length)audit.emptyContractSessions.push(date);
+    for(const strike of inventory.contracts){
      const selected:RagEventRequest={...targetRequest,date,expiry,strike,includeOutcomes:true,asOf:Date.parse(target.event.availableAt)};
      const snapshot=buildRagPremiumSnapshot(selected,replay,noPrior);
      if(!snapshot.ok)audit.rejectedContracts.push({date,expiry,strike,side:targetRequest.side,reason:snapshot.reason});
@@ -103,8 +121,10 @@ export async function loadRecorderMatchedHistory(input:Input,deps:Dependencies={
      audit.recordedContracts++;
     }
     audit.loadedSessionDates.push(date);
-   }catch{
+   }catch(error){
     audit.failedSessionDates.push(date);
+    const allowed=['SOURCE_READ_OR_IDENTITY_FAILED','INCOMPLETE_SOURCE_MARKERS','INVALID_RECORDED_CONTRACT_EXPIRY','CONTRACT_ROW_OUTSIDE_REPLAY_WINDOW','INVALID_RECORDED_CONTRACT_INVENTORY','CONTRACT_INVENTORY_EXCEEDS_BOUND'];
+    audit.failedSessionDetails.push({date,reason:error instanceof Error&&allowed.includes(error.message)?error.message:'SOURCE_READ_OR_VALIDATION_FAILED'});
     // No source retry, outcome-based replacement or silent successful partial pool.
     return fail('HISTORICAL_RECORDER_SESSION_READ_INCOMPLETE');
    }

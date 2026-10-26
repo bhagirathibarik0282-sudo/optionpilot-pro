@@ -1,11 +1,13 @@
 # PR799 bounded archive transport for browser acceptance
 
-Latest status, 26 Oct: user explicitly approved one attempt. Diagnostic build
-succeeded, but runtime returned `PR799_CAPTURE_FAILED_NO_PAYLOAD`; no payload or
-completion marker was received. Main remains unchanged. The idle start command
-was restored and the known idle build redeployed with status SUCCESS; a positive
-idle console marker has not been observed. Actual browser/mobile acceptance is
-still open. See `docs/audits/pr799-capture-run-20261026.json` for exact evidence.
+Latest status, 26 Oct: two separately approved attempts ran. The second passed
+archive-read, known fingerprint, original projection and pool-close guards, then
+failed at `BUILDING_BOUNDED_PAYLOAD`. No capture payload was received. A pg DATE
+object conversion defect was reproduced offline and fixed; eleven capture/preview
+tests pass. A third capture has not run. Main remains unchanged. The diagnostic
+idle command is restored and cleanup deployment is SUCCESS. Browser/mobile
+acceptance is open. See `docs/audits/pr799-capture-retry-20261026.json` and the
+first-attempt record `docs/audits/pr799-capture-run-20261026.json`.
 
 The available browser cannot reach the workspace's loopback preview (observed
 ERR_CONNECTION_REFUSED). Proposed next step: transport a fixed archive capture
@@ -47,7 +49,9 @@ for this bounded operation before running it.
 
 The above rejection describes the earlier attempt to obtain authorization. The
 user subsequently approved one capture on 26 Oct; both mutations were accepted.
-That attempt failed as recorded above. No second capture was performed. Offline
+That first attempt failed as recorded in its audit. At that point no second
+capture had been performed; the separately approved second attempt is documented
+in the latest status above. Offline
 repairs preserve null checkpoints and add safe failure-stage reporting, without
 relaxing source identity, fingerprint, size or read-only guards.
 

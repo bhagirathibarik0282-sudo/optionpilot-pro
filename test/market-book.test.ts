@@ -19,7 +19,7 @@ test('Research tables retain separate recorded identities and missing evidence w
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{requests++;}};
  vm.runInContext('installMarketBook(api)',ctx);
  const output=nodes.get('mb-page').innerHTML;
- assert.equal((output.match(/class="mb-research-section"/g)||[]).length,3);
+ assert.equal((output.match(/class="mb-research-section"/g)||[]).length,5);
  for(const label of ['Spot &amp; Futures · recorded levels','PCR &amp; OI walls · recorded context','Premiums · exact recorded contracts','NIFTY Spot','NIFTY Futures','SENSEX Spot','BANKNIFTY Futures','22000 CE','22000 PE',expiry,'Window endpoints · IST'])assert(output.includes(label),label);
  const pcr=output.match(/aria-label="PCR &amp; OI walls · recorded context">([\s\S]*?)<\/section>/)![1];
  assert(!pcr.includes('9.8765'));assert(pcr.includes('Unavailable'));assert(pcr.includes('Unverified source'));
@@ -31,6 +31,32 @@ test('Research tables retain separate recorded identities and missing evidence w
  assert(!/data-op-label="PD[HL]">(?!Unavailable)/.test(tables),'contradictory spot/premium levels withheld');
  assert(output.includes('first 1 of 1 available recorded expiries'));
  assert(!output.includes('NaN'));assert(!output.includes('undefined'));assert.equal(requests,0);
+});
+test('Research participation loads only on click and rejects future, stale and duplicate quote evidence',async()=>{
+ const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>();
+ for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const receipt=new Date(Date.parse(at(18))-1000).toISOString(),quoteAt=new Date(Date.parse(receipt)-1000).toISOString();
+ const row=(name:string,price:number,extra:any={})=>({name,symbol:'NSE:'+name,price,previousClose:100,exchangeTimestamp:quoteAt,weight:99,contribution:999,...extra});
+ const snapshot:any={source:'SERVER_BACKGROUND_KITE_QUOTES',tradingDate:tradeDate,timestamp:receipt,
+  stocks:{NIFTY:[row('<Gain>',105),row('Loss',95),row('Stale',110,{exchangeTimestamp:at(15)}),row('Dup',150),row('Dup',160)]},
+  sectors:[row('Broad proxy',102),row('Missing price',0)]};
+ let requests=0;
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math,AbortSignal,
+  fetch:async(url:string)=>{requests++;assert.equal(url,'/api/research/background-quotes/history?date='+tradeDate);return {ok:true,json:async()=>({date:tradeDate,snapshots:[snapshot,{...snapshot,timestamp:at(21),stocks:{NIFTY:[row('Future leak',200)]}}],truncated:false})};}};
+ vm.createContext(ctx);vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)![1],ctx);
+ const state:any={date:tradeDate,recordedDates,current:{NIFTY:fixture()},history:{},baseline:{},health:{}};
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){throw Error('No broker refresh');},memory:async()=>{}};
+ vm.runInContext('globalThis.book=installMarketBook(api)',ctx);assert.equal(requests,0);
+ const click=()=>nodes.get('mb-page').onclick({target:{closest:(selector:string)=>selector==='[data-agreement-load]'?{}:null}});
+ click();await new Promise(resolve=>setImmediate(resolve));assert.equal(requests,1);
+ const output=nodes.get('mb-page').innerHTML;
+ const stocks=output.match(/aria-label="Tracked heavyweights">([\s\S]*?)<\/section>/)![1];
+ assert(stocks.includes('&lt;Gain&gt;'));assert(!stocks.includes('<Gain>'));assert(stocks.includes('+5%'));assert(stocks.includes('-5%'));
+ assert(!output.includes('Future leak'));assert(stocks.includes('Ambiguous identity'));assert(stocks.includes('Quote time / prices unavailable'));
+ assert(!stocks.includes('>150<'));assert(!stocks.includes('>160<'));assert(!stocks.includes('>110<'));
+ assert(!stocks.includes('>99<'));assert(!stocks.includes('>999<'));assert(output.includes('not selected-index sector weights'));
+ snapshot.timestamp=at(6);click();await new Promise(resolve=>setImmediate(resolve));
+ assert(!nodes.get('mb-page').innerHTML.includes('&lt;Gain&gt;'),'old receipt outside six minutes withheld');
 });
 test('monthly premium board uses every recorded month expiry and preserves exact missing contracts',()=>{
  const c=fixture();const base=[...c.options];for(const expiry of ['2026-10-14','2026-10-15','2026-10-19','2026-10-27','2026-11-24'])c.options.push(...base.map(r=>({...r,expiry})));

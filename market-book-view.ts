@@ -338,11 +338,16 @@ export function installMarketBook(api:any) {
   const symbols=['NIFTY','SENSEX','BANKNIFTY'];
   const observed=(value:any,d=2)=>typeof value==='number'&&Number.isFinite(value)?fmt(value,d):'Unavailable';
   const signed=(value:any,d=2)=>typeof value==='number'&&Number.isFinite(value)?sign(value,d):'Unavailable';
+  const reference=(metric:any,key:'pdh'|'pdl')=>{
+   const positive=(value:any)=>typeof value==='number'&&Number.isFinite(value)&&value>0;
+   if(positive(metric.pdh)&&positive(metric.pdl)&&metric.pdh<=metric.pdl)return 'Unavailable';
+   return positive(metric[key])?observed(metric[key]):'Unavailable';
+  };
   const time=(metric:any)=>when(metric?.fromAt)+' → '+when(metric?.at);
   const section=(number:number,title:string,body:string)=>'<section class="mb-research-section" aria-label="'+esc(title)+'"><h3>'+number+' · '+esc(title)+'</h3>'+body+'</section>';
   const levels=symbols.flatMap(s=>{
    const a=models[s],spot=a.spot,future=a.future;
-   return [[s+' Spot',observed(spot.value),signed(spot.delta),pct(spot.percent),observed(spot.pdh),observed(spot.day?.from),observed(spot.pdl),spot.range?.complete?observed(spot.range.high)+' / '+observed(spot.range.low):'Unavailable',time(spot)],
+   return [[s+' Spot',observed(spot.value),signed(spot.delta),pct(spot.percent),reference(spot,'pdh'),typeof spot.day?.from==='number'&&spot.day.from>0?observed(spot.day.from):'Unavailable',reference(spot,'pdl'),spot.range?.complete?observed(spot.range.high)+' / '+observed(spot.range.low):'Unavailable',time(spot)],
     [s+' Futures',observed(future.value),signed(future.delta),pct(future.percent),'Unavailable','Unavailable','Unavailable','Unavailable',time(future)]];
   });
   const positioning=symbols.map(s=>{
@@ -353,13 +358,13 @@ export function installMarketBook(api:any) {
   const expiries=selected.allExpiryPairs.slice(0,4);
   const premiums=expiries.flatMap((pair:any)=>[pair.ce,pair.pe].map((p:any)=>[
    selected.symbol+' '+(p.strike??'Unavailable')+' '+p.type,p.expiry||'Unavailable',observed(p.dte,0),observed(p.value),signed(p.delta),pct(p.percent),
-   observed(p.oi?.value,0),signed(p.oi?.delta,0),observed(p.pdh),observed(p.pdl),time(p)]));
-  return section(1,'Spot & Futures · recorded levels',table(['Instrument','LTP','Window Δ','Window %','PDH','PDC','PDL','First 15m H / L','Window endpoints · IST'],levels)+
-   note('Futures expiry continuity and contract-specific reference levels are unavailable. BANKNIFTY remains monthly observation. Opening ranges require complete recorded coverage.'))+
+   observed(p.oi?.value,0),signed(p.oi?.delta,0),reference(p,'pdh'),reference(p,'pdl'),time(p)]));
+  return section(1,'Spot & Futures · recorded levels',table(['Instrument','LTP','Window Δ','Window %','PDH','PDC','PDL','First 15m sampled H / L','Window endpoints · IST'],levels)+
+   note('Futures expiry continuity and contract-specific reference levels are unavailable. BANKNIFTY remains monthly observation. Opening ranges use admitted 09:15–09:30 recorded LTP samples, not exchange candle extremes.'))+
    section(2,'PCR & OI walls · recorded context',table(['Index','PCR expiry','Recorded full PCR','Window Δ','PCR endpoints · IST','CE wall / time','PE wall / time','PCR source'],positioning)+
    note('Archived source labels do not verify complete chain inventory or quote freshness. Wall clocks are independent; wall migration is not same-strike OI addition.'))+
    section(3,'Premiums · exact recorded contracts',note(selected.symbol+' · first '+expiries.length+' of '+selected.allExpiryPairs.length+' available recorded expiries · selected strike · CE and PE retain their own identity.')+
-    table(['Contract','Expiry','Calendar DTE','LTP ₹','Window Δ ₹','Window %','OI · source units','Window OI Δ','PDH','PDL','Window endpoints · IST'],premiums));
+    table(['Contract','Expiry','Recorded DTE','LTP ₹','Window Δ ₹','Window %','OI · source units','Window OI Δ','PDH','PDL','Window endpoints · IST'],premiums));
  }
  function combined(m:any){const cash=api.getState().cash,row=cash?.windows?.[0];const positive=m.bias==='CE_SUPPORTING',negative=m.bias==='PE_SUPPORTING';return context(m)+(row?note('Separate cash context '+cash.latestStoredSessionDate+' · '+row.window+': FII '+sign(row.fiiNetCrore)+' / DII '+sign(row.diiNetCrore)+' / combined '+sign(row.combinedNetCrore)+' ₹ crore. '+row.state):note('FII / DII stored context unavailable.'))+note(positive?'If the same-time spot / CE / PE agreement continues and spot holds above its marked level, the CE-supporting context persists. A spot failure or opposite-premium reversal would weaken it.':negative?'If the same-time spot / CE / PE agreement continues below its marked level, the bearish context persists. A spot reclaim or CE recovery would weaken it.':'Agreement is incomplete or conflicting. A synchronized spot move with CE and PE reacting in opposite directions would be needed to resolve this context.')+note('PCR and wall changes describe positioning separately; they do not prove direction. Futures contract continuity and quote freshness must be considered.',true);}
  function positioningCard(a:any){

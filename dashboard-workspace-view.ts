@@ -21,7 +21,8 @@ const oneEnd=LEGACY_WORKSPACE_NAV_HTML.indexOf('<details id="op-commodities"');
 const atmStart=LEGACY_WORKSPACE_NAV_HTML.indexOf('<details id="op-atm-weeklies"');
 const atmEnd=LEGACY_WORKSPACE_NAV_HTML.indexOf('</details><p class="op-one-note">One shared stream',atmStart)+10;
 const actualAtm=LEGACY_WORKSPACE_NAV_HTML.slice(atmStart,atmEnd);
-export const WORKSPACE_NAV_HTML=LEGACY_WORKSPACE_NAV_HTML.slice(0,oneStart)+'<nav id="op-view-links" aria-label="Chapter tools"></nav>'+renderOneShotCard(actualAtm)+LEGACY_WORKSPACE_NAV_HTML.slice(oneEnd);
+const RESEARCH_CONTROLS_HTML='<section id="op-research-controls" aria-label="Recorded research controls"><div><strong>Recorder Data</strong><small id="op-research-session">Saved session · unavailable</small></div><button id="op-research-open-data" type="button" aria-controls="recorded-replay">Open Data</button><button id="op-research-settings" type="button" aria-controls="mb-settings">Session / Index / Expiry</button></section>';
+export const WORKSPACE_NAV_HTML=LEGACY_WORKSPACE_NAV_HTML.slice(0,oneStart)+'<nav id="op-view-links" aria-label="Chapter tools"></nav>'+RESEARCH_CONTROLS_HTML+renderOneShotCard(actualAtm)+LEGACY_WORKSPACE_NAV_HTML.slice(oneEnd);
 
 export const WORKSPACE_TICKER_HTML=`<details id="op-ticker-tools"><summary>Market ticker</summary><div id="op-workspace-ticker" aria-label="Market snapshot"></div></details>`;
 
@@ -164,6 +165,11 @@ body[data-op-workspace] #market-book .mb-reading-guide{margin:6px 0;padding:8px}
 body[data-op-workspace] #market-book .mb-chapter-head{padding-bottom:6px;margin-bottom:6px;gap:5px}
 body[data-op-workspace] #market-book .mb-chapter-head .mb-eyebrow{display:none}
 /* Reference-image navigation: six destinations, with touch-sized mobile rows. */
+#op-research-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px;border:1px solid #31546b;border-radius:10px;padding:8px;margin:4px 0 8px;background:#101a2a}
+#op-research-controls>div{flex:1;min-width:150px}#op-research-controls strong{color:#79f8e9}#op-research-controls small{display:block;color:var(--op-muted);overflow-wrap:anywhere}
+#market-book #op-research-controls button{min-height:44px;padding:7px 12px;font-size:14px}
+#market-book #op-research-open-data{border-color:#9569ed;color:#eadcff;background:#38215b}
+@media(max-width:600px){#op-research-controls>div{flex-basis:100%}#op-research-controls button{flex:1;min-width:0}}
 #market-book #op-chapter-links{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;overflow:visible}
 #market-book #op-chapter-links button{min-width:0;width:100%;padding:7px 3px;font-size:13px;justify-content:center;white-space:nowrap}
 #market-book #op-chapter-links button>span{font-size:10px}
@@ -205,11 +211,24 @@ export function installDashboardWorkspace(api:any){
   {name:'Futures & Spot',views:[4,1]}, {name:'PCR & Flow',views:[5,9,11]},
   {name:'Sector & Weight',views:[8,10]}, {name:'Memory & Replay',views:[7,6,10]}];
  const replayGroup=5,remembered=[0,7,4,5,8,7];
+ // Open the existing saved-session UI; this action performs no fetch or replay.
+ const openResearchTool=(id:string)=>{
+  const tools=$('mb-tools'),target=$(id);if(!tools||!target)return;
+  tools.open=true;target.open=true;target.scrollIntoView?.({block:'start',behavior:'auto'});
+  target.querySelector?.('summary')?.focus?.();
+ };
+ if($('op-research-open-data'))$('op-research-open-data').onclick=()=>openResearchTool('recorded-replay');
+ if($('op-research-settings'))$('op-research-settings').onclick=()=>openResearchTool('mb-settings');
+ const researchScope=()=>{
+  const controls=$('op-research-controls');if(controls)controls.hidden=group!==0;
+  const label=$('op-research-session'),date=api.getState?.()?.date;
+  if(label)label.textContent=typeof date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(date)?'Saved session · '+date+' · recorded data':'Saved session · unavailable';
+ };
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const premium=installPremiumWorkspace({getState:api.getState,setDate:api.setDate,replay:api.replay});
  const resolveGroup=(page:number)=>groups[group].views.includes(page)?group:Math.max(0,groups.findIndex(g=>g.views.includes(page)));
  const draw=()=>{const page=api.page();group=resolveGroup(page);active=page;remembered[group]=page;
-  $('market-book')?.setAttribute('data-main-chapter',String(group+1));
+  $('market-book')?.setAttribute('data-main-chapter',String(group+1));researchScope();
   const buttons=groups.map((g,i)=>'<button type="button" data-op-group="'+i+'"'+(group===i?' aria-current="page"':'')+'><span>'+String(i+1).padStart(2,'0')+'</span> '+g.name+'</button>').join('');
   $('op-chapter-links').innerHTML=buttons;const command=$('op-command-chapters');if(command)command.innerHTML=buttons;
   const tools=$('op-view-links');if(tools)tools.innerHTML=groups[group].views.map(i=>'<button type="button" data-op-view="'+i+'"'+(page===i?' aria-pressed="true"':' aria-pressed="false"')+'>'+esc(group===replayGroup&&i===7?'Recorded ladder':i===7?'Option chain':chapters[i])+'</button>').join('');
@@ -485,6 +504,6 @@ export function installDashboardWorkspace(api:any){
   }).join('');
   setHtml($('op-workspace-ticker'),tickerHtml);
  }) as EventListener);
- return {render(){if(active!==api.page())draw();oneShot?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
+ return {render(){if(active!==api.page())draw();researchScope();oneShot?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
 }
 

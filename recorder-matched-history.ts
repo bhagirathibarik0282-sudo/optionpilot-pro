@@ -1,6 +1,6 @@
 import {listH1TheoryRecordedDates} from './h1-theory-history.js';
 import {runH1ReplayHttp,parseH1ReplayRequest,type H1ReplayHttpResult,type H1ReplayRequest} from './h1-replay-http.js';
-import {buildRagPremiumSnapshot,parseRagEventRequest,type RagEventRequest} from './rag-event-evidence.js';
+import {buildRagPremiumSnapshot,inspectRagSnapshotAdmission,parseRagEventRequest,type RagEventRequest} from './rag-event-evidence.js';
 import {computeRecorderMatchedOutcome,validRecorderMatchRule,type RecorderMatchRule} from './recorder-matched-outcome.js';
 
 type Input={target:Record<string,string|undefined>;historyFrom:string;historyTo:string;rule:RecorderMatchRule};
@@ -18,7 +18,8 @@ const clock=(n:number)=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60
 export async function loadRecorderMatchedHistory(input:Input,deps:Dependencies={listDates:listH1TheoryRecordedDates,read:runH1ReplayHttp}){
  const audit={dateIndexReads:0,replayReads:0,selectedSessionDates:[] as string[],loadedSessionDates:[] as string[],
   failedSessionDates:[] as string[],recordedContracts:0,emptyContractSessions:[] as string[],
-  rejectedContracts:[] as {date:string;expiry:string;strike:number;side:string;reason:string}[]};
+  rejectedContracts:[] as {date:string;expiry:string;strike:number;side:string;reason:string}[],
+  targetAdmission:null as ReturnType<typeof inspectRagSnapshotAdmission>|null};
  const base={mode:'READ_ONLY_RECORDER_MATCHED_HISTORY_V1',audit,
   limits:{maxSessions:MAX_SESSIONS,maxContractsPerSession:MAX_CONTRACTS_PER_SESSION,concurrency:1,retries:0},
   safety:{readOnly:true,writesPerformed:false,newDatabase:false,affectsSelector:false,affectsTelegram:false,affectsExecution:false},
@@ -64,7 +65,7 @@ export async function loadRecorderMatchedHistory(input:Input,deps:Dependencies={
   audit.selectedSessionDates=dates;
   const current=await read(request(targetRequest.date,false));
   const target=buildRagPremiumSnapshot(targetRequest,current,noPrior);
-  if(!target.ok)return fail('TARGET_RECORDER_SNAPSHOT_UNAVAILABLE');
+  if(!target.ok){audit.targetAdmission=inspectRagSnapshotAdmission(targetRequest,current);return fail('TARGET_RECORDER_SNAPSHOT_UNAVAILABLE');}
   // Validate target rule/cutoff/features before reading any historical sessions.
   const preflight=computeRecorderMatchedOutcome(target,[],input.rule,{source:'EXISTING_POSTGRES_H1_REPLAY',sessionDates:dates,
    complete:true,truncated:false,failedSessionDates:[]});

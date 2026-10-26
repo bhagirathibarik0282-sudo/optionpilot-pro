@@ -5,6 +5,7 @@ import {runH1ReplayPairRead} from '../h1-replay-http.js';
 import {parseRagEventRequest,readRagEventEvidence} from '../rag-event-evidence.js';
 import {projectRecordedRagLadder} from '../rag-recorder-event-ladder-bridge.js';
 import {createPr799RecorderPreview,PR799_PREVIEW_SELECTION} from '../pr799-recorder-preview.js';
+import {recorderCaptureExpiryDate} from '../pr799-browser-capture.js';
 
 // Manual entry point only. Never use npm start or import the full server.
 async function main(){
@@ -43,8 +44,8 @@ async function main(){
  }
  assert.equal(poolFailed,false);
  const rows=(replay:any)=>({market:replay.market,
-   options:replay.options.filter((r:any)=>String(r.expiry).slice(0,10)==='2026-10-19'&&Number(r.strike)===23150),
-   chain:replay.chain.filter((r:any)=>String(r.expiry).slice(0,10)==='2026-10-19')});
+   options:replay.options.filter((r:any)=>recorderCaptureExpiryDate(r.expiry)==='2026-10-19'&&Number(r.strike)===23150),
+   chain:replay.chain.filter((r:any)=>recorderCaptureExpiryDate(r.expiry)==='2026-10-19')});
  const state={date:'2026-10-19',recordedDates:['2026-10-16','2026-10-19'],
    current:{NIFTY:rows(pair[0])},baseline:{NIFTY:rows(pair[1])},history:{}};
  assert(state.current.NIFTY.options.some((r:any)=>r.option_type==='PE'&&

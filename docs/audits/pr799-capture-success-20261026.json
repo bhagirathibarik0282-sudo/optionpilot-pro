@@ -1,0 +1,65 @@
+{
+  "dateIst": "2026-10-26",
+  "attempt": 3,
+  "explicitlyAuthorized": true,
+  "deploymentId": "ecdbbf82-5d73-4c26-9b5c-803106151087",
+  "codeCommit": "949a4f7f2f9391a94fb57976c5bd73efd42199a4",
+  "serviceId": "8db59b5b-25b0-4cd0-b92d-fb584c1a89d4",
+  "deploymentStatus": "SUCCESS",
+  "captureSucceeded": true,
+  "capturedAt": "2026-10-26T03:46:04.783Z",
+  "completionMarker": "PR799_CAPTURE_COMPLETE_DB_CLOSED_NO_LISTENER",
+  "transport": {
+    "chunks": 1,
+    "jsonBytes": 6825,
+    "sha256": "d20c0723293b8875a895db5b5dc3c27dde3d395505ea4f1ccb2a597ff891ff64",
+    "decodedHashVerified": true
+  },
+  "source": {
+    "symbol": "NIFTY",
+    "date": "2026-10-19",
+    "expiry": "2026-10-19",
+    "strike": 23150,
+    "side": "PE",
+    "eventTimeIst": "10:45",
+    "selectedEvidenceSha256": "118a0e2d0c07691435358d41088f4658b8deeeb1f4acf81f539d59eb41b3fc82",
+    "marketRowsTransported": 3,
+    "optionRowsTransported": 3,
+    "premiums": {"10:42":153.85,"10:45":137.1,"10:48":142.9},
+    "readOnlyTransactionsVerifiedByRunner": true,
+    "priorAndCurrentReadsSucceeded": true,
+    "originalAndTransportedProjectionEqual": true,
+    "poolClosedBeforeTransport": true
+  },
+  "localActualCaptureRouteChecks": {
+    "recorderHttpStatus": 200,
+    "evidenceHttpStatus": 200,
+    "withoutAuthenticationStatus": 401,
+    "wrongContractStatus": 422,
+    "postStatus": 405,
+    "bootstrapParses": true,
+    "noStore": true,
+    "scope": "Hono in-process requests using actual archived capture; no DB calls or HTTP listener"
+  },
+  "cleanup": {
+    "startCommandRestored": "node -e 'console.log(\"PR799_ACCEPTANCE_IDLE_NO_DATABASE_QUERY\")'",
+    "restartPolicy": "NEVER",
+    "stagedChanges": false,
+    "publicDomains": 0,
+    "captureProcessCompleted": true,
+    "newIdleStartupMarkerClaimed": false
+  },
+  "mainDeploymentUnchanged": "1450e00b-a707-4dd1-a7ea-a49729943576",
+  "mainDeploymentStatus": "SUCCESS",
+  "databaseWritesIntroduced": false,
+  "browserAcceptance": false,
+  "publicEdgeLatencyMeasured": false,
+  "actualMatchingHistoryAdapterValidated": false,
+  "numericalDashboardProbabilityEnabled": false,
+  "limitations": [
+    "Fixed archived capture, not live data or a complete Recorder session.",
+    "Capture and in-process route checks are not actual browser/mobile acceptance.",
+    "No exchange-wide full-chain freshness, causal, trading or profitability claim.",
+    "Matching-history probability and main rollout remain separately unvalidated."
+  ]
+}

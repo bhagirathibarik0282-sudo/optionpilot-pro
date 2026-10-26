@@ -118,6 +118,7 @@ export const ONE_SHOT_CSS=`
 #market-book #op-one-stop #op-one-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
 #market-book #op-one-stop #op-one-actions button{font-size:11px;min-height:40px;white-space:normal;padding:6px 4px}
 #op-one-stop .os-nav{padding:4px 0 8px}
+#market-book #op-one-stop #os-open-dashboard[aria-pressed=true]{display:none}
 }
 @media(prefers-reduced-motion:reduce){#op-one-stop *{animation:none!important;transition:none!important}}
 `;

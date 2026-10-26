@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {Hono} from 'hono';
-import {parseRagEventRequest,buildRagEventEvidence,buildRagPremiumSnapshot,readRagEventEvidence,mountRagEventEvidenceRoute} from '../rag-event-evidence.js';
+import {parseRagEventRequest,buildRagEventEvidence,buildRagPremiumSnapshot,inspectRagSnapshotAdmission,readRagEventEvidence,mountRagEventEvidenceRoute} from '../rag-event-evidence.js';
 import type {H1ReplayHttpResult} from '../h1-replay-http.js';
 const query={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
 const request=(extra:Record<string,string>={})=>{const p=parseRagEventRequest({...query,...extra});assert.ok(p.ok);return p.value;};
@@ -19,6 +19,20 @@ function fixture(date:string):H1ReplayHttpResult {
  return {ok:true,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request:{symbol:'NIFTY',tradeDate:date,fromTime:'09:15',toTime:'15:30',scope:'CORE'},market,options,chain};
 }
 const result=(extra:Record<string,string>={})=>buildRagEventEvidence(request(extra),fixture('2026-10-13'),fixture('2026-10-12'));
+test('internal rejection diagnostic follows quote admission and exposes only bounded counts/identity inventory',()=>{
+ const cases:[string,(c:any)=>void][]=[
+  ['ADMITTED',()=>{}],['EXACT_CONTRACT_NOT_RECORDED',c=>{c.options=c.options.filter((o:any)=>o.option_type!=='PE');}],
+  ['MARKET_NOT_TRUE',c=>{c.market.forEach((m:any)=>m.truth_verdict='UNKNOWN');}],
+  ['QUOTE_SNAPSHOT_ID_MISMATCH',c=>{c.options.forEach((o:any)=>o.snapshot_id='wrong');}],
+  ['QUOTE_STALE_AT_RECEIPT',c=>{c.options.forEach((o:any)=>o.quote_timestamp=new Date(Date.parse(o.quote_timestamp)-60000).toISOString());}],
+  ['CONFLICTING_EXACT_QUOTES',c=>{c.options.push({...c.options.find((o:any)=>o.option_type==='PE'&&o.minute_bucket==='2026-10-13T04:06:00.000Z'),ltp:999});}]
+ ];
+ for(const [reason,mutate] of cases){const current=fixture('2026-10-13');mutate(current);const r=request({kind:'SNAPSHOT'});
+  const diagnostic=inspectRagSnapshotAdmission(r,current),snapshot=buildRagPremiumSnapshot(r,current,fixture('2026-10-12'));
+  assert.equal(diagnostic.reason,reason);assert.equal(diagnostic.admitted,snapshot.ok);assert.equal(diagnostic.admitted,reason==='ADMITTED');
+  assert(!JSON.stringify(diagnostic).includes('quote_timestamp'));assert(!JSON.stringify(diagnostic).includes('ltp'));
+ }
+});
 test('prior reference work stays bounded with many unrelated strikes and still rejects conflicting duplicates',()=>{
  const prior=fixture('2026-10-12'),market=prior.market![0],quote=prior.options!.find(o=>o.option_type==='PE')!;
  prior.market=[];prior.options=[];

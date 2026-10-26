@@ -54,19 +54,47 @@ export function parseRagEventRequest(q:Record<string,string|undefined>): {ok:tru
 function marketAt(replay:H1ReplayHttpResult,r:RagEventRequest,ms:number):Row|null {
   return one((replay.market??[]).filter(m=>m.symbol===r.symbol&&iso(m.minute_bucket)===new Date(ms).toISOString()));
 }
-function quoteAt(replay:H1ReplayHttpResult,r:RagEventRequest,ms:number,side:string,cutoff=Infinity):Row|null {
+function quoteAt(replay:H1ReplayHttpResult,r:RagEventRequest,ms:number,side:string,cutoff=Infinity,diagnose?:(reason:string)=>void):Row|null {
+  const reject=(reason:string)=>{diagnose?.(reason);return null;};
   const m=marketAt(replay,r,ms);
-  if(!m||m.truth_verdict!=='TRUE'||!iso(m.backend_timestamp)||Date.parse(iso(m.backend_timestamp)!)>cutoff||ms>cutoff)return null;
+  if(!m)return reject('MARKET_RECORD_MISSING_OR_CONFLICTING');
+  if(m.truth_verdict!=='TRUE')return reject('MARKET_NOT_TRUE');
+  if(!iso(m.backend_timestamp))return reject('MARKET_RECEIPT_INVALID');
+  if(Date.parse(iso(m.backend_timestamp)!)>cutoff||ms>cutoff)return reject('MARKET_AFTER_CUTOFF');
   const rows=(replay.options??[]).filter(o=>o.symbol===r.symbol&&expiry(o)===r.expiry&&num(o.strike)===r.strike&&o.option_type===side&&iso(o.minute_bucket)===new Date(ms).toISOString());
   // Relative expiry aliases can duplicate an identical exact contract.
   const signatures=new Map(rows.map(o=>[JSON.stringify([o.ltp,o.oi,o.quote_timestamp,o.snapshot_id,o.truth_verdict,o.day_high,o.day_low]),o]));
-  if(signatures.size!==1)return null;
+  if(signatures.size!==1)return reject(rows.length?'CONFLICTING_EXACT_QUOTES':'EXACT_CONTRACT_NOT_RECORDED');
   const q=[...signatures.values()][0],qt=iso(q.quote_timestamp),price=num(q.ltp);
-  if(!qt||price===null||price<=0||q.truth_verdict!=='TRUE'||!q.snapshot_id||q.snapshot_id!==m.snapshot_id)return null;
+  if(!qt)return reject('QUOTE_TIMESTAMP_INVALID');
+  if(price===null||price<=0)return reject('PREMIUM_INVALID');
+  if(q.truth_verdict!=='TRUE')return reject('QUOTE_NOT_TRUE');
+  if(!q.snapshot_id)return reject('QUOTE_SNAPSHOT_ID_MISSING');
+  if(q.snapshot_id!==m.snapshot_id)return reject('QUOTE_SNAPSHOT_ID_MISMATCH');
   const age=(Date.parse(iso(m.backend_timestamp)!)-Date.parse(qt))/1000;
-  if(day(Date.parse(qt))!==day(ms)||age< -5||age>30||Date.parse(qt)>cutoff)return null;
+  if(day(Date.parse(qt))!==day(ms))return reject('QUOTE_WRONG_SESSION');
+  if(age< -5)return reject('QUOTE_AFTER_RECEIPT_TOLERANCE');
+  if(age>30)return reject('QUOTE_STALE_AT_RECEIPT');
+  if(Date.parse(qt)>cutoff)return reject('QUOTE_AFTER_CUTOFF');
+  diagnose?.('ADMITTED');
   return {price,oi:num(q.oi),quoteAt:qt,receiptAt:iso(m.backend_timestamp),snapshotId:q.snapshot_id,
     quoteAgeSeconds:age,dayHigh:num(q.day_high),dayLow:num(q.day_low),storedPdh:num(q.pdh),storedPdl:num(q.pdl)};
+}
+/** Internal allowlisted diagnostic using the SAME admission path. No raw rows,
+ * prices, SQL or credentials; this does not weaken or replace quote admission. */
+export function inspectRagSnapshotAdmission(r:RagEventRequest,current:H1ReplayHttpResult){
+  const ms=at(r.date,r.time);let reason='UNINSPECTED';
+  const selected=quoteAt(current,r,ms,r.side,r.asOf,value=>{reason=value;});
+  const marketRows=(current.market??[]).filter(m=>m.symbol===r.symbol&&iso(m.minute_bucket)===new Date(ms).toISOString());
+  const rows=(current.options??[]).filter(o=>o.symbol===r.symbol&&iso(o.minute_bucket)===new Date(ms).toISOString());
+  const exactExpiry=rows.filter(o=>expiry(o)===r.expiry),exactSide=exactExpiry.filter(o=>o.option_type===r.side);
+  const strikes=[...new Set(exactSide.map(o=>num(o.strike)).filter((s):s is number=>s!==null&&s>0))];
+  return {admitted:!!selected,reason,marketRows:marketRows.length,optionRows:rows.length,
+    exactExpiryRows:exactExpiry.length,exactSideRows:exactSide.length,
+    exactContractRows:exactSide.filter(o=>num(o.strike)===r.strike).length,
+    recordedExpiries:[...new Set(rows.map(o=>expiry(o)).filter(Boolean))].sort().slice(0,16),
+    expiryInventoryTruncated:new Set(rows.map(o=>expiry(o)).filter(Boolean)).size>16,
+    exactSideStrikeCount:strikes.length,minStrike:strikes.length?Math.min(...strikes):null,maxStrike:strikes.length?Math.max(...strikes):null};
 }
 // Corroborate the old writer's wall against its exact archived input. This is
 // only the maximum OI among loaded strikes, never certified exchange-wide OI.

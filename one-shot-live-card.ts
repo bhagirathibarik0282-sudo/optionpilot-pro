@@ -188,7 +188,7 @@ export const ONE_SHOT_CSS=`
 }
 /* On the Research command page, remove duplicate mobile chrome; functionality remains in six tabs and source panel. */
 @media(max-width:600px){
-#market-book[data-main-chapter='1'] #op-view-links{display:none}
+#market-book[data-main-chapter='1'] #op-view-links{display:flex;gap:3px;padding:0 0 3px}#market-book[data-main-chapter='1'] #op-view-links button{min-height:32px;padding:3px 8px;font-size:11px}
 #market-book #op-workspace-top{display:none}
 #market-book #op-workspace-nav:before{content:'OPTIONPILOT PRO';display:block;color:#a8f8fe;font-size:13px;font-weight:850;letter-spacing:.4px;padding:2px 1px 5px}
 #market-book #op-one-stop.os-card .os-hero{margin-bottom:3px}

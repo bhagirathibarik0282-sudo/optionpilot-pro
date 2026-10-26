@@ -1,8 +1,11 @@
 # PR799 bounded archive transport for browser acceptance
 
-Status: prepared and guard-tested, NOT run against the archive. Main and the
-existing diagnostic runtime remain unchanged. Actual browser/mobile acceptance
-is still open.
+Latest status, 26 Oct: user explicitly approved one attempt. Diagnostic build
+succeeded, but runtime returned `PR799_CAPTURE_FAILED_NO_PAYLOAD`; no payload or
+completion marker was received. Main remains unchanged. The idle start command
+was restored and the known idle build redeployed with status SUCCESS; a positive
+idle console marker has not been observed. Actual browser/mobile acceptance is
+still open. See `docs/audits/pr799-capture-run-20261026.json` for exact evidence.
 
 The available browser cannot reach the workspace's loopback preview (observed
 ERR_CONNECTION_REFUSED). Proposed next step: transport a fixed archive capture
@@ -41,6 +44,12 @@ change and pinned-source deployment because explicit authorization for service
 mutation and archived-data logging was missing. Neither operation succeeded.
 Do not reroute the operation to evade that decision. Obtain explicit approval
 for this bounded operation before running it.
+
+The above rejection describes the earlier attempt to obtain authorization. The
+user subsequently approved one capture on 26 Oct; both mutations were accepted.
+That attempt failed as recorded above. No second capture was performed. Offline
+repairs preserve null checkpoints and add safe failure-stage reporting, without
+relaxing source identity, fingerprint, size or read-only guards.
 
 ## Local verification
 

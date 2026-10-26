@@ -20,7 +20,7 @@ try{
  const base='http://127.0.0.1:'+address.port;
  browser=await chromium.launch({headless:true,args:['--no-sandbox']});
  await mkdir('pr800-mobile-ui-artifacts',{recursive:true});
- for(const [name,width,height] of [['mobile',390,844],['small-mobile',360,780],['desktop',1440,900],['reference',1024,1536]] as const){
+ for(const [name,width,height] of [['mobile',390,844],['small-mobile',360,780],['short-mobile',390,667],['laptop',1024,768],['desktop',1440,900],['reference',1024,1536]] as const){
   const context=await browser.newContext({viewport:{width,height},serviceWorkers:'block'});
   try{
    const page=await context.newPage(),errors:string[]=[];
@@ -28,6 +28,36 @@ try{
    await page.route('**/*',r=>new URL(r.request().url()).origin===base?r.continue():r.abort('blockedbyclient'));
    const response=await page.goto(base,{waitUntil:'domcontentloaded',timeout:20000});
    assert.equal(response?.status(),200);
+   await page.locator('#os-screen-overview').waitFor({state:'visible',timeout:15000});
+   const screen=await page.evaluate(()=>({height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,cards:Array.from(document.querySelectorAll('.os-screen-card')).map(el=>{const r=el.getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height,width:r.width};})}));
+   assert.equal(screen.cards.length,7,name+' must show all seven categories');
+   assert(screen.scroll<=screen.height+2,name+' overview must not require vertical page scrolling: '+JSON.stringify(screen));
+   assert(screen.scrollWidth<=screen.width+2,name+' overview must not require horizontal page scrolling');
+   assert(screen.cards.every(c=>c.top>=0&&c.bottom<=screen.height&&c.height>=55&&c.width>=100),name+' all seven cards must be visible and usable: '+JSON.stringify(screen));
+   await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-one-screen-no-data.png',fullPage:false,timeout:15000});
+   const levels=await page.locator('#os-futures').elementHandle();
+   await page.locator('[data-screen-open="os-futures"]').click();
+   assert.equal(await page.locator('#os-screen-detail').evaluate((el:any)=>el.open),true);
+   assert.equal(await page.locator('#os-screen-detail-body>#os-futures').count(),1);
+   assert.equal(await levels?.evaluate((el:any)=>el===document.getElementById('os-futures')),true,'detail must preserve the same source DOM node');
+   await page.locator('#os-screen-close').click();
+   assert.equal(await page.locator('#os-dashboard #os-futures').count(),1,'closing restores the original source panel');
+   await page.locator('[data-screen-open="os-walls"]').click();
+   assert.equal(await page.locator('#os-screen-detail-body>#os-pcr-strip').count(),1,'PCR detail must preserve primary recorded/live PCR evidence');
+   assert.equal(await page.locator('#os-screen-detail-body>#os-walls').count(),1);
+   await page.locator('#os-screen-close').click();
+   assert.equal(await page.locator('#os-dashboard #os-pcr-strip').count(),1);
+   await page.locator('#op-research-open-data').click();
+   assert.equal(await page.locator('#os-screen-detail-body>#mb-tools').count(),1);
+   assert.equal(await page.locator('#recorded-replay').evaluate((el:any)=>el.open),true);
+   await page.locator('#os-screen-close').click();
+   assert.equal(await page.locator('#market-book>#mb-tools').count(),1);
+   // Exercise source revocation without inventing market quotes or changing a source gate.
+   await page.evaluate(()=>{const el=document.getElementById('os-future-response')!;(window as any).__screenOriginal=el.innerHTML;el.innerHTML='<table><tbody><tr><td>TEST_SOURCE_ROW</td><td>TEST_SOURCE_VALUE</td></tr></tbody></table>';});
+   await page.waitForFunction(()=>document.getElementById('os-screen-levels')?.textContent?.includes('TEST_SOURCE_VALUE'));
+   await page.evaluate(()=>{document.getElementById('os-future-response')!.innerHTML=(window as any).__screenOriginal;delete (window as any).__screenOriginal;});
+   await page.waitForFunction(()=>!document.getElementById('os-screen-levels')?.textContent?.includes('TEST_SOURCE_VALUE'));
+   await page.locator('#os-screen-tables').click();
    await page.locator('#os-market-radar').waitFor({state:'visible',timeout:15000});
    const data=await page.evaluate(()=>{
     const rect=(id:string)=>{const n=document.getElementById(id);if(!n)throw Error('missing '+id);return n.getBoundingClientRect().top};

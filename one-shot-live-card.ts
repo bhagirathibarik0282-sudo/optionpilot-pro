@@ -1,7 +1,8 @@
+import { SCREEN_OVERVIEW_HTML } from './screen-overview.js';
 /** Production presentation of the approved One Shot design. No network, timers or persistence. */
 export function renderOneShotCard(atm:string){
  return `<section id="op-one-stop" class="os-card" data-os-version="ONE_SHOT_LIVE_V1" data-workspace-version="FOUR_EXPIRY_V2" aria-label="One Shot live market command centre">
-<div class="os-controls os-reading-actions" aria-label="Dashboard pages"><button type="button" id="os-open-preface" aria-controls="os-preface" aria-expanded="false">00 · ପ୍ରଥମେ ପଢ଼ନ୍ତୁ / Preface</button><button type="button" id="os-open-dashboard" aria-controls="os-dashboard" aria-pressed="true">Live dashboard →</button></div><section id="os-preface" class="os-preface" aria-label="Dashboard reading preface" hidden>
+<div class="os-controls os-reading-actions" aria-label="Dashboard pages"><button type="button" id="os-open-preface" aria-controls="os-preface" aria-expanded="false">00 · ପ୍ରଥମେ ପଢ଼ନ୍ତୁ / Preface</button><button type="button" id="os-open-dashboard" aria-controls="os-dashboard" aria-pressed="true">Live dashboard →</button></div>${SCREEN_OVERVIEW_HTML}<section id="os-preface" class="os-preface" aria-label="Dashboard reading preface" hidden>
 <h3 tabindex="-1" id="os-preface-title">00 · ଡ୍ୟାଶବୋର୍ଡ କେମିତି ପଢ଼ିବେ</h3><p>ଏହି କ୍ରମରେ ପଢ଼ନ୍ତୁ: <strong>Spot + PDH/PDL → ତିନି Index PCR → Expiry + CE/PE → Source time</strong></p>
 <div class="os-guide-grid">
 <article><h4>01 · Spot / PDH / PDL</h4><p>PDH = ପୂର୍ବ sessionର High; PDL = Low; PDC = Close। Spot, Futures ଓ option premiumର ନିଜସ୍ୱ level ଅଲଗା। “Above” ମାନେ ବର୍ତ୍ତମାନ ଉପରେ; “BREAK” ପାଇଁ crossing ଦେଖାଯିବା ଦରକାର।</p></article>

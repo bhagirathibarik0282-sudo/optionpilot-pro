@@ -34,7 +34,7 @@ try {
    await page.locator('#op-command-chapters [data-op-group]').first().waitFor({timeout:15000,state:'attached'});
    assert.equal(await page.locator('#op-command-chapters [data-op-group]').count(),6);
    assert.equal(await page.locator('#mb-chapter option').count(),6);
-   await page.locator('#os-screen-tables').click();
+   await page.locator('#rd-source-tables').click();
    await page.locator('#op-research-open-data').click({timeout:10000});
    assert.equal(await page.locator('#mb-tools').evaluate((n:any)=>n.open),true);
    assert.equal(await page.locator('#recorded-replay').evaluate((n:any)=>n.open),true);

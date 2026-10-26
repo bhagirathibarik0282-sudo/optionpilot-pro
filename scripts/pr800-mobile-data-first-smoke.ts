@@ -33,11 +33,12 @@ try{
     const rect=(id:string)=>{const n=document.getElementById(id);if(!n)throw Error('missing '+id);return n.getBoundingClientRect().top};
     return {radar:rect('os-market-radar'),pcr:rect('os-pcr-strip'),toolbar:rect('op-research-controls'),memory:rect('os-memory'),
       ladder:rect('os-premium'),advanced:rect('os-reference-settings'),scrollWidth:document.documentElement.scrollWidth,
-      viewport:innerWidth,pcrSourceFont:parseFloat(getComputedStyle(document.querySelector('#os-pcr-strip small')!).fontSize),marketCols:getComputedStyle(document.querySelector('#os-market-radar')!).gridTemplateColumns,
+      viewport:innerWidth,duplicateLogo:getComputedStyle(document.getElementById('op-workspace-nav')!,'::before').display,pcrSourceFont:parseFloat(getComputedStyle(document.querySelector('#os-pcr-strip small')!).fontSize),marketCols:getComputedStyle(document.querySelector('#os-market-radar')!).gridTemplateColumns,
       mobileHero:getComputedStyle(document.querySelector('#op-one-stop .os-hero>div:first-child')!).display};
    });
    assert(data.toolbar<data.radar&&data.radar<data.pcr&&data.pcr<data.ladder&&data.ladder<data.memory&&data.memory<data.advanced,
      name+' expected toolbar and seven primary sections before settings: '+JSON.stringify(data));
+   assert.equal(data.duplicateLogo,'none',name+' must have one actual brand header');
    assert(data.pcrSourceFont<=11,name+' legacy mobile font rules must not inflate source labels: '+JSON.stringify(data));
    if(width===1024)await page.screenshot({path:'pr800-mobile-ui-artifacts/reference-no-market-data.png',fullPage:true,timeout:15000});
    if(width===1024)assert(data.memory<1536,'seven primary sections must fit the reference-height reading flow: '+JSON.stringify(data));

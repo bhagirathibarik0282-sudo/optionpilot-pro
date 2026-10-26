@@ -1,8 +1,9 @@
 # Recorder matched outcome rate — deterministic core
 
-Status: implemented as an internal pure calculation and fixture-tested. No
-historical retrieval adapter, HTTP route, dashboard number or production
-deployment is enabled by this change. No actual Recorder match rate is claimed.
+Status: internal calculation and bounded history adapter implemented and
+fixture-tested. No HTTP route, dashboard number or production deployment is
+enabled. Actual-source adapter validation remains pending; see
+`docs/recorder-matched-history-v1.md`. No actual Recorder match rate is claimed.
 
 The existing trade-plan probability engine uses target-before-stop outcomes.
 This core instead consumes admitted saved Recorder snapshots and measures the
@@ -43,8 +44,8 @@ threshold or active rule. Configuration must be agreed and audited before use.
 Require a complete, non-truncated history scope with no failed sessions from an
 audited Recorder loader. The scope object is a trusted internal loader contract,
 not proof supplied by an end user or LLM. Do not expose this calculator as a
-public JSON-input route. The loader adapter itself still needs implementation
-and actual-source validation before a dashboard probability can be enabled.
+public JSON-input route. The internal loader adapter now exists, but still needs
+actual-source validation before a dashboard probability can be enabled.
 
 Compute qualifying completed episodes divided by completed selected sessions.
 Reject numeric output when selected outcomes, match features or admitted source
@@ -87,4 +88,4 @@ baseline/delta guard. Display percentages do not select matches or qualify wins.
 Tests cover exact decimal/exponent boundaries and values just below a threshold.
 Non-finite calculated outcome changes and missing explicit no-write attestation
 also block a numeric rate. This repair remains internal; actual Recorder history
-loading, browser acceptance and numerical dashboard activation remain pending.
+validation, browser acceptance and numerical dashboard activation remain pending.

@@ -69,7 +69,7 @@ test('Research notable events reuse exact event contracts, filter categories and
  let requests=0;ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{requests++;}};
  vm.runInContext('globalThis.book=installMarketBook(api)',ctx);
  const section=()=>nodes.get('mb-page').innerHTML.match(/aria-label="Recorded notable events">([\s\S]*?)<\/section>/)![1];
- assert(section().includes('retrospective research'));assert(section().includes('latest 10 retained per category'));assert(section().includes('no O=H, RAG match or probability is inferred'));
+ assert(section().includes('retrospective research'));assert(section().includes('latest 10 retained per category'));assert(section().includes('no O=H or RAG match is inferred'));
  nodes.get('mb-page').onchange({target:{id:'mb-notable-filter',value:'PREMIUM'}});
  assert(section().includes('22100 CE'));assert(section().includes('NIFTY '+expiry+' 22100 CE / PE'));
  assert(section().includes('Unavailable: event premium missing'));assert(section().includes('Unavailable: target record missing')||section().includes('Pending beyond latest recording'));
@@ -92,7 +92,7 @@ test('Research memory keeps exact prior contract references and opens the shared
  const memory=nodes.get('mb-page').innerHTML.match(/aria-label="Recorder memory and replay">([\s\S]*?)<\/section>/)![1];
  assert(memory.includes('CE · NIFTY '+expiry+' 22000'));assert(memory.includes('>77<'));assert(!memory.includes('>999<'));
  const pe=memory.match(/<tr><td[^>]*>PE · NIFTY[^<]*<\/td>([\s\S]*?)<\/tr>/)![1];assert(pe.includes('data-op-label="Prior recorded value">Unavailable'));
- assert(memory.includes('Historical matches / probability: unavailable.'));assert(memory.includes('not official closes or historical matches'));
+ assert(memory.includes('Recorded event matching is unavailable.'));assert(memory.includes('not official closes or historical matches'));
  nodes.get('mb-page').onclick({target:{closest:(selector:string)=>selector==='[data-research-replay]'?{}:null}});
  assert.equal(nodes.get('mb-tools').open,true);assert.equal(nodes.get('recorded-replay').open,true);
  assert(nodes.get('rr-status').textContent.includes('Paused'));assert.equal(timers,0);assert.equal(requests,0);

@@ -11,7 +11,7 @@ test('reference terminal reuses real source-driven views in seven numbered secti
  assert(indices.every((x,i)=>i===0||x>indices[i-1]),'source-backed sections retain deliberate reading order');
  for(const id of ['os-market-radar','os-pcr-strip','os-events','os-stock-ranks','os-sector-ranks','os-rag-open','os-memory-open','op-one-actions'])assert.equal(html.split('id="'+id+'"').length-1,1,id+' uniqueness');
  assert.match(html,/No similarity percentage, market bias, sector bias or FII\/DII interpretation/);
- assert.match(html,/Probability<\/span><b>Unavailable/);
+ assert.doesNotMatch(html,/probability/i);
  assert(!html.includes('82%'),'historical probability may not be fabricated');
  assert(!html.includes('23,145.60'),'reference figures must not be hardcoded');
  assert(!html.includes('520M'),'mockup OI must not become live data');

@@ -460,3 +460,17 @@ test('reference expiry tabs filter exact recorded contracts and survive refresh 
  h.el('os-premium-expiries').onclick({target:{closest:()=>({dataset:{osExpiry:''}})}});
  assert.equal((h.el('os-premium-table').innerHTML.match(/<tr>/g)||[]).length,5);
 });
+
+test('data-only premium source shows gated volume and bid/ask spread without substituting Greeks',()=>{
+ const h=harness(),p=h.payload(),ce=p.snapshot.atmExpiryLadder[0].rows[0].ce;
+ Object.assign(ce,{volume:123456,bid:119,ask:121,iv:99,delta:.99});h.send(p);
+ const first=h.el('os-premium-table').innerHTML.split('<tbody>')[1].split('</tr>')[0];
+ const cells=[...first.matchAll(/<td>([\s\S]*?)<\/td>/g)].map(m=>m[1]);
+ assert.equal(cells[12],'1,23,456');assert.equal(cells[13],'2');
+ assert.equal(cells[14],'—');assert.equal(cells[15],'—','unsourced Greeks remain unavailable');
+ h.advance(600);const crossed=h.payload();Object.assign(crossed.snapshot.atmExpiryLadder[0].rows[0].ce,{bid:121,ask:119});h.send(crossed);
+ const invalid=h.el('os-premium-table').innerHTML.split('<tbody>')[1].split('</tr>')[0];
+ assert.equal([...invalid.matchAll(/<td>([\s\S]*?)<\/td>/g)][13][1],'—');
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});
+ assert(!h.el('os-premium-table').innerHTML.includes('1,23,456'));
+});

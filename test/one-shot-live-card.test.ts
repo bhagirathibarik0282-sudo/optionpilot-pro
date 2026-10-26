@@ -37,7 +37,7 @@ test('production HTML mounts the real new design once, with ten categories and e
  const html=renderBusinessDashboardV1Html({} as any);
  assert.equal((html.match(/data-os-version="ONE_SHOT_LIVE_V1"/g)||[]).length,1);
  assert.equal((WORKSPACE_NAV_HTML.match(/data-os-go=/g)||[]).length,10);
- for(const name of ['3-index market radar','Spot × Full PCR pulse','Multi-expiry premium ladder','VIX + agreement radar'])assert(WORKSPACE_NAV_HTML.includes(name));
+ for(const name of ['Spot & Futures · three-index levels','Spot × Full PCR pulse','Premium Ladder · Multi-DTE','VIX + agreement radar'])assert(WORKSPACE_NAV_HTML.includes(name));
  assert.equal((WORKSPACE_NAV_HTML.match(/id="op-atm-pairs"/g)||[]).length,1);
  assert.equal((html.match(/dashboard-live\/stream/g)||[]).length,1);
  for(const [,script] of html.matchAll(/<script>([\s\S]*?)<\/script>/g))new vm.Script(script);

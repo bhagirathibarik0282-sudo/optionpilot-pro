@@ -37,6 +37,7 @@ try {
    await page.locator('#op-research-open-data').click({timeout:10000});
    assert.equal(await page.locator('#mb-tools').evaluate((n:any)=>n.open),true);
    assert.equal(await page.locator('#recorded-replay').evaluate((n:any)=>n.open),true);
+   await page.locator('#os-reference-settings>summary').click();
    await page.locator('#op-research-settings').click({timeout:10000});
    assert.equal(await page.locator('#mb-settings').evaluate((n:any)=>n.open),true);
    // The numbered chapter panel is hidden in compact mode: exercise the

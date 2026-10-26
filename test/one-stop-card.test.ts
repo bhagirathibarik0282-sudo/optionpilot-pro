@@ -66,7 +66,8 @@ test('one-stop card is a single top-level workspace panel, not hidden inside fee
  const head=html.indexOf('id="op-workspace-top"'),one=html.indexOf('id="op-one-stop"');
  const tools=html.indexOf('id="mb-tools"');
  assert(head>=0&&one>head&&tools>one);
- assert.match(WORKSPACE_NAV_HTML, /<nav id="op-view-links"[^>]*><\/nav><section id="op-research-controls"/);
+ assert(WORKSPACE_NAV_HTML.indexOf('id="op-research-controls"')<WORKSPACE_NAV_HTML.indexOf('id="op-one-stop"'));
+ assert(WORKSPACE_NAV_HTML.indexOf('id="op-subviews"')>WORKSPACE_NAV_HTML.indexOf('id="op-one-stop"'));
  assert.equal((html.match(/id="op-research-open-data"/g)||[]).length,1);
  assert.match(WORKSPACE_CSS, /\.op-one-scroll\{overflow-x:auto/);
 });

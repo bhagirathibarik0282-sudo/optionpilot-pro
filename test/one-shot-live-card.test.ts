@@ -433,3 +433,16 @@ test('reference premium table retains exact identities, side/index controls and 
  h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});
  assert(!h.el('os-premium-table').innerHTML.includes('>120<'),'disconnected premiums must be revoked');
 });
+
+test('date scope exposes only actual saved sessions and never fabricates expiry dates',()=>{
+ const h=harness();h.setSaved({date:'2026-10-19',current:{},recordedDates:['2026-10-12','2026-10-13','2026-10-14','2026-10-15','2026-10-16','2026-10-19','2026-02-30','<script>']});
+ const scope=(v:string)=>h.el('os-date-scope').onclick({target:{closest:()=>({dataset:{osScope:v}})}});
+ scope('LAST5');
+ const dates=h.el('os-date-options').innerHTML;
+ assert.equal((dates.match(/data-os-date=/g)||[]).length,5);
+ assert(!dates.includes('2026-10-12'));assert(!dates.includes('2026-02-30'));assert(!dates.includes('<script>'));
+ assert.equal(h.el('os-date-picker').open,true);
+ assert.equal(h.loadArgs(),null,'changing the inventory filter must not load a session');
+ scope('EXPIRY');assert(h.el('os-date-options').innerHTML.includes('No saved session matches a loaded verified expiry'));
+ scope('ALL');assert.equal((h.el('os-date-options').innerHTML.match(/data-os-date=/g)||[]).length,6);
+});

@@ -18,7 +18,7 @@ try{
  server.listen(0,'127.0.0.1');await once(server,'listening');
  const address=server.address();assert(address&&typeof address!=='string');
  const base='http://127.0.0.1:'+address.port;
- browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+ browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{}),args:['--no-sandbox','--disable-dev-shm-usage']});
  await mkdir('pr800-mobile-ui-artifacts',{recursive:true});
  for(const [name,width,height] of [['mobile',390,844],['small-mobile',360,780],['short-mobile',390,667],['laptop',1024,768],['desktop',1440,900],['reference',1024,1536]] as const){
   const context=await browser.newContext({viewport:{width,height},serviceWorkers:'block'});
@@ -38,7 +38,24 @@ try{
    const clippedHeaders=await page.evaluate(()=>Array.from(document.querySelectorAll('#rd-page table')).filter(table=>{const last=table.querySelector('thead th:last-child');return last&&last.getBoundingClientRect().right>table.closest('.rd-section')!.getBoundingClientRect().right+1;}).length);
    assert.equal(clippedHeaders,0,name+' full table columns must remain visible');
    const premiumHeads=await page.locator('#rd-premium-table th').allTextContents();
-   for(const h of ['Type','Strike','LTP','Chg','%','OI','OI Δ','Vol','Spread','IV','Delta','PDH','PDC','PDL','Trend','Note'])assert(premiumHeads.includes(h),'full premium column '+h);
+   for(const h of ['Expiry','Side','ATM','LTP ₹','Day Δ ₹','1m Δ ₹','3m Δ ₹','15m Δ ₹','OI','OI Δ','Spread','PDH','PDL','Position','Quote IST','Source'])assert(premiumHeads.includes(h),'full premium column '+h);
+   // Offline DOM projection fixtures, restored before capturing the absence-only page.
+   await page.evaluate(()=>{
+    const ids=['os-future-response','os-vix-value','os-premium-table'];
+    (window as any).__projectionRestore={source:document.getElementById('op-one-stop')!.dataset.osSource,html:Object.fromEntries(ids.map(id=>[id,document.getElementById(id)!.innerHTML]))};
+    const sourceTable=(heads:string[],rows:string[][])=>'<table><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(v=>'<td>'+v+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
+    document.getElementById('op-one-stop')!.dataset.osSource='RECORDED';
+    document.getElementById('os-future-response')!.innerHTML=sourceTable(['Instrument','LTP','Window %','PDH','PDC','PDL','15m H','15m L','OI','Basis','Source time · IST','Window Δ ₹','OI Δ'],[['NIFTY Spot','101','1%','—','100','—','—','—','—','—','09:45:00','1','—'],['NIFTY Futures','111','1%','—','—','—','—','—','980','10','09:45:00','1','-20']]);
+    document.getElementById('os-vix-value')!.innerHTML='<div class="os-vix-number">17.1</div>';
+    document.getElementById('os-premium-table')!.innerHTML=sourceTable(['Type','Strike','Expiry','LTP ₹','Day Δ ₹','1m Δ ₹','3m Δ ₹','15m Δ ₹','OI','OI Δ','Spread','PDH','PDL','Level position','Quote time · IST','Status'],['2026-10-22','2026-10-29','2026-11-05','2026-11-12'].flatMap(expiry=>['CE','PE'].map(side=>[side,'100',expiry,'121','26','1','—','—','2,010','10','2','125','85','Inside PDH/PDL','09:45:00','RECORDED'])));
+   });
+   await page.waitForFunction(()=>document.querySelector('#rd-market-metrics')?.textContent?.includes('VIX17.1')&&document.querySelectorAll('#rd-premium-table tbody tr').length===8);
+   assert.equal(await page.locator('#rd-levels-table tbody tr').nth(1).locator('td').nth(9).innerText(),'980');
+   assert.equal(await page.locator('#rd-levels-table tbody tr').nth(1).locator('td').nth(10).innerText(),'-20');
+   assert.equal(await page.locator('#rd-levels-table tbody tr').nth(1).locator('td').nth(11).innerText(),'10');
+   assert.equal(await page.locator('#rd-premium-table tbody tr').first().locator('td').nth(9).innerText(),'10');
+   await page.evaluate(()=>{const restore=(window as any).__projectionRestore;for(const [id,html] of Object.entries(restore.html))document.getElementById(id)!.innerHTML=html as string;document.getElementById('op-one-stop')!.dataset.osSource=restore.source;delete (window as any).__projectionRestore;});
+   await page.waitForFunction(()=>document.querySelectorAll('#rd-premium-table tbody tr').length!==8);
    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-reference-data-page.png',fullPage:false,timeout:15000});
    await page.locator('[data-rd-fit="ACTUAL"]').click();assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1');
    await page.locator('[data-rd-fit="PAGE"]').click();

@@ -21,16 +21,16 @@ function harness(){
   indices:symbols.map(symbol=>({symbol,expiry,expiries:[expiry],strike:100,spot:quote('SPOT',symbol),future:quote('FUTURE',symbol),ce:quote('OPTION',symbol),pe:quote('OPTION',symbol,90,{identity:{role:'OPTION',symbol,expiry,strike:100,side:'PE',token:4}})})),
   atmExpiryLadder:symbols.map(symbol=>({symbol,spot:quote('SPOT',symbol),rows:[{expiry,strike:100,ce:quote('OPTION',symbol,120),pe:quote('OPTION',symbol,90,{identity:{role:'OPTION',symbol,expiry,strike:100,side:'PE',token:4}})}]})),
   vix:quote('VIX','',14,{pdc:13}),participation:[quote('STOCK','',150,{identity:{role:'STOCK',label:'HDFC <Bank>',token:99},pdc:100}),quote('SECTOR','',90,{identity:{role:'SECTOR',label:'PSU Bank',token:98},pdc:100})]}});
- let saved:any={date,current:{}},loadArgs:any=null;
+ let saved:any={date,current:{}},loadArgs:any=null,opened:any=null;
  const models=Object.fromEntries(symbols.map(symbol=>[symbol,{symbol,tradeDate:date,spot:{pdh:101,pdl:90,at:stamp()}}]));
- const context:any={document:{body:{dataset:{}},getElementById:el,querySelectorAll(){return [];}},window:{addEventListener(n:string,f:any){listeners[n]=f;}},localStorage:{getItem(){return null;},setItem(){}},Date:Clock,__name:(fn:any)=>fn,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,deriveAtmFibHold,derivePremiumWorkspace,derivePremiumSeriesInventory,installPremiumWorkspace(){return {openLadder(){},setVisible(){},refreshRecorded(){}};}};
+ const context:any={document:{body:{dataset:{}},getElementById:el,querySelectorAll(){return [];}},window:{addEventListener(n:string,f:any){listeners[n]=f;}},localStorage:{getItem(){return null;},setItem(){}},Date:Clock,__name:(fn:any)=>fn,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,deriveAtmFibHold,derivePremiumWorkspace,derivePremiumSeriesInventory,installPremiumWorkspace(){return {openLadder(detail:any){opened=detail;},setVisible(){},refreshRecorded(){}};}};
  vm.createContext(context);vm.runInContext('var installOneShotLiveCard='+installOneShotLiveCard.toString(),context);
  const installer=vm.runInContext('('+installDashboardWorkspace.toString()+')',context);
  installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>0,turn(){},getState:()=>saved,getModels:()=>models,setDate:async(date:string,options:any)=>{loadArgs={date,options};saved={...saved,date,scope:options.scope};}});
  el('os-chart-cadence').onchange({target:{value:'0'}});
  el('os-window').onclick({target:{closest:()=>({dataset:{osWindow:'1'}})}});
  const send=(p:any)=>listeners['optionpilot:live-context']({detail:p});
- return {el,payload,send,writes,loadArgs:()=>loadArgs,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
+ return {el,payload,send,writes,loadArgs:()=>loadArgs,opened:()=>opened,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
 }
 
 test('production HTML mounts the real new design once, with ten categories and existing real controls',()=>{
@@ -56,7 +56,8 @@ test('new radar, PCR, VIX and source walls render verified values and revoke the
  for(const id of ['os-market-radar','os-pcr-strip','os-vix-value','os-wall-ladder'])assert(!h.el(id).innerHTML.includes('1.2'));
  assert(h.el('os-pulse-chart').innerHTML.includes('RECORDED'));
  assert.equal(h.el('op-one-stop').dataset.osSource,'RECORDED');
- assert(h.el('os-future-response').innerHTML.includes('no stale comparison'));
+ assert(h.el('os-future-response').innerHTML.includes('RECORDED'));
+ assert(!h.el('os-future-response').innerHTML.includes('>100<'));
 });
 
 test('three-index level radar and futures chapter show PDH/PDC/PDL with exact source gates',()=>{
@@ -473,4 +474,41 @@ test('data-only premium source shows gated volume and bid/ask spread without sub
  assert.equal([...invalid.matchAll(/<td>([\s\S]*?)<\/td>/g)][13][1],'—');
  h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});
  assert(!h.el('os-premium-table').innerHTML.includes('1,23,456'));
+});
+
+test('premium behaviour windows use continuous exact-token history and reset on ATM roll',()=>{
+ const h=harness();h.send(h.payload());
+ for(let i=1;i<=90;i++){
+  h.advance(10000);const p=h.payload();p.snapshot.atmExpiryLadder[0].rows[0].ce.price=120+i;h.send(p);
+ }
+ const cells=()=>[...h.el('os-premium-table').innerHTML.split('<tbody>')[1].split('</tr>')[0].matchAll(/<td>([\s\S]*?)<\/td>/g)].map(m=>m[1]);
+ assert.deepEqual(cells().slice(16,20),['6','18','90','LIVE']);
+ h.advance(10000);const rolled=h.payload();rolled.snapshot.atmExpiryLadder[0].rows[0].ce.identity.token=999;h.send(rolled);
+ assert.deepEqual(cells().slice(16,20),['—','—','—','LIVE']);
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});
+ assert(!h.el('os-premium-table').innerHTML.includes('>210<'));
+});
+
+test('recorded overview retains exact OI, spread, futures basis and VIX without live substitution',()=>{
+ const h=harness(),s=recordedSession();
+ s.current.NIFTY.market.forEach((r:any,i:number)=>Object.assign(r,{future_ltp:110+i,future_basis:10,future_oi:1000-i*20,india_vix:17+i*.1}));
+ s.current.NIFTY.options.forEach((r:any,i:number)=>Object.assign(r,{oi:2000+i*10,bid:r.ltp-1,ask:r.ltp+1}));
+ h.setSaved(s);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ assert.match(h.el('os-future-response').innerHTML,/>111</);
+ assert.match(h.el('os-future-response').innerHTML,/>980</);
+ assert.match(h.el('os-future-response').innerHTML,/>10</);
+ assert.match(h.el('os-vix-value').innerHTML,/>17.1</);
+ const cells=[...h.el('os-premium-table').innerHTML.split('<tbody>')[1].split('</tr>')[0].matchAll(/<td>([\s\S]*?)<\/td>/g)].map(m=>m[1]);
+ assert.equal(cells[16],'2,010');assert.equal(cells[17],'2');assert.equal(cells[18],'10');
+ assert.match(h.el('os-wall-ladder').innerHTML,/>0.1</);
+ h.el('os-source').onchange({target:{value:'LIVE'}});
+ assert(!h.el('os-vix-value').innerHTML.includes('>17.1<'));
+ assert(!h.el('os-future-response').innerHTML.includes('>980<'));
+});
+
+test('opening Ladder from recorded overview preserves source and selected index',()=>{
+ const h=harness();h.setSaved(recordedSession());h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ h.el('os-index').onchange({target:{value:'SENSEX'}});
+ h.el('op-chapter-links').onclick({target:{closest:()=>({dataset:{opGroup:'1'}})}});
+ assert.equal(h.opened().source,'RECORDED');assert.equal(h.opened().symbol,'SENSEX');
 });

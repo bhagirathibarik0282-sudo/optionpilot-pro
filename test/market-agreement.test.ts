@@ -80,3 +80,19 @@ test('history HTTP route validates dates and never caches failed reads',async()=
  assert.equal(response.status,400);assert.equal(response.headers.get('cache-control'),'no-store');
  assert.deepEqual(await response.json(),{error:'INVALID_DATE'});
 });
+
+test('old saved snapshots remain readable at their own time without becoming synchronized agreement',()=>{
+ const i=participation({asOf:date+'T04:15:00Z'}),v=derive(i);
+ assert.equal(v.usable,0);assert.equal(v.rows[0].status,'MISSING');
+ assert.equal(v.selection.lastVerified.receipt,at);
+ assert.equal(v.selection.lastVerified.stocks.length,1);
+ assert.equal(v.selection.lastVerified.sectors.length,1);
+ const html=render(v,{date,window:'3m',asOf:i.asOf});
+ assert.match(html,/Last verified/);assert.match(html,/Read last verified prices/);
+ assert.match(html,/unavailable for the selected endpoint comparison/);
+ const stale=participation({asOf:date+'T04:15:00Z'});
+ stale.snapshots[1].stocks.NIFTY[0].exchangeTimestamp=date+'T04:00:00Z';
+ assert.equal(derive(stale).selection.lastVerified.stocks.length,0);
+ const future=participation({asOf:date+'T03:59:00Z'});
+ assert.equal(derive(future).selection.lastVerified,null);
+});

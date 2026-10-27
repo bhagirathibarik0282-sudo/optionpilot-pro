@@ -491,8 +491,8 @@ test('premium behaviour windows use continuous exact-token history and reset on 
 
 test('recorded overview retains exact OI, spread, futures basis and VIX without live substitution',()=>{
  const h=harness(),s=recordedSession();
- s.current.NIFTY.market.forEach((r:any,i:number)=>Object.assign(r,{future_ltp:110+i,future_basis:10,future_oi:1000-i*20,india_vix:17+i*.1}));
- s.current.NIFTY.options.forEach((r:any,i:number)=>Object.assign(r,{oi:2000+i*10,bid:r.ltp-1,ask:r.ltp+1}));
+ s.current.NIFTY.market.forEach((r:any,i:number)=>Object.assign(r,{future_ltp:110+i,future_basis:10,future_oi:String(1000-i*20),india_vix:17+i*.1}));
+ s.current.NIFTY.options.forEach((r:any,i:number)=>Object.assign(r,{oi:String(2000+i*10),bid:r.ltp-1,ask:r.ltp+1}));
  h.setSaved(s);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
  assert.match(h.el('os-future-response').innerHTML,/>111</);
  assert.match(h.el('os-future-response').innerHTML,/>980</);

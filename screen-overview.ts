@@ -81,6 +81,7 @@ body[data-op-screen=reference] #rd-shell{display:flex;flex-direction:column;heig
 #market-book #rd-page table :is(th,td):before{display:none!important;content:none!important}
 #rd-page .rd-cell-note{display:block;font-size:9px;color:#8eacbd;line-height:1.2;max-width:150px;overflow:hidden;text-overflow:ellipsis}
 #rd-page .rd-up{color:#00ee74}#rd-page .rd-down{color:#ff3b57}#rd-page .rd-level-pdh{color:#ff445b;background:#220a12}#rd-page .rd-level-pdc{color:#ffe633;background:#201e05}#rd-page .rd-level-pdl{color:#00ea74;background:#032313}
+#rd-page #rd-event-table table,#rd-page #rd-memory-table table{table-layout:fixed}#market-book #rd-page :is(#rd-event-table,#rd-memory-table) :is(th,td){white-space:normal;overflow-wrap:anywhere}
 #rd-provenance{font-size:10px;color:#9bb6c8;line-height:1.3;padding:2px}
 #os-screen-detail{position:fixed;inset:8px;margin:0;width:calc(100vw - 16px);height:calc(100dvh - 16px);max-width:none;max-height:none;padding:0;border:1px solid #3185b1;border-radius:6px;background:#030d15;color:#eaf5ff;overflow:hidden}
 #os-screen-detail[open]{display:flex;flex-direction:column}#os-screen-detail::backdrop{background:#000c}

@@ -39,6 +39,20 @@ try{
    assert.equal(clippedHeaders,0,name+' full table columns must remain visible');
    const premiumHeads=await page.locator('#rd-premium-table th').allTextContents();
    for(const h of ['Expiry','Side','ATM','LTP ₹','Day Δ ₹','1m Δ ₹','3m Δ ₹','15m Δ ₹','OI','OI Δ','Spread','PDH','PDL','Position','Quote IST','Source'])assert(premiumHeads.includes(h),'full premium column '+h);
+   // Offline PCR projection: a valid mixed-time observation must survive the compact view.
+   await page.evaluate(()=>{
+    const ids=['os-pcr-strip','os-wall-ladder'];
+    (window as any).__pcrRestore=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)!.innerHTML]));
+    document.getElementById('os-pcr-strip')!.innerHTML='<div class="os-pcr"><strong>NIFTY</strong><small>UNAVAILABLE · Fresh Full PCR</small><b>—</b><small>Expiry 2026-10-27</small><small>ATM ±7 band: 1.1043 · 30/30 verified</small><small>OI 282/288 fresh · stale 6 · missing 0 · invalid 0</small><div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small><b>1.0969</b><small>288/288 contracts · 6 older than 30s</small><small>Source 11:04:26 → 11:05:37 IST · checked 11:05:37 IST</small></div></div>';
+    document.getElementById('os-wall-ladder')!.innerHTML='<table><tbody><tr><td>NIFTY</td><td>— / 1.1043</td><td>—</td><td>—</td></tr></tbody></table>';
+   });
+   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
+   const pcrText=await page.locator('#rd-pcr-table').innerText();
+   for(const label of ['MIXED SOURCE TIMES','288/288 contracts','stale 6','11:04:26','1.1043'])assert(pcrText.includes(label),name+' PCR provenance '+label);
+   assert((await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'));
+   await page.evaluate(()=>{for(const [id,html] of Object.entries((window as any).__pcrRestore))document.getElementById(id)!.innerHTML=html as string;delete (window as any).__pcrRestore;});
+   await page.waitForFunction(()=>!document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
+   assert(!(await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'),'revoked reported observation must disappear');
    // Offline DOM projection fixtures, restored before capturing the absence-only page.
    await page.evaluate(()=>{
     const ids=['os-future-response','os-vix-value','os-premium-table','mb-page'];

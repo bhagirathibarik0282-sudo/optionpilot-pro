@@ -243,7 +243,7 @@ export function installDashboardWorkspace(api:any){
  const openChapter=(i:number,replay=false)=>{if(!Number.isInteger(i)||i<0||i>=chapters.length)return;
   group=replay?replayGroup:Math.max(0,groups.findIndex(g=>g.views.includes(i)));api.turn(i);draw();};
  const openGroup=(i:number)=>{if(!Number.isInteger(i)||i<0||i>=groups.length)return;group=i;const view=remembered[i];api.turn(view);
-  if(view===7)premium?.openLadder({source:i===replayGroup||$('op-one-stop')?.dataset.osSource==='RECORDED'?'RECORDED':'LIVE',symbol:atmSelected});draw();};
+  if(view===7)premium?.openLadder({source:i===replayGroup||$('op-one-stop')?.dataset?.osSource==='RECORDED'?'RECORDED':'LIVE',symbol:atmSelected});draw();};
  const mainClick=(e:any)=>{const b=e.target.closest?.('[data-op-group]');if(b)openGroup(Number(b.dataset.opGroup));};
  $('op-chapter-links').onclick=mainClick;if($('op-command-chapters'))$('op-command-chapters').onclick=mainClick;
  if($('mb-nav'))$('mb-nav').onclick=mainClick;

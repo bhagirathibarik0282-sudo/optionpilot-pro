@@ -374,7 +374,7 @@ test('PR5 repeated live packets preserve ATM DOM and flashing; new premium, disc
  });
  installer({chapters:Array.from({length:12},(_,i)=>'Chapter '+i),page(){return 0},turn(){},getState(){return {};}});
  const at=()=>new Date(fakeNow).toISOString();
- const date=new Date(fakeNow+19800000).toISOString().slice(0,10),expiry='2026-10-26';
+ const date=new Date(fakeNow+19800000).toISOString().slice(0,10),expiry=date;
  const quote=(role:string,price:number,side?:string)=>({
   state:'LIVE',price,observedAt:at(),receivedAt:at(),
   identity:{role,symbol:'NIFTY',expiry,strike:22000,side}

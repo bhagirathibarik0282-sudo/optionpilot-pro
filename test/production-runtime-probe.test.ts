@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { productionVerificationPending as pending, PRODUCTION_ORIGIN } from './helpers/production-runtime.js';
+import { productionVerificationPending as productionPending, PRODUCTION_ORIGIN } from './helpers/production-runtime.js';
+// Fixture checks must not write a production-readiness summary.
+const pending: typeof productionPending = (response,t,fetcher,clock) => productionPending(response,t,fetcher,clock,()=>{});
 const closed = { tradingDate:'2026-10-28', supervisor:true, timezone:'Asia/Kolkata', hoursIST:'08:45–16:15',
   scheduled:false, maintenance:false, shouldRun:false, running:false, ready:false, draining:false };
 const clock = () => new Date('2026-10-28T14:00:00Z');

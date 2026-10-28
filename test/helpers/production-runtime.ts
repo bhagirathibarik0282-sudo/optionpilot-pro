@@ -4,6 +4,11 @@ import { operatingStatus } from '../../runtime-operating-window.js';
 
 export const PRODUCTION_ORIGIN = 'https://optionpilot-pro-v2-production.up.railway.app';
 
+const writePendingSummary = () => {
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+    '\n- **Production verification pending:** scheduled app closure confirmed. This skipped probe is not live readiness proof.\n');
+};
+
 // A closed runtime is pending evidence, never application readiness. A generic
 // 503, a stale status, an active window or an enabled maintenance window fails.
 export async function productionVerificationPending(
@@ -11,6 +16,7 @@ export async function productionVerificationPending(
   t: Pick<TestContext, 'skip' | 'diagnostic'>,
   fetchStatus: typeof fetch = fetch,
   clock = () => new Date(),
+  reportPending = writePendingSummary,
 ): Promise<boolean> {
   if (response.status !== 503 || new URL(response.url).origin !== PRODUCTION_ORIGIN) return false;
   let body: any;
@@ -27,8 +33,7 @@ export async function productionVerificationPending(
   if (!status.ok || !closed(await status.json()) || operatingStatus(clock()).scheduled || operatingStatus(clock()).tradingDate !== local.tradingDate) return false;
   const reason = 'PENDING_LIVE_VERIFICATION: confirmed scheduled runtime closure; real application readiness is unverified.';
   t.diagnostic(reason);
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-    '\n- **Production verification pending:** scheduled app closure confirmed. This skipped probe is not live readiness proof.\n');
+  reportPending();
   t.skip(reason);
   return true;
 }

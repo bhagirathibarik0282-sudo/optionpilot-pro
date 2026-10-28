@@ -23,8 +23,9 @@ function harness() {
     querySelector: (selector: string) => selector === '.os-market-head' ? node({ textContent: selected }) :
       selector === '.os-price' ? node({ textContent: price }) : null,
   }) }));
+  const reference = node({ dataset: { recordedIndex: 'NIFTY', referenceFrom: '2026-10-27T06:03:00Z', referenceAt: '2026-10-27T06:06:00Z' } });
   nodes.set('mb-page', node({ querySelector: (selector: string) => selector.includes('Recorded notable events') ? events :
-    selector.includes('Recorder memory and replay') ? memory : null }));
+    selector.includes('Recorder memory and replay') ? memory : selector.includes('Three-index recorded overview') ? reference : null }));
   nodes.set('rd-page', node({ scrollHeight: 700 }));
   nodes.set('rd-viewport', node({ clientWidth: 1024, clientHeight: 800 }));
   for (const id of ['rd-market-head','rd-market-levels','rd-market-metrics','rd-levels-table','rd-pcr-table',
@@ -38,7 +39,7 @@ function harness() {
     __name: (fn: any) => fn, requestAnimationFrame: () => 1 };
   const installer = vm.runInNewContext(`(${installScreenOverview.toString()})`, context);
   const view = installer();
-  return { nodes, events, memory, futures(heads:string[],rows:string[][]){nodes.set('os-future-response',tableSource(heads,rows));view.refresh();}, headline(value:string,status:string){price=value;validation=status;view.refresh();}, premium(heads:string[],rows:string[][]){nodes.set('os-premium-table',tableSource(heads,rows));view.refresh();}, select(symbol: string) { selected = symbol; view.refresh(); } };
+  return { nodes, events, memory, reference, futures(heads:string[],rows:string[][]){nodes.set('os-future-response',tableSource(heads,rows));view.refresh();}, headline(value:string,status:string){price=value;validation=status;view.refresh();}, premium(heads:string[],rows:string[][]){nodes.set('os-premium-table',tableSource(heads,rows));view.refresh();}, select(symbol: string) { selected = symbol; view.refresh(); } };
 }
 
 test('changing selected index never exposes another index recorded events or memory', () => {
@@ -109,4 +110,29 @@ test('selected-index futures metrics never borrow a fixed row from another index
  h.select('BANKNIFTY');const metrics=h.nodes.get('rd-market-metrics').innerHTML;
  assert.match(metrics,/54392.6/);assert.match(metrics,/8.85/);assert.doesNotMatch(metrics,/22764.9/);
  assert.doesNotMatch(h.nodes.get('rd-levels-table').innerHTML,/>(?:NIFTY Spot|NIFTY Futures)</);
+});
+
+
+test('comparison reference retains full date and IST clocks without promising synchronized replay',()=>{
+ const h=harness(),output=h.nodes.get('rd-context-rows').innerHTML;
+ assert.match(output,/Comparison reference/);assert.match(output,/27 Oct 2026/);
+ assert.match(output,/11:33:00/);assert.match(output,/11:36:00/);
+ assert.match(output,/synchronized replay unavailable/);
+ h.select('SENSEX');assert.doesNotMatch(h.nodes.get('rd-context-rows').innerHTML,/11:36:00/);
+ assert.match(h.nodes.get('rd-context-rows').innerHTML,/Unavailable → Unavailable/);
+});
+test('missing or malformed reference endpoints are never replaced by headline clocks',()=>{
+ const h=harness();h.reference.dataset.referenceFrom='';h.reference.dataset.referenceAt='garbage';h.select('NIFTY');
+ assert.match(h.nodes.get('rd-context-rows').innerHTML,/Unavailable → Unavailable/);
+ assert.doesNotMatch(h.nodes.get('rd-context-rows').innerHTML,/11:36:00/);
+});
+test('recorded section clocks explain independent and retrospective evidence',()=>{
+ const h=harness();
+ assert.match(h.nodes.get('rd-levels-table').innerHTML,/simultaneous observations are unverified/);
+ assert.match(h.nodes.get('rd-premium-table').innerHTML,/missing clock stays unavailable/);
+ assert.match(h.nodes.get('rd-event-table').innerHTML,/not event-time knowledge/);
+ assert.match(h.nodes.get('rd-memory-table').innerHTML,/not a synchronized replay frame/);
+ h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.select('NIFTY');
+ assert.doesNotMatch(h.nodes.get('rd-context-rows').innerHTML,/Comparison reference/);
+ assert.doesNotMatch(h.nodes.get('rd-premium-table').innerHTML,/Source clocks/);
 });

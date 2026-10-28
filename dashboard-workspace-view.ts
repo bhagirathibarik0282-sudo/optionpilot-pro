@@ -415,7 +415,7 @@ export function installDashboardWorkspace(api:any){
  };
  const oneShot=typeof installOneShotLiveCard==='function'?installOneShotLiveCard({
   getState:api.getState,getModels:api.getModels,setDate:api.setDate,derivePremium:typeof derivePremiumWorkspace==='function'?derivePremiumWorkspace:undefined,validEnvelope:freshEnvelope,validQuote:freshQuote,
-  derivePcr:deriveLiveThreeIndexPcr,deriveRecordedPcr:typeof deriveRecordedThreeIndexPcr==='function'?deriveRecordedThreeIndexPcr:undefined,chooseIndex:(symbol:string)=>{atmSelected=symbol;$('op-atm-index').value=symbol;paintAtm(atmLast);}
+  derivePcr:deriveLiveThreeIndexPcr,deriveRecordedPcr:typeof deriveRecordedThreeIndexPcr==='function'?deriveRecordedThreeIndexPcr:undefined,chooseIndex:(symbol:string)=>{api.chooseResearchIndex?.(symbol);atmSelected=symbol;$('op-atm-index').value=symbol;paintAtm(atmLast);}
  }):null;
  if(typeof installScreenOverview==='function')installScreenOverview();
  // PR3: reuse the strict three-index full-PCR verifier; render from the existing stream only.

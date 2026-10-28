@@ -1,0 +1,42 @@
+name: Release OptionPilot production
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Main commit to release (default latest main)
+        required: true
+        default: main
+      emergency:
+        description: Allow release during operating hours (may interrupt recording)
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Validate operating window and main ancestry
+        env:
+          RELEASE_REVISION: ${{ inputs.revision }}
+          EMERGENCY_RELEASE: ${{ inputs.emergency }}
+        run: |
+          node --import tsx --input-type=module -e 'import {runtimeWindowOpen} from "./runtime-operating-window.ts"; if(runtimeWindowOpen() && process.env.EMERGENCY_RELEASE!=="true") {console.error("Release blocked during 08:45–16:15 IST; use emergency only for an intentional recording interruption.");process.exit(1);}'
+          revision_sha=$(git rev-parse --verify --end-of-options "${RELEASE_REVISION}^{commit}")
+          git merge-base --is-ancestor "$revision_sha" origin/main
+          echo "RELEASE_SHA=$revision_sha" >> "$GITHUB_ENV"
+      - run: npm run test:runtime-window
+      - name: Promote tested main commit to production branch
+        run: git push origin "$RELEASE_SHA:refs/heads/production"

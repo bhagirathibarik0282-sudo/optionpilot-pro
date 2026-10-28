@@ -1,0 +1,20 @@
+name: Scheduled market refresh cost controls
+on:
+  pull_request:
+    paths: ['runtime-operating-window.ts', 'scripts/optionpilot-*.mjs', 'scripts/runtime-io-tracker.mjs', 'test/runtime-*.test.ts', 'test/fixtures/runtime-child.mjs', 'scheduled-market-refresh.ts', 'test/scheduled-market-refresh.test.ts', 'server.ts', 'package.json', '.github/workflows/scheduled-market-refresh-ci.yml']
+  push:
+    branches: [main]
+    paths: ['runtime-operating-window.ts', 'scripts/optionpilot-*.mjs', 'scripts/runtime-io-tracker.mjs', 'test/runtime-*.test.ts', 'test/fixtures/runtime-child.mjs', 'scheduled-market-refresh.ts', 'test/scheduled-market-refresh.test.ts', 'server.ts', 'package.json', '.github/workflows/scheduled-market-refresh-ci.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run test:market-refresh-singleflight
+      - run: NODE_ENV=test node --import tsx --test test/index-closing-observation.test.ts test/dashboard-background-quotes.test.ts
+      - run: npm run test:runtime-window

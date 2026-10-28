@@ -1,10 +1,12 @@
+import { productionVerificationPending } from './helpers/production-runtime.js';
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const URL = "https://optionpilot-pro-v2-production.up.railway.app/api/research/broad-market-size/recovery-audit";
 
-test("production recovery audit proves the existing seven-index historical archive", async () => {
+test("production recovery audit proves the existing seven-index historical archive", async (t) => {
   const response = await fetch(URL, { headers: { accept: "application/json" } });
+  if (await productionVerificationPending(response, t)) return;
   const text = await response.text();
   console.log(`[RECOVERY_PRODUCTION_PROOF] status=${response.status} body=${text}`);
   assert.equal(response.ok, true, `HTTP_${response.status}:${text}`);

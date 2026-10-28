@@ -63,3 +63,15 @@ must be followed by real runtime/selection verification.
 Maintain tests for index switching, source mismatches, empty/partial inventory,
 duplicate legs, CE/PE-only views, unavailable headline evidence and wrong-index
 futures rows. Broker credentials are not needed for these view-level checks.
+
+## Production probe behavior
+
+Live production probes report `PENDING_LIVE_VERIFICATION` as a skipped test
+only when a 503 response explicitly identifies the scheduled supervisor closure,
+all lifecycle flags say stopped, the date/calendar agrees with the current IST
+runtime policy, and a separate `/ops/runtime-status` read confirms that state.
+The GitHub job summary states that live readiness remains unverified. A skipped
+probe is not release acceptance and must be rerun when the app is running.
+Generic 503s, startup/drain errors, enabled maintenance, active operating hours,
+stale status dates and network failures retain failure behavior. Existing live
+payload assertions remain in place. The probes never start or restart the app.

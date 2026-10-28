@@ -1,10 +1,12 @@
+import { productionVerificationPending } from './helpers/production-runtime.js';
 import assert from "node:assert/strict";
 import test from "node:test";
 
 const URL = "https://optionpilot-pro-v2-production.up.railway.app/api/research/fii-dii/production-readiness";
 
-test("production FII DII readiness reflects actual DB state and remains context-only", async () => {
+test("production FII DII readiness reflects actual DB state and remains context-only", async (t) => {
   const response = await fetch(URL, { headers: { accept: "application/json" } });
+  if (await productionVerificationPending(response, t)) return;
   const body = await response.json() as any;
   console.log(JSON.stringify(body));
 

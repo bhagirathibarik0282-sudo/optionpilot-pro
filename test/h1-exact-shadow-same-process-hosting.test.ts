@@ -8,7 +8,12 @@ test("production start no longer launches H1 exact shadow as a separate process"
   const pkg = JSON.parse(readFileSync(new URL("package.json", root), "utf8"));
   const start = String(pkg.scripts?.start ?? "");
   assert.doesNotMatch(start, /&\s*tsx h1-exact-shadow-live-service\.ts/);
-  assert.match(start, /tsx h1-same-process-server-entry\.ts/);
+  assert.match(start, /node --import tsx scripts\/optionpilot-service-supervisor\.mjs/);
+  const supervisor = readFileSync(new URL('scripts/optionpilot-service-supervisor.mjs', root), 'utf8');
+  const child = readFileSync(new URL('scripts/optionpilot-runtime-child.mjs', root), 'utf8');
+  assert.match(supervisor, /runtimeEntry = 'scripts\/optionpilot-runtime-child\.mjs'/);
+  assert.match(child, /await import\('\.\.\/h1-same-process-server-entry\.ts'\)/);
+  assert.doesNotMatch(child, /spawn\([^\n]*h1-exact-shadow-live-service/);
 });
 
 test("one entrypoint owns exact shadow and server import in the same process", () => {

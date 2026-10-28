@@ -1,3 +1,4 @@
+import { runScheduledMarketRefresh, scheduledMarketRefreshAllowed } from "./scheduled-market-refresh.js";
 import { findOrCreateArchiveDriveFolder } from './drive-archive-folder.js';
 import { checkDriveFilePermission } from './drive-permission-check.js';
 import { mountSellerResearchRoutes } from './seller-research-http.js';
@@ -26358,14 +26359,16 @@ async function dhanM1BuildProductionSnapshot(symbol: "NIFTY" | "BANKNIFTY"): Pro
 }
 
 async function dhanM1ProductionRefreshCycle() {
-  for (const symbol of ["NIFTY", "BANKNIFTY"] as const) {
-    const snap = await dhanM1BuildProductionSnapshot(symbol);
-    if (!snap) continue;
-    const arr = DHAN_M1_PRODUCTION_HISTORY.get(symbol) || [];
-    arr.push(snap);
-    if (arr.length > DHAN_M1_PRODUCTION_MAX_SNAPSHOTS) arr.shift();
-    DHAN_M1_PRODUCTION_HISTORY.set(symbol, arr);
-  }
+  await runScheduledMarketRefresh("dhanM1ProductionRefreshCycle", async () => {
+    for (const symbol of ["NIFTY", "BANKNIFTY"] as const) {
+      const snap = await dhanM1BuildProductionSnapshot(symbol);
+      if (!snap) continue;
+      const arr = DHAN_M1_PRODUCTION_HISTORY.get(symbol) || [];
+      arr.push(snap);
+      if (arr.length > DHAN_M1_PRODUCTION_MAX_SNAPSHOTS) arr.shift();
+      DHAN_M1_PRODUCTION_HISTORY.set(symbol, arr);
+    }
+  });
 }
 
 // Background cadence, independent of any inbound HTTP request — mirrors the
@@ -34527,10 +34530,9 @@ async function buildTradeLabDhanM9(symbol: "NIFTY" | "BANKNIFTY" | "SENSEX", por
 
 // ===== Shared rolling history buffer for M2 (skew-over-time) and M8 (rollover-over-time) =====
 // Same 3-minute cadence as M1's DHAN_M1_PRODUCTION_REFRESH_MS, reused (not
-// redefined) to avoid a second, slightly-different timer. Not gated on
-// market hours (matches M1's existing unconditional-refresh precedent) —
-// Dhan's after-hours option-chain response is still a real, honestly-timestamped
-// snapshot, just not a fresh intraday one.
+// redefined) to avoid a second, slightly-different timer. Automatic polling
+// observes the shared market/closing window. Explicit Dhan endpoints retain
+// their existing behavior.
 const TRADELAB_DHAN_MULTIEXPIRY_HISTORY = new Map<"NIFTY" | "BANKNIFTY" | "SENSEX", TradeLabDhanMultiExpirySnapshot[]>();
 const TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS = 200; // matches RECORDER_MAX_SNAPSHOTS / DHAN_M1_PRODUCTION_MAX_SNAPSHOTS
 
@@ -34550,24 +34552,26 @@ const DHAN_SPOT_HISTORY = new Map<"NIFTY" | "BANKNIFTY" | "SENSEX", DhanSpotPoin
 const DHAN_SPOT_HISTORY_MAX_POINTS = 200; // same cap as TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS
 
 async function tradeLabDhanMultiExpiryRefreshCycle() {
-  const port = process.env.PORT || String(PORT);
-  for (const symbol of ["NIFTY", "BANKNIFTY", "SENSEX"] as const) {
-    const snap = await buildTradeLabDhanMultiExpirySnapshot(symbol, port);
-    if (snap.status !== "OK") continue;
-    const arr = TRADELAB_DHAN_MULTIEXPIRY_HISTORY.get(symbol) || [];
-    arr.push(snap);
-    if (arr.length > TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS) arr.shift();
-    TRADELAB_DHAN_MULTIEXPIRY_HISTORY.set(symbol, arr);
+  await runScheduledMarketRefresh("tradeLabDhanMultiExpiryRefreshCycle", async () => {
+    const port = process.env.PORT || String(PORT);
+    for (const symbol of ["NIFTY", "BANKNIFTY", "SENSEX"] as const) {
+      const snap = await buildTradeLabDhanMultiExpirySnapshot(symbol, port);
+      if (snap.status !== "OK") continue;
+      const arr = TRADELAB_DHAN_MULTIEXPIRY_HISTORY.get(symbol) || [];
+      arr.push(snap);
+      if (arr.length > TRADELAB_DHAN_MULTIEXPIRY_MAX_SNAPSHOTS) arr.shift();
+      TRADELAB_DHAN_MULTIEXPIRY_HISTORY.set(symbol, arr);
 
-    const spotVal = snap.current && typeof snap.current.spot === "number" ? snap.current.spot : null;
-    if (spotVal != null && spotVal > 0) {
-      const nowIso = new Date().toISOString();
-      const spotArr = DHAN_SPOT_HISTORY.get(symbol) || [];
-      spotArr.push({ t: Date.now(), timestamp: nowIso, spot: spotVal, vix: null });
-      if (spotArr.length > DHAN_SPOT_HISTORY_MAX_POINTS) spotArr.shift();
-      DHAN_SPOT_HISTORY.set(symbol, spotArr);
+      const spotVal = snap.current && typeof snap.current.spot === "number" ? snap.current.spot : null;
+      if (spotVal != null && spotVal > 0) {
+        const nowIso = new Date().toISOString();
+        const spotArr = DHAN_SPOT_HISTORY.get(symbol) || [];
+        spotArr.push({ t: Date.now(), timestamp: nowIso, spot: spotVal, vix: null });
+        if (spotArr.length > DHAN_SPOT_HISTORY_MAX_POINTS) spotArr.shift();
+        DHAN_SPOT_HISTORY.set(symbol, spotArr);
+      }
     }
-  }
+  });
 }
 
 if (process.env.NODE_ENV !== "test" && isDhanConfigured()) {
@@ -35806,6 +35810,12 @@ async function restorePersistedState(): Promise<void> {
   }
 }
 
+// Supervisor calls this only after admitting no new requests and stopping
+// periodic work. Never terminate an active minute capture or session refresh.
+export function runtimeDrainReady(): boolean {
+  return !recorderCaptureInFlight && ![...sessions.values()].some(session => session.refreshPromise);
+}
+
 if (process.env.NODE_ENV !== "test") {
   void restorePersistedState().finally(() => {
     serve({ fetch: app.fetch, port: PORT }, (info) => {
@@ -35825,6 +35835,7 @@ if (process.env.NODE_ENV !== "test") {
         sessions.delete(sessionId);
         continue;
       }
+      if (!scheduledMarketRefreshAllowed()) continue;
       if (!session.snapshotTime || Date.now() - session.snapshotTime >= effectiveTtl) {
         void refreshMarketSnapshot(session).catch((err) => {
           console.error(

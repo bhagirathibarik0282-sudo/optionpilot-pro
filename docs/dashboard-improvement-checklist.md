@@ -27,8 +27,12 @@ unavailable field or a selected historical cursor.
 
 ## Next batches, in order
 
-5. One explicit replay cursor and per-section source clocks; reject unsupported
-   claims of simultaneous observations. Preserve missing exact endpoints.
+5. **Source-clock explanation — implemented; synchronized replay cursor pending.**
+   Show the selected recorded model’s spot comparison baseline and endpoint with
+   full IST date/time, guarded by index identity. Keep headline and section clocks
+   independent; explain per-contract quote times, retrospective session events and
+   independently timed memory. Missing endpoints remain unavailable. This does
+   not create an as-of replay filter or claim simultaneous source observations.
 6. Recorder completeness from bounded source-backed counts: first/last stored
    minute, expected/observed buckets and gaps. Separate partial user selections
    from collection gaps; define expected calendar/session bounds first.

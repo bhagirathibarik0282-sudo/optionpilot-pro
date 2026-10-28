@@ -82,6 +82,7 @@ body[data-op-screen=reference] #rd-shell{display:flex;flex-direction:column;heig
 #rd-page .rd-cell-note{display:block;font-size:9px;color:#8eacbd;line-height:1.2;max-width:150px;overflow:hidden;text-overflow:ellipsis}
 #rd-page .rd-up{color:#00ee74}#rd-page .rd-down{color:#ff3b57}#rd-page .rd-level-pdh{color:#ff445b;background:#220a12}#rd-page .rd-level-pdc{color:#ffe633;background:#201e05}#rd-page .rd-level-pdl{color:#00ea74;background:#032313}
 #rd-page #rd-event-table table,#rd-page #rd-memory-table table{table-layout:fixed}#market-book #rd-page :is(#rd-event-table,#rd-memory-table) :is(th,td){white-space:normal;overflow-wrap:anywhere}
+#rd-page .rd-section>div>.rd-cell-note{max-width:none;padding:3px 5px;white-space:normal;overflow-wrap:anywhere}
 #rd-provenance{font-size:10px;color:#9bb6c8;line-height:1.3;padding:2px}
 #os-screen-detail{position:fixed;inset:8px;margin:0;width:calc(100vw - 16px);height:calc(100dvh - 16px);max-width:none;max-height:none;padding:0;border:1px solid #3185b1;border-radius:6px;background:#030d15;color:#eaf5ff;overflow:hidden}
 #os-screen-detail[open]{display:flex;flex-direction:column}#os-screen-detail::backdrop{background:#000c}
@@ -129,6 +130,10 @@ export function installScreenOverview(){
   const reportedPcr=(card:any)=>{const reported=card?.querySelector('.os-pcr-reported');return reported?{value:text(reported.querySelector('b')),details:Array.from(reported.querySelectorAll('small')).map(text).join(' · ')}:null;};
   const selectedReported=reportedPcr(selectedPcr);
   const recorded=root.dataset.osSource==='RECORDED';
+  const overview=$('mb-page')?.querySelector('.mb-overview[aria-label="Three-index recorded overview"]');
+  const reference=overview?.dataset?.recordedIndex===symbol?overview.dataset:null;
+  const clock=(value:any)=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(value)&&Number.isFinite(Date.parse(value))?new Date(value).toLocaleString('en-GB',{timeZone:'Asia/Kolkata',year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})+' IST':'Unavailable';
+  const sourceNote=(value:string)=>recorded?note(value):'';
   const savedFuture=Array.from(selected?.querySelectorAll('.os-subline')||[]).map(text).map(v=>v.match(/Futures\s+(.+)$/)?.[1]).find(Boolean);
   const vix=text($('os-vix-value')?.querySelector('.os-vix-number'));
   const band=read('os-wall-ladder').rows.find(r=>r[0]?.startsWith(symbol))?.[1]?.split(' / ')[1];
@@ -136,12 +141,12 @@ export function installScreenOverview(){
   const recordedLevels=read($('mb-page')?.querySelector('.mb-research-section[aria-label="Spot & Futures · recorded levels"]'));
   const selectedRecorded=recordedLevels.rows.filter(r=>r[0]?.startsWith(symbol+' '));
   const levelRows=recorded&&selectedRecorded.length?selectedRecorded.map(r=>[cell(r[0]),cell(r[1]),signed(r[2]),signed(r[3]),cell(r[4]),cell(r[5]),cell(r[6]),cell(r[7]?.split(' / ')[0]),cell(r[7]?.split(' / ')[1]),cell(/Fut/.test(r[0])?l.rows.find(x=>x[0]?.startsWith(r[0]?.split(' ')[0])&&/Fut/.test(x[0]))?.[8]:'—'),cell(/Fut/.test(r[0])?l.rows.find(x=>x[0]?.startsWith(r[0]?.split(' ')[0])&&/Fut/.test(x[0]))?.[12]:'—'),cell(/Fut/.test(r[0])?l.rows.find(x=>x[0]?.startsWith(r[0]?.split(' ')[0])&&/Fut/.test(x[0]))?.[9]:'—'),'—',cell(r[8])+note('RECORDED · selected window')]):l.rows.filter(r=>r[0]?.startsWith(symbol+' ')).map(r=>[cell(r[0]),cell(r[1]),signed(r[11]),signed(r[2]),cell(r[3]),cell(r[4]),cell(r[5]),cell(r[6]),cell(r[7]),cell(r[8]),cell(r[12]),cell(r[9]),'—',cell(r[10])]);
-  paint('rd-levels-table',table(['Instrument','LTP',recorded?'Window Δ':'Day Δ',recorded?'Window %':'Day %','PDH','PDC','PDL','15m H','15m L','OI','OI Δ','Basis','Trend','Note'],levelRows));
+  paint('rd-levels-table',table(['Instrument','LTP',recorded?'Window Δ':'Day Δ',recorded?'Window %':'Day %','PDH','PDC','PDL','15m H','15m L','OI','OI Δ','Basis','Trend','Note'],levelRows)+sourceNote('Source clocks: each row retains its own window endpoints in Note. Futures OI/Basis may have independent source times; simultaneous observations are unverified.'));
   const wall=read('os-wall-ladder');
   paint('rd-pcr-table',table(['Index','Full PCR','Δ','±7 PCR','Δ','±5 PCR','Δ','±3 PCR','Δ','CE OI','PE OI','CE Δ','PE Δ','Wall','Trend','Note'],pcrCards.map((card:any)=>{const r=wall.rows.find(r=>r[0]?.startsWith(text(card.querySelector(':scope>strong')).split(' ')[0]))||[],full=text(card.querySelector(':scope>b')),reported=reportedPcr(card);const pair=(r[1]||'').split(' / ');return [cell(text(card.querySelector(':scope>strong'))),signed(full)+(reported?note('Reported '+reported.value+' · MIXED SOURCE TIMES'):''),cell(r[6]),cell(pair[1]),'—','—','—','—','—',cell((r[2]||'').split('Δ')[0]),cell((r[3]||'').split('Δ')[0]),cell(r[2]?.match(/Δ\s*([^·]+)/)?.[1]?.trim()),cell(r[3]?.match(/Δ\s*([^·]+)/)?.[1]?.trim()),cell(r[4]),'—',note(Array.from(card.querySelectorAll(':scope>small')).map(text).join(' · ')+(reported?' · '+reported.details:''))];})));
   const premium=read('os-premium-table');
   const premiumRows=premium.rows.map(r=>{const get=(n:string)=>val(premium.heads,r,n);return [cell(get('Expiry')),cell(get('Type')),cell(get('Strike')),cell(get('LTP ₹')),signed(get('Day Δ ₹')),signed(get('1m Δ ₹')),signed(get('3m Δ ₹')),signed(get('15m Δ ₹')),cell(get('OI')),cell(get('OI Δ')),cell(get('Spread')),cell(get('PDH')),cell(get('PDL')),cell(get('Level position')),cell(get('Source time · IST')!=='—'?get('Source time · IST'):get('Quote time · IST')),cell(get('Status'))];});
-  paint('rd-premium-table',table(['Expiry','Side','ATM','LTP ₹','Day Δ ₹','1m Δ ₹','3m Δ ₹','15m Δ ₹','OI','OI Δ','Spread','PDH','PDL','Position','Quote IST','Source'],premiumRows));
+  paint('rd-premium-table',table(['Expiry','Side','ATM','LTP ₹','Day Δ ₹','1m Δ ₹','3m Δ ₹','15m Δ ₹','OI','OI Δ','Spread','PDH','PDL','Position','Quote IST','Source'],premiumRows)+sourceNote('Source clocks: Quote IST belongs to each exact contract. A missing clock stays unavailable; equal recording clocks alone do not prove exchange freshness.'));
   for(const [source,target,label] of [['os-stock-ranks','rd-stock-table','Stock'],['os-sector-ranks','rd-sector-table','Sector']]){const data=read(source);paint(target,table(['#',label,'Weight %','Price','%Chg','Contribution','Trend','RAG','Similar Event','Note'],data.rows.slice(0,5).map(r=>[cell(r[0]),cell(r[1]),cell(r[2]),cell(r[3]),signed(r[4]),cell(r[5]),cell(r[6]),'—','—',cell(r[7])])));}
   const recordedEvents=read($('mb-page')?.querySelector('.mb-research-section[aria-label="Recorded notable events"]'));
   const bridge=read($('mb-page')?.querySelector('.mb-research-section[aria-label="Recorder memory and replay"]'));
@@ -150,8 +155,8 @@ export function installScreenOverview(){
   if(recorded){
    const eventRows=recordedEvents.symbol===symbol?recordedEvents.rows.filter(r=>r[3]?.startsWith(symbol+' · ')):[];
    const memoryRows=bridge.symbol===symbol?bridge.rows.filter(r=>r[0]?.match(/^(?:Spot|CE|PE) · (NIFTY|SENSEX|BANKNIFTY)(?: |$)/)?.[1]===symbol):[];
-   paint('rd-event-table',table(recordedEvents.heads.length?recordedEvents.heads:['Time','Event','Evidence'],eventRows.map(r=>r.map(cell)),'No verified recorded events for '+symbol+' in the loaded selection.'));
-   paint('rd-memory-table',table(bridge.heads.length?bridge.heads:['Contract','Previous','Current'],memoryRows.map(r=>r.map(cell)),'No verified recorded memory for '+symbol+' in the loaded selection.'));
+   paint('rd-event-table',table(recordedEvents.heads.length?recordedEvents.heads:['Time','Event','Evidence'],eventRows.map(r=>r.map(cell)),'No verified recorded events for '+symbol+' in the loaded selection.')+sourceNote('Source clocks: previous → event per row. Loaded-session events are retrospective and are not limited by the comparison reference; later observations are not event-time knowledge.'));
+   paint('rd-memory-table',table(bridge.heads.length?bridge.heads:['Contract','Previous','Current'],memoryRows.map(r=>r.map(cell)),'No verified recorded memory for '+symbol+' in the loaded selection.')+sourceNote('Source clocks: prior and selected-session endpoint per exact series. These independently timed rows are not a synchronized replay frame.'));
   }
   // Listed expiry placeholders are not observations. Count admitted displayed
   // prices separately and only pair a unique CE/PE at the same expiry/strike.
@@ -162,7 +167,7 @@ export function installScreenOverview(){
   for(const expiry of expirySet){const rows=admitted.filter(r=>val(premium.heads,r,'Expiry')===expiry),strikes=new Set(rows.map(r=>number(val(premium.heads,r,'Strike'))));for(const strike of strikes){const same=rows.filter(r=>number(val(premium.heads,r,'Strike'))===strike);if(same.filter(r=>val(premium.heads,r,'Type')==='CE').length===1&&same.filter(r=>val(premium.heads,r,'Type')==='PE').length===1)paired.add(expiry);}}
   const sides=new Set(premium.rows.map(r=>val(premium.heads,r,'Type')).filter(x=>x==='CE'||x==='PE'));
   const pairText=sides.size===1?'Hidden by '+[...sides][0]+'-only view':paired.size+'/'+expirySet.size+' displayed expiries';
-  paint('rd-context-rows',[['Mode',recorded?'RECORDED':'LIVE / source gated'],['CE/PE price pairs',pairText],['Displayed prices',admitted.length+'/'+premium.rows.length+' rows'],['Contract scope','All strikes via CE/PE ↗'],['History','1/3/15m values may be missing'],['RAG','Historical match not verified']].map(([label,value])=>'<div><span>'+esc(label)+'</span><b>'+esc(value)+'</b></div>').join('')+'<small class="rd-cell-note">Displayed price availability only; full inventory and matching source times are not asserted.</small>');
+  paint('rd-context-rows',[['Mode',recorded?'RECORDED':'LIVE / source gated'],...(recorded?[['Comparison reference',clock(reference?.referenceFrom)+' → '+clock(reference?.referenceAt)],['Time alignment','Independent source clocks · synchronized replay unavailable']]:[]),['CE/PE price pairs',pairText],['Displayed prices',admitted.length+'/'+premium.rows.length+' rows'],['Contract scope','All strikes via CE/PE ↗'],['History','1/3/15m values may be missing'],['RAG','Historical match not verified']].map(([label,value])=>'<div><span>'+esc(label)+'</span><b>'+esc(value)+'</b></div>').join('')+'<small class="rd-cell-note">Displayed price availability only; full inventory and matching source times are not asserted.</small>');
   document.querySelectorAll('.rd-selected-index').forEach(el=>el.textContent=symbol);
   $('rd-source').textContent=text($('os-reading-status'))||'Verified source unavailable';$('rd-source').title=$('rd-source').textContent;
   fit();

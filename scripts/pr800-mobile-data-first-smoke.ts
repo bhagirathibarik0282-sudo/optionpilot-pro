@@ -59,7 +59,7 @@ try{
     (window as any).__projectionRestore={source:document.getElementById('op-one-stop')!.dataset.osSource,html:Object.fromEntries(ids.map(id=>[id,document.getElementById(id)!.innerHTML]))};
     const sourceTable=(heads:string[],rows:string[][])=>'<table><thead><tr>'+heads.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(v=>'<td>'+v+'</td>').join('')+'</tr>').join('')+'</tbody></table>';
     document.getElementById('op-one-stop')!.dataset.osSource='RECORDED';
-    document.getElementById('mb-page')!.innerHTML='<section class="mb-research-section" aria-label="Recorded notable events">'+sourceTable(['Previous → event · IST','Category','Recorded observation','Exact response contract','Spot before → event','Recorded PCR before → event'],[['27 Oct, 10:04 IST → 27 Oct, 10:05 IST','Premium PDH / PDL','23050 CE BELOW PDL · Observed crossing interval','NIFTY · 2026-10-27 · 23050 CE / PE','22790 → 22775','1.1000 → 1.2000']])+'</section>';
+    document.getElementById('mb-page')!.innerHTML='<section class="mb-research-section" data-recorded-index="NIFTY" aria-label="Recorded notable events">'+sourceTable(['Previous → event · IST','Category','Recorded observation','Exact response contract','Spot before → event','Recorded PCR before → event'],[['27 Oct, 10:04 IST → 27 Oct, 10:05 IST','Premium PDH / PDL','23050 CE BELOW PDL · Observed crossing interval','NIFTY · 2026-10-27 · 23050 CE / PE','22790 → 22775','1.1000 → 1.2000']])+'</section>';
     document.getElementById('os-future-response')!.innerHTML=sourceTable(['Instrument','LTP','Window %','PDH','PDC','PDL','15m H','15m L','OI','Basis','Source time · IST','Window Δ ₹','OI Δ'],[['NIFTY Spot','101','1%','—','100','—','—','—','—','—','09:45:00','1','—'],['NIFTY Futures','111','1%','—','—','—','—','—','980','10','09:45:00','1','-20']]);
     document.getElementById('os-vix-value')!.innerHTML='<div class="os-vix-number">17.1</div>';
     document.getElementById('os-premium-table')!.innerHTML=sourceTable(['Type','Strike','Expiry','LTP ₹','Day Δ ₹','1m Δ ₹','3m Δ ₹','15m Δ ₹','OI','OI Δ','Spread','PDH','PDL','Level position','Quote time · IST','Status'],['2026-10-22','2026-10-29','2026-11-05','2026-11-12'].flatMap(expiry=>['CE','PE'].map(side=>[side,'100',expiry,'121','26','1','—','—','2,010','10','2','125','85','Inside PDH/PDL','09:45:00','RECORDED'])));
@@ -69,6 +69,9 @@ try{
    assert.equal(await page.locator('#rd-levels-table tbody tr').nth(1).locator('td').nth(10).innerText(),'-20');
    assert.equal(await page.locator('#rd-levels-table tbody tr').nth(1).locator('td').nth(11).innerText(),'10');
    assert.equal(await page.locator('#rd-premium-table tbody tr').first().locator('td').nth(9).innerText(),'10');
+   assert((await page.locator('#rd-context-rows').innerText()).includes('4/4 displayed expiries'));
+   assert((await page.locator('#rd-context-rows').innerText()).includes('8/8 rows'));
+   assert((await page.locator('#rd-event-table').innerText()).includes('23050 CE BELOW PDL'));
    const eventBounds=await page.locator('#rd-event-table th:last-child').evaluate((el:any)=>({right:el.getBoundingClientRect().right,limit:el.closest('.rd-section').getBoundingClientRect().right}));assert(eventBounds.right<=eventBounds.limit+1,name+' populated event columns must remain inside the page');
    await page.evaluate(()=>{const restore=(window as any).__projectionRestore;for(const [id,html] of Object.entries(restore.html))document.getElementById(id)!.innerHTML=html as string;document.getElementById('op-one-stop')!.dataset.osSource=restore.source;delete (window as any).__projectionRestore;});
    await page.waitForFunction(()=>document.querySelectorAll('#rd-premium-table tbody tr').length!==8);
@@ -93,8 +96,11 @@ try{
    await page.locator('#os-screen-close').click();
    assert.equal(await page.locator('#market-book>#mb-tools').count(),1);
    // Exercise source revocation without inventing market quotes or changing a source gate.
-   await page.evaluate(()=>{const el=document.getElementById('os-future-response')!;(window as any).__screenOriginal=el.innerHTML;el.innerHTML='<table><tbody><tr><td>TEST_SOURCE_ROW</td><td>TEST_SOURCE_VALUE</td></tr></tbody></table>';});
+   await page.evaluate(()=>{const el=document.getElementById('os-future-response')!;(window as any).__screenOriginal=el.innerHTML;el.innerHTML='<table><tbody><tr><td>NIFTY Spot</td><td>TEST_SOURCE_VALUE</td></tr></tbody></table>';});
    await page.waitForFunction(()=>document.getElementById('rd-levels-table')?.textContent?.includes('TEST_SOURCE_VALUE'));
+   await page.evaluate(()=>{document.getElementById('os-future-response')!.innerHTML='<table><tbody><tr><td>SENSEX Spot</td><td>WRONG_INDEX_MARKER</td></tr></tbody></table>';});
+   await page.waitForFunction(()=>!document.getElementById('rd-levels-table')?.textContent?.includes('TEST_SOURCE_VALUE'));
+   assert(!(await page.locator('#rd-levels-table').innerText()).includes('WRONG_INDEX_MARKER'),'another index source must never populate the selected level table');
    await page.evaluate(()=>{document.getElementById('os-future-response')!.innerHTML=(window as any).__screenOriginal;delete (window as any).__screenOriginal;});
    await page.waitForFunction(()=>!document.getElementById('rd-levels-table')?.textContent?.includes('TEST_SOURCE_VALUE'));
    await page.locator('#rd-source-tables').click();

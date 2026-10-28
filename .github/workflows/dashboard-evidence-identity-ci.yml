@@ -1,0 +1,21 @@
+name: Dashboard evidence identity and availability
+on:
+  pull_request:
+    paths: ['screen-overview.ts', 'market-book-view.ts', 'dashboard-workspace-view.ts', 'one-shot-live-card.ts', 'test/screen-overview-evidence.test.ts', 'test/market-book.test.ts', 'test/one-shot-live-card.test.ts', '.github/workflows/dashboard-evidence-identity-ci.yml']
+  push:
+    branches: [main]
+    paths: ['screen-overview.ts', 'market-book-view.ts', 'dashboard-workspace-view.ts', 'one-shot-live-card.ts', 'test/screen-overview-evidence.test.ts', 'test/market-book.test.ts', 'test/one-shot-live-card.test.ts', '.github/workflows/dashboard-evidence-identity-ci.yml']
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/screen-overview-evidence.test.ts test/one-shot-live-card.test.ts test/market-book.test.ts test/market-book-strike-comparison.test.ts test/reference-research-terminal.test.ts test/dashboard-reading-layout.test.ts test/data-reading-checklist.test.ts
+      - run: node scripts/optionpilot-guardrail-check.mjs

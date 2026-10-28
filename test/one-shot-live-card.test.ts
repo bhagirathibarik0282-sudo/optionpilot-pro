@@ -21,16 +21,16 @@ function harness(){
   indices:symbols.map(symbol=>({symbol,expiry,expiries:[expiry],strike:100,spot:quote('SPOT',symbol),future:quote('FUTURE',symbol),ce:quote('OPTION',symbol),pe:quote('OPTION',symbol,90,{identity:{role:'OPTION',symbol,expiry,strike:100,side:'PE',token:4}})})),
   atmExpiryLadder:symbols.map(symbol=>({symbol,spot:quote('SPOT',symbol),rows:[{expiry,strike:100,ce:quote('OPTION',symbol,120),pe:quote('OPTION',symbol,90,{identity:{role:'OPTION',symbol,expiry,strike:100,side:'PE',token:4}})}]})),
   vix:quote('VIX','',14,{pdc:13}),participation:[quote('STOCK','',150,{identity:{role:'STOCK',label:'HDFC <Bank>',token:99},pdc:100}),quote('SECTOR','',90,{identity:{role:'SECTOR',label:'PSU Bank',token:98},pdc:100})]}});
- let saved:any={date,current:{}},loadArgs:any=null,opened:any=null;
+ let saved:any={date,current:{}},loadArgs:any=null,opened:any=null; const chosen:string[]=[];
  const models=Object.fromEntries(symbols.map(symbol=>[symbol,{symbol,tradeDate:date,spot:{pdh:101,pdl:90,at:stamp()}}]));
  const context:any={document:{body:{dataset:{}},getElementById:el,querySelectorAll(){return [];}},window:{addEventListener(n:string,f:any){listeners[n]=f;}},localStorage:{getItem(){return null;},setItem(){}},Date:Clock,__name:(fn:any)=>fn,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,deriveAtmFibHold,derivePremiumWorkspace,derivePremiumSeriesInventory,installPremiumWorkspace(){return {openLadder(detail:any){opened=detail;},setVisible(){},refreshRecorded(){}};}};
  vm.createContext(context);vm.runInContext('var installOneShotLiveCard='+installOneShotLiveCard.toString(),context);
  const installer=vm.runInContext('('+installDashboardWorkspace.toString()+')',context);
- installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>0,turn(){},getState:()=>saved,getModels:()=>models,setDate:async(date:string,options:any)=>{loadArgs={date,options};saved={...saved,date,scope:options.scope};}});
+ installer({chapters:Array.from({length:13},(_,i)=>'Chapter '+i),page:()=>0,turn(){},getState:()=>saved,getModels:()=>models,chooseResearchIndex:(symbol:string)=>chosen.push(symbol),setDate:async(date:string,options:any)=>{loadArgs={date,options};saved={...saved,date,scope:options.scope};}});
  el('os-chart-cadence').onchange({target:{value:'0'}});
  el('os-window').onclick({target:{closest:()=>({dataset:{osWindow:'1'}})}});
  const send=(p:any)=>listeners['optionpilot:live-context']({detail:p});
- return {el,payload,send,writes,loadArgs:()=>loadArgs,opened:()=>opened,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
+ return {el,payload,send,writes,chosen,loadArgs:()=>loadArgs,opened:()=>opened,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
 }
 
 test('production HTML mounts the real new design once, with ten categories and existing real controls',()=>{
@@ -511,4 +511,20 @@ test('opening Ladder from recorded overview preserves source and selected index'
  h.el('os-index').onchange({target:{value:'SENSEX'}});
  h.el('op-chapter-links').onclick({target:{closest:()=>({dataset:{opGroup:'1'}})}});
  assert.equal(h.opened().source,'RECORDED');assert.equal(h.opened().symbol,'SENSEX');
+});
+
+
+test('reference index selection synchronizes the recorded research source without fetching',()=>{
+ const h=harness();h.send(h.payload());
+ for(const symbol of ['SENSEX','BANKNIFTY','NIFTY'])h.el('os-reference-indices').onclick({target:{closest:()=>({dataset:{osSelect:symbol}})}});
+ assert.deepEqual(h.chosen,['SENSEX','BANKNIFTY','NIFTY']);
+});
+
+
+test('recorded radar exposes latest-row validation and source bucket without filling a withheld headline',()=>{
+ const h=harness(),state=recordedSession();state.current.SENSEX.market.forEach(row=>row.truth_verdict='PARTIAL');
+ h.setSaved(state);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ const card=h.el('os-market-radar').innerHTML.split('data-os-index="SENSEX"')[1].split('</button>')[0];
+ assert.match(card,/data-recorded-validation="PARTIAL"/);assert.match(card,/data-recorded-at="2026-10-19T04:15:00.000Z"/);
+ assert.match(card,/class="os-price">—/);assert.doesNotMatch(card,/class="os-price">101/);
 });

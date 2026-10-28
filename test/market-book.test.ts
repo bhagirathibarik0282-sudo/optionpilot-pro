@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {installDashboardWorkspace} from '../dashboard-workspace-view.js';
 import {deriveMarketBook as book,derivePremiumBreakConsensus as consensus} from '../market-book-model.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 const symbol='NIFTY',expiry='2026-10-13',tradeDate='2026-10-08',recordedDates=['2026-10-05','2026-10-06','2026-10-07','2026-10-08'];
@@ -445,4 +446,27 @@ test('replay reuses presentation formatters while reading changed source values 
  vm.runInContext('installed.render(true)',ctx);
  assert(page.innerHTML.includes('22,018.25'));assert(page.innerHTML.includes('09:34 IST'));assert.notEqual(page.innerHTML,before,'formatted market values and times are never cached');
  assert.deepEqual({dates,numbers},formats);
+});
+
+test('reference selector updates the actual recorded event and memory source without new requests',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>();
+ for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math};
+ vm.createContext(ctx);
+ const script=html.match(/<script>([\s\S]*?)<\/script>/)![1];
+ const original='const installDashboardWorkspace='+installDashboardWorkspace.toString()+';';
+ assert(script.includes(original));
+ vm.runInContext(script.replace(original,'const installDashboardWorkspace=(api)=>{globalThis.chooseResearchIndex=api.chooseResearchIndex;return {render(){}};};'),ctx);
+ let requests=0;
+ const sensex=fixture();for(const key of ['market','options','chain'] as const)for(const row of sensex[key])row.symbol='SENSEX';
+ const state={date:tradeDate,recordedDates,current:{NIFTY:fixture(),SENSEX:sensex},history:{},baseline:{},health:{}};
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){requests++;},memory:async()=>{requests++;}};
+ vm.runInContext('installMarketBook(api)',ctx);
+ assert.match(nodes.get('mb-page').innerHTML,/data-recorded-index="NIFTY" aria-label="Recorded notable events"/);
+ ctx.chooseResearchIndex('SENSEX');
+ assert.match(nodes.get('mb-page').innerHTML,/data-recorded-index="SENSEX" aria-label="Recorded notable events"/);
+ assert.match(nodes.get('mb-page').innerHTML,/data-recorded-index="SENSEX" aria-label="Recorder memory and replay"/);
+ const memory=nodes.get('mb-page').innerHTML.match(/aria-label="Recorder memory and replay">([\s\S]*?)<\/section>/)![1];
+ assert.match(memory,/Spot · SENSEX/);assert.doesNotMatch(memory,/Spot · NIFTY/);
+ ctx.chooseResearchIndex('NOT_AN_INDEX');assert.equal(nodes.get('mb-index').value,'SENSEX');assert.equal(requests,0);
 });

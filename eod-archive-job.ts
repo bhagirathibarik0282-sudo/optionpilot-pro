@@ -54,7 +54,8 @@ export async function sourceCounts(client: PoolClient, tradingDate: string) {
       (SELECT count(*) FROM trade_plan_history WHERE (created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS trade_plan_count,
       (SELECT count(*) FROM trade_event_history WHERE (event_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS trade_event_count,
       (SELECT count(*) FROM app_state_log WHERE kind=$2 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date = $1::date) AS narrative_event_count,
-      (SELECT count(*) FROM app_state_log WHERE kind=ANY($3::text[]) AND payload->>'tradeDate'=$1::text) AS research_memory_count
+      (SELECT count(*) FROM app_state_log WHERE kind=ANY($3::text[]) AND payload->>'tradeDate'=$1::text) AS research_memory_count,
+      (SELECT count(*) FROM app_state_log WHERE kind='DASHBOARD_PARTICIPATION_MINUTE_V1' AND payload->>'tradeDate'=$1::text) AS participation_minute_count
   `, [tradingDate, MEANINGFUL_NARRATIVE_KIND, RESEARCH_MEMORY_KINDS]);
   const row = q.rows[0] || {};
   const counts = Object.fromEntries(Object.entries(row).map(([k, v]) => [k, Number(v || 0)]));
@@ -80,7 +81,8 @@ export async function buildPayload(client: PoolClient, tradingDate: string) {
       'tradePlans',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY created_at), '[]'::jsonb) FROM trade_plan_history t WHERE (created_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
       'tradeEvents',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY event_at), '[]'::jsonb) FROM trade_event_history t WHERE (event_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
       'meaningfulNarrativeEvents',(SELECT COALESCE(jsonb_agg(payload ORDER BY created_at), '[]'::jsonb) FROM app_state_log WHERE kind=$2 AND (created_at AT TIME ZONE 'Asia/Kolkata')::date=$1::date),
-      'researchMemories',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY kind, payload->>'memoryKey', id), '[]'::jsonb) FROM app_state_log t WHERE kind=ANY($3::text[]) AND payload->>'tradeDate'=$1::text)
+      'researchMemories',(SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY kind, payload->>'memoryKey', id), '[]'::jsonb) FROM app_state_log t WHERE kind=ANY($3::text[]) AND payload->>'tradeDate'=$1::text),
+      'participationMinutes',(SELECT COALESCE(jsonb_agg(payload ORDER BY payload->>'minuteBucket', id), '[]'::jsonb) FROM app_state_log WHERE kind='DASHBOARD_PARTICIPATION_MINUTE_V1' AND payload->>'tradeDate'=$1::text)
     ) AS payload
   `, [tradingDate, MEANINGFUL_NARRATIVE_KIND, RESEARCH_MEMORY_KINDS]);
   return result.rows[0]?.payload || null;

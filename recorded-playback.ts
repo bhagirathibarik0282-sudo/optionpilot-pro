@@ -1,4 +1,22 @@
 /** One session in memory; dates play in order, never interpolate overnight or fill a gap. */
+export function mergeRecordedParts(parts:any[]) {
+ const merged:any={};
+ // Compact tables add null columns for optional keys present on OTHER rows in a window.
+ // Missing key and explicit null both mean unavailable; key order is not market evidence.
+ const signature=(row:any)=>JSON.stringify(Object.keys(row).filter(key=>row[key]!==null&&row[key]!==undefined).sort().map(key=>[key,row[key]]));
+ for(const kind of ['market','options','chain']){
+  const rows=new Map<string,any>();
+  for(const part of parts){const table=part[kind];for(const values of table?.rows||[]){
+   const row=Object.fromEntries(table.columns.map((key:string,i:number)=>[key,values[i]]));
+   const key=JSON.stringify([row.symbol,row.minute_bucket,row.expiry,row.strike,row.option_type]),prior=rows.get(key);
+   if(prior&&signature(prior)!==signature(row))throw new Error('Conflicting saved '+kind+' rows at '+row.minute_bucket+'. Replay stopped.');
+   if(!prior)rows.set(key,row);
+  }}
+  merged[kind]=[...rows.values()];
+ }
+ return merged;
+}
+
 export function recordedSession(input:any, symbol:string, date:string) {
  const unpack=(table:any):any[]=>Array.isArray(table)?table:table?.columns&&table?.rows?table.rows.map((row:any[])=>Object.fromEntries(table.columns.map((key:string,i:number)=>[key,row[i]]))):[];
  const valid=(row:any)=>row.symbol===symbol&&row.truth_verdict==='TRUE'&&Number.isFinite(Date.parse(row.minute_bucket))&&new Date(Date.parse(row.minute_bucket)+19800000).toISOString().slice(0,10)===date;

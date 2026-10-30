@@ -145,7 +145,7 @@ export function installScreenOverview(){
    const r=wall.rows.find(r=>r[0]?.startsWith(index))||[];
    const full=text(card.querySelector(':scope>b')),reported=reportedPcr(card);
    const band=(r[1]||'').split(' / ')[1];
-   return [cell(index),signed(full),reported?note('Reported '+reported.value+' · MIXED SOURCE TIMES'):cell('—'),cell(band),cell((r[2]||'').split('Δ')[0]),cell((r[3]||'').split('Δ')[0]),cell(r[2]?.match(/Δ\\s*([^·]+)/)?.[1]?.trim()),cell(r[3]?.match(/Δ\\s*([^·]+)/)?.[1]?.trim()),cell(r[4]),note(Array.from(card.querySelectorAll(':scope>small')).map(text).join(' · ')+(reported?' · '+reported.details:''))];
+   return [cell(index),signed(full),reported?note('Reported '+reported.value+' · MIXED SOURCE TIMES'):cell('—'),cell(band),cell((r[2]||'').split('Δ')[0]),cell((r[3]||'').split('Δ')[0]),cell(r[2]?.match(/Δ\s*([^·]+)/)?.[1]?.trim()),cell(r[3]?.match(/Δ\s*([^·]+)/)?.[1]?.trim()),cell(r[4]),note(Array.from(card.querySelectorAll(':scope>small')).map(text).join(' · ')+(reported?' · '+reported.details:''))];
   })));
   const premium=read('os-premium-table');
   const premiumRows=premium.rows.map(r=>{const get=(n:string)=>val(premium.heads,r,n);return [cell(get('Expiry')),cell(get('Type')),cell(get('Strike')),cell(get('LTP ₹')),signed(get('Day Δ ₹')),signed(get('1m Δ ₹')),signed(get('3m Δ ₹')),signed(get('15m Δ ₹')),cell(get('OI')),cell(get('OI Δ')),cell(get('Spread')),cell(get('PDH')),cell(get('PDL')),cell(get('Level position')),cell(get('Source time · IST')!=='—'?get('Source time · IST'):get('Quote time · IST')),cell(get('Status'))];});

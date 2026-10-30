@@ -32,7 +32,10 @@ test('admin toggles save immediately, edit same menu, and report uses saved sele
  await handle({callback_query:{id:'a',from:{id:7},data:'cfg:spot',message:msg}});assert.ok(!store.get('-1').includes('spot'));assert.equal(calls.at(-1)[0],'editMessageText');assert.equal(calls.at(-1)[1].message_id,42);
  store.set('-1',['spot']);await handle({message:{...msg,text:'/report'}});
  const summary=calls.findLast(c=>c[0]==='sendMessage')[1].text;assert.match(summary,/RECORDED/);assert.doesNotMatch(summary,/Full OI PCR|CE wall/);
- const form=calls.findLast(c=>c[0]==='sendDocument')[1];assert.equal(form.get('chat_id'),'-1');const text=await form.get('document').text();assert.match(text,/STALE/);assert.doesNotMatch(text,/PDH|CE wall|Strike 100 CE/);
+ assert.ok(!calls.some(c=>c[0]==='sendDocument'));assert.match(summary,/STALE/);assert.doesNotMatch(summary,/PDH|Strike 100 CE/);
+ const button=calls.findLast(c=>c[0]==='sendMessage')[1].reply_markup.inline_keyboard[0][0];
+ await handle({callback_query:{id:'txt',from:{id:7},data:button.callback_data,message:msg}});
+ const form=calls.findLast(c=>c[0]==='sendDocument')[1];assert.equal(form.get('chat_id'),'-1');assert.match(await form.get('document').text(),/STALE/);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -58,7 +61,7 @@ test('missing newest endpoint returns an explicitly delayed recorded window, ret
  const handle=createSettingsController({store,chats:{'-1':'NIFTY'},now:()=>Date.parse('2026-10-30T04:49:00Z'),read:async(r:any)=>{reads.push(r);return {frames:reads.length===1?[]:[older],failures:[]};},api:async(m,b)=>{calls.push([m,b]);return {status:'creator'};}});
  await handle({message:{chat:{id:-1},from:{id:7},text:'/report'}});assert.equal(reads.length,2);assert.ok(Date.parse(reads[1].to)-Date.parse(reads[1].from)<=12*60000);
  const summary=calls.find(c=>c[0]==='sendMessage')[1].text;assert.match(summary,/DELAYED/);assert.match(summary,/10:15–10:18/);assert.match(summary,/10:12–10:15/);assert.match(summary,/3 min/);assert.doesNotMatch(summary,/Full OI PCR/);
- const document=calls.find(c=>c[0]==='sendDocument')[1].get('document');assert.match(await document.text(),/DELAYED/);assert.match(await document.text(),/Minute coverage 1\/4/);
+ assert.ok(!calls.some(c=>c[0]==='sendDocument'));assert.match(summary,/Minute coverage 1\/4/);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 test('missing every bounded endpoint and source failures are distinct; neither fabricates a report',async()=>{
@@ -67,4 +70,31 @@ test('missing every bounded endpoint and source failures are distinct; neither f
  await handle({message:{chat:{id:-1},from:{id:7},text:'/report'}});assert.ok(!calls.some(c=>c[0]==='sendDocument'));
  assert.match(calls.find(c=>c[0]==='sendMessage')[1].text,failures.length?/read ବିଫଳ/:/୧୨ minute/);
  }finally{rmSync(dir,{recursive:true,force:true});}}
+});
+
+test('large inline reports preserve every selected contract, obey limits, and cache the exact optional TXT across restart',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'tg-inline-')),calls:any[]=[],waits:number[]=[];try{
+ const large=structuredClone(frame);large.indices[0].expiries[0].contracts=Array.from({length:180},(_,n)=>({strike:100+n,side:'CE',ltp:v(n+1),pdh:v(n+2),pdl:v(n)}));
+ const store=settingsStore(dir);store.set('-1',['spot','levels','premiums']);
+ const api=async(m:string,b:any)=>{calls.push([m,b]);return {status:'administrator',message_id:calls.length};};
+ const handle=createSettingsController({store,chats:{'-1':'NIFTY'},now:()=>Date.parse('2026-10-30T04:49:00Z'),read:async()=>({frames:[large],failures:[]}),api,pause:async ms=>{waits.push(ms);}});
+ await handle({message:{chat:{id:-1},from:{id:7},text:'/report'}});
+ const messages=calls.filter(c=>c[0]==='sendMessage');assert.ok(messages.length>1);assert.ok(!calls.some(c=>c[0]==='sendDocument'));
+ for(const [,body] of messages){assert.ok(body.text.length<=4096);assert.match(body.text,/RECORDED/);assert.match(body.text,/ଭାଗ/);}
+ const body=messages.map(c=>c[1].text).join('\n');for(let n=0;n<180;n++)assert.ok(body.includes(`Strike ${100+n} CE`));assert.match(body,/STALE/);assert.match(body,/PDH/);assert.equal(waits.length,messages.length-1);
+ assert.ok(messages.slice(0,-1).every(c=>!c[1].reply_markup));const data=messages.at(-1)[1].reply_markup.inline_keyboard[0][0].callback_data;
+ const saved=store.getReport('-1')!;store.set('-1',['spot']);
+ const restarted=createSettingsController({store:settingsStore(dir),chats:{'-1':'NIFTY'},api,read:async()=>{throw Error('Must not re-read source');}});
+ await restarted({callback_query:{id:'d',from:{id:7},data,message:{chat:{id:-1},message_id:2}}});
+ const file=calls.find(c=>c[0]==='sendDocument')[1].get('document');assert.equal(await file.text(),saved.content);assert.equal(file.name,'OptionPilot_NIFTY_2026-10-30_1018.txt');
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+test('optional download rejects another group, non-admin, and stale report identities',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'tg-download-')),calls:any[]=[];try{
+ const store=settingsStore(dir);store.cacheReport('-1',{id:'a'.repeat(16),content:'exact report',filename:'report.txt'});let role='member';
+ const handle=createSettingsController({store,chats:{'-1':'NIFTY','-2':'SENSEX'},api:async(m,b)=>{calls.push([m,b]);return {status:role};}});
+ const update=(chat:number,id:string)=>({callback_query:{id:'d',from:{id:7},data:'cfg:txt:'+id,message:{chat:{id:chat},message_id:2}}});
+ await handle(update(-1,'a'.repeat(16)));assert.ok(!calls.some(c=>c[0]==='sendDocument'));
+ role='creator';await handle(update(-2,'a'.repeat(16)));await handle(update(-1,'b'.repeat(16)));assert.ok(!calls.some(c=>c[0]==='sendDocument'));
+ }finally{rmSync(dir,{recursive:true,force:true});}
 });

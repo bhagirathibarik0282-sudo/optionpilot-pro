@@ -604,6 +604,9 @@ export function dbIsConfigured(): boolean {
   return !!process.env.DATABASE_URL?.trim();
 }
 
+/** Reuse the existing pool for the authenticated ladder acceptance outbox. */
+export function dbSharedPoolForLadder() { return getPool(); }
+
 /** One compact immutable CAS summary per index/day/version in the existing log.
  * Separate statements after the advisory lock ensure a concurrent writer's
  * committed row is visible under READ COMMITTED. Errors never claim persistence.

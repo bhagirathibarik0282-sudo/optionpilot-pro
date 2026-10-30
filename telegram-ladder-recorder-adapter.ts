@@ -2,8 +2,12 @@
 import {premiumRecordStatus} from './h1-premium-record-quality.js';
 import {SYMBOLS,missing,numeric,value,type Value,type MinuteFrame,type IndexFrame,type Expiry,type Participation} from './telegram-ladder-v4.js';
 const arr=(x:unknown):any[]=>Array.isArray(x)?x:[];
-function time(x:unknown):number|null {if(typeof x!=='string'||!/(Z|[+-]\d{2}:\d{2})$/.test(x))return null;const n=Date.parse(x);return Number.isFinite(n)?n:null;}
-function exp(x:unknown):string {if(typeof x!=='string')throw Error('EXPIRY_MISSING');const d=x.slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(d)||!Number.isFinite(Date.parse(d))||new Date(d).toISOString().slice(0,10)!==d)throw Error('EXPIRY_INVALID');return d;}
+function time(x:unknown):number|null {if(x instanceof Date)return Number.isFinite(x.getTime())?x.getTime():null;if(typeof x!=='string'||!/(Z|[+-]\d{2}:\d{2})$/.test(x))return null;const n=Date.parse(x);return Number.isFinite(n)?n:null;}
+function exp(x:unknown):string {
+  // pg parses SQL DATE as local midnight; UTC conversion can change its calendar date.
+  if(x instanceof Date){if(!Number.isFinite(x.getTime())||x.getHours()||x.getMinutes()||x.getSeconds()||x.getMilliseconds())throw Error('EXPIRY_INVALID');x=`${x.getFullYear()}-${String(x.getMonth()+1).padStart(2,'0')}-${String(x.getDate()).padStart(2,'0')}`;}
+  if(typeof x!=='string')throw Error('EXPIRY_MISSING');const d=x.slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(d)||!Number.isFinite(Date.parse(d))||new Date(d).toISOString().slice(0,10)!==d)throw Error('EXPIRY_INVALID');return d;
+}
 function positive(v:unknown,quality:'VERIFIED'|'UNVERIFIED'|'STALE',source:string):Value {const n=numeric(v);return n!==null&&n>0?value(n,quality,source):missing(source);}
 function rowValue(v:unknown,source:string):Value {return value(v,'UNVERIFIED',source);}
 /** Input must be full-scope, unchanged recorder exports; duplicate identities fail visibly. */
@@ -40,7 +44,8 @@ export function framesFromH1(replays:readonly any[],participation:readonly any[]
           const strike=numeric(o.strike),side=o.option_type;
           if(strike===null||strike<=0||!['CE','PE'].includes(side))throw Error('INVALID_CONTRACT_IDENTITY');
           const key=`${strike}|${side}`;if(seen.has(key))throw Error('DUPLICATE_CONTRACT_IDENTITY');seen.add(key);
-          const status=!contextValid||capture===null?'CAPTURE_CONTEXT_MISSING':premiumRecordStatus({verdict:o.truth_verdict,quoteTimestamp:o.quote_timestamp,now:new Date(capture),expiry,legExpiry:expiry,strike,ltp:numeric(o.ltp)??NaN});
+          const quoteTime=time(o.quote_timestamp);
+          const status=!contextValid||capture===null?'CAPTURE_CONTEXT_MISSING':premiumRecordStatus({verdict:o.truth_verdict,quoteTimestamp:quoteTime===null?null:new Date(quoteTime).toISOString(),now:new Date(capture),expiry,legExpiry:expiry,strike,ltp:numeric(o.ltp)??NaN});
           const eligible=status==='RESEARCH_ELIGIBLE'&&o.validation_status==='RESEARCH_ELIGIBLE'&&typeof row.snapshot_id==='string'&&row.snapshot_id===o.snapshot_id;
           const quality=eligible?'VERIFIED':status.includes('STALE')||status.includes('OTHER_SESSION')?'STALE':'UNVERIFIED';
           e.contracts.push({strike,side,ltp:positive(o.ltp,quality,'H1_EXACT_CONTRACT_QUOTE'),pdh:positive(o.pdh,'UNVERIFIED','H1_PREVIOUS_SESSION_NOT_INDEPENDENTLY_VERIFIED'),pdl:positive(o.pdl,'UNVERIFIED','H1_PREVIOUS_SESSION_NOT_INDEPENDENTLY_VERIFIED')});

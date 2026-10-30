@@ -52,3 +52,19 @@ test('transient bootstrap failure retries; verified menus send once; polling con
  await startTelegramSettings({...env,TELEGRAM_BOT_TOKEN:'TEST_ONLY'},{http,pause:async()=>{}});assert.equal(sends,1);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
+test('missing newest endpoint returns an explicitly delayed recorded window, retaining preferences',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'tg-gap-')),calls:any[]=[],reads:any[]=[];try{const store=settingsStore(dir);store.set('-1',['spot']);
+ const older={...frame,minute:'2026-10-30T04:45:00.000Z'};
+ const handle=createSettingsController({store,chats:{'-1':'NIFTY'},now:()=>Date.parse('2026-10-30T04:49:00Z'),read:async(r:any)=>{reads.push(r);return {frames:reads.length===1?[]:[older],failures:[]};},api:async(m,b)=>{calls.push([m,b]);return {status:'creator'};}});
+ await handle({message:{chat:{id:-1},from:{id:7},text:'/report'}});assert.equal(reads.length,2);assert.ok(Date.parse(reads[1].to)-Date.parse(reads[1].from)<=12*60000);
+ const summary=calls.find(c=>c[0]==='sendMessage')[1].text;assert.match(summary,/DELAYED/);assert.match(summary,/10:15–10:18/);assert.match(summary,/10:12–10:15/);assert.match(summary,/3 min/);assert.doesNotMatch(summary,/Full OI PCR/);
+ const document=calls.find(c=>c[0]==='sendDocument')[1].get('document');assert.match(await document.text(),/DELAYED/);assert.match(await document.text(),/Minute coverage 1\/4/);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+test('missing every bounded endpoint and source failures are distinct; neither fabricates a report',async()=>{
+ for(const failures of [[],['NIFTY_SOURCE_UNAVAILABLE']]){const dir=mkdtempSync(join(tmpdir(),'tg-no-data-')),calls:any[]=[];try{
+ const handle=createSettingsController({store:settingsStore(dir),chats:{'-1':'NIFTY'},now:()=>Date.parse('2026-10-30T04:49:00Z'),read:async()=>({frames:[],failures}),api:async(m,b)=>{calls.push([m,b]);return {status:'administrator'};}});
+ await handle({message:{chat:{id:-1},from:{id:7},text:'/report'}});assert.ok(!calls.some(c=>c[0]==='sendDocument'));
+ assert.match(calls.find(c=>c[0]==='sendMessage')[1].text,failures.length?/read ବିଫଳ/:/୧୨ minute/);
+ }finally{rmSync(dir,{recursive:true,force:true});}}
+});

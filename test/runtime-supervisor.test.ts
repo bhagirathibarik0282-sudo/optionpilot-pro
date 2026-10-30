@@ -30,7 +30,9 @@ test('off-hours deploy has explicit maintenance health; app stays stopped', asyn
   assert.equal(instance.status().running, false);
   const health = await fetch(`${url}/health`); assert.equal(health.status, 200);
   assert.equal((await health.json()).mode, 'SUPERVISOR');
-  assert.equal((await fetch(url)).status, 503);
+  const archive=await fetch(url);assert.equal(archive.status, 200);
+  assert.match(await archive.text(), /Saved sessions & Replay/);
+  assert.equal(instance.status().running,false,'viewing recordings cannot start the market child');
   assert.equal((await fetch(`${url}/ops/runtime-window`, { method: 'POST', body: '{"minutes":30}' })).status, 401);
 });
 test('scheduled start proxies POST and cookies; closing waits for in-flight request and restarts next morning', async t => {

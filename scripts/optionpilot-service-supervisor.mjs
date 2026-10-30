@@ -14,6 +14,7 @@ export function createSupervisor({
   runtimeEntry = 'scripts/optionpilot-runtime-child.mjs',
   cadenceMs = 5_000,
   probeMs = 2_000,
+  recordedHandler,
 } = {}) {
 if (port === childPort) throw new Error('SUPERVISOR_PORT_COLLISION');
 const statePath = join(stateDir, 'runtime-maintenance-window.json');
@@ -22,6 +23,16 @@ try { overrideUntil = maintenanceExpiry(JSON.parse(readFileSync(statePath, 'utf8
 let child = null, draining = false, ready = false, retryAt = 0, stopping = false, requests = 0;
 const peers = new Set();
 const streams = new Set();
+// Import the SELECT-only archive viewer on demand. The market runtime remains stopped.
+let archiveHandler = recordedHandler;
+async function recorded(request, response) {
+  const path = new URL(request.url || '/', 'http://localhost').pathname;
+  if (!(path === '/recorded-dashboard' || path.startsWith('/api/research/recorded-dashboard/') ||
+      (!status().shouldRun && (path === '/' || path === '/api/research/business-dashboard/view')))) return false;
+  archiveHandler ||= import('../recorded-dashboard-http.ts').then(module => module.createRecordedDashboardHandler());
+  try { return await (await archiveHandler)(request, response, status()); }
+  catch { reply(response, 503, { error: 'RECORDED_VIEW_UNAVAILABLE' }); return true; }
+}
 function status() {
   return { ...operatingStatus(now(), overrideUntil), running: Boolean(child), ready, draining,
     hoursIST: '08:45–16:15', timezone: 'Asia/Kolkata', supervisor: true };
@@ -88,6 +99,7 @@ const server = http.createServer(async (request, response) => {
   if (path === '/health' && (!status().shouldRun || !ready)) {
     return reply(response, status().shouldRun ? 503 : 200, { ok: !status().shouldRun, mode: 'SUPERVISOR', ...status() });
   }
+  if (await recorded(request, response)) return;
   if (!status().shouldRun || !child || !ready || draining) {
     response.setHeader('Retry-After', '15');
     return reply(response, 503, { error: status().shouldRun ? 'RUNTIME_STARTING' : 'OUTSIDE_OPERATING_HOURS', ...status() });

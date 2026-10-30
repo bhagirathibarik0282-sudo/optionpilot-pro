@@ -1,9 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { recordedSession, recordedFrame, createRecordedPlayback } from '../recorded-playback.js';
+import { recordedSession, recordedFrame, createRecordedPlayback, mergeRecordedParts } from '../recorded-playback.js';
 
 const row=(date:string,time:string,extra:any={})=>({symbol:'NIFTY',minute_bucket:date+'T'+time+':00+05:30',truth_verdict:'TRUE',...extra});
 const session=(date:string)=>recordedSession({market:[row(date,'09:15',{spot_ltp:23000}),row(date,'09:18',{spot_ltp:23005})]},'NIFTY',date);
+test('compact window boundaries deduplicate identical evidence despite optional null columns and key order',()=>{
+ const a={chain:{columns:['symbol','minute_bucket','expiry','full_chain_oi_pcr'],rows:[['NIFTY','2026-10-30T09:45:00.000Z','2026-11-03',1.503]]}},
+  b={chain:{columns:['expiry','minute_bucket','symbol','full_chain_oi_pcr','full_pcr_source_timestamp'],rows:[['2026-11-03','2026-10-30T09:45:00.000Z','NIFTY',1.503,null]]}};
+ assert.equal(mergeRecordedParts([a,b]).chain.length,1);
+ const changed=structuredClone(b);changed.chain.rows[0][3]=1.504;assert.throws(()=>mergeRecordedParts([a,changed]),/Conflicting saved chain/);
+ const missing=structuredClone(b);missing.chain.rows[0][3]=null;assert.throws(()=>mergeRecordedParts([a,missing]),/Conflicting saved chain/);
+ const zero=structuredClone(b);zero.chain.rows[0][3]=0;assert.throws(()=>mergeRecordedParts([missing,zero]),/Conflicting saved chain/);
+});
 function harness(load:any=async(date:string)=>session(date)) {
  const scheduled=new Map<number,any>();let id=0;
  const controller=createRecordedPlayback({load,render(){},setTimeout(fn:any){scheduled.set(++id,fn);return id;},clearTimeout(key:number){scheduled.delete(key);}});

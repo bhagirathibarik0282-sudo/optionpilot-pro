@@ -1,4 +1,4 @@
-import { createRecordedPlayback, recordedFrame, recordedSession } from './recorded-playback.js';
+import { createRecordedPlayback, recordedFrame, recordedSession, mergeRecordedParts } from './recorded-playback.js';
 import { standardIndexObservationClose } from './index-observation-session.js';
 
 export function renderRecordedDashboard(){return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OptionPilot · Recorded Replay</title><style>
@@ -9,7 +9,7 @@ export function renderRecordedDashboard(){return `<!doctype html><html lang="en"
 <section class="panel"><div class="controls"><button id="ar-play" class="primary" disabled>▶ Play</button><button id="ar-prev" disabled>← Record</button><button id="ar-next" disabled>Record →</button><button id="ar-reset" disabled>Reset day</button><label>Speed <select id="ar-speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option></select></label></div><input type="range" id="ar-seek" min="0" max="0" value="0" disabled aria-label="Replay recorded time"><p id="clock">No saved session loaded</p><p id="ar-coverage" class="note"></p></section>
 <section class="panel"><h2>Spot · Futures · Positioning</h2><div id="ar-metrics" class="metrics"></div><div class="controls"><label>Contract <select id="ar-contract-mode"><option value="SESSION">Session ATM · reset each day</option><option value="PINNED">Same contract across days</option></select></label><label>Expiry <select id="ar-expiry" aria-label="Pinned exact expiry"></select></label><label>Strike <select id="ar-strike" aria-label="Pinned CE and PE strike"></select></label><button id="ar-atm">Pin ATM at cursor</button></div><p id="ar-contract" class="note"></p><div id="ar-charts"></div></section>
 <section class="panel"><h2>CE / PE ladder · ATM ±7 saved strikes</h2><p class="note">Exact replay timestamp only · PDH green / PDC yellow / PDL red · ΔOI uses the preceding saved bucket only when ≤3 minutes apart.</p><div id="ar-ladder" class="scroll"></div></section><footer class="note">1× = one recorded step / second. Gaps remain gaps; samples are not OHLC candles. Session ATM pins the opening saved contract separately each day. Choose Same contract to keep expiry / strike across days; missing contracts remain unavailable. BANKNIFTY is monthly research only. No orders or Telegram messages.</footer>
-</main><script>const __name=(fn,_name)=>fn;const recordedSession=${recordedSession.toString()};const recordedFrame=${recordedFrame.toString()};const createRecordedPlayback=${createRecordedPlayback.toString()};const standardIndexObservationClose=${standardIndexObservationClose.toString()};(${installRecordedDashboard.toString()})();</script></body></html>`;}
+</main><script>const __name=(fn,_name)=>fn;const mergeRecordedParts=${mergeRecordedParts.toString()};const recordedSession=${recordedSession.toString()};const recordedFrame=${recordedFrame.toString()};const createRecordedPlayback=${createRecordedPlayback.toString()};const standardIndexObservationClose=${standardIndexObservationClose.toString()};(${installRecordedDashboard.toString()})();</script></body></html>`;}
 
 export function installRecordedDashboard(){
  const $=(id:string)=>document.getElementById(id) as any;
@@ -36,14 +36,7 @@ export function installRecordedDashboard(){
    const query=new URLSearchParams({symbol,date,from:text(start),to:text(Math.min(start+60,minute(end)))});
    parts.push(await json('/api/research/recorded-dashboard/replay?'+query,signal));
   }
-  // Inclusive boundary rows repeat between windows. Drop only byte-identical copies;
-  // conflicting same-key evidence fails visibly instead of picking a value.
-  const merged:any={};
-  for(const kind of ['market','options','chain']){
-   const rows=new Map<string,any>();
-   for(const part of parts){const table=part[kind];for(const values of table?.rows||[]){const row=Object.fromEntries(table.columns.map((key:string,i:number)=>[key,values[i]]));const key=JSON.stringify([row.symbol,row.minute_bucket,row.expiry,row.strike,row.option_type]);const prior=rows.get(key);if(prior&&JSON.stringify(prior)!==JSON.stringify(row))throw new Error('Conflicting saved '+kind+' rows at '+row.minute_bucket+'. Replay stopped.');rows.set(key,row);}}
-   merged[kind]=[...rows.values()];
-  }
+  const merged=mergeRecordedParts(parts);
   $('progress').textContent='Loaded '+date+' · '+merged.market.length+' market / '+merged.options.length+' option / '+merged.chain.length+' chain rows.';
   return recordedSession(merged,symbol,date);
  }

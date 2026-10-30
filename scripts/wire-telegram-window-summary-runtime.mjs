@@ -1,12 +1,23 @@
 import fs from "node:fs";
 import path from "node:path";
+import { windowSummaryCadenceAlreadyWired } from "./telegram-window-wirer-guard.mjs";
 
 const root=process.cwd();
 const serverFile=path.resolve(root,"server.ts");
 const checkOnly=process.argv.includes("--check");
 let server=fs.readFileSync(serverFile,"utf8");
 const original=server;
-function replaceOnce(src,from,to,label){if(src.includes(to))return src;const count=src.split(from).length-1;if(count===0)throw new Error(`${label}: source occurrence not found`);return src.replace(from,to);}
+function replaceOnce(src,from,to,label){
+  if(src.includes(to))return src;
+  // The exact-Z watch wirer may add code between the summary text and its
+  // 15m send gate on a previous startup. Check the individual markers in
+  // order rather than treating the whole old replacement as absent.
+  if(label==="append summaries to fused message with 15m cadence" &&
+     windowSummaryCadenceAlreadyWired(src))return src;
+  const count=src.split(from).length-1;
+  if(count!==1)throw new Error(`${label}: expected one source occurrence, found ${count}`);
+  return src.replace(from,to);
+}
 
 // Import wiring must remain order-independent: other safe runtime patches may add
 // their own imports before this script runs. Insert after the final top-level import.

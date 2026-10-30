@@ -12,7 +12,7 @@ function harness(at='2026-10-19T04:00:00Z'){
  class Sampler{constructor(_inventory:any,public deps:any){samplers.push(this);}read(){return null;}tick(){}version(){return 0;}}
  const context:any={Date:Clock,process:{env:{DASHBOARD_LIVE_ENABLED:'true',KITE_API_KEY:'fixture',NODE_ENV:'production'}},
   DashboardLiveStore:Store,KiteWebSocketTransport:Socket,DashboardPcrSampler:Sampler,QUOTE_SYMBOLS:[],
-  createParticipationMinuteRecorder,dbSaveParticipationMinuteOnce:async()=>{throw Error('Unexpected participation DB write in recovery tests');},
+  createParticipationMinuteRecorder,tickTelegramLadderShadow:async()=>{},dbSaveParticipationMinuteOnce:async()=>{throw Error('Unexpected participation DB write in recovery tests');},
   buildDashboardLiveInventory:()=>({date:indianTradingDateAt(new Clock()),entries:[{token:1}]}),
   fetchH1KiteLiveInstrumentMaster:async()=>{masterReads++;return {ready:true,rows:[]};},
   resolveVerifiedKiteAuthoritySession:async()=>{checks++;return {session:active?{accessToken:'fixture-token'}:null,status:{active,code:active?'ACTIVE':'RECONNECT_REQUIRED'}};},

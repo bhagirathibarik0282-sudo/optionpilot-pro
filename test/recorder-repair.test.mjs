@@ -109,6 +109,7 @@ test('actual EOD builder includes minute participation by observed tradeDate',as
 test('existing runtime timer invokes archive without requiring a browser read',async()=>{
  let tick,open=true,calls=0;
  const c=vm.createContext({process:{env:{NODE_ENV:'production'}},console,
+  tickTelegramLadderShadow:async()=>{},
   createParticipationMinuteRecorder:()=>({capture:async read=>{assert.equal(typeof read,'function');calls++;return 'SAVED';}}),
   dbSaveParticipationMinuteOnce:()=>{},setInterval:fn=>{tick=fn;return {unref(){}};},
   subscribeKiteAuthoritySessionPersisted:()=>{},isIndianEquityMarketOpenAt:()=>open,

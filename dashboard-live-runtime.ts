@@ -1,4 +1,5 @@
 import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
+import { tickTelegramLadderShadow } from './telegram-ladder-shadow-host.js';
 import { createParticipationMinuteRecorder } from './participation-minute-recorder.js';
 import { dbSaveParticipationMinuteOnce } from './db.js';
 import { DashboardLiveStore, buildDashboardLiveInventory, type LiveSelection, type PremiumWatchFilter } from './dashboard-live-feed.js';
@@ -68,6 +69,7 @@ export async function reconcileDashboardLiveRuntime(force=false){
 export function startDashboardLiveRuntime(){
  if(timer||process.env.NODE_ENV==='test')return;
  timer=setInterval(()=>{void reconcileDashboardLiveRuntime();void pcrSampler?.tick();
+  void tickTelegramLadderShadow().catch(()=>console.warn('[TELEGRAM_LADDER_SHADOW] TICK_FAILED'));
   if(isIndianEquityMarketOpenAt(new Date()))void participationRecorder.capture(readDashboardLiveSnapshot).then(result=>{
    if(result==='FAILED')console.warn('[PARTICIPATION_MINUTE] SAVE_FAILED_RETRY_NEXT_TICK');
   });

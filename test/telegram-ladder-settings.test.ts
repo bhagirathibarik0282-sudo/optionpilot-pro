@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {settingsStore,settingsPanel,createSettingsController,startTelegramSettings} from '../telegram-ladder-settings.js';
+import {LADDER_FIELDS,renderWindow,renderSummary,value,type MinuteFrame,type Window} from '../telegram-ladder-v4.js';
+const v=(n:number)=>value(n,'STALE','RECORDED');
+const frame:MinuteFrame={minute:'2026-10-30T04:48:00.000Z',indices:[{symbol:'NIFTY',spot:v(100),pdh:v(105),pdl:v(90),expiries:[{expiry:'2026-11-03',volumeScope:'FULL',pcr:{full:v(1),band7:v(2),volume:v(3)},ceWall:{strike:110,oi:v(10)},peWall:{strike:90,oi:v(20)},contracts:[{strike:100,side:'CE',ltp:v(10),pdh:v(12),pdl:v(8)}]}]}],participation:[]};
+const w:Window={date:'2026-10-30',from:'2026-10-30T04:45:00.000Z',to:frame.minute,timeframe:3,partial:false};
+test('legacy token is removed even when settings are disabled',()=>{const env={TELEGRAM_BOT_TOKEN:'TEST_TOKEN'};startTelegramSettings(env);assert.equal(env.TELEGRAM_BOT_TOKEN,undefined);});
+test('selected parameters alter real TXT and summary, preserving quality and coverage',()=>{
+ const text=renderWindow([frame],w,'NIFTY',['spot']).join('\n'),summary=renderSummary([frame],w,'NIFTY',['spot']);
+ for(const t of [text,summary]){assert.match(t,/STALE/);assert.match(t,/Minute coverage 1\/4/);assert.doesNotMatch(t,/PDH|PDL|Full OI|±7 OI|Volume PCR|CE wall|Strike 100 CE|SECTORS/);}
+ const premiums=renderWindow([frame],w,'NIFTY',['premiums','levels']).join('\n');assert.match(premiums,/Strike 100 CE/);assert.match(premiums,/PDH/);assert.doesNotMatch(premiums,/SPOT|CE wall|Full OI/);
+});
+test('settings persist across restart, group choices and update offsets stay isolated',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'tg-settings-'));try{const a=settingsStore(dir);a.set('-1',['spot']);a.advance(19);a.markAnnounced('-1');const b=settingsStore(dir);assert.deepEqual(b.get('-1'),['spot']);assert.equal(b.offset(),19);assert.equal(b.announced('-1'),true);assert.deepEqual(b.get('-2'),[...LADDER_FIELDS]);}finally{rmSync(dir,{recursive:true,force:true});}
+});
+test('corrupt state fails closed rather than forgetting saved settings',()=>{const dir=mkdtempSync(join(tmpdir(),'tg-settings-'));try{writeFileSync(join(dir,'telegram-message-settings.json'),'broken');assert.throws(()=>settingsStore(dir),/STATE_INVALID/);}finally{rmSync(dir,{recursive:true,force:true});}});
+test('menu has valid toggle for each supported field and one report button',()=>{const rows=settingsPanel(['spot']).reply_markup.inline_keyboard.flat();for(const key of LADDER_FIELDS)assert.equal(rows.filter(x=>x.callback_data==='cfg:'+key).length,1);assert.ok(rows.some(x=>x.callback_data==='cfg:report'));});
+test('unmapped chats and non-admin users cannot change settings or request reports',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'tg-settings-')),calls:any[]=[];try{const store=settingsStore(dir),handle=createSettingsController({store,chats:{'-1':'NIFTY'},api:async(m,b)=>{calls.push([m,b]);return {status:'member'};}});
+ await handle({message:{chat:{id:-2},from:{id:7},text:'/settings'}});assert.equal(calls.length,0);
+ await handle({callback_query:{id:'cb',from:{id:7},data:'cfg:spot',message:{chat:{id:-1},message_id:2}}});assert.deepEqual(store.get('-1'),[...LADDER_FIELDS]);assert.ok(!calls.some(c=>c[0]==='sendMessage'||c[0]==='editMessageText'));
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+test('admin toggles save immediately, edit same menu, and report uses saved selection',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'tg-settings-')),calls:any[]=[];try{const store=settingsStore(dir),handle=createSettingsController({store,chats:{'-1':'NIFTY'},now:()=>Date.parse('2026-10-30T04:49:00Z'),read:async()=>({frames:[frame],failures:[]}),api:async(m,b)=>{calls.push([m,b]);return {status:'administrator'};}});
+ const msg={chat:{id:-1},message_id:42,from:{id:7},text:'/settings@OptionPilotBot'};
+ await handle({message:msg});assert.equal(calls.at(-1)[0],'sendMessage');
+ await handle({callback_query:{id:'a',from:{id:7},data:'cfg:spot',message:msg}});assert.ok(!store.get('-1').includes('spot'));assert.equal(calls.at(-1)[0],'editMessageText');assert.equal(calls.at(-1)[1].message_id,42);
+ store.set('-1',['spot']);await handle({message:{...msg,text:'/report'}});
+ const summary=calls.findLast(c=>c[0]==='sendMessage')[1].text;assert.match(summary,/RECORDED/);assert.doesNotMatch(summary,/Full OI PCR|CE wall/);
+ const form=calls.findLast(c=>c[0]==='sendDocument')[1];assert.equal(form.get('chat_id'),'-1');const text=await form.get('document').text();assert.match(text,/STALE/);assert.doesNotMatch(text,/PDH|CE wall|Strike 100 CE/);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});

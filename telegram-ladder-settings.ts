@@ -1,16 +1,20 @@
 import {mkdirSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {join} from 'node:path';
-import {LADDER_FIELDS,sessionWindows,renderWindow,renderSummary,type LadderField,type SymbolName} from './telegram-ladder-v4.js';
+import {createHash} from 'node:crypto';
+import {LADDER_FIELDS,sessionWindows,renderWindow,type LadderField,type SymbolName} from './telegram-ladder-v4.js';
 
 const labels:Record<LadderField,string>={spot:'Spot',levels:'PDH / PDL',fullPcr:'Full OI PCR',bandPcr:'±7 OI PCR',volumePcr:'Volume PCR',walls:'CE / PE walls',premiums:'Premium ladder',changes:'Changes Δ',alignment:'PCR alignment',participation:'Sectors / stocks',sources:'Source details'};
-type State={offset:number;fields:Record<string,LadderField[]>;announced?:string[]};
+type SavedReport={id:string;content:string;filename:string};
+type State={offset:number;fields:Record<string,LadderField[]>;announced?:string[];reports?:Record<string,SavedReport>};
 export function settingsStore(dir:string) {
   const path=join(dir,'telegram-message-settings.json');let state:State={offset:0,fields:{}};
   try {const raw=JSON.parse(readFileSync(path,'utf8'));if(!Number.isSafeInteger(raw.offset)||raw.offset<0||!raw.fields||typeof raw.fields!=='object')throw Error();
+    if(raw.reports)for(const r of Object.values(raw.reports) as any[])if(!r||typeof r.content!=='string'||typeof r.filename!=='string'||!/^[-\w.]+\.txt$/.test(r.filename)||!/^[a-f0-9]{16}$/.test(r.id))throw Error();
     for(const v of Object.values(raw.fields))if(!Array.isArray(v)||v.some(x=>!LADDER_FIELDS.includes(x)))throw Error();state=raw;
   }catch(error:any){if(error.code!=='ENOENT')throw Error('TELEGRAM_SETTINGS_STATE_INVALID');}
   function save(next:State){mkdirSync(dir,{recursive:true});writeFileSync(path+'.tmp',JSON.stringify(next),{mode:0o600});renameSync(path+'.tmp',path);state=next;}
   return {offset:()=>state.offset,advance:(offset:number)=>save({...state,offset}),get:(chat:string)=>[...(state.fields[chat]??LADDER_FIELDS)],
+    getReport:(chat:string)=>state.reports?.[chat],cacheReport:(chat:string,report:SavedReport)=>save({...state,reports:{...state.reports,[chat]:report}}),
     announced:(chat:string)=>state.announced?.includes(chat)??false,markAnnounced:(chat:string)=>save({...state,announced:[...(state.announced??[]),chat]}),
     set:(chat:string,fields:LadderField[])=>save({...state,fields:{...state.fields,[chat]:[...new Set(fields)]}})};
 }
@@ -18,10 +22,16 @@ export function settingsPanel(fields:readonly LadderField[]) {
   const buttons=LADDER_FIELDS.map(key=>({text:`${fields.includes(key)?'✅':'⬜'} ${labels[key]}`,callback_data:'cfg:'+key}));
   const rows=[];for(let i=0;i<buttons.length;i+=2)rows.push(buttons.slice(i,i+2));
   rows.push([{text:'📄 My report',callback_data:'cfg:report'},{text:'↺ Reset',callback_data:'cfg:reset'}]);
-  return {text:'⚙️ OptionPilot message settings\nButton ଦବାଇ parameter ON/OFF କରନ୍ତୁ — ପସନ୍ଦ ସଙ୍ଗେସଙ୍ଗେ save ହେବ।\nଏହି groupର admin ପସନ୍ଦ ବଦଳାଇପାରିବେ।\nOld automatic messages: OFF. /report = ଆପଣଙ୍କ ପସନ୍ଦର recorded report.\nQuality / missing-data labels ସବୁବେଳେ ରହିବ।',reply_markup:{inline_keyboard:rows}};
+  return {text:'⚙️ OptionPilot message settings\nButton ଦବାଇ parameter ON/OFF କରନ୍ତୁ — ପସନ୍ଦ ସଙ୍ଗେସଙ୍ଗେ save ହେବ।\nଏହି groupର admin ପସନ୍ଦ ବଦଳାଇପାରିବେ।\nOld automatic messages: OFF. /report = ସିଧା messageରେ ପଢ଼ନ୍ତୁ। TXT button ଇଚ୍ଛାଧୀନ।\nQuality / missing-data labels ସବୁବେଳେ ରହିବ।',reply_markup:{inline_keyboard:rows}};
 }
-export function createSettingsController(options:{api:(method:string,body:any)=>Promise<any>;store:ReturnType<typeof settingsStore>;chats:Record<string,SymbolName>;now?:()=>number;read?:any;botUsername?:string}) {
-  const {api,store,chats}=options,now=options.now??Date.now;
+export function createSettingsController(options:{api:(method:string,body:any)=>Promise<any>;store:ReturnType<typeof settingsStore>;chats:Record<string,SymbolName>;now?:()=>number;read?:any;botUsername?:string;pause?:(ms:number)=>Promise<void>}) {
+  const {api,store,chats}=options,now=options.now??Date.now,pause=options.pause??(ms=>new Promise(r=>setTimeout(r,ms)));
+  async function download(chat:string,id:string){
+    const saved=store.getReport(chat);
+    if(!saved||saved.id!==id)return api('sendMessage',{chat_id:chat,text:'ଏହି reportର TXT ଆଉ ରଖାଯାଇନାହିଁ। My report ପୁଣି ଦବାନ୍ତୁ।'});
+    const form=new FormData();form.set('chat_id',chat);form.set('document',new Blob([saved.content],{type:'text/plain;charset=utf-8'}),saved.filename);
+    return api('sendDocument',form);
+  }
   async function allowed(chat:string,user:any){if(!chats[chat]||!Number.isSafeInteger(user?.id)||user.is_bot)return false;
     const member=await api('getChatMember',{chat_id:chat,user_id:user.id});return ['creator','administrator'].includes(member?.status);}
   async function report(chat:string){
@@ -41,9 +51,16 @@ export function createSettingsController(options:{api:(method:string,body:any)=>
     const notice=w.to===requested!.to?'RECORDED / ON DEMAND':`RECORDED / DELAYED — ${clock(requested!.from)}–${clock(requested!.to)} IST endpoint ଅନୁପଲବ୍ଧ।\nଉପଲବ୍ଧ window: ${clock(w.from)}–${clock(w.to)} IST; latest completed endpointଠାରୁ ${(Date.parse(requested!.to)-Date.parse(w.to))/60000} min ପଛରେ।`;
     console.log('[TELEGRAM_SETTINGS_REPORT]',JSON.stringify({symbol,requestedTo:requested!.to,reportedTo:w.to,sourceFailures:result.failures??[]}));
     const fields=store.get(chat),parts=renderWindow(result.frames,w,symbol,fields);
-    await api('sendMessage',{chat_id:chat,text:notice+'\n'+renderSummary(result.frames,w,symbol,fields)});
-    const form=new FormData();form.set('chat_id',chat);form.set('document',new Blob([notice+'\n\n'+parts.join('\n\n')],{type:'text/plain;charset=utf-8'}),`OptionPilot_${symbol}_${date}_${w.to.slice(11,16).replace(':','')}.txt`);
-    return api('sendDocument',form);
+    const content=notice+'\n\n'+parts.join('\n\n'),filename=`OptionPilot_${symbol}_${date}_${clock(w.to).replace(':','')}.txt`;
+    const id=createHash('sha256').update(filename+'\n'+content).digest('hex').slice(0,16);
+    const messages=parts.map(part=>notice+'\n'+part);if(messages.some(text=>text.length>4096))throw Error('INLINE_REPORT_TOO_LONG');
+    store.cacheReport(chat,{id,content,filename});
+    for(let i=0;i<messages.length;i++){
+      if(i)await pause(1100);
+      const reply_markup=i===messages.length-1?{inline_keyboard:[[{text:'📥 TXT (optional)',callback_data:'cfg:txt:'+id}]]}:undefined;
+      const sent=await api('sendMessage',{chat_id:chat,text:messages[i],...(reply_markup?{reply_markup}:{})});
+      console.log('[TELEGRAM_SETTINGS_INLINE]',JSON.stringify({symbol,part:i+1,total:messages.length,messageId:sent?.message_id}));
+    }
   }
   return async function handle(update:any){
     const cb=update.callback_query,msg=cb?.message??update.message,chat=String(msg?.chat?.id??''),data=cb?.data;
@@ -55,6 +72,7 @@ export function createSettingsController(options:{api:(method:string,body:any)=>
     if(cb&&(typeof data!=='string'||!data.startsWith('cfg:')))return;
     if(!await allowed(chat,cb?.from??msg?.from)){if(cb)await api('answerCallbackQuery',{callback_query_id:cb.id,text:'Group admin only',show_alert:true});return;}
     if(cb)await api('answerCallbackQuery',{callback_query_id:cb.id});
+    if(typeof data==='string'&&/^cfg:txt:[a-f0-9]{16}$/.test(data)){try{return await download(chat,data.slice(8));}catch{return api('sendMessage',{chat_id:chat,text:'TXT ପଠାଇବା ସଫଳ ହୋଇନାହିଁ। Report ଉପର messageରେ ପଢ଼ିପାରିବେ।'});}}
     if(command==='/report'||data==='cfg:report'){try{return await report(chat);}catch{return api('sendMessage',{chat_id:chat,text:'Report ପୂର୍ଣ୍ଣ ହୋଇନାହିଁ। Data / delivery ଯାଞ୍ଚ ପରେ /report ପୁଣି ମାଗନ୍ତୁ।'});}}
     if(cb){const key=data.slice(4);if(key==='reset')store.set(chat,[...LADDER_FIELDS]);
       else if(LADDER_FIELDS.includes(key as LadderField)){const fields=store.get(chat);store.set(chat,fields.includes(key)?fields.filter(x=>x!==key):[...fields,key]);}else return;

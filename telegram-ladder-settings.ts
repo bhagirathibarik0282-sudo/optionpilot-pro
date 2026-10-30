@@ -54,16 +54,16 @@ export function createSettingsController(options:{api:(method:string,body:any)=>
 }
 /** Capture credentials before importing legacy modules. Only this lexical API can
  * use the token; all old senders see an absent token even when menu is enabled. */
-export function startTelegramSettings(env:NodeJS.ProcessEnv=process.env) {
+export function startTelegramSettings(env:NodeJS.ProcessEnv=process.env,options:{http?:typeof fetch;pause?:(ms:number)=>Promise<void>}={}) {
   const token=env.TELEGRAM_BOT_TOKEN?.trim();delete env.TELEGRAM_BOT_TOKEN;
   console.log('[TELEGRAM_LEGACY_DELIVERY] disabled; token isolated from legacy runtime');
   if(!token||env.TELEGRAM_SETTINGS_ENABLED!=='true')return;
-  const http=globalThis.fetch.bind(globalThis),chats:Record<string,SymbolName>={};
+  const http=options.http??globalThis.fetch.bind(globalThis),pause=options.pause??(ms=>new Promise(r=>setTimeout(r,ms))),chats:Record<string,SymbolName>={};
   for(const symbol of ['NIFTY','SENSEX','BANKNIFTY'] as const){const id=env['TELEGRAM_CHAT_ID_'+symbol]?.trim();if(id)chats[id]=symbol;}
   const api=async(method:string,body:any)=>{const form=body instanceof FormData;
     const r=await http(`https://api.telegram.org/bot${token}/${method}`,{method:'POST',headers:form?undefined:{'content-type':'application/json'},body:form?body:JSON.stringify(body),signal:AbortSignal.timeout(35_000),redirect:'error'});
     const json:any=await r.json();if(!r.ok||json.ok!==true)throw Error('TELEGRAM_API_FAILED_'+method+'_'+r.status);return json.result;};
-  void(async()=>{
+  async function initialize(){
     const info=await api('getWebhookInfo',{});if(info.url)throw Error('EXISTING_WEBHOOK_PRESENT');
     const me=await api('getMe',{});
     const store=settingsStore(env.RAILWAY_VOLUME_MOUNT_PATH||'/app/data'),handle=createSettingsController({api,store,chats,botUsername:me.username});
@@ -79,6 +79,12 @@ export function startTelegramSettings(env:NodeJS.ProcessEnv=process.env) {
     let errors=0;
     for(;;){try{const updates=await api('getUpdates',{offset:store.offset(),timeout:20,allowed_updates:['message','callback_query']});
       for(const update of updates){store.advance(update.update_id+1);try{await handle(update);}catch{console.error('[TELEGRAM_SETTINGS] update failed; not replayed');}}errors=0;
-    }catch(error:any){if(error.message?.endsWith('_409'))throw Error('TELEGRAM_POLLING_CONFLICT');errors=Math.min(errors+1,6);console.error('[TELEGRAM_SETTINGS] polling retry');await new Promise(r=>setTimeout(r,errors*5000));}}
-  })().catch(error=>console.error('[TELEGRAM_SETTINGS]',error.message));
+    }catch(error:any){if(error.message?.endsWith('_409'))throw Error('TELEGRAM_POLLING_CONFLICT');errors=Math.min(errors+1,6);console.error('[TELEGRAM_SETTINGS] polling retry');await pause(errors*5000);}}
+  }
+  return(async()=>{for(;;){try{await initialize();return;}catch(error:any){
+    const reason=error.message??'STARTUP_FAILED';
+    console.error('[TELEGRAM_SETTINGS]',reason,'cause='+String(error.cause?.code??'NONE'));
+    if(/EXISTING_WEBHOOK|DESTINATION_MISMATCH|STATE_INVALID|POLLING_CONFLICT|_401$|_403$/.test(reason))return;
+    await pause(15_000);
+  }}})();
 }

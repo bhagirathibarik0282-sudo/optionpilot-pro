@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --ignore-scripts --no-audit --no-fund
-      - run: node --import tsx --test test/telegram-ladder-v4.test.ts test/telegram-ladder-integration.test.ts test/telegram-ladder-runtime.test.ts test/telegram-ladder-shadow-host.test.ts test/telegram-ladder-acceptance.test.ts test/dashboard-live-recovery.test.ts
+      - run: node --import tsx --test test/telegram-ladder-v4.test.ts test/telegram-ladder-settings.test.ts test/telegram-ladder-integration.test.ts test/telegram-ladder-runtime.test.ts test/telegram-ladder-shadow-host.test.ts test/telegram-ladder-acceptance.test.ts test/dashboard-live-recovery.test.ts
         env:
           NODE_ENV: test
           DATABASE_URL: ''

@@ -2,6 +2,10 @@
 export const LADDER_PREFIX = '📊 OPTIONPILOT LADDER V4 | ';
 export const SYMBOLS = ['NIFTY','SENSEX','BANKNIFTY'] as const;
 export type SymbolName = typeof SYMBOLS[number];
+export const LADDER_FIELDS = ['spot','levels','fullPcr','bandPcr','volumePcr','walls','premiums','changes','alignment','participation','sources'] as const;
+export type LadderField = typeof LADDER_FIELDS[number];
+export type ReportFields = readonly LadderField[];
+const enabled = (fields:ReportFields|undefined,key:LadderField)=>fields===undefined||fields.includes(key);
 export type Quality = 'VERIFIED'|'UNVERIFIED'|'STALE'|'MISSING';
 export type Value = { value:number|null; quality:Quality; source:string };
 export type Wall = { strike:number|null; oi:Value };
@@ -45,8 +49,8 @@ function change(a:Value|undefined,b:Value|undefined,percent=false) {
   const n=percent?(b.value-a.value)/a.value*100:b.value-a.value;
   return `${sign(n)} ${n>0?'+':''}${fmt(n)}${percent?'%':''}`;
 }
-function levels(ltp:Value,pdh:Value,pdl:Value,label:string):string[] {
-  const rows=[{label,v:ltp},{label:'PDH',v:pdh},{label:'PDL',v:pdl}];
+function levels(ltp:Value,pdh:Value,pdl:Value,label:string,showLevels=true):string[] {
+  const rows=[{label,v:ltp},...(showLevels?[{label:'PDH',v:pdh},{label:'PDL',v:pdl}]:[])];
   rows.sort((a,b)=>(b.v.value??-Infinity)-(a.v.value??-Infinity));
   return rows.flatMap(r=>[`    ${r.label}`,`      ${display(r.v)}`]);
 }
@@ -79,10 +83,12 @@ function selectedFrames(frames:readonly MinuteFrame[],w:Window) {
   }
   return {map,from,to};
 }
-function indexLines(s:SymbolName,a:IndexFrame|undefined,b:IndexFrame|undefined,d:string):string[] {
+function indexLines(s:SymbolName,a:IndexFrame|undefined,b:IndexFrame|undefined,d:string,fields?:ReportFields):string[] {
   if(!b)return [s,'  ⚪ ଏହି minuteର index record ନାହିଁ'];
-  const out=[s,...levels(b.spot,b.pdh,b.pdl,'SPOT'),`  Spot Δ ${change(a?.spot,b.spot)}`,
-    `  Spot source: ${safe(b.spot.source)}`];
+  const out=[s];
+  if(enabled(fields,'spot'))out.push(...levels(b.spot,b.pdh,b.pdl,'SPOT',enabled(fields,'levels')));
+  if(enabled(fields,'spot')&&enabled(fields,'changes'))out.push(`  Spot Δ ${change(a?.spot,b.spot)}`);
+  if(enabled(fields,'sources'))out.push(`  Spot source: ${safe(b.spot.source)}`);
   if(!b.expiries.length)out.push('  ⚪ Expiry record ନାହିଁ');
   const seen=new Set<string>();
   for(const e of [...b.expiries].sort((a,b)=>a.expiry.localeCompare(b.expiry))) {
@@ -90,18 +96,26 @@ function indexLines(s:SymbolName,a:IndexFrame|undefined,b:IndexFrame|undefined,d
     const dte=(Date.parse(e.expiry)-Date.parse(d))/86_400_000;
     const before=findExpiry(a,e.expiry);
     out.push(`  Expiry ${e.expiry}`,`    DTE ${dte}${dte<0?' ⚪ EXPIRED':''}`,'    PCR');
-    for(const [key,label] of [['full','Full OI'],['band7','±7 OI'],['volume',`Volume (${safe(e.volumeScope)})`]] as const)out.push(`      ${label}`,`        ${display(e.pcr[key])}`,`        Δ ${change(key==='volume'&&before?.volumeScope!==e.volumeScope?undefined:before?.pcr[key],e.pcr[key])}`,`        source: ${safe(e.pcr[key].source)}`);
+    for(const [key,label,field] of [['full','Full OI','fullPcr'],['band7','±7 OI','bandPcr'],['volume',`Volume (${safe(e.volumeScope)})`,'volumePcr']] as const) {
+      if(!enabled(fields,field))continue;out.push(`      ${label}`,`        ${display(e.pcr[key])}`);
+      if(enabled(fields,'changes'))out.push(`        Δ ${change(key==='volume'&&before?.volumeScope!==e.volumeScope?undefined:before?.pcr[key],e.pcr[key])}`);
+      if(enabled(fields,'sources'))out.push(`        source: ${safe(e.pcr[key].source)}`);
+    }
     for(const [key,label] of [['ceWall','CE wall'],['peWall','PE wall']] as const) {
-      const wall=e[key],old=before?.[key];out.push(`    ${label}`,`      Strike ${wall.strike===null?'⚪ MISSING':fmt(wall.strike)}`,`      OI ${display(wall.oi)}`);
+      if(!enabled(fields,'walls'))continue;const wall=e[key],old=before?.[key];out.push(`    ${label}`,`      Strike ${wall.strike===null?'⚪ MISSING':fmt(wall.strike)}`,`      OI ${display(wall.oi)}`);
+      if(!enabled(fields,'changes'))continue;
       if(old && old.strike!==null && wall.strike!==null && old.strike!==wall.strike)out.push(`      Strike migration ${fmt(old.strike)} → ${fmt(wall.strike)}`,'      OI Δ: ଭିନ୍ନ strike; ତୁଳନା ନାହିଁ');
       else out.push(`      OI Δ ${old?.strike===wall.strike?change(old?.oi,wall.oi,true):'⚪ baseline ନାହିଁ'}`);
     }
     const keys=new Set<string>();
     for(const c of [...e.contracts].sort((a,b)=>a.strike-b.strike||a.side.localeCompare(b.side))) {
+      if(!enabled(fields,'premiums'))continue;
       const key=`${c.strike}|${c.side}`;
       if(!Number.isFinite(c.strike)||c.strike<=0||!['CE','PE'].includes(c.side)||keys.has(key))throw Error('INVALID_OR_DUPLICATE_CONTRACT');keys.add(key);
       const prev=before?.contracts.find(p=>p.strike===c.strike&&p.side===c.side);
-      out.push(`    Strike ${c.strike} ${c.side}`,...levels(c.ltp,c.pdh,c.pdl,'LTP'),`      LTP Δ ${change(prev?.ltp,c.ltp,true)}`,`      source: ${safe(c.ltp.source)}`);
+      out.push(`    Strike ${c.strike} ${c.side}`,...levels(c.ltp,c.pdh,c.pdl,'LTP',enabled(fields,'levels')));
+      if(enabled(fields,'changes'))out.push(`      LTP Δ ${change(prev?.ltp,c.ltp,true)}`);
+      if(enabled(fields,'sources'))out.push(`      source: ${safe(c.ltp.source)}`);
     }
   }
   if(s==='BANKNIFTY')out.push('  କେବଳ ଗବେଷଣା ପାଇଁ');return out;
@@ -120,16 +134,16 @@ function alignment(a:MinuteFrame|undefined,b:MinuteFrame|undefined):string[] {
   }
   out.push('  Direction alignment; buy/sell signal ନୁହେଁ');return out;
 }
-function participationLines(a:MinuteFrame|undefined,b:MinuteFrame|undefined):string[] {
+function participationLines(a:MinuteFrame|undefined,b:MinuteFrame|undefined,fields?:ReportFields):string[] {
   const out=['SECTORS / HEAVYWEIGHTS'];
   if(!b?.participation.length)return [...out,'  ⚪ ଏହି minuteର participation record ନାହିଁ'];
   const seen=new Set<string>();
   for(const q of b.participation) {
     if(seen.has(q.key))throw Error('DUPLICATE_PARTICIPATION');seen.add(q.key);
     const prev=a?.participation.find(p=>p.key===q.key);
-    out.push(`  ${safe(q.role)} · ${safe(q.label)}`,`    Price ${display(q.price)}`,`    Window Δ ${change(prev?.price,q.price,true)}`,
-      `    Day Δ ${display(q.dayChange)}${q.dayChange.value!==null&&q.dayChange.quality==='VERIFIED'?`% ${sign(q.dayChange.value)}`:'%'}`,
-      `    Index weight ${display(q.weight)}%`);
+    out.push(`  ${safe(q.role)} · ${safe(q.label)}`,`    Price ${display(q.price)}`);
+    if(enabled(fields,'changes'))out.push(`    Window Δ ${change(prev?.price,q.price,true)}`,`    Day Δ ${display(q.dayChange)}${q.dayChange.value!==null&&q.dayChange.quality==='VERIFIED'?`% ${sign(q.dayChange.value)}`:'%'}`);
+    out.push(`    Index weight ${display(q.weight)}%`);
   }
   return out;
 }
@@ -145,45 +159,49 @@ export function splitLadder(lines:readonly string[],identity:string,limit=3800):
   if(buf||!chunks.length)chunks.push(buf);
   return chunks.map((c,i)=>`${header}\nଭାଗ ${i+1}/${chunks.length}\n${c}`);
 }
-export function renderWindow(frames:readonly MinuteFrame[],w:Window,symbol?:SymbolName):string[] {
+export function renderWindow(frames:readonly MinuteFrame[],w:Window,symbol?:SymbolName,fields?:ReportFields):string[] {
   const symbols=scopedSymbols(symbol);
   if(w.timeframe==='EOD')throw Error('USE_EOD_RENDERER');
   const {map,from,to}=selectedFrames(frames,w),a=from===to?undefined:map.get(from),b=map.get(to);
   const expected=(to-from)/M+1;
-  const lines=[`${clock(from)} → ${clock(to)} IST${w.partial?' · PARTIAL':''}`,`Minute coverage ${coverage(map,symbol)}/${expected}`,...alignment(a,b)];
-  for(const s of symbols)lines.push('',...indexLines(s,findIndex(a,s),findIndex(b,s),w.date));
+  const lines=[`${clock(from)} → ${clock(to)} IST${w.partial?' · PARTIAL':''}`,`Minute coverage ${coverage(map,symbol)}/${expected}`,...(enabled(fields,'alignment')?alignment(a,b):[])];
+  for(const s of symbols)lines.push('',...indexLines(s,findIndex(a,s),findIndex(b,s),w.date,fields));
   if(symbol)lines.push('ସାଧାରଣ sector/stock context; index membership ରେକର୍ଡ ନାହିଁ');
-  lines.push('',...participationLines(a,b));
+  lines.push('',...(enabled(fields,'participation')?participationLines(a,b,fields):[]));
   return splitLadder(lines,`${symbol?symbol+' | ':''}${w.timeframe} MIN | ${w.date} | ${clock(from)}-${clock(to)}`);
 }
 /** All 376 session timestamps, all three indices; missing minutes are explicit, never filled. */
-export function renderEod(frames:readonly MinuteFrame[],d:string,symbol?:SymbolName):string[] {
+export function renderEod(frames:readonly MinuteFrame[],d:string,symbol?:SymbolName,fields?:ReportFields):string[] {
   const symbols=scopedSymbols(symbol);
   const {open,close}=bounds(d),w:Window={date:d,from:iso(open),to:iso(close),timeframe:'EOD',partial:false};
   const {map}=selectedFrames(frames,w),lines=[`${d} · 09:15–15:30 IST`,`Minute coverage ${coverage(map,symbol)}/376`];
   if(symbol)lines.push('ସାଧାରଣ sector/stock context; index membership ରେକର୍ଡ ନାହିଁ');
   for(let t=open;t<=close;t+=M) {
     const b=map.get(t),a=t===open?undefined:map.get(t-M);
-    lines.push('',`⏱ ${clock(t)} IST`,...alignment(a,b));
-    for(const s of symbols)lines.push(...indexLines(s,findIndex(a,s),findIndex(b,s),d));
-    lines.push(...participationLines(a,b));
+    lines.push('',`⏱ ${clock(t)} IST`,...(enabled(fields,'alignment')?alignment(a,b):[]));
+    for(const s of symbols)lines.push(...indexLines(s,findIndex(a,s),findIndex(b,s),d,fields));
+    lines.push(...(enabled(fields,'participation')?participationLines(a,b,fields):[]));
   }
   return splitLadder(lines,`${symbol?symbol+' | ':''}EOD | ${d} | 1 MIN HISTORY`);
 }
 /** Compact chat preface; complete levels, expiries and minute history remain in the attachment. */
-export function renderSummary(frames:readonly MinuteFrame[],w:Window,symbol?:SymbolName):string {
+export function renderSummary(frames:readonly MinuteFrame[],w:Window,symbol?:SymbolName,fields?:ReportFields):string {
   const symbols=scopedSymbols(symbol);
   const {map,from,to}=selectedFrames(frames,w),a=map.get(from),b=map.get(to);
   const lines=[LADDER_PREFIX+`${symbol?symbol+' | ':''}${w.timeframe} | ${w.date} | ${clock(from)}-${clock(to)}`,
     `Minute coverage ${coverage(map,symbol)}/${(to-from)/M+1}${w.partial?' · PARTIAL':''}`];
   for(const s of symbols) {
-    const i=findIndex(b,s),prev=findIndex(a,s);lines.push(s,`  Spot ${display(i?.spot)}`,`  Δ ${change(from===to?undefined:prev?.spot,i?.spot)}`);
+    const i=findIndex(b,s),prev=findIndex(a,s);lines.push(s);
+    if(enabled(fields,'spot'))lines.push(`  Spot ${display(i?.spot)}`);
+    if(enabled(fields,'spot')&&enabled(fields,'changes'))lines.push(`  Δ ${change(from===to?undefined:prev?.spot,i?.spot)}`);
     const e=i?.expiries.slice().sort((x,y)=>x.expiry.localeCompare(y.expiry))[0];
-    if(e){lines.push(`  Expiry ${e.expiry}`);for(const [key,label] of [['full','Full OI PCR'],['band7','±7 OI PCR'],['volume','Volume PCR']] as const)lines.push(`    ${label}`,`      ${display(e.pcr[key])}`);
-      lines.push(`  CE wall ${e.ceWall.strike??'⚪ MISSING'}`,`  PE wall ${e.peWall.strike??'⚪ MISSING'}`,`  ସମ୍ପୂର୍ଣ୍ଣ expiry ${i!.expiries.length}: ସଂଲଗ୍ନରେ`);
+    if(e){lines.push(`  Expiry ${e.expiry}`);for(const [key,label,field] of [['full','Full OI PCR','fullPcr'],['band7','±7 OI PCR','bandPcr'],['volume','Volume PCR','volumePcr']] as const)if(enabled(fields,field))lines.push(`    ${label}`,`      ${display(e.pcr[key])}`);
+      if(enabled(fields,'walls'))lines.push(`  CE wall ${e.ceWall.strike??'⚪ MISSING'}`,`  PE wall ${e.peWall.strike??'⚪ MISSING'}`);
+      lines.push(`  ସମ୍ପୂର୍ଣ୍ଣ expiry ${i!.expiries.length}: ସଂଲଗ୍ନରେ`);
     }else lines.push('  ⚪ Expiry record ନାହିଁ');
   }
   if(symbols.includes('BANKNIFTY'))lines.push('BANKNIFTY: କେବଳ ଗବେଷଣା ପାଇଁ');
-  lines.push(`${symbol?'Shared ':''}Sector/stock coverage ${b?.participation.length??0}: ସଂଲଗ୍ନରେ`,'ସମ୍ପୂର୍ଣ୍ଣ ladder ତଥ୍ୟ ସଂଲଗ୍ନ TXTରେ ଅଛି।');
+  if(enabled(fields,'participation'))lines.push(`${symbol?'Shared ':''}Sector/stock coverage ${b?.participation.length??0}: ସଂଲଗ୍ନରେ`);
+  lines.push('ଆପଣଙ୍କ ଚୟନ ଅନୁସାରେ ladder ତଥ୍ୟ ସଂଲଗ୍ନ TXTରେ ଅଛି।');
   const text=lines.join('\n');if(text.length>4096)throw Error('SUMMARY_TOO_LONG');return text;
 }

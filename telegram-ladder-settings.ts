@@ -25,14 +25,24 @@ export function createSettingsController(options:{api:(method:string,body:any)=>
   async function allowed(chat:string,user:any){if(!chats[chat]||!Number.isSafeInteger(user?.id)||user.is_bot)return false;
     const member=await api('getChatMember',{chat_id:chat,user_id:user.id});return ['creator','administrator'].includes(member?.status);}
   async function report(chat:string){
-    const date=new Date(now()+19_800_000).toISOString().slice(0,10),w=sessionWindows(date).filter(w=>w.timeframe===3&&Date.parse(w.to)+60_000<=now()).at(-1);
+    const date=new Date(now()+19_800_000).toISOString().slice(0,10),windows=sessionWindows(date).filter(w=>w.timeframe===3&&Date.parse(w.to)+60_000<=now());
+    const requested=windows.at(-1);let w=requested;
     if(!w)return api('sendMessage',{chat_id:chat,text:'ଏପର୍ଯ୍ୟନ୍ତ ଆଜିର closed 3-minute window ନାହିଁ।'});
     const read=options.read??(await import('./telegram-ladder-existing-source.js')).readExistingLadderFrames;
-    const result=await read({date,from:w.from,to:w.to}),symbol=chats[chat];
-    if(!result.frames.some((f:any)=>f.minute===w.to&&f.indices.some((i:any)=>i.symbol===symbol)))return api('sendMessage',{chat_id:chat,text:'ଏହି windowର recorded data ଅନୁପଲବ୍ଧ। /report ପୁଣି ମାଗନ୍ତୁ।'});
+    let result=await read({date,from:w.from,to:w.to});const symbol=chats[chat];
+    const hasEnd=(candidate:typeof w)=>candidate&&result.frames.some((f:any)=>Date.parse(f.minute)===Date.parse(candidate.to)&&f.indices.some((i:any)=>i.symbol===symbol));
+    if(!hasEnd(w)){
+      const candidates=windows.slice(-4),from=candidates[0].from;
+      if(from!==w.from)result=await read({date,from,to:w.to});
+      w=[...candidates].reverse().find(hasEnd);
+      if(!w){const failed=result.failures?.includes(symbol+'_SOURCE_UNAVAILABLE');return api('sendMessage',{chat_id:chat,text:failed?'Recorder read ବିଫଳ; data ନାହିଁ ବୋଲି ନିଶ୍ଚିତ ନୁହେଁ। /report ପୁଣି ମାଗନ୍ତୁ।':'ଶେଷ ୧୨ minute ମଧ୍ୟରେ completed 3-minute endpoint record ନାହିଁ। ପୁରୁଣା dataକୁ current ଭାବେ ଦେଖାଯାଉନାହିଁ।'});}
+    }
+    const clock=(s:string)=>new Date(Date.parse(s)+19_800_000).toISOString().slice(11,16);
+    const notice=w.to===requested!.to?'RECORDED / ON DEMAND':`RECORDED / DELAYED — ${clock(requested!.from)}–${clock(requested!.to)} IST endpoint ଅନୁପଲବ୍ଧ।\nଉପଲବ୍ଧ window: ${clock(w.from)}–${clock(w.to)} IST; latest completed endpointଠାରୁ ${(Date.parse(requested!.to)-Date.parse(w.to))/60000} min ପଛରେ।`;
+    console.log('[TELEGRAM_SETTINGS_REPORT]',JSON.stringify({symbol,requestedTo:requested!.to,reportedTo:w.to,sourceFailures:result.failures??[]}));
     const fields=store.get(chat),parts=renderWindow(result.frames,w,symbol,fields);
-    await api('sendMessage',{chat_id:chat,text:'RECORDED / ON DEMAND\n'+renderSummary(result.frames,w,symbol,fields)});
-    const form=new FormData();form.set('chat_id',chat);form.set('document',new Blob([parts.join('\n\n')],{type:'text/plain;charset=utf-8'}),`OptionPilot_${symbol}_${date}_${w.to.slice(11,16).replace(':','')}.txt`);
+    await api('sendMessage',{chat_id:chat,text:notice+'\n'+renderSummary(result.frames,w,symbol,fields)});
+    const form=new FormData();form.set('chat_id',chat);form.set('document',new Blob([notice+'\n\n'+parts.join('\n\n')],{type:'text/plain;charset=utf-8'}),`OptionPilot_${symbol}_${date}_${w.to.slice(11,16).replace(':','')}.txt`);
     return api('sendDocument',form);
   }
   return async function handle(update:any){

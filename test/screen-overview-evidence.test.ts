@@ -38,7 +38,27 @@ function harness() {
     __name: (fn: any) => fn, requestAnimationFrame: () => 1 };
   const installer = vm.runInNewContext(`(${installScreenOverview.toString()})`, context);
   const view = installer();
-  return { nodes, events, memory, futures(heads:string[],rows:string[][]){nodes.set('os-future-response',tableSource(heads,rows));view.refresh();}, headline(value:string,status:string){price=value;validation=status;view.refresh();}, premium(heads:string[],rows:string[][]){nodes.set('os-premium-table',tableSource(heads,rows));view.refresh();}, select(symbol: string) { selected = symbol; view.refresh(); } };
+  return {
+    nodes, events, memory,
+    source(id:string,heads:string[],rows:string[][]){nodes.set(id,tableSource(heads,rows));view.refresh();},
+    pcr(index:string,full:string,reportedValue:string|null){
+      const simple=(value:string)=>node({textContent:value});
+      const reported=reportedValue===null?null:node({
+        querySelector:(selector:string)=>selector==='b'?simple(reportedValue):null,
+        querySelectorAll:(selector:string)=>selector==='small'?[simple('288/288 contracts · 6 older than 30s')]:[],
+      });
+      const card=node({
+        querySelector:(selector:string)=>selector===':scope>strong'?simple(index):selector===':scope>b'?simple(full):selector==='.os-pcr-reported'?reported:null,
+        querySelectorAll:(selector:string)=>selector===':scope>small'?[simple('OI 282/288 fresh · stale 6')]:[],
+      });
+      nodes.set('os-pcr-strip',node({querySelectorAll:(selector:string)=>selector==='.os-pcr'?[card]:[]}));
+      view.refresh();
+    },
+    futures(heads:string[],rows:string[][]){nodes.set('os-future-response',tableSource(heads,rows));view.refresh();},
+    headline(value:string,status:string){price=value;validation=status;view.refresh();},
+    premium(heads:string[],rows:string[][]){nodes.set('os-premium-table',tableSource(heads,rows));view.refresh();},
+    select(symbol: string) { selected = symbol; view.refresh(); },
+  };
 }
 
 test('changing selected index never exposes another index recorded events or memory', () => {
@@ -109,4 +129,49 @@ test('selected-index futures metrics never borrow a fixed row from another index
  h.select('BANKNIFTY');const metrics=h.nodes.get('rd-market-metrics').innerHTML;
  assert.match(metrics,/54392.6/);assert.match(metrics,/8.85/);assert.doesNotMatch(metrics,/22764.9/);
  assert.doesNotMatch(h.nodes.get('rd-levels-table').innerHTML,/>(?:NIFTY Spot|NIFTY Futures)</);
+});
+
+test('compact PCR table separates fresh, reported and band observations without fake columns',()=>{
+ const h=harness();
+ h.source('os-wall-ladder',['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ'],[
+  ['NIFTY','— / 1.1234','20,000 Δ +150','25,000 Δ -70','23,000 / 22,800','1,000','—'],
+ ]);
+ h.pcr('NIFTY','—','1.0969');
+ const output=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(output,/<th>Fresh Full PCR<\/th>/);
+ assert.match(output,/<th>Reported Full · mixed times<\/th>/);
+ assert.match(output,/<th>ATM ±7 PCR<\/th>/);
+ assert.match(output,/Reported 1.0969 · MIXED SOURCE TIMES/);
+ assert.match(output,/1.1234/);
+ assert.match(output,/\+150/);
+ assert.match(output,/-70/);
+ assert.doesNotMatch(output,/<th>±5 PCR<\/th>|<th>±3 PCR<\/th>|<th>Trend<\/th>/);
+ h.pcr('NIFTY','1.0876',null);
+ const fresh=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(fresh,/1.0876/);
+ assert.doesNotMatch(fresh,/Reported 1.0969/);
+});
+
+test('tracked participation rows do not pretend weights or index-point contributions exist',()=>{
+ const h=harness();
+ h.source('os-stock-ranks',['#','Stock','Weight %','Price','Day %','Contribution','Trend','Quote time · IST','RAG / similar event'],[
+  ['1','RELIANCE','—','₹ 1,200','+1.25%','—','▲','12:14:30','Unmatched'],
+ ]);
+ const output=h.nodes.get('rd-stock-table').innerHTML;
+ for(const label of ['Tracked stock','Price','Day %','Direction','Quote IST'])assert(output.includes('<th>'+label+'</th>'));
+ assert.match(output,/RELIANCE/);
+ assert.match(output,/12:14:30/);
+ assert.match(output,/Tracked market-wide quotes · unweighted ranking/);
+ assert.doesNotMatch(output,/<th>Weight %<\/th>|<th>Contribution<\/th>|<th>RAG<\/th>/);
+});
+
+test('live events project the four observed source columns only',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ h.source('os-events',['Time · IST','Index','Event','Verified observation'],[
+  ['12:14:30','NIFTY','ABOVE PDH','Spot 23,100 · exchange 12:14:30'],
+ ]);
+ const output=h.nodes.get('rd-event-table').innerHTML;
+ assert.match(output,/ABOVE PDH/);
+ assert.match(output,/Spot 23,100/);
+ assert.doesNotMatch(output,/<th>PCR<\/th>|<th>OI<\/th>|<th>RAG<\/th>|<th>Similar Event<\/th>/);
 });

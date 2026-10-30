@@ -19,6 +19,28 @@ test('source failure retains healthy indices and participation and does not fill
   const out=await read(range);assert.deepEqual(out.failures,['SENSEX_SOURCE_UNAVAILABLE']);
   assert.equal(out.frames.length,1);assert.equal(out.frames[0].indices.length,2);
 });
+test('one transient source failure retries the same range without rereading healthy indices',async()=>{
+  const calls:Record<string,number>={};let participationCalls=0;
+  const read=createLadderRecorderSource({replay:async request=>{
+    calls[request.symbol]=(calls[request.symbol]??0)+1;
+    if(request.symbol==='NIFTY'&&calls.NIFTY===1)throw Error('temporary read failure');
+    return replay(request);
+  },participation:async()=>{if(++participationCalls===1)throw Error('temporary participation failure');return [];} });
+  const out=await read(range);
+  assert.deepEqual(out.failures,[]);assert.equal(out.frames[0].indices.length,3);
+  assert.deepEqual(calls,{NIFTY:2,SENSEX:1,BANKNIFTY:1});assert.equal(participationCalls,2);
+});
+test('persistent read failure stops after one retry and preserves healthy values',async()=>{
+  let attempts=0,participationCalls=0;
+  const read=createLadderRecorderSource({replay:async request=>{
+    if(request.symbol==='SENSEX'){attempts++;return {ok:false,request} as any;}
+    return replay(request);
+  },participation:async()=>{participationCalls++;throw Error('offline');}});
+  const out=await read(range);
+  assert.equal(attempts,2);assert.equal(participationCalls,2);
+  assert.deepEqual(out.failures,['SENSEX_SOURCE_UNAVAILABLE','PARTICIPATION_SOURCE_UNAVAILABLE']);
+  assert.equal(out.frames[0].indices.length,2);
+});
 test('missing market row preserves existing exact premiums and chain values as unverified',async()=>{
   const read=createLadderRecorderSource({replay:async request=>({ok:true,request,market:[],options:request.symbol==='NIFTY'?[{symbol:'NIFTY',minute_bucket:range.from,expiry:'2026-11-03',strike:23000,option_type:'CE',ltp:123}]:[],chain:request.symbol==='NIFTY'?[{symbol:'NIFTY',minute_bucket:range.from,expiry:'2026-11-03',full_chain_oi_pcr:1.2}]:[]}) as any,participation:async()=>[]});
   const out=await read(range),nifty=out.frames[0].indices[0];

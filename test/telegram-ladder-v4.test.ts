@@ -1,12 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SYMBOLS,value,missing,numeric,sessionWindows,dueWindows,renderWindow,renderEod,splitLadder,type MinuteFrame,type Window} from '../telegram-ladder-v4.js';
+import {SYMBOLS,value,missing,numeric,sessionWindows,dueWindows,renderWindow,renderEod,renderSummary,splitLadder,type MinuteFrame,type Window} from '../telegram-ladder-v4.js';
 import {framesFromH1} from '../telegram-ladder-recorder-adapter.js';
 import {enqueueLadderReports,deliverLadderJob,reportJob,type Job,type LadderOutbox} from '../telegram-ladder-outbox.js';
 const d='2026-10-29',base=Date.parse(d+'T09:15:00+05:30');
 const v=(n:number)=>value(n,'VERIFIED','TEST_SAME_UNIVERSE');
 const frame=(m:number):MinuteFrame=>({minute:new Date(base+m*60_000).toISOString(),indices:SYMBOLS.map(symbol=>({symbol,spot:v(100+m),pdh:v(105),pdl:v(90),expiries:[{expiry:'2026-11-03',volumeScope:'FULL',pcr:{full:v(1+m/100),band7:v(1+m/100),volume:v(1+m/100)},ceWall:{strike:110,oi:v(1000+m)},peWall:{strike:90,oi:v(1000+m)},contracts:[{strike:100,side:'CE',ltp:v(10+m),pdh:v(15),pdl:v(5)}]}]})),participation:[{key:'STOCK|1',label:'Stock',role:'STOCK',price:v(100+m),dayChange:v(m),weight:missing()}]});
 const w:Window={date:d,from:frame(0).minute,to:frame(3).minute,timeframe:3,partial:false};
+test('scoped window, summary and EOD retain only the selected index premium ladders',()=>{
+ const a=frame(0),b=frame(3);for(const f of [a,b])f.indices.forEach((i,n)=>i.expiries[0].contracts[0].strike=100+n*100);
+ for(const [n,symbol] of SYMBOLS.entries()) {
+  for(const text of [renderWindow([a,b],w,symbol).join('\n'),renderEod([a,b],d,symbol).join('\n')]) {
+   assert.ok(text.includes(`Strike ${100+n*100} CE`));
+   for(let other=0;other<3;other++)if(other!==n)assert.ok(!text.includes(`Strike ${100+other*100} CE`));
+   assert.ok(text.includes('index membership ରେକର୍ଡ ନାହିଁ'));
+  }
+  const summary=renderSummary([a,b],w,symbol);assert.ok(summary.includes(symbol));
+  for(const other of SYMBOLS)if(other!==symbol)assert.ok(!summary.split('\n').includes(other));
+  if(symbol==='BANKNIFTY')assert.ok(summary.includes('କେବଳ ଗବେଷଣା ପାଇଁ'));
+ }
+});
+test('scoped minute coverage cannot be satisfied by other indices or participation alone',()=>{
+ const a=frame(0),b=frame(3);b.indices=b.indices.filter(i=>i.symbol!=='NIFTY');
+ assert.ok(renderWindow([a,b],w,'NIFTY').join('\n').includes('Minute coverage 1/4'));
+ assert.ok(renderSummary([a,b],w,'NIFTY').includes('Minute coverage 1/4'));
+ assert.ok(renderEod([a,b],d,'NIFTY').join('\n').includes('Minute coverage 1/376'));
+ assert.throws(()=>renderWindow([a,b],w,'INVALID' as any),/INVALID_REPORT_SYMBOL/);
+});
 class Store implements LadderOutbox {
  jobs=new Map<string,Job>();states=new Map<string,string>();
  async putIfAbsent(j:Job){if(this.jobs.has(j.id))return false;this.jobs.set(j.id,structuredClone(j));return true;}

@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
+import { createRuntimeControlPanel } from './runtime-control-panel.mjs';
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { operatingStatus, maintenanceExpiry } from '../runtime-operating-window.ts';
@@ -35,7 +36,8 @@ async function recorded(request, response) {
 }
 function status() {
   return { ...operatingStatus(now(), overrideUntil), running: Boolean(child), ready, draining,
-    hoursIST: '08:45–16:15', timezone: 'Asia/Kolkata', supervisor: true };
+    hoursIST: '08:45–16:15', timezone: 'Asia/Kolkata', supervisor: true,
+    maintenanceUntil: overrideUntil > now().getTime() ? new Date(overrideUntil).toISOString() : null };
 }
 function reply(response, code, body) {
   response.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -76,7 +78,24 @@ async function reconcile() {
     console.log('[RUNTIME_STOP] graceful drain requested');
   }
 }
+async function setManualWindow(minutes) {
+  const until = minutes ? new Date(now().getTime() + minutes * 60_000).toISOString() : null;
+  try {
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(`${statePath}.tmp`, JSON.stringify({ until }), { mode: 0o600 });
+    renameSync(`${statePath}.tmp`, statePath);
+  } catch {
+    return { ok: false, error: 'RUNTIME_WINDOW_SAVE_FAILED', ...status() };
+  }
+  overrideUntil = until ? Date.parse(until) : 0;
+  await reconcile();
+  return { ok: true, until, ...status() };
+}
+const controlPanel = createRuntimeControlPanel({
+  env, now, status, start: minutes => setManualWindow(minutes), stop: () => setManualWindow(0),
+});
 const server = http.createServer(async (request, response) => {
+  if (await controlPanel(request, response)) return;
   const path = new URL(request.url || '/', 'http://localhost').pathname;
   if (path === '/ops/runtime-status') return reply(response, 200, status());
   if (path === '/ops/runtime-window') {
@@ -87,13 +106,8 @@ const server = http.createServer(async (request, response) => {
       for await (const chunk of request) { raw += chunk; if (raw.length > 1024) throw new Error('BODY_TOO_LARGE'); }
       const { minutes } = JSON.parse(raw);
       if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) return reply(response, 400, { error: 'MINUTES_MUST_BE_1_TO_60' });
-      const until = new Date(now().getTime() + minutes * 60_000).toISOString();
-      mkdirSync(stateDir, { recursive: true });
-      writeFileSync(`${statePath}.tmp`, JSON.stringify({ until }), { mode: 0o600 });
-      renameSync(`${statePath}.tmp`, statePath);
-      overrideUntil = Date.parse(until);
-      await reconcile();
-      return reply(response, 200, { ok: true, until, ...status() });
+      const result = await setManualWindow(minutes);
+      return reply(response, result.ok ? 200 : 503, result);
     } catch { return reply(response, 400, { error: 'INVALID_REQUEST_OR_STATE_WRITE_FAILED' }); }
   }
   if (path === '/health' && (!status().shouldRun || !ready)) {

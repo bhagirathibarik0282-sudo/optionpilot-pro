@@ -43,7 +43,7 @@
     "test:h1-direction-response": "NODE_ENV=test node --import tsx --test test/h1-direction-response-research-v1.test.ts test/h1-direction-response-research-http-v1.test.ts",
     "start:prepare": "node scripts/wire-market-session-calendar.mjs && node scripts/wire-kite-auth-callback-v2.mjs && node scripts/wire-storage-v3-runtime.mjs && node scripts/wire-outcome-history-runtime.mjs && node scripts/wire-option-buying-risk-runtime.mjs && node scripts/wire-market-forward-test-readiness-runtime.mjs && node scripts/wire-no-trade-reason-dedupe-v1.mjs && node scripts/wire-telegram-z-watch-exact-runtime-v1.mjs",
     "start:legacy-runtime": "node --import tsx h1-live-contract-discovery-startup-audit.ts & node --import tsx kite-shadow-runtime-service.ts & node --import tsx h1-same-process-server-entry.ts",
-    "test:runtime-window": "NODE_ENV=test node --import tsx --test test/runtime-operating-window.test.ts test/runtime-supervisor.test.ts test/runtime-io-tracker.test.ts"
+    "test:runtime-window": "NODE_ENV=test node --import tsx --test test/runtime-operating-window.test.ts test/runtime-supervisor.test.ts test/runtime-io-tracker.test.ts && node --test test/runtime-control-panel.test.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.11",

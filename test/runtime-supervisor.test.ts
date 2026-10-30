@@ -68,3 +68,18 @@ test('SSE stream cannot keep the app alive after operating hours', async t => {
   assert.match(await response.text(), /data: ready/);
   await waitFor(() => !instance.status().running);
 });
+
+test('manual off-hours web control boots the real fixture, then safely stops it',async t=>{
+  const {instance,url}=await harness(t,'2026-10-28T15:00:00Z');
+  const logged=await fetch(url+'/ops/control/login',{method:'POST',headers:{'X-OptionPilot-Control':'1','Content-Type':'application/json'},body:JSON.stringify({token:'test-admin'})});
+  assert.equal(logged.status,200);
+  const cookie=logged.headers.get('set-cookie')!.split(';')[0];
+  const make=(route,body={})=>fetch(url+'/ops/control/'+route,{method:'POST',headers:{Cookie:cookie,'X-OptionPilot-Control':'1','Content-Type':'application/json'},body:JSON.stringify(body)});
+  assert.equal((await make('start',{minutes:15})).status,200);
+  await waitFor(()=>instance.status().ready);
+  assert.equal(instance.status().maintenance,true);
+  assert.equal((await make('stop')).status,200);
+  await waitFor(()=>!instance.status().running);
+  assert.equal(instance.status().maintenance,false);
+  assert.equal((await fetch(url+'/recorded-dashboard')).status,200);
+});

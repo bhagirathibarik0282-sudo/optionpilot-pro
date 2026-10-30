@@ -1,0 +1,42 @@
+name: Telegram ladder V4
+on:
+  pull_request:
+    paths:
+      - 'telegram-ladder-*.ts'
+      - 'test/telegram-ladder-*.test.ts'
+      - 'h1-premium-record-quality.ts'
+      - 'dashboard-live-runtime.ts'
+      - '.github/workflows/telegram-ladder-v4-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ladder_test
+          POSTGRES_PASSWORD: ladder_test
+          POSTGRES_DB: optionpilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ladder_test -d optionpilot_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --import tsx --test test/telegram-ladder-v4.test.ts test/telegram-ladder-integration.test.ts test/telegram-ladder-runtime.test.ts test/telegram-ladder-shadow-host.test.ts test/dashboard-live-recovery.test.ts
+        env:
+          NODE_ENV: test
+          DATABASE_URL: ''
+      - run: node --import tsx --test test/telegram-ladder-postgres.test.ts
+        env:
+          NODE_ENV: test
+          LADDER_TEST_DATABASE_URL: postgresql://ladder_test:ladder_test@127.0.0.1:5432/optionpilot_test

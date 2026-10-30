@@ -9,7 +9,7 @@ async function view(){
  for(const [,id] of renderRecordedDashboard().matchAll(/id="([^"]+)"/g))elements.set(id,{value:'',textContent:'',innerHTML:'',disabled:false,selectedOptions:[]});
  elements.get('ar-index').value='NIFTY';elements.get('ar-speed').value='1';
  const dates=['2026-10-28','2026-10-29','2026-10-30'];
- const context:any={console,AbortController,AbortSignal,URLSearchParams,document:{getElementById:(id:string)=>elements.get(id),addEventListener(){}},window:{addEventListener(){}},setTimeout(fn:any,ms:number){timers.set(++next,{fn,ms});return next;},clearTimeout(id:number){timers.delete(id);},
+ const context:any={console,AbortController,AbortSignal,URLSearchParams,document:{getElementById:(id:string)=>elements.get(id),addEventListener(){}},window:{addEventListener(){}},setTimeout(this:any,fn:any,ms:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.set(++next,{fn,ms});return next;},clearTimeout(this:any,id:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.delete(id);},
   fetch:async(url:string)=>{requests.push(url);if(url.endsWith('/dates'))return {ok:true,json:async()=>({ok:true,dates:dates.map(tradeDate=>({symbol:'NIFTY',tradeDate,markerCount:2}))})};
    const params=new URLSearchParams(url.split('?')[1]),date=params.get('date'),from=params.get('from'),to=params.get('to');
    const time=from==='09:15'?'09:15':to==='15:40'?'15:30':null;

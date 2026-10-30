@@ -82,7 +82,7 @@ export function installRecordedDashboard(){
    return '<td>'+fmt(r.ltp)+'</td><td>'+fmt(r.oi)+'</td><td class="'+(delta>0?'up changed':delta<0?'down changed':'')+'">'+(delta>0?'+':'')+fmt(delta)+'</td><td class="pdh">'+fmt(r.pdh)+'</td><td class="pdc">'+fmt(r.pdc)+'</td><td class="pdl">'+fmt(r.pdl)+'</td><td>'+event+'</td>';};
   $('ar-ladder').innerHTML=band.length?'<table><thead><tr><th>Strike</th><th>CE ₹</th><th>CE OI</th><th>CE ΔOI</th><th>CE PDH</th><th>CE PDC</th><th>CE PDL</th><th>CE state</th><th>PE ₹</th><th>PE OI</th><th>PE ΔOI</th><th>PE PDH</th><th>PE PDC</th><th>PE PDL</th><th>PE state</th></tr></thead><tbody>'+band.map(k=>'<tr><th>'+fmt(k)+'</th>'+cells(value(k,'CE'))+cells(value(k,'PE'))+'</tr>').join('')+'</tbody></table>':'No saved strikes for this pinned expiry.';
  }
- controller=createRecordedPlayback({load,render,setTimeout,clearTimeout});
+ controller=createRecordedPlayback({load,render,setTimeout:(fn:any,ms:number)=>setTimeout(fn,ms),clearTimeout:(id:any)=>clearTimeout(id)});
  async function start(days:string[],play=true){const version=++requestVersion;await controller.start(days,play);if(version===requestVersion&&!play){const state=controller.snapshot();if(state.session?.timeline.length){const optionTimes=new Set(state.session.options.map((r:any)=>r.minute_bucket));let index=state.session.timeline.length-1;for(let i=index;i>=0;i--)if(optionTimes.has(state.session.timeline[i])){index=i;break;}controller.seek(index);}}}
  for(const count of [1,3,5])$('ar-last'+count).onclick=()=>void start(dates.slice(-count));
  $('ar-all').onclick=()=>void start(dates);$('ar-selected').onclick=()=>void start(Array.from($('ar-dates').selectedOptions).map((o:any)=>o.value));$('ar-latest').onclick=()=>void start(dates.slice(-1),false);

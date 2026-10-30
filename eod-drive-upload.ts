@@ -28,27 +28,54 @@ function firstEnv(...names: string[]): string | null {
   return null;
 }
 
+/**
+ * Try the DB-connected Drive token first. When Google has permanently revoked
+ * that token, allow one attempt with the separately configured Railway token.
+ * Never retry outages, authorization-scope failures, or an identical token.
+ */
+export async function refreshOAuthAccessTokenWithFallback(
+  clientId: string,
+  clientSecret: string,
+  connectedToken: string | null,
+  envToken: string | null,
+  fetcher: typeof fetch = fetch,
+): Promise<string> {
+  const primary = connectedToken || envToken;
+  if (!clientId || !clientSecret || !primary) throw new Error("GOOGLE_DRIVE_OAUTH_NOT_CONFIGURED");
+
+  const exchange = async (refreshToken: string): Promise<string> => {
+    const response = await fetcher("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: "refresh_token",
+      }),
+    });
+    const json = await response.json() as { access_token?: string; error?: string; error_description?: string };
+    if (!response.ok || !json.access_token) {
+      throw new Error(`GOOGLE_OAUTH_TOKEN_FAILED:${json.error || response.status}:${json.error_description || "unknown"}`);
+    }
+    return json.access_token;
+  };
+
+  try {
+    return await exchange(primary);
+  } catch (error) {
+    const invalidGrant = error instanceof Error && error.message.startsWith("GOOGLE_OAUTH_TOKEN_FAILED:invalid_grant:");
+    if (!invalidGrant || !connectedToken || !envToken || connectedToken === envToken) throw error;
+    return exchange(envToken);
+  }
+}
+
 async function getOAuthAccessToken(): Promise<string> {
   const clientId = firstEnv("GOOGLE_CLIENT_ID", "GOOGLE_DRIVE_CLIENT_ID");
   const clientSecret = firstEnv("GOOGLE_CLIENT_SECRET", "GOOGLE_DRIVE_CLIENT_SECRET");
-  const refreshToken = clientId && clientSecret ? await loadConnectedDriveRefreshToken(clientId, clientSecret) ?? firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN") : null;
-  if (!clientId || !clientSecret || !refreshToken) throw new Error("GOOGLE_DRIVE_OAUTH_NOT_CONFIGURED");
-
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  });
-  const json = await response.json() as { access_token?: string; error?: string; error_description?: string };
-  if (!response.ok || !json.access_token) {
-    throw new Error(`GOOGLE_OAUTH_TOKEN_FAILED:${json.error || response.status}:${json.error_description || "unknown"}`);
-  }
-  return json.access_token;
+  const connectedToken = clientId && clientSecret ? await loadConnectedDriveRefreshToken(clientId, clientSecret) : null;
+  const envToken = firstEnv("GOOGLE_REFRESH_TOKEN", "GOOGLE_DRIVE_REFRESH_TOKEN");
+  return refreshOAuthAccessTokenWithFallback(clientId || "", clientSecret || "", connectedToken, envToken);
 }
 
 async function getServiceAccountAccessToken(): Promise<string> {

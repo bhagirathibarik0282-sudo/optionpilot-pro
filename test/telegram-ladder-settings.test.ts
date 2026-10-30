@@ -35,3 +35,20 @@ test('admin toggles save immediately, edit same menu, and report uses saved sele
  const form=calls.findLast(c=>c[0]==='sendDocument')[1];assert.equal(form.get('chat_id'),'-1');const text=await form.get('document').text();assert.match(text,/STALE/);assert.doesNotMatch(text,/PDH|CE wall|Strike 100 CE/);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('transient bootstrap failure retries; verified menus send once; polling conflict stops safely',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'tg-retry-'));try{let failed=false,sends=0;const pauses:number[]=[];
+ const env={TELEGRAM_BOT_TOKEN:'TEST_ONLY',TELEGRAM_SETTINGS_ENABLED:'true',RAILWAY_VOLUME_MOUNT_PATH:dir,TELEGRAM_CHAT_ID_NIFTY:'-1'};
+ const http:typeof fetch=async(url:any)=>{assert.equal(env.TELEGRAM_BOT_TOKEN,undefined);const method=String(url).split('/').at(-1);let result:any;
+ if(method==='getWebhookInfo'){if(!failed){failed=true;throw new TypeError('fetch failed');}result={url:''};}
+ else if(method==='getMe')result={id:9,username:'TestBot'};
+ else if(method==='getChat')result={id:-1,type:'supergroup',title:'OptionPilot Nifty'};
+ else if(method==='sendMessage'){sends++;result={message_id:88};}
+ else if(method==='setMyCommands')result=true;
+ else if(method==='getUpdates')return new Response(JSON.stringify({ok:false}),{status:409});
+ else throw Error('Unexpected request');
+ return new Response(JSON.stringify({ok:true,result}));};
+ await startTelegramSettings(env,{http,pause:async ms=>{pauses.push(ms);}});assert.equal(sends,1);assert.deepEqual(pauses,[15000]);
+ await startTelegramSettings({...env,TELEGRAM_BOT_TOKEN:'TEST_ONLY'},{http,pause:async()=>{}});assert.equal(sends,1);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});

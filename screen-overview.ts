@@ -1,5 +1,5 @@
 /** Reference-shaped full data page. Values are projections of existing source-gated DOM only. */
-export const SCREEN_OVERVIEW_HTML=`<section id="rd-shell" aria-label="Full reference data dashboard"><div id="rd-fit-tools"><strong>DATA DASHBOARD</strong><span id="rd-source">Source unavailable</span><button type="button" data-rd-fit="READABLE" aria-pressed="false" title="Readable mobile layout">Read</button><button type="button" data-rd-fit="PAGE" aria-pressed="true">Fit page</button><button type="button" data-rd-fit="WIDTH" aria-pressed="false">Fit width</button><button type="button" data-rd-fit="ACTUAL" aria-pressed="false">100%</button><button type="button" id="rd-settings">Settings</button><button type="button" id="rd-source-tables">Source tables</button></div><div id="rd-viewport"><div id="rd-page"><div id="rd-navigation"></div><div id="rd-toolbar"></div><nav id="rd-parameters" aria-label="Research evidence"><strong>Research Parameters</strong>${[['PDH/PDL','os-futures'],['O=H','op-atm-weeklies'],['PCR Cross','os-pulse'],['OI Wall','os-walls'],['Spread+Vol','os-premium'],['Delta Multi-DTE','op-atm-weeklies'],['Spot-Prem Lead/Lag','os-futures']].map(([label,id])=>`<button type="button" data-rd-open="${id}"><i aria-hidden="true">↗</i>${label}</button>`).join('')}</nav><div id="rd-market-context"><div><div id="rd-market-head"></div><div id="rd-market-metrics"></div><div id="rd-market-levels"></div></div><aside id="rd-context"><header>Source & coverage<button type="button" data-rd-open="mb-tools" data-rd-inner="rag-evidence-card">↗</button></header><div id="rd-context-rows"></div></aside></div><section class="rd-section" id="rd-levels"><header><b><i>1</i>Spot & Futures (Levels)</b><button type="button" data-rd-open="os-futures">↗</button></header><div id="rd-levels-table"></div></section><section class="rd-section" id="rd-pcr"><header><b><i>2</i>PCR & OI (Ladder)</b><nav aria-label="PCR evidence"><button type="button" data-rd-open="os-walls">Full PCR</button><button type="button" data-rd-open="os-walls">±7</button><button type="button" disabled title="Verified band inventory not exposed by the current source view">±5</button><button type="button" disabled title="Verified band inventory not exposed by the current source view">±3</button></nav><button type="button" data-rd-open="os-walls">↗</button></header><div id="rd-pcr-table"></div></section><section class="rd-section" id="rd-premium"><header><b><i>3</i>Premium behaviour · displayed expiries</b><div id="rd-expiry-controls"></div><button type="button" data-rd-open="os-premium">ATM detail ↗</button><button type="button" data-rd-ladder>All strikes · CE/PE ↗</button><button type="button" data-rd-sides="BOTH">CE+PE</button><button type="button" data-rd-sides="CE">CE</button><button type="button" data-rd-sides="PE">PE</button></header><div id="rd-premium-table"></div></section><section class="rd-section" id="rd-stocks"><header><b><i>4</i>Heavyweights</b><span class="rd-selected-index">NIFTY</span><button type="button" data-rd-open="os-stocks">↗</button></header><div id="rd-stock-table"></div></section><section class="rd-section" id="rd-sectors"><header><b><i>5</i>Sectors</b><span class="rd-selected-index">NIFTY</span><button type="button" data-rd-open="os-sectors">↗</button></header><div id="rd-sector-table"></div></section><section class="rd-section" id="rd-events"><header><b><i>6</i>Notable Events (Recorder / RAG)</b><nav><button type="button" data-rd-open="os-notables">All</button><button type="button" data-rd-open="os-notables">PDH/PDL</button><button type="button" data-rd-open="recorded-replay">O=H</button><button type="button" data-rd-open="os-walls">PCR / OI Wall</button><button type="button" data-rd-open="os-premium">Spread / Delta</button><button type="button" data-rd-open="mb-tools" data-rd-inner="mb-settings">FII/DII</button></nav></header><div id="rd-event-table"></div></section><section class="rd-section" id="rd-memory"><header><b><i>7</i>Memory & Replay (RAG)</b><nav><button type="button" disabled title="No verified matching event is loaded">Similar Events</button><button type="button" data-rd-open="mb-tools" data-rd-inner="recorded-replay">Before Event</button><button type="button" data-rd-open="mb-tools" data-rd-inner="recorded-replay">After Event</button><button type="button" data-rd-open="os-sectors">Sector View</button><button type="button" data-rd-open="op-atm-weeklies">Delta</button></nav></header><div id="rd-memory-table"></div></section><footer id="rd-provenance">ATM overview · all subscribed strikes via CE/PE ↗ · — = unavailable · exact source clocks and full evidence are available through ↗ · BANKNIFTY monthly observation</footer></div></div></section><button type="button" id="rd-return">Fit data page</button><dialog id="os-screen-detail" aria-labelledby="os-screen-detail-title"><div class="rd-dialog-head"><button id="os-screen-close" type="button">← Data page</button><strong id="os-screen-detail-title">Source data</strong></div><div id="os-screen-detail-body"></div></dialog>`;
+export const SCREEN_OVERVIEW_HTML=`<section id="rd-shell" aria-label="Full reference data dashboard"><div id="rd-fit-tools"><strong>DATA DASHBOARD</strong><span id="rd-source">Source unavailable</span><button type="button" data-rd-fit="PAGE" aria-pressed="true">Fit page</button><button type="button" data-rd-fit="WIDTH" aria-pressed="false">Fit width</button><button type="button" data-rd-fit="ACTUAL" aria-pressed="false">100%</button><button type="button" id="rd-settings">Settings</button><button type="button" id="rd-source-tables">Source tables</button></div><div id="rd-viewport"><div id="rd-page"><div id="rd-navigation"></div><div id="rd-toolbar"></div><nav id="rd-parameters" aria-label="Research evidence"><strong>Research Parameters</strong>${[['PDH/PDL','os-futures'],['O=H','op-atm-weeklies'],['PCR Cross','os-pulse'],['OI Wall','os-walls'],['Spread+Vol','os-premium'],['Delta Multi-DTE','op-atm-weeklies'],['Spot-Prem Lead/Lag','os-futures']].map(([label,id])=>`<button type="button" data-rd-open="${id}"><i aria-hidden="true">↗</i>${label}</button>`).join('')}</nav><div id="rd-market-context"><div><div id="rd-market-head"></div><div id="rd-market-metrics"></div><div id="rd-market-levels"></div></div><aside id="rd-context"><header>Source & coverage<button type="button" data-rd-open="mb-tools" data-rd-inner="rag-evidence-card">↗</button></header><div id="rd-context-rows"></div></aside></div><section class="rd-section" id="rd-levels"><header><b><i>1</i>Spot & Futures (Levels)</b><button type="button" data-rd-open="os-futures">↗</button></header><div id="rd-levels-table"></div></section><section class="rd-section" id="rd-pcr"><header><b><i>2</i>PCR & OI (Ladder)</b><nav aria-label="PCR evidence"><button type="button" data-rd-open="os-walls">Full PCR</button><button type="button" data-rd-open="os-walls">±7</button><button type="button" disabled title="Verified band inventory not exposed by the current source view">±5</button><button type="button" disabled title="Verified band inventory not exposed by the current source view">±3</button></nav><button type="button" data-rd-open="os-walls">↗</button></header><div id="rd-pcr-table"></div></section><section class="rd-section" id="rd-premium"><header><b><i>3</i>Premium behaviour · displayed expiries</b><div id="rd-expiry-controls"></div><button type="button" data-rd-open="os-premium">ATM detail ↗</button><button type="button" data-rd-ladder>All strikes · CE/PE ↗</button><button type="button" data-rd-sides="BOTH">CE+PE</button><button type="button" data-rd-sides="CE">CE</button><button type="button" data-rd-sides="PE">PE</button></header><div id="rd-premium-table"></div></section><section class="rd-section" id="rd-stocks"><header><b><i>4</i>Heavyweights</b><span class="rd-selected-index">NIFTY</span><button type="button" data-rd-open="os-stocks">↗</button></header><div id="rd-stock-table"></div></section><section class="rd-section" id="rd-sectors"><header><b><i>5</i>Sectors</b><span class="rd-selected-index">NIFTY</span><button type="button" data-rd-open="os-sectors">↗</button></header><div id="rd-sector-table"></div></section><section class="rd-section" id="rd-events"><header><b><i>6</i>Notable Events (Recorder / RAG)</b><nav><button type="button" data-rd-open="os-notables">All</button><button type="button" data-rd-open="os-notables">PDH/PDL</button><button type="button" data-rd-open="recorded-replay">O=H</button><button type="button" data-rd-open="os-walls">PCR / OI Wall</button><button type="button" data-rd-open="os-premium">Spread / Delta</button><button type="button" data-rd-open="mb-tools" data-rd-inner="mb-settings">FII/DII</button></nav></header><div id="rd-event-table"></div></section><section class="rd-section" id="rd-memory"><header><b><i>7</i>Memory & Replay (RAG)</b><nav><button type="button" disabled title="No verified matching event is loaded">Similar Events</button><button type="button" data-rd-open="mb-tools" data-rd-inner="recorded-replay">Before Event</button><button type="button" data-rd-open="mb-tools" data-rd-inner="recorded-replay">After Event</button><button type="button" data-rd-open="os-sectors">Sector View</button><button type="button" data-rd-open="op-atm-weeklies">Delta</button></nav></header><div id="rd-memory-table"></div></section><footer id="rd-provenance">ATM overview · all subscribed strikes via CE/PE ↗ · — = unavailable · exact source clocks and full evidence are available through ↗ · BANKNIFTY monthly observation</footer></div></div></section><button type="button" id="rd-return">Fit data page</button><dialog id="os-screen-detail" aria-labelledby="os-screen-detail-title"><div class="rd-dialog-head"><button id="os-screen-close" type="button">← Data page</button><strong id="os-screen-detail-title">Source data</strong></div><div id="os-screen-detail-body"></div></dialog>`;
 
 export const SCREEN_OVERVIEW_CSS=`
 #rd-shell,#rd-return{display:none}
@@ -90,53 +90,6 @@ body[data-op-screen=reference] #rd-shell{display:flex;flex-direction:column;heig
 #os-screen-detail-title{font-size:15px;color:#80e7ff}#os-screen-detail-body{flex:1;min-height:0;overflow:auto;padding:8px;overscroll-behavior:contain}
 #os-screen-detail-body>details{display:block!important}#os-screen-detail-body>#mb-tools{padding:0;border:0;margin:0}#os-screen-detail-body>#mb-tools>summary{display:none}
 @media(max-width:600px){#rd-fit-tools{gap:3px;padding:3px 4px}#rd-fit-tools strong{font-size:9px}#rd-fit-tools #rd-source{font-size:9px}#market-book #op-one-stop #rd-fit-tools button{font-size:10px;padding:3px 6px}}
-
-/* Read mode keeps real font sizes and allows independent table scrolling.
-   It never reclassifies source data or changes the collector. */
-#rd-viewport[data-readable=true]{overflow-y:auto;overflow-x:hidden}
-#market-book #rd-viewport[data-readable=true] #rd-page{position:relative;left:0;top:0;width:100%;padding:8px;transform:none}
-#market-book #rd-viewport[data-readable=true] #rd-page .op-rail-inner{display:block}
-#market-book #rd-viewport[data-readable=true] #rd-page #op-chapter-links{display:flex;gap:6px;max-width:100%;overflow-x:auto;scrollbar-width:thin;padding:5px 0}
-#market-book #rd-viewport[data-readable=true] #rd-page #op-chapter-links button{flex:0 0 auto;min-height:40px;padding:5px 9px;font-size:11px}
-#market-book #rd-viewport[data-readable=true] #rd-page #op-research-controls{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
-#market-book #rd-viewport[data-readable=true] #rd-page #op-research-controls .op-recorder-group{grid-column:1/-1}
-#market-book #rd-viewport[data-readable=true] #rd-page #op-research-controls>div{padding:5px}
-#market-book #rd-viewport[data-readable=true] #rd-page #op-research-controls button{min-height:36px;font-size:11px;padding:4px}
-#market-book #rd-viewport[data-readable=true] #rd-parameters{overflow-x:auto;gap:9px;scrollbar-width:thin}
-#market-book #rd-viewport[data-readable=true] #rd-parameters>*{flex:0 0 auto}
-#market-book #rd-viewport[data-readable=true] #rd-parameters button{min-height:38px;font-size:12px}
-#rd-viewport[data-readable=true] #rd-market-context{grid-template-columns:minmax(0,1fr);gap:5px}
-#rd-viewport[data-readable=true] #rd-market-head{flex-wrap:wrap;gap:8px;min-height:0}
-#rd-viewport[data-readable=true] #rd-market-head strong{font-size:22px}
-#rd-viewport[data-readable=true] #rd-market-head b{font-size:22px}
-#rd-viewport[data-readable=true] #rd-market-head span{font-size:12px}
-#rd-viewport[data-readable=true] #rd-market-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
-#rd-viewport[data-readable=true] #rd-market-metrics>span{white-space:normal;font-size:12px;overflow-wrap:anywhere}
-#rd-viewport[data-readable=true] #rd-market-levels{gap:5px}
-#rd-viewport[data-readable=true] #rd-market-levels>span{flex-direction:column;justify-content:center;gap:3px;min-width:0;padding:6px 3px;font-size:12px}
-#rd-viewport[data-readable=true] #rd-market-levels b{font-size:15px}
-#rd-viewport[data-readable=true] #rd-context>header{font-size:14px}
-#rd-viewport[data-readable=true] #rd-context-rows>div{grid-template-columns:95px minmax(0,1fr);font-size:12px;overflow-wrap:anywhere}
-#rd-viewport[data-readable=true] #rd-page .rd-section{overflow:hidden;margin-bottom:7px}
-#rd-viewport[data-readable=true] #rd-page .rd-section>header{min-height:40px;flex-wrap:wrap;gap:5px;padding:5px}
-#rd-viewport[data-readable=true] #rd-page .rd-section>header>b{font-size:14px;white-space:normal}
-#rd-viewport[data-readable=true] #rd-page .rd-section>header>b>i{width:25px;height:26px;font-size:17px}
-#rd-viewport[data-readable=true] #rd-page .rd-section>header>nav{overflow-x:auto;justify-content:flex-start;flex:1 1 100%;scrollbar-width:thin}
-#market-book #rd-viewport[data-readable=true] #rd-page .rd-section header button{min-height:36px;font-size:11px}
-#rd-viewport[data-readable=true] #rd-expiry-controls{flex:1 1 100%;overflow-x:auto;order:3}
-#market-book #rd-viewport[data-readable=true] #os-premium-expiries{overflow-x:auto}
-#market-book #rd-viewport[data-readable=true] #os-premium-expiries button{min-height:38px;flex:0 0 auto;font-size:11px}
-#rd-viewport[data-readable=true] #rd-page .rd-selected-index{min-width:0;font-size:12px;padding:5px}
-#rd-viewport[data-readable=true] #rd-page :is(#rd-levels-table,#rd-pcr-table,#rd-premium-table,#rd-stock-table,#rd-sector-table,#rd-event-table,#rd-memory-table){display:block;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
-#market-book #rd-viewport[data-readable=true] #rd-page table{width:max-content;min-width:100%}
-#market-book #rd-viewport[data-readable=true] #rd-page table :is(th,td){font-size:12px;padding:8px 6px}
-#rd-viewport[data-readable=true] #rd-page .rd-cell-note{font-size:11px;max-width:210px;white-space:normal}
-@media(max-width:600px){
- #rd-fit-tools{flex-wrap:wrap;gap:4px;min-height:40px}
- #rd-fit-tools strong{display:none}
- #rd-fit-tools #rd-source{order:-1;flex:1 0 100%;font-size:11px;line-height:1.35}
- #market-book #op-one-stop #rd-fit-tools button{min-height:36px;font-size:11px;padding:4px 7px}
-}
 `;
 
 export function installScreenOverview(){
@@ -151,32 +104,13 @@ export function installScreenOverview(){
  const val=(heads:string[],r:string[],name:string)=>r[heads.indexOf(name)]||'—';
  const table=(heads:string[],rows:string[][],missing='— · verified source data unavailable')=>'<table><thead><tr>'+heads.map(h=>'<th>'+esc(h)+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?rows.map(r=>'<tr>'+r.map((v,i)=>'<td class="'+(/^(PDH|PDC|PDL)$/.test(heads[i])?'rd-level-'+heads[i].toLowerCase():'')+'">'+v+'</td>').join('')+'</tr>').join(''):'<tr><td colspan="'+heads.length+'">'+esc(missing)+'</td></tr>')+'</tbody></table>';
  const signed=(v:string)=>'<span class="'+(/^\+|↑/.test(v)?'rd-up':/^-\d|↓/.test(v)?'rd-down':'')+'">'+cell(v)+'</span>';
- let fitMode=typeof window.innerWidth==='number'&&window.innerWidth<=600?'READABLE':'PAGE',display='reference',active:any=null,frame=0;
+ let fitMode='PAGE',display='reference',active:any=null,frame=0;
  const dialog=$('os-screen-detail'),slot=$('os-screen-detail-body');
  const placements=['op-workspace-nav','op-research-controls','os-premium-expiries'].map(id=>{const node=$(id);return node?{node,parent:node.parentNode,next:node.nextSibling}:null;}).filter(Boolean) as any[];
  const research=()=>String(book.dataset.mainChapter||'1')==='1'&&String(book.dataset.chapter||'1')==='1';
  const enabled=()=>research()&&display==='reference';
  const extent=document.createElement('div');extent.setAttribute('aria-hidden','true');viewport.appendChild(extent);
- const fit=()=>{
-  if(!enabled()||dialog.open)return;
-  const readable=fitMode==='READABLE';
-  viewport.dataset.readable=String(readable);
-  document.querySelectorAll('[data-rd-fit]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.rdFit===fitMode)));
-  if(readable){
-   page.style.transform='none';page.style.left='0px';page.style.position='relative';page.style.width='100%';
-   viewport.style.overflow='auto';viewport.style.overflowX='hidden';viewport.dataset.scale='1';
-   extent.style.width='0px';extent.style.height='0px';
-   return;
-  }
-  const width=1024,height=page.scrollHeight,availableW=viewport.clientWidth,availableH=viewport.clientHeight;
-  if(!height||!availableW||!availableH)return;
-  page.style.width=width+'px';page.style.position='absolute';
-  const scale=fitMode==='PAGE'?Math.min(availableW/width,availableH/height):fitMode==='WIDTH'?availableW/width:1;
-  page.style.transform='scale('+scale+')';page.style.left=Math.max(0,(availableW-width*scale)/2)+'px';
-  viewport.dataset.scale=String(scale);viewport.style.overflow=fitMode==='PAGE'?'hidden':'auto';
-  viewport.style.overflowX=fitMode==='WIDTH'?'hidden':'auto';
-  extent.style.width=(width*scale)+'px';extent.style.height=(height*scale)+'px';
- };
+ const fit=()=>{if(!enabled()||dialog.open)return;const width=1024,height=page.scrollHeight,availableW=viewport.clientWidth,availableH=viewport.clientHeight;if(!height||!availableW||!availableH)return;const scale=fitMode==='PAGE'?Math.min(availableW/width,availableH/height):fitMode==='WIDTH'?availableW/width:1;page.style.transform='scale('+scale+')';page.style.left=Math.max(0,(availableW-width*scale)/2)+'px';viewport.dataset.scale=String(scale);viewport.style.overflow=fitMode==='PAGE'?'hidden':'auto';page.style.position='absolute';extent.style.width=(width*scale)+'px';extent.style.height=(height*scale)+'px';if(fitMode==='WIDTH')viewport.style.overflowX='hidden';};
  const refresh=()=>{
   const on=enabled();document.body.dataset.opScreen=on?'reference':research()&&display==='sources'?'sources':'chapter';
   if(on){const containers=['rd-navigation','rd-toolbar','rd-expiry-controls'];placements.forEach((p,i)=>{if(p.node.parentNode!==$(containers[i]))$(containers[i]).appendChild(p.node);});}

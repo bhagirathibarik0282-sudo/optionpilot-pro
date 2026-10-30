@@ -632,3 +632,30 @@ export async function dbSaveCasMemoryOnce(payload: { memoryKey: string; version:
   if (payload.version !== 'CAS_CLOSING_FIXED_CONTRACT_MEMORY_V1') throw new Error('CAS_MEMORY_VERSION_INVALID');
   return dbSaveResearchMemoryOnce(payload);
 }
+
+/** One shared all-index participation frame per minute, including across restarts.
+ * Separate post-lock SELECT sees a concurrent writer's commit under READ COMMITTED.
+ * Unlike dbInsert, failure throws so the minute recorder can retry honestly.
+ */
+export async function dbSaveParticipationMinuteOnce(payload: {
+  version: string; memoryKey: string; tradeDate: string; minuteBucket: string;
+}): Promise<boolean> {
+  if (payload.version !== 'DASHBOARD_PARTICIPATION_MINUTE_V1'
+    || payload.memoryKey !== payload.minuteBucket) throw new Error('PARTICIPATION_IDENTITY_INVALID');
+  const p = getPool();
+  if (!p) throw new Error('PARTICIPATION_DATABASE_UNAVAILABLE');
+  const client = await p.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL statement_timeout = '5s'");
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [payload.version, payload.memoryKey]);
+    const prior = await client.query("SELECT id FROM app_state_log WHERE kind=$1 AND payload->>'memoryKey'=$2 LIMIT 1", [payload.version, payload.memoryKey]);
+    if (prior.rows.length) { await client.query('COMMIT'); return false; }
+    await client.query('INSERT INTO app_state_log (kind,payload) VALUES ($1,$2::jsonb)', [payload.version, JSON.stringify(payload)]);
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally { client.release(); }
+}

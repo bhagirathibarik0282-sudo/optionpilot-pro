@@ -1,4 +1,7 @@
 import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
+import { tickTelegramLadderShadow } from './telegram-ladder-shadow-host.js';
+import { createParticipationMinuteRecorder } from './participation-minute-recorder.js';
+import { dbSaveParticipationMinuteOnce } from './db.js';
 import { DashboardLiveStore, buildDashboardLiveInventory, type LiveSelection, type PremiumWatchFilter } from './dashboard-live-feed.js';
 import { fetchH1KiteLiveInstrumentMaster } from './h1-kite-live-instrument-master-adapter.js';
 import { subscribeKiteAuthoritySessionPersisted } from './kite-session-authority.js';
@@ -15,6 +18,7 @@ let timer:ReturnType<typeof setInterval>|null=null;
 let preflightAt=0;
 let sessionRefreshQueued=false;
 let sessionCheckLog='';
+const participationRecorder=createParticipationMinuteRecorder(dbSaveParticipationMinuteOnce);
 function noteSessionCheck(){const value=JSON.stringify(readKiteBrokerSessionCheck());if(value!==sessionCheckLog){sessionCheckLog=value;console.info('[DASHBOARD_LIVE_SESSION_CHECK] '+value);}}
 const enabled=()=>process.env[DASHBOARD_LIVE_ENV]?.trim().toLowerCase()==='true';
 function stop(next:string){generation++;socket?.disconnect();socket=null;store=null;pcrSampler=null;credential=null;state=next;}
@@ -64,7 +68,12 @@ export async function reconcileDashboardLiveRuntime(force=false){
 }
 export function startDashboardLiveRuntime(){
  if(timer||process.env.NODE_ENV==='test')return;
- timer=setInterval(()=>{void reconcileDashboardLiveRuntime();void pcrSampler?.tick();},5000);timer.unref();
+ timer=setInterval(()=>{void reconcileDashboardLiveRuntime();void pcrSampler?.tick();
+  void tickTelegramLadderShadow().catch(()=>console.warn('[TELEGRAM_LADDER_SHADOW] TICK_FAILED'));
+  if(isIndianEquityMarketOpenAt(new Date()))void participationRecorder.capture(readDashboardLiveSnapshot).then(result=>{
+   if(result==='FAILED')console.warn('[PARTICIPATION_MINUTE] SAVE_FAILED_RETRY_NEXT_TICK');
+  });
+ },5000);timer.unref();
  subscribeKiteAuthoritySessionPersisted(()=>{stop('RECONNECTING');if(busy)sessionRefreshQueued=true;else void reconcileDashboardLiveRuntime(true);});
  void reconcileDashboardLiveRuntime(true);
 }

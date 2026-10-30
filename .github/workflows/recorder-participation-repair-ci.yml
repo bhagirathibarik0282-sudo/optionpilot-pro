@@ -1,0 +1,54 @@
+name: Recorder participation repair
+on:
+  pull_request:
+    paths:
+      - 'h1-recorder-adapter.ts'
+      - 'h1-premium-record-quality.ts'
+      - 'participation-minute-recorder.ts'
+      - 'dashboard-live-runtime.ts'
+      - 'db.ts'
+      - 'eod-archive-job.ts'
+      - 'test/recorder-*.test.*'
+      - 'test/dashboard-live*.test.ts'
+      - 'test/eod-archive-memory-persistence.test.ts'
+      - 'package.json'
+      - 'test/fixtures/**'
+      - '.github/workflows/recorder-participation-repair-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: recorder_test
+          POSTGRES_PASSWORD: recorder_test
+          POSTGRES_DB: optionpilot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U recorder_test -d optionpilot_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm test
+        env:
+          NODE_ENV: test
+          DATABASE_URL: ''
+      - run: node --experimental-strip-types --test test/recorder-repair.test.mjs
+      - run: node --import tsx --test test/dashboard-live-feed.test.ts test/dashboard-live-view.test.ts test/dashboard-live-recovery.test.ts test/eod-archive-memory-persistence.test.ts test/recorder-shared-authority.test.ts
+        env:
+          NODE_ENV: test
+          DATABASE_URL: ''
+      - run: node --import tsx --test --test-force-exit test/recorder-postgres-integration.test.ts
+        env:
+          NODE_ENV: test
+          RECORDER_TEST_DATABASE_URL: postgresql://recorder_test:recorder_test@127.0.0.1:5432/optionpilot_test

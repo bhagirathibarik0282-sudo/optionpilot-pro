@@ -1,4 +1,5 @@
 import { openingGapPercent } from "./market-snapshot-semantics.js";
+import { premiumRecordStatus, sourceQuoteAgeSeconds } from "./h1-premium-record-quality.js";
 import {
   dbInsert,
   dbUpsertChainState1m,
@@ -132,10 +133,7 @@ function validationStatus(verdict: H1TruthVerdict): string {
 }
 
 function quoteAgeSeconds(ts: string | null, now: Date): number | null {
-  if (!ts) return null;
-  const ms = new Date(ts).getTime();
-  if (!Number.isFinite(ms)) return null;
-  return Math.max(0, Math.floor((now.getTime() - ms) / 1000));
+  return sourceQuoteAgeSeconds(ts, now);
 }
 
 function liquidityStatus(bid: number, ask: number): string {
@@ -357,7 +355,9 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
           quoteTimestamp: leg.quoteTimestamp,
           quoteAgeSeconds: quoteAgeSeconds(leg.quoteTimestamp, now),
           liquidityStatus: liquidityStatus(leg.bid, leg.ask),
-          validationStatus: validationStatus(request.truthVerdict),
+          validationStatus: premiumRecordStatus({ verdict: request.truthVerdict,
+            quoteTimestamp: leg.quoteTimestamp, now, expiry: expiryDate,
+            legExpiry: leg.expiryDate, strike: leg.strike, ltp: leg.lastPrice }),
           calculationVersion: request.calculationVersion,
         };
         await dbUpsertOptionSnapshot1m(row);

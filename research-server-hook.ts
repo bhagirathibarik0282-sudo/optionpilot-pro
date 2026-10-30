@@ -1,4 +1,5 @@
 import { withDashboardReading } from './dashboard-reading-layout.js';
+import { mountLadderAcceptanceRoutes } from './telegram-ladder-acceptance.js';
 import type { Hono } from "hono";
 import { dbLoadRecent } from "./db.js";
 import { H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, type H1LiveExactRawDepthRecord, type H1LiveExactGreekTimingRecord } from "./h1-live-exact-raw-evidence-store.js";
@@ -118,6 +119,7 @@ const h1StartupAuditTimer = setTimeout(() => {
 h1StartupAuditTimer.unref?.();
 
 export function mountResearchRoutes(app: Hono): void {
+  mountLadderAcceptanceRoutes(app);
   mountHawkEyeLiveRoute(app, getHawkEyeLiveSource);
   app.use('*', async (c, next) => {
     await next();

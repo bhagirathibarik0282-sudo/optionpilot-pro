@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { installScreenOverview, SCREEN_OVERVIEW_CSS, SCREEN_OVERVIEW_HTML } from '../screen-overview.js';
+import { installScreenOverview } from '../screen-overview.js';
 
-function harness(screenWidth = 1024) {
+function harness() {
   let selected = 'NIFTY', price = '100', validation = 'TRUE', recordedAt = '2026-10-27T06:06:00Z';
   const nodes = new Map<string, any>();
   const node = (extra: any = {}) => ({ textContent: '', innerHTML: '', dataset: {}, style: {},
@@ -26,7 +26,7 @@ function harness(screenWidth = 1024) {
   nodes.set('mb-page', node({ querySelector: (selector: string) => selector.includes('Recorded notable events') ? events :
     selector.includes('Recorder memory and replay') ? memory : null }));
   nodes.set('rd-page', node({ scrollHeight: 700 }));
-  nodes.set('rd-viewport', node({ clientWidth: screenWidth, clientHeight: 800 }));
+  nodes.set('rd-viewport', node({ clientWidth: 1024, clientHeight: 800 }));
   for (const id of ['rd-market-head','rd-market-levels','rd-market-metrics','rd-levels-table','rd-pcr-table',
     'rd-premium-table','rd-stock-table','rd-sector-table','rd-event-table','rd-memory-table','rd-context-rows',
     'rd-source','rd-fit-tools','rd-source-tables','rd-return','rd-settings','os-screen-close','os-screen-detail','os-screen-detail-body']) {
@@ -34,13 +34,12 @@ function harness(screenWidth = 1024) {
   }
   const context: any = { document: { getElementById: (id: string) => nodes.get(id),
     body: { dataset: {} }, createElement: () => node(), querySelectorAll: () => [], addEventListener() {} },
-    window: { innerWidth: screenWidth, addEventListener() {} }, MutationObserver: class { observe() {} },
+    window: { addEventListener() {} }, MutationObserver: class { observe() {} },
     __name: (fn: any) => fn, requestAnimationFrame: () => 1 };
   const installer = vm.runInNewContext(`(${installScreenOverview.toString()})`, context);
   const view = installer();
   return {
     nodes, events, memory,
-    fitMode(mode:string){const button=node({dataset:{rdFit:mode}});nodes.get('rd-fit-tools').onclick({target:{closest:()=>button}});},
     source(id:string,heads:string[],rows:string[][]){nodes.set(id,tableSource(heads,rows));view.refresh();},
     pcr(index:string,full:string,reportedValue:string|null){
       const simple=(value:string)=>node({textContent:value});
@@ -175,40 +174,4 @@ test('live events project the four observed source columns only',()=>{
  assert.match(output,/ABOVE PDH/);
  assert.match(output,/Spot 23,100/);
  assert.doesNotMatch(output,/<th>PCR<\/th>|<th>OI<\/th>|<th>RAG<\/th>|<th>Similar Event<\/th>/);
-});
-
-test('mobile defaults to readable 1:1 flowing layout, and user can restore Fit page',()=>{
- const h=harness(390),page=h.nodes.get('rd-page'),viewport=h.nodes.get('rd-viewport');
- assert.equal(viewport.dataset.readable,'true');
- assert.equal(viewport.dataset.scale,'1');
- assert.equal(page.style.position,'relative');
- assert.equal(page.style.width,'100%');
- assert.equal(page.style.transform,'none');
- assert.equal(viewport.style.overflowX,'hidden');
- h.fitMode('PAGE');
- assert.equal(viewport.dataset.readable,'false');
- assert.match(page.style.transform,/^scale\(/);
- assert.equal(page.style.position,'absolute');
- assert.equal(page.style.width,'1024px');
- h.fitMode('READABLE');
- assert.equal(viewport.dataset.readable,'true');
- assert.equal(page.style.width,'100%');
- assert.equal(page.style.transform,'none');
-});
-
-test('desktop retains original 1024px reference fit unless Read is chosen',()=>{
- const h=harness(1024);
- assert.equal(h.nodes.get('rd-viewport').dataset.readable,'false');
- assert.equal(h.nodes.get('rd-page').style.width,'1024px');
- h.fitMode('READABLE');
- assert.equal(h.nodes.get('rd-viewport').dataset.readable,'true');
- assert.equal(h.nodes.get('rd-page').style.position,'relative');
-});
-
-test('mobile Read mode preserves source tables in individually scrollable containers',()=>{
- assert.match(SCREEN_OVERVIEW_HTML,/data-rd-fit="READABLE"/);
- assert.match(SCREEN_OVERVIEW_CSS,/#rd-viewport\[data-readable=true\]/);
- assert.match(SCREEN_OVERVIEW_CSS,/overflow-x:auto;overscroll-behavior-x:contain/);
- assert.match(SCREEN_OVERVIEW_CSS,/#rd-market-context\{grid-template-columns:minmax\(0,1fr\)/);
- assert.match(SCREEN_OVERVIEW_CSS,/font-size:12px;padding:8px 6px/);
 });

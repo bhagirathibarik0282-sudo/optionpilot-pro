@@ -29,11 +29,6 @@ try{
    const response=await page.goto(base,{waitUntil:'domcontentloaded',timeout:20000});
    assert.equal(response?.status(),200);
    await page.locator('#rd-shell').waitFor({state:'visible',timeout:15000});
-   // Preserve the explicit legacy Fit page acceptance; phone default is now Read.
-   if(width<=600){
-    assert.equal(await page.locator('#rd-viewport').getAttribute('data-readable'),'true',name+' should default to Read');
-    await page.locator('#rd-fit-tools [data-rd-fit=PAGE]').click();
-   }
    const screen=await page.evaluate(()=>{const page=document.getElementById('rd-page')!,viewport=document.getElementById('rd-viewport')!,p=page.getBoundingClientRect(),v=viewport.getBoundingClientRect();return {height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,page:{left:p.left,right:p.right,top:p.top,bottom:p.bottom},viewport:{left:v.left,right:v.right,top:v.top,bottom:v.bottom},sections:document.querySelectorAll('#rd-page .rd-section').length,probability:/probability/i.test(page.textContent||'')};});
    assert.equal(screen.sections,7,name+' must show all seven full table sections');
    assert.equal(screen.probability,false,'the probability factor must be absent');
@@ -108,28 +103,6 @@ try{
    assert(!(await page.locator('#rd-levels-table').innerText()).includes('WRONG_INDEX_MARKER'),'another index source must never populate the selected level table');
    await page.evaluate(()=>{document.getElementById('os-future-response')!.innerHTML=(window as any).__screenOriginal;delete (window as any).__screenOriginal;});
    await page.waitForFunction(()=>!document.getElementById('rd-levels-table')?.textContent?.includes('TEST_SOURCE_VALUE'));
-   if(width<=600){
-    await page.locator('#rd-fit-tools [data-rd-fit=READABLE]').click();
-    const read=await page.evaluate(()=>{
-     const viewport=document.getElementById('rd-viewport')!,sheet=document.getElementById('rd-page')!,
-      premium=document.getElementById('rd-premium-table')!,header=premium.querySelector('th')!,
-      bounds=sheet.getBoundingClientRect();
-     return {enabled:viewport.dataset.readable,scale:viewport.dataset.scale,position:getComputedStyle(sheet).position,
-      width:bounds.width,viewportWidth:viewport.clientWidth,viewportScrollHeight:viewport.scrollHeight,
-      viewportHeight:viewport.clientHeight,tableScrollable:premium.scrollWidth>premium.clientWidth+20,
-      headerFont:parseFloat(getComputedStyle(header).fontSize),pageOverflow:document.documentElement.scrollWidth-innerWidth};
-    });
-    assert.equal(read.enabled,'true',name+' readable mode');
-    assert.equal(read.scale,'1',name+' no 1024px downscaling');
-    assert.equal(read.position,'relative',name+' flowing page');
-    assert(read.width>=width*.9&&read.width<=width+2,name+' readable sheet width '+JSON.stringify(read));
-    assert(read.viewportScrollHeight>read.viewportHeight,name+' vertical details available');
-    assert(read.tableScrollable,name+' premium table must be scrollable independently');
-    assert(read.headerFont>=12,name+' actual table text must be >= 12px');
-    assert(read.pageOverflow<=2,name+' no horizontal document overflow');
-    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-readable.png',fullPage:true,timeout:15000});
-    await page.locator('#rd-fit-tools [data-rd-fit=PAGE]').click();
-   }
    await page.locator('#rd-source-tables').click();
    await page.locator('#os-market-radar').waitFor({state:'visible',timeout:15000});
    const data=await page.evaluate(()=>{

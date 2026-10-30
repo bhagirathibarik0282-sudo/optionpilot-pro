@@ -52,10 +52,18 @@ server=replaceOnce(server,
 '        const summaryWindows = ([3, 6, 15, 30, 60] as const).map((mins) => {\n          const point: any = timeline.find((p: any) => p.label === `T${mins}`) ?? null;\n          const summaryPrevious: any = point ? null : nearest(mins);\n          const summaryFallback = point ? null : buildContractBoundHistoryPoint({ symbol, previousSnapshot: summaryPrevious, currentCe: atmCe, currentPe: atmPe, currentFuture: fut });\n          const ppdWindow: any = ppd.find((w: any) => w.windowMinutes === mins);\n          return buildWindowSummary({\n            windowMinutes: mins,\n            spotChange: point?.spotChange ?? (summaryPrevious && Number.isFinite(summaryPrevious.spot) ? Number(m.spot) - Number(summaryPrevious.spot) : null),\n            futureChange: point?.futureChange ?? summaryFallback?.futureChange ?? null,\n            pcrChange: point?.pcrChange ?? (summaryPrevious && Number.isFinite(summaryPrevious.pcr) && Number.isFinite(m.pcr) ? Number(m.pcr) - Number(summaryPrevious.pcr) : null),\n            vixChange: point?.vixChange ?? (summaryPrevious && Number.isFinite(summaryPrevious.vix) && Number.isFinite(m.vix) ? Number(m.vix) - Number(summaryPrevious.vix) : null),\n            cePremiumChangePct: point?.cePremiumChangePct ?? summaryFallback?.cePremiumChangePct ?? null,\n            pePremiumChangePct: point?.pePremiumChangePct ?? summaryFallback?.pePremiumChangePct ?? null,\n            ppdSide: ppdWindow?.usable ? ppdWindow.controllingSide ?? null : null,\n            ppdValuePp: ppdWindow?.usable ? ppdWindow.candidateOrientedPpdPp ?? null : null,\n            heavyweightUp: named.length ? ups : null, heavyweightDown: named.length ? downs : null,\n          });\n        });\n\n        const trackedPair = buildContractPairIdentity(symbol, atmCe, atmPe);\n        const view = buildThreeMinuteFusedTelegramView({',
 "build window summaries");
 
+// Z-WATCH inserts code before the pulse gate on the next startup. Check the
+// stable summary prefix independently of that downstream insertion.
+if (!server.includes('        const pulseDue = Number.isFinite(pulseMinute) && pulseMinute % 15 === 0;')) {
 server=replaceOnce(server,
 '        if (TELEGRAM_3M_FUSED_DEDUP.shouldEmit(view)) {',
 '        view.text += `\\n\\n🧠 WINDOW SUMMARIES\\n${summaryWindows.map((x: any) => x.text).join("\\n")}`;\n        console.log(`[TELEGRAM_WINDOW_SUMMARY] ${JSON.stringify({ symbol, summaries: summaryWindows.map((x: any) => ({ windowMinutes: x.windowMinutes, direction: x.direction, evidenceCount: x.evidenceCount })) })}`);\n        const pulseMinute = Number(istPart("minute"));\n        const pulseDue = Number.isFinite(pulseMinute) && pulseMinute % 15 === 0;\n        if (pulseDue && TELEGRAM_3M_FUSED_DEDUP.shouldEmit(view)) {',
 "append summaries to fused message with 15m cadence");
+}
+server=replaceOnce(server,
+'        if (TELEGRAM_3M_FUSED_DEDUP.shouldEmit(view)) {',
+'        if (pulseDue && TELEGRAM_3M_FUSED_DEDUP.shouldEmit(view)) {',
+"gate fused message with 15m cadence");
 
 server=replaceOnce(server,
 '        } else {\n          console.log(`[TELEGRAM_3M_FUSED] ${JSON.stringify({ symbol, state: "SUPPRESSED_UNCHANGED", wallSource: wallCurrent ? "VERIFIED" : "UNAVAILABLE", fingerprint: view.fingerprint })}`);\n        }\n      }',

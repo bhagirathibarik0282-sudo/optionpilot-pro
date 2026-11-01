@@ -58,6 +58,8 @@ try{
     assert.equal(reading.mode,'true');
     assert(reading.pageWidth<=reading.viewportWidth+2,name+' Read chapter must not overflow horizontal page');
     assert(reading.font>=13,name+' Read chapter table text must remain readable');
+    assert.equal(await page.locator('#rd-navigation').isVisible(),false,name+' focus read hides redundant main navigation');
+    assert.equal(await page.locator('#rd-page .op-recorder-group').isVisible(),false,name+' replay remains in toolbar; recorder does not crowd read mode');
     await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-read-chapter.png',fullPage:false,timeout:15000});
     await page.locator('#rd-hub-tabs [data-rd-hub="ALL"]').click();
     assert.equal(await page.locator('#rd-page').getAttribute('data-rd-read'),'false');

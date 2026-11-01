@@ -101,7 +101,8 @@ try{
    assert.equal(await page.locator('#rd-premium-table tbody tr').first().locator('td').nth(9).innerText(),'10');
    assert((await page.locator('#rd-context-rows').innerText()).includes('4/4 displayed expiries'));
    assert((await page.locator('#rd-context-rows').innerText()).includes('8/8 rows'));
-   assert((await page.locator('#rd-event-table').innerText()).includes('23050 CE BELOW PDL'));
+   const eventDiagnostics=await page.locator('#rd-event-table').evaluate(el=>({html:el.innerHTML.slice(0,350),raw:(el.textContent||'').slice(0,350),visible:(el as HTMLElement).innerText.slice(0,350),panelDisplay:getComputedStyle(el.closest('.rd-section')!).display,tableDisplay:getComputedStyle(el).display,hub:document.getElementById('rd-page')!.dataset.rdHub,read:document.getElementById('rd-page')!.dataset.rdRead}));
+   assert(eventDiagnostics.visible.includes('23050 CE BELOW PDL'),name+' recorded event must stay visible after Read toggle '+JSON.stringify(eventDiagnostics));
    const eventBounds=await page.locator('#rd-event-table th:last-child').evaluate((el:any)=>({right:el.getBoundingClientRect().right,limit:el.closest('.rd-section').getBoundingClientRect().right}));assert(eventBounds.right<=eventBounds.limit+1,name+' populated event columns must remain inside the page');
    await page.evaluate(()=>{const restore=(window as any).__projectionRestore;for(const [id,html] of Object.entries(restore.html))document.getElementById(id)!.innerHTML=html as string;document.getElementById('op-one-stop')!.dataset.osSource=restore.source;delete (window as any).__projectionRestore;});
    await page.waitForFunction(()=>document.querySelectorAll('#rd-premium-table tbody tr').length!==8);

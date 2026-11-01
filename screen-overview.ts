@@ -94,6 +94,13 @@ body[data-op-screen=reference] #rd-shell{display:flex;flex-direction:column;heig
 
 /* Read chapter is opt-in, scoped to the existing reference DOM. All 7 tables keeps its known-good fit. */
 #rd-page[data-rd-read="true"]{padding:8px 10px}
+/* Focused reading removes duplicate global navigation; original controls reappear in All. */
+#rd-page[data-rd-read="true"] #rd-navigation{display:none}
+#rd-page[data-rd-read="true"] #op-research-controls{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:4px!important}
+#rd-page[data-rd-read="true"] #op-research-controls .op-recorder-group{display:none!important}
+#rd-page[data-rd-read="true"] #op-research-controls>div{padding:4px!important;gap:3px!important}
+#rd-page[data-rd-read="true"] #op-research-controls strong{font-size:12px!important}
+#rd-page[data-rd-read="true"] #op-research-controls button{padding:4px 5px!important;font-size:11px!important;min-height:30px!important}
 #rd-page[data-rd-read="true"] #op-workspace-nav .op-rail-inner,
 #rd-page[data-rd-read="true"] #op-research-controls,
 #rd-page[data-rd-read="true"] #rd-market-context{grid-template-columns:minmax(0,1fr)!important}

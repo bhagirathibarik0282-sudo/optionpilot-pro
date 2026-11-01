@@ -58,6 +58,7 @@ try{
     assert.equal(reading.mode,'true');
     assert(reading.pageWidth<=reading.viewportWidth+2,name+' Read chapter must not overflow horizontal page');
     assert(reading.font>=13,name+' Read chapter table text must remain readable');
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-read-chapter.png',fullPage:false,timeout:15000});
     await page.locator('#rd-hub-tabs [data-rd-hub="ALL"]').click();
     assert.equal(await page.locator('#rd-page').getAttribute('data-rd-read'),'false');
     assert.equal(await page.locator('#rd-fit-tools [data-rd-fit="PAGE"]').getAttribute('aria-pressed'),'true');

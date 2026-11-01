@@ -113,7 +113,7 @@ body[data-op-screen=reference] #rd-shell{display:flex;flex-direction:column;heig
 #rd-page[data-rd-read="true"] #os-premium-expiries{overflow-x:auto!important}
 #rd-page[data-rd-read="true"] :is(#rd-levels-table,#rd-pcr-table,#rd-premium-table,#rd-stock-table,#rd-sector-table,#rd-event-table,#rd-memory-table){display:block;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
 #rd-page[data-rd-read="true"] :is(#rd-levels-table,#rd-pcr-table,#rd-premium-table,#rd-stock-table,#rd-sector-table,#rd-event-table,#rd-memory-table) table{width:max-content;min-width:100%}
-#rd-page[data-rd-read="true"] .rd-section table :is(th,td){font-size:13px;line-height:1.35;padding:7px}
+#market-book #rd-page[data-rd-read="true"] .rd-section table :is(th,td){font-size:13px;line-height:1.35;padding:7px}
 
 /* Four reversible focus chapters: CSS only changes presentation, never data identity. */
 #rd-hub-tabs{display:flex;flex:1 0 100%;gap:4px;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 0;scrollbar-width:thin}

@@ -175,3 +175,15 @@ test('live events project the four observed source columns only',()=>{
  assert.match(output,/Spot 23,100/);
  assert.doesNotMatch(output,/<th>PCR<\/th>|<th>OI<\/th>|<th>RAG<\/th>|<th>Similar Event<\/th>/);
 });
+
+
+test('four focus chapters are reversible display filters over the same seven evidence tables',()=>{
+ const h=harness(),tabs=['MARKET','PREMIUM','POSITIONING','MEMORY','ALL'];
+ const source=h.nodes.get('rd-levels-table');
+ for(const tab of tabs){
+  h.nodes.get('rd-fit-tools').onclick({target:{closest:(selector:string)=>selector.startsWith('#rd-hub-tabs')?{dataset:{rdHub:tab}}:null}});
+  assert.equal(h.nodes.get('rd-page').dataset.rdHub,tab);
+  assert.equal(h.nodes.get('rd-levels-table'),source,'chapter changes must not replace source evidence nodes');
+ }
+ assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
+});

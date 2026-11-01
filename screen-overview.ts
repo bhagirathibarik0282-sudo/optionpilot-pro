@@ -95,6 +95,9 @@ body[data-op-screen=reference] #rd-shell{display:flex;flex-direction:column;heig
 /* Read chapter is opt-in, scoped to the existing reference DOM. All 7 tables keeps its known-good fit. */
 #rd-page[data-rd-read="true"]{padding:8px 10px}
 /* Focused reading removes duplicate global navigation; original controls reappear in All. */
+#rd-page[data-rd-read="true"] #rd-parameters{display:none}
+#rd-page[data-rd-read="true"] #rd-context-rows>div:nth-child(n+3),
+#rd-page[data-rd-read="true"] #rd-context-rows>.rd-cell-note{display:none}
 #rd-page[data-rd-read="true"] #rd-navigation{display:none}
 #rd-page[data-rd-read="true"] #op-research-controls{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:4px!important}
 #rd-page[data-rd-read="true"] #op-research-controls .op-recorder-group{display:none!important}

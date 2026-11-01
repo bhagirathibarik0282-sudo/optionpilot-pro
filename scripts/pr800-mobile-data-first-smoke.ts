@@ -46,6 +46,22 @@ try{
     assert.equal(await page.locator('#rd-page .rd-section').count(),7,name+' focus must not delete evidence sections');
    }
    assert.equal(screen.probability,false,'the probability factor must be absent');
+   if(width<=600){
+    await page.locator('#rd-hub-tabs [data-rd-hub="MARKET"]').click();
+    await page.locator('[data-rd-fit="READ"]').click();
+    const reading=await page.evaluate(()=>{
+     const vp=document.getElementById('rd-viewport')!,page=document.getElementById('rd-page')!,table=document.getElementById('rd-levels-table')!;
+     return {scale:vp.dataset.scale,mode:page.dataset.rdRead,pageWidth:page.getBoundingClientRect().width,viewportWidth:vp.clientWidth,
+       tableScroll:table.scrollWidth>table.clientWidth,font:parseFloat(getComputedStyle(table.querySelector('td')||table.querySelector('th')!).fontSize)};
+    });
+    assert.equal(reading.scale,'1',name+' Read chapter must preserve 1:1 text sizing');
+    assert.equal(reading.mode,'true');
+    assert(reading.pageWidth<=reading.viewportWidth+2,name+' Read chapter must not overflow horizontal page');
+    assert(reading.font>=13,name+' Read chapter table text must remain readable');
+    await page.locator('#rd-hub-tabs [data-rd-hub="ALL"]').click();
+    assert.equal(await page.locator('#rd-page').getAttribute('data-rd-read'),'false');
+    assert.equal(await page.locator('#rd-fit-tools [data-rd-fit="PAGE"]').getAttribute('aria-pressed'),'true');
+   }
    assert(screen.scroll<=screen.height+2,name+' Fit page must not require document scrolling: '+JSON.stringify(screen));
    assert(screen.scrollWidth<=screen.width+2,name+' no horizontal document scroll');
    assert(screen.page.left>=screen.viewport.left-1&&screen.page.right<=screen.viewport.right+1&&screen.page.top>=screen.viewport.top-1&&screen.page.bottom<=screen.viewport.bottom+1,name+' the complete reference page must fit: '+JSON.stringify(screen));

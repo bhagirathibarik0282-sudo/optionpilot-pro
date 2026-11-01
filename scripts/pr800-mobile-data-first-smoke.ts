@@ -102,7 +102,11 @@ try{
    assert((await page.locator('#rd-context-rows').innerText()).includes('4/4 displayed expiries'));
    assert((await page.locator('#rd-context-rows').innerText()).includes('8/8 rows'));
    const eventDiagnostics=await page.locator('#rd-event-table').evaluate(el=>({html:el.innerHTML.slice(0,350),raw:(el.textContent||'').slice(0,350),visible:(el as HTMLElement).innerText.slice(0,350),panelDisplay:getComputedStyle(el.closest('.rd-section')!).display,tableDisplay:getComputedStyle(el).display,hub:document.getElementById('rd-page')!.dataset.rdHub,read:document.getElementById('rd-page')!.dataset.rdRead,osSource:document.getElementById('op-one-stop')!.dataset.osSource,recordedSection:document.querySelector('.mb-research-section[aria-label="Recorded notable events"]')?.textContent?.slice(0,160),mbPresent:!!document.getElementById('mb-page')}));
-   assert(eventDiagnostics.visible.includes('23050 CE BELOW PDL'),name+' recorded event must stay visible after Read toggle '+JSON.stringify(eventDiagnostics));
+   if(eventDiagnostics.osSource==='RECORDED')assert(eventDiagnostics.visible.includes('23050 CE BELOW PDL'),name+' same-source recorded event must be visible '+JSON.stringify(eventDiagnostics));
+   else{
+    assert.equal(eventDiagnostics.osSource,'LIVE',name+' source must be LIVE or RECORDED');
+    assert(!eventDiagnostics.visible.includes('23050 CE BELOW PDL'),name+' revoked recorded event must not leak into LIVE view');
+   }
    const eventBounds=await page.locator('#rd-event-table th:last-child').evaluate((el:any)=>({right:el.getBoundingClientRect().right,limit:el.closest('.rd-section').getBoundingClientRect().right}));assert(eventBounds.right<=eventBounds.limit+1,name+' populated event columns must remain inside the page');
    await page.evaluate(()=>{const restore=(window as any).__projectionRestore;for(const [id,html] of Object.entries(restore.html))document.getElementById(id)!.innerHTML=html as string;document.getElementById('op-one-stop')!.dataset.osSource=restore.source;delete (window as any).__projectionRestore;});
    await page.waitForFunction(()=>document.querySelectorAll('#rd-premium-table tbody tr').length!==8);

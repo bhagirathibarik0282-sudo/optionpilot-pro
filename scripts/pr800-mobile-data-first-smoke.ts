@@ -31,6 +31,20 @@ try{
    await page.locator('#rd-shell').waitFor({state:'visible',timeout:15000});
    const screen=await page.evaluate(()=>{const page=document.getElementById('rd-page')!,viewport=document.getElementById('rd-viewport')!,p=page.getBoundingClientRect(),v=viewport.getBoundingClientRect();return {height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,page:{left:p.left,right:p.right,top:p.top,bottom:p.bottom},viewport:{left:v.left,right:v.right,top:v.top,bottom:v.bottom},sections:document.querySelectorAll('#rd-page .rd-section').length,probability:/probability/i.test(page.textContent||'')};});
    assert.equal(screen.sections,7,name+' must show all seven full table sections');
+   // Optional focus chapters must not remove any of the seven original source-backed sections.
+   for(const [hub,sections] of [
+    ['MARKET',['rd-levels','rd-pcr']],
+    ['PREMIUM',['rd-premium']],
+    ['POSITIONING',['rd-stocks','rd-sectors']],
+    ['MEMORY',['rd-events','rd-memory']],
+    ['ALL',['rd-levels','rd-pcr','rd-premium','rd-stocks','rd-sectors','rd-events','rd-memory']],
+   ] as const){
+    await page.locator('#rd-hub-tabs button[data-rd-hub="'+hub+'"]').click();
+    assert.equal(await page.locator('#rd-page').getAttribute('data-rd-hub'),hub);
+    const visible=await page.locator('#rd-page .rd-section:visible').evaluateAll(nodes=>nodes.map(n=>n.id));
+    assert.deepEqual(visible,[...sections],name+' focus chapter '+hub+' has exact source-backed panels');
+    assert.equal(await page.locator('#rd-page .rd-section').count(),7,name+' focus must not delete evidence sections');
+   }
    assert.equal(screen.probability,false,'the probability factor must be absent');
    assert(screen.scroll<=screen.height+2,name+' Fit page must not require document scrolling: '+JSON.stringify(screen));
    assert(screen.scrollWidth<=screen.width+2,name+' no horizontal document scroll');

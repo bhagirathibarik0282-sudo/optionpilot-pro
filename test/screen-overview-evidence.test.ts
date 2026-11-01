@@ -187,3 +187,17 @@ test('four focus chapters are reversible display filters over the same seven evi
  }
  assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
 });
+
+test('read chapter is opt-in; All always resets to the known-good Fit page',()=>{
+ const h=harness(),tools=h.nodes.get('rd-fit-tools');
+ const send=(selector:string,value:string)=>tools.onclick({target:{closest:(query:string)=>query===selector?{dataset:selector.includes('rd-hub')?{rdHub:value}:{rdFit:value}}:null}});
+ send('#rd-hub-tabs [data-rd-hub]','MARKET');
+ send('[data-rd-fit]','READ');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'true');
+ assert.equal(h.nodes.get('rd-viewport').dataset.scale,'1');
+ send('#rd-hub-tabs [data-rd-hub]','ALL');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false');
+ assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
+ send('[data-rd-fit]','READ');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false','All cannot enter readable chapter mode');
+});

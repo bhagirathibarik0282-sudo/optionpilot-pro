@@ -8,6 +8,16 @@ on:
       - 'live-three-index-pcr.ts'
       - 'test/live-three-index-pcr.test.ts'
       - 'premium-pcr-panel.ts'
+      - 'premium-workspace-view.ts'
+      - 'one-shot-live-card.ts'
+      - 'screen-overview.ts'
+      - 'test/premium-pcr-panel.test.ts'
+      - 'test/premium-recorded-workspace.test.ts'
+      - 'test/one-shot-live-card.test.ts'
+      - 'test/screen-overview-evidence.test.ts'
+      - 'scripts/pr800-mobile-data-first-smoke.ts'
+      - 'scripts/check-full-pcr-availability.ts'
+      - 'test/full-pcr-availability.test.ts'
       - '.github/workflows/full-pcr-quality-ci.yml'
   workflow_dispatch:
 jobs:
@@ -20,5 +30,5 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/dashboard-pcr-sampler.test.ts test/live-three-index-pcr.test.ts test/premium-pcr-panel.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/dashboard-pcr-sampler.test.ts test/live-three-index-pcr.test.ts test/premium-pcr-panel.test.ts test/premium-recorded-workspace.test.ts test/one-shot-live-card.test.ts test/screen-overview-evidence.test.ts test/dashboard-live-view.test.ts test/dashboard-live-recovery.test.ts test/full-pcr-availability.test.ts
       - run: node scripts/optionpilot-guardrail-check.mjs

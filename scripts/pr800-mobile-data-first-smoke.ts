@@ -89,6 +89,20 @@ try{
    await page.waitForFunction(()=>document.querySelector('#rd-mobile-pcr [data-rd-pcr-index="NIFTY"] b')?.textContent==='1.0969');
    assert.equal(await page.locator('#rd-mobile-pcr [data-rd-pcr-index="NIFTY"]').getAttribute('data-rd-pcr-kind'),'reported',name+' older quote cannot be relabelled fresh');
    for(const index of ['SENSEX','BANKNIFTY'])assert.equal(await page.locator('#rd-mobile-pcr [data-rd-pcr-index="'+index+'"] b').innerText(),'—',name+' absent index must not borrow NIFTY PCR');
+   // Each of the three independently admitted reported values must be visible at 100% zoom.
+   await page.evaluate(()=>{
+    document.getElementById('os-pcr-strip')!.insertAdjacentHTML('beforeend',
+     '<div class="os-pcr"><strong>SENSEX</strong><b>—</b><div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small><b>0.9234</b></div></div>'+
+     '<div class="os-pcr"><strong>BANKNIFTY</strong><b>—</b><div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small><b>1.2305</b></div></div>');
+   });
+   await page.waitForFunction(()=>document.querySelector('#rd-mobile-pcr [data-rd-pcr-index="SENSEX"] b')?.textContent==='0.9234'&&document.querySelector('#rd-mobile-pcr [data-rd-pcr-index="BANKNIFTY"] b')?.textContent==='1.2305');
+   if(width<=600){
+    await page.locator('[data-rd-fit="ACTUAL"]').click();
+    const panel=await page.locator('#rd-mobile-pcr').boundingBox();
+    assert(panel&&panel.x>=0&&panel.x+panel.width<=width+1,name+' PCR values must stay in phone viewport at 100%');
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-all-three-reported-pcr-100pct.png',fullPage:false,timeout:15000});
+    await page.locator('[data-rd-fit="PAGE"]').click();
+   }
    assert((await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'));
    // Earlier-session provenance must survive the same compact projection.
    await page.evaluate(()=>{const card=document.querySelector('#os-pcr-strip .os-pcr-reported')!;card.insertAdjacentHTML('beforeend','<small>Last reported · earlier packets · 1 prior-session · oldest 2026-10-26 15:30:00 IST · current-session OI unproven</small>');});

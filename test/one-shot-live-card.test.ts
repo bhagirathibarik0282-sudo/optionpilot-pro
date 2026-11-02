@@ -417,6 +417,7 @@ test('reported full-chain PCR stays labelled apart from fresh values, charts and
  }
  h.send(p);const html=h.el('os-pcr-strip').innerHTML;
  assert.equal((html.match(/Full-chain reported PCR/g)||[]).length,3);assert.equal((html.match(/1.3333/g)||[]).length,3);
+ for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){const primary=html.split('data-pcr-index="'+symbol+'"')[1].split('<div class="os-pcr-reported"')[0];assert.match(primary,/<b>1\.3333 <span/,'reported value must occupy the primary Full PCR number, not leave a large dash');}
  assert(html.includes('4/4 contracts · 2 older than 30s'));assert(html.includes('Source 09:40:00 → 09:45:00 IST'));
  assert(!html.includes('LIVE · Full OI PCR'));assert(!h.el('os-wall-ladder').innerHTML.includes('1.3333'));assert(!h.el('os-pulse-chart').innerHTML.includes('1.3333'));
  h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-pcr-strip').innerHTML.includes('1.3333'));

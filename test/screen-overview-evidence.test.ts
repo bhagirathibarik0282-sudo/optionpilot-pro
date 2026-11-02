@@ -41,10 +41,10 @@ function harness() {
   return {
     nodes, events, memory,
     source(id:string,heads:string[],rows:string[][]){nodes.set(id,tableSource(heads,rows));view.refresh();},
-    pcr(index:string,full:string,reportedValue:string|null){
+    pcr(index:string,full:string,reportedValue:string|null,primaryOnly=false){
       const simple=(value:string)=>node({textContent:value});
       const reported=reportedValue===null?null:node({
-        querySelector:(selector:string)=>selector==='b'?simple(reportedValue):null,
+        querySelector:(selector:string)=>selector==='b'&&!primaryOnly?simple(reportedValue):null,
         querySelectorAll:(selector:string)=>selector==='small'?[simple('288/288 contracts · 6 older than 30s')]:[],
       });
       const card=node({
@@ -150,6 +150,16 @@ test('compact PCR table separates fresh, reported and band observations without 
  const fresh=h.nodes.get('rd-pcr-table').innerHTML;
  assert.match(fresh,/1.0876/);
  assert.doesNotMatch(fresh,/Reported 1.0969/);
+});
+
+test('a reported primary PCR number projects once and never fills the fresh column',()=>{
+ const h=harness();h.pcr('NIFTY','1.2345','1.2345',true);
+ const html=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(html,/Reported 1.2345/);
+ const cells=[...html.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m=>m[1]);
+ assert(!cells[1].includes('1.2345'),'fresh full-PCR cell stays unavailable');
+ assert.match(cells[2],/1.2345/);
+ assert.match(h.nodes.get('rd-market-metrics').innerHTML,/Reported Full/);
 });
 
 test('tracked participation rows do not pretend weights or index-point contributions exist',()=>{

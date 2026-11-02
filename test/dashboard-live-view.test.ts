@@ -1,3 +1,4 @@
+import {measurePcrSnapshot} from '../dashboard-pcr-sampler.js';
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';import { readFileSync } from 'node:fs';
 import { installDashboardLive,DASHBOARD_LIVE_HTML } from '../dashboard-live-view.js';
 import { DashboardLiveStore,type LiveEntry } from '../dashboard-live-feed.js';
@@ -13,7 +14,7 @@ function harness(){
  const entries:LiveEntry[]=[{token:1,role:'SPOT',symbol:'NIFTY',label:'NIFTY 50'},...['CE','PE'].map((side,i)=>({token:2+i,role:'OPTION' as const,symbol:'NIFTY' as const,label:side,side:side as 'CE'|'PE',expiry:'2026-10-19',strike:22000}))];
  const store=new DashboardLiveStore({entries,date:'2026-10-16',missing:[],omittedExpiries:[]});
  const tick=(price=22001)=>{store.ingest(entries.map(e=>({instrumentToken:e.token,lastPrice:e.role==='SPOT'?price:100,exchangeTimestamp:new Date(now).toISOString(),oi:100,mode:'full' as const,isIndex:e.role==='SPOT'})),new Date(now).toISOString());};
- const emit=(patch?:(snapshot:any)=>void)=>{const before=streams.length;const fire=()=>{const snapshot=store.snapshot(now);patch?.(snapshot);streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',serverTime:new Date(now).toISOString(),snapshot})});};fire();if(streams.length>before)fire();};
+ const emit=(patch?:(snapshot:any)=>void)=>{const before=streams.length;const fire=()=>{const snapshot=store.snapshot(now);patch?.(snapshot);streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:new Date(now).toISOString(),snapshot})});};fire();if(streams.length>before)fire();};
  return {nodes,streams,timers,docEvents,winEvents,contextEvents,document,store,tick,emit,advance:(ms:number)=>now+=ms};
 }
 test('real streamed values change the numbers and chart; selection clears old identity and reconnects exactly once',()=>{
@@ -103,6 +104,21 @@ test('one-minute PCR does not skip a cycle when quote completion times are less 
  const valueOf=()=>h.nodes.get('op-live-indices').innerHTML.split('<h3>NIFTY')[1].match(/FULL PCR[^<]*<strong>([^<]*)/)[1];
  h.advance(10000);h.tick();h.emit(patch);assert.equal(valueOf(),'1.25');
  h.advance(56000);cycle=60000;value=1.5;h.tick();h.emit(patch);assert.equal(valueOf(),'1.5','56s completion gap must not turn minute sampling into 2min sampling');
+});
+
+test('live detail restores a complete reported PCR in the primary number without feeding it to fresh charts',()=>{
+ const h=harness(),date='2026-10-16',now=Date.parse(date+'T04:30:00Z');h.tick();
+ const entries:any[]=['CE','PE'].map((side,i)=>({token:i+2,exchange:'NFO',label:side,symbol:'NIFTY',role:'OPTION',side,expiry:'2026-10-19',strike:22000}));
+ const quotes=Object.fromEntries(entries.map(e=>['NFO:'+e.label,{instrument_token:e.token,oi:e.side==='CE'?100:200,timestamp:e.side==='CE'?date+' 09:58:00':new Date(now).toISOString()}]));
+ const raw=measurePcrSnapshot(entries,quotes,date,now);
+ assert.equal(raw.fullPcr,null);assert.equal(raw.reportedPcr?.value,2);
+ h.emit(s=>s.indices[0].pcrSnapshot={...raw,fetchState:'OK'});
+ const html=h.nodes.get('op-live-indices').innerHTML.split('<h3>NIFTY')[1];
+ assert.match(html,/FULL PCR[^<]*<strong>2<\/strong>/);
+ assert.match(html,/Reported · mixed times/);
+ assert.match(html,/OI_TIME_SKEW|STALE|INCOMPLETE/);
+ const event=h.contextEvents.at(-1).detail;
+ assert.equal(event.pcrDisplay.NIFTY,undefined,'reported context must not qualify the fresh chart sample');
 });
 test('Chapter 6 selections reuse the existing EventSource; independent sides and snapshot row deltas retain identity',()=>{
  const h=harness();h.tick();h.emit();const count=h.streams.length;

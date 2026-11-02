@@ -127,7 +127,7 @@ export function installScreenOverview(){
   const l=read('os-future-response'),selectedFuture=l.rows.find(r=>r[0]===symbol+' Futures')||[],pcrCards=Array.from($('os-pcr-strip')?.querySelectorAll('.os-pcr')||[]) as any[];
   const selectedPcr=pcrCards.find(el=>text(el.querySelector(':scope>strong')).startsWith(symbol));
   // Project the already-validated reported observation without calling it fresh Full PCR.
-  const reportedPcr=(card:any)=>{const reported=card?.querySelector('.os-pcr-reported');return reported?{value:text(reported.querySelector('b')),details:Array.from(reported.querySelectorAll('small')).map(text).join(' · ')}:null;};
+  const reportedPcr=(card:any)=>{const reported=card?.querySelector('.os-pcr-reported');return reported?{value:text(reported.querySelector('b')||card.querySelector(':scope>b')),details:Array.from(reported.querySelectorAll('small')).map(text).join(' · ')}:null;};
   const selectedReported=reportedPcr(selectedPcr);
   const recorded=root.dataset.osSource==='RECORDED';
   const savedFuture=Array.from(selected?.querySelectorAll('.os-subline')||[]).map(text).map(v=>v.match(/Futures\s+(.+)$/)?.[1]).find(Boolean);
@@ -144,7 +144,7 @@ export function installScreenOverview(){
   paint('rd-pcr-table',table(['Index','Fresh Full PCR','Reported Full · mixed times','ATM ±7 PCR','CE OI','PE OI','CE Δ','PE Δ','CE/PE wall','Source · coverage'],pcrCards.map((card:any)=>{
    const index=text(card.querySelector(':scope>strong')).split(' ')[0];
    const r=wall.rows.find(r=>r[0]?.startsWith(index))||[];
-   const full=text(card.querySelector(':scope>b')),reported=reportedPcr(card);
+   const reported=reportedPcr(card),full=reported?'—':text(card.querySelector(':scope>b'));
    const band=(r[1]||'').split(' / ')[1];
    return [cell(index),signed(full),reported?note('Reported '+reported.value+' · MIXED SOURCE TIMES'):cell('—'),cell(band),cell((r[2]||'').split('Δ')[0]),cell((r[3]||'').split('Δ')[0]),cell(r[2]?.match(/Δ\s*([^·]+)/)?.[1]?.trim()),cell(r[3]?.match(/Δ\s*([^·]+)/)?.[1]?.trim()),cell(r[4]),note(Array.from(card.querySelectorAll(':scope>small')).map(text).join(' · ')+(reported?' · '+reported.details:''))];
   })));

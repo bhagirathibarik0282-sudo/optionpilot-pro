@@ -48,7 +48,7 @@ export function measureReportedPcr(entries:LiveEntry[],quotes:Record<string,any>
   if(!q)return reject('MISSING_QUOTE',key);
   if(q.instrument_token!==e.token)return reject('TOKEN_IDENTITY_MISMATCH',key);
   if(!finite(q.oi)||q.oi<0)return reject('INVALID_OI',key);
-  if(!Number.isFinite(at))return reject('INVALID_EXCHANGE_TIMESTAMP',key);
+  if(!Number.isFinite(at)||at<=0)return reject('INVALID_EXCHANGE_TIMESTAMP',key);
   if(!includeCarried&&at<open)return reject(day(at)!==date?'PRIOR_SESSION_TIMESTAMP':'BEFORE_SESSION_OPEN_TIMESTAMP',key);
   if(day(at)>date||!includeCarried&&day(at)!==date)return reject('WRONG_SESSION_TIMESTAMP',key);
   if(at>now+5000)return reject('FUTURE_EXCHANGE_TIMESTAMP',key);

@@ -307,3 +307,11 @@ test('pre-open packets cannot qualify fresh full PCR even within thirty seconds 
  assert.equal(raw.fullPcr,null);assert.equal(raw.reportedPcr,null);assert.equal(raw.lastReportedPcr?.preOpen,2);
  assert.equal(raw.lastReportedPcr?.olderThan30s,0);assert.equal(raw.reportedSourceCounts.preOpen,2);assert.equal(raw.reportedSourceCounts.priorSession,0);
 });
+
+test('epoch-zero and unknown exchange clocks cannot be presented as dated last-reported evidence',()=>{
+ for(const timestamp of ['1970-01-01T00:00:00.000Z','1970-01-01 00:00:00','invalid']){
+  const q=quotes();q['NFO:OPTIONPE'].timestamp=timestamp;const raw=measurePcrSnapshot(entries,q,date,at);
+  assert.equal(raw.fullPcr,null);assert.equal(raw.reportedPcr,null);assert.equal(raw.lastReportedPcr,null);
+  assert.equal(raw.reportedDiagnostic.reason,'INVALID_EXCHANGE_TIMESTAMP');
+ }
+});

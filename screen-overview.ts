@@ -182,20 +182,27 @@ export function installScreenOverview(){
   const selectedFuture=futureRows.length===1?futureRows[0]:[],pcrCards=Array.from($('os-pcr-strip')?.querySelectorAll('.os-pcr')||[]) as any[];
   const selectedPcr=pcrCards.find(el=>text(el.querySelector(':scope>strong')).startsWith(symbol));
   // Project the already-validated reported observation without calling it fresh Full PCR.
-  const reportedPcr=(card:any)=>{const reported=card?.querySelector('.os-pcr-reported');if(!reported)return null;const details=Array.from(reported.querySelectorAll('small')).map(text).join(' · ');return {value:text(reported.querySelector('b')||card.querySelector(':scope>b')),details,sourceDate:details.match(/oldest (\d{4}-\d{2}-\d{2})/)?.[1]||null};};
+  const reportedPcr=(card:any)=>{const reported=card?.querySelector('.os-pcr-reported');if(!reported)return null;const details=Array.from(reported.querySelectorAll('small')).map(text).join(' · ');const qualified=card?.dataset?.pcrKind==='reported'?String(card.dataset.pcrValue||''):'';const fallback=text(reported.querySelector('b')||card.querySelector(':scope>b')).replace(/\s*[↑↓→—]$/,'').trim();return {value:/^(?:0|[1-9]\d*)(?:\.\d{4})$/.test(qualified)?qualified:fallback,details,sourceDate:details.match(/oldest (\d{4}-\d{2}-\d{2})/)?.[1]||null};};
   const selectedReported=reportedPcr(selectedPcr);
   const recorded=root.dataset.osSource==='RECORDED';
 
   // Mirror the three existing source-gated PCR cards outside the scaled 1024px canvas.
   // Reported mixed-time totals are NOT fresh-alignment inputs, and missing stays missing.
   const miniPcr=['NIFTY','SENSEX','BANKNIFTY'].map(index=>{
-   const found=pcrCards.filter(card=>text(card.querySelector(':scope>strong')).split(' ')[0]===index);
-   const card=found.length===1?found[0]:null,reported=reportedPcr(card);
-   const raw=reported?reported.value:text(card?.querySelector(':scope>b'));
-   const valid=!!card&&/^(?:\d+|\d*\.\d+)$/.test(raw);
-   const kind=!valid?'missing':reported?'reported':'fresh';
-   const label=!valid?'No qualified PCR':reported?(reported.sourceDate?'Reported · earlier packets':'Reported · mixed times'):recorded?'Recorded full':'Fresh full';
-   return '<div class="rd-pcr-mini" data-rd-pcr-index="'+index+'" data-rd-pcr-kind="'+kind+'"><strong>'+index+'</strong><b>'+cell(valid?raw:'—')+'</b><small>'+esc(label)+'</small></div>';
+   // One-shot card's qualified source attributes are canonical. Never parse the
+   // rendered number+arrow text (nor infer PCR from CE/PE band or another index).
+   const found=pcrCards.filter(card=>card.dataset?.pcrIndex===index);
+   const card=found.length===1?found[0]:null,raw=String(card?.dataset?.pcrValue||''),state=card?.dataset?.pcrKind;
+   const expiry=String(card?.dataset?.pcrExpiry||''),checked=String(card?.dataset?.pcrChecked||'');
+   const qualified=!!card&&['fresh','reported'].includes(state)&&/^(?:0|[1-9]\d*)\.\d{4}$/.test(raw)
+    &&Number.isFinite(Number(raw))&&/^\d{4}-\d{2}-\d{2}$/.test(expiry)
+    &&Number.isFinite(Date.parse(expiry+'T00:00:00Z'))&&checked!=='—'&&/^\d{2}:\d{2}:\d{2}$/.test(checked);
+   const kind=qualified?state:'missing',olderDate=String(card?.dataset?.pcrSourceDate||'');
+   const older=kind==='reported'&&/^\d{4}-\d{2}-\d{2}$/.test(olderDate);
+   const label=kind==='fresh'?'Fresh full':kind==='reported'?(older?'Earlier packets':'Reported · mixed'):'No qualified PCR';
+   const source=qualified?'<small>'+esc(expiry.slice(5)+' · '+checked+' IST')+'</small>':'';
+   const provenance=older?'<small>'+esc('Oldest '+olderDate)+'</small>':'';
+   return '<div class="rd-pcr-mini" data-rd-pcr-index="'+index+'" data-rd-pcr-kind="'+kind+'"><strong>'+index+(index==='BANKNIFTY'?' · M':'')+'</strong><b>'+cell(qualified?raw:'—')+'</b><small>'+esc(label)+'</small>'+source+provenance+'</div>';
   }).join('');
   paint('rd-mobile-pcr',miniPcr);
 

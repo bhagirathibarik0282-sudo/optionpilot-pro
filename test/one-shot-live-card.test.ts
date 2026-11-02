@@ -230,7 +230,7 @@ test('all three PCR cards distinguish complete full ratio, band and comparable a
  const h=harness();h.send(h.payload());
  let html=h.el('os-pcr-strip').innerHTML;
  for(const symbol of ['NIFTY','SENSEX','BANKNIFTY'])assert(html.includes('data-pcr-index="'+symbol+'"'));
- assert.equal((html.match(/1\.2000/g)||[]).length,3);
+ assert.equal((html.match(/<b>1\.2000 <span/g)||[]).length,3,'exactly three visible source values');
  assert(html.includes('ATM ±7 band: —'));assert(html.includes('waiting for comparable snapshot'));
  h.advance(60000);h.newCycle();const p=h.payload();
  p.pcrDisplay.NIFTY.peTotal=130;p.pcrDisplay.NIFTY.fullPcr=1.3;
@@ -416,7 +416,7 @@ test('reported full-chain PCR stays labelled apart from fresh values, charts and
   a.pcrSnapshot=raw;delete p.pcrDisplay[a.symbol];
  }
  h.send(p);const html=h.el('os-pcr-strip').innerHTML;
- assert.equal((html.match(/Full-chain reported PCR/g)||[]).length,3);assert.equal((html.match(/1.3333/g)||[]).length,3);
+ assert.equal((html.match(/Full-chain reported PCR/g)||[]).length,3);assert.equal((html.match(/<b>1\.3333 <span/g)||[]).length,3,'one visible number per index; semantic attributes are not duplicate readings');
  for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){
   const primary=html.split('data-pcr-index="'+symbol+'"')[1].split('<div class="os-pcr-reported"')[0];
   assert.match(primary,/<b>1\.3333 <span/,'reported value must occupy the primary Full PCR number');
@@ -438,7 +438,7 @@ test('last-reported full PCR displays its earlier source date for all indices an
   a.pcrSnapshot=raw;delete p.pcrDisplay[a.symbol];
  }
  h.send(p);const html=h.el('os-pcr-strip').innerHTML;
- assert.equal((html.match(/1\.3333/g)||[]).length,3);assert.equal((html.match(/Last reported · earlier packets/g)||[]).length,3);
+ assert.equal((html.match(/<b>1\.3333 <span/g)||[]).length,3,'previous-session value appears once in each index card');assert.equal((html.match(/Last reported · earlier packets/g)||[]).length,3);
  assert.equal((html.match(/oldest 2026-10-16 15:30:00 IST/g)||[]).length,3);
  assert.equal((html.match(/data-pcr-source-date="2026-10-16"/g)||[]).length,3,'earlier packet date must travel with the primary mobile number');
  assert(!html.includes('LIVE · Full OI PCR'));assert(!h.el('os-pulse-chart').innerHTML.includes('1.3333'));

@@ -233,3 +233,28 @@ test('reported PCR refuses incomplete identities, previous-session quotes and fa
  fail=true;await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr,null);
  now+=60000;fail=false;await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr?.value,2);
 });
+
+
+// Production diagnostic acceptance: expired outer OI must be classified without inventing a ratio.
+test('reported PCR diagnostics distinguish previous-session timestamp from a same-session old quote',async()=>{
+ const oldSource=quotes();oldSource['NFO:OPTIONPE'].timestamp='2026-10-15 15:30:00';
+ const blocked=measurePcrSnapshot(entries,oldSource,date,at);
+ assert.equal(blocked.fullPcr,null);assert.equal(blocked.reportedPcr,null);
+ assert.equal(blocked.reportedDiagnostic.reason,'PRIOR_SESSION_TIMESTAMP');
+ assert.equal(blocked.reportedDiagnostic.identity,'NFO:OPTIONPE');
+ assert.deepEqual(blocked.reportedSourceCounts,{sameSession:1,priorSession:1,invalidTimestamp:0});
+ const mixed=quotes();mixed['NFO:OPTIONPE'].timestamp='2026-10-16 09:58:00';
+ const valid=measurePcrSnapshot(entries,mixed,date,at);
+ assert.equal(valid.fullPcr,null);assert.equal(valid.reportedPcr?.value,2);
+ assert.equal(valid.reportedDiagnostic.reason,'COMPLETE_REPORTED');
+ assert.deepEqual(valid.reportedSourceCounts,{sameSession:2,priorSession:0,invalidTimestamp:0});
+ let now=at;const diagnostics:any[]=[];
+ const sampler=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{
+  now:()=>now,active:()=>true,wait:async()=>{},fetchQuotes:async()=>oldSource,onDiagnostic:x=>diagnostics.push(x)
+ });
+ await sampler.tick();
+ assert.equal(diagnostics[0].rows[0].reported.reason,'PRIOR_SESSION_TIMESTAMP');
+ assert.equal(diagnostics[0].rows[0].reported.state,'BLOCKED');
+ assert(!JSON.stringify(diagnostics).includes('Authorization'));
+ assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr,null);
+});

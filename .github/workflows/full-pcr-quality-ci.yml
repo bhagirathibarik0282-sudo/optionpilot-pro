@@ -1,0 +1,24 @@
+name: Full PCR quality regression CI
+on:
+  pull_request:
+    branches: [production]
+    paths:
+      - 'dashboard-pcr-sampler.ts'
+      - 'test/dashboard-pcr-sampler.test.ts'
+      - 'live-three-index-pcr.ts'
+      - 'test/live-three-index-pcr.test.ts'
+      - 'premium-pcr-panel.ts'
+      - '.github/workflows/full-pcr-quality-ci.yml'
+  workflow_dispatch:
+jobs:
+  pcr-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/dashboard-pcr-sampler.test.ts test/live-three-index-pcr.test.ts test/premium-pcr-panel.test.ts
+      - run: node scripts/optionpilot-guardrail-check.mjs

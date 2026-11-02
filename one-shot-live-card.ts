@@ -556,7 +556,7 @@ export function installOneShotLiveCard(api:any){
    const pcrState=n(qualifiedPcr)!==null&&qualifiedPcr>=0?(r?.current?'fresh':reported?'reported':'missing'):'missing';
    const pcrValue=pcrState!=='missing'?Number(qualifiedPcr).toFixed(4):'';
    const sourceDate=pcrState==='reported'&&reported?.basis==='LAST_REPORTED_WITH_EARLIER_PACKETS'?
-     (reported.sourceNote?.match(/oldest (\\d{4}-\\d{2}-\\d{2})/)?.[1]||''):'';
+     (reported.sourceNote?.match(/oldest (\d{4}-\d{2}-\d{2})/)?.[1]||''):'';
    const pcrChecked=pcrState==='fresh'?time(r.current.checked):pcrState==='reported'?time(reported.checkedAt):'';
    const pcrProof=' data-pcr-kind="'+pcrState+'" data-pcr-value="'+pcrValue+'" data-pcr-expiry="'+esc(r?.expiry||'')+'" data-pcr-checked="'+esc(pcrChecked)+'" data-pcr-source-date="'+esc(sourceDate)+'"';
    const reportedHtml=reported&&!r?.current?'<div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small>'+(reported.sourceNote?'<small>'+esc(reported.sourceNote)+'</small>':'')+'<small>'+reported.reported+'/'+reported.expected+' contracts · '+reported.olderThan30s+' older than 30s</small><small>Source '+time(reported.sourceMinAt)+' → '+time(reported.sourceMaxAt)+' IST · checked '+time(reported.checkedAt)+' IST</small><small>Latest reported OI · no fresh alignment</small></div>':'';

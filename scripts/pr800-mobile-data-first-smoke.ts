@@ -31,6 +31,8 @@ try{
    await page.locator('#rd-shell').waitFor({state:'visible',timeout:15000});
    const screen=await page.evaluate(()=>{const page=document.getElementById('rd-page')!,viewport=document.getElementById('rd-viewport')!,p=page.getBoundingClientRect(),v=viewport.getBoundingClientRect();return {height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,page:{left:p.left,right:p.right,top:p.top,bottom:p.bottom},viewport:{left:v.left,right:v.right,top:v.top,bottom:v.bottom},sections:document.querySelectorAll('#rd-page .rd-section').length,probability:/probability/i.test(page.textContent||'')};});
    assert.equal(screen.sections,7,name+' must show all seven full table sections');
+   assert.equal(await page.locator('#rd-mobile-pcr .rd-pcr-mini').count(),3,name+' PCR shortcut must have exactly three index slots');
+   if(width<=600)assert(await page.locator('#rd-mobile-pcr').isVisible(),name+' source-backed PCR strip visible outside zoomed page');
    // Optional focus chapters must not remove any of the seven original source-backed sections.
    for(const [hub,sections] of [
     ['MARKET',['rd-levels','rd-pcr']],
@@ -84,6 +86,9 @@ try{
    await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
    const pcrText=await page.locator('#rd-pcr-table').innerText();
    for(const label of ['MIXED SOURCE TIMES','288/288 contracts','stale 6','11:04:26','1.1043'])assert(pcrText.includes(label),name+' PCR provenance '+label);
+   await page.waitForFunction(()=>document.querySelector('#rd-mobile-pcr [data-rd-pcr-index="NIFTY"] b')?.textContent==='1.0969');
+   assert.equal(await page.locator('#rd-mobile-pcr [data-rd-pcr-index="NIFTY"]').getAttribute('data-rd-pcr-kind'),'reported',name+' older quote cannot be relabelled fresh');
+   for(const index of ['SENSEX','BANKNIFTY'])assert.equal(await page.locator('#rd-mobile-pcr [data-rd-pcr-index="'+index+'"] b').innerText(),'—',name+' absent index must not borrow NIFTY PCR');
    assert((await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'));
    // Earlier-session provenance must survive the same compact projection.
    await page.evaluate(()=>{const card=document.querySelector('#os-pcr-strip .os-pcr-reported')!;card.insertAdjacentHTML('beforeend','<small>Last reported · earlier packets · 1 prior-session · oldest 2026-10-26 15:30:00 IST · current-session OI unproven</small>');});
@@ -100,6 +105,7 @@ try{
    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-offline-reported-pcr.png',fullPage:true});
    await page.evaluate(()=>{for(const [id,html] of Object.entries((window as any).__pcrRestore))document.getElementById(id)!.innerHTML=html as string;delete (window as any).__pcrRestore;});
    await page.waitForFunction(()=>!document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
+   assert.notEqual(await page.locator('#rd-mobile-pcr [data-rd-pcr-index="NIFTY"] b').innerText(),'1.0969',name+' revoked PCR must vanish from mobile strip');
    assert(!(await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'),'revoked reported observation must disappear');
    // Offline DOM projection fixtures, restored before capturing the absence-only page.
    await page.evaluate(()=>{

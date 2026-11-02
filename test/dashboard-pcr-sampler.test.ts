@@ -323,7 +323,7 @@ test('release PCR proof emits the exact valid ratio and revokes after a quote fa
  let now=at,fail=false;const records:any[]=[];
  const sample=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{
   now:()=>now,active:()=>true,wait:async()=>{},
-  fetchQuotes:async()=>{if(fail)throw Error('PCR_QUOTE_HTTP_429');return quotes();},
+  fetchQuotes:async()=>{if(fail)throw Error('PCR_QUOTE_HTTP_429');const q=quotes();for(const row of Object.values(q))row.timestamp=new Date(now).toISOString();q['NFO:OPTIONPE'].oi=now===at?200:300;return q;},
   onDiagnostic:v=>records.push(v)
  });
  await sample.tick();

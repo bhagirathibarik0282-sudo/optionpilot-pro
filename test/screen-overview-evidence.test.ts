@@ -131,6 +131,28 @@ test('selected-index futures metrics never borrow a fixed row from another index
  assert.doesNotMatch(h.nodes.get('rd-levels-table').innerHTML,/>(?:NIFTY Spot|NIFTY Futures)</);
 });
 
+test('real live Fut-plus-expiry label supplies the headline FUT and Basis from its existing source table',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ h.futures(['Instrument','LTP','Day %','OI','Basis'],[
+  ['NIFTY Spot','23,260.35','0.9%','—','—'],
+  ['NIFTY Fut2026-11-23','23,326.5','0.98%','1,55,27,256','66.15'],
+  ['BANKNIFTY Fut2026-11-23','54,500','1%','100','120'],
+ ]);
+ h.select('NIFTY');const html=h.nodes.get('rd-market-metrics').innerHTML;
+ assert.match(html,/FUT<b>23,326.5<\/b>/);assert.match(html,/Basis<b>66.15<\/b>/);
+ assert.doesNotMatch(html,/54,500/);
+});
+
+test('ambiguous futures contracts, invalid expiry labels and other underlyings cannot fill headline metrics',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ for(const rows of [
+  [['NIFTY Fut2026-11-23','123','7'],['NIFTY Fut2026-12-29','456','8']],
+  [['NIFTY Fut2026-02-30','123','7']],
+  [['NIFTYNXT50 Fut2026-11-23','123','7']],
+  [['BANKNIFTY Fut2026-11-23','123','7']],
+ ]){h.futures(['Instrument','LTP','Basis'],rows);h.select('NIFTY');const html=h.nodes.get('rd-market-metrics').innerHTML;assert.match(html,/FUT<b>—<\/b>/);assert.match(html,/Basis<b>—<\/b>/);}
+});
+
 test('compact PCR table separates fresh, reported and band observations without fake columns',()=>{
  const h=harness();
  h.source('os-wall-ladder',['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ'],[
@@ -192,4 +214,30 @@ test('live events project the four observed source columns only',()=>{
  assert.match(output,/ABOVE PDH/);
  assert.match(output,/Spot 23,100/);
  assert.doesNotMatch(output,/<th>PCR<\/th>|<th>OI<\/th>|<th>RAG<\/th>|<th>Similar Event<\/th>/);
+});
+
+
+test('four focus chapters are reversible display filters over the same seven evidence tables',()=>{
+ const h=harness(),tabs=['MARKET','PREMIUM','POSITIONING','MEMORY','ALL'];
+ const source=h.nodes.get('rd-levels-table');
+ for(const tab of tabs){
+  h.nodes.get('rd-fit-tools').onclick({target:{closest:(selector:string)=>selector.startsWith('#rd-hub-tabs')?{dataset:{rdHub:tab}}:null}});
+  assert.equal(h.nodes.get('rd-page').dataset.rdHub,tab);
+  assert.equal(h.nodes.get('rd-levels-table'),source,'chapter changes must not replace source evidence nodes');
+ }
+ assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
+});
+
+test('read chapter is opt-in; All always resets to the known-good Fit page',()=>{
+ const h=harness(),tools=h.nodes.get('rd-fit-tools');
+ const send=(selector:string,value:string)=>tools.onclick({target:{closest:(query:string)=>query===selector?{dataset:selector.includes('rd-hub')?{rdHub:value}:{rdFit:value}}:null}});
+ send('#rd-hub-tabs [data-rd-hub]','MARKET');
+ send('[data-rd-fit]','READ');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'true');
+ assert.equal(h.nodes.get('rd-viewport').dataset.scale,'1');
+ send('#rd-hub-tabs [data-rd-hub]','ALL');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false');
+ assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
+ send('[data-rd-fit]','READ');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false','All cannot enter readable chapter mode');
 });

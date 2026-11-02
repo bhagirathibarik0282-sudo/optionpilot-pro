@@ -31,7 +31,42 @@ try{
    await page.locator('#rd-shell').waitFor({state:'visible',timeout:15000});
    const screen=await page.evaluate(()=>{const page=document.getElementById('rd-page')!,viewport=document.getElementById('rd-viewport')!,p=page.getBoundingClientRect(),v=viewport.getBoundingClientRect();return {height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,page:{left:p.left,right:p.right,top:p.top,bottom:p.bottom},viewport:{left:v.left,right:v.right,top:v.top,bottom:v.bottom},sections:document.querySelectorAll('#rd-page .rd-section').length,probability:/probability/i.test(page.textContent||'')};});
    assert.equal(screen.sections,7,name+' must show all seven full table sections');
+   // Optional focus chapters must not remove any of the seven original source-backed sections.
+   for(const [hub,sections] of [
+    ['MARKET',['rd-levels','rd-pcr']],
+    ['PREMIUM',['rd-premium']],
+    ['POSITIONING',['rd-stocks','rd-sectors']],
+    ['MEMORY',['rd-events','rd-memory']],
+    ['ALL',['rd-levels','rd-pcr','rd-premium','rd-stocks','rd-sectors','rd-events','rd-memory']],
+   ] as const){
+    await page.locator('#rd-hub-tabs button[data-rd-hub="'+hub+'"]').click();
+    assert.equal(await page.locator('#rd-page').getAttribute('data-rd-hub'),hub);
+    const visible=await page.locator('#rd-page .rd-section:visible').evaluateAll(nodes=>nodes.map(n=>n.id));
+    assert.deepEqual(visible,[...sections],name+' focus chapter '+hub+' has exact source-backed panels');
+    assert.equal(await page.locator('#rd-page .rd-section').count(),7,name+' focus must not delete evidence sections');
+   }
    assert.equal(screen.probability,false,'the probability factor must be absent');
+   if(width<=600){
+    await page.locator('#rd-hub-tabs [data-rd-hub="MARKET"]').click();
+    await page.locator('[data-rd-fit="READ"]').click();
+    const reading=await page.evaluate(()=>{
+     const vp=document.getElementById('rd-viewport')!,page=document.getElementById('rd-page')!,table=document.getElementById('rd-levels-table')!;
+     return {scale:vp.dataset.scale,mode:page.dataset.rdRead,pageWidth:page.getBoundingClientRect().width,viewportWidth:vp.clientWidth,
+       tableScroll:table.scrollWidth>table.clientWidth,font:parseFloat(getComputedStyle(table.querySelector('td')||table.querySelector('th')!).fontSize)};
+    });
+    assert.equal(reading.scale,'1',name+' Read chapter must preserve 1:1 text sizing');
+    assert.equal(reading.mode,'true');
+    assert(reading.pageWidth<=reading.viewportWidth+2,name+' Read chapter must not overflow horizontal page');
+    assert(reading.font>=13,name+' Read chapter table text must remain readable');
+    assert.equal(await page.locator('#rd-navigation').isVisible(),false,name+' focus read hides redundant main navigation');
+    assert.equal(await page.locator('#rd-parameters').isVisible(),false,name+' detail evidence stays available through panel links');
+    assert.equal(await page.locator('#rd-context-rows>div:visible').count(),2,name+' read shows concise source coverage');
+    assert.equal(await page.locator('#rd-page .op-recorder-group').isVisible(),false,name+' replay remains in toolbar; recorder does not crowd read mode');
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-read-chapter.png',fullPage:false,timeout:15000});
+    await page.locator('#rd-hub-tabs [data-rd-hub="ALL"]').click();
+    assert.equal(await page.locator('#rd-page').getAttribute('data-rd-read'),'false');
+    assert.equal(await page.locator('#rd-fit-tools [data-rd-fit="PAGE"]').getAttribute('aria-pressed'),'true');
+   }
    assert(screen.scroll<=screen.height+2,name+' Fit page must not require document scrolling: '+JSON.stringify(screen));
    assert(screen.scrollWidth<=screen.width+2,name+' no horizontal document scroll');
    assert(screen.page.left>=screen.viewport.left-1&&screen.page.right<=screen.viewport.right+1&&screen.page.top>=screen.viewport.top-1&&screen.page.bottom<=screen.viewport.bottom+1,name+' the complete reference page must fit: '+JSON.stringify(screen));
@@ -84,8 +119,16 @@ try{
    assert.equal(await page.locator('#rd-premium-table tbody tr').first().locator('td').nth(9).innerText(),'10');
    assert((await page.locator('#rd-context-rows').innerText()).includes('4/4 displayed expiries'));
    assert((await page.locator('#rd-context-rows').innerText()).includes('8/8 rows'));
-   assert((await page.locator('#rd-event-table').innerText()).includes('23050 CE BELOW PDL'));
+   const eventDiagnostics=await page.locator('#rd-event-table').evaluate(el=>({html:el.innerHTML.slice(0,350),raw:(el.textContent||'').slice(0,350),visible:(el as HTMLElement).innerText.slice(0,350),panelDisplay:getComputedStyle(el.closest('.rd-section')!).display,tableDisplay:getComputedStyle(el).display,hub:document.getElementById('rd-page')!.dataset.rdHub,read:document.getElementById('rd-page')!.dataset.rdRead,osSource:document.getElementById('op-one-stop')!.dataset.osSource,recordedSection:document.querySelector('.mb-research-section[aria-label="Recorded notable events"]')?.textContent?.slice(0,160),mbPresent:!!document.getElementById('mb-page')}));
+   if(eventDiagnostics.osSource==='RECORDED')assert(eventDiagnostics.visible.includes('23050 CE BELOW PDL'),name+' same-source recorded event must be visible '+JSON.stringify(eventDiagnostics));
+   else{
+    assert.equal(eventDiagnostics.osSource,'LIVE',name+' source must be LIVE or RECORDED');
+    assert(!eventDiagnostics.visible.includes('23050 CE BELOW PDL'),name+' revoked recorded event must not leak into LIVE view');
+   }
    const eventBounds=await page.locator('#rd-event-table th:last-child').evaluate((el:any)=>({right:el.getBoundingClientRect().right,limit:el.closest('.rd-section').getBoundingClientRect().right}));assert(eventBounds.right<=eventBounds.limit+1,name+' populated event columns must remain inside the page');
+   // Reproduce the actual live renderer's Fut<small>expiry</small> identity.
+   await page.evaluate(()=>{document.getElementById('op-one-stop')!.dataset.osSource='LIVE';document.querySelector('#os-future-response tbody tr:nth-child(2) td')!.innerHTML='NIFTY Fut<small>2026-11-23</small>';});
+   await page.waitForFunction(()=>document.getElementById('rd-market-metrics')?.textContent?.includes('FUT111')&&document.getElementById('rd-market-metrics')?.textContent?.includes('Basis10'));
    await page.evaluate(()=>{const restore=(window as any).__projectionRestore;for(const [id,html] of Object.entries(restore.html))document.getElementById(id)!.innerHTML=html as string;document.getElementById('op-one-stop')!.dataset.osSource=restore.source;delete (window as any).__projectionRestore;});
    await page.waitForFunction(()=>document.querySelectorAll('#rd-premium-table tbody tr').length!==8);
    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-reference-data-page.png',fullPage:false,timeout:15000});

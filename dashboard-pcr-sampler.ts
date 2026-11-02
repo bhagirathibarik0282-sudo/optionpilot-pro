@@ -35,19 +35,32 @@ export function quoteTime(value:unknown):number {
 }
 /** Latest reported OI from one complete REST attempt. Mixed exchange times are
  * explicit; this is never the fresh/synchronised Full PCR or an alignment input. */
-export function measureReportedPcr(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number){
+/** Exact rejection reason for the optional mixed-time PCR; never authorizes a fresh ratio. */
+export type ReportedPcrDiagnostic={reason:string;identity:string|null};
+export function measureReportedPcr(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number,audit?:ReportedPcrDiagnostic){
  const first=entries[0],times:number[]=[],tokens=new Set<number>(),keys=new Set<string>(),ids=new Set<string>();
  let ce=0,pe=0,calls=0,puts=0;
- if(!first||day(now)!==date||!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol||'')||!/^\d{4}-\d{2}-\d{2}$/.test(first.expiry||'')||String(first.expiry)<date||!Number.isFinite(Date.parse(first.expiry+'T00:00:00Z'))||new Date(first.expiry+'T00:00:00Z').toISOString().slice(0,10)!==first.expiry)return null;
+ const reject=(reason:string,identity:string|null=null):null=>{if(audit){audit.reason=reason;audit.identity=identity;}return null;};
+ if(!first||day(now)!==date||!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol||'')||!/^(?:\\d{4})-(?:\\d{2})-(?:\\d{2})$/.test(first.expiry||'')||String(first.expiry)<date||!Number.isFinite(Date.parse(first.expiry+'T00:00:00Z'))||new Date(first.expiry+'T00:00:00Z').toISOString().slice(0,10)!==first.expiry)return reject('INVALID_SESSION_OR_EXPIRY');
  const open=Date.parse(date+'T09:15:00+05:30');
  for(const e of entries){
   const key=e.exchange+':'+e.label,q=quotes[key],at=quoteTime(q?.timestamp),id=e.strike+'|'+e.side;
-  if(e.role!=='OPTION'||e.symbol!==first.symbol||e.expiry!==first.expiry||!e.exchange||!e.label||!Number.isInteger(e.token)||e.token<=0||!finite(e.strike)||e.strike<=0||!['CE','PE'].includes(e.side||'')||tokens.has(e.token)||keys.has(key)||ids.has(id)||q?.instrument_token!==e.token||!finite(q.oi)||q.oi<0||!Number.isFinite(at)||at<open||day(at)!==date||at>now+5000)return null;
+  if(e.role!=='OPTION'||e.symbol!==first.symbol||e.expiry!==first.expiry||!e.exchange||!e.label||!Number.isInteger(e.token)||e.token<=0||!finite(e.strike)||e.strike<=0||!['CE','PE'].includes(e.side||'')||tokens.has(e.token)||keys.has(key)||ids.has(id))return reject('INVALID_OR_DUPLICATE_INVENTORY_IDENTITY',key);
+  if(!q)return reject('MISSING_QUOTE',key);
+  if(q.instrument_token!==e.token)return reject('TOKEN_IDENTITY_MISMATCH',key);
+  if(!finite(q.oi)||q.oi<0)return reject('INVALID_OI',key);
+  if(!Number.isFinite(at))return reject('INVALID_EXCHANGE_TIMESTAMP',key);
+  if(at<open)return reject(day(at)!==date?'PRIOR_SESSION_TIMESTAMP':'BEFORE_SESSION_OPEN_TIMESTAMP',key);
+  if(day(at)!==date)return reject('WRONG_SESSION_TIMESTAMP',key);
+  if(at>now+5000)return reject('FUTURE_EXCHANGE_TIMESTAMP',key);
   tokens.add(e.token);keys.add(key);ids.add(id);times.push(at);
   if(e.side==='CE'){ce+=q.oi;calls++;}else{pe+=q.oi;puts++;}
  }
- if(!calls||!puts||!finite(ce)||ce<=0||!finite(pe)||!finite(pe/ce))return null;
+ if(!calls||!puts)return reject('MISSING_CE_OR_PE_SIDE');
+ if(!finite(ce)||ce<=0)return reject('ZERO_OR_INVALID_CE_DENOMINATOR');
+ if(!finite(pe)||!finite(pe/ce))return reject('INVALID_PE_TOTAL_OR_RATIO');
  const lo=Math.min(...times),hi=Math.max(...times);
+ if(audit){audit.reason='COMPLETE_REPORTED';audit.identity=null;}
  return {basis:'LATEST_REPORTED_MIXED_TIMESTAMPS',symbol:first.symbol,expiry:first.expiry,value:pe/ce,ceTotal:ce,peTotal:pe,volume:quoteVolumes(entries,quotes),expected:entries.length,reported:times.length,olderThan30s:times.filter(t=>now-t>30000).length,sourceMinAt:new Date(lo).toISOString(),sourceMaxAt:new Date(hi).toISOString(),checkedAt:new Date(now).toISOString()};
 }
 export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number,cycleStartedAt=now,spot?:any){
@@ -92,8 +105,13 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
   const priceOk=finite(q.last_price)&&q.last_price>0&&Number.isFinite(tradeAt)&&day(tradeAt)===date&&now-tradeAt>=-5000&&now-tradeAt<=30000;
   return {symbol:e.symbol,expiry:e.expiry,strike:e.strike,side:e.side,token:e.token,oi:q.oi,sourceAt:new Date(quoteTime(q.timestamp)).toISOString(),price:priceOk?q.last_price:null,priceAt:priceOk?new Date(tradeAt).toISOString():null};
  }):[];
+ const reportedDiagnostic:ReportedPcrDiagnostic={reason:'NOT_CHECKED',identity:null};
+ const reportedPcr=measureReportedPcr(entries,quotes,date,now,reportedDiagnostic);
+ const regularSessionOpen=Date.parse(date+'T09:15:00+05:30');
+ const sourceTimes=entries.map(e=>quoteTime(quotes[e.exchange+':'+e.label]?.timestamp));
+ const reportedSourceCounts={sameSession:sourceTimes.filter(t=>Number.isFinite(t)&&day(t)===date&&t>=regularSessionOpen).length,priorSession:sourceTimes.filter(t=>Number.isFinite(t)&&t<regularSessionOpen).length,invalidTimestamp:sourceTimes.filter(t=>!Number.isFinite(t)).length};
  const reason=!entries.length?'NO_OPTION_INVENTORY':invalid.length?'INVALID_IDENTITY_OR_OI':missing.length?'MISSING_QUOTES':stale.length?'STALE_OI_TIMESTAMPS':skew!==null&&skew>30000?'OI_TIME_SKEW':ce<=0?'CE_OI_ZERO':complete?'COMPLETE':'INCOMPLETE';
- return {state:complete&&ce>0?'COMPLETE':'INCOMPLETE',reason,reportedPcr:measureReportedPcr(entries,quotes,date,now),volume:complete?quoteVolumes(entries,quotes):null,fullPcr:complete&&ce>0?pe/ce:null,ceTotal:complete?ce:null,peTotal:complete?pe:null,bandPcr,strikeRows,callWall:wall(calls),putWall:wall(puts),coverage:{expected:entries.length,freshOi:times.length,complete,sourceSkewMs:skew,missing:missing.length,stale:stale.length,invalid:invalid.length},
+ return {state:complete&&ce>0?'COMPLETE':'INCOMPLETE',reason,reportedPcr,reportedDiagnostic,reportedSourceCounts,volume:complete?quoteVolumes(entries,quotes):null,fullPcr:complete&&ce>0?pe/ce:null,ceTotal:complete?ce:null,peTotal:complete?pe:null,bandPcr,strikeRows,callWall:wall(calls),putWall:wall(puts),coverage:{expected:entries.length,freshOi:times.length,complete,sourceSkewMs:skew,missing:missing.length,stale:stale.length,invalid:invalid.length},
   // Bounded diagnostics, no credentials or raw broker responses.
   unavailable:[...missing.map(identity=>({identity,reason:'MISSING'})),...stale.map(identity=>({identity,reason:'STALE_TIMESTAMP'})),...invalid.map(identity=>({identity,reason:'INVALID_IDENTITY_OR_OI'}))].slice(0,12),
   sourceMinAt:times.length?new Date(Math.min(...times)).toISOString():null,sourceMaxAt:times.length?new Date(Math.max(...times)).toISOString():null,checkedAt:new Date(now).toISOString(),cycleStartedAt:new Date(cycleStartedAt).toISOString(),source:'KITE_REST_FULL_EXPIRY_SNAPSHOT'};
@@ -146,7 +164,7 @@ export class DashboardPcrSampler {
      this.results.set(key,{...result,fetchState,batchesRequested,batchesCompleted});
     }
     this.revision++;
-    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2)}));
+    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts}}));
     const signature=JSON.stringify(rows);
     if(signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){
      this.lastDiagnostic=signature;this.lastDiagnosticAt=at;

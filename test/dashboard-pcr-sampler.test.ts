@@ -315,3 +315,44 @@ test('epoch-zero and unknown exchange clocks cannot be presented as dated last-r
   assert.equal(raw.reportedDiagnostic.reason,'INVALID_EXCHANGE_TIMESTAMP');
  }
 });
+
+
+// Stable-release proof is explicitly bounded to independently source-qualified
+// ratios. It is carried by existing throttled diagnostics; no new quote requests.
+test('release PCR proof emits the exact valid ratio and revokes after a quote fails',async()=>{
+ let now=at,fail=false;const records:any[]=[];
+ const sample=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{
+  now:()=>now,active:()=>true,wait:async()=>{},
+  fetchQuotes:async()=>{if(fail)throw Error('PCR_QUOTE_HTTP_429');return quotes();},
+  onDiagnostic:v=>records.push(v)
+ });
+ await sample.tick();
+ const first=records.at(-1)?.rows?.[0]?.pcrProof;
+ assert.equal(first.kind,'FRESH_FULL');
+ assert.equal(first.value,2);
+ assert.equal(first.expiry,'2026-10-19');
+ assert.equal(first.checkedAt,new Date(at).toISOString());
+ assert.equal(first.sourceMinAt,new Date(at).toISOString());
+ const count=records.length;
+ now+=60000;await sample.tick();
+ assert.equal(records.length,count,'ratio-only changes must not create extra diagnostic log events');
+ now+=60000;fail=true;await sample.tick();
+ const revoked=records.at(-1)?.rows?.[0]?.pcrProof;
+ assert.equal(revoked.kind,'UNAVAILABLE');
+ assert.equal(revoked.value,null);
+ assert.equal(revoked.checkedAt,null);
+ assert.equal(sample.read('NIFTY','2026-10-19')?.fullPcr,null);
+ assert(!JSON.stringify(records).includes('Authorization'));
+});
+test('same-session old OI logs reported value but never promotes it to fresh',async()=>{
+ let now=at;const records:any[]=[];const q=quotes();
+ q['NFO:OPTIONPE'].timestamp='2026-10-16 09:59:00';
+ const sample=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{
+  now:()=>now,active:()=>true,wait:async()=>{},fetchQuotes:async()=>q,onDiagnostic:v=>records.push(v)
+ });
+ await sample.tick();
+ const p=records.at(-1).rows[0].pcrProof;
+ assert.equal(p.kind,'SAME_SESSION_REPORTED');
+ assert.equal(p.value,2);
+ assert.equal(sample.read('NIFTY','2026-10-19')?.fullPcr,null);
+});

@@ -167,10 +167,26 @@ export class DashboardPcrSampler {
     }
     this.revision++;
     const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
+    // The release audit needs the *actual* source-qualified ratio, not coverage
+    // counts alone. Retain the existing state-only log throttle: changes in a
+    // ratio never increase the frequency or cost of diagnostic messages.
+    const releaseProofRows=rows.map(row=>{
+     const q=this.results.get(row.identity),fresh=q?.fetchState==='OK'&&q?.state==='COMPLETE'&&finite(q.fullPcr)&&q.fullPcr >= 0;
+     const reported=!fresh&&q?.fetchState==='OK'&&q?.reportedPcr&&finite(q.reportedPcr.value)&&q.reportedPcr.value>=0;
+     const v=fresh?q!.fullPcr:reported?q!.reportedPcr!.value:null;
+     return {...row,pcrProof:{
+      kind:fresh?'FRESH_FULL':reported?'SAME_SESSION_REPORTED':'UNAVAILABLE',
+      value:v===null?null:Number(v.toFixed(4)),
+      expiry:row.identity.split('|')[1]||null,
+      checkedAt:fresh?q!.checkedAt:reported?q!.reportedPcr!.checkedAt:null,
+      sourceMinAt:fresh?q!.sourceMinAt:reported?q!.reportedPcr!.sourceMinAt:null,
+      sourceMaxAt:fresh?q!.sourceMaxAt:reported?q!.reportedPcr!.sourceMaxAt:null
+     }};
+    });
     const signature=JSON.stringify(rows);
     if(signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){
      this.lastDiagnostic=signature;this.lastDiagnosticAt=at;
-     try{this.deps.onDiagnostic?.({checkedAt:new Date(at).toISOString(),batchesRequested,batchesCompleted,rows});}catch{/* A log sink must not break quote collection. */}
+     try{this.deps.onDiagnostic?.({checkedAt:new Date(at).toISOString(),batchesRequested,batchesCompleted,rows:releaseProofRows});}catch{/* A log sink must not break quote collection. */}
     }
    }
    this.busy=false;

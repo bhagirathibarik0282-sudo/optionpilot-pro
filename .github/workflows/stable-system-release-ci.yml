@@ -1,0 +1,48 @@
+name: OptionPilot Stable System Release Gate
+on:
+  pull_request:
+    branches: [production]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: stable-system-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  stable-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install existing project dependencies (repository has no lockfile)
+        run: npm install --no-audit --no-fund
+      - name: Verify source, PCR, UI, recorder, Telegram and safe runtime together
+        run: >-
+          NODE_ENV=test node --import tsx --test
+          test/stable-system-release-contract.test.ts
+          test/dashboard-pcr-sampler.test.ts
+          test/live-three-index-pcr.test.ts
+          test/full-pcr-availability.test.ts
+          test/pcr-historical-parity.test.ts
+          test/screen-overview-evidence.test.ts
+          test/one-shot-live-card.test.ts
+          test/dashboard-live-recovery.test.ts
+          test/recorded-playback.test.ts
+          test/recorded-dashboard-http.test.ts
+          test/runtime-supervisor.test.ts
+          test/runtime-operating-window.test.ts
+          test/telegram-z-watch-exact-feed-v1.test.ts
+          test/telegram-z-watch-live-exact-runtime-v1.test.ts
+          test/telegram-window-runtime-contract.test.ts
+          test/meaningful-live-telegram.test.ts
+          test/canonical-fii-dii-production-readiness.test.ts
+          test/eod-archive-core.test.ts
+          test/eod-retention-core.test.ts
+          test/option-buying-risk-authority.test.ts
+      - name: Enforce safety guardrails
+        run: node scripts/optionpilot-guardrail-check.mjs
+      - name: Reject whitespace mistakes
+        run: git diff --check

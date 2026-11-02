@@ -33,15 +33,14 @@ export function quoteTime(value:unknown):number {
  const at=/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)?value.replace(' ','T')+'+05:30':value;
  return /(?:Z|[+-]\d{2}:\d{2})$/.test(at)?Date.parse(at):NaN;
 }
-/** Latest reported OI from one complete REST attempt. Mixed exchange times are
- * explicit; this is never the fresh/synchronised Full PCR or an alignment input. */
-/** Exact rejection reason for the optional mixed-time PCR; never authorizes a fresh ratio. */
+/** Reported OI uses only complete exact identities from one REST attempt.
+ * Mixed exchange times remain explicit; diagnostics never authorize fresh PCR. */
 export type ReportedPcrDiagnostic={reason:string;identity:string|null};
 export function measureReportedPcr(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number,audit?:ReportedPcrDiagnostic){
  const first=entries[0],times:number[]=[],tokens=new Set<number>(),keys=new Set<string>(),ids=new Set<string>();
  let ce=0,pe=0,calls=0,puts=0;
  const reject=(reason:string,identity:string|null=null):null=>{if(audit){audit.reason=reason;audit.identity=identity;}return null;};
- if(!first||day(now)!==date||!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol||'')||!/^(?:\\d{4})-(?:\\d{2})-(?:\\d{2})$/.test(first.expiry||'')||String(first.expiry)<date||!Number.isFinite(Date.parse(first.expiry+'T00:00:00Z'))||new Date(first.expiry+'T00:00:00Z').toISOString().slice(0,10)!==first.expiry)return reject('INVALID_SESSION_OR_EXPIRY');
+ if(!first||day(now)!==date||!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol||'')||!/^\d{4}-\d{2}-\d{2}$/.test(first.expiry||'')||String(first.expiry)<date||!Number.isFinite(Date.parse(first.expiry+'T00:00:00Z'))||new Date(first.expiry+'T00:00:00Z').toISOString().slice(0,10)!==first.expiry)return reject('INVALID_SESSION_OR_EXPIRY');
  const open=Date.parse(date+'T09:15:00+05:30');
  for(const e of entries){
   const key=e.exchange+':'+e.label,q=quotes[key],at=quoteTime(q?.timestamp),id=e.strike+'|'+e.side;

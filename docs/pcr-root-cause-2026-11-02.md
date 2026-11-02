@@ -203,3 +203,10 @@ repeated after the production-file changes; generated Telegram wiring is not
 included in this patch. The real Chromium smoke now explicitly tests the new
 single primary reported number, checks that it does not fill the Fresh column,
 and saves clearly named offline reported-PCR fixture screenshots for review.
+
+
+Screenshot review caught that long source notes were ellipsized in the compact
+table. Earlier-packet observations now retain a visible EARLIER PACKETS badge
+and oldest source date beside the number in both the main metric and PCR row.
+The browser smoke checks the badge is visible and not horizontally clipped.
+Final focused suite after that repair: 159 passed, zero failed/skipped.

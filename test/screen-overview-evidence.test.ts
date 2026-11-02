@@ -41,11 +41,11 @@ function harness() {
   return {
     nodes, events, memory,
     source(id:string,heads:string[],rows:string[][]){nodes.set(id,tableSource(heads,rows));view.refresh();},
-    pcr(index:string,full:string,reportedValue:string|null,primaryOnly=false){
+    pcr(index:string,full:string,reportedValue:string|null,primaryOnly=false,sourceDate=''){
       const simple=(value:string)=>node({textContent:value});
       const reported=reportedValue===null?null:node({
         querySelector:(selector:string)=>selector==='b'&&!primaryOnly?simple(reportedValue):null,
-        querySelectorAll:(selector:string)=>selector==='small'?[simple('288/288 contracts · 6 older than 30s')]:[],
+        querySelectorAll:(selector:string)=>selector==='small'?[simple('288/288 contracts · 6 older than 30s'+(sourceDate?' · oldest '+sourceDate+' 15:30:00 IST':''))]:[],
       });
       const card=node({
         querySelector:(selector:string)=>selector===':scope>strong'?simple(index):selector===':scope>b'?simple(full):selector==='.os-pcr-reported'?reported:null,
@@ -160,6 +160,14 @@ test('a reported primary PCR number projects once and never fills the fresh colu
  assert(!cells[1].includes('1.2345'),'fresh full-PCR cell stays unavailable');
  assert.match(cells[2],/1.2345/);
  assert.match(h.nodes.get('rd-market-metrics').innerHTML,/Reported Full/);
+});
+
+test('earlier-packet dates stay beside the reported number instead of only in an ellipsized source column',()=>{
+ const h=harness();h.pcr('NIFTY','1.2345','1.2345',true,'2026-10-15');
+ for(const id of ['rd-market-metrics','rd-pcr-table']){
+  const html=h.nodes.get(id).innerHTML;
+  assert.match(html,/class="rd-pcr-mixed">EARLIER PACKETS<br>2026-10-15<\/small>/);
+ }
 });
 
 test('tracked participation rows do not pretend weights or index-point contributions exist',()=>{

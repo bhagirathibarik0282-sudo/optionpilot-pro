@@ -53,6 +53,21 @@ test('Premium PCR renders the validated complete reported ratio without fresh ar
  assert.equal(h.calls.length,0);assert.equal(h.requests.filter(x=>x.includes('/quote')).length,0);
  h.emitContext({...payload,connected:false,connectionState:'DISCONNECTED',snapshot:null});assert.doesNotMatch(h.node('pw-chain-pcr').innerHTML,/1\.2345|Reported · mixed times/);
 });
+
+test('Premium last-reported PCR exposes earlier-session dates beside every ratio and cannot label old volume as today',async()=>{
+ const h=harness(),payload:any=reportedPcrFixture();
+ for(const a of payload.snapshot.indices){
+  const q=a.pcrSnapshot;q.lastReportedPcr={...q.reportedPcr,basis:'LAST_REPORTED_WITH_EARLIER_PACKETS',sessionDate:'2026-10-23',priorSession:1,preOpen:0,sourceMinAt:'2026-10-22T10:00:00Z',volume:{ceTotal:100,peTotal:200,expected:4,value:2}};delete q.reportedPcr;
+ }
+ h.respond({connected:true,connectionState:'OPEN',serverTime:payload.serverTime,snapshot:{rows:[],series:[]}});
+ h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');h.emitContext(payload);
+ const visible=h.node('pw-chain-pcr').innerHTML.split('<details class="pw-pcr-audit"')[0];
+ assert.equal((visible.match(/1\.2345/g)||[]).length,3);assert.equal((visible.match(/Last reported · earlier packets/g)||[]).length,3);
+ assert.equal((visible.match(/oldest 2026-10-22 15:30:00 IST/g)||[]).length,3);
+ assert.equal((visible.match(/Day volume · CE — \/ PE —/g)||[]).length,3);
+ assert.doesNotMatch(visible,/1\.2345 [↑↓]|pw-pcr-spark|pw-chain-pulse/);
+ h.emitContext(null);assert.doesNotMatch(h.node('pw-chain-pcr').innerHTML,/1\.2345|earlier packets/);
+});
 test('reported Premium PCR is revoked for invalid provenance and preserves real zero put OI',async()=>{
  const h=harness(),payload=reportedPcrFixture();h.respond({connected:true,connectionState:'OPEN',serverTime:payload.serverTime,snapshot:{rows:[],series:[]}});
  h.view.setVisible(true);await settle();await settle();h.change('pw-layout','ladder');

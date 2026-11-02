@@ -41,11 +41,11 @@ function harness() {
   return {
     nodes, events, memory,
     source(id:string,heads:string[],rows:string[][]){nodes.set(id,tableSource(heads,rows));view.refresh();},
-    pcr(index:string,full:string,reportedValue:string|null){
+    pcr(index:string,full:string,reportedValue:string|null,primaryOnly=false,sourceDate=''){
       const simple=(value:string)=>node({textContent:value});
       const reported=reportedValue===null?null:node({
-        querySelector:(selector:string)=>selector==='b'?simple(reportedValue):null,
-        querySelectorAll:(selector:string)=>selector==='small'?[simple('288/288 contracts · 6 older than 30s')]:[],
+        querySelector:(selector:string)=>selector==='b'&&!primaryOnly?simple(reportedValue):null,
+        querySelectorAll:(selector:string)=>selector==='small'?[simple('288/288 contracts · 6 older than 30s'+(sourceDate?' · oldest '+sourceDate+' 15:30:00 IST':''))]:[],
       });
       const card=node({
         querySelector:(selector:string)=>selector===':scope>strong'?simple(index):selector===':scope>b'?simple(full):selector==='.os-pcr-reported'?reported:null,
@@ -131,6 +131,28 @@ test('selected-index futures metrics never borrow a fixed row from another index
  assert.doesNotMatch(h.nodes.get('rd-levels-table').innerHTML,/>(?:NIFTY Spot|NIFTY Futures)</);
 });
 
+test('real live Fut-plus-expiry label supplies the headline FUT and Basis from its existing source table',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ h.futures(['Instrument','LTP','Day %','OI','Basis'],[
+  ['NIFTY Spot','23,260.35','0.9%','—','—'],
+  ['NIFTY Fut2026-11-23','23,326.5','0.98%','1,55,27,256','66.15'],
+  ['BANKNIFTY Fut2026-11-23','54,500','1%','100','120'],
+ ]);
+ h.select('NIFTY');const html=h.nodes.get('rd-market-metrics').innerHTML;
+ assert.match(html,/FUT<b>23,326.5<\/b>/);assert.match(html,/Basis<b>66.15<\/b>/);
+ assert.doesNotMatch(html,/54,500/);
+});
+
+test('ambiguous futures contracts, invalid expiry labels and other underlyings cannot fill headline metrics',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ for(const rows of [
+  [['NIFTY Fut2026-11-23','123','7'],['NIFTY Fut2026-12-29','456','8']],
+  [['NIFTY Fut2026-02-30','123','7']],
+  [['NIFTYNXT50 Fut2026-11-23','123','7']],
+  [['BANKNIFTY Fut2026-11-23','123','7']],
+ ]){h.futures(['Instrument','LTP','Basis'],rows);h.select('NIFTY');const html=h.nodes.get('rd-market-metrics').innerHTML;assert.match(html,/FUT<b>—<\/b>/);assert.match(html,/Basis<b>—<\/b>/);}
+});
+
 test('compact PCR table separates fresh, reported and band observations without fake columns',()=>{
  const h=harness();
  h.source('os-wall-ladder',['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ'],[
@@ -150,6 +172,24 @@ test('compact PCR table separates fresh, reported and band observations without 
  const fresh=h.nodes.get('rd-pcr-table').innerHTML;
  assert.match(fresh,/1.0876/);
  assert.doesNotMatch(fresh,/Reported 1.0969/);
+});
+
+test('a reported primary PCR number projects once and never fills the fresh column',()=>{
+ const h=harness();h.pcr('NIFTY','1.2345','1.2345',true);
+ const html=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(html,/Reported 1.2345/);
+ const cells=[...html.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m=>m[1]);
+ assert(!cells[1].includes('1.2345'),'fresh full-PCR cell stays unavailable');
+ assert.match(cells[2],/1.2345/);
+ assert.match(h.nodes.get('rd-market-metrics').innerHTML,/Reported Full/);
+});
+
+test('earlier-packet dates stay beside the reported number instead of only in an ellipsized source column',()=>{
+ const h=harness();h.pcr('NIFTY','1.2345','1.2345',true,'2026-10-15');
+ for(const id of ['rd-market-metrics','rd-pcr-table']){
+  const html=h.nodes.get(id).innerHTML;
+  assert.match(html,/class="rd-pcr-mixed">EARLIER PACKETS<br>2026-10-15<\/small>/);
+ }
 });
 
 test('tracked participation rows do not pretend weights or index-point contributions exist',()=>{

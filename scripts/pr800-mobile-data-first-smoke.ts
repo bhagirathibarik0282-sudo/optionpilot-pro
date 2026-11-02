@@ -85,6 +85,19 @@ try{
    const pcrText=await page.locator('#rd-pcr-table').innerText();
    for(const label of ['MIXED SOURCE TIMES','288/288 contracts','stale 6','11:04:26','1.1043'])assert(pcrText.includes(label),name+' PCR provenance '+label);
    assert((await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'));
+   // Earlier-session provenance must survive the same compact projection.
+   await page.evaluate(()=>{const card=document.querySelector('#os-pcr-strip .os-pcr-reported')!;card.insertAdjacentHTML('beforeend','<small>Last reported · earlier packets · 1 prior-session · oldest 2026-10-26 15:30:00 IST · current-session OI unproven</small>');});
+   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('oldest 2026-10-26 15:30:00 IST'));
+   assert((await page.locator('#rd-pcr-table').innerText()).includes('current-session OI unproven'));
+   const ageBadge=page.locator('#rd-market-metrics .rd-pcr-mixed');
+   await ageBadge.filter({hasText:'2026-10-26'}).waitFor({state:'visible'});
+   assert((await ageBadge.innerText()).includes('EARLIER PACKETS'));
+   assert(await ageBadge.evaluate((el:any)=>el.scrollWidth<=el.clientWidth+1),'source-date badge must not be clipped');
+   // The current card has one primary reported number; no duplicate value in Sources.
+   await page.evaluate(()=>{const card=document.querySelector('#os-pcr-strip .os-pcr')!,reported=card.querySelector('.os-pcr-reported b')!;card.querySelector(':scope>b')!.textContent=reported.textContent;reported.remove();});
+   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
+   assert(!(await page.locator('#rd-pcr-table tbody tr').first().locator('td').nth(1).innerText()).includes('1.0969'),'reported primary number cannot populate Fresh Full PCR');
+   await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-offline-reported-pcr.png',fullPage:true});
    await page.evaluate(()=>{for(const [id,html] of Object.entries((window as any).__pcrRestore))document.getElementById(id)!.innerHTML=html as string;delete (window as any).__pcrRestore;});
    await page.waitForFunction(()=>!document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
    assert(!(await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'),'revoked reported observation must disappear');
@@ -113,6 +126,9 @@ try{
     assert(!eventDiagnostics.visible.includes('23050 CE BELOW PDL'),name+' revoked recorded event must not leak into LIVE view');
    }
    const eventBounds=await page.locator('#rd-event-table th:last-child').evaluate((el:any)=>({right:el.getBoundingClientRect().right,limit:el.closest('.rd-section').getBoundingClientRect().right}));assert(eventBounds.right<=eventBounds.limit+1,name+' populated event columns must remain inside the page');
+   // Reproduce the actual live renderer's Fut<small>expiry</small> identity.
+   await page.evaluate(()=>{document.getElementById('op-one-stop')!.dataset.osSource='LIVE';document.querySelector('#os-future-response tbody tr:nth-child(2) td')!.innerHTML='NIFTY Fut<small>2026-11-23</small>';});
+   await page.waitForFunction(()=>document.getElementById('rd-market-metrics')?.textContent?.includes('FUT111')&&document.getElementById('rd-market-metrics')?.textContent?.includes('Basis10'));
    await page.evaluate(()=>{const restore=(window as any).__projectionRestore;for(const [id,html] of Object.entries(restore.html))document.getElementById(id)!.innerHTML=html as string;document.getElementById('op-one-stop')!.dataset.osSource=restore.source;delete (window as any).__projectionRestore;});
    await page.waitForFunction(()=>document.querySelectorAll('#rd-premium-table tbody tr').length!==8);
    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-reference-data-page.png',fullPage:false,timeout:15000});

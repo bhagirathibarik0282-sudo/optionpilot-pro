@@ -33,22 +33,34 @@ export function quoteTime(value:unknown):number {
  const at=/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)?value.replace(' ','T')+'+05:30':value;
  return /(?:Z|[+-]\d{2}:\d{2})$/.test(at)?Date.parse(at):NaN;
 }
-/** Latest reported OI from one complete REST attempt. Mixed exchange times are
- * explicit; this is never the fresh/synchronised Full PCR or an alignment input. */
-export function measureReportedPcr(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number){
+/** Reported OI uses only complete exact identities from one REST attempt.
+ * Mixed exchange times remain explicit; diagnostics never authorize fresh PCR. */
+export type ReportedPcrDiagnostic={reason:string;identity:string|null};
+export function measureReportedPcr(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number,audit?:ReportedPcrDiagnostic,includeCarried=false){
  const first=entries[0],times:number[]=[],tokens=new Set<number>(),keys=new Set<string>(),ids=new Set<string>();
  let ce=0,pe=0,calls=0,puts=0;
- if(!first||day(now)!==date||!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol||'')||!/^\d{4}-\d{2}-\d{2}$/.test(first.expiry||'')||String(first.expiry)<date||!Number.isFinite(Date.parse(first.expiry+'T00:00:00Z'))||new Date(first.expiry+'T00:00:00Z').toISOString().slice(0,10)!==first.expiry)return null;
+ const reject=(reason:string,identity:string|null=null):null=>{if(audit){audit.reason=reason;audit.identity=identity;}return null;};
+ if(!first||day(now)!==date||!['NIFTY','SENSEX','BANKNIFTY'].includes(first.symbol||'')||!/^\d{4}-\d{2}-\d{2}$/.test(first.expiry||'')||String(first.expiry)<date||!Number.isFinite(Date.parse(first.expiry+'T00:00:00Z'))||new Date(first.expiry+'T00:00:00Z').toISOString().slice(0,10)!==first.expiry)return reject('INVALID_SESSION_OR_EXPIRY');
  const open=Date.parse(date+'T09:15:00+05:30');
  for(const e of entries){
   const key=e.exchange+':'+e.label,q=quotes[key],at=quoteTime(q?.timestamp),id=e.strike+'|'+e.side;
-  if(e.role!=='OPTION'||e.symbol!==first.symbol||e.expiry!==first.expiry||!e.exchange||!e.label||!Number.isInteger(e.token)||e.token<=0||!finite(e.strike)||e.strike<=0||!['CE','PE'].includes(e.side||'')||tokens.has(e.token)||keys.has(key)||ids.has(id)||q?.instrument_token!==e.token||!finite(q.oi)||q.oi<0||!Number.isFinite(at)||at<open||day(at)!==date||at>now+5000)return null;
+  if(e.role!=='OPTION'||e.symbol!==first.symbol||e.expiry!==first.expiry||!e.exchange||!e.label||!Number.isInteger(e.token)||e.token<=0||!finite(e.strike)||e.strike<=0||!['CE','PE'].includes(e.side||'')||tokens.has(e.token)||keys.has(key)||ids.has(id))return reject('INVALID_OR_DUPLICATE_INVENTORY_IDENTITY',key);
+  if(!q)return reject('MISSING_QUOTE',key);
+  if(q.instrument_token!==e.token)return reject('TOKEN_IDENTITY_MISMATCH',key);
+  if(!finite(q.oi)||q.oi<0)return reject('INVALID_OI',key);
+  if(!Number.isFinite(at)||at<=0)return reject('INVALID_EXCHANGE_TIMESTAMP',key);
+  if(!includeCarried&&at<open)return reject(day(at)!==date?'PRIOR_SESSION_TIMESTAMP':'BEFORE_SESSION_OPEN_TIMESTAMP',key);
+  if(day(at)>date||!includeCarried&&day(at)!==date)return reject('WRONG_SESSION_TIMESTAMP',key);
+  if(at>now+5000)return reject('FUTURE_EXCHANGE_TIMESTAMP',key);
   tokens.add(e.token);keys.add(key);ids.add(id);times.push(at);
   if(e.side==='CE'){ce+=q.oi;calls++;}else{pe+=q.oi;puts++;}
  }
- if(!calls||!puts||!finite(ce)||ce<=0||!finite(pe)||!finite(pe/ce))return null;
+ if(!calls||!puts)return reject('MISSING_CE_OR_PE_SIDE');
+ if(!finite(ce)||ce<=0)return reject('ZERO_OR_INVALID_CE_DENOMINATOR');
+ if(!finite(pe)||!finite(pe/ce))return reject('INVALID_PE_TOTAL_OR_RATIO');
  const lo=Math.min(...times),hi=Math.max(...times);
- return {basis:'LATEST_REPORTED_MIXED_TIMESTAMPS',symbol:first.symbol,expiry:first.expiry,value:pe/ce,ceTotal:ce,peTotal:pe,volume:quoteVolumes(entries,quotes),expected:entries.length,reported:times.length,olderThan30s:times.filter(t=>now-t>30000).length,sourceMinAt:new Date(lo).toISOString(),sourceMaxAt:new Date(hi).toISOString(),checkedAt:new Date(now).toISOString()};
+ if(audit){audit.reason='COMPLETE_REPORTED';audit.identity=null;}
+ return {basis:includeCarried?'LAST_REPORTED_WITH_EARLIER_PACKETS':'LATEST_REPORTED_MIXED_TIMESTAMPS',sessionDate:date,priorSession:times.filter(t=>day(t)<date).length,preOpen:times.filter(t=>day(t)===date&&t<open).length,symbol:first.symbol,expiry:first.expiry,value:pe/ce,ceTotal:ce,peTotal:pe,volume:includeCarried?null:quoteVolumes(entries,quotes),expected:entries.length,reported:times.length,olderThan30s:times.filter(t=>now-t>30000).length,sourceMinAt:new Date(lo).toISOString(),sourceMaxAt:new Date(hi).toISOString(),checkedAt:new Date(now).toISOString()};
 }
 export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>,date:string,now:number,cycleStartedAt=now,spot?:any){
  let ce=0,pe=0;const times:number[]=[],missing:string[]=[],stale:string[]=[],invalid:string[]=[],calls:LiveEntry[]=[],puts:LiveEntry[]=[];
@@ -59,7 +71,7 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
   if(!q){missing.push(key);continue;}
   if(q.instrument_token!==e.token||!finite(q.oi)||q.oi<0){invalid.push(key);continue;}
   const at=quoteTime(q.timestamp);
-  if(!Number.isFinite(at)||day(at)!==date||now-at>30_000||at-now>5_000){stale.push(key);continue;}
+  if(!Number.isFinite(at)||day(at)!==date||at<Date.parse(date+'T09:15:00+05:30')||now-at>30_000||at-now>5_000){stale.push(key);continue;}
   times.push(at);if(e.side==='CE'){ce+=q.oi;calls.push(e);}else{pe+=q.oi;puts.push(e);}
  }
  const skew=times.length?Math.max(...times)-Math.min(...times):null;
@@ -80,7 +92,7 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
    const sum=(xs:LiveEntry[])=>xs.reduce((total,e)=>total+(quotes[e.exchange+':'+e.label]?.oi??NaN),0);
    const ceTotal=sum(bandCe),peTotal=sum(bandPe);
    const bandTimes=band.map(e=>quoteTime(quotes[e.exchange+':'+e.label]?.timestamp));
-   const validBand=band.every(e=>{const q=quotes[e.exchange+':'+e.label],t=quoteTime(q?.timestamp);return e.role==='OPTION'&&e.symbol===entries[0]?.symbol&&e.expiry===entries[0]?.expiry&&q?.instrument_token===e.token&&finite(q.oi)&&q.oi>=0&&Number.isFinite(t)&&day(t)===date&&now-t>=-5000&&now-t<=30000;});
+   const validBand=band.every(e=>{const q=quotes[e.exchange+':'+e.label],t=quoteTime(q?.timestamp);return e.role==='OPTION'&&e.symbol===entries[0]?.symbol&&e.expiry===entries[0]?.expiry&&q?.instrument_token===e.token&&finite(q.oi)&&q.oi>=0&&Number.isFinite(t)&&day(t)===date&&t>=Date.parse(date+'T09:15:00+05:30')&&now-t>=-5000&&now-t<=30000;});
    if(band.length===30&&bandCe.length===15&&bandPe.length===15&&new Set(band.map(e=>e.strike+'|'+e.side)).size===30&&new Set(band.map(e=>e.token)).size===30&&validBand&&Math.max(...bandTimes,spotAt)-Math.min(...bandTimes,spotAt)<=30000&&finite(ceTotal)&&ceTotal>0&&finite(peTotal)&&peTotal>=0){
     Object.assign(bandPcr,{state:'COMPLETE',value:peTotal/ceTotal,fromStrike:strikes[index-7],toStrike:strikes[index+7],strikes:[...allowed],membershipKey:band.map(e=>[e.token,e.strike,e.side].join(':')).sort().join('|'),volume:quoteVolumes(band,quotes),ceTotal,peTotal,freshOi:30,sourceMinAt:new Date(Math.min(...bandTimes)).toISOString(),sourceMaxAt:new Date(Math.max(...bandTimes)).toISOString()});
    }
@@ -92,8 +104,16 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
   const priceOk=finite(q.last_price)&&q.last_price>0&&Number.isFinite(tradeAt)&&day(tradeAt)===date&&now-tradeAt>=-5000&&now-tradeAt<=30000;
   return {symbol:e.symbol,expiry:e.expiry,strike:e.strike,side:e.side,token:e.token,oi:q.oi,sourceAt:new Date(quoteTime(q.timestamp)).toISOString(),price:priceOk?q.last_price:null,priceAt:priceOk?new Date(tradeAt).toISOString():null};
  }):[];
+ const reportedDiagnostic:ReportedPcrDiagnostic={reason:'NOT_CHECKED',identity:null};
+ const reportedPcr=measureReportedPcr(entries,quotes,date,now,reportedDiagnostic);
+ // Separate last-known context only. Never copy an earlier cycle, infer zero OI,
+ // or promote a prior-session packet to current-session/fresh evidence.
+ const lastReportedPcr=reportedPcr?null:measureReportedPcr(entries,quotes,date,now,undefined,true);
+ const regularSessionOpen=Date.parse(date+'T09:15:00+05:30');
+ const sourceTimes=entries.map(e=>quoteTime(quotes[e.exchange+':'+e.label]?.timestamp));
+ const reportedSourceCounts={sameSession:sourceTimes.filter(t=>Number.isFinite(t)&&day(t)===date&&t>=regularSessionOpen).length,priorSession:sourceTimes.filter(t=>Number.isFinite(t)&&day(t)<date).length,preOpen:sourceTimes.filter(t=>Number.isFinite(t)&&day(t)===date&&t<regularSessionOpen).length,invalidTimestamp:sourceTimes.filter(t=>!Number.isFinite(t)).length};
  const reason=!entries.length?'NO_OPTION_INVENTORY':invalid.length?'INVALID_IDENTITY_OR_OI':missing.length?'MISSING_QUOTES':stale.length?'STALE_OI_TIMESTAMPS':skew!==null&&skew>30000?'OI_TIME_SKEW':ce<=0?'CE_OI_ZERO':complete?'COMPLETE':'INCOMPLETE';
- return {state:complete&&ce>0?'COMPLETE':'INCOMPLETE',reason,reportedPcr:measureReportedPcr(entries,quotes,date,now),volume:complete?quoteVolumes(entries,quotes):null,fullPcr:complete&&ce>0?pe/ce:null,ceTotal:complete?ce:null,peTotal:complete?pe:null,bandPcr,strikeRows,callWall:wall(calls),putWall:wall(puts),coverage:{expected:entries.length,freshOi:times.length,complete,sourceSkewMs:skew,missing:missing.length,stale:stale.length,invalid:invalid.length},
+ return {state:complete&&ce>0?'COMPLETE':'INCOMPLETE',reason,reportedPcr,lastReportedPcr,reportedDiagnostic,reportedSourceCounts,volume:complete?quoteVolumes(entries,quotes):null,fullPcr:complete&&ce>0?pe/ce:null,ceTotal:complete?ce:null,peTotal:complete?pe:null,bandPcr,strikeRows,callWall:wall(calls),putWall:wall(puts),coverage:{expected:entries.length,freshOi:times.length,complete,sourceSkewMs:skew,missing:missing.length,stale:stale.length,invalid:invalid.length},
   // Bounded diagnostics, no credentials or raw broker responses.
   unavailable:[...missing.map(identity=>({identity,reason:'MISSING'})),...stale.map(identity=>({identity,reason:'STALE_TIMESTAMP'})),...invalid.map(identity=>({identity,reason:'INVALID_IDENTITY_OR_OI'}))].slice(0,12),
   sourceMinAt:times.length?new Date(Math.min(...times)).toISOString():null,sourceMaxAt:times.length?new Date(Math.max(...times)).toISOString():null,checkedAt:new Date(now).toISOString(),cycleStartedAt:new Date(cycleStartedAt).toISOString(),source:'KITE_REST_FULL_EXPIRY_SNAPSHOT'};
@@ -141,12 +161,12 @@ export class DashboardPcrSampler {
      const measured=measurePcrSnapshot(group,quotes,this.inventory.date,completedAt.get(key)??at,now,spot);
      // A later failed batch invalidates the entire attempt; never publish
      // an earlier expiry from a partially failed REST cycle.
-     const result=fetchState==='OK'?measured:{...measured,state:'INCOMPLETE',reason:'INCOMPLETE',reportedPcr:null,volume:null,fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...measured.coverage,complete:false}};
+     const result=fetchState==='OK'?measured:{...measured,state:'INCOMPLETE',reason:'INCOMPLETE',reportedPcr:null,lastReportedPcr:null,volume:null,fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...measured.coverage,complete:false}};
      // No network errors are surfaced verbatim (credentials and URLs are excluded).
      this.results.set(key,{...result,fetchState,batchesRequested,batchesCompleted});
     }
     this.revision++;
-    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2)}));
+    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
     const signature=JSON.stringify(rows);
     if(signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){
      this.lastDiagnostic=signature;this.lastDiagnosticAt=at;
@@ -158,7 +178,7 @@ export class DashboardPcrSampler {
  }
  read(symbol:string,expiry:string|null){
   const result=this.results.get(symbol+'|'+expiry);if(!result)return null;
-  if(this.deps.now()-Date.parse(result.checkedAt)>90_000||day(this.deps.now())!==this.inventory.date)return {...result,state:'STALE',reason:'PCR_SNAPSHOT_STALE',reportedPcr:null,volume:null,fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...result.coverage,complete:false}};
+  if(this.deps.now()-Date.parse(result.checkedAt)>90_000||day(this.deps.now())!==this.inventory.date)return {...result,state:'STALE',reason:'PCR_SNAPSHOT_STALE',reportedPcr:null,lastReportedPcr:null,volume:null,fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...result.coverage,complete:false}};
   return result;
  }
  version(){return this.revision;}

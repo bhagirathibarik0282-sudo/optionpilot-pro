@@ -17,8 +17,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install project locked dependencies
-        run: npm ci --no-audit --no-fund
+      - name: Install existing project dependencies (repository has no lockfile)
+        run: npm install --no-audit --no-fund
       - name: Verify source, PCR, UI, recorder, Telegram and safe runtime together
         run: >-
           NODE_ENV=test node --import tsx --test

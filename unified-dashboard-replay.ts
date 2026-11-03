@@ -24,7 +24,7 @@ export function installUnifiedDashboardReplay(api:any,controller:any){
   $('dr-label').textContent=active?'REPLAY · '+(frame?.date||'')+' · '+time(frame?.at)+' IST':'Replay · recorded dashboard';
   $('dr-status').textContent=active?'REPLAY · '+((loading||error?days[dayIndex]:frame?.date)||api.getState().date||'')+' · '+time(loading?null:frame?.at)+' IST · '+(loading?'Loading recorded day':error||(!frame?.at?'No TRUE recordings':frame.playing?'Playing':'Paused'))+(days.length?' · day '+(dayIndex+1)+' / '+days.length:''):'LIVE dashboard · select Replay for saved observations';
   const timeline=frame?.timeline||[];for(const id of ['dr-play','dr-prev','dr-next','dr-reset','dr-seek','dr-speed'])$(id).disabled=!active||loading||!timeline.length;
-  $('dr-play').textContent=frame?.playing?'Pause':'Play';$('dr-seek').max=String(Math.max(0,timeline.length-1));$('dr-seek').value=String(Math.max(0,frame?.index||0));$('dr-speed').value=String(frame?.speed||1);
+  $('dr-play').textContent=error?'Retry recorded day':frame?.playing?'Pause':'Play';$('dr-seek').max=String(Math.max(0,timeline.length-1));$('dr-seek').value=String(Math.max(0,frame?.index||0));$('dr-speed').value=String(frame?.speed||1);
   const dates=(api.getState().recordedDates||[]).slice().sort(),signature=dates.join('|');if(datesKey!==signature){$('dr-date').innerHTML=dates.map((d:string)=>'<option>'+d+'</option>').join('');datesKey=signature;}$('dr-date').value=frame?.date||api.getState().date;
   $('dr-date').disabled=loading;for(const id of ['dr-3','dr-5','dr-all'])$(id).disabled=loading||!dates.length;
  }
@@ -47,7 +47,7 @@ export function installUnifiedDashboardReplay(api:any,controller:any){
  });
  $('dr-toggle').onclick=()=>toggle(!active);
  if($('rd-replay-link'))$('rd-replay-link').onclick=()=>{bar.open=true;toggle(true);};
- $('dr-play').onclick=()=>{if(!active||loading)return;error='';controller.playPause();};
+ $('dr-play').onclick=()=>{if(!active||loading)return;if(error&&days.length){void loadDay(dayIndex,true,++generation);return;}error='';controller.playPause();};
  $('dr-prev').onclick=()=>{pause();controller.step(-1);};$('dr-next').onclick=()=>{pause();if(frame?.index===frame?.timeline?.length-1&&dayIndex<days.length-1)void loadDay(dayIndex+1,false,++generation);else controller.step(1);};
  $('dr-reset').onclick=()=>{pause();if(dayIndex>0)void loadDay(0,false,++generation);else controller.reset();};
  $('dr-seek').oninput=()=>{pause();controller.seek(Number($('dr-seek').value));};$('dr-speed').onchange=()=>controller.speed(Number($('dr-speed').value));

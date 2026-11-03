@@ -1,13 +1,11 @@
-import { productionVerificationPending } from './helpers/production-runtime.js';
 import test from "node:test";
 import assert from "node:assert/strict";
 
 const BASE = "https://optionpilot-pro-v2-production.up.railway.app/api/research/business-dashboard";
 
 for (const symbol of ["NIFTY","SENSEX"] as const) {
-  test(`production Business Dashboard V1 JSON responds for ${symbol}`, async (t) => {
+  test(`production Business Dashboard V1 JSON responds for ${symbol}`, async () => {
     const response = await fetch(`${BASE}?symbol=${symbol}`, { headers:{ accept:"application/json" } });
-  if (await productionVerificationPending(response, t)) return;
     assert.equal(response.ok, true, `HTTP_${response.status}`);
     const body:any = await response.json();
     console.log(JSON.stringify(body));
@@ -25,9 +23,8 @@ for (const symbol of ["NIFTY","SENSEX"] as const) {
   });
 }
 
-test("production Business Dashboard V1 HTML view exposes a supported read-only dashboard during rollout", async (t) => {
+test("production Business Dashboard V1 HTML view exposes a supported read-only dashboard during rollout", async () => {
   const response = await fetch(`${BASE}/view?symbol=NIFTY`, { headers:{ accept:"text/html" } });
-  if (await productionVerificationPending(response, t)) return;
   assert.equal(response.ok, true, `HTTP_${response.status}`);
   const html = await response.text();
   assert.match(html, /viewport/);

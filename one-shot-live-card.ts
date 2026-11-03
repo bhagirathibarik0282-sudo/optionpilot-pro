@@ -511,7 +511,8 @@ export function installOneShotLiveCard(api:any){
  };
 
  const update=(payload:any,force=false)=>{
-  const clock=new Date(Date.now());if($('op-terminal-date'))$('op-terminal-date').textContent=clock.toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric'});if($('op-terminal-time'))$('op-terminal-time').textContent=time(clock.toISOString());
+  const replayState=api.getState?.()?.replay;if(replayState?.active){payload=null;force=true;}
+  const clock=new Date(replayState?.at||Date.now());if($('op-terminal-date'))$('op-terminal-date').textContent=clock.toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric'});if($('op-terminal-time'))$('op-terminal-time').textContent=time(clock.toISOString());
   $('os-reference-indices')?.querySelectorAll?.('[data-os-select]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.osSelect===selected)));
   const live=api.validEnvelope(payload),d=live?payload:null,key=live?d.snapshot.runtimeId+'|'+d.snapshot.tradeDate:'';last=payload;
   if(live&&paintedLive&&key===session&&!force&&Date.now()-lastPaint<500)return;lastPaint=Date.now();paintedLive=live;
@@ -531,7 +532,7 @@ export function installOneShotLiveCard(api:any){
    for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side)sample(selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side,Date.parse(q.observedAt),q.price);}
   }
   renderDte(d,optionRows);
-  const useRecorded=sourceMode==='RECORDED'||sourceMode==='AUTO'&&payload?.connectionState==='MARKET_CLOSED';
+  const useRecorded=!!replayState?.active||sourceMode==='RECORDED'||sourceMode==='AUTO'&&payload?.connectionState==='MARKET_CLOSED';
   const savedState=api.getState?.();
   if($('os-recorded-date')&&document.activeElement!==$('os-recorded-date')&&!loadBusy&&savedState?.date)$('os-recorded-date').value=savedState.date;
   write('os-reading-status',useRecorded?'RECORDED · '+esc(savedState?.date||'load a session')+(savedState?.loading?' · LOADING HISTORY':'')+' · radar / ladder / PCR / chart use saved observations. Other panels retain LIVE source gates.':live?'LIVE · fresh Kite observations · four-expiry workspace V2':'LIVE unavailable · '+esc(payload?.connectionState||'connecting')+' · choose Recorded for saved observations.');
@@ -552,8 +553,8 @@ export function installOneShotLiveCard(api:any){
    const c=r?.coverageInfo,coverage=r?.current?'OI '+r.current.expected+'/'+r.current.expected+' verified':c&&c.fresh+c.stale+c.missing+c.invalid===c.expected?'OI '+c.fresh+'/'+c.expected+' fresh · stale '+c.stale+' · missing '+c.missing+' · invalid '+c.invalid:'';
    const saved=recorded?.rows.find((x:any)=>x.symbol===symbol&&x.expiry===r?.expiry&&x.current&&n(x.value)!==null);
    const savedHtml=r?.value===null&&saved?'<div class="os-pcr-recorded"><small>RECORDED · Full PCR</small><strong>'+saved.value.toFixed(4)+'</strong><small>'+esc(recordedState.date)+' · '+time(saved.current.checked)+' IST</small><small>Expiry '+esc(saved.expiry)+' · saved full-chain source</small></div>':'';
-   const reported=r?.reportedPcr,reportedHtml=reported&&!r?.current?'<div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small><b>'+reported.value.toFixed(4)+'</b><small>'+reported.reported+'/'+reported.expected+' contracts · '+reported.olderThan30s+' older than 30s</small><small>Source '+time(reported.sourceMinAt)+' → '+time(reported.sourceMaxAt)+' IST · checked '+time(reported.checkedAt)+' IST</small><small>Latest reported OI · no fresh alignment</small></div>':'';
-   return '<div class="os-pcr" data-pcr-index="'+symbol+'"><strong>'+symbol+(symbol==='BANKNIFTY'?' · M':'')+'</strong><small>'+ (r?.current?'LIVE · Full OI PCR':'UNAVAILABLE · Fresh Full PCR')+'</small><b>'+ (n(r?.value)!==null?r.value.toFixed(4):'—')+' <span class="'+colour+'" aria-label="PCR '+direction.toLowerCase()+'">'+arrow+'</span></b><small>Expiry '+esc(r?.expiry||'unavailable')+'</small><small>ATM ±7 band: '+fmt(r?.bandValue,4)+(r?.bandCheckedAt?' · 30/30 verified · '+time(r.bandCheckedAt)+' IST':'')+'</small><small>'+esc(r?.current?'Checked '+time(r.current.checked)+' IST · '+r.current.period/60000+'m snapshots':r?.pcrStatus?.replaceAll('_',' ')||'UNAVAILABLE')+'</small>'+(coverage?'<small>'+esc(coverage)+(c&&!r?.current?' · checked '+time(c.checked)+' IST':'')+'</small>':'')+'<small>'+esc(r?.baseline?'Compared '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':r?.current?'Arrow: waiting for comparable snapshot':'Full expiry OI not verified')+'</small>'+reportedHtml+savedHtml+'</div>';
+   const reported=r?.reportedPcr,reportedHtml=reported&&!r?.current?'<div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small>'+(reported.sourceNote?'<small>'+esc(reported.sourceNote)+'</small>':'')+'<small>'+reported.reported+'/'+reported.expected+' contracts · '+reported.olderThan30s+' older than 30s</small><small>Source '+time(reported.sourceMinAt)+' → '+time(reported.sourceMaxAt)+' IST · checked '+time(reported.checkedAt)+' IST</small><small>Latest reported OI · no fresh alignment</small></div>':'';
+   return '<div class="os-pcr" data-pcr-index="'+symbol+'"><strong>'+symbol+(symbol==='BANKNIFTY'?' · M':'')+'</strong><small>'+ (r?.current?'LIVE · Full OI PCR':reported?'Full OI PCR · '+reported.displayLabel:'UNAVAILABLE · Fresh Full PCR')+'</small><b>'+ (n(r?.value??reported?.value)!==null?(r?.value??reported.value).toFixed(4):'—')+' <span class="'+colour+'" aria-label="PCR '+direction.toLowerCase()+'">'+arrow+'</span></b><small>Expiry '+esc(r?.expiry||'unavailable')+'</small><small>ATM ±7 band: '+fmt(r?.bandValue,4)+(r?.bandCheckedAt?' · 30/30 verified · '+time(r.bandCheckedAt)+' IST':'')+'</small><small>'+esc(r?.current?'Checked '+time(r.current.checked)+' IST · '+r.current.period/60000+'m snapshots':r?.pcrStatus?.replaceAll('_',' ')||'UNAVAILABLE')+'</small>'+(coverage?'<small>'+esc(coverage)+(c&&!r?.current?' · checked '+time(c.checked)+' IST':'')+'</small>':'')+'<small>'+esc(r?.baseline?'Compared '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':r?.current?'Arrow: waiting for comparable snapshot':'Full expiry OI not verified')+'</small>'+reportedHtml+savedHtml+'</div>';
   }).join(''));
   const v=live?d.snapshot.vix:null,vo=live&&valid(d,v,'VIX');
   write('os-vix-value','<small class="os-subline">INDIA VIX · '+(vo?time(v.observedAt)+' IST':'SOURCE UNAVAILABLE')+'</small><div class="os-vix-number">'+fmt(vo?v.price:null)+'</div><span class="'+tone(vo?change(d,v,'VIX'):null)+'">'+pct(vo?change(d,v,'VIX'):null)+' vs previous close</span>');
@@ -579,6 +580,7 @@ export function installOneShotLiveCard(api:any){
   if($('os-stocks')?.open||!live)write('os-stock-ranks',rank(d,'STOCK'));
   if($('os-sectors')?.open||!live)write('os-sector-ranks',rank(d,'SECTOR'));
   if(useRecorded)renderRecorded();
+  if(replayState?.active)write('os-reading-status','REPLAY · '+esc(savedState?.date||'')+' · '+time(replayState.at)+' IST · all recorded views share this cursor');
   root.dataset.osSource=useRecorded?'RECORDED':'LIVE';
  };
  const showPreface=(show:boolean,focus=false)=>{

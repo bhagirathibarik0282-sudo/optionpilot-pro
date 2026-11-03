@@ -1,5 +1,7 @@
 // Only the main app uses this entrypoint. Independent FII/DII/EOD cron jobs
 // never import it. Stop new interval work and drain active I/O before exiting.
+import { startTelegramSettings } from '../telegram-ladder-settings.ts';
+startTelegramSettings();
 import pg from 'pg';
 import { spawn } from 'node:child_process';
 

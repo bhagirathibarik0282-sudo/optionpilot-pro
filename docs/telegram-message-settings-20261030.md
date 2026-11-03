@@ -1,0 +1,11 @@
+# Telegram message settings
+
+Old main-service Telegram senders are stopped. The runtime child captures and removes TELEGRAM_BOT_TOKEN before importing any legacy server code. Only the new settings controller retains a lexical reference. The initial production stop was applied independently using `env -u TELEGRAM_BOT_TOKEN npm start`, deployment 96a99497-4030-4d7b-87a5-cd2cbd0200d1 SUCCESS.
+
+In each existing index group use `/settings`, tap parameter buttons, then **My report** or `/report`. Changes persist immediately on the existing mounted volume in telegram-message-settings.json, separately per group. Admin status is checked against Telegram for each action. Non-admin group members cannot change the shared format. Bot-addressed commands also work. Scope-specific slash commands are registered.
+
+Choices: spot, PDH/PDL, full OI PCR, ±7 OI PCR, volume PCR, CE/PE walls, premium ladder, changes, PCR alignment, sector/stock participation, source details. Missing/stale/unverified labels and BANKNIFTY research-only labels remain mandatory. Reports use today's latest completed session-anchored three-minute archive window; absence of the endpoint produces an explicit unavailable message. No values are invented or substituted. This is an on-demand report feature; regular ladder scheduling remains OFF.
+
+Enable only with TELEGRAM_SETTINGS_ENABLED=true and normal `npm start`. The stored bot credential is never printed or exported. Startup validates canonical group IDs, types, and expected names. It refuses to take over an existing webhook. Initial menus are attempted at most once per group; /settings always recovers the menu if a launch send failed. Telegram update offsets persist before action processing, preventing replay after restart, with the tradeoff that interrupted requests must be requested again. Ambiguous report sends are never retried automatically. Existing webhook/other poller conflicts stop the controller and leave old delivery disabled. Polling follows the main runtime's existing operating hours (08:45–16:15 IST weekdays); the feature is not available while that runtime is asleep.
+
+Tests cover token isolation, real renderer choices, mandatory quality labels, group separation, restart persistence, corrupt-state failure, non-admin denial, admin menu changes and selected TXT output. No trading/execution configuration changes.

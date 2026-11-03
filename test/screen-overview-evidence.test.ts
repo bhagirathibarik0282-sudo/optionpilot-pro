@@ -23,9 +23,8 @@ function harness() {
     querySelector: (selector: string) => selector === '.os-market-head' ? node({ textContent: selected }) :
       selector === '.os-price' ? node({ textContent: price }) : null,
   }) }));
-  const reference = node({ dataset: { recordedIndex: 'NIFTY', referenceFrom: '2026-10-27T06:03:00Z', referenceAt: '2026-10-27T06:06:00Z' } });
   nodes.set('mb-page', node({ querySelector: (selector: string) => selector.includes('Recorded notable events') ? events :
-    selector.includes('Recorder memory and replay') ? memory : selector.includes('Three-index recorded overview') ? reference : null }));
+    selector.includes('Recorder memory and replay') ? memory : null }));
   nodes.set('rd-page', node({ scrollHeight: 700 }));
   nodes.set('rd-viewport', node({ clientWidth: 1024, clientHeight: 800 }));
   for (const id of ['rd-market-head','rd-market-levels','rd-market-metrics','rd-levels-table','rd-pcr-table',
@@ -39,7 +38,27 @@ function harness() {
     __name: (fn: any) => fn, requestAnimationFrame: () => 1 };
   const installer = vm.runInNewContext(`(${installScreenOverview.toString()})`, context);
   const view = installer();
-  return { nodes, events, memory, reference, futures(heads:string[],rows:string[][]){nodes.set('os-future-response',tableSource(heads,rows));view.refresh();}, headline(value:string,status:string){price=value;validation=status;view.refresh();}, premium(heads:string[],rows:string[][]){nodes.set('os-premium-table',tableSource(heads,rows));view.refresh();}, select(symbol: string) { selected = symbol; view.refresh(); } };
+  return {
+    nodes, events, memory,
+    source(id:string,heads:string[],rows:string[][]){nodes.set(id,tableSource(heads,rows));view.refresh();},
+    pcr(index:string,full:string,reportedValue:string|null,primaryOnly=false,sourceDate=''){
+      const simple=(value:string)=>node({textContent:value});
+      const reported=reportedValue===null?null:node({
+        querySelector:(selector:string)=>selector==='b'&&!primaryOnly?simple(reportedValue):null,
+        querySelectorAll:(selector:string)=>selector==='small'?[simple('288/288 contracts · 6 older than 30s'+(sourceDate?' · oldest '+sourceDate+' 15:30:00 IST':''))]:[],
+      });
+      const card=node({
+        querySelector:(selector:string)=>selector===':scope>strong'?simple(index):selector===':scope>b'?simple(full):selector==='.os-pcr-reported'?reported:null,
+        querySelectorAll:(selector:string)=>selector===':scope>small'?[simple('OI 282/288 fresh · stale 6')]:[],
+      });
+      nodes.set('os-pcr-strip',node({querySelectorAll:(selector:string)=>selector==='.os-pcr'?[card]:[]}));
+      view.refresh();
+    },
+    futures(heads:string[],rows:string[][]){nodes.set('os-future-response',tableSource(heads,rows));view.refresh();},
+    headline(value:string,status:string){price=value;validation=status;view.refresh();},
+    premium(heads:string[],rows:string[][]){nodes.set('os-premium-table',tableSource(heads,rows));view.refresh();},
+    select(symbol: string) { selected = symbol; view.refresh(); },
+  };
 }
 
 test('changing selected index never exposes another index recorded events or memory', () => {
@@ -112,27 +131,113 @@ test('selected-index futures metrics never borrow a fixed row from another index
  assert.doesNotMatch(h.nodes.get('rd-levels-table').innerHTML,/>(?:NIFTY Spot|NIFTY Futures)</);
 });
 
+test('real live Fut-plus-expiry label supplies the headline FUT and Basis from its existing source table',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ h.futures(['Instrument','LTP','Day %','OI','Basis'],[
+  ['NIFTY Spot','23,260.35','0.9%','—','—'],
+  ['NIFTY Fut2026-11-23','23,326.5','0.98%','1,55,27,256','66.15'],
+  ['BANKNIFTY Fut2026-11-23','54,500','1%','100','120'],
+ ]);
+ h.select('NIFTY');const html=h.nodes.get('rd-market-metrics').innerHTML;
+ assert.match(html,/FUT<b>23,326.5<\/b>/);assert.match(html,/Basis<b>66.15<\/b>/);
+ assert.doesNotMatch(html,/54,500/);
+});
 
-test('comparison reference retains full date and IST clocks without promising synchronized replay',()=>{
- const h=harness(),output=h.nodes.get('rd-context-rows').innerHTML;
- assert.match(output,/Comparison reference/);assert.match(output,/27 Oct 2026/);
- assert.match(output,/11:33:00/);assert.match(output,/11:36:00/);
- assert.match(output,/synchronized replay unavailable/);
- h.select('SENSEX');assert.doesNotMatch(h.nodes.get('rd-context-rows').innerHTML,/11:36:00/);
- assert.match(h.nodes.get('rd-context-rows').innerHTML,/Unavailable → Unavailable/);
+test('ambiguous futures contracts, invalid expiry labels and other underlyings cannot fill headline metrics',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ for(const rows of [
+  [['NIFTY Fut2026-11-23','123','7'],['NIFTY Fut2026-12-29','456','8']],
+  [['NIFTY Fut2026-02-30','123','7']],
+  [['NIFTYNXT50 Fut2026-11-23','123','7']],
+  [['BANKNIFTY Fut2026-11-23','123','7']],
+ ]){h.futures(['Instrument','LTP','Basis'],rows);h.select('NIFTY');const html=h.nodes.get('rd-market-metrics').innerHTML;assert.match(html,/FUT<b>—<\/b>/);assert.match(html,/Basis<b>—<\/b>/);}
 });
-test('missing or malformed reference endpoints are never replaced by headline clocks',()=>{
- const h=harness();h.reference.dataset.referenceFrom='';h.reference.dataset.referenceAt='garbage';h.select('NIFTY');
- assert.match(h.nodes.get('rd-context-rows').innerHTML,/Unavailable → Unavailable/);
- assert.doesNotMatch(h.nodes.get('rd-context-rows').innerHTML,/11:36:00/);
-});
-test('recorded section clocks explain independent and retrospective evidence',()=>{
+
+test('compact PCR table separates fresh, reported and band observations without fake columns',()=>{
  const h=harness();
- assert.match(h.nodes.get('rd-levels-table').innerHTML,/simultaneous observations are unverified/);
- assert.match(h.nodes.get('rd-premium-table').innerHTML,/missing clock stays unavailable/);
- assert.match(h.nodes.get('rd-event-table').innerHTML,/not event-time knowledge/);
- assert.match(h.nodes.get('rd-memory-table').innerHTML,/not a synchronized replay frame/);
- h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.select('NIFTY');
- assert.doesNotMatch(h.nodes.get('rd-context-rows').innerHTML,/Comparison reference/);
- assert.doesNotMatch(h.nodes.get('rd-premium-table').innerHTML,/Source clocks/);
+ h.source('os-wall-ladder',['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ'],[
+  ['NIFTY','— / 1.1234','20,000 Δ +150','25,000 Δ -70','23,000 / 22,800','1,000','—'],
+ ]);
+ h.pcr('NIFTY','—','1.0969');
+ const output=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(output,/<th>Fresh Full PCR<\/th>/);
+ assert.match(output,/<th>Reported Full · mixed times<\/th>/);
+ assert.match(output,/<th>ATM ±7 PCR<\/th>/);
+ assert.match(output,/Reported 1.0969 · MIXED SOURCE TIMES/);
+ assert.match(output,/1.1234/);
+ assert.match(output,/\+150/);
+ assert.match(output,/-70/);
+ assert.doesNotMatch(output,/<th>±5 PCR<\/th>|<th>±3 PCR<\/th>|<th>Trend<\/th>/);
+ h.pcr('NIFTY','1.0876',null);
+ const fresh=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(fresh,/1.0876/);
+ assert.doesNotMatch(fresh,/Reported 1.0969/);
+});
+
+test('a reported primary PCR number projects once and never fills the fresh column',()=>{
+ const h=harness();h.pcr('NIFTY','1.2345','1.2345',true);
+ const html=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(html,/Reported 1.2345/);
+ const cells=[...html.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m=>m[1]);
+ assert(!cells[1].includes('1.2345'),'fresh full-PCR cell stays unavailable');
+ assert.match(cells[2],/1.2345/);
+ assert.match(h.nodes.get('rd-market-metrics').innerHTML,/Reported Full/);
+});
+
+test('earlier-packet dates stay beside the reported number instead of only in an ellipsized source column',()=>{
+ const h=harness();h.pcr('NIFTY','1.2345','1.2345',true,'2026-10-15');
+ for(const id of ['rd-market-metrics','rd-pcr-table']){
+  const html=h.nodes.get(id).innerHTML;
+  assert.match(html,/class="rd-pcr-mixed">EARLIER PACKETS<br>2026-10-15<\/small>/);
+ }
+});
+
+test('tracked participation rows do not pretend weights or index-point contributions exist',()=>{
+ const h=harness();
+ h.source('os-stock-ranks',['#','Stock','Weight %','Price','Day %','Contribution','Trend','Quote time · IST','RAG / similar event'],[
+  ['1','RELIANCE','—','₹ 1,200','+1.25%','—','▲','12:14:30','Unmatched'],
+ ]);
+ const output=h.nodes.get('rd-stock-table').innerHTML;
+ for(const label of ['Tracked stock','Price','Day %','Direction','Quote IST'])assert(output.includes('<th>'+label+'</th>'));
+ assert.match(output,/RELIANCE/);
+ assert.match(output,/12:14:30/);
+ assert.match(output,/Tracked market-wide quotes · unweighted ranking/);
+ assert.doesNotMatch(output,/<th>Weight %<\/th>|<th>Contribution<\/th>|<th>RAG<\/th>/);
+});
+
+test('live events project the four observed source columns only',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ h.source('os-events',['Time · IST','Index','Event','Verified observation'],[
+  ['12:14:30','NIFTY','ABOVE PDH','Spot 23,100 · exchange 12:14:30'],
+ ]);
+ const output=h.nodes.get('rd-event-table').innerHTML;
+ assert.match(output,/ABOVE PDH/);
+ assert.match(output,/Spot 23,100/);
+ assert.doesNotMatch(output,/<th>PCR<\/th>|<th>OI<\/th>|<th>RAG<\/th>|<th>Similar Event<\/th>/);
+});
+
+
+test('four focus chapters are reversible display filters over the same seven evidence tables',()=>{
+ const h=harness(),tabs=['MARKET','PREMIUM','POSITIONING','MEMORY','ALL'];
+ const source=h.nodes.get('rd-levels-table');
+ for(const tab of tabs){
+  h.nodes.get('rd-fit-tools').onclick({target:{closest:(selector:string)=>selector.startsWith('#rd-hub-tabs')?{dataset:{rdHub:tab}}:null}});
+  assert.equal(h.nodes.get('rd-page').dataset.rdHub,tab);
+  assert.equal(h.nodes.get('rd-levels-table'),source,'chapter changes must not replace source evidence nodes');
+ }
+ assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
+});
+
+test('read chapter is opt-in; All always resets to the known-good Fit page',()=>{
+ const h=harness(),tools=h.nodes.get('rd-fit-tools');
+ const send=(selector:string,value:string)=>tools.onclick({target:{closest:(query:string)=>query===selector?{dataset:selector.includes('rd-hub')?{rdHub:value}:{rdFit:value}}:null}});
+ send('#rd-hub-tabs [data-rd-hub]','MARKET');
+ send('[data-rd-fit]','READ');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'true');
+ assert.equal(h.nodes.get('rd-viewport').dataset.scale,'1');
+ send('#rd-hub-tabs [data-rd-hub]','ALL');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false');
+ assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
+ send('[data-rd-fit]','READ');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false','All cannot enter readable chapter mode');
 });

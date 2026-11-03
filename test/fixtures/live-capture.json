@@ -1,0 +1,348 @@
+{
+  "connected": true,
+  "source": "KITE_WEBSOCKET_FULL",
+  "serverTime": "2026-10-29T04:22:26.312Z",
+  "snapshot": {
+    "asOf": "2026-10-29T04:22:26.309Z",
+    "tradeDate": "2026-10-29",
+    "runtimeId": "0015f8a3-427b-4b65-86be-fe34bae92ee3",
+    "participation": [
+      {
+        "identity": {
+          "token": 341249,
+          "label": "HDFCBANK",
+          "role": "STOCK"
+        },
+        "price": 683.35,
+        "dayOpen": 681.2,
+        "dayHigh": 684,
+        "dayLow": 678.1,
+        "oi": 0,
+        "volume": 3238879,
+        "bid": 683.1,
+        "ask": 683.35,
+        "pdc": 685.3,
+        "changePct": -0.2845469137603862,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.693Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 738561,
+          "label": "RELIANCE",
+          "role": "STOCK"
+        },
+        "price": 1177.3,
+        "dayOpen": 1159,
+        "dayHigh": 1179.5,
+        "dayLow": 1155.6,
+        "oi": 0,
+        "volume": 2961374,
+        "bid": 1176.8,
+        "ask": 1177,
+        "pdc": 1158,
+        "changePct": 1.6666666666666607,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.944Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 1270529,
+          "label": "ICICIBANK",
+          "role": "STOCK"
+        },
+        "price": 1376.3,
+        "dayOpen": 1374,
+        "dayHigh": 1377,
+        "dayLow": 1367.5,
+        "oi": 0,
+        "volume": 929583,
+        "bid": 1376.3,
+        "ask": 1376.7,
+        "pdc": 1377.6,
+        "changePct": -0.09436701509871748,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:24.000Z",
+        "receivedAt": "2026-10-29T04:22:24.693Z",
+        "ageMs": 2309
+      },
+      {
+        "identity": {
+          "token": 408065,
+          "label": "INFY",
+          "role": "STOCK"
+        },
+        "price": 1131.95,
+        "dayOpen": 1130,
+        "dayHigh": 1139.65,
+        "dayLow": 1125.2,
+        "oi": 0,
+        "volume": 1739775,
+        "bid": 1131.6,
+        "ask": 1131.95,
+        "pdc": 1123.15,
+        "changePct": 0.7835106619774601,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.443Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 779521,
+          "label": "SBIN",
+          "role": "STOCK"
+        },
+        "price": 959.8,
+        "dayOpen": 956.8,
+        "dayHigh": 961.9,
+        "dayLow": 954.6,
+        "oi": 0,
+        "volume": 1338037,
+        "bid": 959.7,
+        "ask": 959.85,
+        "pdc": 956.8,
+        "changePct": 0.31354515050168175,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:23.000Z",
+        "receivedAt": "2026-10-29T04:22:23.443Z",
+        "ageMs": 3309
+      },
+      {
+        "identity": {
+          "token": 1510401,
+          "label": "AXISBANK",
+          "role": "STOCK"
+        },
+        "price": 1220.7,
+        "dayOpen": 1212,
+        "dayHigh": 1223.8,
+        "dayLow": 1210.5,
+        "oi": 0,
+        "volume": 360841,
+        "bid": 1220.7,
+        "ask": 1221,
+        "pdc": 1220,
+        "changePct": 0.05737704918034048,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:23.000Z",
+        "receivedAt": "2026-10-29T04:22:23.443Z",
+        "ageMs": 3309
+      },
+      {
+        "identity": {
+          "token": 492033,
+          "label": "KOTAKBANK",
+          "role": "STOCK"
+        },
+        "price": 446.7,
+        "dayOpen": 441.8,
+        "dayHigh": 447.2,
+        "dayLow": 439.25,
+        "oi": 0,
+        "volume": 2683134,
+        "bid": 446.75,
+        "ask": 446.8,
+        "pdc": 440,
+        "changePct": 1.5227272727272645,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:23.000Z",
+        "receivedAt": "2026-10-29T04:22:23.443Z",
+        "ageMs": 3309
+      },
+      {
+        "identity": {
+          "token": 2953217,
+          "label": "TCS",
+          "role": "STOCK"
+        },
+        "price": 2477.6,
+        "dayOpen": 2490,
+        "dayHigh": 2509.5,
+        "dayLow": 2471.5,
+        "oi": 0,
+        "volume": 825253,
+        "bid": 2476.7,
+        "ask": 2477,
+        "pdc": 2460,
+        "changePct": 0.715447154471538,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:23.000Z",
+        "receivedAt": "2026-10-29T04:22:23.443Z",
+        "ageMs": 3309
+      },
+      {
+        "identity": {
+          "token": 262921,
+          "label": "NIFTY PSU BANK",
+          "role": "SECTOR"
+        },
+        "price": 8192.6,
+        "dayOpen": 8131.05,
+        "dayHigh": 8211.5,
+        "dayLow": 8115.65,
+        "oi": null,
+        "volume": null,
+        "bid": null,
+        "ask": null,
+        "pdc": 8133.6,
+        "changePct": 0.7253860529162992,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.944Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 267017,
+          "label": "NIFTY SMLCAP 100",
+          "role": "SECTOR"
+        },
+        "price": 18706.55,
+        "dayOpen": 18663.15,
+        "dayHigh": 18726.65,
+        "dayLow": 18575.15,
+        "oi": null,
+        "volume": null,
+        "bid": null,
+        "ask": null,
+        "pdc": 18634.9,
+        "changePct": 0.3844936114494768,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.944Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 256777,
+          "label": "NIFTY MIDCAP 100",
+          "role": "SECTOR"
+        },
+        "price": 57433.75,
+        "dayOpen": 57340.25,
+        "dayHigh": 57538.7,
+        "dayLow": 57242.35,
+        "oi": null,
+        "volume": null,
+        "bid": null,
+        "ask": null,
+        "pdc": 57274.7,
+        "changePct": 0.27769678409490517,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.693Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 259849,
+          "label": "NIFTY IT",
+          "role": "SECTOR"
+        },
+        "price": 31729.7,
+        "dayOpen": 31756.65,
+        "dayHigh": 31982.9,
+        "dayLow": 31606.35,
+        "oi": null,
+        "volume": null,
+        "bid": null,
+        "ask": null,
+        "pdc": 31553.4,
+        "changePct": 0.5587353502316761,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.944Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 289033,
+          "label": "NIFTY OIL AND GAS",
+          "role": "SECTOR"
+        },
+        "price": 10343.5,
+        "dayOpen": 10279.1,
+        "dayHigh": 10352.35,
+        "dayLow": 10259.75,
+        "oi": null,
+        "volume": null,
+        "bid": null,
+        "ask": null,
+        "pdc": 10296.6,
+        "changePct": 0.45549016180097546,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.944Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 257801,
+          "label": "NIFTY FIN SERVICE",
+          "role": "SECTOR"
+        },
+        "price": 24480.85,
+        "dayOpen": 24373.25,
+        "dayHigh": 24493.2,
+        "dayLow": 24319.05,
+        "oi": null,
+        "volume": null,
+        "bid": null,
+        "ask": null,
+        "pdc": 24418.25,
+        "changePct": 0.2563656281674431,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:26.269Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 263433,
+          "label": "NIFTY AUTO",
+          "role": "SECTOR"
+        },
+        "price": 25617.4,
+        "dayOpen": 25738.3,
+        "dayHigh": 25744.55,
+        "dayLow": 25519.5,
+        "oi": null,
+        "volume": null,
+        "bid": null,
+        "ask": null,
+        "pdc": 25707.35,
+        "changePct": -0.3498999313425788,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.693Z",
+        "ageMs": 1309
+      },
+      {
+        "identity": {
+          "token": 261897,
+          "label": "NIFTY FMCG",
+          "role": "SECTOR"
+        },
+        "price": 43017.55,
+        "dayOpen": 42763.05,
+        "dayHigh": 43023.15,
+        "dayLow": 42758.7,
+        "oi": null,
+        "volume": null,
+        "bid": null,
+        "ask": null,
+        "pdc": 42878.35,
+        "changePct": 0.32463935762454543,
+        "state": "LIVE",
+        "observedAt": "2026-10-29T04:22:25.000Z",
+        "receivedAt": "2026-10-29T04:22:25.693Z",
+        "ageMs": 1309
+      }
+    ]
+  }
+}

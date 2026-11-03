@@ -1,0 +1,31 @@
+name: Recorded dashboard and multi-day replay
+on:
+  pull_request:
+    paths: ['unified-dashboard-replay.ts', 'oi-wall-replay.ts', 'scripts/unified-dashboard-replay-smoke.ts', 'market-book-view.ts', 'business-dashboard-v1-view.ts', 'dashboard-workspace-view.ts', 'one-shot-live-card.ts', 'premium-workspace-view.ts', 'screen-overview.ts', 'test/unified-dashboard-replay.test.ts', 'recorded-*.ts', 'scripts/optionpilot-service-supervisor.mjs', 'test/recorded-*.test.ts', 'test/runtime-supervisor.test.ts', '.github/workflows/recorded-dashboard-replay-ci.yml']
+permissions:
+  contents: read
+jobs:
+  recorded-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/unified-dashboard-replay.test.ts test/recorded-playback.test.ts test/recorded-dashboard-http.test.ts test/recorded-dashboard-view.test.ts test/recorded-replay-view.test.ts test/runtime-supervisor.test.ts test/runtime-operating-window.test.ts test/runtime-io-tracker.test.ts
+      - run: node scripts/optionpilot-guardrail-check.mjs
+
+  unified-replay-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm install --no-save --no-audit --no-fund playwright
+      - run: npx playwright install --with-deps chromium
+      - run: NODE_ENV=test node --import tsx scripts/unified-dashboard-replay-smoke.ts

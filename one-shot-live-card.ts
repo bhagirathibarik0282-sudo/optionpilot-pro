@@ -511,7 +511,8 @@ export function installOneShotLiveCard(api:any){
  };
 
  const update=(payload:any,force=false)=>{
-  const clock=new Date(Date.now());if($('op-terminal-date'))$('op-terminal-date').textContent=clock.toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric'});if($('op-terminal-time'))$('op-terminal-time').textContent=time(clock.toISOString());
+  const replayState=api.getState?.()?.replay;if(replayState?.active){payload=null;force=true;}
+  const clock=new Date(replayState?.at||Date.now());if($('op-terminal-date'))$('op-terminal-date').textContent=clock.toLocaleDateString('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'numeric'});if($('op-terminal-time'))$('op-terminal-time').textContent=time(clock.toISOString());
   $('os-reference-indices')?.querySelectorAll?.('[data-os-select]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.osSelect===selected)));
   const live=api.validEnvelope(payload),d=live?payload:null,key=live?d.snapshot.runtimeId+'|'+d.snapshot.tradeDate:'';last=payload;
   if(live&&paintedLive&&key===session&&!force&&Date.now()-lastPaint<500)return;lastPaint=Date.now();paintedLive=live;
@@ -531,7 +532,7 @@ export function installOneShotLiveCard(api:any){
    for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side)sample(selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side,Date.parse(q.observedAt),q.price);}
   }
   renderDte(d,optionRows);
-  const useRecorded=sourceMode==='RECORDED'||sourceMode==='AUTO'&&payload?.connectionState==='MARKET_CLOSED';
+  const useRecorded=!!replayState?.active||sourceMode==='RECORDED'||sourceMode==='AUTO'&&payload?.connectionState==='MARKET_CLOSED';
   const savedState=api.getState?.();
   if($('os-recorded-date')&&document.activeElement!==$('os-recorded-date')&&!loadBusy&&savedState?.date)$('os-recorded-date').value=savedState.date;
   write('os-reading-status',useRecorded?'RECORDED · '+esc(savedState?.date||'load a session')+(savedState?.loading?' · LOADING HISTORY':'')+' · radar / ladder / PCR / chart use saved observations. Other panels retain LIVE source gates.':live?'LIVE · fresh Kite observations · four-expiry workspace V2':'LIVE unavailable · '+esc(payload?.connectionState||'connecting')+' · choose Recorded for saved observations.');
@@ -579,6 +580,7 @@ export function installOneShotLiveCard(api:any){
   if($('os-stocks')?.open||!live)write('os-stock-ranks',rank(d,'STOCK'));
   if($('os-sectors')?.open||!live)write('os-sector-ranks',rank(d,'SECTOR'));
   if(useRecorded)renderRecorded();
+  if(replayState?.active)write('os-reading-status','REPLAY · '+esc(savedState?.date||'')+' · '+time(replayState.at)+' IST · all recorded views share this cursor');
   root.dataset.osSource=useRecorded?'RECORDED':'LIVE';
  };
  const showPreface=(show:boolean,focus=false)=>{

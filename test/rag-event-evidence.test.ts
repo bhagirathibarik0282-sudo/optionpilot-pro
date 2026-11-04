@@ -197,7 +197,7 @@ test('snapshot respects receipt cutoff and never interpolates absent 1/5m baseli
  for(const lookback of ['1','5']){const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',lookback}),fixture('2026-10-13'),fixture('2026-10-12'));assert.ok(r.ok);assert.equal(r.comparison.selectedChangePercent,null);assert.equal(r.comparison.oppositeChangePercent,null);assert.match(r.answer,/exact baseline ଅନୁପଲବ୍ଧ/);}
  const r=buildRagPremiumSnapshot(request({kind:'SNAPSHOT',asOf:'2026-10-13T09:36:00'}),fixture('2026-10-13'),fixture('2026-10-12'));assert.equal(r.ok,false);
  assert.equal(parseRagEventRequest({...query,kind:'SNAPSHOT',time:'09:15'}).ok,true);
- for(const q of [{kind:'ANY'},{lookback:'2'},{kind:'SNAPSHOT',time:'09:37'}])assert.equal(parseRagEventRequest({...query,...q}).ok,false);
+ for(const q of [{kind:'ANY'},{lookback:'2'}])assert.equal(parseRagEventRequest({...query,...q}).ok,false);
 });
 test('all-strike retrieval is bounded to selected date and requested lookback; default event path preserved',async()=>{
  const calls:any[]=[];const r=await readRagEventEvidence(request({kind:'SNAPSHOT',lookback:'75',time:'10:06'}),async q=>{calls.push(q);return fixture(q.tradeDate);});
@@ -269,4 +269,33 @@ test('RAG snapshot excludes later cross-expiry quotes from event-time direction 
  assert.deepEqual(r.multiDte?.accepted.map((x:any)=>x.expiry),['2026-10-13']);
  assert.equal(r.multiDte?.blocked.find((x:any)=>x.expiry==='2026-10-20')?.reason,'UNVERIFIED_OR_AFTER_CUTOFF');
  assert.equal(r.multiDte?.direction.agreement,'NOT_ESTABLISHED');
+});
+
+test('snapshot opens an exact recorded minute outside the event grid without implying a crossing',async()=>{
+ const parsed=parseRagEventRequest({...query,kind:'SNAPSHOT',time:'09:37',lookback:'1'});assert.ok(parsed.ok);
+ const current=fixture('2026-10-13'),bucket='2026-10-13T04:07:00.000Z',receipt='2026-10-13T04:07:24.000Z';
+ current.market!.push({...current.market![1],minute_bucket:bucket,backend_timestamp:receipt,snapshot_id:'minute-37'});
+ current.options!.push(...current.options!.filter(o=>o.minute_bucket==='2026-10-13T04:06:00.000Z').map(o=>({...o,minute_bucket:bucket,quote_timestamp:receipt,snapshot_id:'minute-37',ltp:o.option_type==='PE'?10:220})));
+ const read=async(r:any)=>readRagEventEvidence(r,async q=>q.tradeDate==='2026-10-13'?current:fixture('2026-10-12'));
+ const app=new Hono();mountRagEventEvidenceRoute(app,read);
+ const base=new URLSearchParams({...query,kind:'SNAPSHOT',time:'09:37',lookback:'1'});
+ const response=await app.request('/rag-event-evidence?'+base);assert.equal(response.status,200);const body=await response.json() as any;
+ assert.equal(body.mode,'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1');assert.equal(body.event.timeIst,'09:37');assert.equal(body.event.after,10);assert.deepEqual(body.event.flags,[]);
+ assert(Math.abs(body.premiumResponse.change.price+1.2)<1e-10);assert.equal(body.safety.writesPerformed,false);
+ for(const patch of [{time:'09:38'},{asOf:'2026-10-13T09:37:00'}]){const p=new URLSearchParams({...Object.fromEntries(base),...patch});const missing=await app.request('/rag-event-evidence?'+p);assert.equal(missing.status,422);assert.equal((await missing.json() as any).reason,'EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF');}
+ assert.equal(parseRagEventRequest({...query,time:'09:37',kind:'EVENT'}).ok,false);
+});
+
+test('production-recorded 14:31 minute replays exact prices and arithmetic with no previous-session reference',async()=>{
+ const actual=JSON.parse(readFileSync(new URL('./fixtures/rag-minute-access-production-20261104.json',import.meta.url),'utf8'));
+ const current=actual.replay as H1ReplayHttpResult;
+ const prior={ok:true,mode:'READ_ONLY_H1_3M_REPLAY',productionImpact:'NONE',request:{symbol:'NIFTY',tradeDate:'2026-11-03',fromTime:'09:15',toTime:'15:30',scope:'FULL'},market:[],options:[],chain:[]} as H1ReplayHttpResult;
+ const input={symbol:'NIFTY',date:'2026-11-04',expiry:'2026-11-09',strike:'23900',side:'CE',time:'14:31',kind:'SNAPSHOT',lookback:'3'};
+ const app=new Hono();mountRagEventEvidenceRoute(app,async r=>readRagEventEvidence(r,async q=>q.tradeDate===input.date?current:prior));
+ const response=await app.request('/rag-event-evidence?'+new URLSearchParams(input));assert.equal(response.status,200);const result=await response.json() as any;
+ assert.equal(result.event.after,162.65);assert.equal(result.reference,null);assert.equal(result.status,'PARTIAL');assert.equal(result.premiumResponse.status,'MEASURED');
+ assert.equal(result.premiumResponse.before.price,172.85);assert.equal(result.premiumResponse.current.price,162.65);
+ assert(Math.abs(result.premiumResponse.change.price-(-10.2))<1e-10);assert(Math.abs(result.comparison.selectedChangePercent-((162.65/172.85-1)*100))<1e-10);
+ assert.equal(result.beforeAndAt.at(-1).pair.pe.price,163.3);assert.deepEqual(result.event.flags,[]);
+ const blocked=await app.request('/rag-event-evidence?'+new URLSearchParams({...input,strike:'23950'}));assert.equal(blocked.status,422);assert.equal((await blocked.json() as any).reason,'EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF');
 });

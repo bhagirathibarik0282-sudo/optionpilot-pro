@@ -45,3 +45,18 @@ exchange AND receipt clocks still invalidate history; freshness, gaps, contract
 identity, runtime reset and PCR comparison gates remain intact. No timestamps
 are shifted and no baseline is interpolated. The follow-up adds positive and
 negative packet-clock regressions; all 196 related tests pass locally.
+
+## Transient transport reset root cause
+
+The live-view watchdog publishes a missing envelope after four seconds without
+an update. Acceptance encountered browser read timeouts and minute deltas remained
+unavailable even after the receipt-clock correction. The one-shot update path
+converted any missing envelope to an empty runtime key, then cleared all history.
+A regression reproducing intermittent missing frames failed before correction.
+
+A missing envelope still revokes all current values immediately. Valid historical
+points now survive that display-only outage until a new valid runtime/session
+identity proves a reset. Existing 35-second observation-gap resets, endpoint
+age/tolerance and exact contract checks remain. A replacement runtime still
+clears all history. This does not retain stale current values or bridge arbitrary
+long recording gaps. All 197 related tests pass, including revocation and reset.

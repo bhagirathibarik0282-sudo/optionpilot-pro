@@ -554,7 +554,7 @@ export function installOneShotLiveCard(api:any){
   $('os-reference-indices')?.querySelectorAll?.('[data-os-select]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.osSelect===selected)));
   const live=api.validEnvelope(payload),d=live?payload:null,key=live?d.snapshot.runtimeId+'|'+d.snapshot.tradeDate:'';last=payload;
   if(live&&paintedLive&&key===session&&!force&&Date.now()-lastPaint<500)return;lastPaint=Date.now();paintedLive=live;
-  if(key!==session){session=key;series.clear();conflicts.clear();pcrIds.clear();previous.clear();breaks.clear();events.length=0;pcr=null;}
+  if(live&&key!==session){session=key;series.clear();conflicts.clear();pcrIds.clear();previous.clear();breaks.clear();events.length=0;pcr=null;}
   pcr=api.derivePcr(d,pcr,Date.now());
   const groups=live&&Array.isArray(d.snapshot.atmExpiryLadder)?d.snapshot.atmExpiryLadder:[];
   const matching=groups.filter((g:any)=>g.symbol===selected),group=matching.length===1?matching[0]:null;

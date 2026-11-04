@@ -141,3 +141,9 @@ test('one-click evidence actions preserve the selected row and request future ou
  b.node('history').onclick();await new Promise(resolve=>setImmediate(resolve));assert.match(b.requests.at(-1)!,/rag-same-dte-history/);assert.equal(new URL(b.requests.at(-1)!,'https://example.test').searchParams.has('includeOutcomes'),false);
  b.node('now').onclick();await new Promise(resolve=>setImmediate(resolve));assert.match(b.requests.at(-1)!,/rag-event-evidence/);assert.equal(new URL(b.requests.at(-1)!,'https://example.test').searchParams.has('includeOutcomes'),false);
 });
+
+test('invalid native selection opens manual details and explains the window without requesting',()=>{
+ const b=browser(async()=>success());b.node('form').checkValidity=()=>false;let reported=false;b.node('form').reportValidity=()=>{reported=true;assert.equal(b.node('selection-details').open,true);};
+ b.events['optionpilot:rag-selection']({detail:{symbol:'NIFTY',date:'2026-11-04',expiry:'2026-11-09',strike:23900,side:'CE',time:'15:40'}});
+ assert.equal(reported,true);assert.equal(b.requests.length,0);assert.match(b.node('status').textContent,/09:15–15:30/);
+});

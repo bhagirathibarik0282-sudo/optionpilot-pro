@@ -14,5 +14,5 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/recorded-playback.test.ts test/recorded-dashboard-http.test.ts test/recorded-dashboard-view.test.ts test/recorded-replay-view.test.ts test/runtime-supervisor.test.ts test/runtime-operating-window.test.ts test/runtime-io-tracker.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/recorded-playback.test.ts test/recorded-dashboard-http.test.ts test/recorded-dashboard-view.test.ts test/recorded-sixty-point-finder.test.ts test/recorded-replay-view.test.ts test/runtime-supervisor.test.ts test/runtime-operating-window.test.ts test/runtime-io-tracker.test.ts
       - run: node scripts/optionpilot-guardrail-check.mjs

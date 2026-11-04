@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { installScreenOverview } from '../screen-overview.js';
+import { KEY_STOCKS } from '../dashboard-background-quotes.js';
 
-function harness() {
+function harness(width=1024) {
   let selected = 'NIFTY', price = '100', validation = 'TRUE', recordedAt = '2026-10-27T06:06:00Z';
   const nodes = new Map<string, any>();
   const node = (extra: any = {}) => ({ textContent: '', innerHTML: '', dataset: {}, style: {},
@@ -25,8 +26,9 @@ function harness() {
   }) }));
   nodes.set('mb-page', node({ querySelector: (selector: string) => selector.includes('Recorded notable events') ? events :
     selector.includes('Recorder memory and replay') ? memory : null }));
+  nodes.set('rd-shell',node({dataset:{stockScopes:JSON.stringify(KEY_STOCKS)}}));
   nodes.set('rd-page', node({ scrollHeight: 700 }));
-  nodes.set('rd-viewport', node({ clientWidth: 1024, clientHeight: 800 }));
+  nodes.set('rd-viewport', node({ clientWidth: width, clientHeight: 800 }));
   for (const id of ['rd-market-head','rd-market-levels','rd-market-metrics','rd-levels-table','rd-pcr-table',
     'rd-premium-table','rd-stock-table','rd-sector-table','rd-event-table','rd-memory-table','rd-context-rows',
     'rd-source','rd-fit-tools','rd-source-tables','rd-return','rd-settings','os-screen-close','os-screen-detail','os-screen-detail-body']) {
@@ -34,7 +36,7 @@ function harness() {
   }
   const context: any = { document: { getElementById: (id: string) => nodes.get(id),
     body: { dataset: {} }, createElement: () => node(), querySelectorAll: () => [], addEventListener() {} },
-    window: { addEventListener() {} }, MutationObserver: class { observe() {} },
+    window: { innerWidth:width,addEventListener() {} }, MutationObserver: class { observe() {} },
     __name: (fn: any) => fn, requestAnimationFrame: () => 1 };
   const installer = vm.runInNewContext(`(${installScreenOverview.toString()})`, context);
   const view = installer();
@@ -227,7 +229,7 @@ test('tracked participation rows do not pretend weights or index-point contribut
  for(const label of ['Tracked stock','Price','Day %','Direction','Quote IST'])assert(output.includes('<th>'+label+'</th>'));
  assert.match(output,/RELIANCE/);
  assert.match(output,/12:14:30/);
- assert.match(output,/Tracked market-wide quotes · unweighted ranking/);
+ assert.match(output,/Tracked watchlist quotes · unweighted ranking/);
  assert.doesNotMatch(output,/<th>Weight %<\/th>|<th>Contribution<\/th>|<th>RAG<\/th>/);
 });
 
@@ -266,4 +268,25 @@ test('read chapter is opt-in; All always resets to the known-good Fit page',()=>
  assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
  send('[data-rd-fit]','READ');
  assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false','All cannot enter readable chapter mode');
+});
+
+test('mobile opens a readable Market chapter and automatically reads each selected chapter at scale one',()=>{
+ const h=harness(390),page=h.nodes.get('rd-page'),vp=h.nodes.get('rd-viewport'),tools=h.nodes.get('rd-fit-tools');
+ assert.equal(page.dataset.rdHub,'MARKET');assert.equal(page.dataset.rdRead,'true');assert.equal(vp.dataset.scale,'1');
+ for(const chapter of ['PREMIUM','POSITIONING','MEMORY','ALL','MARKET']){
+  tools.onclick({target:{closest:(q:string)=>q==='#rd-hub-tabs [data-rd-hub]'?{dataset:{rdHub:chapter}}:null}});
+  assert.equal(page.dataset.rdHub,chapter);assert.equal(page.dataset.rdRead,String(chapter!=='ALL'));
+  if(chapter!=='ALL')assert.equal(vp.dataset.scale,'1');
+ }
+});
+
+test('BANKNIFTY positioning filters the existing watchlist before taking five; sectors stay market-wide',()=>{
+ const h=harness(),heads=['#','Stock','Weight %','Price','Day %','Contribution','Trend','Quote time · IST'];
+ h.source('os-stock-ranks',heads,['TCS','INFY','HDFCBANK','KOTAKBANK','SBIN','ICICIBANK','AXISBANK'].map((name,i)=>[String(i+1),name,'—','100','1%','—','▲','12:14:30']));
+ h.select('BANKNIFTY');const html=h.nodes.get('rd-stock-table').innerHTML;
+ for(const name of ['HDFCBANK','KOTAKBANK','SBIN','ICICIBANK','AXISBANK'])assert.match(html,new RegExp(name));
+ assert.doesNotMatch(html,/TCS|INFY/);assert.match(html,/BANKNIFTY watchlist/);assert.match(html,/5\/5/);
+ h.select('SENSEX');const next=h.nodes.get('rd-stock-table').innerHTML;
+ assert.match(next,/TCS/);assert.match(next,/INFY/);assert.doesNotMatch(next,/KOTAKBANK|SBIN|AXISBANK/);
+ assert.match(h.nodes.get('rd-sector-table').innerHTML,/Market-wide/);
 });

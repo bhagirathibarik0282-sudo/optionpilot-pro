@@ -33,6 +33,11 @@ try{
    assert.equal(await page.locator('#op-one-stop').getAttribute('data-os-source'),'RECORDED');
    await page.locator('#rd-source-tabs [data-rd-source="LIVE"]').click();
    assert.equal(await page.locator('#op-one-stop').getAttribute('data-os-source'),'LIVE');
+   if(width<=600){
+    assert.equal(await page.locator('#rd-page').getAttribute('data-rd-hub'),'MARKET',name+' opens a readable chapter automatically');
+    assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1');
+   }
+   await page.locator('#rd-hub-tabs [data-rd-hub="ALL"]').click();
    const screen=await page.evaluate(()=>{const page=document.getElementById('rd-page')!,viewport=document.getElementById('rd-viewport')!,p=page.getBoundingClientRect(),v=viewport.getBoundingClientRect();return {height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,page:{left:p.left,right:p.right,top:p.top,bottom:p.bottom},viewport:{left:v.left,right:v.right,top:v.top,bottom:v.bottom},sections:document.querySelectorAll('#rd-page .rd-section').length,probability:/probability/i.test(page.textContent||'')};});
    assert.equal(screen.sections,7,name+' must show all seven full table sections');
    // Optional focus chapters must not remove any of the seven original source-backed sections.
@@ -48,11 +53,17 @@ try{
     const visible=await page.locator('#rd-page .rd-section:visible').evaluateAll(nodes=>nodes.map(n=>n.id));
     assert.deepEqual(visible,[...sections],name+' focus chapter '+hub+' has exact source-backed panels');
     assert.equal(await page.locator('#rd-page .rd-section').count(),7,name+' focus must not delete evidence sections');
+    if(width<=600&&hub!=='ALL'){
+     assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1',name+' '+hub+' auto read scale');
+     assert.equal(await page.locator('#rd-page').getAttribute('data-rd-read'),'true');
+     const font=await page.locator('#rd-page .rd-section:visible th').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize));
+     assert(font>=13,name+' '+hub+' readable table font');
+     if(hub==='POSITIONING')await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-positioning-chapter.png',fullPage:false});
+    }
    }
    assert.equal(screen.probability,false,'the probability factor must be absent');
    if(width<=600){
     await page.locator('#rd-hub-tabs [data-rd-hub="MARKET"]').click();
-    await page.locator('[data-rd-fit="READ"]').click();
     const reading=await page.evaluate(()=>{
      const vp=document.getElementById('rd-viewport')!,page=document.getElementById('rd-page')!,table=document.getElementById('rd-levels-table')!;
      return {scale:vp.dataset.scale,mode:page.dataset.rdRead,pageWidth:page.getBoundingClientRect().width,viewportWidth:vp.clientWidth,
@@ -137,8 +148,10 @@ try{
    await page.evaluate(()=>{const restore=(window as any).__projectionRestore;for(const [id,html] of Object.entries(restore.html))document.getElementById(id)!.innerHTML=html as string;document.getElementById('op-one-stop')!.dataset.osSource=restore.source;delete (window as any).__projectionRestore;});
    await page.waitForFunction(()=>document.querySelectorAll('#rd-premium-table tbody tr').length!==8);
    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-reference-data-page.png',fullPage:false,timeout:15000});
-   await page.locator('[data-rd-fit="ACTUAL"]').click();assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1');
-   await page.locator('[data-rd-fit="PAGE"]').click();
+   if(width>600){
+    await page.locator('[data-rd-fit="ACTUAL"]').click();assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1');
+    await page.locator('[data-rd-fit="PAGE"]').click();
+   }
    const levels=await page.locator('#os-futures').elementHandle();
    await page.locator('[data-rd-open="os-futures"]').first().click();
    assert.equal(await page.locator('#os-screen-detail').evaluate((el:any)=>el.open),true);

@@ -1,0 +1,2695 @@
+{
+  "capturedAtUtc": "2026-11-04T11:47:58.917699+00:00",
+  "finalRevision": "d336592fbd832a49fb078f755c393020d407a5ca",
+  "finalTestedTree": "4d7c2535ec0c8196e98b5e1136ad38baacfb22ec",
+  "finalDeploymentId": "6cdfbe6d-5f6a-485a-bec7-b11113d27c6a",
+  "localTests": {
+    "total": 381,
+    "passed": 379,
+    "skippedOptionalHistoricalFixtures": 2,
+    "failed": 0
+  },
+  "firstWorkflowDeployment": {
+    "revision": "9bd58894fe76b2112ede2b39a551e76f4e386741",
+    "deploymentId": "de46eb53-4a19-4d22-900a-39eb5f5dc50a",
+    "capturedAtUtc": "2026-11-04T11:34:17.445230+00:00",
+    "reads": [
+      {
+        "label": "workerBefore",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/health",
+        "httpStatus": 200,
+        "elapsedSeconds": 8.126,
+        "sha256": "50c8fe0f42627918254a09fbf11b6b26d40b6f4e62a1b29132859109971f4b49",
+        "body": {
+          "ok": true,
+          "mode": "SUPERVISOR",
+          "tradingDate": "2026-11-04",
+          "scheduled": false,
+          "maintenance": false,
+          "shouldRun": false,
+          "running": false,
+          "ready": false,
+          "draining": false,
+          "hoursIST": "08:45\u201316:15",
+          "timezone": "Asia/Kolkata",
+          "supervisor": true,
+          "maintenanceUntil": null
+        }
+      },
+      {
+        "label": "dashboard",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/business-dashboard/view",
+        "httpStatus": 200,
+        "elapsedSeconds": 8.604,
+        "sha256": "f6da6769478c7d11fed49a05b734dcb70b08ffe3702fb0ae8326a1ec282ea62a",
+        "body": {
+          "projection": "Full HTML omitted; raw-response SHA256 retained. Production markers were asserted by the acceptance script."
+        }
+      },
+      {
+        "label": "exactSnapshot",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-event-evidence?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=23900&side=CE&time=14%3A31&kind=SNAPSHOT&lookback=3",
+        "httpStatus": 200,
+        "elapsedSeconds": 11.751,
+        "sha256": "c9fc266b7b6dfb7acbbba4b6c6a8dbc3bae31ed72b8dc414744312dc14c2443d",
+        "body": {
+          "ok": true,
+          "status": "PARTIAL",
+          "mode": "READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1",
+          "source": "EXISTING_POSTGRES_H1_REPLAY",
+          "safety": {
+            "readOnly": true,
+            "writesPerformed": false,
+            "affectsSelector": false,
+            "affectsVerdict": false,
+            "affectsTelegram": false,
+            "affectsExecution": false,
+            "createsOrders": false
+          },
+          "identity": {
+            "symbol": "NIFTY",
+            "date": "2026-11-04",
+            "expiry": "2026-11-09",
+            "strike": 23900,
+            "side": "CE",
+            "dte": 5
+          },
+          "event": {
+            "timeIst": "14:31",
+            "flags": [],
+            "before": 172.85,
+            "after": 162.65,
+            "availableAt": "2026-11-04T09:01:27.000Z"
+          },
+          "comparison": {
+            "lookbackMinutes": 3,
+            "selectedChangePercent": -5.901070292160826,
+            "oppositeSide": "PE",
+            "oppositeChangePercent": 6.871727748691092
+          },
+          "multiDte": {
+            "mode": "READ_ONLY_RAG_DTE_ALIGNMENT_V1",
+            "status": "PARTIAL",
+            "identity": {
+              "symbol": "NIFTY",
+              "date": "2026-11-04",
+              "strike": 23900,
+              "side": "CE",
+              "timeIst": "14:31"
+            },
+            "accepted": [
+              {
+                "expiry": "2026-11-09",
+                "dte": 5,
+                "price": 162.65,
+                "previousPrice": 172.85,
+                "changePercent": -5.901070292160826,
+                "quoteAt": "2026-11-04T09:01:27.000Z",
+                "receiptAt": "2026-11-04T09:01:27.000Z",
+                "snapshotId": "NIFTY-1793782887268-e60ad346"
+              },
+              {
+                "expiry": "2026-11-17",
+                "dte": 13,
+                "price": 250.05,
+                "previousPrice": 260.55,
+                "changePercent": -4.029936672423718,
+                "quoteAt": "2026-11-04T09:01:27.000Z",
+                "receiptAt": "2026-11-04T09:01:27.000Z",
+                "snapshotId": "NIFTY-1793782887268-e60ad346"
+              }
+            ],
+            "blocked": [
+              {
+                "expiry": "2026-11-23",
+                "reason": "UNVERIFIED_OR_AFTER_CUTOFF"
+              }
+            ],
+            "coverage": {
+              "observedExpiries": 3,
+              "verifiedExpiries": 2
+            },
+            "direction": {
+              "rising": 0,
+              "falling": 2,
+              "flat": 0,
+              "agreement": "ALL_VERIFIED_SAME_DIRECTION"
+            },
+            "limitations": [
+              "Only supplied verified snapshots; no database access or expiry discovery.",
+              "No interpolated prices, inferred missing DTE or causal/trading claims."
+            ],
+            "sourceStatus": "EXACT_REPLAY_READ"
+          },
+          "reference": null,
+          "referenceUnavailableReason": "PREVIOUS_REFERENCE_UNAVAILABLE",
+          "beforeOffsets": [
+            -30,
+            -15,
+            -6,
+            -3,
+            0
+          ],
+          "beforeAndAt": [
+            {
+              "offset": -30,
+              "timeIst": "14:01",
+              "bucketAt": "2026-11-04T08:31:00.000Z",
+              "receiptAt": "2026-11-04T08:31:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 156.55,
+                  "oi": 9313915,
+                  "quoteAt": "2026-11-04T08:31:28.000Z",
+                  "receiptAt": "2026-11-04T08:31:27.000Z",
+                  "snapshotId": "NIFTY-1793781087097-7f1fa3e9",
+                  "quoteAgeSeconds": -1,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 178.3,
+                  "oi": 6356090,
+                  "quoteAt": "2026-11-04T08:31:28.000Z",
+                  "receiptAt": "2026-11-04T08:31:27.000Z",
+                  "snapshotId": "NIFTY-1793781087097-7f1fa3e9",
+                  "quoteAgeSeconds": -1,
+                  "dayHigh": 355.45,
+                  "dayLow": 153.45,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23884.65,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.32,
+                "futures": 23925,
+                "futuresOi": 13774930,
+                "fullPcr": 0.979575418870738,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T08:31:27.097Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 11106940,
+                "peWallOi": 8141770,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 11106940,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:31:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 8141770,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:31:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            },
+            {
+              "offset": -15,
+              "timeIst": "14:16",
+              "bucketAt": "2026-11-04T08:46:00.000Z",
+              "receiptAt": "2026-11-04T08:46:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 159.25,
+                  "oi": 10091575,
+                  "quoteAt": "2026-11-04T08:46:27.000Z",
+                  "receiptAt": "2026-11-04T08:46:27.000Z",
+                  "snapshotId": "NIFTY-1793781987262-3e6241f7",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 170.7,
+                  "oi": 6195735,
+                  "quoteAt": "2026-11-04T08:46:27.000Z",
+                  "receiptAt": "2026-11-04T08:46:27.000Z",
+                  "snapshotId": "NIFTY-1793781987262-3e6241f7",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 355.45,
+                  "dayLow": 153.45,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23884.8,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.32,
+                "futures": 23932,
+                "futuresOi": 13722735,
+                "fullPcr": 0.9822636149213163,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T08:46:27.262Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 11137035,
+                "peWallOi": 8279505,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 11137035,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:46:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 8279505,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:46:26.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            },
+            {
+              "offset": -6,
+              "timeIst": "14:25",
+              "bucketAt": "2026-11-04T08:55:00.000Z",
+              "receiptAt": "2026-11-04T08:55:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 171.4,
+                  "oi": 10096905,
+                  "quoteAt": "2026-11-04T08:55:27.000Z",
+                  "receiptAt": "2026-11-04T08:55:27.000Z",
+                  "snapshotId": "NIFTY-1793782527275-d81044e6",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 153.55,
+                  "oi": 6324565,
+                  "quoteAt": "2026-11-04T08:55:27.000Z",
+                  "receiptAt": "2026-11-04T08:55:27.000Z",
+                  "snapshotId": "NIFTY-1793782527275-d81044e6",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 355.45,
+                  "dayLow": 149.3,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23908.55,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.22,
+                "futures": 23965,
+                "futuresOi": 13736060,
+                "fullPcr": 0.9809726867859855,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T08:55:27.275Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 11051950,
+                "peWallOi": 8034715,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 11051950,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:55:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 8034715,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:55:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            },
+            {
+              "offset": -3,
+              "timeIst": "14:28",
+              "bucketAt": "2026-11-04T08:58:00.000Z",
+              "receiptAt": "2026-11-04T08:58:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 172.85,
+                  "oi": 10152220,
+                  "quoteAt": "2026-11-04T08:58:27.000Z",
+                  "receiptAt": "2026-11-04T08:58:27.000Z",
+                  "snapshotId": "NIFTY-1793782707262-2dab5369",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 152.8,
+                  "oi": 6479590,
+                  "quoteAt": "2026-11-04T08:58:27.000Z",
+                  "receiptAt": "2026-11-04T08:58:27.000Z",
+                  "snapshotId": "NIFTY-1793782707262-2dab5369",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 355.45,
+                  "dayLow": 149.3,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23909.65,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.25,
+                "futures": 23961,
+                "futuresOi": 13733005,
+                "fullPcr": 0.9788513486810985,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T08:58:27.262Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 11048180,
+                "peWallOi": 7965035,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 11048180,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:58:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 7965035,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:58:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            },
+            {
+              "offset": 0,
+              "timeIst": "14:31",
+              "bucketAt": "2026-11-04T09:01:00.000Z",
+              "receiptAt": "2026-11-04T09:01:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 162.65,
+                  "oi": 9978930,
+                  "quoteAt": "2026-11-04T09:01:27.000Z",
+                  "receiptAt": "2026-11-04T09:01:27.000Z",
+                  "snapshotId": "NIFTY-1793782887268-e60ad346",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 163.3,
+                  "oi": 6626880,
+                  "quoteAt": "2026-11-04T09:01:27.000Z",
+                  "receiptAt": "2026-11-04T09:01:27.000Z",
+                  "snapshotId": "NIFTY-1793782887268-e60ad346",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 355.45,
+                  "dayLow": 149.3,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23896.55,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.26,
+                "futures": 23935.4,
+                "futuresOi": 13736255,
+                "fullPcr": 0.9916999792781138,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T09:01:27.268Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 10825750,
+                "peWallOi": 7954635,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 10825750,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T09:01:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 7954635,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T09:01:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            }
+          ],
+          "outcomes": [],
+          "premiumResponse": {
+            "version": "RECORDED_PREMIUM_RESPONSE_V1",
+            "identity": {
+              "symbol": "NIFTY",
+              "date": "2026-11-04",
+              "expiry": "2026-11-09",
+              "strike": 23900,
+              "side": "CE"
+            },
+            "lookbackMinutes": 3,
+            "clock": {
+              "calendarDte": 5,
+              "expiryAt": null,
+              "minutesToExpiry": null,
+              "reason": "EXPIRY_TIMESTAMP_NOT_RECORDED"
+            },
+            "safety": {
+              "readOnly": true,
+              "affectsSelector": false,
+              "affectsVerdict": false,
+              "affectsTelegram": false,
+              "affectsExecution": false
+            },
+            "sources": [
+              {
+                "id": "OIC_OPTIONS_PRICING",
+                "url": "https://prd-web.optionseducation.org/optionsoverview/options-pricing",
+                "use": "Spot intrinsic proxy and premium remainder; no attribution to time decay."
+              },
+              {
+                "id": "OIC_DELTA",
+                "url": "https://prd-web.optionseducation.org/advancedconcepts/delta",
+                "use": "Observed premium/spot ratio is not theoretical Delta."
+              },
+              {
+                "id": "KITE_QUOTE_TIMES",
+                "url": "https://kite.trade/docs/connect/v3/market-quotes/",
+                "use": "Keep quote, bucket and receipt times distinct; archived quote timestamp semantics remain unverified."
+              }
+            ],
+            "modelAttribution": {
+              "status": "UNAVAILABLE",
+              "reason": "VERIFIED_GREEK_MODEL_AND_UNITS_NOT_ESTABLISHED"
+            },
+            "semantics": "Measured exact endpoints. Spot intrinsic is an arithmetic proxy; the remainder is not isolated Theta or IV.",
+            "status": "MEASURED",
+            "reason": null,
+            "before": {
+              "bucketAt": "2026-11-04T08:58:00.000Z",
+              "quoteAt": "2026-11-04T08:58:27.000Z",
+              "receiptAt": "2026-11-04T08:58:27.000Z",
+              "availableAt": "2026-11-04T08:58:27.000Z",
+              "snapshotId": "NIFTY-1793782707262-2dab5369",
+              "quoteAgeSeconds": 0,
+              "optionCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+              "marketCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+              "price": 172.85,
+              "spot": 23909.65,
+              "oi": 10152220,
+              "spotBasis": "RECORDED_SAME_SNAPSHOT; SPOT_TRADE_FRESHNESS_UNVERIFIED",
+              "spotExchangeAt": null,
+              "spotIntrinsicProxy": 9.650000000001455,
+              "spotRemainder": 163.19999999999854,
+              "remainderStatus": "ARITHMETIC_PROXY",
+              "liquidity": {
+                "bid": 172.9,
+                "ask": 173.35,
+                "spread": 0.44999999999998863,
+                "status": "RECORDED_TWO_SIDED_QUOTE",
+                "executionPriceVerified": false
+              }
+            },
+            "current": {
+              "bucketAt": "2026-11-04T09:01:00.000Z",
+              "quoteAt": "2026-11-04T09:01:27.000Z",
+              "receiptAt": "2026-11-04T09:01:27.000Z",
+              "availableAt": "2026-11-04T09:01:27.000Z",
+              "snapshotId": "NIFTY-1793782887268-e60ad346",
+              "quoteAgeSeconds": 0,
+              "optionCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+              "marketCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+              "price": 162.65,
+              "spot": 23896.55,
+              "oi": 9978930,
+              "spotBasis": "RECORDED_SAME_SNAPSHOT; SPOT_TRADE_FRESHNESS_UNVERIFIED",
+              "spotExchangeAt": null,
+              "spotIntrinsicProxy": 0,
+              "spotRemainder": 162.65,
+              "remainderStatus": "ARITHMETIC_PROXY",
+              "liquidity": {
+                "bid": 162.55,
+                "ask": 163,
+                "spread": 0.44999999999998863,
+                "status": "RECORDED_TWO_SIDED_QUOTE",
+                "executionPriceVerified": false
+              }
+            },
+            "change": {
+              "price": -10.199999999999989,
+              "pricePercent": -5.901070292160826,
+              "spot": -13.100000000002183,
+              "spotPercent": -0.05478959332320708,
+              "spotIntrinsicProxy": -9.650000000001455,
+              "spotRemainder": -0.5499999999985334,
+              "oi": -173290,
+              "observedPremiumPerSpotPoint": 0.7786259541983427
+            },
+            "endpointReasons": {
+              "before": null,
+              "current": null
+            },
+            "evidenceSha256": "b5001a42665869fb30b7ff519f600b88340101a87075cba7132c4c0d8a5751ff"
+          },
+          "cutoff": null,
+          "coverage": {
+            "current": {
+              "cadenceMinutes": 1,
+              "expectedBuckets": 31,
+              "observedMarkerBuckets": 31,
+              "missingBuckets": [],
+              "firstObserved": "2026-11-04T08:31:00.000Z",
+              "lastObserved": "2026-11-04T09:01:00.000Z",
+              "coveragePct": 100,
+              "complete": true,
+              "truthCounts": {
+                "TRUE": 31
+              },
+              "canonicalArchiveBuckets": 31,
+              "canonicalCoveragePct": 100,
+              "allParameterArchiveSemantics": "FULL_RUNTIME_INDEX_METRICS_JSONB"
+            },
+            "previous": {
+              "cadenceMinutes": 1,
+              "expectedBuckets": 376,
+              "observedMarkerBuckets": 19,
+              "missingBuckets": [
+                "2026-11-03T03:45:00.000Z",
+                "2026-11-03T04:05:00.000Z",
+                "2026-11-03T04:06:00.000Z",
+                "2026-11-03T04:07:00.000Z",
+                "2026-11-03T04:08:00.000Z",
+                "2026-11-03T04:09:00.000Z",
+                "2026-11-03T04:10:00.000Z",
+                "2026-11-03T04:11:00.000Z",
+                "2026-11-03T04:12:00.000Z",
+                "2026-11-03T04:13:00.000Z",
+                "2026-11-03T04:14:00.000Z",
+                "2026-11-03T04:15:00.000Z",
+                "2026-11-03T04:16:00.000Z",
+                "2026-11-03T04:17:00.000Z",
+                "2026-11-03T04:18:00.000Z",
+                "2026-11-03T04:19:00.000Z",
+                "2026-11-03T04:20:00.000Z",
+                "2026-11-03T04:21:00.000Z",
+                "2026-11-03T04:22:00.000Z",
+                "2026-11-03T04:23:00.000Z",
+                "2026-11-03T04:24:00.000Z",
+                "2026-11-03T04:25:00.000Z",
+                "2026-11-03T04:26:00.000Z",
+                "2026-11-03T04:27:00.000Z",
+                "2026-11-03T04:28:00.000Z",
+                "2026-11-03T04:29:00.000Z",
+                "2026-11-03T04:30:00.000Z",
+                "2026-11-03T04:31:00.000Z",
+                "2026-11-03T04:32:00.000Z",
+                "2026-11-03T04:33:00.000Z",
+                "2026-11-03T04:34:00.000Z",
+                "2026-11-03T04:35:00.000Z",
+                "2026-11-03T04:36:00.000Z",
+                "2026-11-03T04:37:00.000Z",
+                "2026-11-03T04:38:00.000Z",
+                "2026-11-03T04:39:00.000Z",
+                "2026-11-03T04:40:00.000Z",
+                "2026-11-03T04:41:00.000Z",
+                "2026-11-03T04:42:00.000Z",
+                "2026-11-03T04:43:00.000Z",
+                "2026-11-03T04:44:00.000Z",
+                "2026-11-03T04:45:00.000Z",
+                "2026-11-03T04:46:00.000Z",
+                "2026-11-03T04:47:00.000Z",
+                "2026-11-03T04:48:00.000Z",
+                "2026-11-03T04:49:00.000Z",
+                "2026-11-03T04:50:00.000Z",
+                "2026-11-03T04:51:00.000Z",
+                "2026-11-03T04:52:00.000Z",
+                "2026-11-03T04:53:00.000Z",
+                "2026-11-03T04:54:00.000Z",
+                "2026-11-03T04:55:00.000Z",
+                "2026-11-03T04:56:00.000Z",
+                "2026-11-03T04:57:00.000Z",
+                "2026-11-03T04:58:00.000Z",
+                "2026-11-03T04:59:00.000Z",
+                "2026-11-03T05:00:00.000Z",
+                "2026-11-03T05:01:00.000Z",
+                "2026-11-03T05:02:00.000Z",
+                "2026-11-03T05:03:00.000Z",
+                "2026-11-03T05:04:00.000Z",
+                "2026-11-03T05:05:00.000Z",
+                "2026-11-03T05:06:00.000Z",
+                "2026-11-03T05:07:00.000Z",
+                "2026-11-03T05:08:00.000Z",
+                "2026-11-03T05:09:00.000Z",
+                "2026-11-03T05:10:00.000Z",
+                "2026-11-03T05:11:00.000Z",
+                "2026-11-03T05:12:00.000Z",
+                "2026-11-03T05:13:00.000Z",
+                "2026-11-03T05:14:00.000Z",
+                "2026-11-03T05:15:00.000Z",
+                "2026-11-03T05:16:00.000Z",
+                "2026-11-03T05:17:00.000Z",
+                "2026-11-03T05:18:00.000Z",
+                "2026-11-03T05:19:00.000Z",
+                "2026-11-03T05:20:00.000Z",
+                "2026-11-03T05:21:00.000Z",
+                "2026-11-03T05:22:00.000Z",
+                "2026-11-03T05:23:00.000Z",
+                "2026-11-03T05:24:00.000Z",
+                "2026-11-03T05:25:00.000Z",
+                "2026-11-03T05:26:00.000Z",
+                "2026-11-03T05:27:00.000Z",
+                "2026-11-03T05:28:00.000Z",
+                "2026-11-03T05:29:00.000Z",
+                "2026-11-03T05:30:00.000Z",
+                "2026-11-03T05:31:00.000Z",
+                "2026-11-03T05:32:00.000Z",
+                "2026-11-03T05:33:00.000Z",
+                "2026-11-03T05:34:00.000Z",
+                "2026-11-03T05:35:00.000Z",
+                "2026-11-03T05:36:00.000Z",
+                "2026-11-03T05:37:00.000Z",
+                "2026-11-03T05:38:00.000Z",
+                "2026-11-03T05:39:00.000Z",
+                "2026-11-03T05:40:00.000Z",
+                "2026-11-03T05:41:00.000Z",
+                "2026-11-03T05:42:00.000Z",
+                "2026-11-03T05:43:00.000Z",
+                "2026-11-03T05:44:00.000Z",
+                "2026-11-03T05:45:00.000Z",
+                "2026-11-03T05:46:00.000Z",
+                "2026-11-03T05:47:00.000Z",
+                "2026-11-03T05:48:00.000Z",
+                "2026-11-03T05:49:00.000Z",
+                "2026-11-03T05:50:00.000Z",
+                "2026-11-03T05:51:00.000Z",
+                "2026-11-03T05:52:00.000Z",
+                "2026-11-03T05:53:00.000Z",
+                "2026-11-03T05:54:00.000Z",
+                "2026-11-03T05:55:00.000Z",
+                "2026-11-03T05:56:00.000Z",
+                "2026-11-03T05:57:00.000Z",
+                "2026-11-03T05:58:00.000Z",
+                "2026-11-03T05:59:00.000Z",
+                "2026-11-03T06:00:00.000Z",
+                "2026-11-03T06:01:00.000Z",
+                "2026-11-03T06:02:00.000Z",
+                "2026-11-03T06:03:00.000Z",
+                "2026-11-03T06:04:00.000Z",
+                "2026-11-03T06:05:00.000Z",
+                "2026-11-03T06:06:00.000Z",
+                "2026-11-03T06:07:00.000Z",
+                "2026-11-03T06:08:00.000Z",
+                "2026-11-03T06:09:00.000Z",
+                "2026-11-03T06:10:00.000Z",
+                "2026-11-03T06:11:00.000Z",
+                "2026-11-03T06:12:00.000Z",
+                "2026-11-03T06:13:00.000Z",
+                "2026-11-03T06:14:00.000Z",
+                "2026-11-03T06:15:00.000Z",
+                "2026-11-03T06:16:00.000Z",
+                "2026-11-03T06:17:00.000Z",
+                "2026-11-03T06:18:00.000Z",
+                "2026-11-03T06:19:00.000Z",
+                "2026-11-03T06:20:00.000Z",
+                "2026-11-03T06:21:00.000Z",
+                "2026-11-03T06:22:00.000Z",
+                "2026-11-03T06:23:00.000Z",
+                "2026-11-03T06:24:00.000Z",
+                "2026-11-03T06:25:00.000Z",
+                "2026-11-03T06:26:00.000Z",
+                "2026-11-03T06:27:00.000Z",
+                "2026-11-03T06:28:00.000Z",
+                "2026-11-03T06:29:00.000Z",
+                "2026-11-03T06:30:00.000Z",
+                "2026-11-03T06:31:00.000Z",
+                "2026-11-03T06:32:00.000Z",
+                "2026-11-03T06:33:00.000Z",
+                "2026-11-03T06:34:00.000Z",
+                "2026-11-03T06:35:00.000Z",
+                "2026-11-03T06:36:00.000Z",
+                "2026-11-03T06:37:00.000Z",
+                "2026-11-03T06:38:00.000Z",
+                "2026-11-03T06:39:00.000Z",
+                "2026-11-03T06:40:00.000Z",
+                "2026-11-03T06:41:00.000Z",
+                "2026-11-03T06:42:00.000Z",
+                "2026-11-03T06:43:00.000Z",
+                "2026-11-03T06:44:00.000Z",
+                "2026-11-03T06:45:00.000Z",
+                "2026-11-03T06:46:00.000Z",
+                "2026-11-03T06:47:00.000Z",
+                "2026-11-03T06:48:00.000Z",
+                "2026-11-03T06:49:00.000Z",
+                "2026-11-03T06:50:00.000Z",
+                "2026-11-03T06:51:00.000Z",
+                "2026-11-03T06:52:00.000Z",
+                "2026-11-03T06:53:00.000Z",
+                "2026-11-03T06:54:00.000Z",
+                "2026-11-03T06:55:00.000Z",
+                "2026-11-03T06:56:00.000Z",
+                "2026-11-03T06:57:00.000Z",
+                "2026-11-03T06:58:00.000Z",
+                "2026-11-03T06:59:00.000Z",
+                "2026-11-03T07:00:00.000Z",
+                "2026-11-03T07:01:00.000Z",
+                "2026-11-03T07:02:00.000Z",
+                "2026-11-03T07:03:00.000Z",
+                "2026-11-03T07:04:00.000Z",
+                "2026-11-03T07:05:00.000Z",
+                "2026-11-03T07:06:00.000Z",
+                "2026-11-03T07:07:00.000Z",
+                "2026-11-03T07:08:00.000Z",
+                "2026-11-03T07:09:00.000Z",
+                "2026-11-03T07:10:00.000Z",
+                "2026-11-03T07:11:00.000Z",
+                "2026-11-03T07:12:00.000Z",
+                "2026-11-03T07:13:00.000Z",
+                "2026-11-03T07:14:00.000Z",
+                "2026-11-03T07:15:00.000Z",
+                "2026-11-03T07:16:00.000Z",
+                "2026-11-03T07:17:00.000Z",
+                "2026-11-03T07:18:00.000Z",
+                "2026-11-03T07:19:00.000Z",
+                "2026-11-03T07:20:00.000Z",
+                "2026-11-03T07:21:00.000Z",
+                "2026-11-03T07:22:00.000Z",
+                "2026-11-03T07:23:00.000Z",
+                "2026-11-03T07:24:00.000Z",
+                "2026-11-03T07:25:00.000Z",
+                "2026-11-03T07:26:00.000Z",
+                "2026-11-03T07:27:00.000Z",
+                "2026-11-03T07:28:00.000Z",
+                "2026-11-03T07:29:00.000Z",
+                "2026-11-03T07:30:00.000Z",
+                "2026-11-03T07:31:00.000Z",
+                "2026-11-03T07:32:00.000Z",
+                "2026-11-03T07:33:00.000Z",
+                "2026-11-03T07:34:00.000Z",
+                "2026-11-03T07:35:00.000Z",
+                "2026-11-03T07:36:00.000Z",
+                "2026-11-03T07:37:00.000Z",
+                "2026-11-03T07:38:00.000Z",
+                "2026-11-03T07:39:00.000Z",
+                "2026-11-03T07:40:00.000Z",
+                "2026-11-03T07:41:00.000Z",
+                "2026-11-03T07:42:00.000Z",
+                "2026-11-03T07:43:00.000Z",
+                "2026-11-03T07:44:00.000Z",
+                "2026-11-03T07:45:00.000Z",
+                "2026-11-03T07:46:00.000Z",
+                "2026-11-03T07:47:00.000Z",
+                "2026-11-03T07:48:00.000Z",
+                "2026-11-03T07:49:00.000Z",
+                "2026-11-03T07:50:00.000Z",
+                "2026-11-03T07:51:00.000Z",
+                "2026-11-03T07:52:00.000Z",
+                "2026-11-03T07:53:00.000Z",
+                "2026-11-03T07:54:00.000Z",
+                "2026-11-03T07:55:00.000Z",
+                "2026-11-03T07:56:00.000Z",
+                "2026-11-03T07:57:00.000Z",
+                "2026-11-03T07:58:00.000Z",
+                "2026-11-03T07:59:00.000Z",
+                "2026-11-03T08:00:00.000Z",
+                "2026-11-03T08:01:00.000Z",
+                "2026-11-03T08:02:00.000Z",
+                "2026-11-03T08:03:00.000Z",
+                "2026-11-03T08:04:00.000Z",
+                "2026-11-03T08:05:00.000Z",
+                "2026-11-03T08:06:00.000Z",
+                "2026-11-03T08:07:00.000Z",
+                "2026-11-03T08:08:00.000Z",
+                "2026-11-03T08:09:00.000Z",
+                "2026-11-03T08:10:00.000Z",
+                "2026-11-03T08:11:00.000Z",
+                "2026-11-03T08:12:00.000Z",
+                "2026-11-03T08:13:00.000Z",
+                "2026-11-03T08:14:00.000Z",
+                "2026-11-03T08:15:00.000Z",
+                "2026-11-03T08:16:00.000Z",
+                "2026-11-03T08:17:00.000Z",
+                "2026-11-03T08:18:00.000Z",
+                "2026-11-03T08:19:00.000Z",
+                "2026-11-03T08:20:00.000Z",
+                "2026-11-03T08:21:00.000Z",
+                "2026-11-03T08:22:00.000Z",
+                "2026-11-03T08:23:00.000Z",
+                "2026-11-03T08:24:00.000Z",
+                "2026-11-03T08:25:00.000Z",
+                "2026-11-03T08:26:00.000Z",
+                "2026-11-03T08:27:00.000Z",
+                "2026-11-03T08:28:00.000Z",
+                "2026-11-03T08:29:00.000Z",
+                "2026-11-03T08:30:00.000Z",
+                "2026-11-03T08:31:00.000Z",
+                "2026-11-03T08:32:00.000Z",
+                "2026-11-03T08:33:00.000Z",
+                "2026-11-03T08:34:00.000Z",
+                "2026-11-03T08:35:00.000Z",
+                "2026-11-03T08:36:00.000Z",
+                "2026-11-03T08:37:00.000Z",
+                "2026-11-03T08:38:00.000Z",
+                "2026-11-03T08:39:00.000Z",
+                "2026-11-03T08:40:00.000Z",
+                "2026-11-03T08:41:00.000Z",
+                "2026-11-03T08:42:00.000Z",
+                "2026-11-03T08:43:00.000Z",
+                "2026-11-03T08:44:00.000Z",
+                "2026-11-03T08:45:00.000Z",
+                "2026-11-03T08:46:00.000Z",
+                "2026-11-03T08:47:00.000Z",
+                "2026-11-03T08:48:00.000Z",
+                "2026-11-03T08:49:00.000Z",
+                "2026-11-03T08:50:00.000Z",
+                "2026-11-03T08:51:00.000Z",
+                "2026-11-03T08:52:00.000Z",
+                "2026-11-03T08:53:00.000Z",
+                "2026-11-03T08:54:00.000Z",
+                "2026-11-03T08:55:00.000Z",
+                "2026-11-03T08:56:00.000Z",
+                "2026-11-03T08:57:00.000Z",
+                "2026-11-03T08:58:00.000Z",
+                "2026-11-03T08:59:00.000Z",
+                "2026-11-03T09:00:00.000Z",
+                "2026-11-03T09:01:00.000Z",
+                "2026-11-03T09:02:00.000Z",
+                "2026-11-03T09:03:00.000Z",
+                "2026-11-03T09:04:00.000Z",
+                "2026-11-03T09:05:00.000Z",
+                "2026-11-03T09:06:00.000Z",
+                "2026-11-03T09:07:00.000Z",
+                "2026-11-03T09:08:00.000Z",
+                "2026-11-03T09:09:00.000Z",
+                "2026-11-03T09:10:00.000Z",
+                "2026-11-03T09:11:00.000Z",
+                "2026-11-03T09:12:00.000Z",
+                "2026-11-03T09:13:00.000Z",
+                "2026-11-03T09:14:00.000Z",
+                "2026-11-03T09:15:00.000Z",
+                "2026-11-03T09:16:00.000Z",
+                "2026-11-03T09:17:00.000Z",
+                "2026-11-03T09:18:00.000Z",
+                "2026-11-03T09:19:00.000Z",
+                "2026-11-03T09:20:00.000Z",
+                "2026-11-03T09:21:00.000Z",
+                "2026-11-03T09:22:00.000Z",
+                "2026-11-03T09:23:00.000Z",
+                "2026-11-03T09:24:00.000Z",
+                "2026-11-03T09:25:00.000Z",
+                "2026-11-03T09:26:00.000Z",
+                "2026-11-03T09:27:00.000Z",
+                "2026-11-03T09:28:00.000Z",
+                "2026-11-03T09:29:00.000Z",
+                "2026-11-03T09:30:00.000Z",
+                "2026-11-03T09:31:00.000Z",
+                "2026-11-03T09:32:00.000Z",
+                "2026-11-03T09:33:00.000Z",
+                "2026-11-03T09:34:00.000Z",
+                "2026-11-03T09:35:00.000Z",
+                "2026-11-03T09:36:00.000Z",
+                "2026-11-03T09:37:00.000Z",
+                "2026-11-03T09:38:00.000Z",
+                "2026-11-03T09:39:00.000Z",
+                "2026-11-03T09:40:00.000Z",
+                "2026-11-03T09:41:00.000Z",
+                "2026-11-03T09:42:00.000Z",
+                "2026-11-03T09:43:00.000Z",
+                "2026-11-03T09:44:00.000Z",
+                "2026-11-03T09:45:00.000Z",
+                "2026-11-03T09:46:00.000Z",
+                "2026-11-03T09:47:00.000Z",
+                "2026-11-03T09:48:00.000Z",
+                "2026-11-03T09:49:00.000Z",
+                "2026-11-03T09:50:00.000Z",
+                "2026-11-03T09:51:00.000Z",
+                "2026-11-03T09:52:00.000Z",
+                "2026-11-03T09:53:00.000Z",
+                "2026-11-03T09:54:00.000Z",
+                "2026-11-03T09:55:00.000Z",
+                "2026-11-03T09:56:00.000Z",
+                "2026-11-03T09:57:00.000Z",
+                "2026-11-03T09:58:00.000Z",
+                "2026-11-03T09:59:00.000Z",
+                "2026-11-03T10:00:00.000Z"
+              ],
+              "firstObserved": "2026-11-03T03:46:00.000Z",
+              "lastObserved": "2026-11-03T04:04:00.000Z",
+              "coveragePct": 5.053191489361701,
+              "complete": false,
+              "truthCounts": {
+                "TRUE": 19
+              },
+              "canonicalArchiveBuckets": 19,
+              "canonicalCoveragePct": 5.053191489361701,
+              "allParameterArchiveSemantics": "FULL_RUNTIME_INDEX_METRICS_JSONB"
+            }
+          },
+          "provenance": {
+            "selectedEvidenceSha256": "24390740f68b252fdff587e5bc44470c99f78ec77e8311cf4c6a250574935e40",
+            "digestSemantics": "SELECTED_NORMALIZED_EVIDENCE_NOT_RAW_HTTP_BYTES",
+            "snapshotIds": [
+              "NIFTY-1793781087097-7f1fa3e9",
+              "NIFTY-1793781987262-3e6241f7",
+              "NIFTY-1793782527275-d81044e6",
+              "NIFTY-1793782707262-2dab5369",
+              "NIFTY-1793782887268-e60ad346"
+            ]
+          },
+          "answer": "2026-11-04 NIFTY 23900 \u00b7 expiry 2026-11-09 \u00b7 14:31 IST: CE \u20b9162.65; 3m \u20b9172.85 \u2192 \u20b9162.65 (-5.90%)\u0964 Opposite PE \u20b9163.30; 3m \u20b9152.80 \u2192 \u20b9163.30 (+6.87%)\u0964 Previous-session PDH/PDL reference \u0b05\u0b28\u0b41\u0b2a\u0b32\u0b2c\u0b4d\u0b27\u0964 Full PCR 0.9917\u0964",
+          "limitations": [
+            "Structured retrieval and deterministic answer; no embeddings or LLM call.",
+            "Snapshot describes recorded endpoints; no crossing or causality claim.",
+            "Missing endpoints remain unavailable; no interpolated 1/5-minute response."
+          ]
+        }
+      },
+      {
+        "label": "exactHistory",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-same-dte-history?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=23900&side=CE&time=14%3A31",
+        "httpStatus": 200,
+        "elapsedSeconds": 25.461,
+        "sha256": "9cbbbc1e8ce186bbee998b02f1f63f5082529031bb4b94505fe2d16646473f00",
+        "body": {
+          "mode": "READ_ONLY_SAME_DTE_HISTORY_V1",
+          "safety": {
+            "readOnly": true,
+            "writesPerformed": false,
+            "affectsSelector": false,
+            "affectsVerdict": false,
+            "affectsTelegram": false,
+            "affectsExecution": false
+          },
+          "ok": true,
+          "status": "PARTIAL",
+          "anchor": {
+            "date": "2026-11-04",
+            "expiry": "2026-11-09",
+            "strike": 23900,
+            "side": "CE",
+            "before": {
+              "bucketAt": "2026-11-04T08:58:00.000Z",
+              "receiptAt": "2026-11-04T08:58:27.262Z",
+              "quoteAt": "2026-11-04T08:58:27.000Z",
+              "snapshotId": "NIFTY-1793782707262-2dab5369",
+              "price": 172.85,
+              "spot": 23909.65
+            },
+            "at": {
+              "bucketAt": "2026-11-04T09:01:00.000Z",
+              "receiptAt": "2026-11-04T09:01:27.268Z",
+              "quoteAt": "2026-11-04T09:01:27.000Z",
+              "snapshotId": "NIFTY-1793782887268-e60ad346",
+              "price": 162.65,
+              "spot": 23896.55
+            },
+            "calendarDte": 5,
+            "moneynessBps": 1.44372304788698,
+            "premiumChange": -10.199999999999989,
+            "premiumChangePercent": -5.901070292160826,
+            "spotChange": -13.100000000002183,
+            "clock": {
+              "closeIst": "15:40",
+              "rule": "SEBI_20260116_EFFECTIVE_20260803",
+              "minutesToExpiry": 7269,
+              "standardSessionOnly": true
+            }
+          },
+          "matches": [
+            {
+              "date": "2026-10-29",
+              "expiry": "2026-11-03",
+              "strike": 22950,
+              "side": "CE",
+              "before": {
+                "bucketAt": "2026-10-29T08:58:00.000Z",
+                "receiptAt": "2026-10-29T08:58:08.341Z",
+                "quoteAt": "2026-10-29T08:58:08.000Z",
+                "snapshotId": "NIFTY-1793264288341-391a0e60",
+                "price": 143.25,
+                "spot": 22934.7
+              },
+              "at": {
+                "bucketAt": "2026-10-29T09:01:00.000Z",
+                "receiptAt": "2026-10-29T09:01:08.347Z",
+                "quoteAt": "2026-10-29T09:01:08.000Z",
+                "snapshotId": "NIFTY-1793264468347-0077599a",
+                "price": 146.55,
+                "spot": 22933.3
+              },
+              "calendarDte": 5,
+              "moneynessBps": 7.2819873284712955,
+              "premiumChange": 3.3000000000000114,
+              "premiumChangePercent": 2.3036649214659866,
+              "spotChange": -1.4000000000014552,
+              "clock": {
+                "closeIst": "15:40",
+                "rule": "SEBI_20260116_EFFECTIVE_20260803",
+                "minutesToExpiry": 7269,
+                "standardSessionOnly": true
+              },
+              "moneynessDifferenceBps": 5.8382642805843155
+            }
+          ],
+          "blocked": [
+            {
+              "date": "2026-11-03",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            },
+            {
+              "date": "2026-11-02",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            },
+            {
+              "date": "2026-10-30",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            },
+            {
+              "date": "2026-10-28",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            },
+            {
+              "date": "2026-10-27",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            }
+          ],
+          "cutoff": "2026-11-04T09:01:27.268Z",
+          "coverage": {
+            "suppliedPriorDays": 6,
+            "matchedDays": 1
+          },
+          "selectionMethod": "ONE_CONTRACT_PER_DAY_CLOSEST_OBSERVED_STRIKE_TO_SPOT_RATIO; SAME_INDEX_SIDE_CALENDAR_DTE_IST_MINUTE_CLOSE_CLOCK",
+          "provenance": {
+            "selectedEvidenceSha256": "7d7ef1ce59d9b26bea0d0c5d3205291333ace72a1b6129b9db317c229a2c5411"
+          },
+          "limitations": [
+            "Descriptive comparison only; no candidate, probability, causality or profitability claim.",
+            "Closest recorded moneyness is not a validated similarity threshold; differences remain visible.",
+            "IV, liquidity, event regime, OI, PCR and wall context are not matched in this stage.",
+            "Standard-session model expiry clock; contract-master and special-session validation unavailable.",
+            "No future outcomes retrieved; supplied days and recorded contracts are not exhaustive."
+          ],
+          "retrieval": {
+            "maximumPriorDays": 6,
+            "requestedDays": [
+              "2026-11-03",
+              "2026-11-02",
+              "2026-10-30",
+              "2026-10-29",
+              "2026-10-28",
+              "2026-10-27"
+            ],
+            "readFailures": [],
+            "source": "EXISTING_H1_REPLAY_AND_RECORDED_DATE_INDEX"
+          }
+        }
+      },
+      {
+        "label": "beforeReceiptCutoff",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-event-evidence?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=23900&side=CE&time=14%3A31&kind=SNAPSHOT&asOf=2026-11-04T14%3A31%3A00",
+        "httpStatus": 422,
+        "elapsedSeconds": 10.645,
+        "sha256": "2bd83ac8af6075a39c4bd69fd1339e7cab6b584d1c90c067185c0b929bc093a8",
+        "body": {
+          "ok": false,
+          "mode": "READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1",
+          "status": "BLOCKED",
+          "reason": "EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF",
+          "safety": {
+            "readOnly": true,
+            "writesPerformed": false,
+            "affectsSelector": false,
+            "affectsVerdict": false,
+            "affectsTelegram": false,
+            "affectsExecution": false,
+            "createsOrders": false
+          }
+        }
+      },
+      {
+        "label": "eventGridGuard",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-event-evidence?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=23900&side=CE&time=14%3A31&kind=EVENT",
+        "httpStatus": 400,
+        "elapsedSeconds": 8.505,
+        "sha256": "04b5474ba7423a0f6bebf4938c46cfe2591388dd3ae2d0ff9ac0aa93b39fe03b",
+        "body": {
+          "ok": false,
+          "status": "BLOCKED",
+          "reason": "EVENT_REQUIRES_REGULAR_3M_PAIR"
+        }
+      },
+      {
+        "label": "absentContract",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-event-evidence?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=99999&side=CE&time=14%3A31&kind=SNAPSHOT",
+        "httpStatus": 422,
+        "elapsedSeconds": 11.457,
+        "sha256": "2bd83ac8af6075a39c4bd69fd1339e7cab6b584d1c90c067185c0b929bc093a8",
+        "body": {
+          "ok": false,
+          "mode": "READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1",
+          "status": "BLOCKED",
+          "reason": "EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF",
+          "safety": {
+            "readOnly": true,
+            "writesPerformed": false,
+            "affectsSelector": false,
+            "affectsVerdict": false,
+            "affectsTelegram": false,
+            "affectsExecution": false,
+            "createsOrders": false
+          }
+        }
+      },
+      {
+        "label": "workerAfter",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/health",
+        "httpStatus": 200,
+        "elapsedSeconds": 7.955,
+        "sha256": "50c8fe0f42627918254a09fbf11b6b26d40b6f4e62a1b29132859109971f4b49",
+        "body": {
+          "ok": true,
+          "mode": "SUPERVISOR",
+          "tradingDate": "2026-11-04",
+          "scheduled": false,
+          "maintenance": false,
+          "shouldRun": false,
+          "running": false,
+          "ready": false,
+          "draining": false,
+          "hoursIST": "08:45\u201316:15",
+          "timezone": "Asia/Kolkata",
+          "supervisor": true,
+          "maintenanceUntil": null
+        }
+      }
+    ],
+    "acceptance": "PASS",
+    "historySummary": {
+      "matchedDays": 1,
+      "requestedDays": [
+        "2026-11-03",
+        "2026-11-02",
+        "2026-10-30",
+        "2026-10-29",
+        "2026-10-28",
+        "2026-10-27"
+      ],
+      "blocked": [
+        {
+          "date": "2026-11-03",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        },
+        {
+          "date": "2026-11-02",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        },
+        {
+          "date": "2026-10-30",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        },
+        {
+          "date": "2026-10-28",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        },
+        {
+          "date": "2026-10-27",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        }
+      ],
+      "readFailures": []
+    }
+  },
+  "finalBoundaryDeployment": {
+    "revision": "d336592fbd832a49fb078f755c393020d407a5ca",
+    "deploymentId": "6cdfbe6d-5f6a-485a-bec7-b11113d27c6a",
+    "capturedAtUtc": "2026-11-04T11:44:59.067069+00:00",
+    "reads": [
+      {
+        "label": "workerBefore",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/health",
+        "httpStatus": 200,
+        "elapsedSeconds": 8.071,
+        "sha256": "50c8fe0f42627918254a09fbf11b6b26d40b6f4e62a1b29132859109971f4b49",
+        "body": {
+          "ok": true,
+          "mode": "SUPERVISOR",
+          "tradingDate": "2026-11-04",
+          "scheduled": false,
+          "maintenance": false,
+          "shouldRun": false,
+          "running": false,
+          "ready": false,
+          "draining": false,
+          "hoursIST": "08:45\u201316:15",
+          "timezone": "Asia/Kolkata",
+          "supervisor": true,
+          "maintenanceUntil": null
+        }
+      },
+      {
+        "label": "dashboard",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/business-dashboard/view",
+        "httpStatus": 200,
+        "elapsedSeconds": 6.612,
+        "sha256": "f8b94b8aff388a8263d868cd963a9f6ded1f091756dae4eb9cab10e6cfa765c7",
+        "body": {
+          "projection": "Full HTML omitted; raw-response SHA256 retained. Production markers were asserted by the acceptance script."
+        }
+      },
+      {
+        "label": "exactSnapshot",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-event-evidence?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=23900&side=CE&time=14%3A31&kind=SNAPSHOT&lookback=3",
+        "httpStatus": 200,
+        "elapsedSeconds": 10.655,
+        "sha256": "c9fc266b7b6dfb7acbbba4b6c6a8dbc3bae31ed72b8dc414744312dc14c2443d",
+        "body": {
+          "ok": true,
+          "status": "PARTIAL",
+          "mode": "READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1",
+          "source": "EXISTING_POSTGRES_H1_REPLAY",
+          "safety": {
+            "readOnly": true,
+            "writesPerformed": false,
+            "affectsSelector": false,
+            "affectsVerdict": false,
+            "affectsTelegram": false,
+            "affectsExecution": false,
+            "createsOrders": false
+          },
+          "identity": {
+            "symbol": "NIFTY",
+            "date": "2026-11-04",
+            "expiry": "2026-11-09",
+            "strike": 23900,
+            "side": "CE",
+            "dte": 5
+          },
+          "event": {
+            "timeIst": "14:31",
+            "flags": [],
+            "before": 172.85,
+            "after": 162.65,
+            "availableAt": "2026-11-04T09:01:27.000Z"
+          },
+          "comparison": {
+            "lookbackMinutes": 3,
+            "selectedChangePercent": -5.901070292160826,
+            "oppositeSide": "PE",
+            "oppositeChangePercent": 6.871727748691092
+          },
+          "multiDte": {
+            "mode": "READ_ONLY_RAG_DTE_ALIGNMENT_V1",
+            "status": "PARTIAL",
+            "identity": {
+              "symbol": "NIFTY",
+              "date": "2026-11-04",
+              "strike": 23900,
+              "side": "CE",
+              "timeIst": "14:31"
+            },
+            "accepted": [
+              {
+                "expiry": "2026-11-09",
+                "dte": 5,
+                "price": 162.65,
+                "previousPrice": 172.85,
+                "changePercent": -5.901070292160826,
+                "quoteAt": "2026-11-04T09:01:27.000Z",
+                "receiptAt": "2026-11-04T09:01:27.000Z",
+                "snapshotId": "NIFTY-1793782887268-e60ad346"
+              },
+              {
+                "expiry": "2026-11-17",
+                "dte": 13,
+                "price": 250.05,
+                "previousPrice": 260.55,
+                "changePercent": -4.029936672423718,
+                "quoteAt": "2026-11-04T09:01:27.000Z",
+                "receiptAt": "2026-11-04T09:01:27.000Z",
+                "snapshotId": "NIFTY-1793782887268-e60ad346"
+              }
+            ],
+            "blocked": [
+              {
+                "expiry": "2026-11-23",
+                "reason": "UNVERIFIED_OR_AFTER_CUTOFF"
+              }
+            ],
+            "coverage": {
+              "observedExpiries": 3,
+              "verifiedExpiries": 2
+            },
+            "direction": {
+              "rising": 0,
+              "falling": 2,
+              "flat": 0,
+              "agreement": "ALL_VERIFIED_SAME_DIRECTION"
+            },
+            "limitations": [
+              "Only supplied verified snapshots; no database access or expiry discovery.",
+              "No interpolated prices, inferred missing DTE or causal/trading claims."
+            ],
+            "sourceStatus": "EXACT_REPLAY_READ"
+          },
+          "reference": null,
+          "referenceUnavailableReason": "PREVIOUS_REFERENCE_UNAVAILABLE",
+          "beforeOffsets": [
+            -30,
+            -15,
+            -6,
+            -3,
+            0
+          ],
+          "beforeAndAt": [
+            {
+              "offset": -30,
+              "timeIst": "14:01",
+              "bucketAt": "2026-11-04T08:31:00.000Z",
+              "receiptAt": "2026-11-04T08:31:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 156.55,
+                  "oi": 9313915,
+                  "quoteAt": "2026-11-04T08:31:28.000Z",
+                  "receiptAt": "2026-11-04T08:31:27.000Z",
+                  "snapshotId": "NIFTY-1793781087097-7f1fa3e9",
+                  "quoteAgeSeconds": -1,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 178.3,
+                  "oi": 6356090,
+                  "quoteAt": "2026-11-04T08:31:28.000Z",
+                  "receiptAt": "2026-11-04T08:31:27.000Z",
+                  "snapshotId": "NIFTY-1793781087097-7f1fa3e9",
+                  "quoteAgeSeconds": -1,
+                  "dayHigh": 355.45,
+                  "dayLow": 153.45,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23884.65,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.32,
+                "futures": 23925,
+                "futuresOi": 13774930,
+                "fullPcr": 0.979575418870738,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T08:31:27.097Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 11106940,
+                "peWallOi": 8141770,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 11106940,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:31:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 8141770,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:31:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            },
+            {
+              "offset": -15,
+              "timeIst": "14:16",
+              "bucketAt": "2026-11-04T08:46:00.000Z",
+              "receiptAt": "2026-11-04T08:46:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 159.25,
+                  "oi": 10091575,
+                  "quoteAt": "2026-11-04T08:46:27.000Z",
+                  "receiptAt": "2026-11-04T08:46:27.000Z",
+                  "snapshotId": "NIFTY-1793781987262-3e6241f7",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 170.7,
+                  "oi": 6195735,
+                  "quoteAt": "2026-11-04T08:46:27.000Z",
+                  "receiptAt": "2026-11-04T08:46:27.000Z",
+                  "snapshotId": "NIFTY-1793781987262-3e6241f7",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 355.45,
+                  "dayLow": 153.45,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23884.8,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.32,
+                "futures": 23932,
+                "futuresOi": 13722735,
+                "fullPcr": 0.9822636149213163,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T08:46:27.262Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 11137035,
+                "peWallOi": 8279505,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 11137035,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:46:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 8279505,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:46:26.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            },
+            {
+              "offset": -6,
+              "timeIst": "14:25",
+              "bucketAt": "2026-11-04T08:55:00.000Z",
+              "receiptAt": "2026-11-04T08:55:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 171.4,
+                  "oi": 10096905,
+                  "quoteAt": "2026-11-04T08:55:27.000Z",
+                  "receiptAt": "2026-11-04T08:55:27.000Z",
+                  "snapshotId": "NIFTY-1793782527275-d81044e6",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 153.55,
+                  "oi": 6324565,
+                  "quoteAt": "2026-11-04T08:55:27.000Z",
+                  "receiptAt": "2026-11-04T08:55:27.000Z",
+                  "snapshotId": "NIFTY-1793782527275-d81044e6",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 355.45,
+                  "dayLow": 149.3,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23908.55,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.22,
+                "futures": 23965,
+                "futuresOi": 13736060,
+                "fullPcr": 0.9809726867859855,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T08:55:27.275Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 11051950,
+                "peWallOi": 8034715,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 11051950,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:55:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 8034715,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:55:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            },
+            {
+              "offset": -3,
+              "timeIst": "14:28",
+              "bucketAt": "2026-11-04T08:58:00.000Z",
+              "receiptAt": "2026-11-04T08:58:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 172.85,
+                  "oi": 10152220,
+                  "quoteAt": "2026-11-04T08:58:27.000Z",
+                  "receiptAt": "2026-11-04T08:58:27.000Z",
+                  "snapshotId": "NIFTY-1793782707262-2dab5369",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 152.8,
+                  "oi": 6479590,
+                  "quoteAt": "2026-11-04T08:58:27.000Z",
+                  "receiptAt": "2026-11-04T08:58:27.000Z",
+                  "snapshotId": "NIFTY-1793782707262-2dab5369",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 355.45,
+                  "dayLow": 149.3,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23909.65,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.25,
+                "futures": 23961,
+                "futuresOi": 13733005,
+                "fullPcr": 0.9788513486810985,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T08:58:27.262Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 11048180,
+                "peWallOi": 7965035,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 11048180,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:58:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 7965035,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T08:58:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            },
+            {
+              "offset": 0,
+              "timeIst": "14:31",
+              "bucketAt": "2026-11-04T09:01:00.000Z",
+              "receiptAt": "2026-11-04T09:01:27.000Z",
+              "pair": {
+                "ce": {
+                  "price": 162.65,
+                  "oi": 9978930,
+                  "quoteAt": "2026-11-04T09:01:27.000Z",
+                  "receiptAt": "2026-11-04T09:01:27.000Z",
+                  "snapshotId": "NIFTY-1793782887268-e60ad346",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 212.45,
+                  "dayLow": 79.45,
+                  "storedPdh": 82.3,
+                  "storedPdl": 35
+                },
+                "pe": {
+                  "price": 163.3,
+                  "oi": 6626880,
+                  "quoteAt": "2026-11-04T09:01:27.000Z",
+                  "receiptAt": "2026-11-04T09:01:27.000Z",
+                  "snapshotId": "NIFTY-1793782887268-e60ad346",
+                  "quoteAgeSeconds": 0,
+                  "dayHigh": 355.45,
+                  "dayLow": 149.3,
+                  "storedPdh": 456.65,
+                  "storedPdl": 358
+                }
+              },
+              "context": {
+                "spot": 23896.55,
+                "pdc": 23810.85,
+                "pdh": 23810.85,
+                "pdl": 23482.8,
+                "vix": 15.26,
+                "futures": 23935.4,
+                "futuresOi": 13736255,
+                "fullPcr": 0.9916999792781138,
+                "fullPcrSource": "Exact canonical full-chain source",
+                "fullPcrCanonicalSourceAt": "2026-11-04T09:01:27.268Z",
+                "ceWall": 24000,
+                "peWall": 23500,
+                "ceWallOi": 10825750,
+                "peWallOi": 7954635,
+                "wallEvidence": {
+                  "CE": {
+                    "strike": 24000,
+                    "oi": 10825750,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T09:01:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  },
+                  "PE": {
+                    "strike": 23500,
+                    "oi": 7954635,
+                    "count": 21,
+                    "quoteAt": "2026-11-04T09:01:27.000Z",
+                    "source": "Canonical-corroborated loaded-strike OI maximum; full-chain coverage and freshness unverified"
+                  }
+                }
+              }
+            }
+          ],
+          "outcomes": [],
+          "premiumResponse": {
+            "version": "RECORDED_PREMIUM_RESPONSE_V1",
+            "identity": {
+              "symbol": "NIFTY",
+              "date": "2026-11-04",
+              "expiry": "2026-11-09",
+              "strike": 23900,
+              "side": "CE"
+            },
+            "lookbackMinutes": 3,
+            "clock": {
+              "calendarDte": 5,
+              "expiryAt": null,
+              "minutesToExpiry": null,
+              "reason": "EXPIRY_TIMESTAMP_NOT_RECORDED"
+            },
+            "safety": {
+              "readOnly": true,
+              "affectsSelector": false,
+              "affectsVerdict": false,
+              "affectsTelegram": false,
+              "affectsExecution": false
+            },
+            "sources": [
+              {
+                "id": "OIC_OPTIONS_PRICING",
+                "url": "https://prd-web.optionseducation.org/optionsoverview/options-pricing",
+                "use": "Spot intrinsic proxy and premium remainder; no attribution to time decay."
+              },
+              {
+                "id": "OIC_DELTA",
+                "url": "https://prd-web.optionseducation.org/advancedconcepts/delta",
+                "use": "Observed premium/spot ratio is not theoretical Delta."
+              },
+              {
+                "id": "KITE_QUOTE_TIMES",
+                "url": "https://kite.trade/docs/connect/v3/market-quotes/",
+                "use": "Keep quote, bucket and receipt times distinct; archived quote timestamp semantics remain unverified."
+              }
+            ],
+            "modelAttribution": {
+              "status": "UNAVAILABLE",
+              "reason": "VERIFIED_GREEK_MODEL_AND_UNITS_NOT_ESTABLISHED"
+            },
+            "semantics": "Measured exact endpoints. Spot intrinsic is an arithmetic proxy; the remainder is not isolated Theta or IV.",
+            "status": "MEASURED",
+            "reason": null,
+            "before": {
+              "bucketAt": "2026-11-04T08:58:00.000Z",
+              "quoteAt": "2026-11-04T08:58:27.000Z",
+              "receiptAt": "2026-11-04T08:58:27.000Z",
+              "availableAt": "2026-11-04T08:58:27.000Z",
+              "snapshotId": "NIFTY-1793782707262-2dab5369",
+              "quoteAgeSeconds": 0,
+              "optionCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+              "marketCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+              "price": 172.85,
+              "spot": 23909.65,
+              "oi": 10152220,
+              "spotBasis": "RECORDED_SAME_SNAPSHOT; SPOT_TRADE_FRESHNESS_UNVERIFIED",
+              "spotExchangeAt": null,
+              "spotIntrinsicProxy": 9.650000000001455,
+              "spotRemainder": 163.19999999999854,
+              "remainderStatus": "ARITHMETIC_PROXY",
+              "liquidity": {
+                "bid": 172.9,
+                "ask": 173.35,
+                "spread": 0.44999999999998863,
+                "status": "RECORDED_TWO_SIDED_QUOTE",
+                "executionPriceVerified": false
+              }
+            },
+            "current": {
+              "bucketAt": "2026-11-04T09:01:00.000Z",
+              "quoteAt": "2026-11-04T09:01:27.000Z",
+              "receiptAt": "2026-11-04T09:01:27.000Z",
+              "availableAt": "2026-11-04T09:01:27.000Z",
+              "snapshotId": "NIFTY-1793782887268-e60ad346",
+              "quoteAgeSeconds": 0,
+              "optionCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+              "marketCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+              "price": 162.65,
+              "spot": 23896.55,
+              "oi": 9978930,
+              "spotBasis": "RECORDED_SAME_SNAPSHOT; SPOT_TRADE_FRESHNESS_UNVERIFIED",
+              "spotExchangeAt": null,
+              "spotIntrinsicProxy": 0,
+              "spotRemainder": 162.65,
+              "remainderStatus": "ARITHMETIC_PROXY",
+              "liquidity": {
+                "bid": 162.55,
+                "ask": 163,
+                "spread": 0.44999999999998863,
+                "status": "RECORDED_TWO_SIDED_QUOTE",
+                "executionPriceVerified": false
+              }
+            },
+            "change": {
+              "price": -10.199999999999989,
+              "pricePercent": -5.901070292160826,
+              "spot": -13.100000000002183,
+              "spotPercent": -0.05478959332320708,
+              "spotIntrinsicProxy": -9.650000000001455,
+              "spotRemainder": -0.5499999999985334,
+              "oi": -173290,
+              "observedPremiumPerSpotPoint": 0.7786259541983427
+            },
+            "endpointReasons": {
+              "before": null,
+              "current": null
+            },
+            "evidenceSha256": "b5001a42665869fb30b7ff519f600b88340101a87075cba7132c4c0d8a5751ff"
+          },
+          "cutoff": null,
+          "coverage": {
+            "current": {
+              "cadenceMinutes": 1,
+              "expectedBuckets": 31,
+              "observedMarkerBuckets": 31,
+              "missingBuckets": [],
+              "firstObserved": "2026-11-04T08:31:00.000Z",
+              "lastObserved": "2026-11-04T09:01:00.000Z",
+              "coveragePct": 100,
+              "complete": true,
+              "truthCounts": {
+                "TRUE": 31
+              },
+              "canonicalArchiveBuckets": 31,
+              "canonicalCoveragePct": 100,
+              "allParameterArchiveSemantics": "FULL_RUNTIME_INDEX_METRICS_JSONB"
+            },
+            "previous": {
+              "cadenceMinutes": 1,
+              "expectedBuckets": 376,
+              "observedMarkerBuckets": 19,
+              "missingBuckets": [
+                "2026-11-03T03:45:00.000Z",
+                "2026-11-03T04:05:00.000Z",
+                "2026-11-03T04:06:00.000Z",
+                "2026-11-03T04:07:00.000Z",
+                "2026-11-03T04:08:00.000Z",
+                "2026-11-03T04:09:00.000Z",
+                "2026-11-03T04:10:00.000Z",
+                "2026-11-03T04:11:00.000Z",
+                "2026-11-03T04:12:00.000Z",
+                "2026-11-03T04:13:00.000Z",
+                "2026-11-03T04:14:00.000Z",
+                "2026-11-03T04:15:00.000Z",
+                "2026-11-03T04:16:00.000Z",
+                "2026-11-03T04:17:00.000Z",
+                "2026-11-03T04:18:00.000Z",
+                "2026-11-03T04:19:00.000Z",
+                "2026-11-03T04:20:00.000Z",
+                "2026-11-03T04:21:00.000Z",
+                "2026-11-03T04:22:00.000Z",
+                "2026-11-03T04:23:00.000Z",
+                "2026-11-03T04:24:00.000Z",
+                "2026-11-03T04:25:00.000Z",
+                "2026-11-03T04:26:00.000Z",
+                "2026-11-03T04:27:00.000Z",
+                "2026-11-03T04:28:00.000Z",
+                "2026-11-03T04:29:00.000Z",
+                "2026-11-03T04:30:00.000Z",
+                "2026-11-03T04:31:00.000Z",
+                "2026-11-03T04:32:00.000Z",
+                "2026-11-03T04:33:00.000Z",
+                "2026-11-03T04:34:00.000Z",
+                "2026-11-03T04:35:00.000Z",
+                "2026-11-03T04:36:00.000Z",
+                "2026-11-03T04:37:00.000Z",
+                "2026-11-03T04:38:00.000Z",
+                "2026-11-03T04:39:00.000Z",
+                "2026-11-03T04:40:00.000Z",
+                "2026-11-03T04:41:00.000Z",
+                "2026-11-03T04:42:00.000Z",
+                "2026-11-03T04:43:00.000Z",
+                "2026-11-03T04:44:00.000Z",
+                "2026-11-03T04:45:00.000Z",
+                "2026-11-03T04:46:00.000Z",
+                "2026-11-03T04:47:00.000Z",
+                "2026-11-03T04:48:00.000Z",
+                "2026-11-03T04:49:00.000Z",
+                "2026-11-03T04:50:00.000Z",
+                "2026-11-03T04:51:00.000Z",
+                "2026-11-03T04:52:00.000Z",
+                "2026-11-03T04:53:00.000Z",
+                "2026-11-03T04:54:00.000Z",
+                "2026-11-03T04:55:00.000Z",
+                "2026-11-03T04:56:00.000Z",
+                "2026-11-03T04:57:00.000Z",
+                "2026-11-03T04:58:00.000Z",
+                "2026-11-03T04:59:00.000Z",
+                "2026-11-03T05:00:00.000Z",
+                "2026-11-03T05:01:00.000Z",
+                "2026-11-03T05:02:00.000Z",
+                "2026-11-03T05:03:00.000Z",
+                "2026-11-03T05:04:00.000Z",
+                "2026-11-03T05:05:00.000Z",
+                "2026-11-03T05:06:00.000Z",
+                "2026-11-03T05:07:00.000Z",
+                "2026-11-03T05:08:00.000Z",
+                "2026-11-03T05:09:00.000Z",
+                "2026-11-03T05:10:00.000Z",
+                "2026-11-03T05:11:00.000Z",
+                "2026-11-03T05:12:00.000Z",
+                "2026-11-03T05:13:00.000Z",
+                "2026-11-03T05:14:00.000Z",
+                "2026-11-03T05:15:00.000Z",
+                "2026-11-03T05:16:00.000Z",
+                "2026-11-03T05:17:00.000Z",
+                "2026-11-03T05:18:00.000Z",
+                "2026-11-03T05:19:00.000Z",
+                "2026-11-03T05:20:00.000Z",
+                "2026-11-03T05:21:00.000Z",
+                "2026-11-03T05:22:00.000Z",
+                "2026-11-03T05:23:00.000Z",
+                "2026-11-03T05:24:00.000Z",
+                "2026-11-03T05:25:00.000Z",
+                "2026-11-03T05:26:00.000Z",
+                "2026-11-03T05:27:00.000Z",
+                "2026-11-03T05:28:00.000Z",
+                "2026-11-03T05:29:00.000Z",
+                "2026-11-03T05:30:00.000Z",
+                "2026-11-03T05:31:00.000Z",
+                "2026-11-03T05:32:00.000Z",
+                "2026-11-03T05:33:00.000Z",
+                "2026-11-03T05:34:00.000Z",
+                "2026-11-03T05:35:00.000Z",
+                "2026-11-03T05:36:00.000Z",
+                "2026-11-03T05:37:00.000Z",
+                "2026-11-03T05:38:00.000Z",
+                "2026-11-03T05:39:00.000Z",
+                "2026-11-03T05:40:00.000Z",
+                "2026-11-03T05:41:00.000Z",
+                "2026-11-03T05:42:00.000Z",
+                "2026-11-03T05:43:00.000Z",
+                "2026-11-03T05:44:00.000Z",
+                "2026-11-03T05:45:00.000Z",
+                "2026-11-03T05:46:00.000Z",
+                "2026-11-03T05:47:00.000Z",
+                "2026-11-03T05:48:00.000Z",
+                "2026-11-03T05:49:00.000Z",
+                "2026-11-03T05:50:00.000Z",
+                "2026-11-03T05:51:00.000Z",
+                "2026-11-03T05:52:00.000Z",
+                "2026-11-03T05:53:00.000Z",
+                "2026-11-03T05:54:00.000Z",
+                "2026-11-03T05:55:00.000Z",
+                "2026-11-03T05:56:00.000Z",
+                "2026-11-03T05:57:00.000Z",
+                "2026-11-03T05:58:00.000Z",
+                "2026-11-03T05:59:00.000Z",
+                "2026-11-03T06:00:00.000Z",
+                "2026-11-03T06:01:00.000Z",
+                "2026-11-03T06:02:00.000Z",
+                "2026-11-03T06:03:00.000Z",
+                "2026-11-03T06:04:00.000Z",
+                "2026-11-03T06:05:00.000Z",
+                "2026-11-03T06:06:00.000Z",
+                "2026-11-03T06:07:00.000Z",
+                "2026-11-03T06:08:00.000Z",
+                "2026-11-03T06:09:00.000Z",
+                "2026-11-03T06:10:00.000Z",
+                "2026-11-03T06:11:00.000Z",
+                "2026-11-03T06:12:00.000Z",
+                "2026-11-03T06:13:00.000Z",
+                "2026-11-03T06:14:00.000Z",
+                "2026-11-03T06:15:00.000Z",
+                "2026-11-03T06:16:00.000Z",
+                "2026-11-03T06:17:00.000Z",
+                "2026-11-03T06:18:00.000Z",
+                "2026-11-03T06:19:00.000Z",
+                "2026-11-03T06:20:00.000Z",
+                "2026-11-03T06:21:00.000Z",
+                "2026-11-03T06:22:00.000Z",
+                "2026-11-03T06:23:00.000Z",
+                "2026-11-03T06:24:00.000Z",
+                "2026-11-03T06:25:00.000Z",
+                "2026-11-03T06:26:00.000Z",
+                "2026-11-03T06:27:00.000Z",
+                "2026-11-03T06:28:00.000Z",
+                "2026-11-03T06:29:00.000Z",
+                "2026-11-03T06:30:00.000Z",
+                "2026-11-03T06:31:00.000Z",
+                "2026-11-03T06:32:00.000Z",
+                "2026-11-03T06:33:00.000Z",
+                "2026-11-03T06:34:00.000Z",
+                "2026-11-03T06:35:00.000Z",
+                "2026-11-03T06:36:00.000Z",
+                "2026-11-03T06:37:00.000Z",
+                "2026-11-03T06:38:00.000Z",
+                "2026-11-03T06:39:00.000Z",
+                "2026-11-03T06:40:00.000Z",
+                "2026-11-03T06:41:00.000Z",
+                "2026-11-03T06:42:00.000Z",
+                "2026-11-03T06:43:00.000Z",
+                "2026-11-03T06:44:00.000Z",
+                "2026-11-03T06:45:00.000Z",
+                "2026-11-03T06:46:00.000Z",
+                "2026-11-03T06:47:00.000Z",
+                "2026-11-03T06:48:00.000Z",
+                "2026-11-03T06:49:00.000Z",
+                "2026-11-03T06:50:00.000Z",
+                "2026-11-03T06:51:00.000Z",
+                "2026-11-03T06:52:00.000Z",
+                "2026-11-03T06:53:00.000Z",
+                "2026-11-03T06:54:00.000Z",
+                "2026-11-03T06:55:00.000Z",
+                "2026-11-03T06:56:00.000Z",
+                "2026-11-03T06:57:00.000Z",
+                "2026-11-03T06:58:00.000Z",
+                "2026-11-03T06:59:00.000Z",
+                "2026-11-03T07:00:00.000Z",
+                "2026-11-03T07:01:00.000Z",
+                "2026-11-03T07:02:00.000Z",
+                "2026-11-03T07:03:00.000Z",
+                "2026-11-03T07:04:00.000Z",
+                "2026-11-03T07:05:00.000Z",
+                "2026-11-03T07:06:00.000Z",
+                "2026-11-03T07:07:00.000Z",
+                "2026-11-03T07:08:00.000Z",
+                "2026-11-03T07:09:00.000Z",
+                "2026-11-03T07:10:00.000Z",
+                "2026-11-03T07:11:00.000Z",
+                "2026-11-03T07:12:00.000Z",
+                "2026-11-03T07:13:00.000Z",
+                "2026-11-03T07:14:00.000Z",
+                "2026-11-03T07:15:00.000Z",
+                "2026-11-03T07:16:00.000Z",
+                "2026-11-03T07:17:00.000Z",
+                "2026-11-03T07:18:00.000Z",
+                "2026-11-03T07:19:00.000Z",
+                "2026-11-03T07:20:00.000Z",
+                "2026-11-03T07:21:00.000Z",
+                "2026-11-03T07:22:00.000Z",
+                "2026-11-03T07:23:00.000Z",
+                "2026-11-03T07:24:00.000Z",
+                "2026-11-03T07:25:00.000Z",
+                "2026-11-03T07:26:00.000Z",
+                "2026-11-03T07:27:00.000Z",
+                "2026-11-03T07:28:00.000Z",
+                "2026-11-03T07:29:00.000Z",
+                "2026-11-03T07:30:00.000Z",
+                "2026-11-03T07:31:00.000Z",
+                "2026-11-03T07:32:00.000Z",
+                "2026-11-03T07:33:00.000Z",
+                "2026-11-03T07:34:00.000Z",
+                "2026-11-03T07:35:00.000Z",
+                "2026-11-03T07:36:00.000Z",
+                "2026-11-03T07:37:00.000Z",
+                "2026-11-03T07:38:00.000Z",
+                "2026-11-03T07:39:00.000Z",
+                "2026-11-03T07:40:00.000Z",
+                "2026-11-03T07:41:00.000Z",
+                "2026-11-03T07:42:00.000Z",
+                "2026-11-03T07:43:00.000Z",
+                "2026-11-03T07:44:00.000Z",
+                "2026-11-03T07:45:00.000Z",
+                "2026-11-03T07:46:00.000Z",
+                "2026-11-03T07:47:00.000Z",
+                "2026-11-03T07:48:00.000Z",
+                "2026-11-03T07:49:00.000Z",
+                "2026-11-03T07:50:00.000Z",
+                "2026-11-03T07:51:00.000Z",
+                "2026-11-03T07:52:00.000Z",
+                "2026-11-03T07:53:00.000Z",
+                "2026-11-03T07:54:00.000Z",
+                "2026-11-03T07:55:00.000Z",
+                "2026-11-03T07:56:00.000Z",
+                "2026-11-03T07:57:00.000Z",
+                "2026-11-03T07:58:00.000Z",
+                "2026-11-03T07:59:00.000Z",
+                "2026-11-03T08:00:00.000Z",
+                "2026-11-03T08:01:00.000Z",
+                "2026-11-03T08:02:00.000Z",
+                "2026-11-03T08:03:00.000Z",
+                "2026-11-03T08:04:00.000Z",
+                "2026-11-03T08:05:00.000Z",
+                "2026-11-03T08:06:00.000Z",
+                "2026-11-03T08:07:00.000Z",
+                "2026-11-03T08:08:00.000Z",
+                "2026-11-03T08:09:00.000Z",
+                "2026-11-03T08:10:00.000Z",
+                "2026-11-03T08:11:00.000Z",
+                "2026-11-03T08:12:00.000Z",
+                "2026-11-03T08:13:00.000Z",
+                "2026-11-03T08:14:00.000Z",
+                "2026-11-03T08:15:00.000Z",
+                "2026-11-03T08:16:00.000Z",
+                "2026-11-03T08:17:00.000Z",
+                "2026-11-03T08:18:00.000Z",
+                "2026-11-03T08:19:00.000Z",
+                "2026-11-03T08:20:00.000Z",
+                "2026-11-03T08:21:00.000Z",
+                "2026-11-03T08:22:00.000Z",
+                "2026-11-03T08:23:00.000Z",
+                "2026-11-03T08:24:00.000Z",
+                "2026-11-03T08:25:00.000Z",
+                "2026-11-03T08:26:00.000Z",
+                "2026-11-03T08:27:00.000Z",
+                "2026-11-03T08:28:00.000Z",
+                "2026-11-03T08:29:00.000Z",
+                "2026-11-03T08:30:00.000Z",
+                "2026-11-03T08:31:00.000Z",
+                "2026-11-03T08:32:00.000Z",
+                "2026-11-03T08:33:00.000Z",
+                "2026-11-03T08:34:00.000Z",
+                "2026-11-03T08:35:00.000Z",
+                "2026-11-03T08:36:00.000Z",
+                "2026-11-03T08:37:00.000Z",
+                "2026-11-03T08:38:00.000Z",
+                "2026-11-03T08:39:00.000Z",
+                "2026-11-03T08:40:00.000Z",
+                "2026-11-03T08:41:00.000Z",
+                "2026-11-03T08:42:00.000Z",
+                "2026-11-03T08:43:00.000Z",
+                "2026-11-03T08:44:00.000Z",
+                "2026-11-03T08:45:00.000Z",
+                "2026-11-03T08:46:00.000Z",
+                "2026-11-03T08:47:00.000Z",
+                "2026-11-03T08:48:00.000Z",
+                "2026-11-03T08:49:00.000Z",
+                "2026-11-03T08:50:00.000Z",
+                "2026-11-03T08:51:00.000Z",
+                "2026-11-03T08:52:00.000Z",
+                "2026-11-03T08:53:00.000Z",
+                "2026-11-03T08:54:00.000Z",
+                "2026-11-03T08:55:00.000Z",
+                "2026-11-03T08:56:00.000Z",
+                "2026-11-03T08:57:00.000Z",
+                "2026-11-03T08:58:00.000Z",
+                "2026-11-03T08:59:00.000Z",
+                "2026-11-03T09:00:00.000Z",
+                "2026-11-03T09:01:00.000Z",
+                "2026-11-03T09:02:00.000Z",
+                "2026-11-03T09:03:00.000Z",
+                "2026-11-03T09:04:00.000Z",
+                "2026-11-03T09:05:00.000Z",
+                "2026-11-03T09:06:00.000Z",
+                "2026-11-03T09:07:00.000Z",
+                "2026-11-03T09:08:00.000Z",
+                "2026-11-03T09:09:00.000Z",
+                "2026-11-03T09:10:00.000Z",
+                "2026-11-03T09:11:00.000Z",
+                "2026-11-03T09:12:00.000Z",
+                "2026-11-03T09:13:00.000Z",
+                "2026-11-03T09:14:00.000Z",
+                "2026-11-03T09:15:00.000Z",
+                "2026-11-03T09:16:00.000Z",
+                "2026-11-03T09:17:00.000Z",
+                "2026-11-03T09:18:00.000Z",
+                "2026-11-03T09:19:00.000Z",
+                "2026-11-03T09:20:00.000Z",
+                "2026-11-03T09:21:00.000Z",
+                "2026-11-03T09:22:00.000Z",
+                "2026-11-03T09:23:00.000Z",
+                "2026-11-03T09:24:00.000Z",
+                "2026-11-03T09:25:00.000Z",
+                "2026-11-03T09:26:00.000Z",
+                "2026-11-03T09:27:00.000Z",
+                "2026-11-03T09:28:00.000Z",
+                "2026-11-03T09:29:00.000Z",
+                "2026-11-03T09:30:00.000Z",
+                "2026-11-03T09:31:00.000Z",
+                "2026-11-03T09:32:00.000Z",
+                "2026-11-03T09:33:00.000Z",
+                "2026-11-03T09:34:00.000Z",
+                "2026-11-03T09:35:00.000Z",
+                "2026-11-03T09:36:00.000Z",
+                "2026-11-03T09:37:00.000Z",
+                "2026-11-03T09:38:00.000Z",
+                "2026-11-03T09:39:00.000Z",
+                "2026-11-03T09:40:00.000Z",
+                "2026-11-03T09:41:00.000Z",
+                "2026-11-03T09:42:00.000Z",
+                "2026-11-03T09:43:00.000Z",
+                "2026-11-03T09:44:00.000Z",
+                "2026-11-03T09:45:00.000Z",
+                "2026-11-03T09:46:00.000Z",
+                "2026-11-03T09:47:00.000Z",
+                "2026-11-03T09:48:00.000Z",
+                "2026-11-03T09:49:00.000Z",
+                "2026-11-03T09:50:00.000Z",
+                "2026-11-03T09:51:00.000Z",
+                "2026-11-03T09:52:00.000Z",
+                "2026-11-03T09:53:00.000Z",
+                "2026-11-03T09:54:00.000Z",
+                "2026-11-03T09:55:00.000Z",
+                "2026-11-03T09:56:00.000Z",
+                "2026-11-03T09:57:00.000Z",
+                "2026-11-03T09:58:00.000Z",
+                "2026-11-03T09:59:00.000Z",
+                "2026-11-03T10:00:00.000Z"
+              ],
+              "firstObserved": "2026-11-03T03:46:00.000Z",
+              "lastObserved": "2026-11-03T04:04:00.000Z",
+              "coveragePct": 5.053191489361701,
+              "complete": false,
+              "truthCounts": {
+                "TRUE": 19
+              },
+              "canonicalArchiveBuckets": 19,
+              "canonicalCoveragePct": 5.053191489361701,
+              "allParameterArchiveSemantics": "FULL_RUNTIME_INDEX_METRICS_JSONB"
+            }
+          },
+          "provenance": {
+            "selectedEvidenceSha256": "24390740f68b252fdff587e5bc44470c99f78ec77e8311cf4c6a250574935e40",
+            "digestSemantics": "SELECTED_NORMALIZED_EVIDENCE_NOT_RAW_HTTP_BYTES",
+            "snapshotIds": [
+              "NIFTY-1793781087097-7f1fa3e9",
+              "NIFTY-1793781987262-3e6241f7",
+              "NIFTY-1793782527275-d81044e6",
+              "NIFTY-1793782707262-2dab5369",
+              "NIFTY-1793782887268-e60ad346"
+            ]
+          },
+          "answer": "2026-11-04 NIFTY 23900 \u00b7 expiry 2026-11-09 \u00b7 14:31 IST: CE \u20b9162.65; 3m \u20b9172.85 \u2192 \u20b9162.65 (-5.90%)\u0964 Opposite PE \u20b9163.30; 3m \u20b9152.80 \u2192 \u20b9163.30 (+6.87%)\u0964 Previous-session PDH/PDL reference \u0b05\u0b28\u0b41\u0b2a\u0b32\u0b2c\u0b4d\u0b27\u0964 Full PCR 0.9917\u0964",
+          "limitations": [
+            "Structured retrieval and deterministic answer; no embeddings or LLM call.",
+            "Snapshot describes recorded endpoints; no crossing or causality claim.",
+            "Missing endpoints remain unavailable; no interpolated 1/5-minute response."
+          ]
+        }
+      },
+      {
+        "label": "exactHistory",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-same-dte-history?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=23900&side=CE&time=14%3A31",
+        "httpStatus": 200,
+        "elapsedSeconds": 28.211,
+        "sha256": "9cbbbc1e8ce186bbee998b02f1f63f5082529031bb4b94505fe2d16646473f00",
+        "body": {
+          "mode": "READ_ONLY_SAME_DTE_HISTORY_V1",
+          "safety": {
+            "readOnly": true,
+            "writesPerformed": false,
+            "affectsSelector": false,
+            "affectsVerdict": false,
+            "affectsTelegram": false,
+            "affectsExecution": false
+          },
+          "ok": true,
+          "status": "PARTIAL",
+          "anchor": {
+            "date": "2026-11-04",
+            "expiry": "2026-11-09",
+            "strike": 23900,
+            "side": "CE",
+            "before": {
+              "bucketAt": "2026-11-04T08:58:00.000Z",
+              "receiptAt": "2026-11-04T08:58:27.262Z",
+              "quoteAt": "2026-11-04T08:58:27.000Z",
+              "snapshotId": "NIFTY-1793782707262-2dab5369",
+              "price": 172.85,
+              "spot": 23909.65
+            },
+            "at": {
+              "bucketAt": "2026-11-04T09:01:00.000Z",
+              "receiptAt": "2026-11-04T09:01:27.268Z",
+              "quoteAt": "2026-11-04T09:01:27.000Z",
+              "snapshotId": "NIFTY-1793782887268-e60ad346",
+              "price": 162.65,
+              "spot": 23896.55
+            },
+            "calendarDte": 5,
+            "moneynessBps": 1.44372304788698,
+            "premiumChange": -10.199999999999989,
+            "premiumChangePercent": -5.901070292160826,
+            "spotChange": -13.100000000002183,
+            "clock": {
+              "closeIst": "15:40",
+              "rule": "SEBI_20260116_EFFECTIVE_20260803",
+              "minutesToExpiry": 7269,
+              "standardSessionOnly": true
+            }
+          },
+          "matches": [
+            {
+              "date": "2026-10-29",
+              "expiry": "2026-11-03",
+              "strike": 22950,
+              "side": "CE",
+              "before": {
+                "bucketAt": "2026-10-29T08:58:00.000Z",
+                "receiptAt": "2026-10-29T08:58:08.341Z",
+                "quoteAt": "2026-10-29T08:58:08.000Z",
+                "snapshotId": "NIFTY-1793264288341-391a0e60",
+                "price": 143.25,
+                "spot": 22934.7
+              },
+              "at": {
+                "bucketAt": "2026-10-29T09:01:00.000Z",
+                "receiptAt": "2026-10-29T09:01:08.347Z",
+                "quoteAt": "2026-10-29T09:01:08.000Z",
+                "snapshotId": "NIFTY-1793264468347-0077599a",
+                "price": 146.55,
+                "spot": 22933.3
+              },
+              "calendarDte": 5,
+              "moneynessBps": 7.2819873284712955,
+              "premiumChange": 3.3000000000000114,
+              "premiumChangePercent": 2.3036649214659866,
+              "spotChange": -1.4000000000014552,
+              "clock": {
+                "closeIst": "15:40",
+                "rule": "SEBI_20260116_EFFECTIVE_20260803",
+                "minutesToExpiry": 7269,
+                "standardSessionOnly": true
+              },
+              "moneynessDifferenceBps": 5.8382642805843155
+            }
+          ],
+          "blocked": [
+            {
+              "date": "2026-11-03",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            },
+            {
+              "date": "2026-11-02",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            },
+            {
+              "date": "2026-10-30",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            },
+            {
+              "date": "2026-10-28",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            },
+            {
+              "date": "2026-10-27",
+              "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+            }
+          ],
+          "cutoff": "2026-11-04T09:01:27.268Z",
+          "coverage": {
+            "suppliedPriorDays": 6,
+            "matchedDays": 1
+          },
+          "selectionMethod": "ONE_CONTRACT_PER_DAY_CLOSEST_OBSERVED_STRIKE_TO_SPOT_RATIO; SAME_INDEX_SIDE_CALENDAR_DTE_IST_MINUTE_CLOSE_CLOCK",
+          "provenance": {
+            "selectedEvidenceSha256": "7d7ef1ce59d9b26bea0d0c5d3205291333ace72a1b6129b9db317c229a2c5411"
+          },
+          "limitations": [
+            "Descriptive comparison only; no candidate, probability, causality or profitability claim.",
+            "Closest recorded moneyness is not a validated similarity threshold; differences remain visible.",
+            "IV, liquidity, event regime, OI, PCR and wall context are not matched in this stage.",
+            "Standard-session model expiry clock; contract-master and special-session validation unavailable.",
+            "No future outcomes retrieved; supplied days and recorded contracts are not exhaustive."
+          ],
+          "retrieval": {
+            "maximumPriorDays": 6,
+            "requestedDays": [
+              "2026-11-03",
+              "2026-11-02",
+              "2026-10-30",
+              "2026-10-29",
+              "2026-10-28",
+              "2026-10-27"
+            ],
+            "readFailures": [],
+            "source": "EXISTING_H1_REPLAY_AND_RECORDED_DATE_INDEX"
+          }
+        }
+      },
+      {
+        "label": "workerAfter",
+        "url": "https://optionpilot-pro-v2-production.up.railway.app/health",
+        "httpStatus": 200,
+        "elapsedSeconds": 7.913,
+        "sha256": "50c8fe0f42627918254a09fbf11b6b26d40b6f4e62a1b29132859109971f4b49",
+        "body": {
+          "ok": true,
+          "mode": "SUPERVISOR",
+          "tradingDate": "2026-11-04",
+          "scheduled": false,
+          "maintenance": false,
+          "shouldRun": false,
+          "running": false,
+          "ready": false,
+          "draining": false,
+          "hoursIST": "08:45\u201316:15",
+          "timezone": "Asia/Kolkata",
+          "supervisor": true,
+          "maintenanceUntil": null
+        }
+      }
+    ],
+    "acceptance": "PASS",
+    "historySummary": {
+      "matchedDays": 1,
+      "requestedDays": [
+        "2026-11-03",
+        "2026-11-02",
+        "2026-10-30",
+        "2026-10-29",
+        "2026-10-28",
+        "2026-10-27"
+      ],
+      "blocked": [
+        {
+          "date": "2026-11-03",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        },
+        {
+          "date": "2026-11-02",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        },
+        {
+          "date": "2026-10-30",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        },
+        {
+          "date": "2026-10-28",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        },
+        {
+          "date": "2026-10-27",
+          "reason": "NO_VERIFIED_SAME_DTE_CLOCK_PAIR"
+        }
+      ],
+      "readFailures": []
+    }
+  },
+  "sampledAdditionalIndices": [
+    {
+      "symbol": "SENSEX",
+      "selection": {
+        "symbol": "SENSEX",
+        "date": "2026-11-04",
+        "expiry": "2026-11-05",
+        "strike": "77200",
+        "side": "CE",
+        "time": "14:31",
+        "kind": "SNAPSHOT",
+        "lookback": "3"
+      },
+      "sourcePrice": 324.55,
+      "responsePrice": 324.55,
+      "responseStatus": "PARTIAL",
+      "premiumResponseStatus": "MEASURED",
+      "delta": {
+        "price": -37.25,
+        "pricePercent": -10.295743504698729,
+        "spot": -30.160000000003492,
+        "spotPercent": -0.03906024369137369,
+        "spotIntrinsicProxy": -14.059999999997672,
+        "spotRemainder": -23.19000000000233,
+        "oi": 5860,
+        "observedPremiumPerSpotPoint": 1.235079575596674
+      },
+      "sourceQuote": {
+        "symbol": "SENSEX",
+        "minute_bucket": "2026-11-04T09:01:00.000Z",
+        "truth_verdict": "TRUE",
+        "snapshot_id": "SENSEX-1793782887269-2151e4af",
+        "expiry": "2026-11-05T00:00:00.000Z",
+        "expiry_bucket": "Current Expiry",
+        "dte": 1,
+        "strike": 77200,
+        "option_type": "CE",
+        "atm_offset": 0,
+        "is_candidate": false,
+        "is_wall": false,
+        "ltp": 324.55,
+        "bid": 324.55,
+        "ask": 325.35,
+        "spread": 0.8000000000000114,
+        "volume": "85147300",
+        "oi": "2045760",
+        "oi_change": null,
+        "derived_oi_change": "0",
+        "derived_oi_change_source": "DERIVED_PREVIOUS_PERSISTED_SNAPSHOT",
+        "derived_oi_change_gap_seconds": 60,
+        "iv": 19.49096872288812,
+        "delta": 0.505079477091189,
+        "gamma": 0.000495,
+        "vega": 16.49483627216633,
+        "theta": -164.04121590594448,
+        "intrinsic": 0,
+        "extrinsic": 324.55,
+        "day_high": 497.9,
+        "day_low": 117.1,
+        "pdh": 214.45,
+        "pdl": 33.55,
+        "quote_timestamp": "2026-11-04T09:01:28.000Z",
+        "quote_age_seconds": -1,
+        "liquidity_status": "TIGHT",
+        "validation_status": "RESEARCH_ELIGIBLE",
+        "calculation_version": "H1_RUNTIME_BRIDGE_V1"
+      },
+      "sourceMarket": {
+        "symbol": "SENSEX",
+        "minute_bucket": "2026-11-04T09:01:00.000Z",
+        "truth_verdict": "TRUE",
+        "snapshot_id": "SENSEX-1793782887269-2151e4af",
+        "exchange_timestamp": null,
+        "backend_timestamp": "2026-11-04T09:01:27.269Z",
+        "freshness_status": "TRUE",
+        "spot_ltp": 77183.9,
+        "spot_open": 76853.11,
+        "spot_high": 77396.04,
+        "spot_low": 76604.85,
+        "spot_prev_close": 76917.85,
+        "vwap": 77214.49,
+        "pdh": 76917.85,
+        "pdl": 76033.74,
+        "gap_percent": -0.0841677191965262,
+        "future_ltp": 77370,
+        "future_vwap": null,
+        "future_oi": "62360",
+        "future_oi_change": null,
+        "future_volume": "34960",
+        "future_basis": 186.10000000000582,
+        "india_vix": 15.26,
+        "india_vix_change": -0.46000000000000085,
+        "calculation_version": "H1_RUNTIME_BRIDGE_V1"
+      },
+      "sourceUrl": "https://optionpilot-pro-v2-production.up.railway.app/api/research/recorded-dashboard/replay?symbol=SENSEX&date=2026-11-04&from=14%3A28&to=14%3A31&scope=FULL&format=compact&canonical=pcr-provenance",
+      "sourceSha256": "1b1f58564368fb45fed5f1a70ea81dd2d3ff702d4ae00f776bd22a71ca5c2c6d",
+      "evidenceUrl": "https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-event-evidence?symbol=SENSEX&date=2026-11-04&expiry=2026-11-05&strike=77200&side=CE&time=14%3A31&kind=SNAPSHOT&lookback=3",
+      "evidenceSha256": "12e8ccd7cc27dcd77da169689e0e545901e25d22674a5ebd2fcac580322a1571",
+      "affectsExecution": false
+    },
+    {
+      "symbol": "BANKNIFTY",
+      "selection": {
+        "symbol": "BANKNIFTY",
+        "date": "2026-11-04",
+        "expiry": "2026-11-23",
+        "strike": "55900",
+        "side": "CE",
+        "time": "14:31",
+        "kind": "SNAPSHOT",
+        "lookback": "3"
+      },
+      "sourcePrice": 757.7,
+      "responsePrice": 757.7,
+      "responseStatus": "PARTIAL",
+      "premiumResponseStatus": "MEASURED",
+      "delta": {
+        "price": -22.149999999999977,
+        "pricePercent": -2.8402897993203835,
+        "spot": -30.150000000001455,
+        "spotPercent": -0.05391717677859883,
+        "spotIntrinsicProxy": -19.099999999998545,
+        "spotRemainder": -3.0500000000014325,
+        "oi": 3270,
+        "observedPremiumPerSpotPoint": 0.7346600331674596
+      },
+      "sourceQuote": {
+        "symbol": "BANKNIFTY",
+        "minute_bucket": "2026-11-04T09:01:00.000Z",
+        "truth_verdict": "TRUE",
+        "snapshot_id": "BANKNIFTY-1793782887268-feb0f14a",
+        "expiry": "2026-11-23T00:00:00.000Z",
+        "expiry_bucket": "Current Expiry",
+        "dte": 19,
+        "strike": 55900,
+        "option_type": "CE",
+        "atm_offset": 0,
+        "is_candidate": false,
+        "is_wall": false,
+        "ltp": 757.7,
+        "bid": 755.85,
+        "ask": 758.65,
+        "spread": 2.7999999999999545,
+        "volume": "987900",
+        "oi": "131040",
+        "oi_change": null,
+        "derived_oi_change": "2940",
+        "derived_oi_change_source": "DERIVED_PREVIOUS_PERSISTED_SNAPSHOT",
+        "derived_oi_change_gap_seconds": 60,
+        "iv": 11.957784435046786,
+        "delta": 0.5782663339907992,
+        "gamma": 0.000256,
+        "vega": 49.95084263285607,
+        "theta": -24.32604057389656,
+        "intrinsic": 0,
+        "extrinsic": 757.7,
+        "day_high": 795.05,
+        "day_low": 510.1,
+        "pdh": 563.9,
+        "pdl": 444.95,
+        "quote_timestamp": "2026-11-04T09:01:28.000Z",
+        "quote_age_seconds": -1,
+        "liquidity_status": "TIGHT",
+        "validation_status": "RESEARCH_ELIGIBLE",
+        "calculation_version": "H1_RUNTIME_BRIDGE_V1"
+      },
+      "sourceMarket": {
+        "symbol": "BANKNIFTY",
+        "minute_bucket": "2026-11-04T09:01:00.000Z",
+        "truth_verdict": "TRUE",
+        "snapshot_id": "BANKNIFTY-1793782887268-feb0f14a",
+        "exchange_timestamp": null,
+        "backend_timestamp": "2026-11-04T09:01:27.268Z",
+        "freshness_status": "TRUE",
+        "spot_ltp": 55888.95,
+        "spot_open": 55485.1,
+        "spot_high": 55946.85,
+        "spot_low": 55294.5,
+        "spot_prev_close": 55540.05,
+        "vwap": 55811.99,
+        "pdh": 55739,
+        "pdl": 55174.1,
+        "gap_percent": -0.09893761348793234,
+        "future_ltp": 56000.4,
+        "future_vwap": null,
+        "future_oi": "2244330",
+        "future_oi_change": null,
+        "future_volume": "630630",
+        "future_basis": 111.45000000000437,
+        "india_vix": 15.26,
+        "india_vix_change": -0.46000000000000085,
+        "calculation_version": "H1_RUNTIME_BRIDGE_V1"
+      },
+      "sourceUrl": "https://optionpilot-pro-v2-production.up.railway.app/api/research/recorded-dashboard/replay?symbol=BANKNIFTY&date=2026-11-04&from=14%3A28&to=14%3A31&scope=FULL&format=compact&canonical=pcr-provenance",
+      "sourceSha256": "6e95b043f51f831bf4a7b0a5591a1cfaf78f2ceb0164c4dd7b047333b4c93d7c",
+      "evidenceUrl": "https://optionpilot-pro-v2-production.up.railway.app/api/research/rag-event-evidence?symbol=BANKNIFTY&date=2026-11-04&expiry=2026-11-23&strike=55900&side=CE&time=14%3A31&kind=SNAPSHOT&lookback=3",
+      "evidenceSha256": "f662f237bb16dd525e94774ebec952fb9e46c71d351799e0a772d782bf56c70d",
+      "affectsExecution": false
+    }
+  ],
+  "browserObserved": {
+    "url": "https://optionpilot-pro-v2-production.up.railway.app/api/research/business-dashboard/view",
+    "observationsAre": "Transcription of actual browser DOM readbacks, separate from isolated Chromium fixture acceptance",
+    "finalLatest": {
+      "clock": "2026-11-04 \u00b7 15:40:00 IST \u00b7 SAVED / PAUSED",
+      "visibleEvidenceButtons": 0,
+      "windowExplanation": "Evidence 09:15\u201315:30 IST",
+      "pricesRetained": true
+    },
+    "finalSelected": {
+      "timeIst": "14:31",
+      "symbol": "NIFTY",
+      "expiry": "2026-11-09",
+      "strike": 23900,
+      "side": "CE",
+      "visibleEvidenceButtons": 30,
+      "price": 162.65,
+      "baseline": 172.85,
+      "priceChange": -10.2,
+      "oppositePe": 163.3
+    },
+    "manualInvalidTime": {
+      "timeIst": "15:40",
+      "rangeOverflow": true,
+      "advancedOpen": true,
+      "windowExplanationVisible": true,
+      "result": ""
+    },
+    "cursorMoved": {
+      "timeIst": "14:30",
+      "strike": "",
+      "result": ""
+    },
+    "samePageHistoryOnFirstWorkflowDeployment": {
+      "comparisonDate": "2026-10-29",
+      "expiry": "2026-11-03",
+      "strike": 22950,
+      "side": "CE",
+      "calendarDte": 5,
+      "timeIst": "14:31",
+      "premiumBefore": 143.25,
+      "premiumAt": 146.55,
+      "premiumChange": 3.3,
+      "moneynessDifferenceBps": 5.8382642805843155
+    }
+  },
+  "limitations": [
+    "Sampled recorded-data acceptance, not live-market acceptance or all-date/contract completeness.",
+    "No semantic similarity/profitability certification, query-plan/catalog audit, or cost benchmark.",
+    "Read times include network and application overhead; they are not database timings."
+  ]
+}

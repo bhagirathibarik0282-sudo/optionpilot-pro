@@ -1,6 +1,6 @@
 # RAG evidence: strict work checklist
 
-Overall status: PARTIAL. Unit 1 is verified for the sampled exact-minute read and off-hours route; wider usability and all-index coverage remain later work. Accepted production commit: a85fd3fbcf09ea0880e177ea0c6fac416f0d4e56.
+Recorded row-to-evidence interaction: PROVEN for the sampled production workflow, including session boundaries. Overall historical/source coverage remains PARTIAL. Final accepted production commit: d336592fbd832a49fb078f755c393020d407a5ca. This acceptance copy includes postdeployment evidence and is retained on the audit branch linked from PR845.
 
 ## Fixed objective
 
@@ -104,9 +104,9 @@ Acceptance checklist:
 - [x] Source identity propagation, pause, absent-contract rejection and cursor invalidation regression tests.
 - [x] Race suppression, explicit outcome opt-in and invalidated-identity action tests.
 - [x] Exact non-grid history endpoints accepted; absent/nearby endpoints and pre-receipt cutoff rejected.
-- [ ] Final-head real Chromium 360px/390px frozen-production-source workflow, including front dashboard modal.
-- [ ] Final-head CI and deployed revision identity.
-- [ ] Actual production exact-minute arithmetic, cutoff/event negative controls, history endpoint and runtime-off state.
+- [x] Final-head real Chromium 360px/390px frozen-production-source workflow, including front dashboard modal.
+- [x] Final-head CI and deployed revision identity.
+- [x] Actual production exact-minute arithmetic, cutoff/event negative controls, history endpoint and runtime-off state.
 
 The browser fixture projects the already documented production 23900 CE/PE records; it is isolated acceptance evidence, not a current live-data or full-chain coverage claim. SQL catalog/query-plan audit, cost benchmarking, semantic retrieval ranking, all-date coverage and live-market acceptance remain unproven. This release completes the recorded row-to-evidence interaction; it does not manufacture absent records or certify the wider research system.
 
@@ -120,3 +120,20 @@ Final production cursor testing also exposed a separate UI boundary defect: the 
 The closure correction preserves both data and calculation boundaries: post-window sample prices remain visible, but the table explains the supported evidence window instead of offering a dead action. The row handler independently rejects an out-of-window cursor. Invalid explicit/manual quick actions open their fields and explain the window before reporting native validity. No market-close policy, source timestamp, quote eligibility or backend admission rule is extended.
 
 Additional acceptance: archive/source-table boundary regressions, actual native closed-form validation at 15:40, and the 09:15→history missing-baseline boundary. These must pass on the final deployment before unit 2 is closed.
+
+
+## Final unit 2 closure
+
+Final production revision d336592fbd832a49fb078f755c393020d407a5ca, exact tested tree 4d7c2535ec0c8196e98b5e1136ad38baacfb22ec; Railway deployment 6cdfbe6d-5f6a-485a-bec7-b11113d27c6a SUCCESS. All six final-head workflows passed. Local checks: 381 tests, 379 passed, two optional historical fixture skips, zero failures; guardrail and whitespace checks passed.
+
+Final-revision production API readback: snapshot and same-DTE history HTTP200, exact selected 162.65 and 3m -10.20; one prior eligible day, no historical read failures. Health before and after: running=false, scheduled=false, maintenance=false. No worker startup was required for archived reads.
+
+Actual final production browser acceptance, within the original dashboard URL:
+- Latest saved sample 15:40 retained visible prices, zero row Evidence buttons, and explicit supported-window labels.
+- Selecting 14:31 restored 30 exact row actions. Clicking 23900 CE populated the exact identity and rendered 162.65, 172.85 baseline, -10.20 / -5.90%, and opposite PE 163.30.
+- A closed manual 15:40 selection now opened its advanced form and displayed the window explanation (rangeOverflow=true, advancedOpen=true), correcting the reproduced silent failure.
+- Moving the cursor to 14:30 cleared result and strike identity; returning to 14:31 restored the selected-row workflow.
+
+Read-only audit receipt: docs/audits/rag-workflow-production-20261104.json on this audit branch. It separates first workflow deployment, final boundary deployment, three sampled index-source comparisons, and browser observations. Raw HTTP response hashes are preserved; the full HTML body is omitted from the projection.
+
+Completed scope: exact recorded access, row selection, before/selected/explicit-after actions, bounded descriptive history, same-page replay interaction, asynchronous invalidation, supported-session boundary handling, tested deployment and sampled production acceptance. Remaining independent work: live-market UI acceptance, broad archive/source completeness, stronger semantic/context matching, query-plan/catalog and cost benchmarking. These are not certified by this release.

@@ -61,7 +61,7 @@ test('same-dashboard all-recorded finder reports verified sampled 60-point CE mo
  assert.match(renderRecordedDashboard(),/id="ar-60-all"/);
  h.elements.get('ar-60-all').onclick();
  await until(()=>h.elements.get('ar-60-status').textContent.includes('Completed 3 / 3'));
- assert.match(h.elements.get('ar-60-results').innerHTML,/₹70/);
+ assert.match(h.elements.get('ar-60-results').innerHTML,/₹70/,'DEBUG '+JSON.stringify({status:h.elements.get('ar-60-status').textContent,coverage:h.elements.get('ar-60-coverage').textContent,emptyText:h.elements.get('ar-60-results').textContent,requestCount:h.requests.length}));
  assert.match(h.elements.get('ar-60-results').innerHTML,/Gap/);
  assert.match(h.elements.get('ar-60-coverage').textContent,/ATM ±7/);
  const old=h.events.length;

@@ -22,3 +22,26 @@ Changes:
 No extra browser polling, broker requests, tables, processes, retention or trading authority is added. Browser-local charts and Multi-DTE comparison semantics are unchanged. Missing saved endpoints, opening coverage, verified futures references and historical matches remain missing.
 
 Validation: 194 related data/display/PCR regressions pass, zero failures/skips. Tests cover immediate saved-baseline projection, exact identity/session, stale/future sources, conflicting duplicates/references, zero OI, disconnect revocation, delayed model availability and front provenance retention.
+
+## Receipt-clock follow-up from deployed acceptance
+
+The deployed front showed NIFTY 23,900 CE for 9 November with PDH 82.3,
+PDL 35 and Above PDH. At 15:07:23 IST its live price 177.60 minus the
+eligible 14:52:09 saved price 180.75 matched the displayed 15m change -3.15.
+For 23 November CE, saved OI 2,111,135 at 15:04:09 versus live 2,110,550
+matched the displayed 3m OI change -585. These exact saved endpoints were
+independently read from compact CORE replay. The December expiry had no admitted
+recorded references and stayed missing.
+
+Live 1m history still disappeared during acceptance. Source inspection and a
+failing regression reproduced the cause: sample() treated a different value
+at the same second-resolution exchange timestamp as contradictory, even when
+a later packet receipt timestamp identified a separate newer tick. Repeated
+valid updates consequently erased older baseline history.
+
+Samples now retain the latest validated receipt in each exchange second.
+Older receipts cannot overwrite newer ones. Different values with identical
+exchange AND receipt clocks still invalidate history; freshness, gaps, contract
+identity, runtime reset and PCR comparison gates remain intact. No timestamps
+are shifted and no baseline is interpolated. The follow-up adds positive and
+negative packet-clock regressions; all 196 related tests pass locally.

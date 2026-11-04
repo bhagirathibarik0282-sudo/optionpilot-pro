@@ -292,21 +292,27 @@ export function installOneShotLiveCard(api:any){
  const table=(heads:string[],rows:string[][])=>'<div class="os-table-wrap"><table class="os-table"><thead><tr>'+heads.map(s=>'<th>'+esc(s)+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?'':'<tr><td colspan="'+heads.length+'">Unavailable · verified source rows required</td></tr>')+rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
  let premiumExpiry='';
  let selected='NIFTY',dteMetric='day',minutes=3,sourceMode='AUTO',sideMode='BOTH',chartSeries='BOTH',chartCadence=180000,chartManual=false,chartAt=0,chartKey='',loadBusy=false,last:any=null,pcr:any=null,session='',lastPaint=0,paintedLive=false;
- const series=new Map<string,Array<{at:number;value:number}>>(),conflicts=new Map<string,number>(),pcrIds=new Map<string,string>(),previous=new Map<string,any>(),breaks=new Map<string,any>();
+ const series=new Map<string,Array<{at:number;value:number;received?:number}>>(),conflicts=new Map<string,number>(),pcrIds=new Map<string,string>(),previous=new Map<string,any>(),breaks=new Map<string,any>();
  const events:any[]=[];
  const valid=(d:any,q:any,role:string,symbol?:string)=>api.validQuote(d,q,role,symbol)&&Number.isInteger(q.identity?.token)&&q.identity.token>0&&
   (role!=='FUTURE'||/^\d{4}-\d{2}-\d{2}$/.test(q.identity?.expiry||'')&&Number.isFinite(Date.parse(q.identity.expiry+'T00:00:00Z'))&&new Date(q.identity.expiry+'T00:00:00Z').toISOString().slice(0,10)===q.identity.expiry&&q.identity.expiry>=d.snapshot.tradeDate);
  const change=(d:any,q:any,role:string,symbol?:string)=>valid(d,q,role,symbol)&&positive(q.pdc)!==null?(q.price/q.pdc-1)*100:null;
  const indexRow=(d:any,symbol:string)=>{const rows=(d?.snapshot?.indices||[]).filter((a:any)=>a.symbol===symbol);return rows.length===1?rows[0]:null;};
- const sample=(key:string,at:number,value:any)=>{
+ const sample=(key:string,at:number,value:any,received?:number)=>{
   if(n(value)===null||!Number.isFinite(at))return;
   const rejected=conflicts.get(key);if(rejected!==undefined){if(at<=rejected)return;conflicts.delete(key);}
   let rows=series.get(key)||[],prior=rows.at(-1);
-  if(prior&&at===prior.at){if(value!==prior.value){series.delete(key);conflicts.set(key,at);if(conflicts.size>48)conflicts.delete(conflicts.keys().next().value!);}return;}
+  if(prior&&at===prior.at){
+   // Exchange timestamps have second precision. A later validated receipt may
+   // contain another legitimate tick in that same second; retain the latest.
+   if(Number.isFinite(received)&&Number.isFinite(prior.received)&&received!>prior.received!){prior.value=value;prior.received=received;return;}
+   if(Number.isFinite(received)&&Number.isFinite(prior.received)&&received!<prior.received!)return;
+   if(value!==prior.value){series.delete(key);conflicts.set(key,at);if(conflicts.size>48)conflicts.delete(conflicts.keys().next().value!);}return;
+  }
   if(prior&&at<prior.at)return;
   if(prior&&at-prior.at>(key.endsWith('|PCR')?210000:35000))rows=[];
   if(rows.length&&at-rows.at(-1)!.at<10000)return;
-  rows.push({at,value});if(rows.length>600)rows.splice(0,rows.length-600);series.set(key,rows);
+  rows.push({at,value,...(Number.isFinite(received)?{received}:{})});if(rows.length>600)rows.splice(0,rows.length-600);series.set(key,rows);
   if(series.size>48)series.delete(series.keys().next().value!);
  };
  const refs=(d:any,symbol:string,q:any)=>{
@@ -555,13 +561,13 @@ export function installOneShotLiveCard(api:any){
   const optionRows=group&&valid(d,group.spot,'SPOT',selected)&&Array.isArray(group.rows)?group.rows.filter((r:any)=>/^\d{4}-\d{2}-\d{2}$/.test(r?.expiry||'')&&Number.isFinite(Date.parse(r.expiry+'T00:00:00Z'))&&new Date(r.expiry+'T00:00:00Z').toISOString().slice(0,10)===r.expiry&&r.expiry>=d.snapshot.tradeDate&&positive(r.strike)!==null&&group.rows.filter((x:any)=>x?.expiry===r.expiry).length===1).sort((a:any,b:any)=>a.expiry.localeCompare(b.expiry)).slice(0,4):[];
   if(live){
    for(const symbol of symbols){const a=indexRow(d,symbol);if(!a)continue;
-    observe(d,a);if(valid(d,a.spot,'SPOT',symbol))sample(symbol+'|SPOT',Date.parse(a.spot.observedAt),a.spot.price);else series.delete(symbol+'|SPOT');
-    if(valid(d,a.future,'FUTURE',symbol))sample(symbol+'|FUTURE|'+a.future.identity.token+'|'+a.future.identity.expiry,Date.parse(a.future.observedAt),a.future.price);
+    observe(d,a);if(valid(d,a.spot,'SPOT',symbol))sample(symbol+'|SPOT',Date.parse(a.spot.observedAt),a.spot.price,Date.parse(a.spot.receivedAt));else series.delete(symbol+'|SPOT');
+    if(valid(d,a.future,'FUTURE',symbol))sample(symbol+'|FUTURE|'+a.future.identity.token+'|'+a.future.identity.expiry,Date.parse(a.future.observedAt),a.future.price,Date.parse(a.future.receivedAt));
     const r=pcr.rows.find((x:any)=>x.symbol===symbol),identity=r?.current?r.expiry+'|'+r.current.period:'';
     if(pcrIds.get(symbol)!==identity){series.delete(symbol+'|PCR');conflicts.delete(symbol+'|PCR');pcrIds.set(symbol,identity);}
     if(r?.current)sample(symbol+'|PCR',r.current.checked,r.value);else series.delete(symbol+'|PCR');
    }
-   for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side){const key=selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side;sample(key,Date.parse(q.observedAt),q.price);if(n(q.oi)!==null&&q.oi>=0)sample(key+'|OI',Date.parse(q.observedAt),q.oi);}}
+   for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side){const key=selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side;sample(key,Date.parse(q.observedAt),q.price,Date.parse(q.receivedAt));if(n(q.oi)!==null&&q.oi>=0)sample(key+'|OI',Date.parse(q.observedAt),q.oi,Date.parse(q.receivedAt));}}
   }
   renderDte(d,optionRows);
   const useRecorded=sourceMode==='RECORDED'||sourceMode==='AUTO'&&payload?.connectionState==='MARKET_CLOSED';

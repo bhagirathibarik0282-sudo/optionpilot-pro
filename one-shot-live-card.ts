@@ -572,7 +572,7 @@ export function installOneShotLiveCard(api:any){
   write('os-wall-ladder',table(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI'],symbols.map(symbol=>{
    const r=pcr.rows.find((x:any)=>x.symbol===symbol),a=live?indexRow(d,symbol):null,raw=r?.current?d?.pcrDisplay?.[symbol]:null,cw=raw?.callWall,pw=raw?.putWall;
    const delta=(key:string)=>r?.current&&r?.baseline?r.current[key]-r.baseline[key]:null;
-   const oi=(key:string)=>fmt(r?.current?.[key],0)+'<small>Δ '+(delta(key)>0?'+':'')+fmt(delta(key),0)+(r?.baseline?' · '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':' · baseline pending')+'</small>';
+   const oi=(key:string)=>fmt(r?.current?.[key]??r?.reportedPcr?.[key],0)+'<small>Δ '+(delta(key)>0?'+':'')+fmt(delta(key),0)+(r?.current?(r?.baseline?' · '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':' · baseline pending'):r?.reportedPcr?' · REPORTED · mixed source times · '+esc(r.reportedPcr.displayLabel)+(r.reportedPcr.sourceNote?' · '+esc(r.reportedPcr.sourceNote):''):' · unavailable')+'</small>';
    return [esc(symbol)+'<small>'+esc(r?.expiry||'—')+'</small>',fmt(r?.value,4)+' / '+fmt(r?.bandValue,4),oi('ceTotal'),oi('peTotal'),fmt(positive(cw?.strike),0)+' / '+fmt(positive(pw?.strike),0)+'<small>OI '+fmt(positive(cw?.oi),0)+' / '+fmt(positive(pw?.oi),0)+'</small>',fmt(a&&valid(d,a.future,'FUTURE',symbol)&&n(a.future.oi)!==null&&a.future.oi>=0?a.future.oi:null,0)];
   })));
 

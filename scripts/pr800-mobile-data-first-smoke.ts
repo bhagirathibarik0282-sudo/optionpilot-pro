@@ -29,6 +29,10 @@ try{
    const response=await page.goto(base,{waitUntil:'domcontentloaded',timeout:20000});
    assert.equal(response?.status(),200);
    await page.locator('#rd-shell').waitFor({state:'visible',timeout:15000});
+   await page.locator('#rd-source-tabs [data-rd-source="RECORDED"]').click();
+   assert.equal(await page.locator('#op-one-stop').getAttribute('data-os-source'),'RECORDED');
+   await page.locator('#rd-source-tabs [data-rd-source="LIVE"]').click();
+   assert.equal(await page.locator('#op-one-stop').getAttribute('data-os-source'),'LIVE');
    const screen=await page.evaluate(()=>{const page=document.getElementById('rd-page')!,viewport=document.getElementById('rd-viewport')!,p=page.getBoundingClientRect(),v=viewport.getBoundingClientRect();return {height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,page:{left:p.left,right:p.right,top:p.top,bottom:p.bottom},viewport:{left:v.left,right:v.right,top:v.top,bottom:v.bottom},sections:document.querySelectorAll('#rd-page .rd-section').length,probability:/probability/i.test(page.textContent||'')};});
    assert.equal(screen.sections,7,name+' must show all seven full table sections');
    // Optional focus chapters must not remove any of the seven original source-backed sections.
@@ -81,7 +85,7 @@ try{
     document.getElementById('os-pcr-strip')!.innerHTML='<div class="os-pcr"><strong>NIFTY</strong><small>UNAVAILABLE · Fresh Full PCR</small><b>—</b><small>Expiry 2026-10-27</small><small>ATM ±7 band: 1.1043 · 30/30 verified</small><small>OI 282/288 fresh · stale 6 · missing 0 · invalid 0</small><div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small><b>1.0969</b><small>288/288 contracts · 6 older than 30s</small><small>Source 11:04:26 → 11:05:37 IST · checked 11:05:37 IST</small></div></div>';
     document.getElementById('os-wall-ladder')!.innerHTML='<table><tbody><tr><td>NIFTY</td><td>— / 1.1043</td><td>—</td><td>—</td></tr></tbody></table>';
    });
-   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
+   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('1.0969'));
    const pcrText=await page.locator('#rd-pcr-table').innerText();
    for(const label of ['MIXED SOURCE TIMES','288/288 contracts','stale 6','11:04:26','1.1043'])assert(pcrText.includes(label),name+' PCR provenance '+label);
    assert((await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'));
@@ -95,11 +99,12 @@ try{
    assert(await ageBadge.evaluate((el:any)=>el.scrollWidth<=el.clientWidth+1),'source-date badge must not be clipped');
    // The current card has one primary reported number; no duplicate value in Sources.
    await page.evaluate(()=>{const card=document.querySelector('#os-pcr-strip .os-pcr')!,reported=card.querySelector('.os-pcr-reported b')!;card.querySelector(':scope>b')!.textContent=reported.textContent;reported.remove();});
-   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
-   assert(!(await page.locator('#rd-pcr-table tbody tr').first().locator('td').nth(1).innerText()).includes('1.0969'),'reported primary number cannot populate Fresh Full PCR');
+   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('1.0969'));
+   assert((await page.locator('#rd-pcr-table tbody tr').first().locator('td').nth(1).innerText()).includes('1.0969'),'reported value occupies primary Full OI PCR');
+   assert((await page.locator('#rd-pcr-table tbody tr').first().locator('td').nth(2).innerText()).includes('EARLIER PACKETS'),'primary number retains earlier-packet source');
    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-offline-reported-pcr.png',fullPage:true});
    await page.evaluate(()=>{for(const [id,html] of Object.entries((window as any).__pcrRestore))document.getElementById(id)!.innerHTML=html as string;delete (window as any).__pcrRestore;});
-   await page.waitForFunction(()=>!document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
+   await page.waitForFunction(()=>!document.getElementById('rd-pcr-table')?.textContent?.includes('1.0969'));
    assert(!(await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'),'revoked reported observation must disappear');
    // Offline DOM projection fixtures, restored before capturing the absence-only page.
    await page.evaluate(()=>{

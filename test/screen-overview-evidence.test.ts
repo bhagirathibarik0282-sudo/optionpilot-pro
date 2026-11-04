@@ -41,14 +41,15 @@ function harness() {
   return {
     nodes, events, memory,
     source(id:string,heads:string[],rows:string[][]){nodes.set(id,tableSource(heads,rows));view.refresh();},
-    pcr(index:string,full:string,reportedValue:string|null,primaryOnly=false,sourceDate=''){
+    pcr(index:string,full:string,reportedValue:string|null,primaryOnly=false,sourceDate='',savedValue:string|null=null){
       const simple=(value:string)=>node({textContent:value});
       const reported=reportedValue===null?null:node({
         querySelector:(selector:string)=>selector==='b'&&!primaryOnly?simple(reportedValue):null,
         querySelectorAll:(selector:string)=>selector==='small'?[simple('288/288 contracts · 6 older than 30s'+(sourceDate?' · oldest '+sourceDate+' 15:30:00 IST':''))]:[],
       });
+      const saved=savedValue===null?null:node({querySelector:(selector:string)=>selector==='strong'?simple(savedValue):null,querySelectorAll:()=>[simple('RECORDED · Full PCR'),simple('2026-10-27 · 11:36:00 IST')]});
       const card=node({
-        querySelector:(selector:string)=>selector===':scope>strong'?simple(index):selector===':scope>b'?simple(full):selector==='.os-pcr-reported'?reported:null,
+        querySelector:(selector:string)=>selector===':scope>strong'?simple(index):selector===':scope>b'?simple(full):selector==='.os-pcr-reported'?reported:selector==='.os-pcr-recorded'?saved:null,
         querySelectorAll:(selector:string)=>selector===':scope>small'?[simple('OI 282/288 fresh · stale 6')]:[],
       });
       nodes.set('os-pcr-strip',node({querySelectorAll:(selector:string)=>selector==='.os-pcr'?[card]:[]}));
@@ -155,15 +156,16 @@ test('ambiguous futures contracts, invalid expiry labels and other underlyings c
 
 test('compact PCR table separates fresh, reported and band observations without fake columns',()=>{
  const h=harness();
+ h.nodes.get('op-one-stop').dataset.osSource='LIVE';
  h.source('os-wall-ladder',['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ'],[
   ['NIFTY','— / 1.1234','20,000 Δ +150','25,000 Δ -70','23,000 / 22,800','1,000','—'],
  ]);
  h.pcr('NIFTY','—','1.0969');
  const output=h.nodes.get('rd-pcr-table').innerHTML;
- assert.match(output,/<th>Fresh Full PCR<\/th>/);
- assert.match(output,/<th>Reported Full · mixed times<\/th>/);
+ assert.match(output,/<th>Full OI PCR<\/th>/);
+ assert.match(output,/<th>PCR source<\/th>/);
  assert.match(output,/<th>ATM ±7 PCR<\/th>/);
- assert.match(output,/Reported 1.0969 · MIXED SOURCE TIMES/);
+ assert.match(output,/<strong>1.0969<\/strong>/);assert.match(output,/REPORTED · MIXED SOURCE TIMES/);
  assert.match(output,/1.1234/);
  assert.match(output,/\+150/);
  assert.match(output,/-70/);
@@ -171,25 +173,49 @@ test('compact PCR table separates fresh, reported and band observations without 
  h.pcr('NIFTY','1.0876',null);
  const fresh=h.nodes.get('rd-pcr-table').innerHTML;
  assert.match(fresh,/1.0876/);
- assert.doesNotMatch(fresh,/Reported 1.0969/);
+ assert.doesNotMatch(fresh,/1.0969/);assert.match(fresh,/FRESH SNAPSHOT/);
 });
 
-test('a reported primary PCR number projects once and never fills the fresh column',()=>{
- const h=harness();h.pcr('NIFTY','1.2345','1.2345',true);
+test('recorded front PCR keeps the saved number and its recorded heading instead of claiming fresh',()=>{
+ const h=harness();h.pcr('NIFTY','0.8799 →',null);
  const html=h.nodes.get('rd-pcr-table').innerHTML;
- assert.match(html,/Reported 1.2345/);
+ assert.match(html,/<th>Recorded Full PCR<\/th>/);assert.doesNotMatch(html,/<th>Fresh Full PCR<\/th>/);
+ assert.match(html,/0.8799/);assert.match(h.nodes.get('rd-market-metrics').innerHTML,/Recorded Full/);
+ h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.pcr('NIFTY','—',null);
+ assert.match(h.nodes.get('rd-pcr-table').innerHTML,/<th>Full OI PCR<\/th>/);
+ assert.doesNotMatch(h.nodes.get('rd-pcr-table').innerHTML,/0.8799/);
+ h.pcr('NIFTY','— —',null);assert.doesNotMatch(h.nodes.get('rd-pcr-table').innerHTML,/FRESH SNAPSHOT/);
+});
+
+test('front source buttons reuse the existing source selector and do not load or invent data',()=>{
+ const h=harness(),seen:string[]=[],control:any={value:'AUTO',onchange:(e:any)=>seen.push(e.target.value)};
+ h.nodes.set('os-source',control);
+ for(const source of ['RECORDED','LIVE'])h.nodes.get('rd-fit-tools').onclick({target:{closest:(selector:string)=>selector==='[data-rd-source]'?{dataset:{rdSource:source}}:null}});
+ assert.deepEqual(seen,['RECORDED','LIVE']);assert.equal(control.value,'LIVE');
+});
+
+test('a reported primary PCR number projects once with its source and never claims fresh eligibility',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.pcr('NIFTY','1.2345','1.2345',true);
+ const html=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(html,/<strong>1.2345<\/strong>/);
  const cells=[...html.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m=>m[1]);
- assert(!cells[1].includes('1.2345'),'fresh full-PCR cell stays unavailable');
- assert.match(cells[2],/1.2345/);
+ assert.match(cells[1],/1.2345/);assert.match(cells[2],/REPORTED · MIXED SOURCE TIMES/);
+ assert(!cells[2].includes('FRESH'),'reported observation cannot claim fresh eligibility');
  assert.match(h.nodes.get('rd-market-metrics').innerHTML,/Reported Full/);
 });
 
 test('earlier-packet dates stay beside the reported number instead of only in an ellipsized source column',()=>{
- const h=harness();h.pcr('NIFTY','1.2345','1.2345',true,'2026-10-15');
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.pcr('NIFTY','1.2345','1.2345',true,'2026-10-15');
  for(const id of ['rd-market-metrics','rd-pcr-table']){
   const html=h.nodes.get(id).innerHTML;
   assert.match(html,/class="rd-pcr-mixed">EARLIER PACKETS<br>2026-10-15<\/small>/);
  }
+});
+
+test('an admitted saved PCR in the source card reaches the front with its recorded clock, then revokes',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.pcr('NIFTY','—',null,false,'','0.8799');
+ for(const id of ['rd-pcr-table','rd-market-metrics']){const html=h.nodes.get(id).innerHTML;assert.match(html,/0.8799/);assert.match(html,/RECORDED/);assert.match(html,/11:36:00/);assert.doesNotMatch(html,/FRESH SNAPSHOT/);}
+ h.pcr('NIFTY','—',null);assert.doesNotMatch(h.nodes.get('rd-pcr-table').innerHTML,/0.8799/);
 });
 
 test('tracked participation rows do not pretend weights or index-point contributions exist',()=>{

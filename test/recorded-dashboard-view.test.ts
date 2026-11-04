@@ -7,7 +7,7 @@ async function until(check:()=>boolean){for(let i=0;i<50;i++){if(check())return;
 async function view(close='15:30'){
  const elements=new Map<string,any>(),timers=new Map<number,any>(),requests:string[]=[];let next=0;const events:any[]=[];
  for(const [,id] of renderRecordedDashboard().matchAll(/id="([^"]+)"/g))elements.set(id,{value:'',textContent:'',innerHTML:'',disabled:false,selectedOptions:[]});
- elements.get('ar-index').value='NIFTY';elements.get('ar-speed').value='1';
+ elements.get('ar-index').value='NIFTY';elements.get('ar-speed').value='1';elements.get('ar-60-side').value='BOTH';elements.get('ar-60-direction').value='BOTH';
  const dates=['2026-10-28','2026-10-29','2026-10-30'];
  const context:any={console,AbortController,AbortSignal,URLSearchParams,document:{getElementById:(id:string)=>elements.get(id),addEventListener(){}},CustomEvent:class{constructor(public type:string,public options:any){}get detail(){return this.options.detail;}},window:{addEventListener(){},dispatchEvent:(event:any)=>events.push(event)},setTimeout(this:any,fn:any,ms:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.set(++next,{fn,ms});return next;},clearTimeout(this:any,id:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.delete(id);},
   fetch:async(url:string)=>{requests.push(url);if(url.endsWith('/dates'))return {ok:true,json:async()=>({ok:true,dates:dates.map(tradeDate=>({symbol:'NIFTY',tradeDate,markerCount:2}))})};
@@ -61,7 +61,7 @@ test('same-dashboard all-recorded finder reports verified sampled 60-point CE mo
  assert.match(renderRecordedDashboard(),/id="ar-60-all"/);
  h.elements.get('ar-60-all').onclick();
  await until(()=>h.elements.get('ar-60-status').textContent.includes('Completed 3 / 3'));
- assert.match(h.elements.get('ar-60-results').innerHTML,/₹70/,'DEBUG '+JSON.stringify({status:h.elements.get('ar-60-status').textContent,coverage:h.elements.get('ar-60-coverage').textContent,emptyText:h.elements.get('ar-60-results').textContent,requestCount:h.requests.length}));
+ assert.match(h.elements.get('ar-60-results').innerHTML,/₹70/);
  assert.match(h.elements.get('ar-60-results').innerHTML,/Gap/);
  assert.match(h.elements.get('ar-60-coverage').textContent,/ATM ±7/);
  const old=h.events.length;

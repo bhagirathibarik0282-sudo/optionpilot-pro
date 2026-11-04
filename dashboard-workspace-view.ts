@@ -414,7 +414,7 @@ export function installDashboardWorkspace(api:any){
    server-observed<=30000&&server-received>=0&&server-received<=30000;
  };
  const oneShot=typeof installOneShotLiveCard==='function'?installOneShotLiveCard({
-  getState:api.getState,getModels:api.getModels,setDate:api.setDate,derivePremium:typeof derivePremiumWorkspace==='function'?derivePremiumWorkspace:undefined,validEnvelope:freshEnvelope,validQuote:freshQuote,
+  getState:api.getState,getModels:api.getModels,getOptionReference:atmReference,setDate:api.setDate,derivePremium:typeof derivePremiumWorkspace==='function'?derivePremiumWorkspace:undefined,validEnvelope:freshEnvelope,validQuote:freshQuote,
   derivePcr:deriveLiveThreeIndexPcr,deriveRecordedPcr:typeof deriveRecordedThreeIndexPcr==='function'?deriveRecordedThreeIndexPcr:undefined,chooseIndex:(symbol:string)=>{api.chooseResearchIndex?.(symbol);atmSelected=symbol;$('op-atm-index').value=symbol;paintAtm(atmLast);}
  }):null;
  if(typeof installScreenOverview==='function')installScreenOverview();

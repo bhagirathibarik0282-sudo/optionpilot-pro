@@ -312,7 +312,12 @@ export function installOneShotLiveCard(api:any){
  const refs=(d:any,symbol:string,q:any)=>{
   const m=api.getModels?.()?.[symbol],at=Date.parse(m?.spot?.at||'');
   const ready=api.getState?.()?.date===d?.snapshot?.tradeDate&&m?.tradeDate===d?.snapshot?.tradeDate&&day(at)===d?.snapshot?.tradeDate&&at<=Date.parse(q?.observedAt||'');
-  const pdh=ready?positive(m.spot.pdh):null,pdl=ready?positive(m.spot.pdl):null;
+  let pdh=ready?positive(m.spot.pdh):null,pdl=ready?positive(m.spot.pdl):null;
+  if(pdh===null&&pdl===null){
+   const state=api.getState?.(),rows=state?.date===d?.snapshot?.tradeDate?(state.current?.[symbol]?.market||[]).filter((r:any)=>r.symbol===symbol&&r.truth_verdict==='TRUE'&&day(Date.parse(r.minute_bucket))===d.snapshot.tradeDate&&Date.parse(r.minute_bucket)<=Date.parse(q?.observedAt||'')):[];
+   const level=(key:string)=>{const values=rows.map((r:any)=>positive(r[key])).filter((v:any)=>v!==null);return values.length&&values.every((v:any)=>v===values[0])?values[0]:null;};
+   pdh=level('pdh');pdl=level('pdl');
+  }
   const opening=ready?m.spotPcr?.opening?.spot:null;
   const opened=opening?.complete===true&&positive(opening.high)!==null&&positive(opening.low)!==null&&opening.high>=opening.low&&
    opening.at===new Date(d.snapshot.tradeDate+'T09:30:00+05:30').toISOString()&&opening.fromAt===new Date(d.snapshot.tradeDate+'T09:15:00+05:30').toISOString()&&Date.parse(opening.at)<=Date.parse(q.observedAt);
@@ -373,10 +378,38 @@ export function installOneShotLiveCard(api:any){
   const dates=[...new Set<string>(rows.map(r=>r.expiry))];
   return [''].concat(dates).map(date=>'<button type="button" data-os-expiry="'+esc(date)+'" aria-pressed="'+(premiumExpiry===date)+'">'+esc(date||'All expiries')+'</button>').join('');
  };
- const premiumTable=(d:any,rows:any[])=>table(['Type','Strike','Expiry','LTP ₹','Day %','OI','PDH','PDC','PDL','Source time · IST','Day Δ ₹','OI Δ','Vol','Spread','IV','Delta','1m Δ ₹','3m Δ ₹','15m Δ ₹','Status'],rows.filter(r=>!premiumExpiry||r.expiry===premiumExpiry).flatMap(r=>['CE','PE'].filter(side=>sideMode==='BOTH'||sideMode===side).map(side=>{
+ // Reuse loaded recorder history; no extra request and no browser warm-up requirement.
+ const savedOptions=new WeakMap<object,Map<string,any[]>>();
+ const savedEndpoint=(d:any,q:any,m:number,field:'ltp'|'oi')=>{
+  const state=api.getState?.(),e=q?.identity,rows=state?.current?.[selected]?.options;
+  if(!d||state?.date!==d.snapshot.tradeDate||!e||!Array.isArray(rows))return null;
+  let index=savedOptions.get(rows);if(!index){index=new Map();for(const r of rows){const key=[r.symbol,String(r.expiry).slice(0,10),r.strike,r.option_type].join('|');const values=index.get(key)||[];values.push(r);index.set(key,values);}savedOptions.set(rows,index);}
+  const target=Date.parse(q.observedAt)-m*60000;
+  const candidates=(index.get([e.symbol,e.expiry,e.strike,e.side].join('|'))||[]).filter(r=>{
+   const at=Date.parse(r.quote_timestamp||''),bucket=Date.parse(r.minute_bucket||'');
+   return r.truth_verdict==='TRUE'&&!String(r.validation_status||'').startsWith('DIAGNOSTIC')&&
+    day(at)===d.snapshot.tradeDate&&day(bucket)===d.snapshot.tradeDate&&bucket<=Date.parse(q.observedAt)&&
+    n(r.quote_age_seconds)!==null&&r.quote_age_seconds>=0&&r.quote_age_seconds<=30&&
+    at>=bucket-30000&&at<bucket+60000&&at<=target&&target-at<=15000;
+  });
+  if(!candidates.length)return null;
+  const at=Math.max(...candidates.map(r=>Date.parse(r.quote_timestamp))),same=candidates.filter(r=>Date.parse(r.quote_timestamp)===at);
+  const values=same.map(r=>field==='oi'?recordedCount(r.oi):positive(r.ltp));
+  return values.every(v=>v!==null&&v===values[0])?{at,value:values[0],source:'saved'}:null;
+ };
+ const premiumTable=(d:any,rows:any[])=>table(['Type','Strike','Expiry','LTP ₹','Day %','OI','PDH','PDC','PDL','Source time · IST','Day Δ ₹','OI Δ','Vol','Spread','IV','Delta','1m Δ ₹','3m Δ ₹','15m Δ ₹','Status','Level position','Reference context'],rows.filter(r=>!premiumExpiry||r.expiry===premiumExpiry).flatMap(r=>['CE','PE'].filter(side=>sideMode==='BOTH'||sideMode===side).map(side=>{
   const q=r[side.toLowerCase()],ok=!!d&&valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side;
-  return [side,fmt(r.strike,0),esc(r.expiry),fmt(ok?q.price:null),'<span class="'+tone(ok?change(d,q,'OPTION',selected):null)+'">'+pct(ok?change(d,q,'OPTION',selected):null)+'</span>',fmt(ok&&n(q.oi)!==null&&q.oi>=0?q.oi:null,0),'—',fmt(ok?positive(q.pdc):null),'—',ok?time(q.observedAt):'Unavailable',fmt(ok&&positive(q.pdc)!==null?q.price-q.pdc:null),'—',fmt(ok&&n(q.volume)!==null&&q.volume>=0?q.volume:null,0),fmt(ok&&positive(q.ask)!==null&&positive(q.bid)!==null&&q.ask>=q.bid?q.ask-q.bid:null),'—','—',...[1,3,15].map(m=>{const base=ok?endpoint(selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side,Date.parse(q.observedAt)-m*60000):null;return fmt(base?q.price-base.value:null);}),ok?'LIVE':'UNAVAILABLE'];
+  const ref=ok?api.getOptionReference?.(selected,r.expiry,r.strike,side,d.snapshot.tradeDate,q.observedAt):null;
+  const key=ok?selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side:'';
+  const details:string[]=[];
+  const changes=[1,3,15].map(m=>{const base=ok?endpoint(key,Date.parse(q.observedAt)-m*60000)||savedEndpoint(d,q,m,'ltp'):null;if(base)details.push(m+'m '+('source' in base?'saved ':'live ')+time(base.at));return fmt(base?q.price-base.value:null);});
+  const oiBase=ok?endpoint(key+'|OI',Date.parse(q.observedAt)-minutes*60000)||savedEndpoint(d,q,minutes,'oi'):null;
+  if(oiBase)details.push('OI '+minutes+'m '+('source' in oiBase?'saved ':'live ')+time(oiBase.at));
+  if(positive(ref?.pdh)!==null||positive(ref?.pdl)!==null)details.push('PDH/PDL recorded · exact contract');
+  const position=!ok?'—':positive(ref?.pdh)!==null&&q.price>ref.pdh?'Above PDH':positive(ref?.pdl)!==null&&q.price<ref.pdl?'Below PDL':positive(ref?.pdh)!==null&&positive(ref?.pdl)!==null?'Inside PDH/PDL':'—';
+  return [side,fmt(r.strike,0),esc(r.expiry),fmt(ok?q.price:null),'<span class="'+tone(ok?change(d,q,'OPTION',selected):null)+'">'+pct(ok?change(d,q,'OPTION',selected):null)+'</span>',fmt(ok&&n(q.oi)!==null&&q.oi>=0?q.oi:null,0),fmt(ok?positive(ref?.pdh):null),fmt(ok?positive(q.pdc):null),fmt(ok?positive(ref?.pdl):null),ok?time(q.observedAt):'Unavailable',fmt(ok&&positive(q.pdc)!==null?q.price-q.pdc:null),fmt(ok&&n(q.oi)!==null&&q.oi>=0&&oiBase?q.oi-oiBase.value:null,0),fmt(ok&&n(q.volume)!==null&&q.volume>=0?q.volume:null,0),fmt(ok&&positive(q.ask)!==null&&positive(q.bid)!==null&&q.ask>=q.bid?q.ask-q.bid:null),'—','—',...changes,ok?'LIVE':'UNAVAILABLE',position,esc(details.join(' · ')||'Exact recorded references / window endpoints unavailable')];
  })))+(rows.length?'':empty('No verified exact-contract premiums. Open Data to choose a saved session.'));
+
  const renderDte=(d:any,rows:any[])=>{
   write('os-premium-expiries',expiryTabs(rows));
   write('os-premium-table',premiumTable(d,rows));
@@ -528,7 +561,7 @@ export function installOneShotLiveCard(api:any){
     if(pcrIds.get(symbol)!==identity){series.delete(symbol+'|PCR');conflicts.delete(symbol+'|PCR');pcrIds.set(symbol,identity);}
     if(r?.current)sample(symbol+'|PCR',r.current.checked,r.value);else series.delete(symbol+'|PCR');
    }
-   for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side)sample(selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side,Date.parse(q.observedAt),q.price);}
+   for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side){const key=selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side;sample(key,Date.parse(q.observedAt),q.price);if(n(q.oi)!==null&&q.oi>=0)sample(key+'|OI',Date.parse(q.observedAt),q.oi);}}
   }
   renderDte(d,optionRows);
   const useRecorded=sourceMode==='RECORDED'||sourceMode==='AUTO'&&payload?.connectionState==='MARKET_CLOSED';

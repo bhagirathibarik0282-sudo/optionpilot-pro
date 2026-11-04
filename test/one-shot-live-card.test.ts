@@ -30,7 +30,7 @@ function harness(){
  el('os-chart-cadence').onchange({target:{value:'0'}});
  el('os-window').onclick({target:{closest:()=>({dataset:{osWindow:'1'}})}});
  const send=(p:any)=>listeners['optionpilot:live-context']({detail:p});
- return {el,payload,send,writes,chosen,loadArgs:()=>loadArgs,opened:()=>opened,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
+ return {el,payload,send,writes,chosen,models,loadArgs:()=>loadArgs,opened:()=>opened,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
 }
 
 test('production HTML mounts the real new design once, with ten categories and existing real controls',()=>{
@@ -549,4 +549,36 @@ test('recorded radar exposes latest-row validation and source bucket without fil
  const card=h.el('os-market-radar').innerHTML.split('data-os-index="SENSEX"')[1].split('</button>')[0];
  assert.match(card,/data-recorded-validation="PARTIAL"/);assert.match(card,/data-recorded-at="2026-10-19T04:15:00.000Z"/);
  assert.match(card,/class="os-price">—/);assert.doesNotMatch(card,/class="os-price">101/);
+});
+
+function savedLiveReferences(patch:any={}){
+ const date='2026-10-19',expiry='2026-10-22';
+ return {date,current:{NIFTY:{options:[1,3,15].map((m,i)=>({symbol:'NIFTY',expiry,strike:100,option_type:'CE',truth_verdict:'TRUE',minute_bucket:new Date(Date.parse(date+'T04:15:00Z')-m*60000).toISOString(),quote_timestamp:new Date(Date.parse(date+'T04:15:00Z')-m*60000).toISOString(),quote_age_seconds:0,validation_status:'RESEARCH_ELIGIBLE',ltp:110-i*10,oi:String(900-i*100),pdh:155,pdl:75,...patch}))}}};
+}
+const premiumCells=(h:any)=>h.el('os-premium-table').innerHTML.split('<tbody>')[1].split('<tr>')[1].split('</tr>')[0].split(/<td[^>]*>/).slice(1).map((x:string)=>x.split('</td>')[0]);
+test('live premium projects existing exact recorded references and quote-timed saved baselines immediately',()=>{
+ const h=harness();h.setSaved(savedLiveReferences());h.send(h.payload());const c=premiumCells(h);
+ assert.equal(c[6],'155');assert.equal(c[8],'75');assert.equal(c[11],'100');
+ assert.deepEqual(c.slice(16,19),['10','20','30']);assert.equal(c[20],'Inside PDH/PDL');
+ assert(h.el('os-premium-table').innerHTML.includes('1m saved 09:44:00'));
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-premium-table').innerHTML.includes('>155<'));
+});
+test('saved premium fallback rejects wrong session, contract, stale or future source and conflicting endpoints',()=>{
+ for(const patch of [{symbol:'SENSEX'},{expiry:'2026-10-29'},{strike:105},{option_type:'PE'},{truth_verdict:'FALSE'},
+  {quote_age_seconds:31},{validation_status:'DIAGNOSTIC_STALE_PREMIUM'},{quote_timestamp:'2026-10-19T04:16:00Z'}]){
+  const h=harness();h.setSaved(savedLiveReferences(patch));h.send(h.payload());assert.deepEqual(premiumCells(h).slice(16,19),['—','—','—'],JSON.stringify(patch));
+ }
+ const h=harness(),s=savedLiveReferences();s.date='2026-10-16';h.setSaved(s);h.send(h.payload());assert.equal(premiumCells(h)[6],'—');
+ const conflict=harness(),bad=savedLiveReferences();bad.current.NIFTY.options.push({...bad.current.NIFTY.options[0],ltp:999,oi:'999'});conflict.setSaved(bad);conflict.send(conflict.payload());assert.equal(premiumCells(conflict)[16],'—');assert.equal(premiumCells(conflict)[11],'—');
+});
+test('premium reference conflicts stay missing and zero OI is a usable saved count',()=>{
+ const h=harness(),s=savedLiveReferences();s.current.NIFTY.options[0].oi='0';s.current.NIFTY.options[1].pdh=156;h.setSaved(s);h.send(h.payload());const c=premiumCells(h);assert.equal(c[6],'—');assert.equal(c[8],'75');assert.equal(c[11],'1,000');
+});
+
+test('spot levels use exact same-session recorder rows while derived book models are still loading',()=>{
+ const h=harness();h.models.NIFTY.spot={pdh:null,pdl:null,at:null} as any;
+ h.setSaved({date:'2026-10-19',current:{NIFTY:{market:[{symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:'2026-10-19T04:14:00Z',pdh:155,pdl:75}]}}});h.send(h.payload());
+ assert(h.el('os-future-response').innerHTML.includes('>155<'));
+ h.setSaved({date:'2026-10-16',current:{NIFTY:{market:[{symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:'2026-10-16T04:14:00Z',pdh:155,pdl:75}]}}});h.advance(600);h.send(h.payload());
+ assert(!h.el('os-future-response').innerHTML.includes('>155<'));
 });

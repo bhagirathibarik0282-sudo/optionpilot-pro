@@ -290,3 +290,8 @@ test('BANKNIFTY positioning filters the existing watchlist before taking five; s
  assert.match(next,/TCS/);assert.match(next,/INFY/);assert.doesNotMatch(next,/KOTAKBANK|SBIN|AXISBANK/);
  assert.match(h.nodes.get('rd-sector-table').innerHTML,/Market-wide/);
 });
+
+test('front premium keeps recorded reference and baseline clocks beside the live source',()=>{
+ const h=harness();h.premium(['Type','Strike','Expiry','LTP ₹','Status','Reference context'],[['CE','100','2026-10-27','120','LIVE','PDH/PDL recorded · exact contract · 1m saved 11:35:00']]);
+ const html=h.nodes.get('rd-premium-table').innerHTML;assert(html.includes('LIVE'));assert(html.includes('1m saved 11:35:00'));assert(html.includes('PDH/PDL recorded'));assert(h.nodes.get('rd-context-rows').innerHTML.includes('1/1 rows'));
+});

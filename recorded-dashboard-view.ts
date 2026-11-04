@@ -9,7 +9,7 @@ ${RAG_CARD_CSS}</style></head><body><main><header><div><span class="tag">OPTIONP
 <p class="notice">RECORDED · Read-only. Market collection keeps its 08:45–16:15 IST schedule. Replay uses saved samples, including after market close.</p>
 <section class="panel"><div class="controls"><label>Index <select id="ar-index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><button id="ar-latest">Latest saved data</button><button id="ar-last1">▶ 1 day</button><button id="ar-last3">▶ Last 3 days</button><button id="ar-last5">▶ Last 5 days</button><button id="ar-all">▶ All recorded days</button></div><details><summary>Choose individual recorded days</summary><label for="ar-dates">Select dates; then Replay selected</label><select id="ar-dates" multiple size="5" aria-label="Recorded days"></select><button id="ar-selected" class="primary">▶ Replay selected</button></details><p id="queue">Loading recorded dates…</p><p id="progress" class="note" role="status"></p><p id="error" role="alert"></p></section>
 <section class="panel"><div class="controls"><button id="ar-play" class="primary" disabled>▶ Play</button><button id="ar-prev" disabled>← Record</button><button id="ar-next" disabled>Record →</button><button id="ar-reset" disabled>Reset day</button><label>Speed <select id="ar-speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option></select></label></div><input type="range" id="ar-seek" min="0" max="0" value="0" disabled aria-label="Replay recorded time"><p id="clock">No saved session loaded</p><p id="ar-coverage" class="note"></p></section>
-<section class="panel" id="ar-sixty"><h2>60-point option premium finder · recorded observations</h2><p class="note">Selected index · CE and PE · exact expiry and strike · observed same-day moves of ₹60+. Only archived ATM ±7 strikes; missing minutes and OHLC are not inferred. BANKNIFTY monthly = research only.</p><div class="controls"><button type="button" id="ar-60-week">Find this week</button><button type="button" id="ar-60-all">Find all recorded days</button><button type="button" id="ar-60-cancel" disabled>Cancel scan</button><label>Side <select id="ar-60-side"><option value="BOTH">Both</option><option>CE</option><option>PE</option></select></label><label>Movement <select id="ar-60-direction"><option value="BOTH">Rise + fall</option><option value="RISE">Rise ≥₹60</option><option value="FALL">Fall ≥₹60</option></select></label></div><p id="ar-60-status" class="note" role="status" aria-live="polite">Choose a scan. This week uses trading dates in the current IST calendar week.</p><p id="ar-60-coverage" class="note"></p><div id="ar-60-results" class="scroll" aria-live="polite"></div><div class="controls"><button type="button" id="ar-60-prev" disabled>← Previous</button><span id="ar-60-pages" class="note"></span><button type="button" id="ar-60-next" disabled>Next →</button></div></section>
+<section class="panel" id="ar-sixty"><h2>60-point option premium finder · recorded observations</h2><p class="note">Selected index · CE and PE · exact expiry and strike · observed same-day moves of ₹60+. Only archived ATM ±7 strikes; missing minutes and OHLC are not inferred. BANKNIFTY monthly = research only.</p><div class="controls"><button type="button" id="ar-60-week">Find this week</button><button type="button" id="ar-60-all">Find all recorded days</button><button type="button" id="ar-60-cancel" disabled>Cancel scan</button><label>Scan indices <select id="ar-60-index"><option value="CURRENT">Selected index</option><option value="ALL">All 3 indices</option></select></label><label>Side <select id="ar-60-side"><option value="BOTH">Both</option><option>CE</option><option>PE</option></select></label><label>Movement <select id="ar-60-direction"><option value="BOTH">Rise + fall</option><option value="RISE">Rise ≥₹60</option><option value="FALL">Fall ≥₹60</option></select></label></div><p id="ar-60-status" class="note" role="status" aria-live="polite">Choose a scan. This week uses trading dates in the current IST calendar week.</p><p id="ar-60-coverage" class="note"></p><div id="ar-60-results" class="scroll" aria-live="polite"></div><div class="controls"><button type="button" id="ar-60-prev" disabled>← Previous</button><span id="ar-60-pages" class="note"></span><button type="button" id="ar-60-next" disabled>Next →</button></div></section>
 <section class="panel"><h2>Spot · Futures · Positioning</h2><div id="ar-metrics" class="metrics"></div><div class="controls"><label>Contract <select id="ar-contract-mode"><option value="SESSION">Session ATM · reset each day</option><option value="PINNED">Same contract across days</option></select></label><label>Expiry <select id="ar-expiry" aria-label="Pinned exact expiry"></select></label><label>Strike <select id="ar-strike" aria-label="Pinned CE and PE strike"></select></label><button id="ar-atm">Pin ATM at cursor</button></div><p id="ar-contract" class="note"></p><div id="ar-charts"></div></section>
 <section class="panel"><h2>CE / PE ladder · ATM ±7 saved strikes</h2><p class="note">Exact replay timestamp only · PDH green / PDC yellow / PDL red · ΔOI uses the preceding saved bucket only when ≤3 minutes apart.</p><div id="ar-ladder" class="scroll"></div></section><footer class="note">1× = one recorded step / second. Gaps remain gaps; samples are not OHLC candles. Session ATM pins the opening saved contract separately each day. Choose Same contract to keep expiry / strike across days; missing contracts remain unavailable. BANKNIFTY is monthly research only. No orders or Telegram messages.</footer>
 ${RAG_CARD_HTML}</main><script>const __name=(fn,_name)=>fn;const mergeRecordedParts=${mergeRecordedParts.toString()};const recordedSession=${recordedSession.toString()};const recordedFrame=${recordedFrame.toString()};const createRecordedPlayback=${createRecordedPlayback.toString()};const standardIndexObservationClose=${standardIndexObservationClose.toString()};const scanRecordedSixtyPointMoves=${scanRecordedSixtyPointMoves.toString()};(${installRecordedDashboard.toString()})();</script><script>${RAG_CARD_SCRIPT}</script></body></html>`;}
@@ -34,18 +34,18 @@ export function installRecordedDashboard(){
   catch(error:any){if(combined.aborted)throw new Error(signal?.aborted?'Playback cancelled.':'Saved-data request timed out. Retry this day.');throw error;}
   finally{clearTimeout(id);}
  }
- async function load(date:string,signal:AbortSignal){
+ async function load(date:string,signal:AbortSignal,index=symbol){
   const parts:any[]=[],end=standardIndexObservationClose(date),minute=(v:string)=>Number(v.slice(0,2))*60+Number(v.slice(3)),text=(n:number)=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
   const total=Math.ceil((minute(end)-555)/60);
   for(let start=555,part=0;start<minute(end);start+=60){
    if(signal.aborted)throw new Error('Playback cancelled.');
-   $('progress').textContent='Loading '+symbol+' · '+date+' · '+(++part)+' / '+total+' saved windows…';
-   const query=new URLSearchParams({symbol,date,from:text(start),to:text(Math.min(start+60,minute(end)))});
+   $('progress').textContent='Loading '+index+' · '+date+' · '+(++part)+' / '+total+' saved windows…';
+   const query=new URLSearchParams({symbol:index,date,from:text(start),to:text(Math.min(start+60,minute(end)))});
    parts.push(await json('/api/research/recorded-dashboard/replay?'+query,signal));
   }
   const merged=mergeRecordedParts(parts);
   $('progress').textContent='Loaded '+date+' · '+merged.market.length+' market / '+merged.options.length+' option / '+merged.chain.length+' chain rows.';
-  return recordedSession(merged,symbol,date);
+  return recordedSession(merged,index,date);
  }
  function pin(frame:any,force=false){
   const first=latest?.session,rows=force?frame.options:(first?.options||[]),at=force?frame.at:rows[0]?.minute_bucket;
@@ -128,16 +128,20 @@ export function installRecordedDashboard(){
   const token=++scanGeneration,abort=new AbortController();scanAbort=abort;
   const istToday=new Date(Date.now()+19800000).toISOString().slice(0,10),weekday=new Date(istToday+'T00:00:00Z').getUTCDay();
   const start=new Date(Date.parse(istToday+'T00:00:00Z')-((weekday+6)%7)*86400000).toISOString().slice(0,10);
-  const selected=dates.filter(d=>scope==='ALL'||(d>=start&&d<=istToday)),index=symbol;
+  const scanIndices=$('ar-60-index').value==='ALL'?['NIFTY','SENSEX','BANKNIFTY']:[symbol];
+  const selected=dateRows.filter(row=>scanIndices.includes(row.symbol)&&Number(row.markerCount)>0&&(scope==='ALL'||(row.tradeDate>=start&&row.tradeDate<=istToday)))
+   .map(row=>({date:row.tradeDate,index:row.symbol})).filter((v,i,a)=>a.findIndex(x=>x.index===v.index&&x.date===v.date)===i)
+   .sort((a,b)=>a.date.localeCompare(b.date)||scanIndices.indexOf(a.index)-scanIndices.indexOf(b.index));
+  const scanLabel=scanIndices.join(' + ');
   scanCoverage={eligibleRows:0,rejectedRows:0,conflictedMinutes:0};scanDaysDone=0;
   $('ar-60-week').disabled=true;$('ar-60-all').disabled=true;$('ar-60-cancel').disabled=false;
-  if(!selected.length){stopScan();$('ar-60-status').textContent='No saved '+index+' dates in '+(scope==='WEEK'?'the current IST week.':'this scope.');return;}
-  $('ar-60-status').textContent='Reading '+selected.length+' saved '+index+' day(s), one at a time; read-only archive.';
+  if(!selected.length){stopScan();$('ar-60-status').textContent='No saved '+scanLabel+' dates in '+(scope==='WEEK'?'the current IST week.':'this scope.');return;}
+  $('ar-60-status').textContent='Reading '+selected.length+' saved index-day session(s) for '+scanLabel+', one at a time; read-only archive.';
   try{
-   for(const date of selected){
+   for(const item of selected){
     if(abort.signal.aborted||token!==scanGeneration)break;
-    $('ar-60-status').textContent='Scanning '+index+' '+date+' · day '+(scanDaysDone+1)+' / '+selected.length+'.';
-    const session=await load(date,abort.signal);
+    $('ar-60-status').textContent='Scanning '+item.index+' '+item.date+' · session '+(scanDaysDone+1)+' / '+selected.length+'.';
+    const session=await load(item.date,abort.signal,item.index);
     if(abort.signal.aborted||token!==scanGeneration)break;
     const result=scanRecordedSixtyPointMoves(session,60);
     scanHits.push(...result.events);
@@ -148,7 +152,7 @@ export function installRecordedDashboard(){
     scanHits.sort((a,b)=>b.date.localeCompare(a.date)||b.points-a.points||a.toAt.localeCompare(b.toAt));
     showScan();
    }
-   if(token===scanGeneration)$('ar-60-status').textContent='Completed '+scanDaysDone+' / '+selected.length+' '+index+' saved days · '+scanHits.length+' distinct contract/direction observations ≥₹60. Maximum sampled rise/fall per contract and day; not an execution signal.';
+   if(token===scanGeneration)$('ar-60-status').textContent='Completed '+scanDaysDone+' / '+selected.length+' '+scanLabel+' saved index-day sessions · '+scanHits.length+' distinct contract/direction observations ≥₹60. Maximum sampled rise/fall per contract and day; not an execution signal.';
   }catch(error:any){
    if(token===scanGeneration)$('ar-60-status').textContent='Scan INCOMPLETE after '+scanDaysDone+' days: '+(error?.message||'Archive read failed')+'. Saved results cover completed days only.';
   }finally{
@@ -158,6 +162,7 @@ export function installRecordedDashboard(){
  $('ar-60-week').onclick=()=>void findSixty('WEEK');
  $('ar-60-all').onclick=()=>void findSixty('ALL');
  $('ar-60-cancel').onclick=()=>stopScan();
+ $('ar-60-index').onchange=()=>stopScan(true);
  $('ar-60-side').onchange=()=>{scanPage=0;showScan();};
  $('ar-60-direction').onchange=()=>{scanPage=0;showScan();};
  $('ar-60-prev').onclick=()=>{scanPage=Math.max(0,scanPage-1);showScan();};
@@ -165,7 +170,7 @@ export function installRecordedDashboard(){
  $('ar-60-results').onclick=(event:any)=>{
   const key=event.target.closest?.('[data-ar-sixty-evidence]')?.dataset?.arSixtyEvidence;
   if(key===undefined)return;
-  const hit=scanHits[Number(key)];if(!hit||hit.symbol!==symbol)return;
+  const hit=scanHits[Number(key)];if(!hit)return;
   const end=clock(hit.toAt).slice(0,5);
   if(end<'09:15'||end>'15:30')return;
   controller.pause();evidenceEvent('optionpilot:rag-selection',{symbol:hit.symbol,date:hit.date,expiry:hit.expiry,strike:hit.strike,side:hit.side,time:end,lookback:3});

@@ -14,16 +14,15 @@ export interface RecordedSixtyPointScan {
   coverage: { optionRows: number; eligibleRows: number; rejectedRows: number;
     conflictedMinutes: number; contractsObserved: number; source: string; };
 }
-const round2=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
-const ms=(value:unknown)=>typeof value==='string'&&/(?:Z|[+-]\d\d:\d\d)$/.test(value)&&Number.isFinite(Date.parse(value))?Date.parse(value):null;
-const day=(time:number)=>new Date(time+19800000).toISOString().slice(0,10);
-const expiryOf=(row:any)=>String(row?.expiry||'').slice(0,10);
-const keyOf=(row:any)=>[row.symbol,expiryOf(row),row.strike,row.option_type].join('|');
-const signature=(row:any)=>JSON.stringify([row.ltp,row.snapshot_id,row.quote_timestamp,row.truth_verdict,row.expiry,row.strike,row.option_type]);
-
 /** A TRUE marker is necessary but insufficient: require the exact contemporaneous
  * recorded market receipt and snapshot plus the existing RAG 30s freshness rule. */
 export function scanRecordedSixtyPointMoves(session:any,threshold=60):RecordedSixtyPointScan {
+  const round2=(n:number)=>Math.round((n+Number.EPSILON)*100)/100;
+  const ms=(value:unknown)=>typeof value==='string'&&/(?:Z|[+-]\d\d:\d\d)$/.test(value)&&Number.isFinite(Date.parse(value))?Date.parse(value):null;
+  const day=(time:number)=>new Date(time+19800000).toISOString().slice(0,10);
+  const expiryOf=(row:any)=>String(row?.expiry||'').slice(0,10);
+  const keyOf=(row:any)=>[row.symbol,expiryOf(row),row.strike,row.option_type].join('|');
+  const signature=(row:any)=>JSON.stringify([row.ltp,row.snapshot_id,row.quote_timestamp,row.truth_verdict,row.expiry,row.strike,row.option_type]);
   if(!Number.isFinite(threshold)||threshold<=0)throw new Error('INVALID_MOVEMENT_THRESHOLD');
   const options:any[]=Array.isArray(session?.options)?session.options:[],market:any[]=Array.isArray(session?.market)?session.market:[];
   const symbol=String(session?.symbol||''),date=String(session?.date||'');

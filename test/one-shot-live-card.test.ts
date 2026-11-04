@@ -416,11 +416,17 @@ test('reported full-chain PCR stays labelled apart from fresh values, charts and
   a.pcrSnapshot=raw;delete p.pcrDisplay[a.symbol];
  }
  h.send(p);const html=h.el('os-pcr-strip').innerHTML;
+ const totals=h.el('os-wall-ladder').innerHTML;
+ assert.equal((totals.match(/10,000<small>/g)||[]).length,3,'reported CE totals must reach front-table source');
+ assert.equal((totals.match(/13,333<small>/g)||[]).length,3,'reported PE totals must reach front-table source');
+ assert(totals.includes('REPORTED · mixed source times'));
  assert.equal((html.match(/Full-chain reported PCR/g)||[]).length,3);assert.equal((html.match(/1.3333/g)||[]).length,3);
  for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){const primary=html.split('data-pcr-index="'+symbol+'"')[1].split('<div class="os-pcr-reported"')[0];assert.match(primary,/<b>1\.3333 <span/,'reported value must occupy the primary Full PCR number, not leave a large dash');}
  assert(html.includes('4/4 contracts · 2 older than 30s'));assert(html.includes('Source 09:40:00 → 09:45:00 IST'));
  assert(!html.includes('LIVE · Full OI PCR'));assert(!h.el('os-wall-ladder').innerHTML.includes('1.3333'));assert(!h.el('os-pulse-chart').innerHTML.includes('1.3333'));
- h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-pcr-strip').innerHTML.includes('1.3333'));
+ for(const a of p.snapshot.indices){a.pcrSnapshot.reportedPcr.peTotal=0;a.pcrSnapshot.reportedPcr.value=0;}
+ h.advance(501);h.send(p);assert(h.el('os-pcr-strip').innerHTML.includes('0.0000'));assert.equal((h.el('os-wall-ladder').innerHTML.match(/<td>0<small>/g)||[]).length,3,'real zero PE total remains visible');
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-pcr-strip').innerHTML.includes('1.3333'));assert(!h.el('os-wall-ladder').innerHTML.includes('13,333'));assert(!h.el('os-wall-ladder').innerHTML.includes('10,000'));
 });
 
 test('last-reported full PCR displays its earlier source date for all indices and never enters fresh charts',()=>{

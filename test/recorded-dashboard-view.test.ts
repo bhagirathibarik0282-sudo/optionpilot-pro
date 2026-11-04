@@ -13,8 +13,8 @@ async function view(close='15:30'){
   fetch:async(url:string)=>{requests.push(url);if(url.endsWith('/dates'))return {ok:true,json:async()=>({ok:true,dates:dates.map(tradeDate=>({symbol:'NIFTY',tradeDate,markerCount:2}))})};
    const params=new URLSearchParams(url.split('?')[1]),date=params.get('date'),from=params.get('from'),to=params.get('to');
    const time=from==='09:15'?'09:15':to==='15:40'?close:null;
-   const row=time?{symbol:'NIFTY',minute_bucket:date+'T'+time+':00+05:30',truth_verdict:'TRUE',spot_ltp:time==='09:15'?23000:23100,future_ltp:23120,india_vix:12}:null;
-   const opts=row?['CE','PE'].map(option_type=>({...row,expiry:date!<'2026-10-30'?'2026-10-29':'2026-11-02',strike:23000,option_type,ltp:100,oi:'30000000',pdh:110,pdl:90})):[];
+   const row=time?{symbol:'NIFTY',minute_bucket:date+'T'+time+':00+05:30',truth_verdict:'TRUE',snapshot_id:'snap_'+time,backend_timestamp:date+'T'+time+':24+05:30',spot_ltp:time==='09:15'?23000:23100,future_ltp:23120,india_vix:12}:null;
+   const opts=row?['CE','PE'].map(option_type=>({...row,expiry:date!<'2026-10-30'?'2026-10-29':'2026-11-02',strike:23000,option_type,ltp:option_type==='CE'&&time!=='09:15'?170:100,quote_timestamp:date+'T'+time+':10+05:30',oi:'30000000',pdh:110,pdl:90})):[];
    const compact=(rows:any[])=>{const columns=Object.keys(rows[0]||{});return {columns,rows:rows.map(row=>columns.map(key=>row[key]))};};
    return {ok:true,json:async()=>({ok:true,market:compact(row?[row]:[]),options:compact(opts),chain:compact([])})};}};
  vm.createContext(context);const script=[...renderRecordedDashboard().matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1];vm.runInContext(script,context);
@@ -53,4 +53,28 @@ test('recorded row opens exact cursor evidence, pauses replay and invalidates on
 test('post-window saved samples remain visible without a nonfunctional Evidence action',async()=>{
  const h=await view('15:40');assert.match(h.elements.get('ar-ladder').innerHTML,/23,000/);assert.doesNotMatch(h.elements.get('ar-ladder').innerHTML,/data-ar-evidence=/);assert.match(h.elements.get('ar-ladder').innerHTML,/Evidence 09:15–15:30 IST/);
  const count=h.events.filter(e=>e.type==='optionpilot:rag-selection').length;h.elements.get('ar-ladder').onclick({target:{closest:()=>({dataset:{arEvidence:'23000|CE'}})}});assert.equal(h.events.filter(e=>e.type==='optionpilot:rag-selection').length,count);
+});
+
+test('same-dashboard all-recorded finder reports verified sampled 60-point CE movement with RAG action',async()=>{
+ const h=await view();
+ assert.match(renderRecordedDashboard(),/id="ar-60-week"/);
+ assert.match(renderRecordedDashboard(),/id="ar-60-all"/);
+ h.elements.get('ar-60-all').onclick();
+ await until(()=>h.elements.get('ar-60-status').textContent.includes('Completed 3 / 3'));
+ assert.match(h.elements.get('ar-60-results').innerHTML,/₹70/);
+ assert.match(h.elements.get('ar-60-results').innerHTML,/Gap/);
+ assert.match(h.elements.get('ar-60-coverage').textContent,/ATM ±7/);
+ const old=h.events.length;
+ h.elements.get('ar-60-results').onclick({target:{closest:()=>({dataset:{arSixtyEvidence:'0'}})}});
+ assert.ok(h.events.length>old);
+ assert.equal(h.events.at(-1).type,'optionpilot:rag-selection');
+});
+test('scan can be cancelled and index change invalidates old result identity',async()=>{
+ const h=await view();
+ h.elements.get('ar-60-all').onclick();
+ h.elements.get('ar-60-cancel').onclick();
+ assert.match(h.elements.get('ar-60-status').textContent,/cancelled/);
+ h.elements.get('ar-index').value='SENSEX';
+ h.elements.get('ar-index').onchange();
+ assert.equal(h.elements.get('ar-60-results').innerHTML,'');
 });

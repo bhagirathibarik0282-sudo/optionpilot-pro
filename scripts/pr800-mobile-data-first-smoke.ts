@@ -5,10 +5,16 @@ import {once} from 'node:events';
 import {mkdir} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
+import {renderRagEvidencePage} from '../rag-evidence-card.js';
+import {renderRecordedDashboard} from '../recorded-dashboard-view.js';
 
 const html=renderBusinessDashboardV1Html({} as any);
 assert(html.includes('id="os-market-radar"'));
+const ragRequests:string[]=[];
 const server=createServer((req,res)=>{
+ if(req.url==='/archive-test'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(renderRecordedDashboard());return;}
+ if(req.url==='/rag-test'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(renderRagEvidencePage());return;}
+ if(req.url?.startsWith('/api/research/rag-'))ragRequests.push(req.url);
  if(req.url==='/'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end(html);return;}
  res.writeHead(503,{'Content-Type':'application/json','Cache-Control':'no-store'});
  res.end(JSON.stringify({ok:false,reason:'ISOLATED_UI_NO_MARKET_DATA'}));
@@ -205,6 +211,33 @@ try{
    assert.equal(await page.locator('#recorded-replay').evaluate((el:any)=>el.open),true);
    await page.locator('#mb-chapter').selectOption('0',{timeout:10000});
    assert.deepEqual(errors,[],name+' JS runtime errors');
+   if(name==='mobile'){
+    // Exercise native time-input validity, which serialized DOM mocks cannot enforce.
+    await page.goto(base+'/rag-test',{waitUntil:'domcontentloaded'});
+    await page.locator('#rag-symbol').selectOption('NIFTY');await page.locator('#rag-date').fill('2026-11-04');
+    await page.locator('#rag-expiry').fill('2026-11-09');await page.locator('#rag-strike').fill('23900');await page.locator('#rag-side').selectOption('CE');
+    await page.locator('#rag-time').fill('14:31');
+    assert.equal(await page.locator('#rag-time').evaluate((el:any)=>el.validity.stepMismatch),false);
+    const count=ragRequests.length;await page.locator('#rag-search').click();
+    await page.waitForFunction(()=>document.getElementById('rag-status')?.textContent?.includes('ISOLATED_UI_NO_MARKET_DATA'));
+    assert.equal(ragRequests.length,count+1);assert.equal(new URL(ragRequests.at(-1)!,base).searchParams.get('time'),'14:31');
+    for(const kind of ['EVENT','HISTORY']){
+     await page.locator('#rag-kind').selectOption(kind);await page.locator('#rag-time').fill('14:31');
+     assert.equal(await page.locator('#rag-time').evaluate((el:any)=>el.validity.stepMismatch),true,kind+' preserves native 3m input guard');
+     await page.locator('#rag-search').click();assert.equal(ragRequests.length,count+1);
+    }
+    await page.locator('#rag-kind').selectOption('SNAPSHOT');assert.equal(await page.locator('#rag-time').getAttribute('step'),'60');
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/mobile-rag-minute-input.png',fullPage:true});
+    await page.goto(base+'/archive-test',{waitUntil:'domcontentloaded'});
+    const archiveCount=ragRequests.length;await page.locator('#rag-evidence-card summary').click();assert.equal(ragRequests.length,archiveCount,'opening archive evidence makes no RAG request');
+    await page.locator('#rag-symbol').selectOption('NIFTY');await page.locator('#rag-date').fill('2026-11-04');await page.locator('#rag-expiry').fill('2026-11-09');
+    await page.locator('#rag-strike').fill('23900');await page.locator('#rag-side').selectOption('CE');await page.locator('#rag-time').fill('14:31');
+    assert.equal(await page.locator('#rag-time').evaluate((el:any)=>el.validity.stepMismatch),false);await page.locator('#rag-search').click();
+    await page.waitForFunction(()=>document.getElementById('rag-status')?.textContent?.includes('ISOLATED_UI_NO_MARKET_DATA'));
+    assert.equal(ragRequests.length,archiveCount+1);assert.equal(new URL(page.url()).pathname,'/archive-test','evidence remains inside the recorded dashboard');
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/mobile-archive-rag-minute-input.png',fullPage:true});
+    assert.deepEqual(errors,[],name+' RAG JS runtime errors');
+   }
    console.log('PR800_'+name.toUpperCase()+'_PASS '+JSON.stringify(data));
   }finally{await context.close();}
  }

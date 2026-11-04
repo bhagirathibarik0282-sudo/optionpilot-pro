@@ -1,0 +1,270 @@
+{
+  "status": "PARTIAL",
+  "scope": "read-only public production API readback; no direct SQL/catalog/performance audit performed",
+  "serviceId": "030df1c1-24b3-45ec-b2ba-d0798a91e0bb",
+  "deploymentCommit": "6e3aa627da463828c697520b246e2ddf08a15767",
+  "readAt": "2026-11-04T10:38:52Z",
+  "results": [
+    {
+      "name": "source-minute",
+      "path": "/api/research/h1-replay?symbol=NIFTY&date=2026-11-04&from=14:31&to=14:31&scope=FULL&format=compact&canonical=pcr-provenance",
+      "http": 200,
+      "elapsedMs": 11638,
+      "sha256": "8f2be565481615d9fa61a497c525726cb39825260d6ccf60d293e275e036ae3e",
+      "ok": true,
+      "reason": null,
+      "mode": "READ_ONLY_H1_3M_REPLAY_COMPACT_V1",
+      "counts": {
+        "market": 1,
+        "options": 94,
+        "chain": 3,
+        "markers": 1,
+        "canonical": 1
+      },
+      "exactSourceRows": {
+        "market": [
+          {
+            "symbol": "NIFTY",
+            "minute_bucket": "2026-11-04T09:01:00.000Z",
+            "truth_verdict": "TRUE",
+            "snapshot_id": "NIFTY-1793782887268-e60ad346",
+            "exchange_timestamp": null,
+            "backend_timestamp": "2026-11-04T09:01:27.268Z",
+            "freshness_status": "TRUE",
+            "spot_ltp": 23896.55,
+            "spot_open": 23742.25,
+            "spot_high": 23946.35,
+            "spot_low": 23696.15,
+            "spot_prev_close": 23810.85,
+            "vwap": 23879.63,
+            "pdh": 23810.85,
+            "pdl": 23482.8,
+            "gap_percent": -0.2881039526098335,
+            "future_ltp": 23935.4,
+            "future_vwap": null,
+            "future_oi": "13736255",
+            "future_oi_change": null,
+            "future_volume": "3985800",
+            "future_basis": 38.85000000000218,
+            "india_vix": 15.26,
+            "india_vix_change": -0.46000000000000085,
+            "calculation_version": "H1_RUNTIME_BRIDGE_V1"
+          }
+        ],
+        "options": [
+          {
+            "symbol": "NIFTY",
+            "minute_bucket": "2026-11-04T09:01:00.000Z",
+            "truth_verdict": "TRUE",
+            "snapshot_id": "NIFTY-1793782887268-e60ad346",
+            "expiry": "2026-11-09T00:00:00.000Z",
+            "expiry_bucket": "Current Expiry",
+            "dte": 5,
+            "strike": 23900,
+            "option_type": "CE",
+            "atm_offset": 0,
+            "is_candidate": false,
+            "is_wall": false,
+            "ltp": 162.65,
+            "bid": 162.55,
+            "ask": 163,
+            "bid_qty": null,
+            "ask_qty": null,
+            "spread": 0.44999999999998863,
+            "volume": "214394375",
+            "oi": "9978930",
+            "oi_change": null,
+            "derived_oi_change": "-125970",
+            "derived_oi_change_source": "DERIVED_PREVIOUS_PERSISTED_SNAPSHOT",
+            "derived_oi_change_gap_seconds": 60,
+            "iv": 13.155195099954998,
+            "delta": 0.5349803324676322,
+            "gamma": 0.001075,
+            "vega": 11.167774849372018,
+            "theta": -18.010896182615753,
+            "intrinsic": 0,
+            "extrinsic": 162.65,
+            "day_high": 212.45,
+            "day_low": 79.45,
+            "pdh": 82.3,
+            "pdl": 35,
+            "quote_timestamp": "2026-11-04T09:01:27.000Z",
+            "quote_age_seconds": 0,
+            "liquidity_status": "TIGHT",
+            "validation_status": "RESEARCH_ELIGIBLE",
+            "calculation_version": "H1_RUNTIME_BRIDGE_V1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "rag-snapshot-minute",
+      "path": "/api/research/rag-event-evidence?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=23900&side=CE&time=14:31&kind=SNAPSHOT&lookback=3",
+      "http": 400,
+      "elapsedMs": 8267,
+      "sha256": "601db4fe00e83c89426c0107c1f01df716d1fd08719f1cacca3d107becef2ab3",
+      "ok": false,
+      "reason": "EVENT_REQUIRES_REGULAR_3M_PAIR",
+      "mode": null,
+      "identity": null,
+      "answer": null,
+      "referenceWarning": null,
+      "premiumResponse": null
+    },
+    {
+      "name": "rag-snapshot-grid-control",
+      "path": "/api/research/rag-event-evidence?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=23900&side=CE&time=14:30&kind=SNAPSHOT&lookback=3",
+      "http": 200,
+      "elapsedMs": 11475,
+      "sha256": "3fa50b4f681fcf9b6c568f79216c0f5c55573fe269eaa4a62d0c8dfaa54452ef",
+      "ok": true,
+      "reason": null,
+      "mode": "READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1",
+      "identity": {
+        "symbol": "NIFTY",
+        "date": "2026-11-04",
+        "expiry": "2026-11-09",
+        "strike": 23900,
+        "side": "CE",
+        "dte": 5
+      },
+      "answer": "2026-11-04 NIFTY 23900 · expiry 2026-11-09 · 14:30 IST: CE ₹165.55; 3m ₹171.05 → ₹165.55 (-3.22%)। Opposite PE ₹160.30; 3m ₹156.00 → ₹160.30 (+2.76%)। Previous-session PDH/PDL reference ଅନୁପଲବ୍ଧ। Full PCR 0.9855।",
+      "referenceWarning": null,
+      "premiumResponse": {
+        "version": "RECORDED_PREMIUM_RESPONSE_V1",
+        "identity": {
+          "symbol": "NIFTY",
+          "date": "2026-11-04",
+          "expiry": "2026-11-09",
+          "strike": 23900,
+          "side": "CE"
+        },
+        "lookbackMinutes": 3,
+        "clock": {
+          "calendarDte": 5,
+          "expiryAt": null,
+          "minutesToExpiry": null,
+          "reason": "EXPIRY_TIMESTAMP_NOT_RECORDED"
+        },
+        "safety": {
+          "readOnly": true,
+          "affectsSelector": false,
+          "affectsVerdict": false,
+          "affectsTelegram": false,
+          "affectsExecution": false
+        },
+        "sources": [
+          {
+            "id": "OIC_OPTIONS_PRICING",
+            "url": "https://prd-web.optionseducation.org/optionsoverview/options-pricing",
+            "use": "Spot intrinsic proxy and premium remainder; no attribution to time decay."
+          },
+          {
+            "id": "OIC_DELTA",
+            "url": "https://prd-web.optionseducation.org/advancedconcepts/delta",
+            "use": "Observed premium/spot ratio is not theoretical Delta."
+          },
+          {
+            "id": "KITE_QUOTE_TIMES",
+            "url": "https://kite.trade/docs/connect/v3/market-quotes/",
+            "use": "Keep quote, bucket and receipt times distinct; archived quote timestamp semantics remain unverified."
+          }
+        ],
+        "modelAttribution": {
+          "status": "UNAVAILABLE",
+          "reason": "VERIFIED_GREEK_MODEL_AND_UNITS_NOT_ESTABLISHED"
+        },
+        "semantics": "Measured exact endpoints. Spot intrinsic is an arithmetic proxy; the remainder is not isolated Theta or IV.",
+        "status": "MEASURED",
+        "reason": null,
+        "before": {
+          "bucketAt": "2026-11-04T08:57:00.000Z",
+          "quoteAt": "2026-11-04T08:57:27.000Z",
+          "receiptAt": "2026-11-04T08:57:27.000Z",
+          "availableAt": "2026-11-04T08:57:27.000Z",
+          "snapshotId": "NIFTY-1793782647023-6bdc10ef",
+          "quoteAgeSeconds": 0,
+          "optionCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+          "marketCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+          "price": 171.05,
+          "spot": 23907.6,
+          "oi": 10088455,
+          "spotBasis": "RECORDED_SAME_SNAPSHOT; SPOT_TRADE_FRESHNESS_UNVERIFIED",
+          "spotExchangeAt": null,
+          "spotIntrinsicProxy": 7.599999999998545,
+          "spotRemainder": 163.45000000000147,
+          "remainderStatus": "ARITHMETIC_PROXY",
+          "liquidity": {
+            "bid": 171.2,
+            "ask": 171.45,
+            "spread": 0.25,
+            "status": "RECORDED_TWO_SIDED_QUOTE",
+            "executionPriceVerified": false
+          }
+        },
+        "current": {
+          "bucketAt": "2026-11-04T09:00:00.000Z",
+          "quoteAt": "2026-11-04T09:00:27.000Z",
+          "receiptAt": "2026-11-04T09:00:27.000Z",
+          "availableAt": "2026-11-04T09:00:27.000Z",
+          "snapshotId": "NIFTY-1793782827030-35126896",
+          "quoteAgeSeconds": 0,
+          "optionCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+          "marketCalculationVersion": "H1_RUNTIME_BRIDGE_V1",
+          "price": 165.55,
+          "spot": 23903.05,
+          "oi": 10104900,
+          "spotBasis": "RECORDED_SAME_SNAPSHOT; SPOT_TRADE_FRESHNESS_UNVERIFIED",
+          "spotExchangeAt": null,
+          "spotIntrinsicProxy": 3.0499999999992724,
+          "spotRemainder": 162.50000000000074,
+          "remainderStatus": "ARITHMETIC_PROXY",
+          "liquidity": {
+            "bid": 165.9,
+            "ask": 166.35,
+            "spread": 0.44999999999998863,
+            "status": "RECORDED_TWO_SIDED_QUOTE",
+            "executionPriceVerified": false
+          }
+        },
+        "change": {
+          "price": -5.5,
+          "pricePercent": -3.2154340836012874,
+          "spot": -4.549999999999272,
+          "spotPercent": -0.019031605012628926,
+          "spotIntrinsicProxy": -4.549999999999272,
+          "spotRemainder": -0.9500000000007276,
+          "oi": 16445,
+          "observedPremiumPerSpotPoint": 1.2087912087914021
+        },
+        "endpointReasons": {
+          "before": null,
+          "current": null
+        },
+        "evidenceSha256": "08dfb44bb31dcc5f29ede8d597e828f327ce093502ba0023f5c9ed8875fd1a00"
+      }
+    }
+  ],
+  "afterHoursReadback": {
+    "http": 503,
+    "body": {
+      "error": "OUTSIDE_OPERATING_HOURS",
+      "tradingDate": "2026-11-04",
+      "scheduled": false,
+      "maintenance": false,
+      "shouldRun": false,
+      "running": false,
+      "ready": false,
+      "draining": false,
+      "hoursIST": "08:45–16:15",
+      "timezone": "Asia/Kolkata",
+      "supervisor": true,
+      "maintenanceUntil": null
+    }
+  },
+  "firstCodeHeadCi": {
+    "head": "929bf385cd3d1f393262896b73df890061aec96d",
+    "allFiveWorkflows": "success",
+    "nativeMobileRun": 41816404767
+  }
+}

@@ -70,7 +70,7 @@ test('card is in production book and standalone route, without introducing an au
  const html=renderBusinessDashboardV1Html({} as any);assert.match(html,/id="rag-evidence-card"/);assert.match(html,/RAG evidence search/);assert.ok(html.includes(RAG_CARD_SCRIPT));
  assert.equal((html.match(/id="rag-evidence-card"/g)||[]).length,1);assert.ok(renderRagEvidencePage().includes('<details open id="rag-evidence-card"'));
  const app=new Hono();app.route('/api/research',researchRouter);const r=await app.request('/api/research/rag-event-evidence/view');assert.equal(r.status,200);assert.match(await r.text(),/id="rag-question"/);
- assert.ok(RAG_CARD_HTML.includes('step="180"'));
+ assert.ok(RAG_CARD_HTML.includes('step="60"'));
 });
 
 test('card Ask RAG submits snapshot identity once and invalidation removes old evidence',async()=>{
@@ -123,4 +123,11 @@ test('source-backed response is rendered by the actual serialized card, with unk
  b.node('example').onclick();await b.submit();const html=b.node('result').innerHTML;
  assert.match(html,/Recorded premium response/);assert.match(html,/Calendar DTE 0/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);assert.match(html,/theoretical Delta/);assert.match(html,/11\.20/);assert.match(html,/expiry timestamp/);
  assert.equal(renderPremiumResponseEvidence(null),'');
+});
+
+test('snapshot time uses minute steps while event and history retain the regular three-minute grid',()=>{
+ const b=browser(async()=>success());
+ b.node('kind').value='SNAPSHOT';b.node('kind').listeners.change();assert.equal(b.node('time').step,'60');assert.equal(b.node('time').min,'09:15');
+ for(const kind of ['EVENT','HISTORY']){b.node('kind').value=kind;b.node('kind').listeners.change();assert.equal(b.node('time').step,'180');assert.equal(b.node('time').min,'09:18');}
+ b.node('kind').value='SNAPSHOT';b.node('kind').listeners.change();assert.equal(b.node('time').step,'60');
 });

@@ -41,3 +41,16 @@ test('archive concurrency is bounded; existing in-flight reads finish normally',
 test('standalone browser script parses and exposes the requested queue controls',()=>{
  const html=renderRecordedDashboard();for(const [,script] of html.matchAll(/<script>([\s\S]*?)<\/script>/g))assert.doesNotThrow(()=>new Function(script));assert.match(html,/id="ar-last3"/);assert.match(html,/id="ar-last5"/);assert.match(html,/id="ar-all"/);
 });
+
+test('archive facade serves existing RAG readers with GET-only methods and unchanged exact selection',async t=>{
+ let reads=0;const url=await serve(t,{ragEvidence:async(selection:any)=>{reads++;return {ok:true,identity:selection,safety:{writesPerformed:false,createsOrders:false}};},ragHistory:async()=>({ok:true,matches:[]})});
+ const path='/api/research/rag-event-evidence?symbol=NIFTY&date=2026-11-04&expiry=2026-11-09&strike=23900&side=CE&time=14:31&kind=SNAPSHOT&lookback=3';
+ const r=await fetch(url+path);assert.equal(r.status,200);assert.equal(r.headers.get('x-optionpilot-mode'),'RECORDED_READ_ONLY');assert.equal((await r.json()).identity.time,'14:31');assert.equal(reads,1);
+ assert.equal((await fetch(url+path,{method:'POST'})).status,405);assert.equal(reads,1);
+ assert.equal((await fetch(url+path.replace('kind=SNAPSHOT','kind=EVENT'))).status,400);assert.equal(reads,1);
+ assert.equal((await fetch(url+'/api/research/rag-event-evidence/view')).status,200);
+ assert.equal((await fetch(url+'/api/research/rag-same-dte-history')).status,200);
+});
+test('after-hours dashboard embeds the same evidence panel without navigating to another page',()=>{
+ const html=renderRecordedDashboard();assert.equal((html.match(/id="rag-evidence-card"/g)||[]).length,1);assert.match(html,/id="rag-time"[^>]*step="60"/);
+});

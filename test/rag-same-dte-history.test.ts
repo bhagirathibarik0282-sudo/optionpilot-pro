@@ -72,3 +72,8 @@ test('invalid anchor avoids history reads and route failures return unavailable'
  const response=await app.request('/rag-same-dte-history');assert.equal(response.status,503);assert.equal((await response.json()).reason,'HISTORICAL_SOURCE_UNAVAILABLE');
  assert.equal((await app.request('/rag-same-dte-history',{method:'POST'})).status,404);
 });
+
+test('same-DTE history rejects non-grid time before any replay or date-index query',async()=>{
+ let reads=0;const out=await readSameDteHistory({symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22500',side:'CE',time:'09:37'},async()=>{reads++;return replay();},async()=>{reads++;return {ok:true,dates:[]} as any;});
+ assert.equal(out.ok,false);assert.equal(reads,0);
+});

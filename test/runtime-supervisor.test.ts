@@ -83,3 +83,15 @@ test('manual off-hours web control boots the real fixture, then safely stops it'
   assert.equal(instance.status().maintenance,false);
   assert.equal((await fetch(url+'/recorded-dashboard')).status,200);
 });
+
+test('historical RAG view and validation stay available off-hours without starting the market child',async t=>{
+ const {instance,url}=await harness(t,'2026-10-28T15:00:00Z');
+ const view=await fetch(url+'/api/research/rag-event-evidence/view');assert.equal(view.status,200);assert.match(await view.text(),/id="rag-evidence-card"/);
+ assert.equal((await fetch(url+'/api/research/rag-event-evidence?symbol=WRONG')).status,400);
+ assert.equal((await fetch(url+'/api/research/rag-not-allowlisted')).status,503);
+ assert.equal(instance.status().running,false);assert.equal(instance.status().maintenance,false);
+});
+test('scheduled RAG requests retain their original child routing',async t=>{
+ const {instance,url}=await harness(t,'2026-10-28T04:00:00Z');await waitFor(()=>instance.status().ready);
+ const r=await fetch(url+'/api/research/rag-event-evidence/view');assert.equal(r.status,200);assert.equal((await r.json()).method,'GET');
+});

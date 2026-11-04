@@ -9,7 +9,8 @@ export async function readSameDteHistory(query:Record<string,string|undefined>,r
  if(!parsed.ok)return {ok:false,status:'BLOCKED',reason:parsed.reason};
  const r=parsed.value;
  const fromTime=new Date(Date.parse(r.date+'T'+r.time+':00+05:30')-180000+19800000).toISOString().slice(11,16);
- if(fromTime<'09:15'||r.time>'15:30')return {ok:false,status:'BLOCKED',reason:'EXACT_REGULAR_3M_PAIR_REQUIRED'};
+ const minute=Number(r.time.slice(0,2))*60+Number(r.time.slice(3));
+ if(fromTime<'09:15'||r.time>'15:30'||(minute-555)%3!==0)return {ok:false,status:'BLOCKED',reason:'EXACT_REGULAR_3M_PAIR_REQUIRED'};
  const selection={symbol:r.symbol,date:r.date,expiry:r.expiry,strike:r.strike,side:r.side,timeIst:r.time,asOf:Math.min(r.asOf,Date.now())};
  const current=await read({symbol:r.symbol,tradeDate:r.date,fromTime,toTime:r.time,scope:'FULL'});
  const anchorCheck=compareSameDteHistory(selection,current,[]);

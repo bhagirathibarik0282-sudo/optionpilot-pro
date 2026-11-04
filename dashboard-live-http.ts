@@ -1,10 +1,10 @@
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { readDashboardLiveSnapshot, dashboardLiveRevision, readDashboardPremiumSnapshot } from './dashboard-live-runtime.js';
+import { readDashboardLiveSnapshot, dashboardLiveRevision, readDashboardPremiumSnapshot, readDashboardPcrAudit } from './dashboard-live-runtime.js';
 import { LIVE_INDICES, type LiveSelection, type PremiumWatchFilter } from './dashboard-live-feed.js';
 
 export const DASHBOARD_LIVE_FLUSH_MS=100;
-export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot,revision=dashboardLiveRevision){
+export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot,revision=dashboardLiveRevision,readAudit=readDashboardPcrAudit){
  let clients=0;
  const parse=(query:Record<string,string>)=>{
   const selection:LiveSelection={};
@@ -16,6 +16,12 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
   }return selection;
  };
 
+ app.get('/dashboard-live/pcr-audit',c=>{
+  c.header('Cache-Control','no-store');
+  const {symbol,expiry}=c.req.query();
+  if(!(LIVE_INDICES as readonly string[]).includes(symbol)||!/^\d{4}-\d{2}-\d{2}$/.test(expiry||'')||!Number.isFinite(Date.parse(expiry+'T00:00:00Z'))||new Date(expiry+'T00:00:00Z').toISOString().slice(0,10)!==expiry)return c.json({ok:false,reason:'INVALID_PCR_AUDIT_SELECTION'},400);
+  return c.json(readAudit(symbol,expiry));
+ });
  app.get('/dashboard-live/premiums',c=>{
   c.header('Cache-Control','no-store');
   try{

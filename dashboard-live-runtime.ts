@@ -89,6 +89,13 @@ export function readDashboardLiveSnapshot(selection:LiveSelection={}){
 /** Cheap dirty check: no full-chain projection until a tick/state changes or heartbeat is due. */
 export function dashboardLiveRevision(){return state+':'+(store?.runtimeId||'none')+':'+(store?.revision()||0)+':'+(pcrSampler?.version()||0);}
 
+/** Read the existing REST attempt only. No broker request or fresh-data promotion. */
+export function readDashboardPcrAudit(symbol:string,expiry:string){
+ const connected=enabled()&&state==='OPEN'&&isIndianEquityMarketOpenAt(new Date());
+ return {readOnly:true,extraBrokerRequests:0,connected,connectionState:state,serverTime:new Date().toISOString(),
+  audit:connected?pcrSampler?.readAudit(symbol,expiry)??null:null};
+}
+
 /** Display-only view of the same socket cache; disconnection revokes all values. */
 export function readDashboardPremiumSnapshot(filter:PremiumWatchFilter={}){
  const connected=state==='OPEN',snapshot=store?.premiums(Date.now(),filter)||null;

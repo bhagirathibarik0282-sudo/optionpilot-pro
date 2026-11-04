@@ -120,6 +120,7 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
 }
 export class DashboardPcrSampler {
  private lastDiagnostic='';private lastDiagnosticAt=0;
+ private auditRows=new Map<string,Array<{symbol:string|undefined;expiry:string|undefined;strike:number|undefined;side:string|undefined;token:number;responseToken:number|null;key:string;oi:number|null;sourceAt:string|null}>>();
  private busy=false;private due=0;private revision=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string;batchesRequested:number;batchesCompleted:number}>();
  constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;readSpot?(symbol:string):any;onDiagnostic?(summary:any):void}){}
  async tick(){
@@ -164,6 +165,14 @@ export class DashboardPcrSampler {
      const result=fetchState==='OK'?measured:{...measured,state:'INCOMPLETE',reason:'INCOMPLETE',reportedPcr:null,lastReportedPcr:null,volume:null,fullPcr:null,ceTotal:null,peTotal:null,bandPcr:null,strikeRows:[],callWall:null,putWall:null,coverage:{...measured.coverage,complete:false}};
      // No network errors are surfaced verbatim (credentials and URLs are excluded).
      this.results.set(key,{...result,fetchState,batchesRequested,batchesCompleted});
+     // Keep only allowlisted contract evidence from this attempt. Never attach
+     // it to the frequently broadcast snapshot or retain it after an HTTP failure.
+     if(fetchState==='OK')this.auditRows.set(key,group.map(e=>{
+      const quoteKey=e.exchange+':'+e.label,q=quotes[quoteKey],sourceAt=quoteTime(q?.timestamp);
+      return {symbol:e.symbol,expiry:e.expiry,strike:e.strike,side:e.side,token:e.token,key:quoteKey,
+       responseToken:Number.isSafeInteger(q?.instrument_token)?q.instrument_token:null,
+       oi:finite(q?.oi)&&q.oi>=0?q.oi:null,sourceAt:Number.isFinite(sourceAt)?new Date(sourceAt).toISOString():null};
+     }));else this.auditRows.delete(key);
     }
     this.revision++;
     const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
@@ -182,4 +191,14 @@ export class DashboardPcrSampler {
   return result;
  }
  version(){return this.revision;}
+ readAudit(symbol:string,expiry:string){
+  const result=this.read(symbol,expiry),rows=this.auditRows.get(symbol+'|'+expiry);
+  if(!result||result.state==='STALE'||result.fetchState!=='OK'||!rows)return null;
+  const reported=result.reportedPcr||result.lastReportedPcr;
+  return {symbol,expiry,expected:result.coverage.expected,checkedAt:result.checkedAt,cycleStartedAt:result.cycleStartedAt,
+   source:result.source,fetchState:result.fetchState,freshnessState:result.state,reason:result.reason,
+   observation:reported?.basis??null,
+   claimed:reported?{ceTotal:reported.ceTotal,peTotal:reported.peTotal,value:reported.value}:null,
+   rows:rows.map(row=>({...row}))};
+ }
 }

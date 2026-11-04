@@ -19,6 +19,12 @@ on:
       - 'scripts/check-full-pcr-availability.ts'
       - 'test/full-pcr-availability.test.ts'
       - 'test/pcr-historical-parity.test.ts'
+      - 'test/pcr-contract-audit.test.ts'
+      - 'scripts/check-pcr-contract-arithmetic.ts'
+      - 'dashboard-live-http.ts'
+      - 'dashboard-live-runtime.ts'
+      - 'test/dashboard-live-feed.test.ts'
+      - 'test/dashboard-live-recovery.test.ts'
       - 'test/fixtures/pcr-legacy-function-20261016.txt'
       - 'dashboard-live-view.ts'
       - 'test/dashboard-live-view.test.ts'
@@ -34,5 +40,5 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/dashboard-pcr-sampler.test.ts test/live-three-index-pcr.test.ts test/premium-pcr-panel.test.ts test/premium-recorded-workspace.test.ts test/one-shot-live-card.test.ts test/screen-overview-evidence.test.ts test/dashboard-live-view.test.ts test/dashboard-live-recovery.test.ts test/full-pcr-availability.test.ts test/pcr-historical-parity.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/dashboard-pcr-sampler.test.ts test/live-three-index-pcr.test.ts test/premium-pcr-panel.test.ts test/premium-recorded-workspace.test.ts test/one-shot-live-card.test.ts test/screen-overview-evidence.test.ts test/dashboard-live-view.test.ts test/dashboard-live-recovery.test.ts test/dashboard-live-feed.test.ts test/full-pcr-availability.test.ts test/pcr-historical-parity.test.ts test/pcr-contract-audit.test.ts
       - run: node scripts/optionpilot-guardrail-check.mjs

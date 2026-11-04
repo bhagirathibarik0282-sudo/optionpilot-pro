@@ -221,7 +221,7 @@ try{
     const count=ragRequests.length;await page.locator('#rag-search').click();
     await page.waitForFunction(()=>document.getElementById('rag-status')?.textContent?.includes('ISOLATED_UI_NO_MARKET_DATA'));
     assert.equal(ragRequests.length,count+1);assert.equal(new URL(ragRequests.at(-1)!,base).searchParams.get('time'),'14:31');
-    for(const kind of ['EVENT','HISTORY']){
+    for(const kind of ['EVENT']){
      await page.locator('#rag-kind').selectOption(kind);await page.locator('#rag-time').fill('14:31');
      assert.equal(await page.locator('#rag-time').evaluate((el:any)=>el.validity.stepMismatch),true,kind+' preserves native 3m input guard');
      await page.locator('#rag-search').click();assert.equal(ragRequests.length,count+1);
@@ -229,7 +229,7 @@ try{
     await page.locator('#rag-kind').selectOption('SNAPSHOT');assert.equal(await page.locator('#rag-time').getAttribute('step'),'60');
     await page.screenshot({path:'pr800-mobile-ui-artifacts/mobile-rag-minute-input.png',fullPage:true});
     await page.goto(base+'/archive-test',{waitUntil:'domcontentloaded'});
-    const archiveCount=ragRequests.length;await page.locator('#rag-evidence-card summary').click();assert.equal(ragRequests.length,archiveCount,'opening archive evidence makes no RAG request');
+    const archiveCount=ragRequests.length;await page.locator('#rag-evidence-card > summary').click();assert.equal(ragRequests.length,archiveCount,'opening archive evidence makes no RAG request');
     await page.locator('#rag-symbol').selectOption('NIFTY');await page.locator('#rag-date').fill('2026-11-04');await page.locator('#rag-expiry').fill('2026-11-09');
     await page.locator('#rag-strike').fill('23900');await page.locator('#rag-side').selectOption('CE');await page.locator('#rag-time').fill('14:31');
     assert.equal(await page.locator('#rag-time').evaluate((el:any)=>el.validity.stepMismatch),false);await page.locator('#rag-search').click();

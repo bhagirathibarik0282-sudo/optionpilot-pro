@@ -609,3 +609,11 @@ test('transient missing frames revoke current values but retain valid same-runti
  assert.equal(premiumCells(h)[16],'6');
  h.advance(600);const changed=h.payload();changed.snapshot.runtimeId='replacement-runtime';h.send(changed);assert.equal(premiumCells(h)[16],'—');
 });
+
+test('recorded premium Evidence retains its exact saved bucket and identity',()=>{
+ const h=harness();h.setSaved(recordedSession());h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ const html=h.el('os-premium-table').innerHTML;const encoded=html.match(/data-os-evidence="([^"]+)"/)?.[1];assert.ok(encoded);
+ const d=JSON.parse(encoded.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&'));
+ assert.deepEqual(d,{symbol:'NIFTY',date:'2026-10-19',expiry:'2026-10-22',strike:100,side:'CE',time:'09:45',lookback:1});
+ assert.match(html,/<td>RECORDED<\/td>/,'status remains a plain coverage field');
+});

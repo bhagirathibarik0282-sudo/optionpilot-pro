@@ -14,6 +14,9 @@ ${RAG_CARD_HTML}</main><script>const __name=(fn,_name)=>fn;const mergeRecordedPa
 
 export function installRecordedDashboard(){
  const $=(id:string)=>document.getElementById(id) as any;
+ let evidenceScope='';
+ const evidenceEvent=(type:string,detail?:any)=>{if(typeof CustomEvent==='function'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent(type,{detail}));};
+ const invalidate=(scope:string)=>{if(scope!==evidenceScope){evidenceScope=scope;evidenceEvent('optionpilot:rag-invalidate');}};
  let dates:string[]=[],dateRows:any[]=[],symbol='NIFTY',expiry='',strike:number|null=null,controller:any=null,latest:any=null,requestVersion=0,renderedDate='';
  const number=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
  const fmt=(v:any)=>number(v)===null?'—':v.toLocaleString('en-IN',{maximumFractionDigits:2});
@@ -64,9 +67,9 @@ export function installRecordedDashboard(){
   if(state.days.length)$('queue').textContent='Day '+(state.dayIndex+1)+' / '+state.days.length+' · '+state.days.join(' → ');
   $('clock').textContent=state.loading?'Loading recorded '+state.days[state.dayIndex]+'…':at?frame.date+' · '+clock(at)+' IST · '+(state.playing?'REPLAY':'SAVED / PAUSED'):'No TRUE saved samples loaded';
   $('ar-coverage').innerHTML=at?(state.index+1)+' / '+session.timeline.length+' saved steps · '+session.cadenceMinutes+'m recorder cadence'+(frame.gapMinutes>session.cadenceMinutes?' · <span class="gap">Gap '+frame.gapMinutes+' minutes since previous step; no values filled</span>':''):'Missing data stays unavailable.';
-  if(!at){$('ar-metrics').innerHTML='';$('ar-charts').innerHTML='';$('ar-ladder').innerHTML='';$('ar-contract').textContent='';return;}
+  if(!at){invalidate('empty|'+symbol);$('ar-metrics').innerHTML='';$('ar-charts').innerHTML='';$('ar-ladder').innerHTML='';$('ar-contract').textContent='';return;}
   if(renderedDate!==frame.date){if($('ar-contract-mode').value!=='PINNED'){expiry='';strike=null;}renderedDate=frame.date;}
-  pin(frame);
+  pin(frame);invalidate([symbol,frame.date,at,expiry,strike,state.loading].join('|'));
   const ex=[...new Set<string>([expiry,...session.options.map((r:any)=>String(r.expiry).slice(0,10))])].filter(Boolean).sort();$('ar-expiry').innerHTML=ex.map(v=>'<option>'+esc(v)+'</option>').join('');$('ar-expiry').value=expiry;
   const strikes=[...new Set<number>([strike,...session.options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry).map((r:any)=>r.strike)])].filter((v:any)=>number(v)!==null).sort((a:any,b:any)=>a-b);$('ar-strike').innerHTML=strikes.map(v=>'<option>'+v+'</option>').join('');$('ar-strike').value=String(strike);
   const market=frame.market.length===1?frame.market[0]:{},chainRows=frame.chain.filter((r:any)=>String(r.expiry).slice(0,10)===expiry),chain=chainRows.length===1?chainRows[0]:{};
@@ -80,9 +83,17 @@ export function installRecordedDashboard(){
   const value=(k:number,side:string)=>{const matches=nowRows.filter((r:any)=>r.strike===k&&r.option_type===side);return matches.length===1?matches[0]:{};};
   const cells=(r:any)=>{const old=previous&&frame.gapMinutes<=3?session.options.filter((q:any)=>q.minute_bucket===previous&&q.strike===r.strike&&q.option_type===r.option_type&&String(q.expiry).slice(0,10)===expiry):[],delta=old.length===1&&number(old[0].oi)!==null&&number(r.oi)!==null?r.oi-old[0].oi:null;
    const event=number(r.ltp)!==null?(number(r.pdh)!==null&&r.ltp>r.pdh?'Above PDH':number(r.pdl)!==null&&r.ltp<r.pdl?'Below PDL':''):'';
-   return '<td>'+fmt(r.ltp)+'</td><td>'+fmt(r.oi)+'</td><td class="'+(delta>0?'up changed':delta<0?'down changed':'')+'">'+(delta>0?'+':'')+fmt(delta)+'</td><td class="pdh">'+fmt(r.pdh)+'</td><td class="pdc">'+fmt(r.pdc)+'</td><td class="pdl">'+fmt(r.pdl)+'</td><td>'+event+'</td>';};
+   return '<td>'+fmt(r.ltp)+(number(r.ltp)!==null&&r.ltp>0?'<button type="button" data-ar-evidence="'+r.strike+'|'+r.option_type+'" aria-label="Evidence '+r.strike+' '+r.option_type+'">Evidence</button>':'')+'</td><td>'+fmt(r.oi)+'</td><td class="'+(delta>0?'up changed':delta<0?'down changed':'')+'">'+(delta>0?'+':'')+fmt(delta)+'</td><td class="pdh">'+fmt(r.pdh)+'</td><td class="pdc">'+fmt(r.pdc)+'</td><td class="pdl">'+fmt(r.pdl)+'</td><td>'+event+'</td>';};
   $('ar-ladder').innerHTML=band.length?'<table><thead><tr><th>Strike</th><th>CE ₹</th><th>CE OI</th><th>CE ΔOI</th><th>CE PDH</th><th>CE PDC</th><th>CE PDL</th><th>CE state</th><th>PE ₹</th><th>PE OI</th><th>PE ΔOI</th><th>PE PDH</th><th>PE PDC</th><th>PE PDL</th><th>PE state</th></tr></thead><tbody>'+band.map(k=>'<tr><th>'+fmt(k)+'</th>'+cells(value(k,'CE'))+cells(value(k,'PE'))+'</tr>').join('')+'</tbody></table>':'No saved strikes for this pinned expiry.';
  }
+ $('ar-ladder').onclick=(event:any)=>{
+  const key=event.target.closest?.('[data-ar-evidence]')?.dataset?.arEvidence;if(!key||latest?.loading)return;
+  const [raw,side]=key.split('|'),k=Number(raw),frame=latest?.frame;
+  if(!frame?.at||!['CE','PE'].includes(side)||!Number.isFinite(k))return;
+  const rows=frame.options.filter((r:any)=>r.symbol===symbol&&String(r.expiry).slice(0,10)===expiry&&r.strike===k&&r.option_type===side);
+  if(rows.length!==1||number(rows[0].ltp)===null||rows[0].ltp<=0)return;
+  controller.pause();evidenceEvent('optionpilot:rag-selection',{symbol,date:frame.date,expiry,strike:k,side,time:new Date(Date.parse(frame.at)+19800000).toISOString().slice(11,16),lookback:3});
+ };
  controller=createRecordedPlayback({load,render,setTimeout:(fn:any,ms:number)=>setTimeout(fn,ms),clearTimeout:(id:any)=>clearTimeout(id)});
  async function start(days:string[],play=true){const version=++requestVersion;await controller.start(days,play);if(version===requestVersion&&!play){const state=controller.snapshot();if(state.session?.timeline.length){const optionTimes=new Set(state.session.options.map((r:any)=>r.minute_bucket));let index=state.session.timeline.length-1;for(let i=index;i>=0;i--)if(optionTimes.has(state.session.timeline[i])){index=i;break;}controller.seek(index);}}}
  for(const count of [1,3,5])$('ar-last'+count).onclick=()=>void start(dates.slice(-count));

@@ -11,12 +11,12 @@ export const RAG_CARD_CSS=`
 @media(max-width:650px){#rag-evidence-card .rag-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#rag-evidence-card{padding:12px}#rag-evidence-card button{width:100%;margin-right:0}}`;
 export const RAG_CARD_HTML=`<details id="rag-evidence-card" lang="or"><summary>RAG evidence · recorded premiumକୁ ପଚାରନ୍ତୁ</summary>
 <p>Saved date, contract ଓ timestampରୁ premium / opposite premium response। Premium cardର Ask RAG selection ଏଠାରେ ଭରିଦେବ; ଅଲଗା ପ୍ରଶ୍ନ ମଧ୍ୟ ଲେଖିପାରିବେ।</p>
-<label for="rag-question">ଆପଣଙ୍କ ପ୍ରଶ୍ନ<textarea id="rag-question" maxlength="800" placeholder="NIFTY 22300 PE date 2026-10-13 expiry 2026-10-13 time 09:36ରେ କଣ ହେଲା?"></textarea></label>
+<p id="rag-selection-summary" class="rag-note">Dashboard rowର Evidence ବାଛନ୍ତୁ, ବା ତଳେ selection ଭରନ୍ତୁ।</p><nav aria-label="Evidence actions"><button id="rag-now" type="button">ପୂର୍ବରୁ → ଏବେ</button><button id="rag-after" type="button">ପରେ କଣ ହେଲା?</button><button id="rag-history" type="button">ପୁରୁଣା ଉଦାହରଣ · 3m</button></nav><details id="rag-selection-details" open><summary>Selection ବଦଳାନ୍ତୁ / ଅନ୍ୟ ପ୍ରଶ୍ନ</summary><label for="rag-question">ଆପଣଙ୍କ ପ୍ରଶ୍ନ<textarea id="rag-question" maxlength="800" placeholder="NIFTY 22300 PE date 2026-10-13 expiry 2026-10-13 time 09:36ରେ କଣ ହେଲା?"></textarea></label>
 <button id="rag-extract" type="button">ପ୍ରଶ୍ନରୁ selection ଭରନ୍ତୁ</button><button id="rag-example" type="button">13 Octର ଯାଞ୍ଚ ହୋଇଥିବା ଉଦାହରଣ</button>
 <p class="rag-note">NIFTY / SENSEX / BANKNIFTY, CE / PE, date / ତାରିଖ, expiry / ମିଆଦ, time / ସମୟ ଲେଖନ୍ତୁ। Date YYYY-MM-DD ବା DD/MM/YYYY। ତଳର fields ସିଧାସଳଖ ଭରି ମଧ୍ୟ ଖୋଜିପାରିବେ।</p>
 <form id="rag-form"><div class="rag-grid"><label>Answer type<select id="rag-kind"><option value="SNAPSHOT">Premium + opposite behaviour</option><option value="EVENT">Verified PDH / PDL crossing · 3m</option><option value="HISTORY">Same-DTE history · 3m</option></select></label><label>Reaction window<select id="rag-lookback"><option value="1">1 minutes</option><option value="3" selected>3 minutes</option><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="75">75 minutes</option><option value="125">125 minutes</option></select></label><label>Index<select id="rag-symbol" required><option value="">ବାଛନ୍ତୁ</option><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>Session date<input id="rag-date" type="date" required></label><label>Exact expiry<input id="rag-expiry" type="date" required></label><label>Strike<input id="rag-strike" type="number" min="1" max="1000000" step="1" required></label><label>Side<select id="rag-side" required><option value="">ବାଛନ୍ତୁ</option><option>CE</option><option>PE</option></select></label><label>Recorded time · IST<input id="rag-time" type="time" min="09:15" max="15:30" step="60" required></label><label>As-of cutoff · IST (optional)<input id="rag-asof" type="datetime-local" step="1"></label></div>
 <label class="rag-check"><input id="rag-outcomes" type="checkbox">ପରବର୍ତ୍ତୀ +3/+6/+15/+30 ମିନିଟ୍ historical response ଦେଖାନ୍ତୁ</label>
-<button id="rag-search" type="submit">Evidence ଖୋଜନ୍ତୁ</button><button id="rag-clear" type="button">Selection ସଫା କରନ୍ତୁ</button></form>
+<button id="rag-search" type="submit">Evidence ଖୋଜନ୍ତୁ</button><button id="rag-clear" type="button">Selection ସଫା କରନ୍ତୁ</button></form></details>
 <p id="rag-status" role="status" aria-live="polite">ପ୍ରଶ୍ନରୁ selection ଭରି ଯାଞ୍ଚ କରନ୍ତୁ, ତାପରେ Evidence ଖୋଜନ୍ତୁ।</p><div id="rag-result"></div>
 <p class="rag-note">ଏହା structured field extraction ଓ recorded evidence retrieval। Free-form semantic search ବା trading signal ନୁହେଁ। Missing data ଅନୁମାନରେ ଭରାଯାଏ ନାହିଁ।</p></details>`;
 
@@ -38,25 +38,28 @@ export function installRagEvidenceCard(parseQuestion:typeof parseRagQuestion,ren
   const esc=(v:unknown)=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
   const n=(v:unknown,d=2)=>v!==null&&v!==undefined&&typeof v!=='boolean'&&String(v).trim()!==''&&Number.isFinite(Number(v))?Number(v).toFixed(d):'ଅନୁପଲବ୍ଧ';
   let version=0,busy=false,active:AbortController|null=null;
-  function syncKind(){const history=$('kind')?.value==='HISTORY';const snapshot=$('kind')?.value==='SNAPSHOT';$('time').min=snapshot?'09:15':'09:18';$('time').step=snapshot?'60':'180';$('lookback').disabled=history;$('outcomes').disabled=history;for(const id of ['lookback','outcomes']){const label=$(id).closest?.('label');if(label)label.hidden=history;}if(history){$('lookback').value='3';$('outcomes').checked=false;}}
+  function syncKind(){const history=$('kind')?.value==='HISTORY';const snapshot=$('kind')?.value==='SNAPSHOT';$('time').min=snapshot?'09:15':'09:18';$('time').step=snapshot||history?'60':'180';$('lookback').disabled=history;$('outcomes').disabled=history;for(const id of ['lookback','outcomes']){const label=$(id).closest?.('label');if(label)label.hidden=history;}if(history){$('lookback').value='3';$('outcomes').checked=false;}}
   const clearResult=()=>{syncKind();version++;active?.abort();active=null;busy=false;$('search').disabled=false;$('result').innerHTML='';};
+  const selectionSummary=()=>{const node=$('selection-summary');if(node)node.textContent=keys.every(k=>$(k).value)?$('date').value+' · '+$('symbol').value+' · '+$('strike').value+' '+$('side').value+' · expiry '+$('expiry').value+' · '+$('time').value+' IST · RECORDED':'Dashboard rowର Evidence ବାଛନ୍ତୁ, ବା selection ଭରନ୍ତୁ।';};
+  const action=(kind:string,outcomes=false)=>{clearResult();$('kind').value=kind;$('outcomes').checked=outcomes;syncKind();if(keys.some(k=>!$(k).value)){const details=$('selection-details') as any;if(details)details.open=true;}$('form').requestSubmit();};
+  if($('now'))$('now').onclick=()=>action('SNAPSHOT');if($('after'))$('after').onclick=()=>action('SNAPSHOT',true);if($('history'))$('history').onclick=()=>action('HISTORY');
   const extract=()=>{
     clearResult();$('asof').value='';$('outcomes').checked=false;const p=parseQuestion($('question').value);
-    for(const key of keys)$(key).value=p.fields[key]??'';
+    for(const key of keys)$(key).value=p.fields[key]??'';selectionSummary();
     $('status').textContent=p.issues.length?p.issues.join('\n'):'Selection ଯାଞ୍ଚ କରନ୍ତୁ।'+(p.missing.length?' ଆହୁରି ଦରକାର: '+p.missing.map(k=>names[k]).join(', '):' ସବୁ exact fields ଚିହ୍ନଟ ହୋଇଛି।');
   };
   $('extract').onclick=extract;
   $('example').onclick=()=>{if($('kind'))$('kind').value='EVENT';$('question').value='NIFTY 22300 PE date 2026-10-13 expiry 2026-10-13 time 09:36';$('asof').value='';$('outcomes').checked=false;extract();};
-  $('clear').onclick=()=>{($('form') as unknown as HTMLFormElement).reset();$('question').value='';clearResult();$('status').textContent='ନୂଆ exact selection ଭରନ୍ତୁ।';};
+  $('clear').onclick=()=>{($('form') as unknown as HTMLFormElement).reset();$('question').value='';clearResult();selectionSummary();$('status').textContent='ନୂଆ exact selection ଭରନ୍ତୁ।';};
   $('form').addEventListener('input',()=>{clearResult();$('status').textContent='Selection ବଦଳିଛି। ପୁଣି Evidence ଖୋଜନ୍ତୁ।';});
-  $('question').addEventListener('input',()=>{clearResult();for(const key of keys)$(key).value='';$('asof').value='';$('outcomes').checked=false;$('status').textContent='ନୂଆ ପ୍ରଶ୍ନ ପାଇଁ selection ପୁଣି ଭରନ୍ତୁ।';});
-  const messages:Record<string,string>={ANCHOR_PAIR_UNAVAILABLE_AT_CUTOFF:'ଚୟନ କରିଥିବା contractର exact 3m premium / spot pair ଉପଲବ୍ଧ ନାହିଁ।',EXACT_REGULAR_3M_PAIR_REQUIRED:'09:18–15:30 ମଧ୍ୟରେ regular 3m timestamp ବାଛନ୍ତୁ।',HISTORICAL_DATE_INDEX_UNAVAILABLE:'Historical date index ଏବେ ଉପଲବ୍ଧ ନାହିଁ।',HISTORICAL_SOURCE_UNAVAILABLE:'Historical source ଏବେ ଉପଲବ୍ଧ ନାହିଁ।',EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF:'ଏହି contract / timestampର verified premium ଉପଲବ୍ଧ ନାହିଁ।',INVALID_LOOKBACK:'Reaction window ବାଛନ୍ତୁ।',EXACT_EVENT_PAIR_UNAVAILABLE_AT_CUTOFF:'ଏହି cutoff ସୁଦ୍ଧା exact event pair ଉପଲବ୍ଧ ନାହିଁ।',
+  $('question').addEventListener('input',()=>{clearResult();for(const key of keys)$(key).value='';selectionSummary();$('asof').value='';$('outcomes').checked=false;$('status').textContent='ନୂଆ ପ୍ରଶ୍ନ ପାଇଁ selection ପୁଣି ଭରନ୍ତୁ।';});
+  const messages:Record<string,string>={ANCHOR_PAIR_UNAVAILABLE_AT_CUTOFF:'ଚୟନ କରିଥିବା contractର exact 3m premium / spot pair ଉପଲବ୍ଧ ନାହିଁ।',EXACT_REGULAR_3M_PAIR_REQUIRED:'09:18–15:30 ମଧ୍ୟରେ ସମୟ ବାଛନ୍ତୁ; ଠିକ୍ 3m ପୂର୍ବର record ଦରକାର।',HISTORICAL_DATE_INDEX_UNAVAILABLE:'Historical date index ଏବେ ଉପଲବ୍ଧ ନାହିଁ।',HISTORICAL_SOURCE_UNAVAILABLE:'Historical source ଏବେ ଉପଲବ୍ଧ ନାହିଁ।',EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF:'ଏହି contract / timestampର verified premium ଉପଲବ୍ଧ ନାହିଁ।',INVALID_LOOKBACK:'Reaction window ବାଛନ୍ତୁ।',EXACT_EVENT_PAIR_UNAVAILABLE_AT_CUTOFF:'ଏହି cutoff ସୁଦ୍ଧା exact event pair ଉପଲବ୍ଧ ନାହିଁ।',
     PREVIOUS_REFERENCE_UNAVAILABLE:'ଏହି contractର previous-session reference ଯାଞ୍ଚ ପାଇଁ ତଥ୍ୟ ଅନୁପଲବ୍ଧ।',PREVIOUS_REFERENCE_INCONSISTENT:'Previous-session reference ମେଳ ଖାଉନାହିଁ।',
     NO_RECONCILED_LEVEL_CROSSING:'ଚୟନ କରିଥିବା intervalରେ ଯାଞ୍ଚ ହୋଇଥିବା PDH/PDL crossing ମିଳିଲା ନାହିଁ।',EVENT_REQUIRES_REGULAR_3M_PAIR:'09:18ରୁ regular 3-minute event time ବାଛନ୍ତୁ, ଯଥା 09:36।',
     EVENT_AFTER_CUTOFF:'Event ସମୟ cutoff ପରେ ଅଛି।',REPLAY_SOURCE_UNAVAILABLE:'Recorded source ଏବେ ଉପଲବ୍ଧ ନାହିଁ।',EVIDENCE_SOURCE_UNAVAILABLE:'Recorded source ଏବେ ଉପଲବ୍ଧ ନାହିଁ।',
     INVALID_DATE_RANGE:'Session date ଯାଞ୍ଚ କରନ୍ତୁ।',INVALID_EXPIRY:'Expiry date ଯାଞ୍ଚ କରନ୍ତୁ।',INVALID_STRIKE:'ଠିକ୍ strike ଭରନ୍ତୁ।',INVALID_AS_OF:'Cutoff date/time ଯାଞ୍ଚ କରନ୍ତୁ।',UNSUPPORTED_OR_NONTRADING_DATE:'ଏହି date existing 2026 trading calendarରେ supported session ନୁହେଁ।'};
   $('form').onsubmit=async event=>{
-    event.preventDefault();if(busy)return;
+    event.preventDefault();if(busy)return;selectionSummary();
     const missing=keys.filter(k=>!$(k).value);clearResult();if(missing.length){$('status').textContent='ଆହୁରି ଦରକାର: '+missing.map(k=>names[k]).join(', ');return;}
     const params=new URLSearchParams(Object.fromEntries(keys.map(k=>[k,$(k).value])));
     const history=$('kind')?.value==='HISTORY';
@@ -80,12 +83,12 @@ export function installRagEvidenceCard(parseQuestion:typeof parseRagQuestion,ren
     finally{clearTimeout(timeout);if(active===controller){active=null;busy=false;($('search') as unknown as HTMLButtonElement).disabled=false;}}
   };
   if(typeof window!=='undefined'){
-    window.addEventListener('optionpilot:rag-invalidate',()=>{clearResult();$('status').textContent='Watch selection ବଦଳିଛି। Ask RAGରେ ନୂଆ evidence ଦେଖନ୍ତୁ।';});
+    window.addEventListener('optionpilot:rag-invalidate',()=>{clearResult();for(const key of keys)$(key).value='';$('question').value='';$('asof').value='';$('outcomes').checked=false;selectionSummary();$('status').textContent='Dashboard selection ବଦଳିଛି। ନୂଆ rowର Evidence ବାଛନ୍ତୁ।';});
     window.addEventListener('optionpilot:rag-selection',((event:CustomEvent)=>{
       const d=event.detail||{},text=d.symbol+' '+d.strike+' '+d.side+' date '+d.date+' expiry '+d.expiry+' time '+d.time;
       const parsed=parseQuestion(text);if(!parsed.complete)return;clearResult();for(const key of keys)$(key).value=parsed.fields[key]||'';
       if($('kind'))$('kind').value='SNAPSHOT';if($('lookback'))$('lookback').value=[1,3,5,15,30,45,75,125].includes(Number(d.lookback))?String(d.lookback):'3';
-      syncKind();$('time').min='09:15';$('asof').value='';$('outcomes').checked=false;$('question').value=text+' premium ଓ opposite premiumର reaction କଣ?';
+      syncKind();selectionSummary();const details=$('selection-details') as any;if(details)details.open=false;$('time').min='09:15';$('asof').value='';$('outcomes').checked=false;$('question').value=text+' premium ଓ opposite premiumର reaction କଣ?';
       const card=document.getElementById('rag-evidence-card') as HTMLDetailsElement|null;if(card){card.open=true;card.scrollIntoView({behavior:'smooth',block:'start'});}
       ($('form') as unknown as HTMLFormElement).requestSubmit();
     }) as EventListener);

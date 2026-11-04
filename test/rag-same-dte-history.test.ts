@@ -73,7 +73,17 @@ test('invalid anchor avoids history reads and route failures return unavailable'
  assert.equal((await app.request('/rag-same-dte-history',{method:'POST'})).status,404);
 });
 
-test('same-DTE history rejects non-grid time before any replay or date-index query',async()=>{
- let reads=0;const out=await readSameDteHistory({symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22500',side:'CE',time:'09:37'},async()=>{reads++;return replay();},async()=>{reads++;return {ok:true,dates:[]} as any;});
+test('same-DTE history rejects pre-session baseline before any replay or date-index query',async()=>{
+ let reads=0;const out=await readSameDteHistory({symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22500',side:'CE',time:'09:17'},async()=>{reads++;return replay();},async()=>{reads++;return {ok:true,dates:[]} as any;});
  assert.equal(out.ok,false);assert.equal(reads,0);
+});
+
+test('non-grid minute uses only exact three-minute endpoints and preserves cutoff',async()=>{
+ const shifted=(day='2026-10-13')=>{const x=replay(day);for(const rows of [x.market,x.options])for(const r of rows)for(const key of ['minute_bucket','backend_timestamp','quote_timestamp'])if(r[key])r[key]=new Date(Date.parse(r[key])+60000).toISOString();return x;};
+ const sel={...s,timeIst:'09:37'};const result:any=compareSameDteHistory(sel,shifted(),[shifted('2026-10-06')]);
+ assert.equal(result.ok,true);assert.equal(result.anchor.before.bucketAt,'2026-10-13T04:04:00.000Z');assert.equal(result.matches.length,1);
+ assert.equal(compareSameDteHistory(sel,replay(),[]).ok,false,'no nearest-minute fallback');
+ assert.equal(compareSameDteHistory({...sel,asOf:Date.parse('2026-10-13T04:07:00Z')},shifted(),[]).ok,false);
+ const calls:any[]=[];const http:any=await readSameDteHistory({symbol:s.symbol,date:s.date,expiry:s.expiry,strike:String(s.strike),side:s.side,time:'09:37'},async q=>{calls.push(q);return shifted(q.tradeDate);},async()=>({ok:true,dates:[]} as any));
+ assert.equal(http.ok,true);assert.equal(calls[0].fromTime,'09:34');assert.equal(calls[0].toTime,'09:37');
 });

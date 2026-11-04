@@ -1,6 +1,6 @@
 # RAG evidence: strict work checklist
 
-Overall status: PARTIAL. One bounded access defect reproduced and corrected locally. The first code head passed all five CI workflows, including native Chromium minute input. The after-hours access correction still needs new-head CI and corrected production acceptance.
+Overall status: PARTIAL. Unit 1 is verified for the sampled exact-minute read and off-hours route; wider usability and all-index coverage remain later work. Accepted production commit: a85fd3fbcf09ea0880e177ea0c6fac416f0d4e56.
 
 ## Fixed objective
 
@@ -27,11 +27,11 @@ No new database, embedding service, model, recorder, broker call, trading author
 - [x] Route existing GET-only RAG readers through the existing archive handler when the market runtime is off.
 - [x] Verify locally that archive RAG access cannot start the market child, authorize maintenance or expose unlisted routes.
 - [x] Embed the existing evidence card in the recorded dashboard.
-- [ ] Pass final-head native Chromium acceptance, including evidence within the recorded dashboard.
-- [ ] Verify the tested code tree is deployed successfully.
-- [ ] Read the previously rejected 14:31 selection from production and match its exact price and arithmetic.
-- [ ] Confirm an EVENT request at 14:31 remains rejected, with no crossing invented.
-- [ ] Attach the corrected readback to the audit record; only then close unit 1.
+- [x] Pass final-head native Chromium acceptance, including evidence within the recorded dashboard.
+- [x] Verify the tested code tree is deployed successfully.
+- [x] Read the previously rejected 14:31 selection from production and match its exact price and arithmetic.
+- [x] Confirm an EVENT request at 14:31 remains rejected, with no crossing invented.
+- [x] Attach the corrected readback to the audit record; only then close unit 1.
 
 ### Baseline evidence
 
@@ -72,3 +72,40 @@ After the first readback, the previously successful 14:30 query returned HTTP 50
 The correction reuses the existing archive handler and existing RAG/evidence/history functions. Only the three exact existing GET endpoints (evidence, its view, same-DTE history) are allowed through that facade outside operating hours. The market child's schedule, startup, authorization and live-session routing are unchanged. RAG shares the archive handler's two-active-read cap and rejects writes. The recorded dashboard embeds the same evidence card; it makes no automatic RAG request.
 
 Before this correction, new facade, embedded-card and supervisor availability tests failed. Afterward, all 38 existing/new archive, playback, operating-window and supervisor tests pass with zero skips. Final-head CI and a successful recorded-minute read with the production market worker still stopped are required before closure.
+
+## Unit 1 acceptance closure
+
+PR #843 deployed successfully as a85fd3fbcf09ea0880e177ea0c6fac416f0d4e56 (Railway deployment 3a5673fe-3907-45f1-8adf-ccd294d1b2aa). All eight final-head CI workflows passed, including 390px native minute input and evidence submission inside the recorded dashboard.
+
+Corrected production readback after operating hours:
+- 14:31 SNAPSHOT: HTTP 200, RECORDED_READ_ONLY, source EXISTING_POSTGRES_H1_REPLAY; selected 162.65, exact 14:28 baseline 172.85, price delta -10.20 and percent -5.901070292160826.
+- Missing previous-session reference remains explicitly PARTIAL; it no longer prevents these eligible snapshot values.
+- 14:31 EVENT: HTTP 400 EVENT_REQUIRES_REGULAR_3M_PAIR; no event-grid weakening.
+- As-of 14:31:00: HTTP 422 EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF; later-received data remains excluded.
+- Original dashboard URL: HTTP 200 with exactly one embedded RAG evidence card.
+- Health before and after reads: market runtime running=false, maintenance=false, scheduled=false. No temporary market window was opened.
+
+The source receipts are recorded in the accompanying audit JSON; the merged PR description also retains this closure. This closes only the sampled access defect. Manual field burden, broad search, similar-event ranking, query plans/cost and full end-to-end mobile data quality remain separately unproven.
+
+
+## Unit 2: complete the recorded evidence interaction
+
+Changes prepared against production a85fd3f (rollback revision):
+
+- Recorded replay ladder: each actual positive-price row has an Evidence action. Clicking derives identity again from the current exact frame, rejects absent/ambiguous rows, pauses playback, and forwards date/index/expiry/strike/side/minute. No nearest-time or inferred-expiry search.
+- Main reference dashboard recorded premium table: retains the same source identity in its Evidence button and opens the existing RAG card inside the existing dashboard modal. Price/status column positions and exact coverage statuses remain intact.
+- Card actions: before → selected time, explicitly requested later observations, and same-DTE historical comparison. The chosen identity stays visible. Advanced manual fields remain available.
+- Cursor/date/index/contract/source changes abort and invalidate an old request, discard its result, and clear its identity. A quick action cannot silently reuse the previous contract.
+- History uses an exact three-minute interval ending at any recorded minute, e.g. 14:28 → 14:31. Both exact endpoints, source identity, duplicate checks, receipt/quote age, session and cutoff still have to pass. No rounding/interpolation. Verified crossing EVENT remains on its regular three-minute grid.
+- Snapshot context with missing baseline/reference stays explicitly partial; an invalid selected quote still cannot enter calculations. Same-DTE examples remain descriptive, one closest recorded moneyness contract per supplied day, maximum six earlier days. No similarity score, win rate, causal claim or trade authority is added.
+- No schema migration, new service, embedding/model request, broker request, database write, retention change, credential change or schedule change. Existing shared two-active archive-read limit remains.
+
+Acceptance checklist:
+- [x] Source identity propagation, pause, absent-contract rejection and cursor invalidation regression tests.
+- [x] Race suppression, explicit outcome opt-in and invalidated-identity action tests.
+- [x] Exact non-grid history endpoints accepted; absent/nearby endpoints and pre-receipt cutoff rejected.
+- [ ] Final-head real Chromium 360px/390px frozen-production-source workflow, including front dashboard modal.
+- [ ] Final-head CI and deployed revision identity.
+- [ ] Actual production exact-minute arithmetic, cutoff/event negative controls, history endpoint and runtime-off state.
+
+The browser fixture projects the already documented production 23900 CE/PE records; it is isolated acceptance evidence, not a current live-data or full-chain coverage claim. SQL catalog/query-plan audit, cost benchmarking, semantic retrieval ranking, all-date coverage and live-market acceptance remain unproven. This release completes the recorded row-to-evidence interaction; it does not manufacture absent records or certify the wider research system.

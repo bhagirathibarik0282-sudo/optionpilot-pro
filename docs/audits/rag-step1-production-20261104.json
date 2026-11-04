@@ -266,5 +266,144 @@
     "head": "929bf385cd3d1f393262896b73df890061aec96d",
     "allFiveWorkflows": "success",
     "nativeMobileRun": 41816404767
+  },
+  "correctedAcceptance": {
+    "status": "PARTIAL",
+    "scope": "NIFTY exact-minute access and after-hours facade only; whole RAG usability is not complete",
+    "deploymentCommit": "a85fd3fbcf09ea0880e177ea0c6fac416f0d4e56",
+    "deploymentId": "3a5673fe-3907-45f1-8adf-ccd294d1b2aa",
+    "results": [
+      {
+        "name": "corrected-snapshot",
+        "http": 200,
+        "modeHeader": "RECORDED_READ_ONLY",
+        "elapsedMs": 10567,
+        "rawSha256": "c9fc266b7b6dfb7acbbba4b6c6a8dbc3bae31ed72b8dc414744312dc14c2443d",
+        "ok": true,
+        "mode": "READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1",
+        "source": "EXISTING_POSTGRES_H1_REPLAY",
+        "reason": null,
+        "status": "PARTIAL",
+        "error": null,
+        "identity": {
+          "symbol": "NIFTY",
+          "date": "2026-11-04",
+          "expiry": "2026-11-09",
+          "strike": 23900,
+          "side": "CE",
+          "dte": 5
+        },
+        "comparison": {
+          "lookbackMinutes": 3,
+          "selectedChangePercent": -5.901070292160826,
+          "oppositeSide": "PE",
+          "oppositeChangePercent": 6.871727748691092
+        },
+        "scheduled": null,
+        "maintenance": null,
+        "running": null,
+        "ready": null,
+        "selectedPrice": 162.65,
+        "beforePrice": 172.85,
+        "currentPrice": 162.65,
+        "priceChange": -10.199999999999989,
+        "referenceUnavailableReason": "PREVIOUS_REFERENCE_UNAVAILABLE",
+        "safety": {
+          "readOnly": true,
+          "writesPerformed": false,
+          "affectsSelector": false,
+          "affectsVerdict": false,
+          "affectsTelegram": false,
+          "affectsExecution": false,
+          "createsOrders": false
+        },
+        "snapshotIds": [
+          "NIFTY-1793781087097-7f1fa3e9",
+          "NIFTY-1793781987262-3e6241f7",
+          "NIFTY-1793782527275-d81044e6",
+          "NIFTY-1793782707262-2dab5369",
+          "NIFTY-1793782887268-e60ad346"
+        ]
+      },
+      {
+        "name": "worker-state",
+        "http": 200,
+        "modeHeader": null,
+        "elapsedMs": 6522,
+        "rawSha256": "50c8fe0f42627918254a09fbf11b6b26d40b6f4e62a1b29132859109971f4b49",
+        "ok": true,
+        "mode": "SUPERVISOR",
+        "source": null,
+        "reason": null,
+        "status": null,
+        "error": null,
+        "identity": null,
+        "comparison": null,
+        "scheduled": false,
+        "maintenance": false,
+        "running": false,
+        "ready": false
+      },
+      {
+        "name": "event-grid-preserved",
+        "http": 400,
+        "modeHeader": "RECORDED_READ_ONLY",
+        "elapsedMs": 8071,
+        "rawSha256": "04b5474ba7423a0f6bebf4938c46cfe2591388dd3ae2d0ff9ac0aa93b39fe03b",
+        "ok": false,
+        "mode": null,
+        "source": null,
+        "reason": "EVENT_REQUIRES_REGULAR_3M_PAIR",
+        "status": "BLOCKED",
+        "error": null,
+        "identity": null,
+        "comparison": null,
+        "scheduled": null,
+        "maintenance": null,
+        "running": null,
+        "ready": null
+      },
+      {
+        "name": "cutoff-preserved",
+        "http": 422,
+        "modeHeader": "RECORDED_READ_ONLY",
+        "elapsedMs": 6966,
+        "rawSha256": "2bd83ac8af6075a39c4bd69fd1339e7cab6b584d1c90c067185c0b929bc093a8",
+        "ok": false,
+        "mode": "READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1",
+        "source": null,
+        "reason": "EXACT_SNAPSHOT_UNAVAILABLE_AT_CUTOFF",
+        "status": "BLOCKED",
+        "error": null,
+        "identity": null,
+        "comparison": null,
+        "scheduled": null,
+        "maintenance": null,
+        "running": null,
+        "ready": null
+      },
+      {
+        "name": "same-dashboard-panel",
+        "http": 200,
+        "modeHeader": "RECORDED_READ_ONLY",
+        "elapsedMs": 7953,
+        "rawSha256": "23e33798612a610f188d82ab0425c6b94a00e79761bc8cd890472909c8517acd",
+        "sameDashboardRagCards": 1
+      }
+    ],
+    "afterReadWorkerState": {
+      "ok": true,
+      "mode": "SUPERVISOR",
+      "scheduled": false,
+      "maintenance": false,
+      "running": false,
+      "ready": false,
+      "hoursIST": "08:45–16:15"
+    }
+  },
+  "finalCodeHeadCi": {
+    "head": "00c7460adbf7c60e26754823715d93be7412c53f",
+    "allEightWorkflows": "success",
+    "nativeMobileRun": 41817393867
   }
 }

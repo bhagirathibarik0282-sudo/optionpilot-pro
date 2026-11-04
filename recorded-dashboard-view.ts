@@ -98,11 +98,82 @@ export function installRecordedDashboard(){
   controller.pause();evidenceEvent('optionpilot:rag-selection',{symbol,date:frame.date,expiry,strike:k,side,time:new Date(Date.parse(frame.at)+19800000).toISOString().slice(11,16),lookback:3});
  };
  controller=createRecordedPlayback({load,render,setTimeout:(fn:any,ms:number)=>setTimeout(fn,ms),clearTimeout:(id:any)=>clearTimeout(id)});
- async function start(days:string[],play=true){const version=++requestVersion;await controller.start(days,play);if(version===requestVersion&&!play){const state=controller.snapshot();if(state.session?.timeline.length){const optionTimes=new Set(state.session.options.map((r:any)=>r.minute_bucket));let index=state.session.timeline.length-1;for(let i=index;i>=0;i--)if(optionTimes.has(state.session.timeline[i])){index=i;break;}controller.seek(index);}}}
+ async function start(days:string[],play=true){stopScan();const version=++requestVersion;await controller.start(days,play);if(version===requestVersion&&!play){const state=controller.snapshot();if(state.session?.timeline.length){const optionTimes=new Set(state.session.options.map((r:any)=>r.minute_bucket));let index=state.session.timeline.length-1;for(let i=index;i>=0;i--)if(optionTimes.has(state.session.timeline[i])){index=i;break;}controller.seek(index);}}}
+
+ const stopScan=(clear=false)=>{
+  scanGeneration++;
+  if(scanAbort){scanAbort.abort();scanAbort=null;$('ar-60-status').textContent='Scan cancelled. Completed-day results remain visible.';}
+  $('ar-60-cancel').disabled=true;
+  $('ar-60-week').disabled=false;$('ar-60-all').disabled=false;
+  if(clear){scanHits=[];scanPage=0;scanCoverage=null;scanDaysDone=0;$('ar-60-results').innerHTML='';$('ar-60-coverage').textContent='';$('ar-60-status').textContent='Choose a scan for '+symbol+'.';}
+ };
+ function showScan(){
+  const side=$('ar-60-side').value,dir=$('ar-60-direction').value;
+  const selected=scanHits.filter(hit=>(side==='BOTH'||hit.side===side)&&(dir==='BOTH'||hit.direction===dir));
+  const pages=Math.max(1,Math.ceil(selected.length/50));scanPage=Math.min(scanPage,pages-1);
+  $('ar-60-prev').disabled=scanPage===0;$('ar-60-next').disabled=scanPage>=pages-1;
+  $('ar-60-pages').textContent=selected.length+' matches · page '+(scanPage+1)+' / '+pages;
+  const cover=scanCoverage;
+  $('ar-60-coverage').textContent=cover?scanDaysDone+' completed days · '+cover.eligibleRows+' eligible option samples · '+cover.rejectedRows+' excluded/ambiguous rows · '+cover.conflictedMinutes+' conflicting contract-minutes. Scope: saved ATM ±7 (CORE), not all strikes.':'';
+  if(!selected.length){$('ar-60-results').textContent=scanDaysDone?'No verified ≥₹60 move in the scanned saved ATM ±7 quotes. This does not prove other strikes or unrecorded intervals had none.':'No completed scan results.';return;}
+  const rows=selected.slice(scanPage*50,(scanPage+1)*50).map(hit=>{
+   const begin=clock(hit.fromAt).slice(0,5),end=clock(hit.toAt).slice(0,5),id=scanHits.indexOf(hit);
+   const evidence=end>='09:15'&&end<='15:30';
+   return '<tr><td>'+esc(hit.date)+'</td><td>'+esc(hit.symbol)+'</td><td>'+esc(hit.expiry)+'</td><td>'+fmt(hit.strike)+' '+esc(hit.side)+'</td><td class="'+(hit.direction==='RISE'?'up':'down')+'">'+(hit.direction==='RISE'?'+':'−')+'₹'+fmt(hit.points)+'</td><td>₹'+fmt(hit.fromPrice)+' → ₹'+fmt(hit.toPrice)+'</td><td>'+begin+' → '+end+' IST</td><td>'+(hit.gapWarning?'<span class="gap">Gap '+fmt(hit.maxGapMinutes)+'m; crossing time uncertain</span>':'Recorded endpoints')+'</td><td>'+(evidence?'<button type="button" data-ar-sixty-evidence="'+id+'">Evidence</button>':'Evidence limited to 09:15–15:30')+'</td></tr>';
+  }).join('');
+  $('ar-60-results').innerHTML='<table><thead><tr><th>Date</th><th>Index</th><th>Expiry</th><th>Contract</th><th>Move</th><th>Saved premium</th><th>Start → End</th><th>Continuity</th><th>RAG</th></tr></thead><tbody>'+rows+'</tbody></table>';
+ }
+ async function findSixty(scope:'WEEK'|'ALL'){
+  stopScan(true);controller.pause();
+  const token=++scanGeneration,abort=new AbortController();scanAbort=abort;
+  const istToday=new Date(Date.now()+19800000).toISOString().slice(0,10),weekday=new Date(istToday+'T00:00:00Z').getUTCDay();
+  const start=new Date(Date.parse(istToday+'T00:00:00Z')-((weekday+6)%7)*86400000).toISOString().slice(0,10);
+  const selected=dates.filter(d=>scope==='ALL'||(d>=start&&d<=istToday)),index=symbol;
+  scanCoverage={eligibleRows:0,rejectedRows:0,conflictedMinutes:0};scanDaysDone=0;
+  $('ar-60-week').disabled=true;$('ar-60-all').disabled=true;$('ar-60-cancel').disabled=false;
+  if(!selected.length){stopScan();$('ar-60-status').textContent='No saved '+index+' dates in '+(scope==='WEEK'?'the current IST week.':'this scope.');return;}
+  $('ar-60-status').textContent='Reading '+selected.length+' saved '+index+' day(s), one at a time; read-only archive.';
+  try{
+   for(const date of selected){
+    if(abort.signal.aborted||token!==scanGeneration)break;
+    $('ar-60-status').textContent='Scanning '+index+' '+date+' · day '+(scanDaysDone+1)+' / '+selected.length+'.';
+    const session=await load(date,abort.signal);
+    if(abort.signal.aborted||token!==scanGeneration)break;
+    const result=scanRecordedSixtyPointMoves(session,60);
+    scanHits.push(...result.events);
+    scanCoverage.eligibleRows+=result.coverage.eligibleRows;
+    scanCoverage.rejectedRows+=result.coverage.rejectedRows;
+    scanCoverage.conflictedMinutes+=result.coverage.conflictedMinutes;
+    scanDaysDone++;
+    scanHits.sort((a,b)=>b.date.localeCompare(a.date)||b.points-a.points||a.toAt.localeCompare(b.toAt));
+    showScan();
+   }
+   if(token===scanGeneration)$('ar-60-status').textContent='Completed '+scanDaysDone+' / '+selected.length+' '+index+' saved days · '+scanHits.length+' distinct contract/direction observations ≥₹60. Maximum sampled rise/fall per contract and day; not an execution signal.';
+  }catch(error:any){
+   if(token===scanGeneration)$('ar-60-status').textContent='Scan INCOMPLETE after '+scanDaysDone+' days: '+(error?.message||'Archive read failed')+'. Saved results cover completed days only.';
+  }finally{
+   if(token===scanGeneration){scanAbort=null;$('ar-60-cancel').disabled=true;$('ar-60-week').disabled=false;$('ar-60-all').disabled=false;showScan();}
+  }
+ }
+ $('ar-60-week').onclick=()=>void findSixty('WEEK');
+ $('ar-60-all').onclick=()=>void findSixty('ALL');
+ $('ar-60-cancel').onclick=()=>stopScan();
+ $('ar-60-side').onchange=()=>{scanPage=0;showScan();};
+ $('ar-60-direction').onchange=()=>{scanPage=0;showScan();};
+ $('ar-60-prev').onclick=()=>{scanPage=Math.max(0,scanPage-1);showScan();};
+ $('ar-60-next').onclick=()=>{scanPage++;showScan();};
+ $('ar-60-results').onclick=(event:any)=>{
+  const key=event.target.closest?.('[data-ar-sixty-evidence]')?.dataset?.arSixtyEvidence;
+  if(key===undefined)return;
+  const hit=scanHits[Number(key)];if(!hit||hit.symbol!==symbol)return;
+  const end=clock(hit.toAt).slice(0,5);
+  if(end<'09:15'||end>'15:30')return;
+  controller.pause();evidenceEvent('optionpilot:rag-selection',{symbol:hit.symbol,date:hit.date,expiry:hit.expiry,strike:hit.strike,side:hit.side,time:end,lookback:3});
+ };
  for(const count of [1,3,5])$('ar-last'+count).onclick=()=>void start(dates.slice(-count));
  $('ar-all').onclick=()=>void start(dates);$('ar-selected').onclick=()=>void start(Array.from($('ar-dates').selectedOptions).map((o:any)=>o.value));$('ar-latest').onclick=()=>void start(dates.slice(-1),false);
  $('ar-play').onclick=()=>controller.toggle();$('ar-prev').onclick=()=>controller.seek(controller.snapshot().index-1);$('ar-next').onclick=()=>void controller.next();$('ar-reset').onclick=()=>controller.seek(0);$('ar-seek').oninput=()=>controller.seek(Number($('ar-seek').value));$('ar-speed').onchange=()=>controller.speed(Number($('ar-speed').value));
- $('ar-index').onchange=()=>{controller.pause();symbol=$('ar-index').value;expiry='';strike=null;available();void start(dates.slice(-1),false);};
+ $('ar-index').onchange=()=>{controller.pause();stopScan(true);symbol=$('ar-index').value;expiry='';strike=null;available();void start(dates.slice(-1),false);};
  $('ar-contract-mode').onchange=()=>{controller.pause();if($('ar-contract-mode').value!=='PINNED'){expiry='';strike=null;}render(controller.snapshot());};
  $('ar-expiry').onchange=()=>{expiry=$('ar-expiry').value;strike=null;render(controller.snapshot());};$('ar-strike').onchange=()=>{strike=Number($('ar-strike').value);render(controller.snapshot());};$('ar-atm').onclick=()=>{pin(controller.snapshot().frame,true);render(controller.snapshot());};
  document.addEventListener('visibilitychange',()=>{if(document.hidden)controller.pause();});window.addEventListener('pagehide',()=>controller.pause());

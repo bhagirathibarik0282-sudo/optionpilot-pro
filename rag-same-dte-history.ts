@@ -36,8 +36,8 @@ export function compareSameDteHistory(s:SameDteSelection,current:H1ReplayHttpRes
  const fail=(reason:string)=>({...base,ok:false,status:'BLOCKED',reason});
  if(!date(s.date)||!date(s.expiry)||!Number.isFinite(s.asOf)||!Number.isFinite(s.strike)||s.strike<=0||!['CE','PE'].includes(s.side)||!/^\d{2}:\d{2}$/.test(s.timeIst))return fail('INVALID_SELECTION');
  const minute=Number(s.timeIst.slice(0,2))*60+Number(s.timeIst.slice(3));
- // Deliberately bounded to the audited common regular-session grid.
- if(minute<558||minute>930||(minute-555)%3!==0)return fail('EXACT_REGULAR_3M_PAIR_REQUIRED');
+ // Exact three-minute interval within the common session; never round the selected minute.
+ if(minute<558||minute>930||Number(s.timeIst.slice(3))>59)return fail('EXACT_REGULAR_3M_PAIR_REQUIRED');
  const anchor=pair(current,s,s.date,s.expiry,s.strike,s.asOf);
  if(!anchor)return fail('ANCHOR_PAIR_UNAVAILABLE_AT_CUTOFF');
  const cutoff=Math.min(s.asOf,ms(anchor.at.receiptAt));

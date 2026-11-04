@@ -221,7 +221,7 @@ try{
     const count=ragRequests.length;await page.locator('#rag-search').click();
     await page.waitForFunction(()=>document.getElementById('rag-status')?.textContent?.includes('ISOLATED_UI_NO_MARKET_DATA'));
     assert.equal(ragRequests.length,count+1);assert.equal(new URL(ragRequests.at(-1)!,base).searchParams.get('time'),'14:31');
-    for(const kind of ['EVENT','HISTORY']){
+    for(const kind of ['EVENT']){
      await page.locator('#rag-kind').selectOption(kind);await page.locator('#rag-time').fill('14:31');
      assert.equal(await page.locator('#rag-time').evaluate((el:any)=>el.validity.stepMismatch),true,kind+' preserves native 3m input guard');
      await page.locator('#rag-search').click();assert.equal(ragRequests.length,count+1);

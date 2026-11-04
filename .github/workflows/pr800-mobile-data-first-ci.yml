@@ -13,6 +13,10 @@ on:
       - 'test/mobile-data-first.test.ts'
       - 'test/reference-research-terminal.test.ts'
       - 'scripts/pr800-mobile-data-first-smoke.ts'
+      - 'scripts/rag-evidence-workflow-smoke.ts'
+      - 'rag-same-dte-history.ts'
+      - 'rag-same-dte-history-http.ts'
+      - 'test/fixtures/rag-minute-access-production-20261104.json'
       - '.github/workflows/pr800-mobile-data-first-ci.yml'
 permissions:
   contents: read
@@ -41,6 +45,8 @@ jobs:
         run: NODE_ENV=test node --import tsx --test test/mobile-data-first.test.ts test/reference-research-terminal.test.ts test/one-stop-card.test.ts test/screen-overview-evidence.test.ts
       - name: Test 360px and 390px mobile and desktop browser layout
         run: node --import tsx scripts/pr800-mobile-data-first-smoke.ts
+      - name: Verify same-page evidence with frozen production endpoints
+        run: node --import tsx scripts/rag-evidence-workflow-smoke.ts
       - name: Verify no whitespace mistakes
         run: git diff --check origin/main...HEAD
       - name: Keep offline no-data browser screenshots

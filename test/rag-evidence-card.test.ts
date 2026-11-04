@@ -25,7 +25,7 @@ test('missing and ambiguous fields never silently choose an index, date or side'
 });
 function browser(fetcher:(url:string)=>Promise<any>) {
  const nodes=new Map<string,any>();
- for(const id of ['form','kind','lookback','question','symbol','date','expiry','strike','side','time','asof','outcomes','search','extract','example','clear','status','result']){
+ for(const id of ['form','kind','lookback','question','symbol','date','expiry','strike','side','time','asof','outcomes','search','extract','example','clear','status','result','selection-summary','selection-details','now','after','history']){
   nodes.set('rag-'+id,{value:'',checked:false,disabled:false,innerHTML:'',textContent:'',listeners:{} as any,
     addEventListener(type:string,fn:Function){this.listeners[type]=fn;},reset(){for(const n of nodes.values()){n.value='';n.checked=false;}}});
  }
@@ -77,7 +77,7 @@ test('card Ask RAG submits snapshot identity once and invalidation removes old e
  const b=browser(async()=>{const res=success();const data=await res.json();return {...res,json:async()=>({...data,reference:null,mode:'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1'})};});
  b.events['optionpilot:rag-selection']({detail:{symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36',lookback:'15'}});await new Promise(resolve=>setImmediate(resolve));
  assert.equal(b.requests.length,1);const p=new URL(b.requests[0],'https://example.test').searchParams;assert.equal(p.get('kind'),'SNAPSHOT');assert.equal(p.get('lookback'),'15');assert.equal(p.get('time'),'09:36');assert.equal(b.node('outcomes').checked,false);
- assert.match(b.node('result').innerHTML,/reference ଅନୁପଲବ୍ଧ/);b.events['optionpilot:rag-invalidate']({});assert.equal(b.node('result').innerHTML,'');
+ assert.match(b.node('result').innerHTML,/reference ଅନୁପଲବ୍ଧ/);b.events['optionpilot:rag-invalidate']({});assert.equal(b.node('result').innerHTML,'');assert.equal(b.node('strike').value,'');b.node('now').onclick();await new Promise(resolve=>setImmediate(resolve));assert.equal(b.requests.length,1,'invalidated selection cannot request its old contract');
 });
 test('a new explicit card question supersedes an in-flight answer without a stale-result race',async()=>{
  const resolves:Function[]=[];const b=browser(()=>new Promise(r=>resolves.push(r)));const detail={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
@@ -125,9 +125,19 @@ test('source-backed response is rendered by the actual serialized card, with unk
  assert.equal(renderPremiumResponseEvidence(null),'');
 });
 
-test('snapshot time uses minute steps while event and history retain the regular three-minute grid',()=>{
+test('snapshot and history use exact minutes while crossing events retain the three-minute grid',()=>{
  const b=browser(async()=>success());
  b.node('kind').value='SNAPSHOT';b.node('kind').listeners.change();assert.equal(b.node('time').step,'60');assert.equal(b.node('time').min,'09:15');
- for(const kind of ['EVENT','HISTORY']){b.node('kind').value=kind;b.node('kind').listeners.change();assert.equal(b.node('time').step,'180');assert.equal(b.node('time').min,'09:18');}
+ for(const kind of ['EVENT']){b.node('kind').value=kind;b.node('kind').listeners.change();assert.equal(b.node('time').step,'180');assert.equal(b.node('time').min,'09:18');}
+ b.node('kind').value='HISTORY';b.node('kind').listeners.change();assert.equal(b.node('time').step,'60');assert.equal(b.node('time').min,'09:18');
  b.node('kind').value='SNAPSHOT';b.node('kind').listeners.change();assert.equal(b.node('time').step,'60');
+});
+
+test('one-click evidence actions preserve the selected row and request future outcomes only explicitly',async()=>{
+ const b=browser(async url=>url.includes('rag-same-dte-history')?historySuccess():success());
+ b.events['optionpilot:rag-selection']({detail:{symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:22300,side:'PE',time:'09:36'}});await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(b.node('selection-details').open,false);assert.match(b.node('selection-summary').textContent,/22300.*PE/);
+ b.node('after').onclick();await new Promise(resolve=>setImmediate(resolve));let p=new URL(b.requests.at(-1)!,'https://example.test').searchParams;assert.equal(p.get('includeOutcomes'),'true');assert.equal(p.get('strike'),'22300');
+ b.node('history').onclick();await new Promise(resolve=>setImmediate(resolve));assert.match(b.requests.at(-1)!,/rag-same-dte-history/);assert.equal(new URL(b.requests.at(-1)!,'https://example.test').searchParams.has('includeOutcomes'),false);
+ b.node('now').onclick();await new Promise(resolve=>setImmediate(resolve));assert.match(b.requests.at(-1)!,/rag-event-evidence/);assert.equal(new URL(b.requests.at(-1)!,'https://example.test').searchParams.has('includeOutcomes'),false);
 });

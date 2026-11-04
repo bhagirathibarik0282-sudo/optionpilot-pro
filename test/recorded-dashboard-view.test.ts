@@ -5,11 +5,11 @@ import { renderRecordedDashboard } from '../recorded-dashboard-view.js';
 
 async function until(check:()=>boolean){for(let i=0;i<50;i++){if(check())return;await new Promise(resolve=>setImmediate(resolve));}throw new Error('VIEW_WAIT_TIMEOUT');}
 async function view(){
- const elements=new Map<string,any>(),timers=new Map<number,any>(),requests:string[]=[];let next=0;
+ const elements=new Map<string,any>(),timers=new Map<number,any>(),requests:string[]=[];let next=0;const events:any[]=[];
  for(const [,id] of renderRecordedDashboard().matchAll(/id="([^"]+)"/g))elements.set(id,{value:'',textContent:'',innerHTML:'',disabled:false,selectedOptions:[]});
  elements.get('ar-index').value='NIFTY';elements.get('ar-speed').value='1';
  const dates=['2026-10-28','2026-10-29','2026-10-30'];
- const context:any={console,AbortController,AbortSignal,URLSearchParams,document:{getElementById:(id:string)=>elements.get(id),addEventListener(){}},window:{addEventListener(){}},setTimeout(this:any,fn:any,ms:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.set(++next,{fn,ms});return next;},clearTimeout(this:any,id:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.delete(id);},
+ const context:any={console,AbortController,AbortSignal,URLSearchParams,document:{getElementById:(id:string)=>elements.get(id),addEventListener(){}},CustomEvent:class{constructor(public type:string,public options:any){}get detail(){return this.options.detail;}},window:{addEventListener(){},dispatchEvent:(event:any)=>events.push(event)},setTimeout(this:any,fn:any,ms:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.set(++next,{fn,ms});return next;},clearTimeout(this:any,id:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.delete(id);},
   fetch:async(url:string)=>{requests.push(url);if(url.endsWith('/dates'))return {ok:true,json:async()=>({ok:true,dates:dates.map(tradeDate=>({symbol:'NIFTY',tradeDate,markerCount:2}))})};
    const params=new URLSearchParams(url.split('?')[1]),date=params.get('date'),from=params.get('from'),to=params.get('to');
    const time=from==='09:15'?'09:15':to==='15:40'?'15:30':null;
@@ -19,7 +19,7 @@ async function view(){
    return {ok:true,json:async()=>({ok:true,market:compact(row?[row]:[]),options:compact(opts),chain:compact([])})};}};
  vm.createContext(context);const script=[...renderRecordedDashboard().matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1];vm.runInContext(script,context);
  await until(()=>elements.get('clock').textContent.includes('15:30:00')).catch(error=>{throw new Error(error.message+' '+elements.get('error').textContent+' '+elements.get('clock').textContent+' '+elements.get('progress').textContent);});
- return {elements,timers,requests,async tick(){const entry=[...timers].find(([,v])=>v.ms<10000);assert(entry);timers.delete(entry[0]);entry[1].fn();await new Promise(resolve=>setImmediate(resolve));}};
+ return {elements,timers,requests,events,async tick(){const entry=[...timers].find(([,v])=>v.ms<10000);assert(entry);timers.delete(entry[0]);entry[1].fn();await new Promise(resolve=>setImmediate(resolve));}};
 }
 test('page opens on latest saved closing samples and converts stored BIGINT OI for the CE/PE ladder',async()=>{
  const h=await view();assert.match(h.elements.get('clock').textContent,/2026-10-30.*SAVED/);assert.match(h.elements.get('ar-metrics').innerHTML,/23,100/);assert.match(h.elements.get('ar-ladder').innerHTML,/3,00,00,000/);assert.equal(h.elements.get('ar-play').disabled,false);assert.equal(h.requests.filter(v=>v.includes('/replay?')).length,7);
@@ -38,4 +38,14 @@ test('session ATM uses each day own expiry while explicit Same contract mode nev
  assert.match(h.elements.get('ar-contract').textContent,/2026-11-02/);h.elements.get('ar-play').onclick();
  h.elements.get('ar-contract-mode').value='PINNED';h.elements.get('ar-contract-mode').onchange();h.elements.get('ar-last3').onclick();await until(()=>h.elements.get('clock').textContent.includes('2026-10-28 · 09:15'));
  assert.match(h.elements.get('ar-contract').textContent,/2026-11-02/);assert.match(h.elements.get('ar-ladder').innerHTML,/No saved strikes/);
+});
+
+test('recorded row opens exact cursor evidence, pauses replay and invalidates on cursor change',async()=>{
+ const h=await view();assert.match(h.elements.get('ar-ladder').innerHTML,/data-ar-evidence="23000\|CE"/);
+ h.elements.get('ar-play').onclick();h.elements.get('ar-ladder').onclick({target:{closest:()=>({dataset:{arEvidence:'23000|CE'}})}});
+ const request=h.events.filter(e=>e.type==='optionpilot:rag-selection').at(-1);assert.ok(request);
+ assert.equal(JSON.stringify(request.detail),JSON.stringify({symbol:'NIFTY',date:'2026-10-30',expiry:'2026-11-02',strike:23000,side:'CE',time:'09:15',lookback:3}));
+ assert.match(h.elements.get('clock').textContent,/PAUSED/);
+ const before=h.events.filter(e=>e.type==='optionpilot:rag-invalidate').length;h.elements.get('ar-next').onclick();assert(h.events.filter(e=>e.type==='optionpilot:rag-invalidate').length>before);
+ const count=h.events.filter(e=>e.type==='optionpilot:rag-selection').length;h.elements.get('ar-ladder').onclick({target:{closest:()=>({dataset:{arEvidence:'99999|CE'}})}});assert.equal(h.events.filter(e=>e.type==='optionpilot:rag-selection').length,count);
 });

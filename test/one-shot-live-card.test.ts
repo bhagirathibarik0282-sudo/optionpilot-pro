@@ -582,3 +582,20 @@ test('spot levels use exact same-session recorder rows while derived book models
  h.setSaved({date:'2026-10-16',current:{NIFTY:{market:[{symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:'2026-10-16T04:14:00Z',pdh:155,pdl:75}]}}});h.advance(600);h.send(h.payload());
  assert(!h.el('os-future-response').innerHTML.includes('>155<'));
 });
+
+test('distinct packet receipts within one exchange second retain live minute history',()=>{
+ const h=harness();
+ for(let i=0;i<=6;i++){
+  if(i)h.advance(9400);const first=h.payload(),at=h.stamp();first.snapshot.atmExpiryLadder[0].rows[0].ce.price=120+i;h.send(first);
+  h.advance(600);const second=h.payload(),q=second.snapshot.atmExpiryLadder[0].rows[0].ce;q.observedAt=at;q.price=121+i;h.send(second);
+ }
+ assert.equal(premiumCells(h)[16],'6','latest distinct packet replaces that second’s observation, preserving older baselines');
+});
+test('conflicting values for the same exchange and receipt clocks still revoke history',()=>{
+ const h=harness();
+ for(let i=0;i<=6;i++){
+  if(i)h.advance(9400);const first=h.payload(),at=h.stamp();first.snapshot.atmExpiryLadder[0].rows[0].ce.price=120+i;h.send(first);
+  h.advance(600);const second=h.payload(),q=second.snapshot.atmExpiryLadder[0].rows[0].ce;q.observedAt=at;q.receivedAt=at;q.price=121+i;h.send(second);
+ }
+ assert.equal(premiumCells(h)[16],'—');
+});

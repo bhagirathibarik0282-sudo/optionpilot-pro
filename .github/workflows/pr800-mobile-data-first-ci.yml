@@ -2,6 +2,7 @@ name: PR800 Mobile Data First UI CI
 on:
   pull_request:
     paths:
+      - 'recorded-dashboard-view.ts'
       - 'rag-evidence-card.ts'
       - 'rag-event-evidence.ts'
       - 'premium-response-evidence.ts'

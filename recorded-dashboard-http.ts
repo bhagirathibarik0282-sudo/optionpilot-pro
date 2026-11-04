@@ -1,3 +1,6 @@
+import {parseRagEventRequest,readRagEventEvidence} from './rag-event-evidence.js';
+import {readSameDteHistory} from './rag-same-dte-history-http.js';
+import {renderRagEvidencePage} from './rag-evidence-card.js';
 import { parseH1ReplayRequest, runH1ReplayHttp } from './h1-replay-http.js';
 import { listH1TheoryRecordedDates } from './h1-theory-history.js';
 import { compactRows } from './h1-replay-compact-v1.js';
@@ -7,19 +10,24 @@ import { renderRecordedDashboard } from './recorded-dashboard-view.js';
 /** Narrow supervisor entry: SELECT-only archive readers. Never import server/runtime/router. */
 export function createRecordedDashboardHandler(dependencies:any={}) {
  const dates=dependencies.dates||listH1TheoryRecordedDates, replay=dependencies.replay||runH1ReplayHttp;
+ const ragEvidence=dependencies.ragEvidence||readRagEventEvidence,ragHistory=dependencies.ragHistory||readSameDteHistory;
  let active=0;
  return async function handle(request:any,response:any,status:any) {
   const url=new URL(request.url||'/','http://localhost'),path=url.pathname;
   const view=path==='/recorded-dashboard'||path==='/api/research/recorded-dashboard/view'||
    (!status.shouldRun&&(path==='/'||path==='/api/research/business-dashboard/view'));
   const dateRoute=path==='/api/research/recorded-dashboard/dates',replayRoute=path==='/api/research/recorded-dashboard/replay';
-  if(!view&&!dateRoute&&!replayRoute)return false;
+  const ragView=path==='/api/research/rag-event-evidence/view',ragRoute=path==='/api/research/rag-event-evidence',historyRoute=path==='/api/research/rag-same-dte-history';
+  if(!view&&!dateRoute&&!replayRoute&&!ragView&&!ragRoute&&!historyRoute)return false;
   const send=(code:number,value:any,html=false)=>{response.writeHead(code,{'Content-Type':html?'text/html; charset=utf-8':'application/json','Cache-Control':'no-store','X-OptionPilot-Mode':'RECORDED_READ_ONLY','X-Content-Type-Options':'nosniff'});response.end(html?value:JSON.stringify(value));return true;};
   if(request.method!=='GET')return send(405,{ok:false,error:'READ_ONLY_GET_REQUIRED'});
   if(view)return send(200,renderRecordedDashboard(),true);
+  if(ragView)return send(200,renderRagEvidencePage(),true);
   if(active>=2){response.setHeader('Retry-After','2');return send(429,{ok:false,error:'ARCHIVE_BUSY_RETRY'});}
   active++;
   try{
+   if(ragRoute){const parsed=parseRagEventRequest(Object.fromEntries(url.searchParams));if(!parsed.ok)return send(400,{ok:false,status:'BLOCKED',reason:parsed.reason});const result=await ragEvidence(parsed.value);return send(result.ok?200:422,result);}
+   if(historyRoute){const result=await ragHistory(Object.fromEntries(url.searchParams));return send(result.ok?200:422,result);}
    if(dateRoute){const result=await dates();return send(result.ok?200:503,result);}
    const parsed=parseH1ReplayRequest({symbol:url.searchParams.get('symbol'),tradeDate:url.searchParams.get('date'),fromTime:url.searchParams.get('from'),toTime:url.searchParams.get('to'),scope:'CORE'});
    if(!parsed.ok)return send(400,{ok:false,error:parsed.reason});
@@ -31,7 +39,7 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
    return send(200,{ok:true,mode:'RECORDED_READ_ONLY',request:result.request,
     market:compactRows(result.market||[]),options:compactRows(resolveRecordedOptionPdc(result)),
     chain:compactRows(resolveRecordedFullPcr(result)),continuity:result.continuity||null});
-  }catch{return send(503,{ok:false,error:'RECORDED_STORAGE_UNAVAILABLE'});}
+  }catch{return send(503,{ok:false,error:'RECORDED_STORAGE_UNAVAILABLE',...((ragRoute||historyRoute)?{status:'BLOCKED',reason:'EVIDENCE_SOURCE_UNAVAILABLE'}:{})});}
   finally{active--;}
  };
 }

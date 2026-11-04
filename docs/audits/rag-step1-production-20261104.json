@@ -244,5 +244,27 @@
         "evidenceSha256": "08dfb44bb31dcc5f29ede8d597e828f327ce093502ba0023f5c9ed8875fd1a00"
       }
     }
-  ]
+  ],
+  "afterHoursReadback": {
+    "http": 503,
+    "body": {
+      "error": "OUTSIDE_OPERATING_HOURS",
+      "tradingDate": "2026-11-04",
+      "scheduled": false,
+      "maintenance": false,
+      "shouldRun": false,
+      "running": false,
+      "ready": false,
+      "draining": false,
+      "hoursIST": "08:45–16:15",
+      "timezone": "Asia/Kolkata",
+      "supervisor": true,
+      "maintenanceUntil": null
+    }
+  },
+  "firstCodeHeadCi": {
+    "head": "929bf385cd3d1f393262896b73df890061aec96d",
+    "allFiveWorkflows": "success",
+    "nativeMobileRun": 41816404767
+  }
 }

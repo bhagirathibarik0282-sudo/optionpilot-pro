@@ -1,6 +1,6 @@
 # RAG evidence: strict work checklist
 
-Overall status: PARTIAL. One bounded access defect reproduced and corrected locally. New-head browser CI and corrected production acceptance remain pending.
+Overall status: PARTIAL. One bounded access defect reproduced and corrected locally. The first code head passed all five CI workflows, including native Chromium minute input. The after-hours access correction still needs new-head CI and corrected production acceptance.
 
 ## Fixed objective
 
@@ -22,7 +22,12 @@ No new database, embedding service, model, recorder, broker call, trading author
 - [x] Verify exact price/percentage arithmetic using a frozen, documented subset of actual production records.
 - [x] Verify missing minute, wrong contract and as-of cutoff cannot acquire nearby or future evidence.
 - [x] Run the existing RAG/read/replay/UI regression suite and permanent guardrail checker.
-- [ ] Pass new-head real Chromium mobile native-form acceptance.
+- [x] Pass first-head real Chromium mobile native-form acceptance.
+- [x] Reproduce the after-hours production blocker (HTTP 503 OUTSIDE_OPERATING_HOURS, running=false, maintenance=false).
+- [x] Route existing GET-only RAG readers through the existing archive handler when the market runtime is off.
+- [x] Verify locally that archive RAG access cannot start the market child, authorize maintenance or expose unlisted routes.
+- [x] Embed the existing evidence card in the recorded dashboard.
+- [ ] Pass final-head native Chromium acceptance, including evidence within the recorded dashboard.
 - [ ] Verify the tested code tree is deployed successfully.
 - [ ] Read the previously rejected 14:31 selection from production and match its exact price and arithmetic.
 - [ ] Confirm an EVENT request at 14:31 remains rejected, with no crossing invented.
@@ -59,3 +64,11 @@ Local result: 246 tests, 244 passed, two optional historical-fixture tests skipp
 6. Database performance/cost: obtain actual bounded query-plan/catalog evidence before changing indexes, caching, retention or query structure. Compare measured latency and resource usage on the same requests.
 
 Direct SQL schema/catalog/size/index audit, broad archival coverage, semantic retrieval quality, all-index production acceptance and cost benchmarking have NOT been performed in unit 1. Platform access and successful replay reads are not substitutes for those checks.
+
+## Additional access cause: after-hours runtime coupling
+
+After the first readback, the previously successful 14:30 query returned HTTP 503 OUTSIDE_OPERATING_HOURS, scheduled=false, running=false, maintenance=false after 16:15 IST. Supervisor source confirmed that historical RAG routes were absent from its exact read-only archive allowlist. This is a separate route-availability cause, not absent PostgreSQL records.
+
+The correction reuses the existing archive handler and existing RAG/evidence/history functions. Only the three exact existing GET endpoints (evidence, its view, same-DTE history) are allowed through that facade outside operating hours. The market child's schedule, startup, authorization and live-session routing are unchanged. RAG shares the archive handler's two-active-read cap and rejects writes. The recorded dashboard embeds the same evidence card; it makes no automatic RAG request.
+
+Before this correction, new facade, embedded-card and supervisor availability tests failed. Afterward, all 38 existing/new archive, playback, operating-window and supervisor tests pass with zero skips. Final-head CI and a successful recorded-minute read with the production market worker still stopped are required before closure.

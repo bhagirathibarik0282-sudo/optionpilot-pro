@@ -119,9 +119,9 @@ export function installRecordedDashboard(){
   const rows=selected.slice(scanPage*50,(scanPage+1)*50).map(hit=>{
    const begin=clock(hit.fromAt).slice(0,5),end=clock(hit.toAt).slice(0,5),id=scanHits.indexOf(hit);
    const evidence=end>='09:15'&&end<='15:30';
-   return '<tr><td>'+esc(hit.date)+'</td><td>'+esc(hit.symbol)+'</td><td>'+esc(hit.expiry)+'</td><td>'+fmt(hit.strike)+' '+esc(hit.side)+'</td><td class="'+(hit.direction==='RISE'?'up':'down')+'">'+(hit.direction==='RISE'?'+':'−')+'₹'+fmt(hit.points)+'</td><td>₹'+fmt(hit.fromPrice)+' → ₹'+fmt(hit.toPrice)+'</td><td>'+begin+' → '+end+' IST</td><td>'+(hit.gapWarning?'<span class="gap">Gap '+fmt(hit.maxGapMinutes)+'m; crossing time uncertain</span>':'Recorded endpoints')+'</td><td>'+(evidence?'<button type="button" data-ar-sixty-evidence="'+id+'">Evidence</button>':'Evidence limited to 09:15–15:30')+'</td></tr>';
+   return '<tr><td>'+esc(hit.date)+'</td><td>'+esc(hit.symbol)+'</td><td>'+esc(hit.expiry)+'</td><td>'+fmt(hit.strike)+' '+esc(hit.side)+'</td><td class="'+(hit.direction==='RISE'?'up':'down')+'">'+(hit.direction==='RISE'?'+':'−')+'₹'+fmt(hit.points)+'</td><td>₹'+fmt(hit.fromPrice)+' → ₹'+fmt(hit.toPrice)+'</td><td>'+begin+' → '+end+' IST</td><td>'+clock(hit.firstThresholdAt).slice(0,5)+' IST (observed)</td><td>'+(hit.gapWarning?'<span class="gap">Gap '+fmt(hit.maxGapMinutes)+'m; crossing time uncertain</span>':'Recorded endpoints')+'</td><td>'+(evidence?'<button type="button" data-ar-sixty-evidence="'+id+'">Evidence</button>':'Evidence limited to 09:15–15:30')+'</td></tr>';
   }).join('');
-  $('ar-60-results').innerHTML='<table><thead><tr><th>Date</th><th>Index</th><th>Expiry</th><th>Contract</th><th>Move</th><th>Saved premium</th><th>Start → End</th><th>Continuity</th><th>RAG</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  $('ar-60-results').innerHTML='<table><thead><tr><th>Date</th><th>Index</th><th>Expiry</th><th>Contract</th><th>Move</th><th>Saved premium</th><th>Start → End</th><th>First ≥₹60 observation</th><th>Continuity</th><th>RAG</th></tr></thead><tbody>'+rows+'</tbody></table>';
  }
  async function findSixty(scope:'WEEK'|'ALL'){
   stopScan(true);controller.pause();

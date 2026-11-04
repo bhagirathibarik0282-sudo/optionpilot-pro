@@ -92,3 +92,16 @@ test('optional all-three-index scan reads exact recorded sessions sequentially, 
  const seen=[...new Set(calls.map(x=>new URLSearchParams(x.split('?')[1]).get('symbol')))].sort();
  assert.equal(JSON.stringify(seen),JSON.stringify(['BANKNIFTY','NIFTY','SENSEX']));
 });
+
+test('full-session premium remains on the same page, follows shared seek and changes display without loading data',async()=>{
+ const h=await view(),panel=h.elements.get('ar-premium-output');
+ assert.match(panel.innerHTML,/09:15–15:40/);assert.match(panel.innerHTML,/OHLC unavailable/);
+ assert.match(panel.innerHTML,/15:30 IST/);
+ const calls=h.requests.length;
+ h.elements.get('ar-premium-interval').value='15';h.elements.get('ar-premium-interval').onchange();
+ assert.match(panel.innerHTML,/15m sampled line/);assert.equal(h.requests.length,calls);
+ h.elements.get('ar-reset').onclick();assert.doesNotMatch(panel.innerHTML,/15:30 IST/);
+ assert.match(panel.innerHTML,/09:15 IST/);
+ h.elements.get('ar-premium-scope').value='SELECTED';h.elements.get('ar-premium-scope').onchange();
+ assert.equal(h.requests.length,calls);
+});

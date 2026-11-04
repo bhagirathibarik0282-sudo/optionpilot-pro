@@ -2,11 +2,20 @@
  * actual saved eligible option LTPs for the identical date/expiry/strike/side.
  * No OHLC inference, price interpolation, trading authority or broker calls.
  */
+export interface RecordedExpiryWindow {
+  expiry: string; dte: number; side: 'CE'|'PE';
+  status: 'ENDPOINTS_OBSERVED'|'MISSING_ENDPOINT'|'GAPPED';
+  fromPrice: number|null; toPrice: number|null; points: number|null; percent: number|null;
+  fromQuoteAt: string|null; toQuoteAt: string|null;
+  fromReceiptAt: string|null; toReceiptAt: string|null;
+}
 export interface RecordedSixtyPointMove {
   symbol: string; date: string; expiry: string; strike: number; side: 'CE'|'PE';
   direction: 'RISE'|'FALL'; points: number;
   fromPrice: number; toPrice: number; fromAt: string; toAt: string;
-  firstThresholdAt: string; observations: number;
+  firstThresholdAt: string; firstThresholdFromAt: string; observations: number;
+  expiryWindow: { mode: 'SAME_STRIKE'; fromAt: string; toAt: string;
+    comparisons: RecordedExpiryWindow[]; };
   maxGapMinutes: number; gapWarning: boolean;
 }
 export interface RecordedSixtyPointScan {
@@ -59,6 +68,8 @@ export function scanRecordedSixtyPointMoves(session:any,threshold=60):RecordedSi
     byContract.get(k)!.push(row);eligible++;
   }
   const events:RecordedSixtyPointMove[]=[];
+  const availableExpiries=[...new Set(options.filter(r=>r.symbol===symbol&&
+    /^\d{4}-\d{2}-\d{2}$/.test(expiryOf(r))&&expiryOf(r)>=date).map(expiryOf))].sort();
   const cadence=Number(session?.cadenceMinutes)===1?1:3;
   for(const rows of byContract.values()){
     rows.sort((a,b)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket));
@@ -69,11 +80,11 @@ export function scanRecordedSixtyPointMoves(session:any,threshold=60):RecordedSi
     for(const row of rows.slice(1)){
       const rise=row.ltp-low.ltp,fall=high.ltp-row.ltp;
       if(rise+1e-8>=threshold){
-        if(!first.RISE)first.RISE=row.minute_bucket;
+        if(!first.RISE)first.RISE={from:low,to:row};
         if(!best.RISE||rise>best.RISE.points)best.RISE={points:rise,from:low,to:row};
       }
       if(fall+1e-8>=threshold){
-        if(!first.FALL)first.FALL=row.minute_bucket;
+        if(!first.FALL)first.FALL={from:high,to:row};
         if(!best.FALL||fall>best.FALL.points)best.FALL={points:fall,from:high,to:row};
       }
       if(row.ltp<low.ltp)low=row;
@@ -84,10 +95,29 @@ export function scanRecordedSixtyPointMoves(session:any,threshold=60):RecordedSi
       const segment=rows.filter(row=>row.minute_bucket>=b.from.minute_bucket&&row.minute_bucket<=b.to.minute_bucket);
       let maxGap=0;
       for(let i=1;i<segment.length;i++)maxGap=Math.max(maxGap,(Date.parse(segment[i].minute_bucket)-Date.parse(segment[i-1].minute_bucket))/60000);
-      const anchor=b.from;
+      const anchor=b.from,firstWindow=first[direction];
+      // Freeze the first observed threshold's own endpoints, independent of the
+      // later daily maximum. Other expiries never choose a better window.
+      const fromAt=firstWindow.from.minute_bucket,toAt=firstWindow.to.minute_bucket;
+      const comparisons:RecordedExpiryWindow[]=[];
+      for(const expiry of availableExpiries)for(const side of ['CE','PE'] as const){
+        const samples=byContract.get([symbol,expiry,anchor.strike,side].join('|'))||[];
+        const from=samples.find(r=>r.minute_bucket===fromAt),to=samples.find(r=>r.minute_bucket===toAt);
+        const segment=samples.filter(r=>Date.parse(r.minute_bucket)>=Date.parse(fromAt)&&Date.parse(r.minute_bucket)<=Date.parse(toAt));
+        const gapped=segment.some((r,i)=>i>0&&(Date.parse(r.minute_bucket)-Date.parse(segment[i-1].minute_bucket))/60000>cadence);
+        const complete=!!from&&!!to;
+        const receipt=(r:any)=>r?marketByTime.get(r.minute_bucket)![0].backend_timestamp:null;
+        comparisons.push({expiry,dte:Math.round((Date.parse(expiry+'T00:00:00Z')-Date.parse(date+'T00:00:00Z'))/86400000),side,
+          status:!complete?'MISSING_ENDPOINT':gapped?'GAPPED':'ENDPOINTS_OBSERVED',
+          fromPrice:from?.ltp??null,toPrice:to?.ltp??null,
+          points:complete?round2(to.ltp-from.ltp):null,percent:complete?round2((to.ltp-from.ltp)/from.ltp*100):null,
+          fromQuoteAt:from?.quote_timestamp??null,toQuoteAt:to?.quote_timestamp??null,
+          fromReceiptAt:receipt(from),toReceiptAt:receipt(to)});
+      }
       events.push({symbol,date,expiry:expiryOf(anchor),strike:anchor.strike,side:anchor.option_type,
         direction,points:round2(b.points),fromPrice:anchor.ltp,toPrice:b.to.ltp,
-        fromAt:anchor.minute_bucket,toAt:b.to.minute_bucket,firstThresholdAt:first[direction],
+        fromAt:anchor.minute_bucket,toAt:b.to.minute_bucket,firstThresholdAt:toAt,firstThresholdFromAt:fromAt,
+        expiryWindow:{mode:'SAME_STRIKE',fromAt,toAt,comparisons},
         observations:segment.length,maxGapMinutes:maxGap,gapWarning:maxGap>cadence});
     }
   }

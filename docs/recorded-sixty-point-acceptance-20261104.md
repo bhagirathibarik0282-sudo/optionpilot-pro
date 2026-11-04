@@ -31,3 +31,14 @@ Date: 2026-11-04. Status: **research draft, NOT production-deployed**.
 
 ## Non-goals
 No execution authority, alerting, strategy P&L, 90-point swing test, all-strike historical scan, new persisted data, or invented 1-minute prices. Other scheduled market work remains unchanged.
+
+## Resumed PR846 — common-window Multi-DTE and bounded real readback
+
+- Added SAME_STRIKE comparisons for each daily rise/fall result. The comparison window is frozen to the **first observed threshold** from/to pair, independent of the later daily maximum. Includes actual discovered expiry dates, calendar DTE, CE and PE, source-priced change and own-baseline percentage, endpoint quote/receipt timestamps, missing endpoints, and gap state. Expiries lacking the selected strike remain explicit as missing.
+- Uses already loaded, strictly admitted CORE samples. No additional archive calls or full-chain/same-delta inference. Matched delta, 90-point outcomes, 3m/15m continuation, repeat-event segmentation, cohort ranking and alignment signals remain outside this increment.
+- Original head 804c5f4: all three final-head CI workflows verified SUCCESS. Resumed changes need fresh CI.
+- **Actual current-week GET readback PARTIAL:** 4 Nov, 11:45–12:45 IST, each index returned HTTP 200 and 61/61 TRUE marker buckets. NIFTY: 5,496 option rows, 4,727 admitted, 35 sampled contract/direction ≥60 observations. SENSEX: 7,328 / 3,249 / 140. BANKNIFTY: 4,758 / 1,680 / 39 (monthly research). These are per-window sampled maximum rise/fall results, include explicitly warned gaps, and are **not independent trade opportunities, whole-day counts, or continuity proof for all contracts**.
+- Approximate sequential response times: 12.6s NIFTY, 11.8s SENSEX, 11.3s BANKNIFTY; response sizes 2.62 / 3.51 / 2.34 MB. Local scanner roughly 0.2–0.5s/index for these windows. Broad full-day/all-recorded mobile memory/network cost and database query plans remain unverified. No broad production scan was started.
+- Evidence summary: `docs/pr846-current-week-readback-20261104.json` retains request bounds, source-response hashes, admission coverage, gap counts and one exact example/index with comparison provenance.
+- Added finder-specific synthetic Chromium acceptance at **360px and 390px** to existing mobile CI: scan, frozen window/DTE display, CE/PE filter, three-index scan, same-page behavior and document overflow. Synthetic quotes do not establish market results. Local Chromium bootstrap currently returned corrupt download archives; CI browser execution is still required.
+- Draft and production unchanged. Full-day/current-week validation, Oct16/Oct19 Multi-DTE acceptance and release/rollback decision remain open.

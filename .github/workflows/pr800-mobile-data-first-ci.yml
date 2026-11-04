@@ -3,6 +3,10 @@ on:
   pull_request:
     paths:
       - 'recorded-dashboard-view.ts'
+      - 'recorded-premium-session.ts'
+      - 'recorded-replay-view.ts'
+      - 'recorded-sixty-point-finder.ts'
+      - 'scripts/recorded-sixty-point-mobile-smoke.ts'
       - 'rag-evidence-card.ts'
       - 'rag-event-evidence.ts'
       - 'premium-response-evidence.ts'
@@ -45,6 +49,8 @@ jobs:
         run: NODE_ENV=test node --import tsx --test test/mobile-data-first.test.ts test/reference-research-terminal.test.ts test/one-stop-card.test.ts test/screen-overview-evidence.test.ts
       - name: Test 360px and 390px mobile and desktop browser layout
         run: node --import tsx scripts/pr800-mobile-data-first-smoke.ts
+      - name: Verify recorded premium finder at 360px and 390px
+        run: node --import tsx scripts/recorded-sixty-point-mobile-smoke.ts
       - name: Verify same-page evidence with frozen production endpoints
         run: node --import tsx scripts/rag-evidence-workflow-smoke.ts
       - name: Verify no whitespace mistakes

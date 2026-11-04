@@ -1,3 +1,5 @@
+import {renderRecordedPremiumSession} from './recorded-premium-session.js';
+import {standardIndexObservationClose} from './index-observation-session.js';
 import {randomBytes} from 'node:crypto';
 import {Hono} from 'hono';
 import {basicAuth} from 'hono/basic-auth';
@@ -35,7 +37,7 @@ export function createPr799RecorderPreview(input:{password:string;state:any;evid
    const nonce=randomBytes(18).toString('base64');
    c.header('Content-Security-Policy',"default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
    const json=JSON.stringify(state).replace(/</g,'\\u003c').replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
-   const script='const __name=(f)=>f;const scopeRecordedReplay='+scopeRecordedReplay.toString()+
+   const script='const __name=(f)=>f;const renderRecordedPremiumSession='+renderRecordedPremiumSession.toString()+';const standardIndexObservationClose='+standardIndexObservationClose.toString()+';const scopeRecordedReplay='+scopeRecordedReplay.toString()+
      ';const deriveMarketBook='+deriveMarketBook.toString()+';const installRecordedReplay='+installRecordedReplay.toString()+
      ';const state='+json+';const replay=installRecordedReplay({getState:()=>state,derive:deriveMarketBook});'+
      'document.getElementById("recorded-replay").open=true;document.getElementById("rr-rag-side").value="PE";'+

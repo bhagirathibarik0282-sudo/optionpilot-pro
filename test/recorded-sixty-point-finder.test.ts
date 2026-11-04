@@ -51,3 +51,40 @@ test('invalid threshold and one positive price do not create a move',()=>{
  assert.throws(()=>scanRecordedSixtyPointMoves(session([['09:15',100]]),0),/INVALID_MOVEMENT_THRESHOLD/);
  assert.deepEqual(scanRecordedSixtyPointMoves(session([['09:15',100]])).events,[]);
 });
+
+test('Multi-DTE freezes first-hit window even when the daily maximum starts later',()=>{
+ const s=session([['09:15',110],['09:16',175],['09:17',90],['09:18',200]]);
+ for(const row of [...s.options])s.options.push({...row,expiry:'2026-11-16',ltp:row.minute_bucket===at('09:15')?200:row.minute_bucket===at('09:16')?180:400});
+ const rise=scanRecordedSixtyPointMoves(s).events.find(e=>e.direction==='RISE'&&e.expiry===expiry)!;
+ assert.equal(rise.fromAt,at('09:17'));assert.equal(rise.points,110);
+ assert.equal(rise.expiryWindow.fromAt,at('09:15'));assert.equal(rise.expiryWindow.toAt,at('09:16'));
+ const other=rise.expiryWindow.comparisons.find(r=>r.expiry==='2026-11-16'&&r.side==='CE')!;
+ assert.equal(other.points,-20);assert.equal(other.percent,-10);assert.equal(other.dte,12);
+ assert.equal(other.status,'ENDPOINTS_OBSERVED');assert.equal(other.fromQuoteAt,base+'T09:15:10+05:30');
+ assert.equal(other.toReceiptAt,base+'T09:16:24+05:30');
+});
+test('Multi-DTE preserves missing, stale, conflicting and opposite-side evidence separately',()=>{
+ const s=session([['09:15',100],['09:16',170]]);
+ s.options.push({...s.options[0],expiry:'2026-11-16',ltp:200});
+ s.options.push({...s.options[1],expiry:'2026-11-16',ltp:280,quote_timestamp:at('09:15')});
+ for(const row of [...s.options].filter(r=>r.expiry===expiry))s.options.push({...row,option_type:'PE',ltp:row.ltp===100?150:80});
+ const window=scanRecordedSixtyPointMoves(s).events.find(e=>e.direction==='RISE')!.expiryWindow;
+ const missing=window.comparisons.find(r=>r.expiry==='2026-11-16'&&r.side==='CE')!;
+ assert.equal(missing.status,'MISSING_ENDPOINT');assert.equal(missing.points,null);assert.equal(missing.toPrice,null);
+ assert.equal(window.comparisons.find(r=>r.expiry===expiry&&r.side==='PE')!.points,-70);
+ s.options.push({...s.options[0],expiry:'2026-11-16',ltp:201});
+ assert.equal(scanRecordedSixtyPointMoves(s).events.find(e=>e.direction==='RISE')!.expiryWindow.comparisons.find(r=>r.expiry==='2026-11-16'&&r.side==='CE')!.fromPrice,null);
+});
+test('Multi-DTE exposes gaps within frozen endpoints without claiming continuity',()=>{
+ const s=session([['09:15',100],['09:20',170]]);
+ const window=scanRecordedSixtyPointMoves(s).events[0].expiryWindow;
+ assert.equal(window.comparisons.find(r=>r.side==='CE')!.status,'GAPPED');
+ assert.equal(window.comparisons.find(r=>r.side==='PE')!.status,'MISSING_ENDPOINT');
+ assert.equal(window.mode,'SAME_STRIKE');
+});
+test('an archived expiry without the selected strike stays explicit as missing',()=>{
+ const s=session([['09:15',100],['09:16',170]]);
+ s.options.push({...s.options[0],expiry:'2026-11-23',strike:24000});
+ const rows=scanRecordedSixtyPointMoves(s).events[0].expiryWindow.comparisons.filter(r=>r.expiry==='2026-11-23');
+ assert.equal(rows.length,2);assert(rows.every(r=>r.status==='MISSING_ENDPOINT'&&r.points===null));
+});

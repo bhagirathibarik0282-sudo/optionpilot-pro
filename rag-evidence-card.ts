@@ -10,7 +10,7 @@ export const RAG_CARD_CSS=`
 #rag-evidence-card .rag-up{color:#74e6ba}#rag-evidence-card .rag-down{color:#ff9fa9}#rag-evidence-card .rag-neutral{color:#cedbed}#rag-evidence-card small{font-size:16px}#rag-evidence-card .rag-scroll{overflow:auto}#rag-evidence-card table{width:100%;border-collapse:collapse;font-size:16px;white-space:nowrap}#rag-evidence-card :is(th,td){padding:10px;border-bottom:1px solid #3c506c;text-align:left;font-size:16px}#rag-evidence-card .rag-note{color:#b9cbe2;font-size:16px}#rag-status{white-space:pre-wrap;overflow-wrap:anywhere}#rag-evidence-card h3{font-size:19px;color:#f4d889}#rag-evidence-card details{margin-top:12px}#rag-evidence-card [hidden]{display:none!important}
 @media(max-width:650px){#rag-evidence-card .rag-grid{grid-template-columns:repeat(2,minmax(0,1fr))}#rag-evidence-card{padding:12px}#rag-evidence-card button{width:100%;margin-right:0}}`;
 export const RAG_CARD_HTML=`<details id="rag-evidence-card" lang="or"><summary>RAG evidence · recorded premiumକୁ ପଚାରନ୍ତୁ</summary>
-<p>Saved date, contract ଓ timestampରୁ premium / opposite premium response। Premium cardର Ask RAG selection ଏଠାରେ ଭରିଦେବ; ଅଲଗା ପ୍ରଶ୍ନ ମଧ୍ୟ ଲେଖିପାରିବେ।</p>
+<p>Saved date, contract ଓ timestampରୁ premium / opposite premium response। Evidence window 09:15–15:30 IST; replayର ଅନ୍ୟ sample ପାଇଁ evidence action ଉପଲବ୍ଧ ନୁହେଁ। Premium cardର Ask RAG selection ଏଠାରେ ଭରିଦେବ; ଅଲଗା ପ୍ରଶ୍ନ ମଧ୍ୟ ଲେଖିପାରିବେ।</p>
 <p id="rag-selection-summary" class="rag-note">Dashboard rowର Evidence ବାଛନ୍ତୁ, ବା ତଳେ selection ଭରନ୍ତୁ।</p><nav aria-label="Evidence actions"><button id="rag-now" type="button">ପୂର୍ବରୁ → ଏବେ</button><button id="rag-after" type="button">ପରେ କଣ ହେଲା?</button><button id="rag-history" type="button">ପୁରୁଣା ଉଦାହରଣ · 3m</button></nav><details id="rag-selection-details" open><summary>Selection ବଦଳାନ୍ତୁ / ଅନ୍ୟ ପ୍ରଶ୍ନ</summary><label for="rag-question">ଆପଣଙ୍କ ପ୍ରଶ୍ନ<textarea id="rag-question" maxlength="800" placeholder="NIFTY 22300 PE date 2026-10-13 expiry 2026-10-13 time 09:36ରେ କଣ ହେଲା?"></textarea></label>
 <button id="rag-extract" type="button">ପ୍ରଶ୍ନରୁ selection ଭରନ୍ତୁ</button><button id="rag-example" type="button">13 Octର ଯାଞ୍ଚ ହୋଇଥିବା ଉଦାହରଣ</button>
 <p class="rag-note">NIFTY / SENSEX / BANKNIFTY, CE / PE, date / ତାରିଖ, expiry / ମିଆଦ, time / ସମୟ ଲେଖନ୍ତୁ। Date YYYY-MM-DD ବା DD/MM/YYYY। ତଳର fields ସିଧାସଳଖ ଭରି ମଧ୍ୟ ଖୋଜିପାରିବେ।</p>
@@ -41,7 +41,8 @@ export function installRagEvidenceCard(parseQuestion:typeof parseRagQuestion,ren
   function syncKind(){const history=$('kind')?.value==='HISTORY';const snapshot=$('kind')?.value==='SNAPSHOT';$('time').min=snapshot?'09:15':'09:18';$('time').step=snapshot||history?'60':'180';$('lookback').disabled=history;$('outcomes').disabled=history;for(const id of ['lookback','outcomes']){const label=$(id).closest?.('label');if(label)label.hidden=history;}if(history){$('lookback').value='3';$('outcomes').checked=false;}}
   const clearResult=()=>{syncKind();version++;active?.abort();active=null;busy=false;$('search').disabled=false;$('result').innerHTML='';};
   const selectionSummary=()=>{const node=$('selection-summary');if(node)node.textContent=keys.every(k=>$(k).value)?$('date').value+' · '+$('symbol').value+' · '+$('strike').value+' '+$('side').value+' · expiry '+$('expiry').value+' · '+$('time').value+' IST · RECORDED':'Dashboard rowର Evidence ବାଛନ୍ତୁ, ବା selection ଭରନ୍ତୁ।';};
-  const action=(kind:string,outcomes=false)=>{clearResult();$('kind').value=kind;$('outcomes').checked=outcomes;syncKind();if(keys.some(k=>!$(k).value)){const details=$('selection-details') as any;if(details)details.open=true;}$('form').requestSubmit();};
+  const submitSelection=()=>{const form=$('form') as unknown as HTMLFormElement;if(typeof form.checkValidity==='function'&&!form.checkValidity()){const details=$('selection-details') as any;if(details)details.open=true;$('status').textContent='Selection ଯାଞ୍ଚ କରନ୍ତୁ। Snapshot 09:15–15:30 IST; history ପାଇଁ 09:18ରୁ exact 3m pair ଦରକାର।';form.reportValidity?.();return;}form.requestSubmit();};
+  const action=(kind:string,outcomes=false)=>{clearResult();$('kind').value=kind;$('outcomes').checked=outcomes;syncKind();if(keys.some(k=>!$(k).value)){const details=$('selection-details') as any;if(details)details.open=true;}submitSelection();};
   if($('now'))$('now').onclick=()=>action('SNAPSHOT');if($('after'))$('after').onclick=()=>action('SNAPSHOT',true);if($('history'))$('history').onclick=()=>action('HISTORY');
   const extract=()=>{
     clearResult();$('asof').value='';$('outcomes').checked=false;const p=parseQuestion($('question').value);
@@ -90,7 +91,7 @@ export function installRagEvidenceCard(parseQuestion:typeof parseRagQuestion,ren
       if($('kind'))$('kind').value='SNAPSHOT';if($('lookback'))$('lookback').value=[1,3,5,15,30,45,75,125].includes(Number(d.lookback))?String(d.lookback):'3';
       syncKind();selectionSummary();const details=$('selection-details') as any;if(details)details.open=false;$('time').min='09:15';$('asof').value='';$('outcomes').checked=false;$('question').value=text+' premium ଓ opposite premiumର reaction କଣ?';
       const card=document.getElementById('rag-evidence-card') as HTMLDetailsElement|null;if(card){card.open=true;card.scrollIntoView({behavior:'smooth',block:'start'});}
-      ($('form') as unknown as HTMLFormElement).requestSubmit();
+      submitSelection();
     }) as EventListener);
   }
   $('kind')?.addEventListener('change',syncKind);

@@ -617,3 +617,8 @@ test('recorded premium Evidence retains its exact saved bucket and identity',()=
  assert.deepEqual(d,{symbol:'NIFTY',date:'2026-10-19',expiry:'2026-10-22',strike:100,side:'CE',time:'09:45',lookback:1});
  assert.match(html,/<td>RECORDED<\/td>/,'status remains a plain coverage field');
 });
+
+test('reference premium keeps an out-of-window recorded price but offers no dead evidence button',()=>{
+ const h=harness(),saved=recordedSession();h.advance(6*3600000);for(const group of Object.values(saved.current))for(const rows of [group.market,group.options,group.chain])for(const row of rows)row.minute_bucket=row.minute_bucket.replace('04:14:00','10:09:00').replace('04:15:00','10:10:00');
+ h.setSaved(saved);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});const html=h.el('os-premium-table').innerHTML;assert.doesNotMatch(html,/data-os-evidence=/);assert.match(html,/Evidence 09:15–15:30 IST/);assert.match(html,/>121</);
+});

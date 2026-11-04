@@ -56,6 +56,9 @@ try{
   await page.locator('[data-ar-evidence="23900|PE"]').click();await page.waitForFunction(()=>document.getElementById('rag-result')?.textContent?.includes('160.30'));
   assert.equal(await page.locator('#rag-time').inputValue(),'14:30');assert.equal(await page.locator('#rag-side').inputValue(),'PE');
   assert.equal(new URL(requests.at(-1)!,base).searchParams.has('includeOutcomes'),false);
+  await page.locator('#rag-selection-details > summary').click();await page.locator('#rag-time').fill('15:40');await page.locator('#rag-selection-details > summary').click();
+  const invalidCount=requests.length;await page.locator('#rag-now').click();assert.equal(requests.length,invalidCount);assert.equal(await page.locator('#rag-selection-details').getAttribute('open'),'');assert.match(await page.locator('#rag-status').innerText(),/09:15–15:30/);
+  await page.locator('#rag-time').fill('09:15');await page.locator('#rag-selection-details > summary').click();await page.locator('#rag-history').click();assert.equal(requests.length,invalidCount);assert.equal(await page.locator('#rag-selection-details').getAttribute('open'),'');
   await page.goto(base+'/front',{waitUntil:'domcontentloaded'});await page.locator('#rd-shell').waitFor({state:'visible'});
   await page.locator('#rd-source-tabs [data-rd-source="RECORDED"]').click();
   await page.evaluate(()=>{

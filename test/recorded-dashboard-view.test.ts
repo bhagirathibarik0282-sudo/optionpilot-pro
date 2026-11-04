@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { renderRecordedDashboard } from '../recorded-dashboard-view.js';
 
 async function until(check:()=>boolean){for(let i=0;i<50;i++){if(check())return;await new Promise(resolve=>setImmediate(resolve));}throw new Error('VIEW_WAIT_TIMEOUT');}
-async function view(){
+async function view(close='15:30'){
  const elements=new Map<string,any>(),timers=new Map<number,any>(),requests:string[]=[];let next=0;const events:any[]=[];
  for(const [,id] of renderRecordedDashboard().matchAll(/id="([^"]+)"/g))elements.set(id,{value:'',textContent:'',innerHTML:'',disabled:false,selectedOptions:[]});
  elements.get('ar-index').value='NIFTY';elements.get('ar-speed').value='1';
@@ -12,13 +12,13 @@ async function view(){
  const context:any={console,AbortController,AbortSignal,URLSearchParams,document:{getElementById:(id:string)=>elements.get(id),addEventListener(){}},CustomEvent:class{constructor(public type:string,public options:any){}get detail(){return this.options.detail;}},window:{addEventListener(){},dispatchEvent:(event:any)=>events.push(event)},setTimeout(this:any,fn:any,ms:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.set(++next,{fn,ms});return next;},clearTimeout(this:any,id:number){if(this?.render)throw new TypeError('Illegal invocation: native Window timer rebound to playback API');timers.delete(id);},
   fetch:async(url:string)=>{requests.push(url);if(url.endsWith('/dates'))return {ok:true,json:async()=>({ok:true,dates:dates.map(tradeDate=>({symbol:'NIFTY',tradeDate,markerCount:2}))})};
    const params=new URLSearchParams(url.split('?')[1]),date=params.get('date'),from=params.get('from'),to=params.get('to');
-   const time=from==='09:15'?'09:15':to==='15:40'?'15:30':null;
+   const time=from==='09:15'?'09:15':to==='15:40'?close:null;
    const row=time?{symbol:'NIFTY',minute_bucket:date+'T'+time+':00+05:30',truth_verdict:'TRUE',spot_ltp:time==='09:15'?23000:23100,future_ltp:23120,india_vix:12}:null;
    const opts=row?['CE','PE'].map(option_type=>({...row,expiry:date!<'2026-10-30'?'2026-10-29':'2026-11-02',strike:23000,option_type,ltp:100,oi:'30000000',pdh:110,pdl:90})):[];
    const compact=(rows:any[])=>{const columns=Object.keys(rows[0]||{});return {columns,rows:rows.map(row=>columns.map(key=>row[key]))};};
    return {ok:true,json:async()=>({ok:true,market:compact(row?[row]:[]),options:compact(opts),chain:compact([])})};}};
  vm.createContext(context);const script=[...renderRecordedDashboard().matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1];vm.runInContext(script,context);
- await until(()=>elements.get('clock').textContent.includes('15:30:00')).catch(error=>{throw new Error(error.message+' '+elements.get('error').textContent+' '+elements.get('clock').textContent+' '+elements.get('progress').textContent);});
+ await until(()=>elements.get('clock').textContent.includes(close+':00')).catch(error=>{throw new Error(error.message+' '+elements.get('error').textContent+' '+elements.get('clock').textContent+' '+elements.get('progress').textContent);});
  return {elements,timers,requests,events,async tick(){const entry=[...timers].find(([,v])=>v.ms<10000);assert(entry);timers.delete(entry[0]);entry[1].fn();await new Promise(resolve=>setImmediate(resolve));}};
 }
 test('page opens on latest saved closing samples and converts stored BIGINT OI for the CE/PE ladder',async()=>{
@@ -48,4 +48,9 @@ test('recorded row opens exact cursor evidence, pauses replay and invalidates on
  assert.match(h.elements.get('clock').textContent,/PAUSED/);
  const before=h.events.filter(e=>e.type==='optionpilot:rag-invalidate').length;h.elements.get('ar-next').onclick();assert(h.events.filter(e=>e.type==='optionpilot:rag-invalidate').length>before);
  const count=h.events.filter(e=>e.type==='optionpilot:rag-selection').length;h.elements.get('ar-ladder').onclick({target:{closest:()=>({dataset:{arEvidence:'99999|CE'}})}});assert.equal(h.events.filter(e=>e.type==='optionpilot:rag-selection').length,count);
+});
+
+test('post-window saved samples remain visible without a nonfunctional Evidence action',async()=>{
+ const h=await view('15:40');assert.match(h.elements.get('ar-ladder').innerHTML,/23,000/);assert.doesNotMatch(h.elements.get('ar-ladder').innerHTML,/data-ar-evidence=/);assert.match(h.elements.get('ar-ladder').innerHTML,/Evidence 09:15–15:30 IST/);
+ const count=h.events.filter(e=>e.type==='optionpilot:rag-selection').length;h.elements.get('ar-ladder').onclick({target:{closest:()=>({dataset:{arEvidence:'23000|CE'}})}});assert.equal(h.events.filter(e=>e.type==='optionpilot:rag-selection').length,count);
 });

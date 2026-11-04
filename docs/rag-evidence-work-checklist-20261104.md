@@ -109,3 +109,14 @@ Acceptance checklist:
 - [ ] Actual production exact-minute arithmetic, cutoff/event negative controls, history endpoint and runtime-off state.
 
 The browser fixture projects the already documented production 23900 CE/PE records; it is isolated acceptance evidence, not a current live-data or full-chain coverage claim. SQL catalog/query-plan audit, cost benchmarking, semantic retrieval ranking, all-date coverage and live-market acceptance remain unproven. This release completes the recorded row-to-evidence interaction; it does not manufacture absent records or certify the wider research system.
+
+
+### Production boundary caught during unit 2 acceptance
+
+PR844 deployed as 9bd58894fe76b2112ede2b39a551e76f4e386741, deployment de46eb53-4a19-4d22-900a-39eb5f5dc50a. All six final-head CI workflows passed. Actual production row 23900 CE at 14:31 opened the card without manual entry; 162.65 and -10.20 matched source. Same-page history showed the 2026-10-29 / 2026-11-03 / 22950 CE example at the same minute and calendar DTE 5; six prior days were searched, one matched, five had no verified eligible pair, zero read failures. Missing-contract, pre-receipt cutoff and event-grid guards passed. Worker remained stopped with maintenance=false.
+
+Final production cursor testing also exposed a separate UI boundary defect: the latest archived sample is 15:40, while the existing audited RAG request/input window ends at 15:30. Its Evidence button filled 15:40 and closed the advanced form, so native range validation silently prevented submission. This was reproduced in the actual dashboard (rangeOverflow=true, result empty, advanced form closed), rather than inferred from CI success.
+
+The closure correction preserves both data and calculation boundaries: post-window sample prices remain visible, but the table explains the supported evidence window instead of offering a dead action. The row handler independently rejects an out-of-window cursor. Invalid explicit/manual quick actions open their fields and explain the window before reporting native validity. No market-close policy, source timestamp, quote eligibility or backend admission rule is extended.
+
+Additional acceptance: archive/source-table boundary regressions, actual native closed-form validation at 15:40, and the 09:15→history missing-baseline boundary. These must pass on the final deployment before unit 2 is closed.

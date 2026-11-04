@@ -9,7 +9,7 @@ function harness(at='2026-10-19T04:00:00Z'){
  class Clock extends Date{constructor(...args:any[]){super(args.length?args[0]:now);}static now(){return now;}}
  class Store{inventory:any;constructor(inventory:any){this.inventory=inventory;}snapshot(){return {indices:[],vix:{},participation:[]};}premiums(){return {rows:[]};}}
  class Socket{lastActivityAt=now;disconnected=false;constructor(public config:any){sockets.push(this);}connect(){this.config.onState('OPEN');}disconnect(){this.disconnected=true;}}
- class Sampler{constructor(_inventory:any,public deps:any){samplers.push(this);}read(){return null;}tick(){}version(){return 0;}}
+ class Sampler{constructor(_inventory:any,public deps:any){samplers.push(this);}read(){return null;}readAudit(){return {fixture:true};}tick(){}version(){return 0;}}
  const context:any={Date:Clock,process:{env:{DASHBOARD_LIVE_ENABLED:'true',KITE_API_KEY:'fixture',NODE_ENV:'production'}},
   DashboardLiveStore:Store,KiteWebSocketTransport:Socket,DashboardPcrSampler:Sampler,QUOTE_SYMBOLS:[],
   createParticipationMinuteRecorder,tickTelegramLadderShadow:async()=>{},dbSaveParticipationMinuteOnce:async()=>{throw Error('Unexpected participation DB write in recovery tests');},
@@ -19,7 +19,7 @@ function harness(at='2026-10-19T04:00:00Z'){
   subscribeKiteAuthoritySessionPersisted:(fn:Function)=>listeners.push(fn),readKiteBrokerSessionCheck:()=>({code:rejected?'RECONNECT_REQUIRED':'VERIFIED'}),
   markKiteBrokerSessionRejected:()=>{rejected++;active=false;},isIndianEquityMarketOpenAt,indianTradingDateAt,indianEquityMarketPhaseAt,
   setInterval:()=>({unref(){}}),setTimeout,URLSearchParams,AbortSignal,console:{info(){}},fetch:async()=>new Response('',{status:403})};
- const runtime=runInNewContext(code+';({reconcileDashboardLiveRuntime,readDashboardLiveSnapshot,startDashboardLiveRuntime})',context);
+ const runtime=runInNewContext(code+';({reconcileDashboardLiveRuntime,readDashboardLiveSnapshot,readDashboardPcrAudit,startDashboardLiveRuntime})',context);
  return {runtime,sockets,samplers,context,listeners,counts:()=>({checks,rejected,masterReads}),advance:(ms:number)=>now+=ms,block:()=>active=false};
 }
 test('08:30 weekday preflight checks broker acceptance without opening a market socket',async()=>{
@@ -42,4 +42,17 @@ test('PCR 403 revokes the session immediately and cannot leak credentials throug
  await assert.rejects(h.samplers[0].deps.fetchQuotes(['NFO:fixture']),/PCR_QUOTE_HTTP_403/);
  const value=h.runtime.readDashboardLiveSnapshot();assert.equal(value.connected,false);assert.equal(value.connectionState,'KITE_SESSION_REQUIRED');assert.equal(value.snapshot,null);
  assert.equal(h.counts().rejected,1);assert(!JSON.stringify(value).includes('fixture-token'));
+});
+
+test('contract audit revokes on socket close, disabled feed and market close without fetching',async()=>{
+ const h=harness();await h.runtime.reconcileDashboardLiveRuntime();
+ assert.equal(h.runtime.readDashboardPcrAudit('NIFTY','2026-10-19').audit.fixture,true);
+ const before=h.counts();h.sockets[0].config.onState('RECONNECTING');
+ assert.equal(h.runtime.readDashboardPcrAudit('NIFTY','2026-10-19').audit,null);
+ h.sockets[0].config.onState('OPEN');h.context.process.env.DASHBOARD_LIVE_ENABLED='false';
+ assert.equal(h.runtime.readDashboardPcrAudit('NIFTY','2026-10-19').audit,null);
+ h.context.process.env.DASHBOARD_LIVE_ENABLED='true';h.advance(86400000);
+ // Sampler owns session/receipt expiry; runtime additionally blocks outside market hours.
+ h.advance(7*3600000);assert.equal(h.runtime.readDashboardPcrAudit('NIFTY','2026-10-19').audit,null);
+ assert.deepEqual(h.counts(),before);
 });

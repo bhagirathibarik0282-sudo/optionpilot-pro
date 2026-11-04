@@ -599,3 +599,13 @@ test('conflicting values for the same exchange and receipt clocks still revoke h
  }
  assert.equal(premiumCells(h)[16],'—');
 });
+
+test('transient missing frames revoke current values but retain valid same-runtime historical endpoints',()=>{
+ const h=harness();h.send(h.payload());
+ for(let i=1;i<=6;i++){
+  h.advance(10000);if(i%2===0){h.send(null);assert(!h.el('os-premium-table').innerHTML.includes('>120<'));}
+  const p=h.payload();p.snapshot.atmExpiryLadder[0].rows[0].ce.price=120+i;h.send(p);
+ }
+ assert.equal(premiumCells(h)[16],'6');
+ h.advance(600);const changed=h.payload();changed.snapshot.runtimeId='replacement-runtime';h.send(changed);assert.equal(premiumCells(h)[16],'—');
+});

@@ -178,7 +178,7 @@ export function installOiWallStudio(){
   while(revoked.size>64)revoked.delete(revoked.values().next().value!);
   while(histories.size>12)histories.delete(histories.keys().next().value!);
   while(pulses.size>256)pulses.delete(pulses.keys().next().value!);
-  render();if(timer)clearTimeout(timer);timer=setTimeout(()=>{timer=null;render();},1850);
+  render();if(timer)clearTimeout(timer);timer=setTimeout(()=>{timer=null;render();const remaining=4100-(Date.now()-payloadReceived);if(remaining>0)timer=setTimeout(()=>{timer=null;render();},remaining);},1850);
  }
  $('index').onchange=()=>{const value=$('index').value;if(!['NIFTY','SENSEX','BANKNIFTY'].includes(value))return;symbol=value;candidate=null;candidateGeneration++;render();};
  $('expiry').onchange=()=>{const expiry=$('expiry').value;if(context()?.expiries?.includes(expiry)){choices[symbol]={expiry};dispatch({expiry});}else if(recorded[symbol]?.expiries?.includes(expiry)){choices[symbol]={expiry};window.dispatchEvent(new CustomEvent('optionpilot:oi-recorded-scope',{detail:{symbol,expiry}}));render();}};

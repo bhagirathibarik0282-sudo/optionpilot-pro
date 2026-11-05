@@ -157,3 +157,9 @@ test('ranked live ladder switches focus/range without network, stays on OI page 
  h.setNow(base+31*60000);h.studio.update(fixture(31,6));h.click('windows','owsWindow','OPEN');
  assert.match(h.nodes.get('ows-chart')!.innerHTML,/No eligible exact baseline/);
 });
+test('a stalled live delivery expires ranked values through the existing bounded UI repaint timer',()=>{
+ const h=harness();h.studio.update(fixture());assert.match(h.nodes.get('ows-chart')!.innerHTML,/oir-table/);
+ const tick=()=>{const [id,fn]=[...h.timers].at(-1)!;h.timers.delete(id);fn();};
+ h.setNow(base+1850);tick();assert.match(h.nodes.get('ows-chart')!.innerHTML,/oir-table/);assert.equal(h.timers.size,1);
+ h.setNow(base+4200);tick();assert.doesNotMatch(h.nodes.get('ows-chart')!.innerHTML,/oir-table/);assert.equal(h.timers.size,0);
+});

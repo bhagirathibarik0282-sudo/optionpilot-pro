@@ -21,6 +21,7 @@ Existing recorded session and shared cursor -> exact snapshot/receipt adapter ->
 3. `renderOiRankedLadder`: one display for live OI workspace, its recorded replay and after-hours recorded dashboard. No provider calls, persistence or candidate authority.
 
 ## Source boundaries
+- The existing bounded UI repaint timer also revokes the ranked view after 4 seconds without payload delivery; it introduces no network polling or trading scheduler.
 - Live OI comes from the existing qualified full-expiry snapshot; no extra subscription, REST polling or broker requests. Snapshot premium has its own last-trade timestamp; it is not relabeled as the latest tick. Existing independently qualified tick-OI pulse remains separately labeled.
 - Recorded ranking covers admitted returned archive contracts only, not a guaranteed complete exchange chain. Stored OI does not expose its actual publication timestamp, so the panel says saved snapshot OI / publication time unavailable; LTP freshness does not establish OI freshness.
 - Live PDH/PDL is unavailable in this OI source and is explicitly withheld. Recorded levels are stored values, not newly inferred levels.
@@ -30,7 +31,7 @@ Existing recorded session and shared cursor -> exact snapshot/receipt adapter ->
 - Shared replay cursor prevents future price/level lookup. Missing context withholds that value rather than erasing otherwise valid OI observations.
 
 ## Validation
-156 focused local tests passed; permanent guardrails and whitespace checks passed. Includes ranking arithmetic/ties/zero OI, missing baseline, side separation, stale price versus stale OI, token/expiry/runtime boundaries, opening retention/reset, changed-universe ranks, source escaping, receipt-clock freshness, source adapters, no extra reads on UI controls, replay look-ahead and existing premium/mobile projections.
+157 focused local tests passed; permanent guardrails and whitespace checks passed. Includes ranking arithmetic/ties/zero OI, missing baseline, side separation, stale price versus stale OI, token/expiry/runtime boundaries, opening retention/reset, changed-universe ranks, source escaping, receipt-clock freshness, source adapters, no extra reads on UI controls, replay look-ahead and existing premium/mobile projections.
 
 Bounded real recorded readback: 4 Nov 2026, 12:24 to 12:27 IST, selected nearest expiry on each index:
 

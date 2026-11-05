@@ -6,7 +6,7 @@ import {mkdir} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {measurePcrSnapshot} from '../dashboard-pcr-sampler.js';
 import {deriveOiStudioSnapshot,installOiWallStudio,OI_WALL_STUDIO_HTML,OI_WALL_STUDIO_CSS} from '../oi-wall-studio.js';
-import {deriveOiRankedLadder,renderOiRankedLadder} from '../oi-ranked-ladder.js';
+import {deriveOiRankedLadder,renderOiRankedLadder,paintOiRankedLadder} from '../oi-ranked-ladder.js';
 import {renderMarketBookLiveContext} from '../market-book-reading-guide.js';
 import {renderRecordedDashboard} from '../recorded-dashboard-view.js';
 const today=new Date(Date.now()+19800000).toISOString().slice(0,10),now=Date.parse(today+'T12:30:00+05:30');
@@ -19,7 +19,7 @@ function packet(time:number,bump=0){
  return {connected:true,source:'KITE_WEBSOCKET_FULL',connectionState:'OPEN',serverTime:iso,snapshot:{runtimeId:'synthetic-browser',tradeDate:date,asOf:iso,indices:[{symbol:'NIFTY',expiry,expiries:[expiry],strikes:[...new Set(entries.map(e=>e.strike))],strike:24000,ceStrike:24000,peStrike:24000,spot,oiQuotes,studioCE:oiQuotes.find(q=>q.identity.strike===24000&&q.identity.side==='CE'),studioPE:oiQuotes.find(q=>q.identity.strike===24000&&q.identity.side==='PE'),pcrSnapshot:measurePcrSnapshot(entries,quotes,date,time,time,spot)}]}};
 }
 const before=packet(now-180000),current=packet(now,10);
-const live='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Synthetic OI ladder acceptance</title><style>body{margin:0;padding:8px;background:#f3f6f3;font:15px system-ui}*{box-sizing:border-box}'+OI_WALL_STUDIO_CSS+'</style></head><body>'+OI_WALL_STUDIO_HTML+'<script>const __name=f=>f;const renderMarketBookLiveContext='+renderMarketBookLiveContext.toString()+';const deriveOiStudioSnapshot='+deriveOiStudioSnapshot.toString()+';const deriveOiRankedLadder='+deriveOiRankedLadder.toString()+';const renderOiRankedLadder='+renderOiRankedLadder.toString()+';const installOiWallStudio='+installOiWallStudio.toString()+';window.studio=installOiWallStudio();studio.setPage(5);studio.update('+JSON.stringify(before)+');studio.update('+JSON.stringify(current)+');window.__rankTick=setInterval(()=>studio.update('+JSON.stringify(current)+'),1000);</script></body></html>';
+const live='<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Synthetic OI ladder acceptance</title><style>body{margin:0;padding:8px;background:#f3f6f3;font:15px system-ui}*{box-sizing:border-box}'+OI_WALL_STUDIO_CSS+'</style></head><body>'+OI_WALL_STUDIO_HTML+'<script>const __name=f=>f;const renderMarketBookLiveContext='+renderMarketBookLiveContext.toString()+';const deriveOiStudioSnapshot='+deriveOiStudioSnapshot.toString()+';const deriveOiRankedLadder='+deriveOiRankedLadder.toString()+';const renderOiRankedLadder='+renderOiRankedLadder.toString()+';const paintOiRankedLadder='+paintOiRankedLadder.toString()+';const installOiWallStudio='+installOiWallStudio.toString()+';window.studio=installOiWallStudio();studio.setPage(5);studio.update('+JSON.stringify(before)+');studio.update('+JSON.stringify(current)+');window.__rankTick=setInterval(()=>studio.update('+JSON.stringify(current)+'),1000);</script></body></html>';
 const compact=(rows:any[])=>{const columns=Object.keys(rows[0]||{});return {columns,rows:rows.map(r=>columns.map(k=>r[k]))};};
 const date='2026-11-04';
 const server=createServer((req,res)=>{
@@ -46,6 +46,10 @@ try{
   try{
    await page.goto(base+'/live');await page.locator('#ows-chart .oir-table').waitFor();
    assert.equal(await page.locator('#ows-chart tbody tr').count(),15);
+   assert(await page.locator('#ows-chart .oir-scroll').evaluate(el=>{const a=el.querySelector('.oir-atm')!.getBoundingClientRect(),b=el.getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom;}),'ATM row visible on initial paint');
+   await page.locator('#ows-chart .oir-scroll').evaluate(el=>el.scrollTop=20);
+   await page.waitForTimeout(1100);
+   assert(Math.abs(await page.locator('#ows-chart .oir-scroll').evaluate(el=>el.scrollTop)-20)<2,'heartbeat preserves ladder scroll');
    await page.locator('#ows-rank-band').selectOption('3');assert.equal(await page.locator('#ows-chart tbody tr').count(),7);
    await page.locator('#ows-rank-focus').selectOption('ADD');assert((await page.locator('#ows-chart').innerText()).includes('Top additions'));
    await page.locator('#ows-chart [data-oir-strike]').first().click();assert.equal(new URL(page.url()).pathname,'/live');

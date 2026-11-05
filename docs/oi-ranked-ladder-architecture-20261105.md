@@ -49,3 +49,13 @@ A new isolated synthetic browser CI exercises live and recorded ladders at 360px
 
 ## Release scope
 No storage migration, new server endpoint, credentials, Telegram, candidate ranking, execution or operating-window change. Existing market runtime remains under its current schedule. Ranking alone does not promote a candidate or create a trading action. Final-head CI/browser verification and live runtime acceptance are required before claiming this feature works in the live market.
+
+## PCR / Premium / All display extension
+
+The shared ladder now has OI, PCR, Premium and All display buttons. All is the initial selection. Each workspace keeps its selected display through heartbeats and comparison/range changes, using local DOM state without extra network reads. CE and PE remain on either side of the strike.
+
+Full-expiry PCR uses the existing qualified live snapshot or a unique exact-cursor archived chain with approved full-chain provenance and matching snapshot identity when supplied (the normalized archive does not expose that optional field). Strike PCR is PE OI / CE OI for the same expiry, strike and cursor; missing sides and zero CE OI withhold the ratio. Its change requires both eligible comparison endpoints and unchanged live token identities. PCR uses gold and numeric arrows without assigning a bullish/bearish meaning.
+
+Premium, OI change and OI rank movement have independent arrows. Premium change uses green/red, PDH is green and PDL red, and the visible range note is yellow. Exact touches are labeled AT PDH / AT PDL; invalid or reversed levels and unavailable live premium levels remain unavailable. Existing source restrictions and live freshness expiry still apply.
+
+Validation for this extension: 68 focused tests and permanent guardrails pass locally. The browser acceptance script now checks all display buttons, display persistence across heartbeats, source labels, range notes and visibility at 360/390/1280px. Browser release checks must pass before deployment.

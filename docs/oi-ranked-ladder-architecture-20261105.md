@@ -20,7 +20,7 @@ Existing recorded session and shared cursor -> exact snapshot/receipt adapter ->
 2. `deriveOiRankedLadder`: deterministic per-side rankings, exact lookback, immutable inputs, safe nonnegative integer OI, independent price qualification, token/session boundaries, stable-universe rank movement and explicit missing baseline handling. Sorting is O(n log n); rank lookups use maps.
 3. `renderOiRankedLadder`: one display for live OI workspace, its recorded replay and after-hours recorded dashboard. No provider calls, persistence or candidate authority.
 
-4. `paintOiRankedLadder`: preserves ladder scroll and expanded source details across heartbeats, centers ATM or an explicitly selected strike only on viewport changes, and never scrolls the whole dashboard.
+4. `paintOiRankedLadder`: preserves the viewed strike/relative offset when row heights change, pixel scroll when they do not, and expanded source details across heartbeats, centers ATM or an explicitly selected strike only on viewport changes, and never scrolls the whole dashboard.
 
 ## Source boundaries
 - The existing bounded UI repaint timer also revokes the ranked view after 4 seconds without payload delivery; it introduces no network polling or trading scheduler.

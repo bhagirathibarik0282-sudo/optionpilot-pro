@@ -93,6 +93,9 @@ export function renderOiRankedLadder(model:any,options:any={}){
 export function paintOiRankedLadder(node:any,html:string){
  if(!node||node.innerHTML===html)return;
  const old=node.querySelector?.('.oir-scroll'),oldPanel=node.querySelector?.('.oir-panel'),key=oldPanel?.getAttribute('data-oir-key'),top=old?.scrollTop;
+ const oldHeight=old?.scrollHeight,box=old?.getBoundingClientRect?.(),middle=box?box.top+old.clientHeight/2:NaN;
+ const readingRow=old?Array.from(old.querySelectorAll('tbody tr')).find((r:any)=>{const b=r.getBoundingClientRect();return b.top<=middle&&b.bottom>=middle;}) as any:null;
+ const reading=readingRow?{strike:readingRow.getAttribute('data-oir-row'),offset:(readingRow.getBoundingClientRect().top+readingRow.getBoundingClientRect().height/2)-middle}:null;
  const opened=new Set<string>(Array.from(node.querySelectorAll?.('[data-oir-contract] details[open]')||[]).map((d:any)=>d.closest('[data-oir-contract]')?.getAttribute('data-oir-contract')));
  const guideOpen=node.querySelector?.('.oir-guide')?.open;
  node.innerHTML=html;
@@ -100,7 +103,7 @@ export function paintOiRankedLadder(node:any,html:string){
  for(const d of node.querySelectorAll?.('[data-oir-contract] details')||[])if(opened.has(d.closest('[data-oir-contract]')?.getAttribute('data-oir-contract')))d.open=true;
  const guide=node.querySelector?.('.oir-guide');if(guide&&guideOpen)guide.open=true;
  if(!scroll||!panel)return;
- if(key===panel.getAttribute('data-oir-key')&&typeof top==='number'){scroll.scrollTop=top;return;}
+ if(key===panel.getAttribute('data-oir-key')&&typeof top==='number'){scroll.scrollTop=top;if(reading&&oldHeight!==scroll.scrollHeight){const row=scroll.querySelector('[data-oir-row="'+reading.strike+'"]');if(row){const a=row.getBoundingClientRect(),b=scroll.getBoundingClientRect();scroll.scrollTop+=(a.top+a.height/2)-(b.top+scroll.clientHeight/2)-reading.offset;}}return;}
  const target=scroll.querySelector('[data-oir-row="'+panel.getAttribute('data-oir-center')+'"]');
  if(target){const a=target.getBoundingClientRect(),b=scroll.getBoundingClientRect();scroll.scrollTop+=a.top-b.top-(scroll.clientHeight-a.height)/2;}
 }

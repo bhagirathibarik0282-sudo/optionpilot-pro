@@ -66,7 +66,7 @@ try{
    await page.screenshot({path:'oi-ranked-ladder-artifacts/recorded-'+width+'-synthetic.png',fullPage:true});
    await page.locator('#ar-reset').click();assert(!(await page.locator('#ar-oi-output').innerText()).includes('15:40:00'));
    assert.deepEqual(errors,[]);
-  }finally{await context.close();}
+  }catch(error){await page.screenshot({path:'oi-ranked-ladder-artifacts/failure-'+width+'.png',fullPage:true}).catch(()=>{});throw error;}finally{await context.close();}
  }
  console.log('OI ranked ladder LIVE + RECORDED synthetic 360/390/1280 browser acceptance PASS');
 }finally{await browser?.close();server.close();}

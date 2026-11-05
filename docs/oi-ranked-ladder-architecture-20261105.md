@@ -54,7 +54,7 @@ No storage migration, new server endpoint, credentials, Telegram, candidate rank
 
 The shared ladder now has OI, PCR, Premium and All display buttons. All is the initial selection. Each workspace keeps its selected display through heartbeats and comparison/range changes, using local DOM state without extra network reads. CE and PE remain on either side of the strike.
 
-Full-expiry PCR uses the existing qualified live snapshot or a unique exact-cursor archived chain with approved full-chain provenance and matching snapshot identity. Strike PCR is PE OI / CE OI for the same expiry, strike and cursor; missing sides and zero CE OI withhold the ratio. Its change requires both eligible comparison endpoints and unchanged live token identities. PCR uses gold and numeric arrows without assigning a bullish/bearish meaning.
+Full-expiry PCR uses the existing qualified live snapshot or a unique exact-cursor archived chain with approved full-chain provenance and matching snapshot identity when supplied (the normalized archive does not expose that optional field). Strike PCR is PE OI / CE OI for the same expiry, strike and cursor; missing sides and zero CE OI withhold the ratio. Its change requires both eligible comparison endpoints and unchanged live token identities. PCR uses gold and numeric arrows without assigning a bullish/bearish meaning.
 
 Premium, OI change and OI rank movement have independent arrows. Premium change uses green/red, PDH is green and PDL red, and the visible range note is yellow. Exact touches are labeled AT PDH / AT PDL; invalid or reversed levels and unavailable live premium levels remain unavailable. Existing source restrictions and live freshness expiry still apply.
 

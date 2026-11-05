@@ -18,7 +18,7 @@ export function recordedOiRankFrame(session:any,at:string,expiry:string){
   const strike=Number(r.strike);if(!pairs.has(strike))pairs.set(strike,{strike});
   pairs.get(strike)[r.option_type]={symbol,expiry,strike,side:r.option_type,oi:n(r.oi),sourceAt:at,price:typeof r.ltp==='number'&&r.ltp>0?r.ltp:null,priceAt:r.quote_timestamp,pdh:typeof r.pdh==='number'?r.pdh:null,pdl:typeof r.pdl==='number'?r.pdl:null};
  }
- const chains=(session?.chain||[]).filter((r:any)=>r.symbol===symbol&&String(r.expiry).slice(0,10)===expiry&&timestamp(r.minute_bucket)===ms&&r.truth_verdict==='TRUE'&&r.snapshot_id===m?.snapshot_id&&/^(Exact archived full-chain source|Normalized full-chain source)$/.test(r.full_pcr_source||''));
+ const chains=(session?.chain||[]).filter((r:any)=>r.symbol===symbol&&String(r.expiry).slice(0,10)===expiry&&timestamp(r.minute_bucket)===ms&&r.truth_verdict==='TRUE'&&(r.snapshot_id==null||r.snapshot_id===m?.snapshot_id)&&/^(Exact archived full-chain source|Normalized full-chain source)$/.test(r.full_pcr_source||''));
  const chain=chains.length===1?chains[0]:null,full=chain?.full_chain_oi_pcr;
  return {symbol,date,expiry,runtime:'RECORDED',cycle:ms,checked:timestamp(m?.backend_timestamp),anchor:typeof m?.spot_ltp==='number'?m.spot_ltp:null,fullPcr:typeof full==='number'&&Number.isFinite(full)&&full>=0?full:null,rows:[...pairs.values()].sort((a,b)=>a.strike-b.strike)};
 }

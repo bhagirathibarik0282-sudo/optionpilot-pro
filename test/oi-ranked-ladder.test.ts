@@ -95,6 +95,7 @@ test('archived full PCR requires exact cursor, expiry, snapshot identity, unique
  const f:any=recorded(),time=new Date(at(3)).toISOString();
  const row={symbol:'NIFTY',expiry,minute_bucket:time,snapshot_id:'s',truth_verdict:'TRUE',full_pcr_source:'Exact archived full-chain source',full_chain_oi_pcr:1.25};
  f.chain=[row];assert.equal(recordedOiRankFrame(f,time,expiry).fullPcr,1.25);
+ const withoutId={...row};delete (withoutId as any).snapshot_id;f.chain=[withoutId];assert.equal(recordedOiRankFrame(f,time,expiry).fullPcr,1.25);
  for(const change of [{snapshot_id:'other'},{minute_bucket:new Date(at(2)).toISOString()},{expiry:'2026-11-16'},{full_pcr_source:'CORE subset'},{full_chain_oi_pcr:Infinity}]){
   f.chain=[{...row,...change}];assert.equal(recordedOiRankFrame(f,time,expiry).fullPcr,null);
  }

@@ -3,6 +3,9 @@ on:
   pull_request:
     paths:
       - 'recorded-dashboard-view.ts'
+      - 'oi-ranked-ladder.ts'
+      - 'oi-wall-studio.ts'
+      - 'oi-wall-replay.ts'
       - 'recorded-premium-session.ts'
       - 'recorded-replay-view.ts'
       - 'recorded-sixty-point-finder.ts'

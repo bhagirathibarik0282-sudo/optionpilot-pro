@@ -1,3 +1,4 @@
+import {recordedOiRankFrame,deriveOiRankedLadder,renderOiRankedLadder} from '../oi-ranked-ladder.js';
 import {renderMarketBookLiveContext} from '../market-book-reading-guide.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -53,7 +54,7 @@ function harness(){
  const nodes=new Map<string,Node>();for(const m of OI_WALL_STUDIO_HTML.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],new Node());
  const events:any[]=[];let now=base,fn:any;const timers=new Map<number,any>();let id=0;
  class Clock extends Date{static now(){return now;}}
- const ctx:any={__name:(f:any)=>f,document:{getElementById:(id:string)=>nodes.get(id)},window:{dispatchEvent:(e:any)=>events.push(e)},CustomEvent:class{type:any;detail:any;constructor(type:any,data:any){this.type=type;this.detail=data.detail;}},Date:Clock,setTimeout:(f:any)=>{timers.set(++id,f);return id;},clearTimeout:(i:number)=>timers.delete(i),fetch:async()=>{throw Error('Network not mocked');},AbortSignal};
+ const ctx:any={recordedOiRankFrame,deriveOiRankedLadder,renderOiRankedLadder,__name:(f:any)=>f,document:{getElementById:(id:string)=>nodes.get(id)},window:{dispatchEvent:(e:any)=>events.push(e)},CustomEvent:class{type:any;detail:any;constructor(type:any,data:any){this.type=type;this.detail=data.detail;}},Date:Clock,setTimeout:(f:any)=>{timers.set(++id,f);return id;},clearTimeout:(i:number)=>timers.delete(i),fetch:async()=>{throw Error('Network not mocked');},AbortSignal};
  vm.createContext(ctx);ctx.renderMarketBookLiveContext=renderMarketBookLiveContext;ctx.deriveOiStudioSnapshot=deriveOiStudioSnapshot;vm.runInContext('const install='+installOiWallStudio.toString()+';var studio=install();',ctx);const studio=ctx.studio;studio.setPage(5);
  const click=(id:string,key:string,value:string)=>nodes.get('ows-'+id)!.onclick({target:{closest:()=>({dataset:{[key]:value}})}});
  return {nodes,events,ctx,studio,click,setNow:(n:number)=>now=n,timers};
@@ -143,4 +144,16 @@ test('all participation intervals preserve their own source endpoints and clear 
   assert(html.includes('+10%'),minutes+'m uses the exact earlier price, not day change');assert(html.includes('09:30:00 IST →'));assert(!html.includes('+99%'));
   h.studio.update(sample(minutes,220,'new-runtime'));html=h.nodes.get('ows-chart')!.innerHTML;assert(html.includes('Building '+minutes+'m history'));assert(!html.includes('+10%'));
  }
+});
+
+test('ranked live ladder switches focus/range without network, stays on OI page and keeps a real opening snapshot',()=>{
+ const h=harness();h.setNow(base-15*60000);h.studio.update(fixture(-15));
+ h.setNow(base+30*60000);h.studio.update(fixture(30,5));h.click('windows','owsWindow','OPEN');
+ assert.match(h.nodes.get('ows-chart')!.innerHTML,/From 09:15/);assert.match(h.nodes.get('ows-chart')!.innerHTML,/09:15:00/);
+ h.nodes.get('ows-rank-focus')!.value='ADD';h.nodes.get('ows-rank-band')!.value='3';h.nodes.get('ows-rank-focus')!.onchange();
+ assert.match(h.nodes.get('ows-chart')!.innerHTML,/Top additions/);
+ const eventCount=h.events.length;h.click('view-tabs','owsView','ladder');assert.equal(h.events.length,eventCount);
+ h.studio.update(null);assert.doesNotMatch(h.nodes.get('ows-chart')!.innerHTML,/oir-table/);
+ h.setNow(base+31*60000);h.studio.update(fixture(31,6));h.click('windows','owsWindow','OPEN');
+ assert.match(h.nodes.get('ows-chart')!.innerHTML,/No eligible exact baseline/);
 });

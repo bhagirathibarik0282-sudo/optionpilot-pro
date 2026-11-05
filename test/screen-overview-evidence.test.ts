@@ -201,8 +201,8 @@ test('a reported primary PCR number projects once with its source and never clai
  const html=h.nodes.get('rd-pcr-table').innerHTML;
  assert.match(html,/<strong>1.2345<\/strong>/);
  const cells=[...html.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m=>m[1]);
- assert.match(cells[1],/1.2345/);assert.match(cells[2],/REPORTED · MIXED SOURCE TIMES/);
- assert(!cells[2].includes('FRESH'),'reported observation cannot claim fresh eligibility');
+ assert.match(cells[0],/1.2345/);assert.match(cells[1],/REPORTED · MIXED SOURCE TIMES/);
+ assert(!cells[1].includes('FRESH'),'reported observation cannot claim fresh eligibility');
  assert.match(h.nodes.get('rd-market-metrics').innerHTML,/Reported Full/);
 });
 
@@ -294,4 +294,16 @@ test('BANKNIFTY positioning filters the existing watchlist before taking five; s
 test('front premium keeps recorded reference and baseline clocks beside the live source',()=>{
  const h=harness();h.premium(['Type','Strike','Expiry','LTP ₹','Status','Reference context'],[['CE','100','2026-10-27','120','LIVE','PDH/PDL recorded · exact contract · 1m saved 11:35:00']]);
  const html=h.nodes.get('rd-premium-table').innerHTML;assert(html.includes('LIVE'));assert(html.includes('1m saved 11:35:00'));assert(html.includes('PDH/PDL recorded'));assert(h.nodes.get('rd-context-rows').innerHTML.includes('1/1 rows'));
+});
+
+test('vertical source PCR ladders preserve each index OI, changes and band without borrowing another index',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ const heads=['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI'];
+ const rows=[['NIFTY 2026-11-09','1.2 / 1.1','10,000 Δ +100','12,000 Δ -200','24,000 / 23,000','700'],['SENSEX 2026-11-05','0.9 / 0.8','90,000 Δ +999','81,000 Δ -888','77,000 / 76,000','800']];
+ const vertical={dataset:{osPcrHeads:JSON.stringify(heads)},querySelectorAll:()=>rows.map(row=>({querySelector:()=>({textContent:row[0]}),querySelectorAll:()=>row.slice(1).map(textContent=>({textContent}))}))};
+ h.nodes.set('os-wall-ladder',{dataset:{},querySelector:(q:string)=>q==='.os-pcr-vertical'?vertical:null});
+ h.pcr('NIFTY','1.2 ↑',null);
+ const out=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(out,/data-rd-pcr-index="NIFTY"/);assert.match(out,/1.1/);assert.match(out,/10,000/);assert.match(out,/12,000/);assert.match(out,/\+100/);assert.match(out,/-200/);assert.match(out,/24,000 \/ 23,000/);
+ assert.doesNotMatch(out,/90,000|81,000|999|888|<thead>/);
 });

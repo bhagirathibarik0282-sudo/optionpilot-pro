@@ -272,6 +272,20 @@ body[data-op-workspace] #market-book{background:#03080c;border-color:#163a4e;bor
 @media(max-width:850px){#op-one-stop .os-terminal-head{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:600px){#market-book #op-one-stop.os-card{padding:0}#op-one-stop .os-market-head{font-size:17px}#op-one-stop .os-reference-indices{justify-content:stretch}#market-book #op-one-stop .os-reference-indices button{flex:1;min-width:0;padding:4px;min-height:40px}#market-book #op-one-stop .os-table :is(th,td){font-size:11px;padding:4px 5px}#op-one-stop .os-levels>span{display:block}#op-one-stop .os-rag-context{margin-bottom:4px}}
 @media(prefers-reduced-motion:reduce){#op-one-stop *{animation:none!important;transition:none!important}}
+
+#op-one-stop .os-pcr-vertical{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;max-width:100%;min-width:0}
+#op-one-stop .os-pcr-vertical table{display:table;width:100%;max-width:100%;min-width:0;table-layout:fixed;border-collapse:collapse;white-space:normal;border:1px solid #294d60;background:#06131e}
+#op-one-stop .os-pcr-vertical caption{text-align:left;padding:10px;background:#0a2332;color:#7ee3f0;font-size:16px;font-weight:700;white-space:normal;overflow-wrap:anywhere}
+#op-one-stop .os-pcr-vertical :is(th,td){width:auto;max-width:none;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:normal;padding:9px 10px;border-bottom:1px solid #254657;font-size:14px;line-height:1.5;text-align:left;vertical-align:top}
+#op-one-stop .os-pcr-vertical th{width:38%;color:#b8ccda;font-weight:500}
+#op-one-stop .os-pcr-vertical td{color:#eaf5ff;font-variant-numeric:tabular-nums}
+#op-one-stop .os-pcr-vertical :is(td,caption) small{display:block;font-size:12px;white-space:normal;overflow-wrap:anywhere;color:#abc3d3;line-height:1.5}
+#op-one-stop .os-pcr-vertical tbody tr:first-child td{color:#7ee3f0;font-size:19px;font-weight:700}
+#os-screen-detail-body #os-pcr-strip{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:8px}
+#os-screen-detail-body #os-pcr-strip .os-pcr{padding:10px;min-width:0}
+#os-screen-detail-body #os-pcr-strip .os-pcr small{font-size:12px;line-height:1.5;white-space:normal}
+#os-screen-detail-body:has(#os-walls){overflow-x:hidden}
+#os-screen-detail-body #os-walls,#os-screen-detail-body #os-wall-ladder{min-width:0;max-width:100%}
 `;
 
 export function installOneShotLiveCard(api:any){
@@ -290,6 +304,9 @@ export function installOneShotLiveCard(api:any){
  const tone=(v:any)=>n(v)===null?'':v>0?'os-up':v<0?'os-down':'';
  const badge=(text:string,cls='')=>'<span class="os-badge '+cls+'">'+esc(text)+'</span>';
  const table=(heads:string[],rows:string[][])=>'<div class="os-table-wrap"><table class="os-table"><thead><tr>'+heads.map(s=>'<th>'+esc(s)+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?'':'<tr><td colspan="'+heads.length+'">Unavailable · verified source rows required</td></tr>')+rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
+ // Vertical presentation keeps the same already-qualified cells and their source clocks.
+ const pcrLadder=(heads:string[],rows:string[][])=>'<div class="os-pcr-vertical" data-os-pcr-heads="'+esc(JSON.stringify(heads))+'">'+rows.map(r=>'<table data-os-pcr-row><caption>'+r[0]+'</caption><tbody>'+heads.slice(1).map((h,i)=>'<tr><th>'+esc(h)+'</th><td>'+r[i+1]+'</td></tr>').join('')+'</tbody></table>').join('')+'</div>';
+
  let premiumExpiry='';
  let selected='NIFTY',dteMetric='day',minutes=3,sourceMode='AUTO',sideMode='BOTH',chartSeries='BOTH',chartCadence=180000,chartManual=false,chartAt=0,chartKey='',loadBusy=false,last:any=null,pcr:any=null,session='',lastPaint=0,paintedLive=false;
  const series=new Map<string,Array<{at:number;value:number;received?:number}>>(),conflicts=new Map<string,number>(),pcrIds=new Map<string,string>(),previous=new Map<string,any>(),breaks=new Map<string,any>();
@@ -528,7 +545,7 @@ export function installOneShotLiveCard(api:any){
    [esc(selected)+' Futures',fmt(positive(q?.future_ltp)),pct(positive(before?.future_ltp)!==null&&positive(q?.future_ltp)!==null?(q.future_ltp/before.future_ltp-1)*100:null),'—','—','—','—','—',fmt(recordedCount(q?.future_oi),0),fmt(n(q?.future_basis)),q?time(q.minute_bucket):'Unavailable',fmt(delta('future_ltp')),fmt(delta('future_oi'),0)]
   ])+'<small class="os-subline">RECORDED · '+esc(date||'no session')+' · '+minutes+'m window · futures expiry continuity unverified · recorded buckets, not live quote times</small>');
   put('os-vix-value','<small class="os-subline">RECORDED · '+esc(date||'no session')+' · '+(q?time(q.minute_bucket)+' IST':'unavailable')+'</small><div class="os-vix-number">'+fmt(positive(q?.india_vix))+'</div>');
-  put('os-wall-ladder',table(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ','PCR time · IST'],symbols.map(symbol=>{
+  put('os-wall-ladder',pcrLadder(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ','PCR time · IST'],symbols.map(symbol=>{
    const r=saved?.rows?.find((x:any)=>x.symbol===symbol),source=(all?.current?.[symbol]?.chain||[]).filter((x:any)=>x.symbol===symbol&&String(x.expiry).slice(0,10)===r?.expiry&&day(Date.parse(x.minute_bucket))===date);
    const exact=(at:number)=>{const xs=source.filter((x:any)=>Date.parse(x.minute_bucket)===at);return xs.length===1&&xs[0].truth_verdict==='TRUE'&&/^(Exact archived full-chain source|Normalized full-chain source)$/.test(xs[0].full_pcr_source||'')?xs[0]:null;};
    const c=r?.current?exact(r.current.checked):null,b=c?exact(r.current.checked-minutes*60000):null;
@@ -608,7 +625,7 @@ export function installOneShotLiveCard(api:any){
   write('os-dte-alignment',sideSummary('CE')+sideSummary('PE')+'<small class="os-subline">'+esc(selected)+' · day returns vs each contract previous close · timestamps within 5s · no cross-contract trade score</small>');
   write('os-events',(triple?badge('🚨 3-index same-side '+aligned[0].label,'os-alert'):'')+(events.length?table(['Time · IST','Index','Event','Verified observation'],events.slice(0,8).map(e=>[time(e.at),esc(e.symbol),esc(e.label),esc(e.detail)])):table(['Time · IST','Index','Event','Verified observation'],[])+empty(live?'No verified level crossing observed in this browser session.':'Market closed / disconnected · live events cleared; use recorded research for saved events.')));
   write('os-future-response',allFutureLevels(d)+(live?'<details class="os-source"><summary>Same-contract futures / premium response</summary>'+response(d,indexRow(d,selected),optionRows)+'</details>':empty('Fresh futures and premium observations required · no stale comparison.')));
-  write('os-wall-ladder',table(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI'],symbols.map(symbol=>{
+  write('os-wall-ladder',pcrLadder(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI'],symbols.map(symbol=>{
    const r=pcr.rows.find((x:any)=>x.symbol===symbol),a=live?indexRow(d,symbol):null,raw=r?.current?d?.pcrDisplay?.[symbol]:null,cw=raw?.callWall,pw=raw?.putWall;
    const delta=(key:string)=>r?.current&&r?.baseline?r.current[key]-r.baseline[key]:null;
    const oi=(key:string)=>fmt(r?.current?.[key]??r?.reportedPcr?.[key],0)+'<small>Δ '+(delta(key)>0?'+':'')+fmt(delta(key),0)+(r?.current?(r?.baseline?' · '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':' · baseline pending'):r?.reportedPcr?' · REPORTED · mixed source times · '+esc(r.reportedPcr.displayLabel)+(r.reportedPcr.sourceNote?' · '+esc(r.reportedPcr.sourceNote):''):' · unavailable')+'</small>';

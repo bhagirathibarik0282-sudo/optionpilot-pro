@@ -29,7 +29,7 @@ const server=createServer((req,res)=>{
  if(u.pathname.endsWith('/replay')){
   const from=u.searchParams.get('from')!,to=u.searchParams.get('to')!;
   const market=['09:15','09:18','15:40'].filter(t=>t>=from&&t<=to).map(t=>({symbol:'NIFTY',minute_bucket:date+'T'+t+':00+05:30',snapshot_id:t,truth_verdict:'TRUE',backend_timestamp:date+'T'+t+':00+05:30',spot_ltp:24000}));
-  const options=market.flatMap(m=>Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({...m,expiry,strike:23650+i*50,option_type:side,ltp:100+i,oi:5000+i*100+(m.snapshot_id==='09:15'?0:side==='CE'?100:-100),pdh:130,pdl:90,quote_timestamp:m.minute_bucket}))).flat());
+  const options=market.flatMap(m=>Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({...m,expiry:'2026-11-09',strike:23650+i*50,option_type:side,ltp:100+i,oi:5000+i*100+(m.snapshot_id==='09:15'?0:side==='CE'?100:-100),pdh:130,pdl:90,quote_timestamp:m.minute_bucket}))).flat());
   res.end(JSON.stringify({ok:true,market:compact(market),options:compact(options),chain:compact([])}));return;
  }
  res.statusCode=503;res.end(JSON.stringify({ok:false,reason:'SYNTHETIC_NO_EXTERNAL_SOURCE'}));
@@ -37,6 +37,7 @@ const server=createServer((req,res)=>{
 let browser:any;
 try{
  server.listen(0,'127.0.0.1');await once(server,'listening');const addr=server.address();assert(addr&&typeof addr!=='string');const base='http://127.0.0.1:'+addr.port;
+ const preflight=await fetch(base+'/api/research/recorded-dashboard/replay?from=09:15&to=10:15');assert.equal(preflight.status,200);const sample=await preflight.json() as any;assert(sample.ok&&sample.options.rows.length===60,'synthetic archive fixture must expose complete CE/PE rows');
  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{}),args:['--no-sandbox','--disable-dev-shm-usage']});
  await mkdir('oi-ranked-ladder-artifacts',{recursive:true});
  for(const width of [360,390,1280]){

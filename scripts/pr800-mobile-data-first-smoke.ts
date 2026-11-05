@@ -175,9 +175,11 @@ try{
    assert(await page.locator('#os-screen-detail-body').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'PCR popup has no horizontal scroll');
    for(const table of await page.locator('#os-wall-ladder .os-pcr-vertical table').all()){
     assert(await table.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'PCR index ladder fits its width');
+    assert.equal(await table.locator('td').first().evaluate(el=>getComputedStyle(el).display),'table-cell','metric and value stay in two columns');
    }
    if(width<=390){
     assert.equal(await page.locator('#os-pcr-strip').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),1,'popup PCR summaries stack vertically');
+    await page.locator('#os-wall-ladder .os-pcr-vertical table').first().scrollIntoViewIfNeeded();
     await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-page2-vertical-pcr.png',fullPage:true});
    }
 

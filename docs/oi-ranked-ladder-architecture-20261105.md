@@ -7,6 +7,7 @@ Status: implementation ready for review. This feature has not been merged/deploy
 - Total OI, positive window addition and negative window shedding have independent per-expiry/per-side competition ranks. Ties share a rank (1,1,3). Top-five chips cover the eligible source universe before viewport filtering; tapping a chip centers that strike. Center ATM restores the spot-based viewport.
 - Each cell combines snapshot premium, OI, signed OI change and percentage, premium change and percentage, rank change and available premium PDH/PDL state. Source times and levels expand on demand. Source OI units are explicit; no unverified lots/quantity conversion.
 - One existing comparison window for each workspace: 1/3/5/6/15/30m and From 09:15 in the OI workspace, or 1/3/5/15/30m/From 09:15 in the after-hours archive panel. Existing 6m view is retained.
+- Live ladder is placed immediately below its comparison controls, before supporting wall/research cards. The archive has a direct OI jump link and places OI before full-session premium charts.
 - Sticky ladder headings and bounded vertical scrolling, responsive three-column cells, no horizontal document overflow intended. Addition/shedding have color plus text labels. No fabricated probabilities or directional scores.
 - Ladder selection remains in the OI workspace, removing its previous automatic jump to another premium panel. Existing explicit navigation remains available.
 

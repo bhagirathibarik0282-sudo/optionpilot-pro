@@ -210,7 +210,10 @@ try{
    assert.equal(data.duplicateLogo,'none',name+' must have one actual brand header');
    assert(data.pcrSourceFont<=11,name+' legacy mobile font rules must not inflate source labels: '+JSON.stringify(data));
    if(width===1024)await page.screenshot({path:'pr800-mobile-ui-artifacts/reference-no-market-data.png',fullPage:true,timeout:15000});
-   if(width===1024)assert(data.memory<1536,'seven primary sections must fit the reference-height reading flow: '+JSON.stringify(data));
+   // Vertical ladders deliberately use more height; require reachability, not shrinking seven sections into one screen.
+   await page.locator('#os-memory').scrollIntoViewIfNeeded();
+   assert(await page.locator('#os-memory').isVisible(),name+' memory stays reachable by vertical scroll');
+   assert(await page.locator('#os-wall-ladder').evaluate(el=>el.scrollWidth<=el.clientWidth+1),name+' source PCR ladder never needs horizontal scroll');
    assert(data.scrollWidth<=data.viewport+5,name+' page overflow: '+JSON.stringify(data));
    if(width<=600){
     assert.equal(data.mobileHero,'none','mobile hero must not displace market data');

@@ -105,3 +105,12 @@ test('full-session premium remains on the same page, follows shared seek and cha
  h.elements.get('ar-premium-scope').value='SELECTED';h.elements.get('ar-premium-scope').onchange();
  assert.equal(h.requests.length,calls);
 });
+
+test('ranked OI ladder uses same recorded clock, labels snapshot OI and handles missing opening without extra reads',async()=>{
+ const h=await view(),panel=h.elements.get('ar-oi-output');
+ assert.match(panel.innerHTML,/OI ranked CE PE ladder/);assert.match(panel.innerHTML,/publication time unavailable/);
+ const calls=h.requests.length;h.elements.get('ar-oi-window').value='OPEN';h.elements.get('ar-oi-window').onchange();
+ assert.match(panel.innerHTML,/09:15 baseline/);assert.match(panel.innerHTML,/exact comparisons/);
+ h.elements.get('ar-oi-focus').value='SHED';h.elements.get('ar-oi-focus').onchange();assert.match(panel.innerHTML,/Top shedding/);
+ assert.equal(h.requests.length,calls);h.elements.get('ar-reset').onclick();assert.doesNotMatch(panel.innerHTML,/15:30:10/);
+});

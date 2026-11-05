@@ -136,6 +136,17 @@ body[data-op-screen=reference] #rd-shell{display:flex;flex-direction:column;heig
 #rd-page[data-rd-hub="POSITIONING"] .rd-section:not(#rd-stocks):not(#rd-sectors),
 #rd-page[data-rd-hub="MEMORY"] .rd-section:not(#rd-events):not(#rd-memory){display:none}
 @media(max-width:600px){#rd-fit-tools>[data-rd-fit]{display:none}#rd-fit-tools{gap:3px;padding:3px 4px}#rd-fit-tools strong{font-size:9px}#rd-fit-tools #rd-source{font-size:9px}#market-book #op-one-stop #rd-fit-tools button{font-size:10px;padding:3px 6px}}
+
+#rd-page #rd-pcr-table .rd-pcr-ladder{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;min-width:0;max-width:100%}
+#rd-page #rd-pcr-table .rd-pcr-ladder table{width:100%!important;min-width:0!important;max-width:100%;table-layout:fixed;white-space:normal;border-collapse:collapse;background:#06131e}
+#rd-page #rd-pcr-table .rd-pcr-ladder caption{padding:9px;text-align:left;background:#0a2332;color:#7ee3f0;font-size:16px;font-weight:700;white-space:normal;overflow-wrap:anywhere}
+#rd-page #rd-pcr-table .rd-pcr-ladder :is(th,td){width:auto;max-width:none;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:normal;font-size:13px;line-height:1.5;padding:8px;vertical-align:top;text-align:left}
+#rd-page #rd-pcr-table .rd-pcr-ladder th{width:38%;color:#b8ccda;font-weight:500}
+#rd-page #rd-pcr-table .rd-pcr-ladder td{font-variant-numeric:tabular-nums;color:#eaf5ff}
+#rd-page #rd-pcr-table .rd-pcr-ladder .rd-cell-note{display:block;white-space:normal;font-size:12px;line-height:1.5;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+#rd-page #rd-pcr-table .rd-pcr-ladder tbody tr:first-child td{color:#7ee3f0;font-size:19px;font-weight:700}
+#rd-page #rd-pcr-table{overflow-x:visible!important}
+@media(max-width:600px){#os-screen-detail .rd-dialog-head{align-items:flex-start;gap:8px;flex-wrap:wrap}#os-screen-detail #os-screen-detail-title{font-size:14px;overflow-wrap:anywhere;white-space:normal}#os-screen-detail-body #os-walls>summary{white-space:normal;flex-wrap:wrap}}
 `;
 
 export function installScreenOverview(){
@@ -146,9 +157,13 @@ export function installScreenOverview(){
  const note=(v:string)=>'<span class="rd-cell-note">'+esc(v)+'</span>';
  const cell=(v:any)=>esc(v&&v!=='Unavailable'?v:'—');
  const paint=(id:string,html:string)=>{const el=$(id);if(el&&el.innerHTML!==html)el.innerHTML=html;};
- const read=(id:any)=>{const source=typeof id==='string'?$(id):id;const table=source?.querySelector('table');const rows=Array.from(table?.querySelectorAll('tbody tr')||[]).filter((r:any)=>!r.querySelector('[colspan]')) as any[];return {symbol:String(source?.dataset?.recordedIndex||''),heads:Array.from(table?.querySelectorAll('thead th')||[]).map(text),rows:rows.map(r=>Array.from(r.cells).map(text)) as string[][],evidence:rows.map(r=>String(r.querySelector('[data-os-evidence]')?.dataset?.osEvidence||''))};};
+ const read=(id:any)=>{const source=typeof id==='string'?$(id):id,vertical=source?.querySelector('.os-pcr-vertical');
+  if(vertical){let heads:string[]=[];try{heads=JSON.parse(vertical.dataset.osPcrHeads||'[]');}catch{}return {symbol:'',heads,rows:Array.from(vertical.querySelectorAll('[data-os-pcr-row]')).map((t:any)=>[text(t.querySelector('caption')),...Array.from(t.querySelectorAll('tbody td')).map(text)]),evidence:[]};}
+  const table=source?.querySelector('table');const rows=Array.from(table?.querySelectorAll('tbody tr')||[]).filter((r:any)=>!r.querySelector('[colspan]')) as any[];return {symbol:String(source?.dataset?.recordedIndex||''),heads:Array.from(table?.querySelectorAll('thead th')||[]).map(text),rows:rows.map(r=>Array.from(r.cells).map(text)) as string[][],evidence:rows.map(r=>String(r.querySelector('[data-os-evidence]')?.dataset?.osEvidence||''))};};
  const val=(heads:string[],r:string[],name:string)=>r[heads.indexOf(name)]||'—';
  const table=(heads:string[],rows:string[][],missing='— · verified source data unavailable')=>'<table><thead><tr>'+heads.map(h=>'<th>'+esc(h)+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?rows.map(r=>'<tr>'+r.map((v,i)=>'<td class="'+(/^(PDH|PDC|PDL)$/.test(heads[i])?'rd-level-'+heads[i].toLowerCase():'')+'">'+v+'</td>').join('')+'</tr>').join(''):'<tr><td colspan="'+heads.length+'">'+esc(missing)+'</td></tr>')+'</tbody></table>';
+ const pcrLadder=(heads:string[],rows:string[][])=>'<div class="rd-pcr-ladder">'+(rows.length?rows.map(r=>'<table data-rd-pcr-index="'+r[0]+'"><caption>'+r[0]+'</caption><tbody>'+heads.slice(1).map((h,i)=>'<tr><th>'+esc(h)+'</th><td>'+r[i+1]+'</td></tr>').join('')+'</tbody></table>').join(''):'<p>— · verified source data unavailable</p>')+'</div>';
+
  const signed=(v:string)=>'<span class="'+(/^\+|↑/.test(v)?'rd-up':/^-\d|↓/.test(v)?'rd-down':'')+'">'+cell(v)+'</span>';
  const mobile=()=>{const width=Number(window.innerWidth)||viewport.clientWidth;return width>0&&width<=600;};
  let stockScopes:any={};try{stockScopes=JSON.parse($('rd-shell')?.dataset?.stockScopes||'{}');}catch{/* Missing mapping must not admit another index's stocks. */}
@@ -198,7 +213,7 @@ export function installScreenOverview(){
   const wall=read('os-wall-ladder');
   // Only project values that the already source-gated cards actually expose.
   // A reported mixed-time PCR is a separate observation, not a fresh Full PCR.
-  paint('rd-pcr-table',table(['Index',recorded?'Recorded Full PCR':'Full OI PCR','PCR source','ATM ±7 PCR','CE OI','PE OI','CE Δ','PE Δ','CE/PE wall','Source · coverage'],pcrCards.map((card:any)=>{
+  paint('rd-pcr-table',pcrLadder(['Index',recorded?'Recorded Full PCR':'Full OI PCR','PCR source','ATM ±7 PCR','CE OI','PE OI','CE Δ','PE Δ','CE/PE wall','Source · coverage'],pcrCards.map((card:any)=>{
    const index=text(card.querySelector(':scope>strong')).split(' ')[0];
    const r=wall.rows.find(r=>r[0]?.startsWith(index))||[];
    const reported=reportedPcr(card),saved=!reported?savedPcr(card):null,full=reported||saved?'—':text(card.querySelector(':scope>b'));

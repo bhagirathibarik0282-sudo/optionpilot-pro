@@ -117,8 +117,8 @@ try{
    // The current card has one primary reported number; no duplicate value in Sources.
    await page.evaluate(()=>{const card=document.querySelector('#os-pcr-strip .os-pcr')!,reported=card.querySelector('.os-pcr-reported b')!;card.querySelector(':scope>b')!.textContent=reported.textContent;reported.remove();});
    await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('1.0969'));
-   assert((await page.locator('#rd-pcr-table tbody tr').first().locator('td').nth(1).innerText()).includes('1.0969'),'reported value occupies primary Full OI PCR');
-   assert((await page.locator('#rd-pcr-table tbody tr').first().locator('td').nth(2).innerText()).includes('EARLIER PACKETS'),'primary number retains earlier-packet source');
+   assert((await page.locator('#rd-pcr-table [data-rd-pcr-index="NIFTY"] tr').filter({has:page.locator('th').filter({hasText:/^Full OI PCR$/})}).locator('td').innerText()).includes('1.0969'),'reported value occupies primary Full OI PCR');
+   assert((await page.locator('#rd-pcr-table [data-rd-pcr-index="NIFTY"] tr').filter({has:page.locator('th').filter({hasText:/^PCR source$/})}).locator('td').innerText()).includes('EARLIER PACKETS'),'primary number retains earlier-packet source');
    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-offline-reported-pcr.png',fullPage:true});
    await page.evaluate(()=>{for(const [id,html] of Object.entries((window as any).__pcrRestore))document.getElementById(id)!.innerHTML=html as string;delete (window as any).__pcrRestore;});
    await page.waitForFunction(()=>!document.getElementById('rd-pcr-table')?.textContent?.includes('1.0969'));
@@ -165,9 +165,24 @@ try{
    assert.equal(await levels?.evaluate((el:any)=>el===document.getElementById('os-futures')),true,'detail must preserve the same source DOM node');
    await page.locator('#os-screen-close').click();
    assert.equal(await page.locator('#os-dashboard #os-futures').count(),1,'closing restores the original source panel');
+   assert.equal(await page.locator('#rd-pcr-table .rd-pcr-ladder table').count(),3,'all three indices have vertical front ladders');
+   assert(await page.locator('#rd-pcr-table').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'PCR front has no horizontal scroll');
    await page.locator('[data-rd-open="os-walls"]').first().click();
    assert.equal(await page.locator('#os-screen-detail-body>#os-pcr-strip').count(),1,'PCR detail must preserve primary recorded/live PCR evidence');
    assert.equal(await page.locator('#os-screen-detail-body>#os-walls').count(),1);
+   assert.equal(await page.locator('#os-wall-ladder .os-pcr-vertical table').count(),3);
+   assert.equal(await page.locator('#os-wall-ladder thead').count(),0,'wide PCR header rows removed');
+   assert(await page.locator('#os-screen-detail-body').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'PCR popup has no horizontal scroll');
+   for(const table of await page.locator('#os-wall-ladder .os-pcr-vertical table').all()){
+    assert(await table.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'PCR index ladder fits its width');
+    assert.equal(await table.locator('td').first().evaluate(el=>getComputedStyle(el).display),'table-cell','metric and value stay in two columns');
+   }
+   if(width<=390){
+    assert.equal(await page.locator('#os-pcr-strip').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),1,'popup PCR summaries stack vertically');
+    await page.locator('#os-wall-ladder .os-pcr-vertical table').first().scrollIntoViewIfNeeded();
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-page2-vertical-pcr.png',fullPage:true});
+   }
+
    await page.locator('#os-screen-close').click();
    assert.equal(await page.locator('#os-dashboard #os-pcr-strip').count(),1);
    await page.locator('#op-research-open-data').click();
@@ -197,7 +212,10 @@ try{
    assert.equal(data.duplicateLogo,'none',name+' must have one actual brand header');
    assert(data.pcrSourceFont<=11,name+' legacy mobile font rules must not inflate source labels: '+JSON.stringify(data));
    if(width===1024)await page.screenshot({path:'pr800-mobile-ui-artifacts/reference-no-market-data.png',fullPage:true,timeout:15000});
-   if(width===1024)assert(data.memory<1536,'seven primary sections must fit the reference-height reading flow: '+JSON.stringify(data));
+   // Vertical ladders deliberately use more height; require reachability, not shrinking seven sections into one screen.
+   await page.locator('#os-memory').scrollIntoViewIfNeeded();
+   assert(await page.locator('#os-memory').isVisible(),name+' memory stays reachable by vertical scroll');
+   assert(await page.locator('#os-wall-ladder').evaluate(el=>el.scrollWidth<=el.clientWidth+1),name+' source PCR ladder never needs horizontal scroll');
    assert(data.scrollWidth<=data.viewport+5,name+' page overflow: '+JSON.stringify(data));
    if(width<=600){
     assert.equal(data.mobileHero,'none','mobile hero must not displace market data');

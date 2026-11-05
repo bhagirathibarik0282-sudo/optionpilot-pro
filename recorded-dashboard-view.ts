@@ -1,4 +1,6 @@
+import {renderRecordedPremiumSession} from './recorded-premium-session.js';
 import {RAG_CARD_HTML,RAG_CARD_CSS,RAG_CARD_SCRIPT} from './rag-evidence-card.js';
+import {scanRecordedSixtyPointMoves} from './recorded-sixty-point-finder.js';
 import { createRecordedPlayback, recordedFrame, recordedSession, mergeRecordedParts } from './recorded-playback.js';
 import { standardIndexObservationClose } from './index-observation-session.js';
 
@@ -8,9 +10,11 @@ ${RAG_CARD_CSS}</style></head><body><main><header><div><span class="tag">OPTIONP
 <p class="notice">RECORDED · Read-only. Market collection keeps its 08:45–16:15 IST schedule. Replay uses saved samples, including after market close.</p>
 <section class="panel"><div class="controls"><label>Index <select id="ar-index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><button id="ar-latest">Latest saved data</button><button id="ar-last1">▶ 1 day</button><button id="ar-last3">▶ Last 3 days</button><button id="ar-last5">▶ Last 5 days</button><button id="ar-all">▶ All recorded days</button></div><details><summary>Choose individual recorded days</summary><label for="ar-dates">Select dates; then Replay selected</label><select id="ar-dates" multiple size="5" aria-label="Recorded days"></select><button id="ar-selected" class="primary">▶ Replay selected</button></details><p id="queue">Loading recorded dates…</p><p id="progress" class="note" role="status"></p><p id="error" role="alert"></p></section>
 <section class="panel"><div class="controls"><button id="ar-play" class="primary" disabled>▶ Play</button><button id="ar-prev" disabled>← Record</button><button id="ar-next" disabled>Record →</button><button id="ar-reset" disabled>Reset day</button><label>Speed <select id="ar-speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option></select></label></div><input type="range" id="ar-seek" min="0" max="0" value="0" disabled aria-label="Replay recorded time"><p id="clock">No saved session loaded</p><p id="ar-coverage" class="note"></p></section>
+<section class="panel" id="ar-sixty"><h2>60-point option premium finder · recorded observations</h2><p class="note">Selected index · CE and PE · exact expiry and strike · observed same-day moves of ₹60+. Only archived ATM ±7 strikes; missing minutes and OHLC are not inferred. BANKNIFTY monthly = research only.</p><div class="controls"><button type="button" id="ar-60-week">Find this week</button><button type="button" id="ar-60-all">Find all recorded days</button><button type="button" id="ar-60-cancel" disabled>Cancel scan</button><label>Scan indices <select id="ar-60-index"><option value="CURRENT">Selected index</option><option value="ALL">All 3 indices</option></select></label><label>Side <select id="ar-60-side"><option value="BOTH">Both</option><option>CE</option><option>PE</option></select></label><label>Movement <select id="ar-60-direction"><option value="BOTH">Rise + fall</option><option value="RISE">Rise ≥₹60</option><option value="FALL">Fall ≥₹60</option></select></label></div><p id="ar-60-status" class="note" role="status" aria-live="polite">Choose a scan. This week uses trading dates in the current IST calendar week.</p><p id="ar-60-coverage" class="note"></p><div id="ar-60-results" class="scroll" aria-live="polite"></div><div class="controls"><button type="button" id="ar-60-prev" disabled>← Previous</button><span id="ar-60-pages" class="note"></span><button type="button" id="ar-60-next" disabled>Next →</button></div></section>
 <section class="panel"><h2>Spot · Futures · Positioning</h2><div id="ar-metrics" class="metrics"></div><div class="controls"><label>Contract <select id="ar-contract-mode"><option value="SESSION">Session ATM · reset each day</option><option value="PINNED">Same contract across days</option></select></label><label>Expiry <select id="ar-expiry" aria-label="Pinned exact expiry"></select></label><label>Strike <select id="ar-strike" aria-label="Pinned CE and PE strike"></select></label><button id="ar-atm">Pin ATM at cursor</button></div><p id="ar-contract" class="note"></p><div id="ar-charts"></div></section>
+<section class="panel" id="ar-premium-session"><h2>Full-session premium · 09:15 to EOD</h2><div class="controls"><label>Expiries <select id="ar-premium-scope"><option value="ALL">All saved expiries · fixed strike</option><option value="SELECTED">Selected expiry</option></select></label><label>Sample display <select id="ar-premium-interval"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">60m</option></select></label></div><p class="note">Uses the expiry / strike selection above and the same replay clock. Point titles and observation tables show source times. No new broker/data requests.</p><div id="ar-premium-output"></div></section>
 <section class="panel"><h2>CE / PE ladder · ATM ±7 saved strikes</h2><p class="note">Exact replay timestamp only · PDH green / PDC yellow / PDL red · ΔOI uses the preceding saved bucket only when ≤3 minutes apart.</p><div id="ar-ladder" class="scroll"></div></section><footer class="note">1× = one recorded step / second. Gaps remain gaps; samples are not OHLC candles. Session ATM pins the opening saved contract separately each day. Choose Same contract to keep expiry / strike across days; missing contracts remain unavailable. BANKNIFTY is monthly research only. No orders or Telegram messages.</footer>
-${RAG_CARD_HTML}</main><script>const __name=(fn,_name)=>fn;const mergeRecordedParts=${mergeRecordedParts.toString()};const recordedSession=${recordedSession.toString()};const recordedFrame=${recordedFrame.toString()};const createRecordedPlayback=${createRecordedPlayback.toString()};const standardIndexObservationClose=${standardIndexObservationClose.toString()};(${installRecordedDashboard.toString()})();</script><script>${RAG_CARD_SCRIPT}</script></body></html>`;}
+${RAG_CARD_HTML}</main><script>const __name=(fn,_name)=>fn;const renderRecordedPremiumSession=${renderRecordedPremiumSession.toString()};const mergeRecordedParts=${mergeRecordedParts.toString()};const recordedSession=${recordedSession.toString()};const recordedFrame=${recordedFrame.toString()};const createRecordedPlayback=${createRecordedPlayback.toString()};const standardIndexObservationClose=${standardIndexObservationClose.toString()};const scanRecordedSixtyPointMoves=${scanRecordedSixtyPointMoves.toString()};(${installRecordedDashboard.toString()})();</script><script>${RAG_CARD_SCRIPT}</script></body></html>`;}
 
 export function installRecordedDashboard(){
  const $=(id:string)=>document.getElementById(id) as any;
@@ -18,6 +22,7 @@ export function installRecordedDashboard(){
  const evidenceEvent=(type:string,detail?:any)=>{if(typeof CustomEvent==='function'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent(type,{detail}));};
  const invalidate=(scope:string)=>{if(scope!==evidenceScope){evidenceScope=scope;evidenceEvent('optionpilot:rag-invalidate');}};
  let dates:string[]=[],dateRows:any[]=[],symbol='NIFTY',expiry='',strike:number|null=null,controller:any=null,latest:any=null,requestVersion=0,renderedDate='';
+ let scanAbort:AbortController|null=null,scanGeneration=0,scanHits:any[]=[],scanPage=0,scanDaysDone=0,scanCoverage:any=null;
  const number=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
  const fmt=(v:any)=>number(v)===null?'—':v.toLocaleString('en-IN',{maximumFractionDigits:2});
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
@@ -31,18 +36,18 @@ export function installRecordedDashboard(){
   catch(error:any){if(combined.aborted)throw new Error(signal?.aborted?'Playback cancelled.':'Saved-data request timed out. Retry this day.');throw error;}
   finally{clearTimeout(id);}
  }
- async function load(date:string,signal:AbortSignal){
+ async function load(date:string,signal:AbortSignal,index=symbol){
   const parts:any[]=[],end=standardIndexObservationClose(date),minute=(v:string)=>Number(v.slice(0,2))*60+Number(v.slice(3)),text=(n:number)=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
   const total=Math.ceil((minute(end)-555)/60);
   for(let start=555,part=0;start<minute(end);start+=60){
    if(signal.aborted)throw new Error('Playback cancelled.');
-   $('progress').textContent='Loading '+symbol+' · '+date+' · '+(++part)+' / '+total+' saved windows…';
-   const query=new URLSearchParams({symbol,date,from:text(start),to:text(Math.min(start+60,minute(end)))});
+   $('progress').textContent='Loading '+index+' · '+date+' · '+(++part)+' / '+total+' saved windows…';
+   const query=new URLSearchParams({symbol:index,date,from:text(start),to:text(Math.min(start+60,minute(end)))});
    parts.push(await json('/api/research/recorded-dashboard/replay?'+query,signal));
   }
   const merged=mergeRecordedParts(parts);
   $('progress').textContent='Loaded '+date+' · '+merged.market.length+' market / '+merged.options.length+' option / '+merged.chain.length+' chain rows.';
-  return recordedSession(merged,symbol,date);
+  return recordedSession(merged,index,date);
  }
  function pin(frame:any,force=false){
   const first=latest?.session,rows=force?frame.options:(first?.options||[]),at=force?frame.at:rows[0]?.minute_bucket;
@@ -67,7 +72,7 @@ export function installRecordedDashboard(){
   if(state.days.length)$('queue').textContent='Day '+(state.dayIndex+1)+' / '+state.days.length+' · '+state.days.join(' → ');
   $('clock').textContent=state.loading?'Loading recorded '+state.days[state.dayIndex]+'…':at?frame.date+' · '+clock(at)+' IST · '+(state.playing?'REPLAY':'SAVED / PAUSED'):'No TRUE saved samples loaded';
   $('ar-coverage').innerHTML=at?(state.index+1)+' / '+session.timeline.length+' saved steps · '+session.cadenceMinutes+'m recorder cadence'+(frame.gapMinutes>session.cadenceMinutes?' · <span class="gap">Gap '+frame.gapMinutes+' minutes since previous step; no values filled</span>':''):'Missing data stays unavailable.';
-  if(!at){invalidate('empty|'+symbol);$('ar-metrics').innerHTML='';$('ar-charts').innerHTML='';$('ar-ladder').innerHTML='';$('ar-contract').textContent='';return;}
+  if(!at){invalidate('empty|'+symbol);$('ar-metrics').innerHTML='';$('ar-charts').innerHTML='';$('ar-ladder').innerHTML='';$('ar-contract').textContent='';$('ar-premium-output').innerHTML='';return;}
   if(renderedDate!==frame.date){if($('ar-contract-mode').value!=='PINNED'){expiry='';strike=null;}renderedDate=frame.date;}
   pin(frame);invalidate([symbol,frame.date,at,expiry,strike,state.loading].join('|'));
   const ex=[...new Set<string>([expiry,...session.options.map((r:any)=>String(r.expiry).slice(0,10))])].filter(Boolean).sort();$('ar-expiry').innerHTML=ex.map(v=>'<option>'+esc(v)+'</option>').join('');$('ar-expiry').value=expiry;
@@ -78,6 +83,7 @@ export function installRecordedDashboard(){
   $('ar-contract').textContent='Pinned '+symbol+' · '+expiry+' · '+strike+' CE / PE. '+(chain.full_pcr_source||'Full PCR provenance unavailable.')+' Walls CE '+fmt(chain.call_wall_strike)+' / PE '+fmt(chain.put_wall_strike)+'.';
   const selected=(side:string)=>session.options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry&&r.strike===strike&&r.option_type===side);
   $('ar-charts').innerHTML=graph(session.market,'spot_ltp','Spot · sampled line','#075e40',at)+'<div class="pair"><div>'+graph(selected('CE'),'ltp','Pinned CE premium','#08723b',at)+'</div><div>'+graph(selected('PE'),'ltp','Pinned PE premium','#b62135',at)+'</div></div>';
+  $('ar-premium-output').innerHTML=renderRecordedPremiumSession({...session,cursor:at,strike,expiry,scope:$('ar-premium-scope').value||'ALL',interval:$('ar-premium-interval').value||1,sessionEnd:standardIndexObservationClose(frame.date)});
   const nowRows=frame.options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry),levels=[...new Set<number>(session.options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry).map((r:any)=>r.strike))].sort((a,b)=>a-b),spot=number(market.spot_ltp),center=spot===null?strike:levels.reduce((best,k)=>Math.abs(k-spot)<Math.abs(best-spot)?k:best,levels[0]);
   const mid=levels.indexOf(center as number),band=mid<0?[]:levels.slice(Math.max(0,mid-7),mid+8),previous=state.index>0?session.timeline[state.index-1]:null;
   const value=(k:number,side:string)=>{const matches=nowRows.filter((r:any)=>r.strike===k&&r.option_type===side);return matches.length===1?matches[0]:{};};
@@ -86,6 +92,7 @@ export function installRecordedDashboard(){
    return '<td>'+fmt(r.ltp)+(number(r.ltp)!==null&&r.ltp>0?(clock(at).slice(0,5)>='09:15'&&clock(at).slice(0,5)<='15:30'?'<button type="button" data-ar-evidence="'+r.strike+'|'+r.option_type+'" aria-label="Evidence '+r.strike+' '+r.option_type+'">Evidence</button>':'<small>Evidence 09:15–15:30 IST</small>'):'')+'</td><td>'+fmt(r.oi)+'</td><td class="'+(delta>0?'up changed':delta<0?'down changed':'')+'">'+(delta>0?'+':'')+fmt(delta)+'</td><td class="pdh">'+fmt(r.pdh)+'</td><td class="pdc">'+fmt(r.pdc)+'</td><td class="pdl">'+fmt(r.pdl)+'</td><td>'+event+'</td>';};
   $('ar-ladder').innerHTML=band.length?'<table><thead><tr><th>Strike</th><th>CE ₹</th><th>CE OI</th><th>CE ΔOI</th><th>CE PDH</th><th>CE PDC</th><th>CE PDL</th><th>CE state</th><th>PE ₹</th><th>PE OI</th><th>PE ΔOI</th><th>PE PDH</th><th>PE PDC</th><th>PE PDL</th><th>PE state</th></tr></thead><tbody>'+band.map(k=>'<tr><th>'+fmt(k)+'</th>'+cells(value(k,'CE'))+cells(value(k,'PE'))+'</tr>').join('')+'</tbody></table>':'No saved strikes for this pinned expiry.';
  }
+ for(const id of ['ar-premium-scope','ar-premium-interval'])$(id).onchange=()=>render(controller.snapshot());
  $('ar-ladder').onclick=(event:any)=>{
   const key=event.target.closest?.('[data-ar-evidence]')?.dataset?.arEvidence;if(!key||latest?.loading)return;if(!latest?.frame?.at||clock(latest.frame.at).slice(0,5)<'09:15'||clock(latest.frame.at).slice(0,5)>'15:30')return;
   const [raw,side]=key.split('|'),k=Number(raw),frame=latest?.frame;
@@ -95,11 +102,89 @@ export function installRecordedDashboard(){
   controller.pause();evidenceEvent('optionpilot:rag-selection',{symbol,date:frame.date,expiry,strike:k,side,time:new Date(Date.parse(frame.at)+19800000).toISOString().slice(11,16),lookback:3});
  };
  controller=createRecordedPlayback({load,render,setTimeout:(fn:any,ms:number)=>setTimeout(fn,ms),clearTimeout:(id:any)=>clearTimeout(id)});
- async function start(days:string[],play=true){const version=++requestVersion;await controller.start(days,play);if(version===requestVersion&&!play){const state=controller.snapshot();if(state.session?.timeline.length){const optionTimes=new Set(state.session.options.map((r:any)=>r.minute_bucket));let index=state.session.timeline.length-1;for(let i=index;i>=0;i--)if(optionTimes.has(state.session.timeline[i])){index=i;break;}controller.seek(index);}}}
+ async function start(days:string[],play=true){stopScan();const version=++requestVersion;await controller.start(days,play);if(version===requestVersion&&!play){const state=controller.snapshot();if(state.session?.timeline.length){const optionTimes=new Set(state.session.options.map((r:any)=>r.minute_bucket));let index=state.session.timeline.length-1;for(let i=index;i>=0;i--)if(optionTimes.has(state.session.timeline[i])){index=i;break;}controller.seek(index);}}}
+
+ const stopScan=(clear=false)=>{
+  scanGeneration++;
+  if(scanAbort){scanAbort.abort();scanAbort=null;$('ar-60-status').textContent='Scan cancelled. Completed-day results remain visible.';}
+  $('ar-60-cancel').disabled=true;
+  $('ar-60-week').disabled=false;$('ar-60-all').disabled=false;
+  if(clear){scanHits=[];scanPage=0;scanCoverage=null;scanDaysDone=0;$('ar-60-results').innerHTML='';$('ar-60-coverage').textContent='';$('ar-60-status').textContent='Choose a scan for '+symbol+'.';}
+ };
+ function showScan(){
+  const side=$('ar-60-side').value,dir=$('ar-60-direction').value;
+  const selected=scanHits.filter(hit=>(side==='BOTH'||hit.side===side)&&(dir==='BOTH'||hit.direction===dir));
+  const pages=Math.max(1,Math.ceil(selected.length/50));scanPage=Math.min(scanPage,pages-1);
+  $('ar-60-prev').disabled=scanPage===0;$('ar-60-next').disabled=scanPage>=pages-1;
+  $('ar-60-pages').textContent=selected.length+' matches · page '+(scanPage+1)+' / '+pages;
+  const cover=scanCoverage;
+  $('ar-60-coverage').textContent=cover?scanDaysDone+' completed days · '+cover.eligibleRows+' eligible option samples · '+cover.rejectedRows+' excluded/ambiguous rows · '+cover.conflictedMinutes+' conflicting contract-minutes. Scope: saved ATM ±7 (CORE), not all strikes.':'';
+  if(!selected.length){$('ar-60-results').textContent=scanDaysDone?'No verified ≥₹60 move in the scanned saved ATM ±7 quotes. This does not prove other strikes or unrecorded intervals had none.':'No completed scan results.';return;}
+  const rows=selected.slice(scanPage*50,(scanPage+1)*50).map(hit=>{
+   const begin=clock(hit.fromAt).slice(0,5),end=clock(hit.toAt).slice(0,5),id=scanHits.indexOf(hit);
+   const evidence=end>='09:15'&&end<='15:30';
+   const window=hit.expiryWindow;
+   const comparison='<details><summary>Same strike · first ≥₹60 window</summary><p>'+clock(window.fromAt).slice(0,5)+' → '+clock(window.toAt).slice(0,5)+' IST · '+fmt(hit.strike)+' · observed endpoints; CORE expiries only</p>'+window.comparisons.map((r:any)=>'<p>'+esc(r.expiry)+' · DTE '+r.dte+' · '+r.side+': '+(r.points===null?'Missing eligible endpoint':'₹'+fmt(r.fromPrice)+' → ₹'+fmt(r.toPrice)+' · '+(r.points>=0?'+':'')+fmt(r.points)+' ('+fmt(r.percent)+'%)')+' · '+esc(r.status)+(r.status==='GAPPED'?' · continuity unproven':'')+'<br>Quote IST: '+(r.fromQuoteAt?clock(r.fromQuoteAt):'—')+' → '+(r.toQuoteAt?clock(r.toQuoteAt):'—')+' · receipt IST: '+(r.fromReceiptAt?clock(r.fromReceiptAt):'—')+' → '+(r.toReceiptAt?clock(r.toReceiptAt):'—')+'</p>').join('')+'</details>';
+   return '<tr><td>'+esc(hit.date)+'</td><td>'+esc(hit.symbol)+'</td><td>'+esc(hit.expiry)+'</td><td>'+fmt(hit.strike)+' '+esc(hit.side)+'</td><td class="'+(hit.direction==='RISE'?'up':'down')+'">'+(hit.direction==='RISE'?'+':'−')+'₹'+fmt(hit.points)+'</td><td>₹'+fmt(hit.fromPrice)+' → ₹'+fmt(hit.toPrice)+'</td><td>'+begin+' → '+end+' IST</td><td>'+clock(hit.firstThresholdAt).slice(0,5)+' IST (observed)</td><td>'+(hit.gapWarning?'<span class="gap">Gap '+fmt(hit.maxGapMinutes)+'m; crossing time uncertain</span>':'Recorded endpoints')+'</td><td>'+comparison+'</td><td>'+(evidence?'<button type="button" data-ar-sixty-evidence="'+id+'">Evidence</button>':'Evidence limited to 09:15–15:30')+'</td></tr>';
+  }).join('');
+  $('ar-60-results').innerHTML='<table><thead><tr><th>Date</th><th>Index</th><th>Expiry</th><th>Contract</th><th>Move</th><th>Saved premium</th><th>Start → End</th><th>First ≥₹60 observation</th><th>Continuity</th><th>Multi-DTE · same window</th><th>RAG</th></tr></thead><tbody>'+rows+'</tbody></table>';
+ }
+ async function findSixty(scope:'WEEK'|'ALL'){
+  stopScan(true);controller.pause();
+  const token=++scanGeneration,abort=new AbortController();scanAbort=abort;
+  const istToday=new Date(Date.now()+19800000).toISOString().slice(0,10),weekday=new Date(istToday+'T00:00:00Z').getUTCDay();
+  const start=new Date(Date.parse(istToday+'T00:00:00Z')-((weekday+6)%7)*86400000).toISOString().slice(0,10);
+  const scanIndices=$('ar-60-index').value==='ALL'?['NIFTY','SENSEX','BANKNIFTY']:[symbol];
+  const selected=dateRows.filter(row=>scanIndices.includes(row.symbol)&&Number(row.markerCount)>0&&(scope==='ALL'||(row.tradeDate>=start&&row.tradeDate<=istToday)))
+   .map(row=>({date:row.tradeDate,index:row.symbol})).filter((v,i,a)=>a.findIndex(x=>x.index===v.index&&x.date===v.date)===i)
+   .sort((a,b)=>a.date.localeCompare(b.date)||scanIndices.indexOf(a.index)-scanIndices.indexOf(b.index));
+  const scanLabel=scanIndices.join(' + ');
+  scanCoverage={eligibleRows:0,rejectedRows:0,conflictedMinutes:0};scanDaysDone=0;
+  $('ar-60-week').disabled=true;$('ar-60-all').disabled=true;$('ar-60-cancel').disabled=false;
+  if(!selected.length){stopScan();$('ar-60-status').textContent='No saved '+scanLabel+' dates in '+(scope==='WEEK'?'the current IST week.':'this scope.');return;}
+  $('ar-60-status').textContent='Reading '+selected.length+' saved index-day session(s) for '+scanLabel+', one at a time; read-only archive.';
+  try{
+   for(const item of selected){
+    if(abort.signal.aborted||token!==scanGeneration)break;
+    $('ar-60-status').textContent='Scanning '+item.index+' '+item.date+' · session '+(scanDaysDone+1)+' / '+selected.length+'.';
+    const session=await load(item.date,abort.signal,item.index);
+    if(abort.signal.aborted||token!==scanGeneration)break;
+    const result=scanRecordedSixtyPointMoves(session,60);
+    scanHits.push(...result.events);
+    scanCoverage.eligibleRows+=result.coverage.eligibleRows;
+    scanCoverage.rejectedRows+=result.coverage.rejectedRows;
+    scanCoverage.conflictedMinutes+=result.coverage.conflictedMinutes;
+    scanDaysDone++;
+    scanHits.sort((a,b)=>b.date.localeCompare(a.date)||b.points-a.points||a.toAt.localeCompare(b.toAt));
+    showScan();
+   }
+   if(token===scanGeneration)$('ar-60-status').textContent='Completed '+scanDaysDone+' / '+selected.length+' '+scanLabel+' saved index-day sessions · '+scanHits.length+' distinct contract/direction observations ≥₹60. Maximum sampled rise/fall per contract and day; not an execution signal.';
+  }catch(error:any){
+   if(token===scanGeneration)$('ar-60-status').textContent='Scan INCOMPLETE after '+scanDaysDone+' days: '+(error?.message||'Archive read failed')+'. Saved results cover completed days only.';
+  }finally{
+   if(token===scanGeneration){scanAbort=null;$('ar-60-cancel').disabled=true;$('ar-60-week').disabled=false;$('ar-60-all').disabled=false;showScan();}
+  }
+ }
+ $('ar-60-week').onclick=()=>void findSixty('WEEK');
+ $('ar-60-all').onclick=()=>void findSixty('ALL');
+ $('ar-60-cancel').onclick=()=>stopScan();
+ $('ar-60-index').onchange=()=>stopScan(true);
+ $('ar-60-side').onchange=()=>{scanPage=0;showScan();};
+ $('ar-60-direction').onchange=()=>{scanPage=0;showScan();};
+ $('ar-60-prev').onclick=()=>{scanPage=Math.max(0,scanPage-1);showScan();};
+ $('ar-60-next').onclick=()=>{scanPage++;showScan();};
+ $('ar-60-results').onclick=(event:any)=>{
+  const key=event.target.closest?.('[data-ar-sixty-evidence]')?.dataset?.arSixtyEvidence;
+  if(key===undefined)return;
+  const hit=scanHits[Number(key)];if(!hit)return;
+  const end=clock(hit.toAt).slice(0,5);
+  if(end<'09:15'||end>'15:30')return;
+  controller.pause();evidenceEvent('optionpilot:rag-selection',{symbol:hit.symbol,date:hit.date,expiry:hit.expiry,strike:hit.strike,side:hit.side,time:end,lookback:3});
+ };
  for(const count of [1,3,5])$('ar-last'+count).onclick=()=>void start(dates.slice(-count));
  $('ar-all').onclick=()=>void start(dates);$('ar-selected').onclick=()=>void start(Array.from($('ar-dates').selectedOptions).map((o:any)=>o.value));$('ar-latest').onclick=()=>void start(dates.slice(-1),false);
  $('ar-play').onclick=()=>controller.toggle();$('ar-prev').onclick=()=>controller.seek(controller.snapshot().index-1);$('ar-next').onclick=()=>void controller.next();$('ar-reset').onclick=()=>controller.seek(0);$('ar-seek').oninput=()=>controller.seek(Number($('ar-seek').value));$('ar-speed').onchange=()=>controller.speed(Number($('ar-speed').value));
- $('ar-index').onchange=()=>{controller.pause();symbol=$('ar-index').value;expiry='';strike=null;available();void start(dates.slice(-1),false);};
+ $('ar-index').onchange=()=>{controller.pause();stopScan(true);symbol=$('ar-index').value;expiry='';strike=null;available();void start(dates.slice(-1),false);};
  $('ar-contract-mode').onchange=()=>{controller.pause();if($('ar-contract-mode').value!=='PINNED'){expiry='';strike=null;}render(controller.snapshot());};
  $('ar-expiry').onchange=()=>{expiry=$('ar-expiry').value;strike=null;render(controller.snapshot());};$('ar-strike').onchange=()=>{strike=Number($('ar-strike').value);render(controller.snapshot());};$('ar-atm').onclick=()=>{pin(controller.snapshot().frame,true);render(controller.snapshot());};
  document.addEventListener('visibilitychange',()=>{if(document.hidden)controller.pause();});window.addEventListener('pagehide',()=>controller.pause());

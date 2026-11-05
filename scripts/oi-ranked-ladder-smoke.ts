@@ -50,6 +50,19 @@ try{
    await page.locator('#ows-chart .oir-scroll').evaluate(el=>el.scrollTop=20);
    await page.waitForTimeout(1100);
    assert(Math.abs(await page.locator('#ows-chart .oir-scroll').evaluate(el=>el.scrollTop)-20)<2,'heartbeat preserves ladder scroll');
+   for(const mode of ['OI','PCR','PREMIUM','ALL']){
+    await page.locator('#ows-chart [data-oir-view-option="'+mode+'"]').click();
+    assert.equal(await page.locator('#ows-chart .oir-panel').getAttribute('data-oir-view'),mode);
+    assert.equal(await page.locator('#ows-chart [data-oir-view-option="'+mode+'"]').getAttribute('aria-pressed'),'true');
+    assert.equal(await page.locator('#ows-chart .oir-pcr-summary').isVisible(),['PCR','ALL'].includes(mode));
+    assert.equal(await page.locator('#ows-chart .oir-premium').first().isVisible(),['PREMIUM','ALL'].includes(mode));
+    assert.equal(await page.locator('#ows-chart .oir-tops').isVisible(),['OI','ALL'].includes(mode));
+   }
+   await page.locator('#ows-chart [data-oir-view-option="PREMIUM"]').click();await page.waitForTimeout(1100);
+   assert.equal(await page.locator('#ows-chart .oir-panel').getAttribute('data-oir-view'),'PREMIUM','heartbeat retains chosen display');
+   await page.locator('#ows-chart [data-oir-view-option="ALL"]').click();
+   assert((await page.locator('#ows-chart .oir-pcr-summary').innerText()).includes('Full-expiry OI PCR'));
+   assert((await page.locator('#ows-chart .oir-levels').first().innerText()).includes('LEVELS UNAVAILABLE'));
    await page.locator('#ows-rank-band').selectOption('3');assert.equal(await page.locator('#ows-chart tbody tr').count(),7);
    await page.locator('#ows-rank-focus').selectOption('ADD');assert((await page.locator('#ows-chart').innerText()).includes('Top additions'));
    await page.locator('#ows-chart [data-oir-strike]').first().click();assert.equal(new URL(page.url()).pathname,'/live');
@@ -62,6 +75,14 @@ try{
    assert((await page.locator('#ar-oi-output').innerText()).includes('Top shedding'));
    assert((await page.locator('#ar-oi-output').innerText()).includes('publication time unavailable'));
    await page.locator('#ar-oi-band').selectOption('3');assert.equal(await page.locator('#ar-oi-output tbody tr').count(),7);
+   await page.locator('#ar-oi-output [data-oir-view-option="PREMIUM"]').click();
+   assert((await page.locator('#ar-oi-output .oir-levels').first().innerText()).includes('IN RANGE'));
+   await page.locator('#ar-oi-focus').selectOption('ADD');
+   assert.equal(await page.locator('#ar-oi-output .oir-panel').getAttribute('data-oir-view'),'PREMIUM');
+   await page.locator('#ar-oi-output [data-oir-view-option="PCR"]').click();
+   assert((await page.locator('#ar-oi-output .oir-pcr-summary').innerText()).includes('qualified full-chain source unavailable'));
+   assert(await page.locator('#ar-oi-output tbody .oir-pcr').first().isVisible());
+   await page.locator('#ar-oi-output [data-oir-view-option="ALL"]').click();
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'recorded document overflow');
    await page.screenshot({path:'oi-ranked-ladder-artifacts/recorded-'+width+'-synthetic.png',fullPage:true});
    await page.locator('#ar-reset').click();assert(!(await page.locator('#ar-oi-output').innerText()).includes('15:40:00'));

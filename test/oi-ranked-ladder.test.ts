@@ -70,3 +70,50 @@ test('recorded premium freshness uses its market receipt, not the start of the m
  const frame=recordedOiRankFrame(f,new Date(at(3)).toISOString(),expiry);
  const m=deriveOiRankedLadder(frame,null,{minutes:3});assert.equal(m.rows[0].CE.price,100);assert.equal(m.at,at(3)+24000);
 });
+
+test('strike PCR uses qualified paired OI, keeps zero PE and withholds a missing or zero CE denominator',()=>{
+ const c=snapshot(3,[100,400,0]),b=snapshot(0);
+ const m=deriveOiRankedLadder(c,b,{mode:'LIVE',minutes:3});
+ assert.equal(m.rows[0].pcr,3);assert.equal(m.rows[0].pcrDelta,0);
+ assert.equal(m.rows[1].pcr,0);assert.equal(m.rows[2].pcr,null);
+ c.rows[0].PE.sourceAt=new Date(at(3)-31000).toISOString();
+ assert.equal(deriveOiRankedLadder(c,b,{mode:'LIVE'}).rows[0].pcr,null);
+ c.rows[1].PE.token=999;
+ assert.equal(deriveOiRankedLadder(c,b,{mode:'LIVE'}).rows[1].pcrDelta,null);
+});
+
+test('full PCR is never synthesized from the viewport or recorded CORE inventory',()=>{
+ const c:any=snapshot(3),b:any=snapshot(0);c.pcr=1.23456;b.pcr=1.1;
+ const m=deriveOiRankedLadder(c,b,{mode:'LIVE'});
+ assert.equal(m.fullPcr,1.23456);assert(Math.abs(m.fullPcrDelta-.13456)<1e-10);
+ assert.equal(deriveOiRankedLadder(c,b,{mode:'RECORDED'}).fullPcr,null);
+ c.rows[0].CE.sourceAt=new Date(at(3)-31000).toISOString();
+ assert.equal(deriveOiRankedLadder(c,b,{mode:'LIVE'}).fullPcr,null);
+});
+
+test('archived full PCR requires exact cursor, expiry, snapshot identity, unique chain and approved provenance',()=>{
+ const f:any=recorded(),time=new Date(at(3)).toISOString();
+ const row={symbol:'NIFTY',expiry,minute_bucket:time,snapshot_id:'s',truth_verdict:'TRUE',full_pcr_source:'Exact archived full-chain source',full_chain_oi_pcr:1.25};
+ f.chain=[row];assert.equal(recordedOiRankFrame(f,time,expiry).fullPcr,1.25);
+ for(const change of [{snapshot_id:'other'},{minute_bucket:new Date(at(2)).toISOString()},{expiry:'2026-11-16'},{full_pcr_source:'CORE subset'},{full_chain_oi_pcr:Infinity}]){
+  f.chain=[{...row,...change}];assert.equal(recordedOiRankFrame(f,time,expiry).fullPcr,null);
+ }
+ f.chain=[row,row];assert.equal(recordedOiRankFrame(f,time,expiry).fullPcr,null);
+});
+
+test('premium range notes distinguish touches and breaks and reject reversed or nonfinite levels',()=>{
+ const c=snapshot(3);c.rows[0].CE.price=120;c.rows[1].CE.price=90;c.rows[2].CE.price=130;
+ let m=deriveOiRankedLadder(c,null,{mode:'RECORDED'});
+ assert.deepEqual(m.rows.map((r:any)=>r.CE.state),['AT PDH','AT PDL','ABOVE PDH']);
+ c.rows[0].CE.price=100;c.rows[1].CE.price=80;c.rows[2].CE.pdl=140;
+ m=deriveOiRankedLadder(c,null,{mode:'RECORDED'});
+ assert.match(m.rows[0].CE.state,/IN RANGE/);assert.equal(m.rows[1].CE.state,'BELOW PDL');assert.equal(m.rows[2].CE.state,'LEVELS UNAVAILABLE');assert.equal(m.rows[2].CE.pdh,null);
+ assert(deriveOiRankedLadder(c,null,{mode:'LIVE'}).rows.every((r:any)=>r.CE.pdh===null&&r.CE.pdl===null));
+});
+
+test('all display provides independent OI, premium and PCR arrows with visible level notes',()=>{
+ const c:any=snapshot(3,[150,250,300]);c.pcr=1.23456;c.rows[0].CE.price=99;
+ const html=renderOiRankedLadder(deriveOiRankedLadder(c,snapshot(0),{mode:'RECORDED'}));
+ for(const view of ['OI','PCR','PREMIUM','ALL'])assert(html.includes('data-oir-view-option="'+view+'"'));
+ assert.match(html,/↑ \+50 ADD/);assert.match(html,/Premium ↓ -1/);assert.match(html,/IN RANGE/);assert.match(html,/Strike PE OI ÷ CE OI/);assert.match(html,/qualified full-chain source unavailable/);
+});

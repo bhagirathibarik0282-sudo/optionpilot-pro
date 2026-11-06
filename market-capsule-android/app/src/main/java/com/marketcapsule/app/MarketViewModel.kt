@@ -6,6 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
@@ -42,7 +44,8 @@ internal class MarketViewModel @JvmOverloads constructor(
             refreshJob?.cancel()
             streamJob?.cancel()
             strikeJob?.cancel()
-            if (mutable.value.updatesWanted) invalidate(UpdatePhase.PAUSED, "Updates paused in background. Saved readings remain historical.")
+            invalidate(if (mutable.value.updatesWanted) UpdatePhase.PAUSED else UpdatePhase.OFF,
+                "App paused in background. Saved readings remain historical.")
             return
         }
         mutable.update { it.copy(currentElapsedMs = SystemClock.elapsedRealtime()) }
@@ -134,7 +137,7 @@ internal class MarketViewModel @JvmOverloads constructor(
     }
     private fun invalidate(phase: UpdatePhase, message: String, retryMs: Long = 0) {
         mutable.update { it.copy(current = null, receivedElapsedMs = null, deliveryAgeMs = 0,
-            snapshotRequestMs = null, updatePhase = phase, retryAfterMs = retryMs, message = message,
+            snapshotRequestMs = null, loading = false, updatePhase = phase, retryAfterMs = retryMs, message = message,
             strikeLadder = null, strikeLoading = false) }
     }
     private suspend fun applySnapshot(fetched: FetchedSnapshot, streaming: Boolean) {
@@ -161,10 +164,14 @@ internal class MarketViewModel @JvmOverloads constructor(
         }
     }
     fun refresh() {
-        if (mutable.value.updatesWanted || refreshJob?.isActive == true) return
+        if (!foreground || mutable.value.updatesWanted || refreshJob?.isActive == true) return
         refreshJob = viewModelScope.launch {
             mutable.update { it.copy(loading = true, message = "Checking runtime and requesting a read-only snapshot…") }
-            try { applySnapshot(repository.fetch(), streaming = false) }
+            try {
+                val fetched = repository.fetch()
+                currentCoroutineContext().ensureActive()
+                if (foreground) applySnapshot(fetched, streaming = false)
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { invalidate(UpdatePhase.OFF, explain(error)) }
             finally { mutable.update { it.copy(loading = false) } }

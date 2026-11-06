@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("TEST 0.1.8 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("TEST 0.1.9 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }

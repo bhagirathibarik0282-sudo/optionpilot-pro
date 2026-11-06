@@ -1,28 +1,28 @@
-# Priority and delivery ledger
+# Market Capsule delivery ledger
 
-Priority: P0 / Market Capsule first.
-Scope: independent Android app using existing OptionPilot backend; no new Railway service, database or broker socket.
-User accepts small clearly disclosed delay in extreme cases, not false live data.
+Priority: P0. Independent native Android app inside the existing OptionPilot project.
+Easy, smooth UI first. No new Railway infrastructure. Manual trading is deferred.
 
 | Stage | Evidence | Status |
 |---|---|---|
-| Production interface inspection | Runtime status, snapshot identity/quality, exact option pair and existing SSE routes read | Bounded source inspection complete; payload/auth live acceptance pending |
-| Native foundation | Local screens, cache, manual read adapter and model tests written | Source prepared |
-| Build | Android SDK/Gradle unavailable; distribution acquisition blocked | Not compiled |
-| Device acceptance | No APK generated | Pending |
-| Full capsule/news/history/AI | Existing evidence modules identified; mobile integration not complete | Pending |
-| Continuous stream/recovery | Existing SSE route identified | Pending |
-| Telegram/push | Existing sender exists; capsule delivery integration not verified | Pending |
-| Manual trading | User requested future feature | Deferred; no execution enabled |
+| First debug APK | GitHub run 42081701401: 9 unit tests, lint and packaging passed | Complete for 0.1 foundation |
+| Offline Android acceptance | Six instrumented tests added; Android 15 emulator workflow | Running; results not yet accepted |
+| Device performance | Physical phone, font scale, orientation and measured frame timing | Pending |
+| Live slice | Existing source inspected; mobile authentication and current-session observation | Pending |
+| Continuous stream/recovery | Existing SSE identified; current app uses manual refresh | Pending |
+| Full capsules, ladder, replay, RAG and notifications | Mobile integration | Pending |
+| Play release | Release signing, privacy, mobile sign-in, acceptance | Pending |
 
-Next step: obtain an Android-capable build execution environment, run the supplied tests/build/lint, then audit mobile authentication and verify the first data screen on-device. Never label source preparation as a completed app.
+The emulator suite covers actual activity launch with Wi-Fi/mobile data disabled,
+manual refresh completion without a qualified quote, tab restoration after recreation,
+all navigation tabs, index identity isolation, saved-data labels, expiry of eligibility,
+UI state recovery and refresh disabling while a request is pending.
 
-## UI source review follow-up
+Synthetic UI fixtures are confined to androidTest. They do not demonstrate network
+reconnection, persisted cache across process death, market-data correctness, measured
+latency or smoothness on the user's phone. The actual activity test uses the real app
+with no fixture data and no credentials. The workflow leaves the backend unchanged.
 
-Three source-level issues were corrected after easy/smooth UI became the explicit priority:
-
-- Runtime/snapshot JSON parsing now runs on Dispatchers.Default instead of resuming CPU parsing on the UI thread.
-- The local age timer starts/stops with the visible lifecycle, with immediate age reconciliation on return.
-- The selected navigation tab uses rememberSaveable for activity recreation.
-
-These are uncompiled source corrections, not measured performance results. Continuous streaming, stable full-ladder behavior, complete state restoration and real-device performance remain pending.
+Official implementation references:
+- https://developer.android.com/develop/ui/compose/testing
+- https://developer.android.com/studio/run/emulator-commandline

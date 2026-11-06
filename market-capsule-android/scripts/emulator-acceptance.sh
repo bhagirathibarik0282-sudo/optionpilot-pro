@@ -3,7 +3,8 @@ set -euo pipefail
 mkdir -p app/build/emulator-evidence
 sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
 avdmanager="$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager"
-"$sdkmanager" "emulator" "system-images;android-35;google_apis;x86_64"
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+"$sdkmanager" "platform-tools" "emulator" "system-images;android-35;google_apis;x86_64"
 sudo chmod a+rw /dev/kvm
 printf 'no\n' | "$avdmanager" create avd --force --name capsule-ci --package 'system-images;android-35;google_apis;x86_64' --device pixel_2
 "$ANDROID_HOME/emulator/emulator" -avd capsule-ci -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader -memory 2048 > app/build/emulator-evidence/emulator.log 2>&1 &

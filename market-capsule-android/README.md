@@ -1,4 +1,28 @@
-# Market Capsule — Android foundation 0.1.3
+# Market Capsule — native Android 0.1.5 candidate
+
+## Current checkpoint — 6 November 2026
+
+The historical checkpoints below are retained for provenance. Current accepted audit:
+0.1.4, source 23d3237ac416c2e3a3a1b33bfd82a3deb6d0f0b7, run 42154680495,
+29 unit +15 Android tests passed. Actual cache force-stop/restart, offline network
+absence, landscape and 150% font captures were checked. Lint: 0 errors, 13 warnings.
+Debug signing keys differ between builds; stable signing remains unresolved.
+
+0.1.5 adds native Live Desk ATM cards for up to three expiries with independent
+CE/PE identity, date, receipt/source age and delivery checks. This is not yet a full
+multi-strike ladder or expiry picker. Server ATM can move; compare the same contract
+before calculating returns between snapshots. Six unit and two UI tests were added.
+See docs/THOROUGH-AUDIT-AND-LADDER.md for candidate build acceptance.
+
+The existing production endpoint supplied current broker snapshots during this
+session. At 10:27 IST a bounded SSE read yielded three complete connected frames
+with increasing sequences and three NIFTY/SENSEX expiry rows each. This supersedes
+earlier outside-hours observations; actual APK live/reconnect/phone acceptance
+remains open. No new infrastructure or backend deployment is required by this UI.
+
+Physical-device frame timing, private release access, stable protected signing,
+release manifest and Play publishing remain pending. News/RAG/capsules, full strike
+ladder, PCR, same-app replay and notifications remain subsequent work.
 
 Highest-priority OptionPilot project. This is **native Android source**, not the existing dashboard wrapped in a WebView. The 0.1 debug APK compiled and passed nine unit tests plus lint in GitHub run 42081701401. It remains a test foundation, not a completed super app or a Play release.
 

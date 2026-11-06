@@ -1,5 +1,23 @@
 # Market Capsule delivery ledger
 
+## Current checkpoint — 0.1.5, 6 November 2026
+
+This supersedes the historical pending live-contract/cache notes below. APK audit
+0.1.4 passed 29 unit +15 Android tests with actual persisted-cache force-stop /
+restart, offline network verification, landscape and 150% font captures.
+
+0.1.5 source e9cef39fc318eb31131e70406618511d2bc5223d adds native vertical
+multi-expiry ATM CE/PE cards to Live Desk. Run 42165422354 SUCCESS: 35 unit +17
+Android 15 tests, zero failures/errors/skips. Signature and archive digests checked;
+actual empty offline screenshot reviewed. Lint: 0 errors, 13 warnings.
+
+APK SHA-256: 9d124622965fccb33f5a6f35ee63b736b9050120c142552e1b42e1be2bced6f4.
+The actual production SSE contract was accessible in a bounded read at 10:27 IST,
+with increasing sequences and three primary-index expiry rows. Actual APK phone
+live/reconnect acceptance remains pending, along with stable signing/private access,
+full strike ladders, PCR, replay and news/RAG/capsules/notification integration.
+See THOROUGH-AUDIT-AND-LADDER.md for scope and evidence.
+
 Priority: P0. Independent native Android app inside the existing OptionPilot project.
 Easy, smooth UI first. No new Railway infrastructure. Manual trading is deferred.
 

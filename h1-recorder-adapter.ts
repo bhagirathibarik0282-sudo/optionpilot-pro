@@ -85,6 +85,7 @@ export interface H1RecordRequest {
 }
 
 const RESEARCH_ELIGIBLE = new Set<H1TruthVerdict>(["TRUE"]);
+const MAX_RESEARCH_QUOTE_AGE_SECONDS = 60;
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 function finiteOrNull(value: unknown): number | null {
@@ -135,7 +136,21 @@ function quoteAgeSeconds(ts: string | null, now: Date): number | null {
   if (!ts) return null;
   const ms = new Date(ts).getTime();
   if (!Number.isFinite(ms)) return null;
-  return Math.max(0, Math.floor((now.getTime() - ms) / 1000));
+  return Math.floor((now.getTime() - ms) / 1000);
+}
+
+export function h1OptionValidationStatus(
+  verdict: H1TruthVerdict,
+  quoteTimestamp: string | null,
+  now: Date,
+): string {
+  const truthStatus = validationStatus(verdict);
+  if (truthStatus !== "RESEARCH_ELIGIBLE") return truthStatus;
+  const age = quoteAgeSeconds(quoteTimestamp, now);
+  if (age == null) return "DIAGNOSTIC_MISSING_OPTION_QUOTE_TIMESTAMP";
+  if (age < 0) return "DIAGNOSTIC_FUTURE_OPTION_QUOTE";
+  if (age > MAX_RESEARCH_QUOTE_AGE_SECONDS) return "DIAGNOSTIC_STALE_OPTION_QUOTE";
+  return truthStatus;
 }
 
 function liquidityStatus(bid: number, ask: number): string {
@@ -323,6 +338,7 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
         const side = leg.optionType;
         if (side !== "CE" && side !== "PE") continue;
         const key = optionKey(market.symbol, expiryDate, leg.strike, side);
+        const age = quoteAgeSeconds(leg.quoteTimestamp, now);
         const ie = intrinsicExtrinsic(market.spot, leg.strike, side, leg.lastPrice);
         const row: OptionSnapshot1mRow = {
           symbol: market.symbol,
@@ -355,9 +371,9 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
           pdh: finiteOrNull(leg.pdh),
           pdl: finiteOrNull(leg.pdl),
           quoteTimestamp: leg.quoteTimestamp,
-          quoteAgeSeconds: quoteAgeSeconds(leg.quoteTimestamp, now),
+          quoteAgeSeconds: age,
           liquidityStatus: liquidityStatus(leg.bid, leg.ask),
-          validationStatus: validationStatus(request.truthVerdict),
+          validationStatus: h1OptionValidationStatus(request.truthVerdict, leg.quoteTimestamp, now),
           calculationVersion: request.calculationVersion,
         };
         await dbUpsertOptionSnapshot1m(row);

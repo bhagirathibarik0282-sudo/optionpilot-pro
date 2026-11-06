@@ -111,3 +111,12 @@ at the top, and returning to each prior position. These changes are source-ready
 Android CI/emulator validation is required before delivery. Local Gradle bootstrap
 was blocked by unavailable network access to the distribution host. No new APK,
 phone smoothness, live-market or production-readiness acceptance is claimed here.
+
+
+## Navigation candidate accepted in CI — 6 November 2026
+
+Source a0afb809e68693c47ab4229d8c6ae9326e10bf06; run https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/42257837554 SUCCESS. Downloaded XML reports: 42 JVM tests plus 21 Android 15 tests, zero failures, errors or skips. Lint: zero errors, 14 warnings. The new test checks independent tab offsets, initial top position, returning to the prior heading and exact Live Desk scroll offset. Earlier attempts failed that same heading check; isolating the list composition and binding content to the captured destination resolved it without removing the assertion.
+
+APK assembly, v2 debug signature verification and offline cold launch passed. The actual offline screenshot was reviewed. Downloaded APK and validation archive SHA-256 matched GitHub artifact digests. APK: 17,858,629 bytes, SHA-256 c2db8555cc9bfbffaae7d48d8cd5f0f6277469e917fba51509165c887c99a967. Signer SHA-256 e98ed6cb54eaa517aa746cdf4ca6b9d8abe634520b1fad6ee8aa4f6dca0d6b4d.
+
+Market_Capsule_0.1.8_Navigation_Test.apk is a debug test candidate, versionCode 9, not a stable upgrade or Play release. Its temporary signer can prevent installing over previous builds; do not remove a working phone installation to force an update. Physical-phone smoothness, stable signing, owner authentication and live-session/reconnect acceptance remain pending. No backend, Railway deployment, broker connection, Telegram sending or order behavior was changed in this navigation milestone.

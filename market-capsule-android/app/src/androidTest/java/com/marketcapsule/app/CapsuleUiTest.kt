@@ -146,7 +146,9 @@ class CapsuleUiTest {
         ui.onNodeWithTag("tab-DESK").performClick()
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("strike-window-7"))
         ui.onNodeWithTag("strike-window-7").performClick()
-        ui.onNodeWithTag("strike-load").performClick()
+        // The LazyColumn can relayout after choosing ±7: make the load action visible.
+        ui.onNodeWithTag("strike-load").performScrollTo().assertIsEnabled().performClick()
+        ui.waitForIdle()
         ui.runOnIdle { assertEquals(listOf(MarketIndex.NIFTY to "2026-11-09"), requests) }
     }
 

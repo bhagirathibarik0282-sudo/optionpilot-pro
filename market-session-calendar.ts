@@ -113,8 +113,14 @@ export function indexDerivativesSessionOn(date: string, index: "NIFTY"|"SENSEX")
     officialCircular:exchange==="NSE"?"NSE/FAOP/76940":"BSE/20261019-10"};
   const weekday=new Date(date+"T00:00:00Z").getUTCDay();
   if(weekday===0||weekday===6||HOLIDAY_BY_DATE.has(date))return null;
-  return {date,index,exchange,type:"REGULAR",opensAtIst:"09:15",closesAtIst:"15:30",
-    officialCircular:"EXCHANGE_2026_REGULAR_TRADING_CALENDAR"};
+  // Derivatives segment close: 15:40 from 2026-08-03, 15:45 from 2026-12-07.
+  // Expiring index contracts have an earlier 15:30 stop from 2026-12-07;
+  // this segment calendar must not be treated as exact contract authority.
+  const close=date>="2026-12-07"?"15:45":date>="2026-08-03"?"15:40":"15:30";
+  return {date,index,exchange,type:"REGULAR",opensAtIst:"09:15",closesAtIst:close,
+    officialCircular:date>="2026-12-07"?"SEBI_CAS_REVISION_2026_10_15"
+      :date>="2026-08-03"?(exchange==="NSE"?"NSE_CAS_REVISION_2026_08_03":"BSE/20260801-2")
+      :"EXCHANGE_2026_REGULAR_TRADING_CALENDAR"};
 }
 export function nextIndexDerivativesSessionAfter(date:string,index:"NIFTY"|"SENSEX"): IndexDerivativesTradingSession|null {
   if(!checkedIndexDate(date))return null;

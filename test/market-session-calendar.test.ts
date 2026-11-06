@@ -112,3 +112,14 @@ test("index-derivatives special Sunday and next trading-day identity use exchang
  }
  assert.equal(indexDerivativesSessionOn("2026-02-30","NIFTY"),null);
 });
+
+test("derivatives close matches official date-effective segment schedule",async()=>{
+ const {indexDerivativesSessionOn}=await import("../market-session-calendar.js");
+ for(const symbol of ["NIFTY","SENSEX"] as const){
+   assert.equal(indexDerivativesSessionOn("2026-07-31",symbol)?.closesAtIst,"15:30");
+   assert.equal(indexDerivativesSessionOn("2026-08-03",symbol)?.closesAtIst,"15:40");
+   assert.equal(indexDerivativesSessionOn("2026-11-06",symbol)?.closesAtIst,"15:40");
+   assert.equal(indexDerivativesSessionOn("2026-11-09",symbol)?.closesAtIst,"15:40");
+   assert.equal(indexDerivativesSessionOn("2026-12-07",symbol)?.closesAtIst,"15:45");
+ }
+});

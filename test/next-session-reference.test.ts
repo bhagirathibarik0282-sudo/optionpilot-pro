@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readNextSessionReference} from '../next-session-reference.js';
-const date='2026-11-06',at='2026-11-06T09:59:00.000Z',now=new Date('2026-11-06T13:00:00Z');
+const date='2026-11-06',at='2026-11-06T10:09:00.000Z',now=new Date('2026-11-06T13:00:00Z');
 const dates=(lastMinute=at,tradeDate=date)=>async()=>({ok:true,dates:[{symbol:'NIFTY',tradeDate,lastMinute,markerCount:300,firstMinute:'2026-11-06T03:45:00Z'}]});
 const row=(minute_bucket=at)=>({symbol:'NIFTY',minute_bucket,truth_verdict:'TRUE',freshness_status:'TRUE',snapshot_id:'A',
  spot_high:25050,spot_low:24850,spot_ltp:25010,spot_prev_close:24910,vwap:24980,exchange_timestamp:minute_bucket});
-const replay=(market:any[]=[row('2026-11-06T09:58:00Z'),row()])=>async(request:any)=>({ok:true,request,market,continuity:{complete:true}});
+const replay=(market:any[]=[row('2026-11-06T10:08:00Z'),row()])=>async(request:any)=>({ok:true,request,market,continuity:{complete:true}});
 const deps=(d:any=dates(),r:any=replay())=>({dates:d,replay:r}) as any;
 test('strictly recorded levels, no guessed trade entry or win rate',async()=>{
  const p=await readNextSessionReference('NIFTY',deps(),now);assert.equal(p.ok,true);
@@ -53,4 +53,9 @@ test('non-trading date never gets a fictitious next-session plan',async()=>{
 test('read failures return a reason, never synthetic data',async()=>{
  const p=await readNextSessionReference('NIFTY',deps(async()=>{throw Error('db offline');}),now);
  assert.equal(p.ok,false);assert.equal(p.reason,'RECORDED_DATE_INDEX_UNAVAILABLE');
+});
+
+test("15:30 close marker cannot represent full November F&O session to 15:40",async()=>{
+ const x=await readNextSessionReference('NIFTY',deps(dates('2026-11-06T10:00:00Z'),replay()),now);
+ assert.equal(x.ok,false);assert.equal(x.reason,'LATEST_SESSION_NO_CLOSE_MARKER');
 });

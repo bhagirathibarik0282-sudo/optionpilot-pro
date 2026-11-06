@@ -3,6 +3,26 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+// Release builds use the owner's stable private key. Never commit the keystore or passwords.
+val releaseEnvKeys = listOf(
+    "MC_RELEASE_KEYSTORE_PATH",
+    "MC_RELEASE_STORE_PASSWORD",
+    "MC_RELEASE_KEY_ALIAS",
+    "MC_RELEASE_KEY_PASSWORD",
+)
+val releaseValues = releaseEnvKeys.associateWith { System.getenv(it)?.takeIf(String::isNotBlank) }
+val releaseConfigured = releaseValues.values.all { it != null }
+val releaseTaskRequested = gradle.startParameter.taskNames.any {
+    Regex("(?i)(assemble|bundle|package|install|publish).*release").containsMatchIn(it)
+}
+if (releaseTaskRequested && !releaseConfigured) {
+    throw GradleException("Release signing is not configured. Set all four MC_RELEASE_* environment variables; do not use a regenerated debug key.")
+}
+val releaseKeystorePath = releaseValues["MC_RELEASE_KEYSTORE_PATH"]?.let { file(it) }
+if (releaseConfigured && releaseKeystorePath?.isFile != true) {
+    throw GradleException("Configured release keystore file does not exist.")
+}
+
 android {
     namespace = "com.marketcapsule.app"
     compileSdk = 36
@@ -13,6 +33,25 @@ android {
         versionCode = 6
         versionName = "0.1.5-expiry-ladder"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+        if (releaseConfigured) {
+            create("marketCapsuleRelease") {
+                storeFile = releaseKeystorePath
+                storePassword = releaseValues["MC_RELEASE_STORE_PASSWORD"]
+                keyAlias = releaseValues["MC_RELEASE_KEY_ALIAS"]
+                keyPassword = releaseValues["MC_RELEASE_KEY_PASSWORD"]
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            // Without valid credentials Gradle may package an unsigned variant locally,
+            // but any assembleRelease/bundleRelease command above fails closed first.
+            if (releaseConfigured) {
+                signingConfig = signingConfigs.getByName("marketCapsuleRelease")
+            }
+        }
     }
     buildFeatures { compose = true }
     compileOptions {

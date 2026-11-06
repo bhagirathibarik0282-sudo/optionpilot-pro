@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -47,36 +48,39 @@ class MainActivity : ComponentActivity() {
 }
 @Composable private fun CapsuleApp(vm: MarketViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
-    var page by rememberSaveable { mutableStateOf(Page.TODAY) }
     LifecycleStartEffect(vm) {
         vm.setForeground(true)
         onStopOrDispose { vm.setForeground(false) }
     }
+    CapsuleScreen(state, vm::select, vm::refresh)
+}
+@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit) {
+    var page by rememberSaveable { mutableStateOf(Page.TODAY) }
     Scaffold(containerColor = Navy, bottomBar = {
         NavigationBar(containerColor = Panel) {
-            Page.entries.forEach { item -> NavigationBarItem(selected = page == item,
+            Page.entries.forEach { item -> NavigationBarItem(modifier = Modifier.testTag("tab-${item.name}"), selected = page == item,
                 onClick = { page = item }, label = { Text(item.label) }, icon = {
                     Icon(when(item) { Page.TODAY -> Icons.Outlined.Home; Page.DESK -> Icons.Outlined.ShowChart
                         Page.MEMORY -> Icons.Outlined.History; Page.PROJECT -> Icons.Outlined.Info }, contentDescription = item.label)
                 }) }
         }
     }) { padding ->
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp),
+        LazyColumn(modifier = Modifier.testTag("screen-content").fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("FOUNDATION 0.1 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("FOUNDATION 0.1.1 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
-                        onClick = { vm.select(symbol) }, label = { Text(symbol.name) }) }
+                        modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
                 }
             }
             if (page == Page.TODAY || page == Page.DESK) {
                 item { QuoteCard(state) }
                 item {
-                    Button(onClick = vm::refresh, enabled = !state.loading, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = onRefresh, enabled = !state.loading, modifier = Modifier.testTag("refresh").fillMaxWidth()) {
                         Text(if(state.loading) "Requesting…" else "Refresh snapshot")
                     }
                     Text(state.message, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
@@ -129,7 +133,7 @@ class MainActivity : ComponentActivity() {
                         Text("REA is not the app runtime, broker data source, calculation engine or AI memory. Development does not depend on an REA connection.", color = Muted)
                     } }
                     item { Section("Build acceptance") {
-                        Text("Source foundation only. Compilation, real-device testing, signed APK, mobile sign-in and Play publishing are pending.", color = Gold)
+                        Text("Debug APK compilation, unit tests and lint passed for 0.1. Physical-device testing, mobile sign-in and Play publishing remain pending. Emulator evidence is tracked in the project ledger.", color = Gold)
                     } }
                 }
             }

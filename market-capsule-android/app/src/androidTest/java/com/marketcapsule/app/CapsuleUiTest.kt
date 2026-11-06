@@ -1,0 +1,62 @@
+package com.marketcapsule.app
+
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import org.junit.Rule
+import org.junit.Test
+
+/** Synthetic UI states only: these prices are never bundled in the production app. */
+class CapsuleUiTest {
+    @get:Rule val ui = createComposeRule()
+    private fun snapshot() = MarketSnapshot("fixture", 1, "2026-11-05T04:00:00Z", true, "CONNECTED",
+        mapOf(MarketIndex.NIFTY to Quote(MarketIndex.NIFTY, 24001.25, 0.5,
+            "2026-11-05T04:00:00Z", "2026-11-05T04:00:00Z", 0, "LIVE",
+            null, null, null, null, null, null)))
+
+    @Test fun emptyScreenAndAllTabsRemainUsable() {
+        ui.setContent { MaterialTheme { CapsuleScreen(MarketUiState(), {}, {}) } }
+        ui.onNodeWithText("NO ELIGIBLE READING").assertIsDisplayed()
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Exact selected option pair"))
+        ui.onNodeWithText("Exact selected option pair").assertIsDisplayed()
+        ui.onNodeWithTag("tab-MEMORY").performClick()
+        ui.onNodeWithText("NIFTY · No saved reading").assertIsDisplayed()
+        ui.onNodeWithTag("tab-PROJECT").performClick()
+        ui.onNodeWithText("Highest priority: usable app first").assertIsDisplayed()
+        ui.onNodeWithTag("tab-TODAY").performClick()
+        ui.onNodeWithText("NO ELIGIBLE READING").assertIsDisplayed()
+    }
+    @Test fun indexSwitchNeverReusesOtherIndexPrice() {
+        val state = mutableStateOf(MarketUiState(current = snapshot(), receivedElapsedMs = 0))
+        ui.setContent { MaterialTheme { CapsuleScreen(state.value, { state.value = state.value.copy(selected = it) }, {}) } }
+        ui.onNodeWithText("RECENT SNAPSHOT — NOT A CONTINUOUS STREAM").assertIsDisplayed()
+        ui.onNodeWithTag("index-SENSEX").performClick()
+        ui.onNodeWithText("NO ELIGIBLE READING").assertIsDisplayed()
+        ui.onNodeWithText("₹24,001.25").assertDoesNotExist()
+    }
+    @Test fun savedReadingIsHistorical() {
+        ui.setContent { MaterialTheme { CapsuleScreen(MarketUiState(saved = snapshot()), {}, {}) } }
+        ui.onNodeWithText("SAVED READING AVAILABLE IN MEMORY").assertIsDisplayed()
+        ui.onNodeWithTag("tab-MEMORY").performClick()
+        ui.onNodeWithText("NIFTY · SAVED — NOT LIVE").assertIsDisplayed()
+        ui.onNodeWithText("₹24,001.25").assertIsDisplayed()
+        ui.onNodeWithText("RECENT SNAPSHOT — NOT A CONTINUOUS STREAM").assertDoesNotExist()
+    }
+    @Test fun expiryAndRecoveryChangeVisibleEligibility() {
+        val state = mutableStateOf(MarketUiState(current = snapshot(), receivedElapsedMs = 0))
+        ui.setContent { MaterialTheme { CapsuleScreen(state.value, {}, {}) } }
+        ui.onNodeWithText("₹24,001.25").assertIsDisplayed()
+        ui.runOnIdle { state.value = state.value.copy(currentElapsedMs = 6000) }
+        ui.onNodeWithText("STALE / REFRESH REQUIRED").assertIsDisplayed()
+        ui.onNodeWithText("₹24,001.25").assertDoesNotExist()
+        ui.runOnIdle { state.value = state.value.copy(receivedElapsedMs = 6000) }
+        ui.onNodeWithText("₹24,001.25").assertIsDisplayed()
+    }
+    @Test fun pendingRequestDisablesRefresh() {
+        ui.setContent { MaterialTheme { CapsuleScreen(MarketUiState(loading = true), {}, {}) } }
+        ui.onNodeWithTag("refresh").performScrollTo().assertIsNotEnabled()
+        ui.onNodeWithText("Requesting…").assertIsDisplayed()
+    }
+}

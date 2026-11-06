@@ -45,6 +45,9 @@ jobs:
         run: ./gradlew --no-daemon :app:lintDebug --stacktrace
       - name: Build test APK
         run: ./gradlew --no-daemon :app:assembleDebug --stacktrace
+      - name: Android 15 offline emulator acceptance
+        timeout-minutes: 15
+        run: ./scripts/emulator-acceptance.sh
       - name: Save test APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -60,5 +63,7 @@ jobs:
           path: |
             market-capsule-android/app/build/reports/
             market-capsule-android/app/build/test-results/
+            market-capsule-android/app/build/outputs/androidTest-results/
+            market-capsule-android/app/build/emulator-evidence/
           retention-days: 7
           if-no-files-found: ignore

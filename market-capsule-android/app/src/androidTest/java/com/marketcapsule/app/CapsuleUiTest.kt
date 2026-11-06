@@ -61,6 +61,48 @@ class CapsuleUiTest {
         assertEquals("Live Desk scroll offset changed after returning", deskOffset, restoredOffset, 0.000001f)
         ui.onNodeWithText("Multi-expiry ATM ladder").assertIsDisplayed()
     }
+    @Test fun pcrTypesRemainSeparateAndWithdrawOnExpiry() {
+        val time = "2026-11-05T04:00:00Z"
+        val pcr = PcrReading(MarketIndex.NIFTY, "2026-11-09", time, 0, 200, 200,
+            PcrValue(1.5, 100.0, 150.0, time, time), null,
+            PcrValue(1.5, 100.0, 150.0, time, time, olderAtCheck = 0), "Unavailable")
+        val state = mutableStateOf(MarketUiState(current = snapshot().copy(
+            pcrReadings = mapOf(MarketIndex.NIFTY to pcr)), receivedElapsedMs = 0))
+        ui.setContent { MaterialTheme { CapsuleScreen(state.value, {}, {}) } }
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("full-pcr"))
+        ui.onNodeWithTag("full-pcr").assertTextEquals("Full PCR · verified snapshot: 1.5000")
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("reported-pcr"))
+        ui.onNodeWithTag("reported-pcr").assertTextEquals("Full PCR · latest reported: 1.5000")
+        ui.runOnIdle {
+            val mixed = pcr.copy(full = null, freshOi = 198,
+                reported = PcrValue(1.8, 100.0, 180.0, time, time, olderAtCheck = 2))
+            state.value = state.value.copy(current = state.value.current!!.copy(
+                pcrReadings = mapOf(MarketIndex.NIFTY to mixed)))
+        }
+        ui.onNodeWithTag("reported-pcr").assertTextEquals("Full PCR · latest reported: 1.8000")
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("full-pcr"))
+        ui.onNodeWithTag("full-pcr").assertTextEquals("Full PCR · verified snapshot: —")
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("reported-pcr"))
+        ui.runOnIdle { state.value = state.value.copy(currentElapsedMs = 90_001) }
+        ui.onNodeWithTag("reported-pcr").assertTextEquals("Full PCR · latest reported: —")
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("full-pcr"))
+        ui.onNodeWithTag("full-pcr").assertTextEquals("Full PCR · verified snapshot: —")
+    }
+    @Test fun pcrCannotFollowTheWrongIndexOrSavedCache() {
+        val time = "2026-11-05T04:00:00Z"
+        val pcr = PcrReading(MarketIndex.NIFTY, "2026-11-09", time, 0, 2, 2,
+            PcrValue(1.5, 100.0, 150.0, time, time), null, null, "Unavailable")
+        val current = snapshot().copy(pcrReadings = mapOf(MarketIndex.NIFTY to pcr))
+        val state = mutableStateOf(MarketUiState(current = current, receivedElapsedMs = 0))
+        ui.setContent { MaterialTheme { CapsuleScreen(state.value, { state.value = state.value.copy(selected = it) }, {}) } }
+        ui.onNodeWithTag("index-SENSEX").performClick()
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("full-pcr"))
+        ui.onNodeWithTag("full-pcr").assertTextEquals("Full PCR · verified snapshot: —")
+        ui.runOnIdle { state.value = state.value.copy(selected = MarketIndex.NIFTY, current = null, saved = current) }
+        ui.onNodeWithTag("full-pcr").assertTextEquals("Full PCR · verified snapshot: —")
+    }
     @Test fun indexSwitchNeverReusesOtherIndexPrice() {
         val state = mutableStateOf(MarketUiState(current = snapshot(), receivedElapsedMs = 0))
         ui.setContent { MaterialTheme { CapsuleScreen(state.value, { state.value = state.value.copy(selected = it) }, {}) } }

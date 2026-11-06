@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("TEST 0.1.9 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("TEST 0.1.10 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
@@ -143,10 +143,11 @@ class MainActivity : ComponentActivity() {
                     } }
                     item { Section("Source coverage") {
                         Text("Snapshot source: Kite FULL via existing OptionPilot backend.")
-                        Text("Multi-expiry ATM premiums: Live Desk. Full PCR, sector weights and FII/DII remain pending.", color = Muted)
+                        Text("PCR/OI snapshots and multi-expiry premiums: Live Desk. Sector weights and FII/DII remain pending.", color = Muted)
                     } }
                 }
                 Page.DESK -> {
+                item(key = "pcr-${state.selected}") { PcrCard(state) }
                 item { Section("Exact selected option pair") {
                     val quote = state.quote
                     val elapsed = state.receivedElapsedMs?.let { (state.currentElapsedMs - it).coerceAtLeast(0) }
@@ -275,6 +276,50 @@ class MainActivity : ComponentActivity() {
             }
         }
         }
+    }
+}
+@Composable private fun PcrCard(state: MarketUiState) {
+    val reading = state.current?.pcrReadings?.get(state.selected)
+    val eligible = reading?.eligible(state) == true
+    Section("PCR & OI · source snapshots") {
+        Text("${state.selected.name} · Expiry ${reading?.expiry ?: "Unavailable"}", color = Muted)
+        fun ratio(value: Double?): String = value?.let {
+            String.format(Locale.ENGLISH, "%.4f", it)
+        } ?: "—"
+        val full = if (eligible) reading?.full else null
+        val band = if (eligible) reading?.band else null
+        val reported = if (eligible) reading?.reported else null
+        Text("Full PCR · verified snapshot: ${ratio(full?.ratio)}",
+            modifier = Modifier.testTag("full-pcr"), color = Gold)
+        if (full != null) Text("CE OI ${strikeText(full.ceOi)} · PE OI ${strikeText(full.peOi)}")
+        Text("ATM ±7 band PCR · 15 strikes: ${ratio(band?.ratio)}",
+            modifier = Modifier.testTag("band-pcr"))
+        if (band != null) {
+            Text("Band ${strikeText(band.fromStrike!!)}–${strikeText(band.toStrike!!)} · frozen ATM ${strikeText(band.anchorStrike!!)}", color = Muted)
+            Text("Band CE OI ${strikeText(band.ceOi)} · PE OI ${strikeText(band.peOi)}")
+        }
+        Text("Full PCR · latest reported: ${ratio(reported?.ratio)}",
+            modifier = Modifier.testTag("reported-pcr"))
+        if (reported != null) {
+            Text("Reported CE OI ${strikeText(reported.ceOi)} · PE OI ${strikeText(reported.peOi)}")
+            Text("Mixed source timestamps · ${reported.olderAtCheck} quotes older than 30s at check. Not fresh/synchronized PCR.",
+                color = Muted, style = MaterialTheme.typography.bodySmall)
+        }
+        if (reading != null) {
+            Text("Checked: ${at(reading.checkedAt)}", color = Muted, style = MaterialTheme.typography.bodySmall)
+            if (reading.expected != null && reading.freshOi != null)
+                Text("Fresh OI at source check: ${reading.freshOi}/${reading.expected} contracts", color = Muted,
+                    style = MaterialTheme.typography.bodySmall)
+            val source = full ?: reported ?: band
+            if (source != null) Text("OI source times: ${at(source.sourceMinAt)} → ${at(source.sourceMaxAt)}", color = Muted,
+                style = MaterialTheme.typography.bodySmall)
+            if (!eligible) Text("Snapshot expired or disconnected. Refresh or start updates.", color = Muted)
+            else if (full == null) Text(reading.sourceReason, color = Muted)
+        } else Text("No qualified PCR snapshot. Refresh or start updates during the operating window.", color = Muted)
+        Text("PCR expiry is shown above; the ATM-card expiry filter below does not change it.",
+            color = Muted, style = MaterialTheme.typography.labelSmall)
+        Text("Full means the backend's subscribed expiry inventory. Band and reported values are separate; no bullish/bearish trade signal is inferred.",
+            color = Muted, style = MaterialTheme.typography.labelSmall)
     }
 }
 @Composable private fun PremiumCell(side: String, leg: PremiumLeg?, state: MarketUiState, modifier: Modifier) {

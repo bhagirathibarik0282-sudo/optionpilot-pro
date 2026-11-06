@@ -1,0 +1,36 @@
+name: Market Capsule exact APK live acceptance
+on:
+  push:
+    branches: ['feature/market-capsule-android']
+    paths: ['market-capsule-acceptance/**', '.github/workflows/market-capsule-live-acceptance.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: market-capsule-live-acceptance
+  cancel-in-progress: false
+jobs:
+  live-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Download exact accepted 0.1.5 APK without rebuilding or resigning
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p app
+          gh run download 42165422354 --repo "$GITHUB_REPOSITORY" --name market-capsule-test-apk-e9cef39fc318eb31131e70406618511d2bc5223d --dir app
+          echo '9d124622965fccb33f5a6f35ee63b736b9050120c142552e1b42e1be2bced6f4  app/app-debug.apk' | sha256sum --check --strict
+      - name: Actual APK foreground connection and network recovery
+        run: bash market-capsule-acceptance/run.sh
+      - name: Save acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: market-capsule-live-acceptance-${{ github.sha }}
+          path: evidence/
+          retention-days: 7

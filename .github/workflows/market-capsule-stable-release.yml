@@ -39,14 +39,16 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate release intent and unique tag
+        id: release_intent
         env:
-          TAG: ${{ inputs.tag }}
+          RAW_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          [[ "$TAG" =~ ^capsule-v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'INVALID_RELEASE_TAG'; exit 1; }
+          TAG="$(python3 ../scripts/market-capsule-release/normalize_tag.py "$RAW_TAG")"
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo 'RELEASE_TAG_ALREADY_EXISTS'; exit 1
           fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Test stable APK verification policy without owner secrets
         run: python3 -m unittest discover -s ../scripts/market-capsule-release -v
       - name: Java 17
@@ -84,7 +86,7 @@ jobs:
         run: ./scripts/emulator-acceptance.sh
       - name: Verify exact release identity, version and signing certificate
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ steps.release_intent.outputs.tag }}
           EXPECTED_CERT_SHA256: ${{ vars.MC_RELEASE_CERT_SHA256 }}
         run: |
           set -euo pipefail
@@ -105,7 +107,7 @@ jobs:
         if: inputs.publish == true
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ steps.release_intent.outputs.tag }}
         run: |
           set -euo pipefail
           gh release create "$TAG" \

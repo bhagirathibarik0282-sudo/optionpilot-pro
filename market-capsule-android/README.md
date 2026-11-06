@@ -1,11 +1,11 @@
-# Market Capsule — Android foundation 0.1.2
+# Market Capsule — Android foundation 0.1.3
 
 Highest-priority OptionPilot project. This is **native Android source**, not the existing dashboard wrapped in a WebView. The 0.1 debug APK compiled and passed nine unit tests plus lint in GitHub run 42081701401. It remains a test foundation, not a completed super app or a Play release.
 
 ## Implemented in source
 
 - Independently installed Compose screens with Today, Live Desk, Memory and Project navigation.
-- NIFTY/SENSEX selection; read-only manual snapshot refresh.
+- NIFTY/SENSEX selection; manual refresh plus opt-in foreground-only snapshot updates.
 - Existing runtime-status and market snapshot endpoint adapter; no broker/API secrets in the app.
 - Explicit no-data, outside-hours, network, authentication-required and viewer-limit handling.
 - Exact spot/option identity and timestamp checks; unavailable values remain null.
@@ -17,7 +17,7 @@ Highest-priority OptionPilot project. This is **native Android source**, not the
 ## Not implemented / not accepted
 
 - Mobile account authentication: server-wide auth still needs end-to-end audit. A 401/403 is surfaced; users must not paste admin or broker secrets.
-- Continuous SSE, persistent event cursors, reconnect reconciliation and adaptive streaming.
+- Production SSE acceptance, persistent event cursors, replay gap reconstruction and adaptive streaming. Foreground-only SSE/reconnect is implemented and fixture-tested; see docs/UPDATES-ACCEPTANCE.md.
 - Full premium ladder, server capsule contract, news/RAG, session replay, AI questions, push/Telegram integration.
 - Signing, physical-device acceptance, Play Console setup and Play publishing.
 - Manual Buy/Sell is deferred until app/data reliability is established. No order code exists.
@@ -61,3 +61,5 @@ The dedicated Market Capsule Android workflow runs on this feature branch and pr
 See docs/CONNECTION-ACCEPTANCE.md. Inspected read-route source does not require browser Kite login. The current credential-free production observation is 503 OUTSIDE_OPERATING_HOURS, not authentication failure. In-window payload and private-release access policy are not yet accepted. Version 0.1.2 delivery-age tests are a new candidate and require their own passing CI evidence.
 
 Latest accepted candidate: 0.1.2, source e4defc4bf5ea4c1f5837b6320c876cd7552c8774, run 42146441214 SUCCESS. 15 unit + 7 Android tests passed, zero errors/failures/skips. Lint passed with 12 warnings; this is a debug test build, not release certification.
+
+Latest accepted update candidate: 0.1.3, source 68ea29b4dd482e39b1510fd844fcfc62a7ab20cd; full workflow 42148706936 SUCCESS. 23 unit and 12 Android tests passed. Updates default OFF; backgrounding cancels the stream, returning resumes the wanted mode, and fatal/off-hours responses stop attempts. Current production NIFTY/SSE, physical-network behavior and phone performance remain unverified.

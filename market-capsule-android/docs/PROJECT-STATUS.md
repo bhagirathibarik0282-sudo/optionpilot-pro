@@ -9,7 +9,7 @@ Easy, smooth UI first. No new Railway infrastructure. Manual trading is deferred
 | Offline Android acceptance | Run 42143672310: 6 instrumented tests, 0 failures/errors/skips on Android 15 | Tests passed; 0.1.1 follow-up 42144918320 now fully green |
 | Device performance | Physical phone, font scale, orientation and measured frame timing | Pending |
 | Live slice | Existing source inspected; mobile authentication and current-session observation | Pending |
-| Continuous stream/recovery | Existing SSE identified; current app uses manual refresh | Pending |
+| Continuous stream/recovery | Opt-in foreground SSE/reconnect implemented and fixture-tested in 0.1.3 | Real production session pending |
 | Full capsules, ladder, replay, RAG and notifications | Mobile integration | Pending |
 | Play release | Release signing, privacy, mobile sign-in, acceptance | Pending |
 
@@ -61,3 +61,7 @@ browser Kite login; live credential-free observation was scheduled closure, not 
 401/403. During-hours current NIFTY data, private app access policy, stable release
 signing, physical-phone performance and persistent-cache restart remain pending.
 No Railway deployment, PR, merge, new infrastructure, login bypass or order change.
+
+## Foreground updates accepted in tests — 0.1.3
+
+Full workflow 42148706936 SUCCESS for source 68ea29b4dd482e39b1510fd844fcfc62a7ab20cd. 23 unit + 12 Android tests passed, zero failures/errors/skips; APK/offline capture verified. Details and bounds are in UPDATES-ACCEPTANCE.md. Production runtime remained outside hours. Start updates is OFF by default; real-feed/phone acceptance remains pending. No PR, merge, Railway infrastructure/deployment or order changes.

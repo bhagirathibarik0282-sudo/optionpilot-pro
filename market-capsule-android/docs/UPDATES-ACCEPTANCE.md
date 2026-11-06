@@ -1,4 +1,4 @@
-# Controlled native updates — 0.1.3 candidate
+# Controlled native updates — 0.1.3 test build
 
 User priority: easy, smooth UI. Existing Railway service, feed and SSE route only.
 No backend deployment, new service, broker connection, token or order path.
@@ -41,3 +41,20 @@ network/Doze. Current NIFTY/SENSEX production acceptance remains pending while
 the observed runtime is outside its window.
 
 Protocol reference: https://html.spec.whatwg.org/multipage/server-sent-events.html
+
+## Accepted test evidence — 6 November 2026
+
+Source 68ea29b4dd482e39b1510fd844fcfc62a7ab20cd, full workflow 42148706936
+SUCCESS. 23 JVM tests (15 prior + 8 framing/transport/policy cases) and 12
+Android 15 tests (8 UI/activity + 4 fake-source lifecycle/controller cases)
+passed, with zero failures/errors/skips. The new tests cover pending-call
+cancellation, fragmented LF/CRLF events, auth/type errors, partial EOF, capped
+retry, control gating, background/resume, nonoverlapping fake collectors,
+simulated disconnect recovery and ordering preserved through reconnect.
+Lint: zero errors, 13 warnings (toolchain/dependency freshness, extraction
+rules, missing icon and target API). This is not release certification.
+APK/evidence digests matched GitHub; APK archive/manifest/DEX checked and native
+offline screenshot visually inspected. The am-start emulator cold-launch result
+was 3419 ms; it is not phone startup, frame-rate or live-data latency evidence.
+A repeated direct production runtime check still returned outside operating
+hours, so a real current quote/SSE session remains pending. No override used.

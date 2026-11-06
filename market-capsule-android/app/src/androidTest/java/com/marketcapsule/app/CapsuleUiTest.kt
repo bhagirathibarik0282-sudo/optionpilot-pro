@@ -3,6 +3,7 @@ package com.marketcapsule.app
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -48,11 +49,16 @@ class CapsuleUiTest {
         ui.onNodeWithText("Market Capsule").assertIsDisplayed()
         ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Multi-expiry ATM ladder"))
         ui.onNodeWithText("Multi-expiry ATM ladder").assertIsDisplayed()
+        val deskOffset = ui.onNodeWithTag("screen-content").fetchSemanticsNode()
+            .config[SemanticsProperties.VerticalScrollAxisRange].value()
         ui.onNodeWithTag("tab-MEMORY").performClick()
         ui.onNodeWithText("Market Capsule").assertIsDisplayed()
         ui.onNodeWithTag("tab-TODAY").performClick()
         ui.onNodeWithText("Source coverage").assertIsDisplayed()
         ui.onNodeWithTag("tab-DESK").performClick()
+        val restoredOffset = ui.onNodeWithTag("screen-content").fetchSemanticsNode()
+            .config[SemanticsProperties.VerticalScrollAxisRange].value()
+        assertEquals("Live Desk scroll offset changed after returning", deskOffset, restoredOffset, 0.000001f)
         ui.onNodeWithText("Multi-expiry ATM ladder").assertIsDisplayed()
     }
     @Test fun indexSwitchNeverReusesOtherIndexPrice() {

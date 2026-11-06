@@ -76,7 +76,8 @@ class MainActivity : ComponentActivity() {
     val deskScroll = rememberLazyListState()
     val memoryScroll = rememberLazyListState()
     val projectScroll = rememberLazyListState()
-    val pageScroll = when (page) {
+    val displayedPage = page
+    val pageScroll = when (displayedPage) {
         Page.TODAY -> todayScroll
         Page.DESK -> deskScroll
         Page.MEMORY -> memoryScroll
@@ -95,7 +96,7 @@ class MainActivity : ComponentActivity() {
         }
     }) { padding ->
         // A separate composition also isolates LazyColumn key/anchor bookkeeping.
-        key(page) {
+        key(displayedPage) {
         LazyColumn(state = pageScroll, modifier = Modifier.testTag("screen-content").fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
@@ -108,7 +109,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
                 }
             }
-            if (page == Page.TODAY || page == Page.DESK) {
+            if (displayedPage == Page.TODAY || displayedPage == Page.DESK) {
                 item { QuoteCard(state) }
                 item {
                     Button(onClick = onRefresh, enabled = !state.loading && !state.updatesWanted, modifier = Modifier.testTag("refresh").fillMaxWidth()) {
@@ -127,7 +128,7 @@ class MainActivity : ComponentActivity() {
                         color = Muted, style = MaterialTheme.typography.labelSmall)
                 }
             }
-            when(page) {
+            when(displayedPage) {
                 Page.TODAY -> {
                     item { Section("What changed · verified observation") {
                         val quote = state.quote

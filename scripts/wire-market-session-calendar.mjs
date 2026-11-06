@@ -7,8 +7,9 @@ let server = fs.readFileSync(serverFile, "utf8");
 const original = server;
 
 function replaceOnce(source, from, to, label) {
+  // Every replacement retains some source anchors; detect completed wiring first.
+  if (source.includes(to)) return source;
   const count = source.split(from).length - 1;
-  if (count === 0 && source.includes(to)) return source;
   if (count !== 1) throw new Error(`${label}: expected exactly 1 source occurrence, found ${count}`);
   return source.replace(from, to);
 }
@@ -102,6 +103,16 @@ server = replaceOnce(
   'app.get("/api/holidays", (c) => {\n  return c.json(INDIAN_EQUITY_TRADING_HOLIDAYS_2026);\n});',
   "holiday endpoint",
 );
+
+// Refuse a runtime copy already corrupted by the old non-idempotent writer.
+// A clean deployment must start from the repository source; never hide duplicates.
+for (const [marker, label] of [
+  ['const calendarPhase = indianEquityMarketPhaseAt(now);', 'calendar truth declaration'],
+  ['} from "./market-session-calendar.js";', 'calendar import'],
+]) {
+  const count = server.split(marker).length - 1;
+  if (count !== 1) throw new Error(`${label}: expected exactly one completed guard, found ${count}`);
+}
 
 if (checkOnly) {
   console.log(server === original ? "market session calendar wiring already applied" : "market session calendar wiring check passed");

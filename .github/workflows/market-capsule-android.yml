@@ -5,6 +5,7 @@ on:
     branches: ['feature/market-capsule-android']
     paths:
       - 'market-capsule-android/**'
+      - '!market-capsule-android/docs/**'
       - '.github/workflows/market-capsule-android.yml'
   workflow_dispatch:
     inputs:
@@ -49,7 +50,7 @@ jobs:
         if: contains(github.event.head_commit.message, '[apk-audit]') || inputs.deep_apk_audit == true
         run: ./scripts/audit-old-parser.sh
       - name: Unit tests, lint and package app and instrumented tests
-        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:processReleaseMainManifest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
       - name: Inspect original and corrected APK signatures and manifests
         env:
           GH_TOKEN: ${{ github.token }}

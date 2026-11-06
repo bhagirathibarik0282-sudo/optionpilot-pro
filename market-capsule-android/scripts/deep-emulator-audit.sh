@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 out=app/build/emulator-evidence
+./scripts/enforce-offline.sh before-cache
 # Synthetic private-cache fixture is in androidTest only, never in the deliverable APK.
 adb shell run-as com.marketcapsule.app mkdir -p files
 adb shell "run-as com.marketcapsule.app sh -c 'cat > files/last-market-snapshot.json'" < app/src/androidTest/assets/audit-cache.json
@@ -12,6 +13,7 @@ adb shell am force-stop com.marketcapsule.app
 adb shell am start -W -n com.marketcapsule.app/.MainActivity > "$out/cache-restart-launch.txt"
 sleep 2
 adb shell pidof com.marketcapsule.app > "$out/cache-restart-pid.txt"
+./scripts/enforce-offline.sh cache-restart
 adb shell uiautomator dump /sdcard/capsule-cache.xml
 adb pull /sdcard/capsule-cache.xml "$out/cache-restart.xml"
 python3 - <<'PY'
@@ -28,6 +30,7 @@ adb exec-out screencap -p > "$out/cache-restart-SYNTHETIC.png"
 # Clean data before normal UI/large-font captures; no synthetic prices are delivered as live.
 adb shell pm clear com.marketcapsule.app
 adb shell settings put system font_scale 1.5
+./scripts/enforce-offline.sh large-font
 adb shell am start -W -n com.marketcapsule.app/.MainActivity > "$out/large-font-launch.txt"
 sleep 2
 adb exec-out screencap -p > "$out/large-font-top.png"
@@ -53,6 +56,7 @@ adb exec-out screencap -p > "$out/large-font-controls.png"
 adb shell settings put system font_scale 1.0
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
+./scripts/enforce-offline.sh landscape
 adb shell am force-stop com.marketcapsule.app
 adb shell am start -W -n com.marketcapsule.app/.MainActivity > "$out/landscape-launch.txt"
 sleep 2

@@ -26,8 +26,7 @@ adb shell settings put global transition_animation_scale 0
 adb shell settings put global animator_duration_scale 0
 adb shell input keyevent 82
 # Offline by construction: no broker, production endpoint or credentials in this test.
-adb shell svc wifi disable
-adb shell svc data disable
+./scripts/enforce-offline.sh before-original
 if [[ "${DEEP_APK_AUDIT:-false}" == true ]]; then
 # Audit the exact already-delivered 0.1.3 binary before installing corrected tests.
 timeout 30 adb install -r "$RUNNER_TEMP/capsule-original-013/app-debug.apk"
@@ -42,8 +41,10 @@ adb shell pidof com.marketcapsule.app > app/build/emulator-evidence/original-013
 fi
 ./gradlew --no-daemon :app:connectedDebugAndroidTest --stacktrace
 # connectedDebugAndroidTest removes its installed APKs after the suite.
+./scripts/enforce-offline.sh after-instrumentation
 timeout 30 adb install -r app/build/outputs/apk/debug/app-debug.apk
 if [[ "${DEEP_APK_AUDIT:-false}" == true ]]; then ./scripts/deep-emulator-audit.sh; fi
+./scripts/enforce-offline.sh final-launch
 timeout 15 adb shell pm clear com.marketcapsule.app
 timeout 30 adb shell am start -W -n com.marketcapsule.app/.MainActivity > app/build/emulator-evidence/cold-launch.txt
 sleep 3

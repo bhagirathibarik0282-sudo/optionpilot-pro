@@ -29,7 +29,9 @@ adb shell input keyevent 82
 adb shell svc wifi disable
 adb shell svc data disable
 ./gradlew --no-daemon :app:connectedDebugAndroidTest --stacktrace
-adb shell pm clear com.marketcapsule.app
-adb shell am start -W -n com.marketcapsule.app/.MainActivity > app/build/emulator-evidence/cold-launch.txt
+# connectedDebugAndroidTest removes its installed APKs after the suite.
+timeout 30 adb install -r app/build/outputs/apk/debug/app-debug.apk
+timeout 15 adb shell pm clear com.marketcapsule.app
+timeout 30 adb shell am start -W -n com.marketcapsule.app/.MainActivity > app/build/emulator-evidence/cold-launch.txt
 sleep 3
 adb exec-out screencap -p > app/build/emulator-evidence/offline-launch.png

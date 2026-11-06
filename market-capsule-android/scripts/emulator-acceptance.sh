@@ -8,11 +8,11 @@ export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
 sudo chmod a+rw /dev/kvm
 printf 'no\n' | "$avdmanager" create avd --force --name capsule-ci --package 'system-images;android-35;google_apis;x86_64' --device pixel_2
 "$ANDROID_HOME/emulator/emulator" -avd capsule-ci -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader -memory 2048 > app/build/emulator-evidence/emulator.log 2>&1 &
-trap 'adb logcat -d > app/build/emulator-evidence/logcat.txt || true; adb emu kill || true' EXIT
+trap 'timeout 10 adb logcat -d > app/build/emulator-evidence/logcat.txt || true; timeout 10 adb emu kill || true' EXIT
 timeout 180 adb wait-for-device
 booted=false
 for attempt in $(seq 1 90); do
-  if [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == '1' ]]; then booted=true; break; fi
+  if [[ "$(timeout 5 adb shell getprop sys.boot_completed | tr -d '\r')" == '1' ]]; then booted=true; break; fi
   sleep 2
 done
 [[ "$booted" == true ]]

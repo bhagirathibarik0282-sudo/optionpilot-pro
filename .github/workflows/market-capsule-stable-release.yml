@@ -5,10 +5,6 @@ name: Market Capsule Stable APK (owner-approved)
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Exact unique tag, e.g. capsule-v0.1.7 (must match APK versionName)'
-        type: string
-        required: true
       publish:
         description: 'Explicitly publish a PUBLIC GitHub release with this signed APK'
         type: boolean
@@ -38,13 +34,11 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Validate release intent and unique tag
+      - name: Validate source version and unique release tag
         id: release_intent
-        env:
-          RAW_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          TAG="$(python3 ../scripts/market-capsule-release/normalize_tag.py "$RAW_TAG")"
+          TAG="$(python3 ../scripts/market-capsule-release/derive_tag.py app/build.gradle.kts)"
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
             echo 'RELEASE_TAG_ALREADY_EXISTS'; exit 1
           fi

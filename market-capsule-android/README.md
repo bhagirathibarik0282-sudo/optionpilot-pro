@@ -1,6 +1,6 @@
-# Market Capsule — Android foundation 0.1
+# Market Capsule — Android foundation 0.1.1
 
-Highest-priority OptionPilot project. This is **native Android source**, not the existing dashboard wrapped in a WebView. It is **not a compiled/tested APK** and not a completed super app.
+Highest-priority OptionPilot project. This is **native Android source**, not the existing dashboard wrapped in a WebView. The 0.1 debug APK compiled and passed nine unit tests plus lint in GitHub run 42081701401. It remains a test foundation, not a completed super app or a Play release.
 
 ## Implemented in source
 
@@ -37,8 +37,9 @@ Build checks required in an Android-capable environment:
 
 - XML resources/manifest parse, Gradle/source layout and endpoint reference inspection.
 - Package and manifest identity consistency, bounded network reads, no mutation endpoints or secret configuration.
-- Nine JVM test cases are provided but **not executed**.
-- Compilation/device tests are **blocked**: this workspace has JDK 17 but no Android SDK or Gradle. Downloading the Gradle distribution was blocked by the current network route. No APK or build success is claimed.
+- Nine JVM tests, Android lint and debug APK packaging passed in GitHub run 42081701401. Lint warnings remain; this is not release certification.
+- Six instrumented Android tests now cover offline native activity launch and isolated UI states. See docs/PROJECT-STATUS.md for the exact accepted run and scope.
+- Physical-device performance, real cache restart and authenticated production data remain pending.
 
 ## Integration evidence
 
@@ -48,7 +49,7 @@ The server may reject private reads until proper mobile authentication is added.
 
 ## Next concrete milestone
 
-Compile and execute the supplied tests in an Android toolchain, then prove local launch plus one authenticated production NIFTY snapshot on the user's phone. Do not add broad features or enable trading before that slice works.
+Accept offline emulator launch and UI states, then prove one authenticated production NIFTY snapshot and usability on the user's phone. Do not add broad features or enable trading before that slice works.
 
 ## GitHub build
 

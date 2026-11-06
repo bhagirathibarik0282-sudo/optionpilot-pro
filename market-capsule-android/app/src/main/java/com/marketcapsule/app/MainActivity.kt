@@ -94,6 +94,8 @@ class MainActivity : ComponentActivity() {
                 }) }
         }
     }) { padding ->
+        // A separate composition also isolates LazyColumn key/anchor bookkeeping.
+        key(page) {
         LazyColumn(state = pageScroll, modifier = Modifier.testTag("screen-content").fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
@@ -270,6 +272,7 @@ class MainActivity : ComponentActivity() {
                     } }
                 }
             }
+        }
         }
     }
 }

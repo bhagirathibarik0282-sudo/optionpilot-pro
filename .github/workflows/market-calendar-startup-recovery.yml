@@ -1,0 +1,36 @@
+name: Market Calendar Startup Recovery CI
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/wire-market-session-calendar.mjs'
+      - 'test/market-session-calendar.test.ts'
+      - '.github/workflows/market-calendar-startup-recovery.yml'
+      - 'server.ts'
+      - 'package.json'
+  workflow_dispatch:
+
+jobs:
+  restart-and-parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Focused market calendar regression
+        run: NODE_ENV=test node --import tsx --test test/market-session-calendar.test.ts
+      - name: First full startup preparation
+        run: npm run start:prepare
+      - name: Verify first startup can compile
+        run: |
+          node --input-type=module -e 'import { transformSync } from "esbuild"; import { readFileSync } from "node:fs"; transformSync(readFileSync("server.ts","utf8"), {loader:"ts", format:"esm"});'
+          sha256sum server.ts > /tmp/server-first.sha256
+      - name: Verify repeated preparation makes no source changes
+        run: |
+          npm run start:prepare
+          sha256sum -c /tmp/server-first.sha256
+          node --input-type=module -e 'import { transformSync } from "esbuild"; import { readFileSync } from "node:fs"; transformSync(readFileSync("server.ts","utf8"), {loader:"ts", format:"esm"});'

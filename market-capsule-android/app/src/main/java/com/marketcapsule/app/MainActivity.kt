@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("FOUNDATION 0.1.3 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("FOUNDATION 0.1.4 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
@@ -161,7 +161,7 @@ class MainActivity : ComponentActivity() {
             Text("Delivery age budget: ${state.deliveryAgeMs / 1000.0}s · conservative, not exact feed latency", color = Muted,
                 style = MaterialTheme.typography.bodySmall)
         }
-        Text("Broker source age at server snapshot: ${state.quote?.sourceAgeMs?.let { "${it / 1000.0}s" } ?: "Unknown"}", color = Muted)
+        Text("Quote age at server snapshot: ${state.quote?.sourceAgeMs?.let { "${it / 1000.0}s" } ?: "Unknown"}", color = Muted)
     }
 }
 @Composable private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {

@@ -10,8 +10,8 @@ android {
         applicationId = "com.marketcapsule.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3-updates"
+        versionCode = 5
+        versionName = "0.1.4-audited"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }

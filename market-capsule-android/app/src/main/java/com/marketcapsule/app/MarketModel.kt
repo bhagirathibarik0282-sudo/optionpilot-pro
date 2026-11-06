@@ -2,6 +2,8 @@ package com.marketcapsule.app
 
 import org.json.JSONObject
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 internal const val QUOTE_MAX_AGE_MS = 30_000L
 internal const val RESPONSE_MAX_AGE_MS = 5_000L
@@ -76,10 +78,12 @@ internal object SnapshotParser {
         val connected = root.opt("connected") == true
         val array = snap.optJSONArray("indices") ?: error("MISSING_INDICES")
         val quotes = mutableMapOf<MarketIndex, Quote>()
+        val seen = mutableSetOf<MarketIndex>()
+        val serverDate = server.atZone(ZoneId.of("Asia/Kolkata")).toLocalDate()
         for (i in 0 until array.length()) {
             val row = array.optJSONObject(i) ?: continue
             val symbol = MarketIndex.entries.find { it.name == row.optString("symbol") } ?: continue
-            require(!quotes.containsKey(symbol)) { "DUPLICATE_INDEX" }
+            require(seen.add(symbol)) { "DUPLICATE_INDEX" }
             val spot = row.optJSONObject("spot") ?: continue
             val identity = spot.optJSONObject("identity") ?: continue
             require(identity.optString("symbol") == symbol.name && identity.optString("role") == "SPOT") { "WRONG_SPOT_IDENTITY" }
@@ -88,13 +92,16 @@ internal object SnapshotParser {
             val age = instant(observed)?.let { java.time.Duration.between(it, server).toMillis() }
             val receiptAge = instant(received)?.let { java.time.Duration.between(it, server).toMillis() }
             val eligible = connected && spot.optString("state") == "LIVE" && age != null && age in -5_000..QUOTE_MAX_AGE_MS &&
-                receiptAge != null && receiptAge in 0..QUOTE_MAX_AGE_MS
-            val expiry = text(row, "expiry")
+                receiptAge != null && receiptAge in 0..QUOTE_MAX_AGE_MS && age + 5_000 >= receiptAge
+            val expiry = text(row, "expiry")?.takeIf { value ->
+                runCatching { LocalDate.parse(value).let { it.toString() == value && it >= serverDate } }.getOrDefault(false)
+            }
             val strike = positive(row, "strike")
             fun legAge(side: String): Long? {
                 val leg = row.optJSONObject(side.lowercase()) ?: return null
-                return instant(text(leg, "observedAt"))
-                    ?.let { java.time.Duration.between(it, server).toMillis().coerceAtLeast(0) }
+                val observedAge = instant(text(leg, "observedAt"))?.let { java.time.Duration.between(it, server).toMillis() }
+                val receivedAge = instant(text(leg, "receivedAt"))?.let { java.time.Duration.between(it, server).toMillis() }
+                return if (observedAge == null || receivedAge == null) null else maxOf(0, observedAge, receivedAge)
             }
             fun option(side: String): Double? {
                 val q = row.optJSONObject(side.lowercase()) ?: return null
@@ -104,12 +111,12 @@ internal object SnapshotParser {
                 if (!eligible || expiry == null || strike == null || q.optString("state") != "LIVE" ||
                     id.optString("symbol") != symbol.name || id.optString("role") != "OPTION" ||
                     id.optString("side") != side || id.optString("expiry") != expiry || number(id, "strike") != strike ||
-                    optionAge == null || optionAge !in -5_000..QUOTE_MAX_AGE_MS || optionReceiptAge == null || optionReceiptAge !in 0..QUOTE_MAX_AGE_MS) return null
+                    optionAge == null || optionAge !in -5_000..QUOTE_MAX_AGE_MS || optionReceiptAge == null || optionReceiptAge !in 0..QUOTE_MAX_AGE_MS || optionAge + 5_000 < optionReceiptAge) return null
                 return positive(q, "price")
             }
             quotes[symbol] = Quote(symbol, if (eligible) positive(spot, "price") else null,
                 if (eligible) number(spot, "changePct") else null, observed, received,
-                age?.coerceAtLeast(0), if (eligible) "LIVE" else "STALE", expiry, strike, option("CE"), option("PE"), legAge("CE"), legAge("PE"))
+                if (age == null || receiptAge == null) null else maxOf(0, age, receiptAge), if (eligible) "LIVE" else "STALE", expiry, strike, option("CE"), option("PE"), legAge("CE"), legAge("PE"))
         }
         return MarketSnapshot(runtime, seq.toLong(), serverText, connected, root.optString("connectionState", "UNKNOWN"), quotes)
     }

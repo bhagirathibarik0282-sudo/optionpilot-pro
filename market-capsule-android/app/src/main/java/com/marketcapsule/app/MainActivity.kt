@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Home
@@ -70,6 +71,17 @@ class MainActivity : ComponentActivity() {
 }
 @Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}, onLoadStrikes: (MarketIndex, String) -> Unit = { _, _ -> }, onKiteLogin: () -> Unit = {}) {
     var page by rememberSaveable { mutableStateOf(Page.TODAY) }
+    // Each destination owns its position; a long ladder must not scroll another tab.
+    val todayScroll = rememberLazyListState()
+    val deskScroll = rememberLazyListState()
+    val memoryScroll = rememberLazyListState()
+    val projectScroll = rememberLazyListState()
+    val pageScroll = when (page) {
+        Page.TODAY -> todayScroll
+        Page.DESK -> deskScroll
+        Page.MEMORY -> memoryScroll
+        Page.PROJECT -> projectScroll
+    }
     // Persist selection through frame updates but reset on an index change.
     var expiryChoice by rememberSaveable(state.selected.name) { mutableStateOf("ALL") }
     var strikeBand by rememberSaveable { mutableIntStateOf(3) }
@@ -82,7 +94,7 @@ class MainActivity : ComponentActivity() {
                 }) }
         }
     }) { padding ->
-        LazyColumn(modifier = Modifier.testTag("screen-content").fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp),
+        LazyColumn(state = pageScroll, modifier = Modifier.testTag("screen-content").fillMaxSize().padding(padding), contentPadding = PaddingValues(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
@@ -201,8 +213,15 @@ class MainActivity : ComponentActivity() {
                             if (visible.isEmpty()) {
                                 Text("ATM reference is unavailable in the returned exact strikes; no substitute.", color = Muted)
                             } else {
-                                Text("CE premium               STRIKE               PE premium",
-                                    color = Muted, style = MaterialTheme.typography.labelSmall)
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 3.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("CE premium", modifier = Modifier.weight(1f), color = Muted,
+                                        style = MaterialTheme.typography.labelSmall)
+                                    Text("STRIKE", modifier = Modifier.weight(1.04f), textAlign = TextAlign.Center,
+                                        color = Muted, style = MaterialTheme.typography.labelSmall)
+                                    Text("PE premium", modifier = Modifier.weight(1f), textAlign = TextAlign.End,
+                                        color = Muted, style = MaterialTheme.typography.labelSmall)
+                                }
                                 visible.forEach { row ->
                                     val atm = row.strike == reference
                                     Row(Modifier.fillMaxWidth().background(if (atm) Navy else Panel, RoundedCornerShape(6.dp))

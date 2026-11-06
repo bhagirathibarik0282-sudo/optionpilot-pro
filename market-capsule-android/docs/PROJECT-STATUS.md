@@ -97,3 +97,17 @@ No Railway deployment, PR, merge, new infrastructure, login bypass or order chan
 ## Foreground updates accepted in tests — 0.1.3
 
 Full workflow 42148706936 SUCCESS for source 68ea29b4dd482e39b1510fd844fcfc62a7ab20cd. 23 unit + 12 Android tests passed, zero failures/errors/skips; APK/offline capture verified. Details and bounds are in UPDATES-ACCEPTANCE.md. Production runtime remained outside hours. Start updates is OFF by default; real-feed/phone acceptance remains pending. No PR, merge, Railway infrastructure/deployment or order changes.
+
+## Native navigation usability candidate — 6 November 2026
+
+Each bottom destination now owns an independently saved list position. Reading a
+long Live Desk no longer carries its offset into Today, Memory or Project; returning
+to a destination restores its own reading position. The strike-ladder header uses
+the same weighted columns as its price rows instead of spacing with literal spaces,
+so alignment follows available screen width and font sizing.
+
+An instrumented regression covers scrolling Today and Live Desk, opening Memory
+at the top, and returning to each prior position. These changes are source-ready;
+Android CI/emulator validation is required before delivery. Local Gradle bootstrap
+was blocked by unavailable network access to the distribution host. No new APK,
+phone smoothness, live-market or production-readiness acceptance is claimed here.

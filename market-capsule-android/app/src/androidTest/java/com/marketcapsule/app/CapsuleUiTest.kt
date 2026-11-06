@@ -40,6 +40,21 @@ class CapsuleUiTest {
         ui.onNodeWithTag("tab-TODAY").performClick()
         ui.onNodeWithText("NO ELIGIBLE READING").assertIsDisplayed()
     }
+    @Test fun tabSwitchPreservesIndependentScrollPositions() {
+        ui.setContent { MaterialTheme { CapsuleScreen(MarketUiState(), {}, {}) } }
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Source coverage"))
+        ui.onNodeWithText("Source coverage").assertIsDisplayed()
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithText("Market Capsule").assertIsDisplayed()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Multi-expiry ATM ladder"))
+        ui.onNodeWithText("Multi-expiry ATM ladder").assertIsDisplayed()
+        ui.onNodeWithTag("tab-MEMORY").performClick()
+        ui.onNodeWithText("Market Capsule").assertIsDisplayed()
+        ui.onNodeWithTag("tab-TODAY").performClick()
+        ui.onNodeWithText("Source coverage").assertIsDisplayed()
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithText("Multi-expiry ATM ladder").assertIsDisplayed()
+    }
     @Test fun indexSwitchNeverReusesOtherIndexPrice() {
         val state = mutableStateOf(MarketUiState(current = snapshot(), receivedElapsedMs = 0))
         ui.setContent { MaterialTheme { CapsuleScreen(state.value, { state.value = state.value.copy(selected = it) }, {}) } }

@@ -1,6 +1,7 @@
 package com.marketcapsule.app
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.AtomicFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,13 +27,21 @@ internal class MarketRepository(context: Context) {
     suspend fun loadSaved(): MarketSnapshot? = withContext(Dispatchers.IO) {
         try { SnapshotParser.parse(cache.openRead().use { readBounded(it) }) } catch (_: Exception) { null }
     }
-    suspend fun fetch(): Pair<MarketSnapshot, String> {
+    suspend fun fetch(): FetchedSnapshot {
         val runtimeRaw = get("/ops/runtime-status")
         val runtime = withContext(Dispatchers.Default) { JSONObject(runtimeRaw) }
         if (runtime.opt("shouldRun") != true) error("OUTSIDE_OPERATING_HOURS")
         if (runtime.opt("ready") != true) error("RUNTIME_STARTING")
+        val requestWall = System.currentTimeMillis()
+        val requestElapsed = SystemClock.elapsedRealtime()
         val raw = get("/api/research/dashboard-live")
-        return withContext(Dispatchers.Default) { SnapshotParser.parse(raw) } to raw
+        return withContext(Dispatchers.Default) {
+            val snapshot = SnapshotParser.parse(raw)
+            val received = SystemClock.elapsedRealtime()
+            val requestMs = received - requestElapsed
+            val budget = SnapshotDelivery.ageBudget(snapshot.serverTime, requestWall + requestMs, requestMs)
+            FetchedSnapshot(snapshot, raw, received, budget, requestMs)
+        }
     }
     suspend fun save(raw: String) = withContext(Dispatchers.IO) {
         var stream: java.io.FileOutputStream? = null

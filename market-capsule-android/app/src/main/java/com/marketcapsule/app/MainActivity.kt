@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("FOUNDATION 0.1.1 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("FOUNDATION 0.1.2 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
@@ -108,9 +108,9 @@ class MainActivity : ComponentActivity() {
                     val quote = state.quote
                     val elapsed = state.receivedElapsedMs?.let { (state.currentElapsedMs - it).coerceAtLeast(0) }
                     val ceEligible = state.status == ReadingStatus.RECENT_SNAPSHOT && elapsed != null &&
-                        quote?.ceAgeMs?.let { it + elapsed <= QUOTE_MAX_AGE_MS } == true
+                        quote?.ceAgeMs?.let { it + elapsed + state.deliveryAgeMs <= QUOTE_MAX_AGE_MS } == true
                     val peEligible = state.status == ReadingStatus.RECENT_SNAPSHOT && elapsed != null &&
-                        quote?.peAgeMs?.let { it + elapsed <= QUOTE_MAX_AGE_MS } == true
+                        quote?.peAgeMs?.let { it + elapsed + state.deliveryAgeMs <= QUOTE_MAX_AGE_MS } == true
                     Text("Expiry: ${quote?.expiry ?: "Unavailable"} · Strike: ${format(quote?.strike)}")
                     Text("CE: ₹${format(if(ceEligible) quote?.cePrice else null)}")
                     Text("PE: ₹${format(if(peEligible) quote?.pePrice else null)}")
@@ -126,7 +126,7 @@ class MainActivity : ComponentActivity() {
                 } }
                 Page.PROJECT -> {
                     item { Section("Highest priority: usable app first") {
-                        Text("1. Independent UI and honest snapshot states\n2. Mobile authentication and reconnecting SSE\n3. Capsule evidence, premium ladder and same-app replay\n4. AI questions and notifications\n5. Manual Buy/Sell only in a later verified phase")
+                        Text("1. Independent UI and honest snapshot states\n2. Verify read access and reconnecting SSE\n3. Capsule evidence, premium ladder and same-app replay\n4. AI questions and notifications\n5. Manual Buy/Sell only in a later verified phase")
                     } }
                     item { Section("REA's role") {
                         Text("Optional investigation and verification of browser behavior, scripts and captures.")
@@ -151,7 +151,12 @@ class MainActivity : ComponentActivity() {
         if(change != null) Text("${signed(change)}% vs previous close", color = if(change >= 0) Up else Down)
         Text("Source time: ${at(state.quote?.observedAt)}", color = Muted)
         Text("Server time: ${at(state.current?.serverTime)}", color = Muted)
-        Text("Broker source age at response: ${state.quote?.sourceAgeMs?.let { "${it / 1000.0}s" } ?: "Unknown"}", color = Muted)
+        state.snapshotRequestMs?.let {
+            Text("Snapshot fetch + decode: ${it / 1000.0}s", color = Muted)
+            Text("Delivery age budget: ${state.deliveryAgeMs / 1000.0}s · conservative, not exact feed latency", color = Muted,
+                style = MaterialTheme.typography.bodySmall)
+        }
+        Text("Broker source age at server snapshot: ${state.quote?.sourceAgeMs?.let { "${it / 1000.0}s" } ?: "Unknown"}", color = Muted)
     }
 }
 @Composable private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {

@@ -38,7 +38,9 @@ internal data class MarketUiState(
     val loading: Boolean = false,
     val message: String = "Read-only foundation · Tap Refresh to request a snapshot.",
     val receivedElapsedMs: Long? = null,
-    val currentElapsedMs: Long = 0
+    val currentElapsedMs: Long = 0,
+    val deliveryAgeMs: Long = 0,
+    val snapshotRequestMs: Long? = null
 ) {
     val quote get() = current?.quotes?.get(selected)
     val savedQuote get() = saved?.quotes?.get(selected)
@@ -46,7 +48,7 @@ internal data class MarketUiState(
         val q = quote ?: return if (savedQuote?.price != null) ReadingStatus.CACHED else ReadingStatus.UNAVAILABLE
         val elapsed = receivedElapsedMs?.let { (currentElapsedMs - it).coerceAtLeast(0) }
         return if (current?.connected == true && q.state == "LIVE" && q.price != null && elapsed != null &&
-            elapsed <= RESPONSE_MAX_AGE_MS && q.sourceAgeMs != null && q.sourceAgeMs + elapsed <= QUOTE_MAX_AGE_MS
+            elapsed <= RESPONSE_MAX_AGE_MS && q.sourceAgeMs != null && q.sourceAgeMs + elapsed + deliveryAgeMs <= QUOTE_MAX_AGE_MS
         ) ReadingStatus.RECENT_SNAPSHOT else ReadingStatus.STALE
     }
 }
@@ -112,3 +114,23 @@ internal object SnapshotParser {
         return previous.runtimeId != next.runtimeId || next.sequence >= previous.sequence
     }
 }
+
+/** Conservative delivery budget, not a measurement of exchange-to-phone latency.
+ * A phone clock mismatch fails closed with an explicit message; cached observations
+ * bypass this current-response check and remain historical only.
+ */
+internal object SnapshotDelivery {
+    fun ageBudget(serverTime: String, receivedWallMs: Long, requestMs: Long): Long {
+        require(requestMs >= 0) { "INVALID_DELIVERY_TIMING" }
+        val serverLag = receivedWallMs - Instant.parse(serverTime).toEpochMilli()
+        require(serverLag in -5_000..QUOTE_MAX_AGE_MS) { "CLOCK_OR_STALE_RESPONSE" }
+        return maxOf(requestMs, serverLag.coerceAtLeast(0))
+    }
+}
+internal data class FetchedSnapshot(
+    val snapshot: MarketSnapshot,
+    val raw: String,
+    val receivedElapsedMs: Long,
+    val deliveryAgeMs: Long,
+    val requestMs: Long
+)

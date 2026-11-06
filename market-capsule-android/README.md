@@ -1,4 +1,4 @@
-# Market Capsule — Android foundation 0.1.1
+# Market Capsule — Android foundation 0.1.2
 
 Highest-priority OptionPilot project. This is **native Android source**, not the existing dashboard wrapped in a WebView. The 0.1 debug APK compiled and passed nine unit tests plus lint in GitHub run 42081701401. It remains a test foundation, not a completed super app or a Play release.
 
@@ -9,6 +9,7 @@ Highest-priority OptionPilot project. This is **native Android source**, not the
 - Existing runtime-status and market snapshot endpoint adapter; no broker/API secrets in the app.
 - Explicit no-data, outside-hours, network, authentication-required and viewer-limit handling.
 - Exact spot/option identity and timestamp checks; unavailable values remain null.
+- Conservative delivery-age budget, explicit old-envelope/phone-clock rejection, and independent option-leg aging.
 - Rejection of backwards responses; local elapsed-time expiry of recent-snapshot status.
 - Atomic private local snapshot cache; saved readings are shown only as saved, never live.
 - Pending features are labelled honestly. No fabricated news, AI answers, probabilities, orders or notifications.
@@ -54,3 +55,7 @@ Accept offline emulator launch and UI states, then prove one authenticated produ
 ## GitHub build
 
 The dedicated Market Capsule Android workflow runs on this feature branch and produces a test APK only after unit tests and lint pass. It has no production deployment or broker/order credentials. A debug APK is for testing and is not a Play release. Ephemeral debug signing may require uninstalling a previous debug build; stable release signing remains a later setup.
+
+## Connection audit
+
+See docs/CONNECTION-ACCEPTANCE.md. Inspected read-route source does not require browser Kite login. The current credential-free production observation is 503 OUTSIDE_OPERATING_HOURS, not authentication failure. In-window payload and private-release access policy are not yet accepted. Version 0.1.2 delivery-age tests are a new candidate and require their own passing CI evidence.

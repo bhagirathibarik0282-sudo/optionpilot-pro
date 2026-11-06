@@ -59,4 +59,18 @@ class CapsuleUiTest {
         ui.onNodeWithTag("refresh").performScrollTo().assertIsNotEnabled()
         ui.onNodeWithText("Requesting…").assertIsDisplayed()
     }
+    @Test fun delayedOptionLegIsHiddenEvenWhenSpotIsRecent() {
+        val original = snapshot()
+        val q = original.quotes.getValue(MarketIndex.NIFTY).copy(
+            expiry = "2026-11-09", strike = 24000.0, cePrice = 149.0, ceAgeMs = 29_000)
+        val state = MarketUiState(current = original.copy(quotes = mapOf(MarketIndex.NIFTY to q)),
+            receivedElapsedMs = 0, deliveryAgeMs = 2000)
+        ui.setContent { MaterialTheme { CapsuleScreen(state, {}, {}) } }
+        ui.onNodeWithText("RECENT SNAPSHOT — NOT A CONTINUOUS STREAM").assertIsDisplayed()
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasText("CE: ₹—"))
+        ui.onNodeWithText("CE: ₹—").assertIsDisplayed()
+        ui.onNodeWithText("CE: ₹149.00").assertDoesNotExist()
+    }
+
 }

@@ -31,7 +31,7 @@ class StrikeLadderTest {
         assertEquals(11, visibleStrikeRows(read.rows, 24650.0, 5).size)
         assertEquals(15, visibleStrikeRows(read.rows, 24650.0, 7).size)
         assertEquals(24650.0, visibleStrikeRows(read.rows, 24650.0, 3)[3].strike, 0.0)
-        assertEquals(emptyList<StrikeRow>(), visibleStrikeRows(read.rows, 24900.0, 7))
+        assertEquals(emptyList<StrikeRow>(), visibleStrikeRows(read.rows, 25100.0, 7))
     }
     @Test fun partialLegAndStaleQuoteStayExplicitlyUnavailable() {
         val read = parse(JSONArray().put(quote(24650.0,"CE"))

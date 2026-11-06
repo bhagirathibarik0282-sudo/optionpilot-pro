@@ -17,6 +17,12 @@ The backend must verify every protected HTTP request and SSE session. Use short-
 
 Initial permission is `MARKET_READ` only. Account/profile, broker login handoff, research, Telegram management, and future manual order placement require independent verified scopes and user confirmation. Server-side Kite brokerage credential renewal remains an independent login and must follow broker rules (often daily); OptionPilot owner login cannot automatically renew Kite tokens or grant order execution.
 
+## Kite Connect user-initiated browser handoff (Android 0.1.8 candidate)
+
+The native app now provides an explicit **Connect Kite · secure browser login** button on Today and Live Desk. Tapping opens the **existing** backend path `/api/kite/login` in the phone's browser with an HTTPS URL from the fixed OptionPilot host. The app does not know or embed the API key, API secret, request token or access token. The current server callback still returns to the web/dashboard flow; users should return to Android and refresh, not expect automatic deep-link return. The actual live Railway login endpoint and production broker persistence have **not** been verified end-to-end by this code change.
+
+This is **not the final owner-login architecture**. Before app-first migration, server-side account binding, CSRF/session checks, broker callback identity binding and fail-closed response behavior must be audited and tested. Broker access-token validity is short-lived and requires renewed legitimate Kite login; it does not replace owner app authentication. The build is release-gated by all Android CI/unit/emulator checks and real-phone acceptance. No Railway/Kite secrets or backend code are modified.
+
 ## Strict release sequencing
 
 1. **Access control first**: inventory dashboard's actual login mechanism; confirm whether all live REST/SSE/read-only research paths are protected upstream; design the isolated `/api/mobile/v1` interface. Write server unit/integration tests proving no-auth requests receive 401 without blocking the existing web dashboard. Do **not** enable new protection on live endpoints until authorized migration and rollback is tested.

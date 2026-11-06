@@ -16,6 +16,17 @@ class CapsuleUiTest {
             "2026-11-05T04:00:00Z", "2026-11-05T04:00:00Z", 0, "LIVE",
             null, null, null, null, null, null)))
 
+    @Test fun kiteLoginIsExplicitUserActionOnTodayAndDesk() {
+        var invocations = 0
+        ui.setContent { MaterialTheme { CapsuleScreen(MarketUiState(), {}, {}, {}, { _, _ -> },
+            onKiteLogin = { invocations++ }) } }
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("kite-connect"))
+        ui.onNodeWithTag("kite-connect").performClick()
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("kite-connect"))
+        ui.onNodeWithTag("kite-connect").performClick()
+        ui.runOnIdle { assertEquals(2, invocations) }
+    }
     @Test fun emptyScreenAndAllTabsRemainUsable() {
         ui.setContent { MaterialTheme { CapsuleScreen(MarketUiState(), {}, {}) } }
         ui.onNodeWithText("NO ELIGIBLE READING").assertIsDisplayed()

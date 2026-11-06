@@ -1,6 +1,9 @@
 package com.marketcapsule.app
 
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -54,9 +57,18 @@ class MainActivity : ComponentActivity() {
         vm.setForeground(true)
         onStopOrDispose { vm.setForeground(false) }
     }
-    CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted, vm::loadStrikes)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted, vm::loadStrikes) {
+        // User-initiated external browser only. The broker request token and API secret
+        // must be exchanged and stored by the already-existing server callback.
+        val route = Uri.parse(BASE_URL + "/api/kite/login")
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, route)) }
+            .onFailure {
+                Toast.makeText(context, "No browser available for Kite login", Toast.LENGTH_LONG).show()
+            }
+    }
 }
-@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}, onLoadStrikes: (MarketIndex, String) -> Unit = { _, _ -> }) {
+@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}, onLoadStrikes: (MarketIndex, String) -> Unit = { _, _ -> }, onKiteLogin: () -> Unit = {}) {
     var page by rememberSaveable { mutableStateOf(Page.TODAY) }
     // Persist selection through frame updates but reset on an index change.
     var expiryChoice by rememberSaveable(state.selected.name) { mutableStateOf("ALL") }
@@ -76,7 +88,7 @@ class MainActivity : ComponentActivity() {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("TEST 0.1.7 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("TEST 0.1.8 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
@@ -94,6 +106,11 @@ class MainActivity : ComponentActivity() {
                     }
                     Text(state.updatePhase.label, color = Gold, style = MaterialTheme.typography.labelMedium)
                     Text(state.message, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                    OutlinedButton(onClick = onKiteLogin, modifier = Modifier.fillMaxWidth().testTag("kite-connect")) {
+                        Text("Connect Kite · secure browser login")
+                    }
+                    Text("Zerodha login opens in your browser. Return to this app and refresh after login. The Kite access token is handled by the backend; it is never stored in the APK.",
+                        color = Muted, style = MaterialTheme.typography.labelSmall)
                 }
             }
             when(page) {

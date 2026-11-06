@@ -70,6 +70,25 @@ class ManualLifecycleTest {
         assertEquals(2L, vm.state.value.saved?.sequence)
     }
 
+    @Test fun foregroundReturnClearsPausedMessageWithoutFetchingOrInventingData() {
+        val source = Source()
+        val vm = create(source)
+        val initialMessage = vm.state.value.message
+        main { vm.setForeground(true) }
+        assertEquals(initialMessage, vm.state.value.message)
+        main { vm.setForeground(false) }
+        assertTrue(vm.state.value.message.contains("App paused in background"))
+        main { vm.setForeground(true) }
+        assertTrue(vm.state.value.message.startsWith("App active."))
+        assertFalse(vm.state.value.message.contains("App paused"))
+        assertEquals(0, source.calls.get())
+        assertNull(vm.state.value.current)
+        assertFalse(vm.state.value.updatesWanted)
+        main { vm.setForeground(false); vm.setForeground(true) }
+        assertTrue(vm.state.value.message.startsWith("App active."))
+        assertEquals(0, source.calls.get())
+    }
+
     @Test fun cancelledManualRequestClearsPendingStateAndCanRetry() {
         val source = Source().apply { block = true }
         val vm = create(source)

@@ -28,6 +28,7 @@ internal class MarketViewModel @JvmOverloads constructor(
     private var streamJob: Job? = null
     private var strikeJob: Job? = null
     private var foreground = false
+    private var wasBackgrounded = false
     private var watermark: MarketSnapshot? = null
     private var lastCacheElapsed: Long? = null
     init {
@@ -41,6 +42,7 @@ internal class MarketViewModel @JvmOverloads constructor(
         foreground = active
         ageJob?.cancel(); ageJob = null
         if (!active) {
+            wasBackgrounded = true
             refreshJob?.cancel()
             streamJob?.cancel()
             strikeJob?.cancel()
@@ -48,7 +50,11 @@ internal class MarketViewModel @JvmOverloads constructor(
                 "App paused in background. Saved readings remain historical.")
             return
         }
-        mutable.update { it.copy(currentElapsedMs = SystemClock.elapsedRealtime()) }
+        mutable.update { it.copy(currentElapsedMs = SystemClock.elapsedRealtime(),
+            message = if (wasBackgrounded && !it.updatesWanted)
+                "App active. Tap Refresh snapshot for a new reading. Saved readings remain historical."
+            else it.message) }
+        wasBackgrounded = false
         ageJob = viewModelScope.launch {
             while (true) {
                 delay(1000)

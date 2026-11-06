@@ -28,6 +28,7 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = "com.marketcapsule.app"
+        manifestPlaceholders["capsuleAppLabel"] = "Market Capsule"
         minSdk = 26
         targetSdk = 36
         versionCode = 8
@@ -46,6 +47,9 @@ android {
     }
     buildTypes {
         getByName("release") {
+            // Parallel-install the first permanent app; never overwrite ephemeral debug-signed APKs.
+            applicationIdSuffix = ".stable"
+            manifestPlaceholders["capsuleAppLabel"] = "Market Capsule Stable"
             // Without valid credentials Gradle may package an unsigned variant locally,
             // but any assembleRelease/bundleRelease command above fails closed first.
             if (releaseConfigured) {

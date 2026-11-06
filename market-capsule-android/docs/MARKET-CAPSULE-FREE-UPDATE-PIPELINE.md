@@ -16,43 +16,7 @@ The release label is **Market Capsule Stable**, to distinguish it from the exist
 - Owner explicitly dispatches **Market Capsule Stable APK (owner-approved)**, entering an exact tag and optional publish=true.
 - Job checks tests, Android emulator, release package ID, non-debuggable APK, exact version, `apksigner` and the expected stable signing certificate fingerprint. If any fail, **nothing is published**.
 - Owner-approved **public** GitHub Release publishes a single deterministic `Market-Capsule-Stable.apk` plus SHA-256 checksum. Public GitHub Release assets are public; do not use this flow for private/customer-sensitive binaries.
-- On Android install **Obtainium** once from its official source, add repository `https://github.com/bhagirathibarik0282-sudo/optionpilot-pro`, and set **Filter Release Titles by Regular Expression** to `^Market Capsule Stable capsule-v[0-9]+\.[0-9]+\.[0-9]+# Free Android updates — signed release pipeline + Obtainium
-
-**Decision:** No Play Console account and no pay-per-build service. Native Android Market Capsule remains the app. Free GitHub Releases + Obtainium are preferred to inventing a risky in-app APK installer.
-
-## Why the existing debug APK cannot just take new releases
-
-Previous CI APKs were signed by ephemeral debug certificates. Android enforces matching package ID and signer (or validated key rotation) for updates. The old signing *private key* is not recoverable from an APK. We must not promise an in-place update of these debug builds.
-
-**One-time safe migration:** Build a permanent, owner-key signed release using package ID `com.marketcapsule.app.stable`. It installs **alongside** the earlier debug ID `com.marketcapsule.app`; leave the working debug app installed until the new version passes real-phone checks. Saved data is separate between the two apps, not migrated automatically; the debug app has `allowBackup=false`. Once stable is trusted, remove the old one only if the owner chooses.
-
-The release label is **Market Capsule Stable**, to distinguish it from the existing debug icon. Its `versionCode` must increase for every subsequent stable version. The same signing keystore must be reused forever, backed up privately.
-
-## Architecture / experience
-
-- GitHub feature-branch development → existing unit/lint/emulator CI (no phone rollout per commit).
-- Owner explicitly dispatches **Market Capsule Stable APK (owner-approved)**, entering an exact tag and optional publish=true.
-- Job checks tests, Android emulator, release package ID, non-debuggable APK, exact version, `apksigner` and the expected stable signing certificate fingerprint. If any fail, **nothing is published**.
-- Owner-approved **public** GitHub Release publishes a single deterministic `Market-Capsule-Stable.apk` plus SHA-256 checksum. Public GitHub Release assets are public; do not use this flow for private/customer-sensitive binaries.
-- On Android install **Obtainium** once from its official source, add repository `https://github.com/bhagirathibarik0282-sudo/optionpilot-pro`, , and **Filter APKs by Regular Expression** to `^Market-Capsule-Stable\.apk# Free Android updates — signed release pipeline + Obtainium
-
-**Decision:** No Play Console account and no pay-per-build service. Native Android Market Capsule remains the app. Free GitHub Releases + Obtainium are preferred to inventing a risky in-app APK installer.
-
-## Why the existing debug APK cannot just take new releases
-
-Previous CI APKs were signed by ephemeral debug certificates. Android enforces matching package ID and signer (or validated key rotation) for updates. The old signing *private key* is not recoverable from an APK. We must not promise an in-place update of these debug builds.
-
-**One-time safe migration:** Build a permanent, owner-key signed release using package ID `com.marketcapsule.app.stable`. It installs **alongside** the earlier debug ID `com.marketcapsule.app`; leave the working debug app installed until the new version passes real-phone checks. Saved data is separate between the two apps, not migrated automatically; the debug app has `allowBackup=false`. Once stable is trusted, remove the old one only if the owner chooses.
-
-The release label is **Market Capsule Stable**, to distinguish it from the existing debug icon. Its `versionCode` must increase for every subsequent stable version. The same signing keystore must be reused forever, backed up privately.
-
-## Architecture / experience
-
-- GitHub feature-branch development → existing unit/lint/emulator CI (no phone rollout per commit).
-- Owner explicitly dispatches **Market Capsule Stable APK (owner-approved)**, entering an exact tag and optional publish=true.
-- Job checks tests, Android emulator, release package ID, non-debuggable APK, exact version, `apksigner` and the expected stable signing certificate fingerprint. If any fail, **nothing is published**.
-- Owner-approved **public** GitHub Release publishes a single deterministic `Market-Capsule-Stable.apk` plus SHA-256 checksum. Public GitHub Release assets are public; do not use this flow for private/customer-sensitive binaries.
-- On Android install **Obtainium** once from its official source, add repository `https://github.com/bhagirathibarik0282-sudo/optionpilot-pro`, . Turn **Verify Latest Tag** off in Obtainium, because GitHub's global latest release may belong to another component. Download the **first stable app via Obtainium**, not the old Actions debug artifact, so it can track future releases.
+- On Android install **Obtainium** once from its official source, add repository `https://github.com/bhagirathibarik0282-sudo/optionpilot-pro`, and set **Filter Release Titles by Regular Expression** to `^Market Capsule Stable capsule-v[0-9]+\.[0-9]+\.[0-9]+$` and **Filter APKs by Regular Expression** to `^Market-Capsule-Stable\.apk$`. Turn **Verify Latest Tag** off in Obtainium, because GitHub's global latest release may belong to another component. Download the **first stable app via Obtainium**, not the old Actions debug artifact, so it can track future releases.
 - Obtainium can monitor releases and install updates. Silent/background installation is **conditional** (Android version, package target, origin installer, user settings and one APK match), not a guarantee. The Android installer may still require approval; never claim an arbitrary APK can silently replace an existing package.
 - The app continues receiving current market quotes from the existing read-only service without APK updates; only genuine native-code release milestones get a new APK.
 
@@ -73,3 +37,16 @@ The release label is **Market Capsule Stable**, to distinguish it from the exist
 - The repository already has fail-closed `assembleRelease` signing. This pipeline does not create, know, or recover the owner's private key and cannot produce a signed stable APK until the owner configures the protected signing secrets.
 - Keep production Railway, broker tokens, order execution, dashboard and existing phone APK unchanged throughout preparation.
 - From 2027, Android developer verification expands globally; consider the **free Android Developer Console limited-distribution registration for up to 20 devices** if it suits the user's own-device use, independently of Play Console. Check current Google requirements before rollout.
+
+## Stable APK verification checkpoint
+
+The release policy now requires an exact versionName/tag match (no ignored suffix),
+a positive valid Android versionCode, one signer, v2 signature verification and the
+expected public certificate fingerprint. The helper consumes successful aapt and
+apksigner reports; it does not replace cryptographic APK verification. The workflow
+runs its synthetic regression suite before reading the owner's signing key.
+
+These checks do not establish a signed release, versionCode increase over a previous
+published APK, real-phone upgrade or data preservation. Owner signing configuration
+and actual consecutive-release phone acceptance are still required. Existing 0.1.9
+native code and its accepted APK are unchanged by this release-policy work.

@@ -1,0 +1,25 @@
+name: Market Capsule release policy checks
+
+on:
+  push:
+    branches: ['feature/market-capsule-android']
+    paths:
+      - 'scripts/market-capsule-release/**'
+      - '.github/workflows/market-capsule-release-checks.yml'
+      - '.github/workflows/market-capsule-stable-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Test release policy without private keys or publication
+        run: python3 -m unittest discover -s scripts/market-capsule-release -v

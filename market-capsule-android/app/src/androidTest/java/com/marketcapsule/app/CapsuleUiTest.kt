@@ -107,7 +107,7 @@ class CapsuleUiTest {
         ui.onNodeWithTag("tab-DESK").performClick()
         ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Expiry 2026-11-09"))
         ui.onNodeWithText("₹117.25").assertIsDisplayed()
-        ui.onNodeWithText("Unavailable / delayed").assertIsDisplayed()
+        ui.onNodeWithText("Unavailable / delayed").performScrollTo().assertIsDisplayed()
         ui.runOnIdle { state.value = state.value.copy(currentElapsedMs = 6000) }
         ui.onNodeWithText("₹117.25").assertDoesNotExist()
     }
@@ -138,11 +138,11 @@ class CapsuleUiTest {
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("expiry-filter-2026-11-16"))
         ui.onNodeWithTag("expiry-filter-2026-11-16").performClick()
         ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Expiry 2026-11-16"))
-        ui.onNodeWithText("₹222.00").assertIsDisplayed()
+        ui.onNodeWithText("₹222.00").performScrollTo().assertIsDisplayed()
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("expiry-filter-ALL"))
         ui.onNodeWithTag("expiry-filter-ALL").performClick()
         ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Expiry 2026-11-23"))
-        ui.onNodeWithText("₹333.00").assertIsDisplayed()
+        ui.onNodeWithText("₹333.00").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun strikeBandIsVerticalAndExplicitLoadUsesSelectedIndexAndExpiry() {

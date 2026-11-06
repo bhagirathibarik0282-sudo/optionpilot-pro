@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -53,12 +54,13 @@ class MainActivity : ComponentActivity() {
         vm.setForeground(true)
         onStopOrDispose { vm.setForeground(false) }
     }
-    CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted)
+    CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted, vm::loadStrikes)
 }
-@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}) {
+@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}, onLoadStrikes: (MarketIndex, String) -> Unit = { _, _ -> }) {
     var page by rememberSaveable { mutableStateOf(Page.TODAY) }
     // Persist selection through frame updates but reset on an index change.
     var expiryChoice by rememberSaveable(state.selected.name) { mutableStateOf("ALL") }
+    var strikeBand by rememberSaveable { mutableIntStateOf(3) }
     Scaffold(containerColor = Navy, bottomBar = {
         NavigationBar(containerColor = Panel) {
             Page.entries.forEach { item -> NavigationBarItem(modifier = Modifier.testTag("tab-${item.name}"), selected = page == item,
@@ -74,7 +76,7 @@ class MainActivity : ComponentActivity() {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("TEST 0.1.6 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("TEST 0.1.7 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
@@ -159,6 +161,55 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 } }
+                if (pairs.isNotEmpty()) item(key = "strike-ladder-panel-${state.selected}") {
+                    Section("CE | Strike | PE · on-demand ladder") {
+                        val target = if (availableChoice == "ALL") pairs.first().expiry else availableChoice
+                        val reference = pairs.firstOrNull { it.expiry == target }?.strike
+                        Text("Selected expiry: $target" + if (availableChoice == "ALL") " (nearest from All)" else "",
+                            color = Muted, style = MaterialTheme.typography.bodySmall)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            listOf(3, 5, 7).forEach { band ->
+                                FilterChip(selected = strikeBand == band, onClick = { strikeBand = band },
+                                    label = { Text("±$band") }, modifier = Modifier.weight(1f).testTag("strike-window-$band"))
+                            }
+                        }
+                        Button(onClick = { onLoadStrikes(state.selected, target) }, modifier = Modifier.fillMaxWidth().testTag("strike-load"),
+                            enabled = !state.strikeLoading && state.status == ReadingStatus.RECENT_SNAPSHOT && reference != null) {
+                            Text(if (state.strikeLoading) "Loading strikes…" else "Load strikes · read only")
+                        }
+                        val read = state.strikeLadder?.takeIf { it.index == state.selected && it.expiry == target &&
+                            it.runtimeId == state.current?.runtimeId }
+                        if (read != null) {
+                            val visible = visibleStrikeRows(read.rows, reference, strikeBand)
+                            if (visible.isEmpty()) {
+                                Text("ATM reference is unavailable in the returned exact strikes; no substitute.", color = Muted)
+                            } else {
+                                Text("CE premium               STRIKE               PE premium",
+                                    color = Muted, style = MaterialTheme.typography.labelSmall)
+                                visible.forEach { row ->
+                                    val atm = row.strike == reference
+                                    Row(Modifier.fillMaxWidth().background(if (atm) Navy else Panel, RoundedCornerShape(6.dp))
+                                        .padding(vertical = 5.dp, horizontal = 3.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("₹${format(if(read.isCurrent(state, row.ce)) row.ce?.price else null)}",
+                                            modifier = Modifier.weight(1f), textAlign = TextAlign.Start,
+                                            style = MaterialTheme.typography.bodySmall, color = Up)
+                                        Text(strikeText(row.strike) + if (atm) " ATM" else "",
+                                            modifier = Modifier.weight(1.04f), textAlign = TextAlign.Center,
+                                            style = MaterialTheme.typography.bodySmall, color = Gold)
+                                        Text("₹${format(if(read.isCurrent(state, row.pe)) row.pe?.price else null)}",
+                                            modifier = Modifier.weight(1f), textAlign = TextAlign.End,
+                                            style = MaterialTheme.typography.bodySmall, color = Down)
+                                    }
+                                }
+                                Text("Only the existing source's exact strikes are shown. — means delayed/missing. Prices expire; tap Load again to refresh.",
+                                    color = Muted, style = MaterialTheme.typography.labelSmall)
+                            }
+                        } else Text("No loaded ladder for this index and expiry.", color = Muted,
+                            style = MaterialTheme.typography.bodySmall)
+                        Text(state.strikeMessage, color = Muted, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
                 item { Text("ATM can change between snapshots. Compare the same strike and expiry when tracking a move. % is versus broker previous close.",
                     color = Muted, style = MaterialTheme.typography.bodySmall) }
                 }
@@ -223,6 +274,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+private fun strikeText(value: Double): String = NumberFormat.getNumberInstance(Locale.forLanguageTag("en-IN")).apply { maximumFractionDigits = 2 }.format(value)
 private fun shortExpiry(value: String): String = LocalDate.parse(value).format(DateTimeFormatter.ofPattern("dd MMM", Locale.ENGLISH))
 private fun format(value: Double?): String = value?.let { NumberFormat.getNumberInstance(Locale.forLanguageTag("en-IN")).apply {
     minimumFractionDigits = 2; maximumFractionDigits = 2

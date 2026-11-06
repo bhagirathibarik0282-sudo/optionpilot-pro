@@ -1,3 +1,11 @@
+## P2.2 candidate — source-verified read-only strike ladder (0.1.7)
+
+The separate native strike panel uses existing GET `/api/research/dashboard-live/premiums?view=ladder&nearby=7&symbol=<NIFTY|SENSEX>&expiries=<selected-date>`. The backend reads already subscribed Kite FULL in-memory tokens, not new Kite API calls or subscriptions. The user explicitly taps **Load strikes** for one expiry; no automatic polling, no extra stream, no persistence and no backend change.
+
+Each response is required to match exact index, expiry, OPTION side, current India trading date and market runtime; duplicates, oversized answers or cross-index/expiry rows fail closed. The selection is CE | Strike | PE in a vertical panel with ±3/±5/±7 widths. A missing actual ATM strike makes the panel unavailable instead of shifting to an invented anchor. Quote/receipt and phone elapsed age gates revoke stale premiums; missing legs display — and never imply an executable trade. NIFTY/SENSEX selection and feed/runtime disconnection revoke the displayed panel.
+
+No OI, PCR, wall, Greeks, replay or manual order authority is added by this phase. Unit/UI tests and real-phone installation remain release gates. The previously working 0.1.5 phone install remains untouched, and this candidate is not a Play release.
+
 ## Candidate — 0.1.6 expiry selection (unreleased)
 
 One native Live Desk feature only: an All (up to three source-reported ATM expiries) / exact-expiry selector in a two-column, vertically stacked chip grid. This uses only existing validated `atmExpiryLadder` pairs; no extra broker/backend requests and no guessed neighbouring strikes. Changing NIFTY/SENSEX resets the chosen expiry; invalidated expiries fall back to All. Independent premium freshness checks remain unchanged.

@@ -27,6 +27,7 @@ internal interface MarketSource {
     suspend fun save(raw: String): Boolean
     suspend fun ensureRuntime()
     fun updates(): Flow<FetchedSnapshot>
+    suspend fun fetchStrikes(index: MarketIndex, expiry: String): StrikeLadderRead = error("STRIKE_LADDER_UNAVAILABLE")
 }
 internal class MarketRepository(context: Context) : MarketSource {
     private val cache = AtomicFile(File(context.filesDir, "last-market-snapshot.json"))
@@ -47,6 +48,19 @@ internal class MarketRepository(context: Context) : MarketSource {
             val requestMs = received - requestElapsed
             val budget = SnapshotDelivery.ageBudget(snapshot.serverTime, requestWall + requestMs, requestMs)
             FetchedSnapshot(snapshot, raw, received, budget, requestMs)
+        }
+    }
+    override suspend fun fetchStrikes(index: MarketIndex, expiry: String): StrikeLadderRead {
+        require(Regex("\\d{4}-\\d{2}-\\d{2}").matches(expiry)) { "INVALID_EXPIRY" }
+        ensureRuntime()
+        val requestElapsed = SystemClock.elapsedRealtime()
+        val path = "/api/research/dashboard-live/premiums?view=ladder&nearby=7&symbol=${index.name}&expiries=$expiry"
+        val raw = get(path)
+        val receivedElapsed = SystemClock.elapsedRealtime()
+        val receivedWall = System.currentTimeMillis()
+        return withContext(Dispatchers.Default) {
+            StrikeLadderParser.parse(raw, index, expiry, receivedWall, receivedElapsed,
+                (receivedElapsed - requestElapsed).coerceAtLeast(0))
         }
     }
     override suspend fun ensureRuntime() {

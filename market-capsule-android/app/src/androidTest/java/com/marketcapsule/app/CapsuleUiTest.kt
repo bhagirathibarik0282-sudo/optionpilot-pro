@@ -133,4 +133,20 @@ class CapsuleUiTest {
         ui.onNodeWithText("₹333.00").assertIsDisplayed()
     }
 
+    @Test fun strikeBandIsVerticalAndExplicitLoadUsesSelectedIndexAndExpiry() {
+        val snap = snapshot().copy(ladders = mapOf(MarketIndex.NIFTY to listOf(
+            ExpiryPair("2026-11-09", 24000.0, PremiumLeg(110.0, null, 0, "2026-11-05T04:00:00Z"), null)
+        )))
+        val requests = mutableListOf<Pair<MarketIndex, String>>()
+        ui.setContent { MaterialTheme {
+            CapsuleScreen(MarketUiState(current = snap, receivedElapsedMs = 0), {}, {}, {},
+                { index, expiry -> requests.add(index to expiry) })
+        } }
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("strike-window-7"))
+        ui.onNodeWithTag("strike-window-7").performClick()
+        ui.onNodeWithTag("strike-load").performClick()
+        ui.runOnIdle { assertEquals(listOf(MarketIndex.NIFTY to "2026-11-09"), requests) }
+    }
+
 }

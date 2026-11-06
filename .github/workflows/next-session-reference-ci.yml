@@ -1,0 +1,31 @@
+name: Next Session Recorded Reference Verification
+on:
+  push:
+    branches: ['feature/next-session-reference-v1']
+    paths:
+      - 'next-session-reference.ts'
+      - 'recorded-dashboard-http.ts'
+      - 'research-router.ts'
+      - 'test/next-session-reference.test.ts'
+      - 'test/recorded-dashboard-http.test.ts'
+      - '.github/workflows/next-session-reference-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: next-session-reference-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  read-only-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - name: Read-only route and provenance regression checks
+        run: NODE_ENV=test node --import tsx --test test/next-session-reference.test.ts test/recorded-dashboard-http.test.ts test/runtime-supervisor.test.ts test/runtime-operating-window.test.ts

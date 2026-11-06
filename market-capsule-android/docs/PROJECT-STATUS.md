@@ -6,7 +6,7 @@ Easy, smooth UI first. No new Railway infrastructure. Manual trading is deferred
 | Stage | Evidence | Status |
 |---|---|---|
 | First debug APK | GitHub run 42081701401: 9 unit tests, lint and packaging passed | Complete for 0.1 foundation |
-| Offline Android acceptance | Run 42143672310: 6 instrumented tests, 0 failures/errors/skips on Android 15 | Tests passed; full delivery workflow not yet green |
+| Offline Android acceptance | Run 42143672310: 6 instrumented tests, 0 failures/errors/skips on Android 15 | Tests passed; 0.1.1 follow-up 42144918320 now fully green |
 | Device performance | Physical phone, font scale, orientation and measured frame timing | Pending |
 | Live slice | Existing source inspected; mobile authentication and current-session observation | Pending |
 | Continuous stream/recovery | Existing SSE identified; current app uses manual refresh | Pending |
@@ -44,3 +44,20 @@ pipeline green until the queued run completes and its artifact is inspected.
 
 CI startup fixes also made platform-tools explicit, shared the AVD directory between
 SDK tools and emulator, and bounded diagnostics. No runtime backend changes occurred.
+
+## Delivery-age candidate accepted — 6 November 2026
+
+Source e4defc4bf5ea4c1f5837b6320c876cd7552c8774, version 0.1.2-delivery-age,
+versionCode 3. Full run 42146441214 SUCCESS, including offline capture and APK upload.
+JUnit XML: 15 unit tests and 7 Android 15 tests; zero failures/errors/skips.
+Lint: zero errors, 12 warnings; release-readiness is not certified.
+APK and evidence ZIP SHA-256 match GitHub artifact digests. APK archive integrity,
+manifest and DEX presence checked; actual offline screenshot visually inspected.
+
+The new reader budgets transit/decode time and envelope age before qualifying spot
+and premium values. Six new unit cases and one Android leg-aging case passed.
+Connection audit is in CONNECTION-ACCEPTANCE.md: inspected read mounts do not require
+browser Kite login; live credential-free observation was scheduled closure, not a
+401/403. During-hours current NIFTY data, private app access policy, stable release
+signing, physical-phone performance and persistent-cache restart remain pending.
+No Railway deployment, PR, merge, new infrastructure, login bypass or order change.

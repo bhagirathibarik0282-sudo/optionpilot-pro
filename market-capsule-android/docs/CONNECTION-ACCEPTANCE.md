@@ -55,3 +55,11 @@ credentials first; verify trade date, exact NIFTY identity, source/server times
 and response age. If 401/403 is actually observed, design scoped mobile access
 against that boundary. Do not reuse admin tokens or browser broker cookies.
 No broad features or orders before that slice is accepted.
+
+## Candidate result
+
+Version 0.1.2 source e4defc4bf5ea4c1f5837b6320c876cd7552c8774 passed the
+full workflow 42146441214: 15 JVM + 7 Android tests, no failures/errors/skips,
+APK packaging/upload and offline capture successful. Lint had 12 warnings and
+zero errors. Downloaded artifact digests and APK integrity were checked; the
+offline screenshot was inspected. During-hours live data remains unaccepted.

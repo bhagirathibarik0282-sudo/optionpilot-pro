@@ -39,7 +39,7 @@ Build checks required in an Android-capable environment:
 - XML resources/manifest parse, Gradle/source layout and endpoint reference inspection.
 - Package and manifest identity consistency, bounded network reads, no mutation endpoints or secret configuration.
 - Nine JVM tests, Android lint and debug APK packaging passed in GitHub run 42081701401. Lint warnings remain; this is not release certification.
-- Six instrumented Android tests now cover offline native activity launch and isolated UI states. See docs/PROJECT-STATUS.md for the exact accepted run and scope.
+- Seven instrumented Android tests now cover offline native activity launch and isolated UI states. See docs/PROJECT-STATUS.md for the exact accepted run and scope.
 - Physical-device performance, real cache restart and authenticated production data remain pending.
 
 ## Integration evidence
@@ -59,3 +59,5 @@ The dedicated Market Capsule Android workflow runs on this feature branch and pr
 ## Connection audit
 
 See docs/CONNECTION-ACCEPTANCE.md. Inspected read-route source does not require browser Kite login. The current credential-free production observation is 503 OUTSIDE_OPERATING_HOURS, not authentication failure. In-window payload and private-release access policy are not yet accepted. Version 0.1.2 delivery-age tests are a new candidate and require their own passing CI evidence.
+
+Latest accepted candidate: 0.1.2, source e4defc4bf5ea4c1f5837b6320c876cd7552c8774, run 42146441214 SUCCESS. 15 unit + 7 Android tests passed, zero errors/failures/skips. Lint passed with 12 warnings; this is a debug test build, not release certification.

@@ -4,9 +4,11 @@ on:
     branches: ['feature/next-session-reference-v1']
     paths:
       - 'next-session-reference.ts'
+      - 'market-session-calendar.ts'
       - 'recorded-dashboard-http.ts'
       - 'research-router.ts'
       - 'test/next-session-reference.test.ts'
+      - 'test/market-session-calendar.test.ts'
       - 'test/recorded-dashboard-http.test.ts'
       - '.github/workflows/next-session-reference-ci.yml'
   workflow_dispatch:
@@ -28,4 +30,4 @@ jobs:
           node-version: '22'
       - run: npm install --no-audit --no-fund
       - name: Read-only route and provenance regression checks
-        run: NODE_ENV=test node --import tsx --test test/next-session-reference.test.ts test/recorded-dashboard-http.test.ts test/runtime-supervisor.test.ts test/runtime-operating-window.test.ts
+        run: NODE_ENV=test node --import tsx --test test/next-session-reference.test.ts test/market-session-calendar.test.ts test/recorded-dashboard-http.test.ts test/runtime-supervisor.test.ts test/runtime-operating-window.test.ts

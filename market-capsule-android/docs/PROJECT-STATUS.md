@@ -120,3 +120,14 @@ Source a0afb809e68693c47ab4229d8c6ae9326e10bf06; run https://github.com/bhagirat
 APK assembly, v2 debug signature verification and offline cold launch passed. The actual offline screenshot was reviewed. Downloaded APK and validation archive SHA-256 matched GitHub artifact digests. APK: 17,858,629 bytes, SHA-256 c2db8555cc9bfbffaae7d48d8cd5f0f6277469e917fba51509165c887c99a967. Signer SHA-256 e98ed6cb54eaa517aa746cdf4ca6b9d8abe634520b1fad6ee8aa4f6dca0d6b4d.
 
 Market_Capsule_0.1.8_Navigation_Test.apk is a debug test candidate, versionCode 9, not a stable upgrade or Play release. Its temporary signer can prevent installing over previous builds; do not remove a working phone installation to force an update. Physical-phone smoothness, stable signing, owner authentication and live-session/reconnect acceptance remain pending. No backend, Railway deployment, broker connection, Telegram sending or order behavior was changed in this navigation milestone.
+
+
+## Manual foreground lifecycle accepted — Android 0.1.9, 6 November 2026
+
+Source 7771948e61b0d992e0dbd8da580ad52545a4df9c; run https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/42260352577 SUCCESS. Backgrounding now cancels manual refresh, withholds the current snapshot/strike panel, clears pending loading and replaces the requesting message with an explicit background state. Last saved data remains historical. Manual requests are rejected while backgrounded, and foreground return requires a new manual read unless ongoing updates were already wanted. A cancellation check precedes applying a returned manual snapshot.
+
+Downloaded XML: 42 JVM tests plus 23 Android 15 tests, zero failures/errors/skips. Two new synthetic-source controller tests cover background request rejection, historical retention, withholding the previous current snapshot after return, cancellation cleanup and successful subsequent refresh. Existing stream/reconnect, scroll and offline activity tests also passed. These are bounded emulator/controller checks, not a new real-phone or live-market acceptance.
+
+Lint: zero errors, 14 warnings. APK v2 signature verified with one debug signer; actual offline screenshot inspected. Both downloaded artifact hashes matched GitHub. APK 17,858,629 bytes, SHA-256 aaff585cb31b2f7b6a28c9e8a6df84dfcb655e0e5f9a5acedda88e2a09cb0da6; debug signer SHA-256 d742b62c4cf52acc94826ca40fa336947a3761b2c445f91e4427552faf641df4. VersionCode 10 / versionName 0.1.9. Delivered as Market_Capsule_0.1.9_Lifecycle_Test.apk. The signer differs from 0.1.8, so a direct upgrade may fail; preserve the working phone installation.
+
+Remaining: owner-controlled stable signing and same-key phone upgrade, owner authentication policy, physical-phone live/reconnect/performance acceptance, qualified PCR/OI and replay/capsules. No production deployment, infrastructure, broker credential, Telegram delivery or order changes occurred in this milestone.

@@ -6,18 +6,27 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
-internal class MarketViewModel(application: Application) : AndroidViewModel(application) {
-    private val repository = MarketRepository(application)
+internal class MarketViewModel @JvmOverloads constructor(
+    application: Application,
+    private val repository: MarketSource = MarketRepository(application)
+) : AndroidViewModel(application) {
     private val mutable = MutableStateFlow(MarketUiState())
     val state = mutable.asStateFlow()
     private var refreshJob: Job? = null
     private var ageJob: Job? = null
+    private var streamJob: Job? = null
+    private var foreground = false
+    private var watermark: MarketSnapshot? = null
+    private var lastCacheElapsed: Long? = null
     init {
         viewModelScope.launch {
             val saved = repository.loadSaved()
@@ -25,9 +34,15 @@ internal class MarketViewModel(application: Application) : AndroidViewModel(appl
         }
     }
     fun setForeground(active: Boolean) {
-        ageJob?.cancel()
-        ageJob = null
-        if (!active) return
+        if (foreground == active) return
+        foreground = active
+        ageJob?.cancel(); ageJob = null
+        if (!active) {
+            refreshJob?.cancel()
+            streamJob?.cancel()
+            if (mutable.value.updatesWanted) invalidate(UpdatePhase.PAUSED, "Updates paused in background. Saved readings remain historical.")
+            return
+        }
         mutable.update { it.copy(currentElapsedMs = SystemClock.elapsedRealtime()) }
         ageJob = viewModelScope.launch {
             while (true) {
@@ -35,42 +50,96 @@ internal class MarketViewModel(application: Application) : AndroidViewModel(appl
                 if (mutable.value.current != null) mutable.update { it.copy(currentElapsedMs = SystemClock.elapsedRealtime()) }
             }
         }
+        if (mutable.value.updatesWanted) startStream()
     }
     fun select(index: MarketIndex) { mutable.update { it.copy(selected = index) } }
+    fun setUpdatesWanted(wanted: Boolean) {
+        if (mutable.value.updatesWanted == wanted) return
+        mutable.update { it.copy(updatesWanted = wanted) }
+        if (wanted && foreground) startStream()
+        else {
+            streamJob?.cancel()
+            invalidate(if (wanted) UpdatePhase.PAUSED else UpdatePhase.OFF,
+                if (wanted) "Updates resume when the app is visible." else "Updates stopped. Saved readings remain historical.")
+        }
+    }
+    private fun startStream() {
+        val previous = streamJob
+        previous?.cancel()
+        refreshJob?.cancel()
+        streamJob = viewModelScope.launch {
+            // Join the previous socket's cancellation before opening another one.
+            previous?.cancelAndJoin()
+            refreshJob?.cancelAndJoin()
+            var attempt = 0
+            while (foreground && mutable.value.updatesWanted) {
+                invalidate(UpdatePhase.CONNECTING, "Checking runtime and connecting updates…")
+                try {
+                    repository.ensureRuntime()
+                    repository.updates().collect { fetched ->
+                        if (!foreground || !mutable.value.updatesWanted) return@collect
+                        applySnapshot(fetched, streaming = true)
+                        attempt = 0
+                    }
+                    error("STREAM_CLOSED")
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (error: Exception) {
+                    if (!ReconnectPolicy.mayRetry(error.message)) {
+                        mutable.update { it.copy(updatesWanted = false) }
+                        invalidate(UpdatePhase.BLOCKED, explain(error))
+                        return@launch
+                    }
+                    val wait = ReconnectPolicy.delayMs(attempt++, error.message == "VIEWER_OR_RATE_LIMIT") + Random.nextLong(0, 501)
+                    invalidate(UpdatePhase.RETRY_WAIT, explain(error) + " Reconnecting in about ${wait / 1000}s.", wait)
+                    delay(wait)
+                }
+            }
+        }
+    }
+    private fun invalidate(phase: UpdatePhase, message: String, retryMs: Long = 0) {
+        mutable.update { it.copy(current = null, receivedElapsedMs = null, deliveryAgeMs = 0,
+            snapshotRequestMs = null, updatePhase = phase, retryAfterMs = retryMs, message = message) }
+    }
+    private suspend fun applySnapshot(fetched: FetchedSnapshot, streaming: Boolean) {
+        val snapshot = fetched.snapshot
+        if (!SnapshotParser.accepts(watermark, snapshot)) error("OUT_OF_ORDER_SNAPSHOT")
+        watermark = snapshot // Retain ordering across disconnects, even while current is withheld.
+        val now = SystemClock.elapsedRealtime()
+        val usable = snapshot.connected && snapshot.quotes.values.any {
+            it.price != null && it.sourceAgeMs != null &&
+                it.sourceAgeMs + fetched.deliveryAgeMs + (now - fetched.receivedElapsedMs).coerceAtLeast(0) <= QUOTE_MAX_AGE_MS
+        }
+        mutable.update { it.copy(current = snapshot, saved = if (usable) snapshot else it.saved,
+            receivedElapsedMs = fetched.receivedElapsedMs, currentElapsedMs = now,
+            deliveryAgeMs = fetched.deliveryAgeMs, snapshotRequestMs = fetched.requestMs,
+            updatePhase = if (streaming) UpdatePhase.RECEIVING else UpdatePhase.OFF, retryAfterMs = 0,
+            message = if (usable) {
+                if (streaming) "Receiving snapshots. Source time and data age determine whether values are recent."
+                else "Snapshot received. Start updates for ongoing reads."
+            } else "Broker state: ${snapshot.connectionState} · No eligible recent values after delivery checks.") }
+        if (usable && (!streaming || lastCacheElapsed == null || now - lastCacheElapsed!! >= 10_000)) {
+            if (repository.save(fetched.raw)) lastCacheElapsed = now
+            else mutable.update { it.copy(message = it.message + " Local cache could not be saved.") }
+        }
+    }
     fun refresh() {
-        if (refreshJob?.isActive == true) return
+        if (mutable.value.updatesWanted || refreshJob?.isActive == true) return
         refreshJob = viewModelScope.launch {
             mutable.update { it.copy(loading = true, message = "Checking runtime and requesting a read-only snapshot…") }
-            try {
-                val fetched = repository.fetch()
-                val snapshot = fetched.snapshot
-                val raw = fetched.raw
-                if (!SnapshotParser.accepts(mutable.value.current, snapshot)) error("OUT_OF_ORDER_SNAPSHOT")
-                val now = SystemClock.elapsedRealtime()
-                val usable = snapshot.connected && snapshot.quotes.values.any {
-                    it.price != null && it.sourceAgeMs != null &&
-                        it.sourceAgeMs + fetched.deliveryAgeMs + (now - fetched.receivedElapsedMs).coerceAtLeast(0) <= QUOTE_MAX_AGE_MS
-                }
-                mutable.update { it.copy(current = snapshot, saved = if (usable) snapshot else it.saved,
-                    receivedElapsedMs = fetched.receivedElapsedMs, currentElapsedMs = now,
-                    deliveryAgeMs = fetched.deliveryAgeMs, snapshotRequestMs = fetched.requestMs,
-                    message = if (usable) "Snapshot received · Continuous streaming is not implemented in this foundation."
-                    else "Broker state: ${snapshot.connectionState} · No eligible recent values after delivery checks.") }
-                if (usable && !repository.save(raw)) mutable.update { it.copy(message = it.message + " Local cache could not be saved.") }
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) {
-                val message = when (error.message) {
-                    "OUTSIDE_OPERATING_HOURS" -> "Market runtime is outside its operating window. Saved readings remain available."
-                    "RUNTIME_STARTING" -> "Market runtime is starting. Retry after it becomes ready."
-                    "CLOCK_OR_STALE_RESPONSE" -> "Response is too old or the phone clock differs from the server. Check automatic date/time and retry; saved readings remain historical."
-                    "APP_AUTHENTICATION_REQUIRED" -> "Server authentication is required. Mobile sign-in integration is pending; do not enter broker/admin secrets here."
-                    "VIEWER_OR_RATE_LIMIT" -> "Server viewer/rate limit reached. Wait before retrying."
-                    "NETWORK_UNAVAILABLE" -> "Network unavailable. Showing saved readings when present."
-                    "OUT_OF_ORDER_SNAPSHOT" -> "Older server response rejected. Refresh to resynchronize."
-                    else -> "Snapshot unavailable or rejected. No values have been invented."
-                }
-                mutable.update { it.copy(current = null, receivedElapsedMs = null, deliveryAgeMs = 0, snapshotRequestMs = null, message = message) }
-            } finally { mutable.update { it.copy(loading = false) } }
+            try { applySnapshot(repository.fetch(), streaming = false) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { invalidate(UpdatePhase.OFF, explain(error)) }
+            finally { mutable.update { it.copy(loading = false) } }
         }
+    }
+    private fun explain(error: Exception): String = when (error.message) {
+        "OUTSIDE_OPERATING_HOURS" -> "Market runtime is outside its operating window. Start updates again during operating hours. Saved readings remain available."
+        "RUNTIME_STARTING" -> "Market runtime is starting."
+        "CLOCK_OR_STALE_RESPONSE" -> "Response is too old or the phone clock differs from the server. Check automatic date/time and retry; saved readings remain historical."
+        "APP_AUTHENTICATION_REQUIRED" -> "Server authentication is required. Mobile sign-in integration is pending; do not enter broker/admin secrets here."
+        "VIEWER_OR_RATE_LIMIT" -> "Server viewer/rate limit reached."
+        "NETWORK_UNAVAILABLE", "STREAM_CLOSED", "SERVICE_UNAVAILABLE" -> "Connection interrupted or unavailable. Saved readings remain historical."
+        "OUT_OF_ORDER_SNAPSHOT" -> "Older server response rejected. Restart updates to resynchronize."
+        else -> "Response unavailable or rejected. Stop, check connection and retry. No values have been invented."
     }
 }

@@ -73,4 +73,18 @@ class CapsuleUiTest {
         ui.onNodeWithText("CE: ₹149.00").assertDoesNotExist()
     }
 
+    @Test fun updatesToggleStopsAndRestoresManualRefresh() {
+        val state = mutableStateOf(MarketUiState())
+        ui.setContent { MaterialTheme { CapsuleScreen(state.value, {}, {}, {
+            state.value = state.value.copy(updatesWanted = it,
+                updatePhase = if (it) UpdatePhase.CONNECTING else UpdatePhase.OFF)
+        }) } }
+        ui.onNodeWithTag("updates-toggle").performScrollTo().performClick()
+        ui.onNodeWithText("Stop updates").assertIsDisplayed()
+        ui.onNodeWithTag("refresh").assertIsNotEnabled()
+        ui.onNodeWithTag("updates-toggle").performClick()
+        ui.onNodeWithText("Start updates").assertIsDisplayed()
+        ui.onNodeWithTag("refresh").assertIsEnabled()
+    }
+
 }

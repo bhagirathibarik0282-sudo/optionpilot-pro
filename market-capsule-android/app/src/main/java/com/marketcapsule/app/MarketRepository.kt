@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.AtomicFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
@@ -19,19 +21,23 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-internal class MarketRepository(context: Context) {
+internal interface MarketSource {
+    suspend fun loadSaved(): MarketSnapshot?
+    suspend fun fetch(): FetchedSnapshot
+    suspend fun save(raw: String): Boolean
+    suspend fun ensureRuntime()
+    fun updates(): Flow<FetchedSnapshot>
+}
+internal class MarketRepository(context: Context) : MarketSource {
     private val cache = AtomicFile(File(context.filesDir, "last-market-snapshot.json"))
     private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS).callTimeout(15, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).build()
-    suspend fun loadSaved(): MarketSnapshot? = withContext(Dispatchers.IO) {
+    override suspend fun loadSaved(): MarketSnapshot? = withContext(Dispatchers.IO) {
         try { SnapshotParser.parse(cache.openRead().use { readBounded(it) }) } catch (_: Exception) { null }
     }
-    suspend fun fetch(): FetchedSnapshot {
-        val runtimeRaw = get("/ops/runtime-status")
-        val runtime = withContext(Dispatchers.Default) { JSONObject(runtimeRaw) }
-        if (runtime.opt("shouldRun") != true) error("OUTSIDE_OPERATING_HOURS")
-        if (runtime.opt("ready") != true) error("RUNTIME_STARTING")
+    override suspend fun fetch(): FetchedSnapshot {
+        ensureRuntime()
         val requestWall = System.currentTimeMillis()
         val requestElapsed = SystemClock.elapsedRealtime()
         val raw = get("/api/research/dashboard-live")
@@ -43,7 +49,22 @@ internal class MarketRepository(context: Context) {
             FetchedSnapshot(snapshot, raw, received, budget, requestMs)
         }
     }
-    suspend fun save(raw: String) = withContext(Dispatchers.IO) {
+    override suspend fun ensureRuntime() {
+        val runtimeRaw = get("/ops/runtime-status")
+        val runtime = withContext(Dispatchers.Default) { JSONObject(runtimeRaw) }
+        if (runtime.opt("shouldRun") != true) error("OUTSIDE_OPERATING_HOURS")
+        if (runtime.opt("ready") != true) error("RUNTIME_STARTING")
+    }
+    override fun updates(): Flow<FetchedSnapshot> = SnapshotStream(client, elapsedClock = SystemClock::elapsedRealtime)
+        .packets().map { packet ->
+            withContext(Dispatchers.Default) {
+                val snapshot = SnapshotParser.parse(packet.raw)
+                // Per-frame clock age; the age of the entire SSE connection is not delivery time.
+                val budget = SnapshotDelivery.ageBudget(snapshot.serverTime, packet.receivedWallMs, 0)
+                FetchedSnapshot(snapshot, packet.raw, packet.receivedElapsedMs, budget, null)
+            }
+        }
+    override suspend fun save(raw: String) = withContext(Dispatchers.IO) {
         var stream: java.io.FileOutputStream? = null
         try {
             stream = cache.startWrite()

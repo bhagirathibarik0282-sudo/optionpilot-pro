@@ -52,9 +52,9 @@ class MainActivity : ComponentActivity() {
         vm.setForeground(true)
         onStopOrDispose { vm.setForeground(false) }
     }
-    CapsuleScreen(state, vm::select, vm::refresh)
+    CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted)
 }
-@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit) {
+@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}) {
     var page by rememberSaveable { mutableStateOf(Page.TODAY) }
     Scaffold(containerColor = Navy, bottomBar = {
         NavigationBar(containerColor = Panel) {
@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("FOUNDATION 0.1.2 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("FOUNDATION 0.1.3 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
@@ -80,9 +80,14 @@ class MainActivity : ComponentActivity() {
             if (page == Page.TODAY || page == Page.DESK) {
                 item { QuoteCard(state) }
                 item {
-                    Button(onClick = onRefresh, enabled = !state.loading, modifier = Modifier.testTag("refresh").fillMaxWidth()) {
+                    Button(onClick = onRefresh, enabled = !state.loading && !state.updatesWanted, modifier = Modifier.testTag("refresh").fillMaxWidth()) {
                         Text(if(state.loading) "Requesting…" else "Refresh snapshot")
                     }
+                    OutlinedButton(onClick = { onUpdatesWanted(!state.updatesWanted) },
+                        modifier = Modifier.testTag("updates-toggle").fillMaxWidth()) {
+                        Text(if (state.updatesWanted) "Stop updates" else "Start updates")
+                    }
+                    Text(state.updatePhase.label, color = Gold, style = MaterialTheme.typography.labelMedium)
                     Text(state.message, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
                 }
             }
@@ -143,7 +148,7 @@ class MainActivity : ComponentActivity() {
 @Composable private fun QuoteCard(state: MarketUiState) {
     Section(state.selected.name + " · snapshot") {
         val recent = state.status == ReadingStatus.RECENT_SNAPSHOT
-        Text(when(state.status) { ReadingStatus.RECENT_SNAPSHOT -> "RECENT SNAPSHOT — NOT A CONTINUOUS STREAM"
+        Text(when(state.status) { ReadingStatus.RECENT_SNAPSHOT -> if (state.updatesWanted && state.updatePhase == UpdatePhase.RECEIVING) "RECENT STREAM SNAPSHOT" else "RECENT SNAPSHOT — NOT A CONTINUOUS STREAM"
             ReadingStatus.STALE -> "STALE / REFRESH REQUIRED"; ReadingStatus.CACHED -> "SAVED READING AVAILABLE IN MEMORY"
             ReadingStatus.UNAVAILABLE -> "NO ELIGIBLE READING" }, color = Gold, style = MaterialTheme.typography.labelMedium)
         Text(if(recent) "₹${format(state.quote?.price)}" else "—", style = MaterialTheme.typography.displaySmall)

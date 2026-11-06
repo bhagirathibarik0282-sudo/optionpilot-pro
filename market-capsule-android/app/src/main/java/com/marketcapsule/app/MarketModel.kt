@@ -7,6 +7,10 @@ internal const val QUOTE_MAX_AGE_MS = 30_000L
 internal const val RESPONSE_MAX_AGE_MS = 5_000L
 internal const val BASE_URL = "https://optionpilot-pro-v2-production.up.railway.app"
 internal enum class MarketIndex { NIFTY, SENSEX }
+internal enum class UpdatePhase(val label: String) {
+    OFF("Updates off"), CONNECTING("Connecting"), RECEIVING("Receiving snapshots"),
+    RETRY_WAIT("Waiting to reconnect"), PAUSED("Paused in background"), BLOCKED("Updates stopped — check message")
+}
 internal enum class ReadingStatus { RECENT_SNAPSHOT, STALE, CACHED, UNAVAILABLE }
 internal data class Quote(
     val index: MarketIndex,
@@ -40,7 +44,10 @@ internal data class MarketUiState(
     val receivedElapsedMs: Long? = null,
     val currentElapsedMs: Long = 0,
     val deliveryAgeMs: Long = 0,
-    val snapshotRequestMs: Long? = null
+    val snapshotRequestMs: Long? = null,
+    val updatesWanted: Boolean = false,
+    val updatePhase: UpdatePhase = UpdatePhase.OFF,
+    val retryAfterMs: Long = 0
 ) {
     val quote get() = current?.quotes?.get(selected)
     val savedQuote get() = saved?.quotes?.get(selected)
@@ -132,5 +139,5 @@ internal data class FetchedSnapshot(
     val raw: String,
     val receivedElapsedMs: Long,
     val deliveryAgeMs: Long,
-    val requestMs: Long
+    val requestMs: Long?
 )

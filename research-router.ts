@@ -1,6 +1,7 @@
 import { readBackgroundQuoteHistory } from './dashboard-background-quotes-history.js';
 import { dbQuerySafe } from './db.js';
 import { mountDashboardLiveRoutes } from './dashboard-live-http.js';
+import { readNextSessionReference } from './next-session-reference.js';
 import { renderRagEvidencePage } from './rag-evidence-card.js';
 import { Hono } from "hono";
 import { mountRagEventEvidenceRoute } from './rag-event-evidence.js';
@@ -64,6 +65,11 @@ import { mountPremiumSpreadRoutes } from './premium-spread-comparison.js';
 export const researchRouter = new Hono();
 mountPremiumSpreadRoutes(researchRouter);
 mountDashboardLiveRoutes(researchRouter);
+researchRouter.get('/recorded-dashboard/next-session-plan',async c=>{
+ c.header('Cache-Control','no-store');
+ const result=await readNextSessionReference(c.req.query('symbol'));
+ return c.json(result,result.ok?200:result.reason==='INVALID_SYMBOL'?400:503);
+});
 mountRagEventEvidenceRoute(researchRouter);
 mountRecorderEventContextLadderRoute(researchRouter);
 mountSameDteHistoryRoute(researchRouter);

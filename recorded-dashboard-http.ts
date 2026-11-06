@@ -6,10 +6,12 @@ import { listH1TheoryRecordedDates } from './h1-theory-history.js';
 import { compactRows } from './h1-replay-compact-v1.js';
 import { resolveRecordedFullPcr, resolveRecordedOptionPdc } from './business-dashboard-v1-view.js';
 import { renderRecordedDashboard } from './recorded-dashboard-view.js';
+import { readNextSessionReference } from './next-session-reference.js';
 
 /** Narrow supervisor entry: SELECT-only archive readers. Never import server/runtime/router. */
 export function createRecordedDashboardHandler(dependencies:any={}) {
  const dates=dependencies.dates||listH1TheoryRecordedDates, replay=dependencies.replay||runH1ReplayHttp;
+ const nextPlan=dependencies.nextPlan||readNextSessionReference;
  const ragEvidence=dependencies.ragEvidence||readRagEventEvidence,ragHistory=dependencies.ragHistory||readSameDteHistory;
  let active=0;
  return async function handle(request:any,response:any,status:any) {
@@ -17,8 +19,9 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
   const view=path==='/recorded-dashboard'||path==='/api/research/recorded-dashboard/view'||
    (!status.shouldRun&&(path==='/'||path==='/api/research/business-dashboard/view'));
   const dateRoute=path==='/api/research/recorded-dashboard/dates',replayRoute=path==='/api/research/recorded-dashboard/replay';
+  const planRoute=path==='/api/research/recorded-dashboard/next-session-plan';
   const ragView=path==='/api/research/rag-event-evidence/view',ragRoute=path==='/api/research/rag-event-evidence',historyRoute=path==='/api/research/rag-same-dte-history';
-  if(!view&&!dateRoute&&!replayRoute&&!ragView&&!ragRoute&&!historyRoute)return false;
+  if(!view&&!dateRoute&&!replayRoute&&!planRoute&&!ragView&&!ragRoute&&!historyRoute)return false;
   const send=(code:number,value:any,html=false)=>{response.writeHead(code,{'Content-Type':html?'text/html; charset=utf-8':'application/json','Cache-Control':'no-store','X-OptionPilot-Mode':'RECORDED_READ_ONLY','X-Content-Type-Options':'nosniff'});response.end(html?value:JSON.stringify(value));return true;};
   if(request.method!=='GET')return send(405,{ok:false,error:'READ_ONLY_GET_REQUIRED'});
   if(view)return send(200,renderRecordedDashboard(),true);
@@ -28,6 +31,7 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
   try{
    if(ragRoute){const parsed=parseRagEventRequest(Object.fromEntries(url.searchParams));if(!parsed.ok)return send(400,{ok:false,status:'BLOCKED',reason:parsed.reason});const result=await ragEvidence(parsed.value);return send(result.ok?200:422,result);}
    if(historyRoute){const result=await ragHistory(Object.fromEntries(url.searchParams));return send(result.ok?200:422,result);}
+   if(planRoute){const result=await nextPlan(url.searchParams.get('symbol'),{dates,replay});return send(result.ok?200:result.reason==='INVALID_SYMBOL'?400:503,result);}
    if(dateRoute){const result=await dates();return send(result.ok?200:503,result);}
    const parsed=parseH1ReplayRequest({symbol:url.searchParams.get('symbol'),tradeDate:url.searchParams.get('date'),fromTime:url.searchParams.get('from'),toTime:url.searchParams.get('to'),scope:'CORE'});
    if(!parsed.ok)return send(400,{ok:false,error:parsed.reason});

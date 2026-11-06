@@ -54,3 +54,11 @@ test('archive facade serves existing RAG readers with GET-only methods and uncha
 test('after-hours dashboard embeds the same evidence panel without navigating to another page',()=>{
  const html=renderRecordedDashboard();assert.equal((html.match(/id="rag-evidence-card"/g)||[]).length,1);assert.match(html,/id="rag-time"[^>]*step="60"/);
 });
+
+test('next-session compact route is read-only and works while supervisor is closed',async t=>{
+ const url=await serve(t,{nextPlan:async()=>({ok:true,mode:'RECORDED_NEXT_SESSION_REFERENCE_V1',sourceTradeDate:'2026-11-06',levels:{high:25050,low:24850},createsOrders:false})});
+ const response=await fetch(url+'/api/research/recorded-dashboard/next-session-plan?symbol=NIFTY');
+ assert.equal(response.status,200);assert.equal(response.headers.get('x-optionpilot-mode'),'RECORDED_READ_ONLY');
+ const body=await response.json();assert.equal(body.levels.high,25050);assert.equal(body.createsOrders,false);
+ assert.equal((await fetch(url+'/api/research/recorded-dashboard/next-session-plan',{method:'POST'})).status,405);
+});

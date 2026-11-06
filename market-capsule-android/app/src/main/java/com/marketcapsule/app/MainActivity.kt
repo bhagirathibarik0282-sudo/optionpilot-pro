@@ -25,6 +25,7 @@ import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.NumberFormat
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -56,6 +57,8 @@ class MainActivity : ComponentActivity() {
 }
 @Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}) {
     var page by rememberSaveable { mutableStateOf(Page.TODAY) }
+    // Persist selection through frame updates but reset on an index change.
+    var expiryChoice by rememberSaveable(state.selected.name) { mutableStateOf("ALL") }
     Scaffold(containerColor = Navy, bottomBar = {
         NavigationBar(containerColor = Panel) {
             Page.entries.forEach { item -> NavigationBarItem(modifier = Modifier.testTag("tab-${item.name}"), selected = page == item,
@@ -71,7 +74,7 @@ class MainActivity : ComponentActivity() {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("TEST 0.1.5 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("TEST 0.1.6 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
@@ -125,10 +128,29 @@ class MainActivity : ComponentActivity() {
                 item { Text("Multi-expiry ATM ladder", color = Gold, style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.testTag("expiry-ladder-title")) }
                 val pairs = state.current?.ladders?.get(state.selected).orEmpty()
+                // A vanished expiry cannot remain a sticky, invisible selection.
+                val availableChoice = if (expiryChoice == "ALL" || pairs.any { it.expiry == expiryChoice }) expiryChoice else "ALL"
                 if (pairs.isEmpty()) item { Section("Expiry readings unavailable") {
                     Text("Refresh or start updates. This panel needs verified expiry identities from the server.", color = Muted)
-                } }
-                pairs.forEach { pair -> item(key = "${state.selected}-${pair.expiry}") {
+                } } else item(key = "expiry-filter-${state.selected}") {
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text("View expiries · no horizontal swipe", color = Muted, style = MaterialTheme.typography.labelMedium)
+                        (listOf("ALL") + pairs.map { it.expiry }).chunked(2).forEach { choices ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                choices.forEach { choice ->
+                                    FilterChip(
+                                        selected = availableChoice == choice,
+                                        onClick = { expiryChoice = choice },
+                                        modifier = Modifier.weight(1f).testTag("expiry-filter-$choice"),
+                                        label = { Text(if (choice == "ALL") "All (${pairs.size})" else shortExpiry(choice), maxLines = 1) }
+                                    )
+                                }
+                                if (choices.size == 1) Spacer(Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+                visibleExpiryPairs(pairs, availableChoice).forEach { pair -> item(key = "${state.selected}-${pair.expiry}") {
                     Section("Expiry ${pair.expiry}") {
                         Text("${state.selected.name} · Strike ${format(pair.strike)}", color = Muted)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -201,6 +223,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+private fun shortExpiry(value: String): String = LocalDate.parse(value).format(DateTimeFormatter.ofPattern("dd MMM", Locale.ENGLISH))
 private fun format(value: Double?): String = value?.let { NumberFormat.getNumberInstance(Locale.forLanguageTag("en-IN")).apply {
     minimumFractionDigits = 2; maximumFractionDigits = 2
 }.format(it) } ?: "—"

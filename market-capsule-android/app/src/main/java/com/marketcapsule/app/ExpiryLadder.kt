@@ -62,3 +62,8 @@ internal object ExpiryLadderParser {
         return result
     }
 }
+
+/** Display-only filter; never substitutes a nearby or different expiry. */
+internal fun visibleExpiryPairs(pairs: List<ExpiryPair>, selectedExpiry: String): List<ExpiryPair> =
+    if (selectedExpiry == "ALL" || pairs.none { it.expiry == selectedExpiry }) pairs
+    else pairs.filter { it.expiry == selectedExpiry }

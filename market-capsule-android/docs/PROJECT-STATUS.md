@@ -1,3 +1,9 @@
+## Candidate — 0.1.6 expiry selection (unreleased)
+
+One native Live Desk feature only: an All (up to three source-reported ATM expiries) / exact-expiry selector in a two-column, vertically stacked chip grid. This uses only existing validated `atmExpiryLadder` pairs; no extra broker/backend requests and no guessed neighbouring strikes. Changing NIFTY/SENSEX resets the chosen expiry; invalidated expiries fall back to All. Independent premium freshness checks remain unchanged.
+
+Source change requires GitHub Android CI (unit, lint, emulator UI and package) before acceptance. The user's installed 0.1.5 debug APK remains the known-good phone build. A new ephemeral debug signer may prevent in-place installation; do not uninstall the working version for this candidate. Stable private release signing and same-signer upgrade still require owner-controlled key and phone proof. No production deployment, trade authority or broker mutation.
+
 # Market Capsule delivery ledger
 
 ## Current checkpoint — 0.1.5, 6 November 2026

@@ -112,4 +112,25 @@ class CapsuleUiTest {
         ui.onNodeWithText("₹117.25").assertDoesNotExist()
     }
 
+    @Test fun compactExpirySelectorShowsAllOrOneVerifiedExpiry() {
+        val observed = "2026-11-05T04:00:00Z"
+        val snap = snapshot().copy(ladders = mapOf(MarketIndex.NIFTY to listOf(
+            ExpiryPair("2026-11-09", 24000.0, PremiumLeg(111.0, null, 0, observed), null),
+            ExpiryPair("2026-11-16", 24050.0, PremiumLeg(222.0, null, 0, observed), null),
+            ExpiryPair("2026-11-23", 24100.0, PremiumLeg(333.0, null, 0, observed), null)
+        )))
+        ui.setContent { MaterialTheme {
+            CapsuleScreen(MarketUiState(current = snap, receivedElapsedMs = 0), {}, {})
+        } }
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("expiry-filter-2026-11-16"))
+        ui.onNodeWithTag("expiry-filter-2026-11-16").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Expiry 2026-11-16"))
+        ui.onNodeWithText("₹222.00").assertIsDisplayed()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("expiry-filter-ALL"))
+        ui.onNodeWithTag("expiry-filter-ALL").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Expiry 2026-11-23"))
+        ui.onNodeWithText("₹333.00").assertIsDisplayed()
+    }
+
 }

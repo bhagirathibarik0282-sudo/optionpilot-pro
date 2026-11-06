@@ -53,6 +53,17 @@ class ExpiryLadderTest {
         assertTrue(PremiumLeg(100.0, null, 26_000, time.toString()).eligible(state))
         assertFalse(PremiumLeg(100.0, null, 0, time.toString()).eligible(state.copy(current = null)))
     }
+    @Test fun expirySelectionIsExactAndFallsBackToAllWhenSourceRevokesExpiry() {
+        val pairs = listOf(
+            ExpiryPair("2026-11-09", 24650.0, null, null),
+            ExpiryPair("2026-11-16", 24700.0, null, null),
+            ExpiryPair("2026-11-23", 24800.0, null, null)
+        )
+        assertEquals(pairs, visibleExpiryPairs(pairs, "ALL"))
+        assertEquals(listOf(pairs[1]), visibleExpiryPairs(pairs, "2026-11-16"))
+        assertEquals(pairs, visibleExpiryPairs(pairs, "2026-11-30"))
+        assertEquals(emptyList<ExpiryPair>(), visibleExpiryPairs(emptyList(), "2026-11-16"))
+    }
     @Test fun missingDisconnectedAndOversizedPanelsStayEmpty() {
         assertTrue(ExpiryLadderParser.parse(JSONObject(), time, true).isEmpty())
         val g = JSONObject().put("atmExpiryLadder", JSONArray().put(group(JSONArray().put(row()))))

@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
                 Text("Market Capsule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                 Text("ନିଜ marketକୁ ପ୍ରମାଣ ସହ ବୁଝନ୍ତୁ", color = Muted)
                 Spacer(Modifier.height(12.dp))
-                Text("FOUNDATION 0.1.4 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
+                Text("TEST 0.1.5 · READ ONLY · NO TRADING", color = Gold, style = MaterialTheme.typography.labelMedium)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     MarketIndex.entries.forEach { symbol -> FilterChip(selected = state.selected == symbol,
                         modifier = Modifier.testTag("index-${symbol.name}"), onClick = { onSelect(symbol) }, label = { Text(symbol.name) }) }
@@ -106,10 +106,11 @@ class MainActivity : ComponentActivity() {
                     } }
                     item { Section("Source coverage") {
                         Text("Snapshot source: Kite FULL via existing OptionPilot backend.")
-                        Text("Full PCR, sector weights, FII/DII and premium ladders are not yet integrated into this app.", color = Muted)
+                        Text("Multi-expiry ATM premiums: Live Desk. Full PCR, sector weights and FII/DII remain pending.", color = Muted)
                     } }
                 }
-                Page.DESK -> item { Section("Exact selected option pair") {
+                Page.DESK -> {
+                item { Section("Exact selected option pair") {
                     val quote = state.quote
                     val elapsed = state.receivedElapsedMs?.let { (state.currentElapsedMs - it).coerceAtLeast(0) }
                     val ceEligible = state.status == ReadingStatus.RECENT_SNAPSHOT && elapsed != null &&
@@ -119,8 +120,26 @@ class MainActivity : ComponentActivity() {
                     Text("Expiry: ${quote?.expiry ?: "Unavailable"} · Strike: ${format(quote?.strike)}")
                     Text("CE: ₹${format(if(ceEligible) quote?.cePrice else null)}")
                     Text("PE: ₹${format(if(peEligible) quote?.pePrice else null)}")
-                    Text("Per-leg eligibility is checked. Full vertical ladder and expiry controls follow after snapshot acceptance.", color = Muted)
+                    Text("Each leg is checked separately. Multi-expiry ATM cards follow below.", color = Muted)
                 } }
+                item { Text("Multi-expiry ATM ladder", color = Gold, style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.testTag("expiry-ladder-title")) }
+                val pairs = state.current?.ladders?.get(state.selected).orEmpty()
+                if (pairs.isEmpty()) item { Section("Expiry readings unavailable") {
+                    Text("Refresh or start updates. This panel needs verified expiry identities from the server.", color = Muted)
+                } }
+                pairs.forEach { pair -> item(key = "${state.selected}-${pair.expiry}") {
+                    Section("Expiry ${pair.expiry}") {
+                        Text("${state.selected.name} · Strike ${format(pair.strike)}", color = Muted)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            PremiumCell("CE", pair.ce, state, Modifier.weight(1f))
+                            PremiumCell("PE", pair.pe, state, Modifier.weight(1f))
+                        }
+                    }
+                } }
+                item { Text("ATM can change between snapshots. Compare the same strike and expiry when tracking a move. % is versus broker previous close.",
+                    color = Muted, style = MaterialTheme.typography.bodySmall) }
+                }
                 Page.MEMORY -> item { Section("Last saved server observation") {
                     val quote = state.savedQuote
                     Text("${state.selected.name} · ${if(quote?.price != null) "SAVED — NOT LIVE" else "No saved reading"}", color = Gold)
@@ -143,6 +162,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+}
+@Composable private fun PremiumCell(side: String, leg: PremiumLeg?, state: MarketUiState, modifier: Modifier) {
+    val eligible = leg?.eligible(state) == true
+    Column(modifier.background(Navy, RoundedCornerShape(10.dp)).padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(side, color = Gold, fontWeight = FontWeight.SemiBold)
+        Text("₹${format(if (eligible) leg?.price else null)}", style = MaterialTheme.typography.titleLarge)
+        if (eligible && leg?.changePct != null) Text("${signed(leg.changePct)}%", color = if (leg.changePct >= 0) Up else Down)
+        Text(if (eligible) "Recent quote" else "Unavailable / delayed", color = Muted, style = MaterialTheme.typography.labelSmall)
+        Text(at(leg?.observedAt), color = Muted, style = MaterialTheme.typography.labelSmall)
     }
 }
 @Composable private fun QuoteCard(state: MarketUiState) {

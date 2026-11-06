@@ -87,4 +87,29 @@ class CapsuleUiTest {
         ui.onNodeWithTag("refresh").assertIsEnabled()
     }
 
+    @Test fun expiryLadderUsesNativeCardsAndWithdrawsExpiredValues() {
+        val snap = snapshot().copy(ladders = mapOf(MarketIndex.NIFTY to listOf(
+            ExpiryPair("2026-11-09", 24000.0, PremiumLeg(117.25, 1.0, 0, "2026-11-05T04:00:00Z"), null))))
+        val state = mutableStateOf(MarketUiState(current = snap, receivedElapsedMs = 0))
+        ui.setContent { MaterialTheme { CapsuleScreen(state.value, {}, {}) } }
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Expiry 2026-11-09"))
+        ui.onNodeWithText("₹117.25").assertIsDisplayed()
+        ui.onNodeWithText("Unavailable / delayed").assertIsDisplayed()
+        ui.runOnIdle { state.value = state.value.copy(currentElapsedMs = 6000) }
+        ui.onNodeWithText("₹117.25").assertDoesNotExist()
+    }
+
+    @Test fun switchingIndexDoesNotReuseLadderRows() {
+        val snap = snapshot().copy(ladders = mapOf(MarketIndex.NIFTY to listOf(
+            ExpiryPair("2026-11-09", 24000.0, PremiumLeg(117.25, null, 0, "2026-11-05T04:00:00Z"), null))))
+        val state = mutableStateOf(MarketUiState(current = snap, receivedElapsedMs = 0))
+        ui.setContent { MaterialTheme { CapsuleScreen(state.value, { state.value = state.value.copy(selected = it) }, {}) } }
+        ui.onNodeWithTag("index-SENSEX").performClick()
+        ui.onNodeWithTag("tab-DESK").performClick()
+        ui.onNodeWithTag("screen-content").performScrollToNode(hasText("Expiry readings unavailable"))
+        ui.onNodeWithText("Expiry readings unavailable").assertIsDisplayed()
+        ui.onNodeWithText("₹117.25").assertDoesNotExist()
+    }
+
 }

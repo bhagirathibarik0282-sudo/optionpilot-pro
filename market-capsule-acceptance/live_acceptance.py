@@ -73,6 +73,8 @@ try:
     capture('03-sensex-live')
     click('Live Desk')
     scroll_to('Expiry 2026-')
+    # A LazyColumn heading may enter the viewport before its card's premium cells.
+    scroll_to('Recent quote')
     wait_for(lambda xs: any(x.startswith('Expiry 2026-') for x in xs) and 'Recent quote' in xs, 45)
     capture('04-native-expiry-card')
     # Return to the quote header before taking away only the emulator network.

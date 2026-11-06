@@ -1,5 +1,6 @@
 import { listH1TheoryRecordedDates } from './h1-theory-history.js';
 import { runH1ReplayHttp } from './h1-replay-http.js';
+import {indexDerivativesSessionOn,nextIndexDerivativesSessionAfter} from './market-session-calendar.js';
 
 /** Small, read-only, recorded-price reference. Never a trade/forecast authority. */
 const VALID=['NIFTY','SENSEX'] as const;
@@ -24,41 +25,52 @@ export async function readNextSessionReference(input:string|null|undefined,deps:
  const dates=index.dates.filter(d=>d.symbol===symbol&&typeof d.tradeDate==='string'&&goodDate(d.tradeDate))
   .sort((a,b)=>b.tradeDate.localeCompare(a.tradeDate));
  if(!dates.length)return fail('NO_RECORDED_SESSION');
- const latest=dates[0]; // No fallback from an incomplete newer day to an older day.
+ const latest=dates[0]; // Never substitute an older date for incomplete latest.
  const today=istDay(now.getTime());
  if(latest.tradeDate>today)return fail('RECORD_DATE_IN_FUTURE');
- if(latest.tradeDate===today&&istMinute(now.getTime())<931)return fail('CLOSING_SESSION_NOT_FINISHED');
+ const sourceSession=indexDerivativesSessionOn(latest.tradeDate,symbol as Sym);
+ if(!sourceSession)return {...fail('SOURCE_DATE_NOT_SUPPORTED_TRADING_SESSION'),sourceTradeDate:latest.tradeDate};
+ const targetSession=nextIndexDerivativesSessionAfter(latest.tradeDate,symbol as Sym);
+ if(!targetSession)return {...fail('NEXT_TRADING_SESSION_UNVERIFIED'),sourceTradeDate:latest.tradeDate};
+ const sourceEndMinute=Number(sourceSession.closesAtIst.slice(0,2))*60+Number(sourceSession.closesAtIst.slice(3));
+ const sourceEndTime=Date.parse(latest.tradeDate+'T'+sourceSession.closesAtIst+':00+05:30');
+ if(now.getTime()<=sourceEndTime)return {...fail('SOURCE_SESSION_NOT_FINISHED'),sourceTradeDate:latest.tradeDate};
+ const targetEndTime=Date.parse(targetSession.date+'T'+targetSession.closesAtIst+':00+05:30');
+ if(now.getTime()>targetEndTime)return {...fail('TARGET_SESSION_ALREADY_ENDED'),sourceTradeDate:latest.tradeDate,targetSessionDate:targetSession.date};
  const indexedEnd=Date.parse(latest.lastMinute??'');
- if(!Number.isFinite(indexedEnd)||istDay(indexedEnd)!==latest.tradeDate||istMinute(indexedEnd)<925||istMinute(indexedEnd)>930)
-  return {...fail('LATEST_SESSION_NO_CLOSE_MARKER'),sourceTradeDate:latest.tradeDate};
- const request={symbol:symbol as Sym,tradeDate:latest.tradeDate,fromTime:'15:00',toTime:'15:30',scope:'CORE' as const};
+ if(!Number.isFinite(indexedEnd)||istDay(indexedEnd)!==latest.tradeDate||istMinute(indexedEnd)<sourceEndMinute-5||istMinute(indexedEnd)>sourceEndMinute)
+  return {...fail('LATEST_SESSION_NO_CLOSE_MARKER'),sourceTradeDate:latest.tradeDate,targetSessionDate:targetSession.date};
+ const request={symbol:symbol as Sym,tradeDate:latest.tradeDate,fromTime:'15:00',toTime:sourceSession.closesAtIst,scope:'CORE' as const};
  let replay;
  try{replay=await deps.replay(request,true);}catch{return fail('CLOSE_ARCHIVE_READ_FAILED');}
  if(!replay.ok||replay.request?.symbol!==symbol||replay.request?.tradeDate!==latest.tradeDate||!Array.isArray(replay.market))
   return fail('CLOSE_ARCHIVE_READ_FAILED');
  const valid=replay.market.filter(r=>r.symbol===symbol&&r.truth_verdict==='TRUE'&&r.freshness_status==='TRUE')
   .map(r=>({...r,at:Date.parse(String(r.minute_bucket??''))}))
-  .filter(r=>Number.isFinite(r.at)&&istDay(r.at)===latest.tradeDate&&istMinute(r.at)>=900&&istMinute(r.at)<=930)
+  .filter(r=>Number.isFinite(r.at)&&istDay(r.at)===latest.tradeDate&&istMinute(r.at)>=900&&istMinute(r.at)<=sourceEndMinute)
   .sort((a,b)=>a.at-b.at);
  const last=valid.at(-1);
- if(!last||istMinute(last.at)<925)return fail('NO_VERIFIED_CLOSING_MARKET_ROW');
+ if(!last||istMinute(last.at)<sourceEndMinute-5)return fail('NO_VERIFIED_CLOSING_MARKET_ROW');
  if(valid.some(r=>r.at===last.at&&['spot_ltp','spot_high','spot_low','snapshot_id'].some(k=>r[k]!==last[k])))
   return fail('CONFLICTING_CLOSING_MARKET_ROWS');
  const high=pos(last.spot_high),low=pos(last.spot_low),close=pos(last.spot_ltp);
  if(high===null||low===null||close===null||low>close||close>high)return fail('INVALID_RECORDED_PRICE_RANGE');
  const quoteAt=Date.parse(String(last.exchange_timestamp??''));
  if(Number.isFinite(quoteAt)&&(istDay(quoteAt)!==latest.tradeDate||quoteAt>last.at+60000))return fail('CONFLICTING_EXCHANGE_TIMESTAMP');
- const daysOld=(Date.parse(today+'T00:00:00Z')-Date.parse(latest.tradeDate+'T00:00:00Z'))/86400000;
  const warnings:string[]=[];
- if(daysOld>7)warnings.push('OLDER_THAN_SEVEN_CALENDAR_DAYS_NOT_NEXT_SESSION');
  if(replay.continuity?.complete!==true)warnings.push('CLOSING_WINDOW_MARKER_GAPS');
  if(valid.length<2)warnings.push('ONLY_ONE_VERIFIED_MARKET_ROW');
  const prevClose=pos(last.spot_prev_close),vwap=pos(last.vwap);
  if(prevClose===null)warnings.push('PREVIOUS_CLOSE_NOT_RECORDED');
  if(vwap===null)warnings.push('VWAP_NOT_RECORDED');
  return {...base,ok:true as const,symbol:symbol as Sym,
-  status:daysOld>7?'HISTORICAL_REFERENCE_ONLY' as const:'CONDITIONAL_REFERENCE' as const,
-  sourceTradeDate:latest.tradeDate,lastRecordedAt:new Date(last.at).toISOString(),
+  status:'CONDITIONAL_REFERENCE' as const,
+  sourceTradeDate:latest.tradeDate,sourceSessionDate:latest.tradeDate,
+  targetSessionDate:targetSession.date,sessionType:targetSession.type,
+  exchange:targetSession.exchange,targetSessionOpenIst:targetSession.opensAtIst,
+  targetSessionCloseIst:targetSession.closesAtIst,sessionCircular:targetSession.officialCircular,
+  generatedAt:now.toISOString(),evidenceVersion:'EXCHANGE_SESSION_IDENTITY_2026_V1',planStatus:'WATCH_ONLY' as const,
+  lastRecordedAt:new Date(last.at).toISOString(),
   sourceExchangeAt:Number.isFinite(quoteAt)?new Date(quoteAt).toISOString():null,
   verifiedRows:valid.length,warnings,
   levels:{high,low,lastObserved:close,previousClose:prevClose,vwap},

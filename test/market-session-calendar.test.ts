@@ -97,3 +97,18 @@ test("calendar startup wiring is unchanged after repeated starts", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("index-derivatives special Sunday and next trading-day identity use exchange circular",async()=>{
+ const {indexDerivativesSessionOn,nextIndexDerivativesSessionAfter}=await import("../market-session-calendar.js");
+ for(const index of ["NIFTY","SENSEX"] as const){
+  const sunday=indexDerivativesSessionOn("2026-11-08",index);
+  assert.equal(sunday?.type,"MUHURAT_SPECIAL");assert.equal(sunday?.opensAtIst,"14:20");assert.equal(sunday?.closesAtIst,"15:40");
+  assert.equal(nextIndexDerivativesSessionAfter("2026-11-06",index)?.date,"2026-11-08");
+  assert.equal(nextIndexDerivativesSessionAfter("2026-11-08",index)?.date,"2026-11-09");
+  assert.equal(nextIndexDerivativesSessionAfter("2026-11-09",index)?.date,"2026-11-11"); // Tuesday holiday
+  assert.equal(indexDerivativesSessionOn("2026-11-10",index),null);
+  assert.equal(indexDerivativesSessionOn("2026-11-07",index),null);
+  assert.equal(nextIndexDerivativesSessionAfter("2026-12-31",index),null); // 2027 unverified
+ }
+ assert.equal(indexDerivativesSessionOn("2026-02-30","NIFTY"),null);
+});

@@ -12,6 +12,10 @@ test('strictly recorded levels, no guessed trade entry or win rate',async()=>{
  if(!p.ok)return;
  assert.equal(p.levels.high,25050);assert.equal(p.levels.low,24850);
  assert.equal(p.sourceTradeDate,date);assert.equal(p.lastRecordedAt,at);
+ assert.equal(p.targetSessionDate,"2026-11-08");
+ assert.equal(p.sessionType,"MUHURAT_SPECIAL");
+ assert.equal(p.targetSessionOpenIst,"14:20");assert.equal(p.targetSessionCloseIst,"15:40");
+ assert.equal(p.planStatus,"WATCH_ONLY");
  assert.equal(p.ceScenario.watchAbove,25050);assert.equal(p.peScenario.watchBelow,24850);
  assert.equal(p.tradeEntry,null);assert.equal(p.winRate,null);assert.equal(p.createsOrders,false);
 });
@@ -24,15 +28,27 @@ test('latest missing close never silently borrows an older day',async()=>{
 });
 test('invalid price, stale/untrusted marker and other symbols blocked',async()=>{
  assert.equal((await readNextSessionReference('BANKNIFTY',deps(),now)).reason,'INVALID_SYMBOL');
- assert.equal((await readNextSessionReference('NIFTY',deps(),new Date('2026-11-06T07:00:00Z'))).reason,'CLOSING_SESSION_NOT_FINISHED');
+ assert.equal((await readNextSessionReference('NIFTY',deps(),new Date('2026-11-06T07:00:00Z'))).reason,'SOURCE_SESSION_NOT_FINISHED');
  assert.equal((await readNextSessionReference('NIFTY',deps(dates(),replay([{...row(),spot_high:24900}])),now)).reason,'INVALID_RECORDED_PRICE_RANGE');
  assert.equal((await readNextSessionReference('NIFTY',deps(dates(),replay([{...row(),truth_verdict:'FALSE'}])),now)).reason,'NO_VERIFIED_CLOSING_MARKET_ROW');
  assert.equal((await readNextSessionReference('NIFTY',deps(dates(),replay([row(),{...row(),spot_low:24800}])),now)).reason,'CONFLICTING_CLOSING_MARKET_ROWS');
 });
-test('older reference is explicitly historical; no synthetic date',async()=>{
- const old='2026-10-25',stamp='2026-10-25T09:59:00Z';
- const p=await readNextSessionReference('NIFTY',deps(dates(stamp,old),replay([{...row(stamp),minute_bucket:stamp,exchange_timestamp:stamp}])),now);
- assert.equal(p.ok,true);if(p.ok){assert.equal(p.status,'HISTORICAL_REFERENCE_ONLY');assert(p.warnings.includes('OLDER_THAN_SEVEN_CALENDAR_DAYS_NOT_NEXT_SESSION'));}
+test('plan never re-labels a previous session after target has ended',async()=>{
+ const p=await readNextSessionReference('NIFTY',deps(),new Date('2026-11-08T10:20:00Z')); // 15:50 IST Sunday
+ assert.equal(p.ok,false);assert.equal(p.reason,'TARGET_SESSION_ALREADY_ENDED');assert.equal(p.targetSessionDate,'2026-11-08');
+});
+test('post-Muhurat next target is Monday; special close marker must be late enough',async()=>{
+ const special='2026-11-08',stamp='2026-11-08T10:09:00Z'; // 15:39 IST
+ const p=await readNextSessionReference('NIFTY',deps(dates(stamp,special),
+ replay([{...row(stamp),minute_bucket:stamp,exchange_timestamp:stamp}])),new Date('2026-11-08T10:20:00Z'));
+ assert.equal(p.ok,true);
+ if(p.ok){assert.equal(p.targetSessionDate,'2026-11-09');assert.equal(p.sessionType,'REGULAR');}
+ const early=await readNextSessionReference('NIFTY',deps(dates('2026-11-08T10:00:00Z',special),replay()),new Date('2026-11-08T10:20:00Z'));
+ assert.equal(early.ok,false);assert.equal(early.reason,'LATEST_SESSION_NO_CLOSE_MARKER');
+});
+test('non-trading date never gets a fictitious next-session plan',async()=>{
+ const p=await readNextSessionReference('NIFTY',deps(dates('2026-10-25T09:59:00Z','2026-10-25')),now);
+ assert.equal(p.ok,false);assert.equal(p.reason,'SOURCE_DATE_NOT_SUPPORTED_TRADING_SESSION');
 });
 test('read failures return a reason, never synthetic data',async()=>{
  const p=await readNextSessionReference('NIFTY',deps(async()=>{throw Error('db offline');}),now);

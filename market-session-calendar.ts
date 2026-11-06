@@ -86,3 +86,44 @@ export function isIndianEquityMarketOpenAt(now: Date): boolean {
 export function isClosedCalendarPhase(phase: IndianEquityMarketPhase): boolean {
   return phase === "WEEKEND" || phase === "HOLIDAY";
 }
+
+/** Source-authorized INDEX DERIVATIVES planning calendar, 2026 only.
+ * Do not silently apply F&O hours to cash constituent feeds or live startup.
+ * NSE FAOP/76940 and BSE circular 20261019-10, dated 19 Oct 2026.
+ */
+export interface IndexDerivativesTradingSession {
+  date: string;
+  index: "NIFTY" | "SENSEX";
+  exchange: "NSE" | "BSE";
+  type: "REGULAR" | "MUHURAT_SPECIAL";
+  opensAtIst: string;
+  closesAtIst: string;
+  officialCircular: string;
+}
+const DATE_2026 = /^2026-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$/;
+function checkedIndexDate(value: string): boolean {
+  if (!DATE_2026.test(value)) return false;
+  const ms=Date.parse(value+"T00:00:00Z");
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0,10)===value;
+}
+export function indexDerivativesSessionOn(date: string, index: "NIFTY"|"SENSEX"): IndexDerivativesTradingSession | null {
+  if(!checkedIndexDate(date) || (index!=="NIFTY" && index!=="SENSEX"))return null;
+  const exchange=index==="NIFTY"?"NSE":"BSE";
+  if(date==="2026-11-08")return {date,index,exchange,type:"MUHURAT_SPECIAL",opensAtIst:"14:20",closesAtIst:"15:40",
+    officialCircular:exchange==="NSE"?"NSE/FAOP/76940":"BSE/20261019-10"};
+  const weekday=new Date(date+"T00:00:00Z").getUTCDay();
+  if(weekday===0||weekday===6||HOLIDAY_BY_DATE.has(date))return null;
+  return {date,index,exchange,type:"REGULAR",opensAtIst:"09:15",closesAtIst:"15:30",
+    officialCircular:"EXCHANGE_2026_REGULAR_TRADING_CALENDAR"};
+}
+export function nextIndexDerivativesSessionAfter(date:string,index:"NIFTY"|"SENSEX"): IndexDerivativesTradingSession|null {
+  if(!checkedIndexDate(date))return null;
+  const original=Date.parse(date+"T00:00:00Z");
+  for(let i=1;i<=370;i++){
+    const candidate=new Date(original+i*86400000).toISOString().slice(0,10);
+    if(!candidate.startsWith("2026-"))return null; // Never silently invent a 2027 holiday schedule.
+    const found=indexDerivativesSessionOn(candidate,index);
+    if(found)return found;
+  }
+  return null;
+}

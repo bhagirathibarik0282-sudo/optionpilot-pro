@@ -25,7 +25,7 @@ This checkpoint supersedes older candidate, signing and delivery statements belo
 | 2 | First deterministic Today capsule | App branch CI accepted | Evidence-backed what changed, comparison baseline/time, facts versus inference, contradictions and two supported watch conditions; unknown cause stays unknown |
 | 3 | Spot/futures/reference context: previous close/open, PDH/PDL, VWAP and supported pivots | App branch CI accepted for broker OHLC and futures. PDH/PDL/VWAP sources pending | Source fields and units, reference session, futures identity/roll, basis and VWAP methodology; no invented reference values |
 | 4 | VIX and BANKNIFTY context | App branch CI accepted. BANKNIFTY research context | Separate volatility from direction; independent symbol/session/source eligibility |
-| 5 | Sectors/heavyweights and dated FII/DII | Tracked participation candidate. FII/DII read contract mapped | Returned subset and coverage; verified weights before point contributions; cash/derivative scope, publication/trading date and revisions |
+| 5 | Sectors/heavyweights and dated FII/DII | Tracked participation CI accepted. Dated FII/DII card pending | Returned subset and coverage; verified weights before point contributions; cash/derivative scope, publication/trading date and revisions |
 | 6 | Advanced options: OI rank/walls/migration, premium/PCR view controls, expiry scope | Pending beyond released baseline | Fixed-contract/time comparisons, real before/after inventory, ranking/coverage and no full/band substitution |
 | 7 | Recorded-session Memory/replay, multi-DTE outcomes and comparable episodes | Saved cache exists; session replay/RAG are not integrated | Available-at cutoff, shared cursor, exact contracts, real candle coverage, gaps/counterexamples and no future leakage |
 | 8 | News/history explanations, previous/current/next-session plans | Not integrated | Source publication times, attribution versus inference, supported outcome horizons and actual data coverage |
@@ -42,7 +42,7 @@ Volume PCR, Greeks/IV and extra history views may be added only when their actua
 5. Re-read the final diff and test evidence independently of the implementation claim. Mark source/test acceptance separately from runtime/phone acceptance. A failed check is unresolved work, not a pass.
 6. Continue to the next dependency only after resolving the affected code/test gate. If market/phone evidence cannot be obtained, record it explicitly; do independent reversible work without claiming the blocked gate passed.
 
-The next engineering step is the source audit for sectors/heavyweights and dated FII/DII before their native integration. Source verification for PDH/PDL/VWAP, owner access and live-phone acceptance are open dependencies.
+The next engineering step is the dated FII/DII card using the audited stored-EOD contract. Source verification for PDH/PDL/VWAP, owner access and live-phone acceptance are open dependencies.
 
 ## Combined APK gate
 
@@ -279,3 +279,12 @@ A native expandable Today card projects this existing array with returned/eligib
 FII/DII source audit found /api/research/fii-dii/production-readiness mounted in research-router.ts. Its implementation queries up to20 stored cash sessions and participant completeness metadata. dailyHistory can carry date, fiiNetCrore, diiNetCrore, combinedNetCrore, fetchedAt, source and sourceUrl under VERIFIED_STORED_EOD, including valid historical context when the top-level current-readiness flag is false. fetchedAt records retrieval and does not establish publication time. Explicit provisional/revision status and publication time are absent in the inspected output. The future mobile card must preserve dated EOD scope, distinguish stored historical validity from current readiness, and label unsupported publication/revision metadata accurately. This step inspected source, without claiming a runtime FII/DII readback or native FII/DII integration.
 
 Source audit files include dashboard-live-feed.ts, dashboard-background-quotes.ts, canonical-fii-dii-production-readiness-http.ts, canonical-fii-dii-production-readiness.ts, canonical-fii-dii-production-row.ts and canonical-fii-dii-dashboard-context-adapter.ts. These support the contract mapping. Phone/live coverage and the combined milestone release require their own acceptance.
+
+
+## Tracked participation accepted — 7 November 2026 IST
+
+Accepted source `a792afd90366644d2384228ba66985188590d03c`. [Run 42342226682](https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/42342226682) completed SUCCESS. Downloaded XML confirms 89 JVM and 32 Android 15 tests with zero failures, errors or skips. Lint recorded zero errors and 14 warnings. Validation artifact 13562391853 SHA256 `59f017bbbed9a15445ace54a98e6bf3a7ef972ecfd8ce826ac948bce7ef573f9` matched downloaded bytes.
+
+The card groups the source's tracked stock and sector/broad-market quotes and ranks percentage moves against each instrument's broker previous close. It shows eligible/returned coverage and each displayed source time. Ranking is confined to the tracked inventory. Verified constituent weights and dated historical coverage are separate open source requirements.
+
+A single bounded production GET to the FII/DII readiness route returned HTTP503 OUTSIDE_OPERATING_HOURS for 2026-11-07, with ready=false and no history payload. This verifies the off-hours access boundary. It does not assess the existence, dates or values of stored rows. The next FII/DII increment can build the dated EOD projection against the inspected read contract, with actual stored-row acceptance during an operating window and publication/revision status explicitly qualified. This change has app-branch acceptance for the combined milestone. Phone/live and combined-release acceptance remain open.

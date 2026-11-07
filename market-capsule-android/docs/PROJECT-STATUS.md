@@ -25,7 +25,7 @@ This checkpoint supersedes older candidate, signing and delivery statements belo
 | 2 | First deterministic Today capsule | App branch CI accepted | Evidence-backed what changed, comparison baseline/time, facts versus inference, contradictions and two supported watch conditions; unknown cause stays unknown |
 | 3 | Spot/futures/reference context: previous close/open, PDH/PDL, VWAP and supported pivots | App branch CI accepted for broker OHLC and futures. PDH/PDL/VWAP sources pending | Source fields and units, reference session, futures identity/roll, basis and VWAP methodology; no invented reference values |
 | 4 | VIX and BANKNIFTY context | App branch CI accepted. BANKNIFTY research context | Separate volatility from direction; independent symbol/session/source eligibility |
-| 5 | Sectors/heavyweights and dated FII/DII | Tracked participation and separate dated top-ten weight views CI accepted. Dated FII/DII candidate | Returned subset and coverage; verified weights before point contributions; cash/derivative scope, publication/trading date and revisions |
+| 5 | Sectors/heavyweights and dated FII/DII | Tracked participation and separate dated top-ten weight views CI accepted. Dated FII/DII app branch CI accepted | Returned subset and coverage; verified weights before point contributions; cash/derivative scope, publication/trading date and revisions |
 | 6 | Advanced options: OI rank/walls/migration, premium/PCR view controls, expiry scope | Pending beyond released baseline | Fixed-contract/time comparisons, real before/after inventory, ranking/coverage and no full/band substitution |
 | 7 | Recorded-session Memory/replay, multi-DTE outcomes and comparable episodes | Saved cache exists; session replay/RAG are not integrated | Available-at cutoff, shared cursor, exact contracts, real candle coverage, gaps/counterexamples and no future leakage |
 | 8 | News/history explanations, previous/current/next-session plans | Not integrated | Source publication times, attribution versus inference, supported outcome horizons and actual data coverage |
@@ -42,7 +42,7 @@ Volume PCR, Greeks/IV and extra history views may be added only when their actua
 5. Re-read the final diff and test evidence independently of the implementation claim. Mark source/test acceptance separately from runtime/phone acceptance. A failed check is unresolved work, not a pass.
 6. Continue to the next dependency only after resolving the affected code/test gate. If market/phone evidence cannot be obtained, record it explicitly; do independent reversible work without claiming the blocked gate passed.
 
-The next engineering step is the dated FII/DII card using the audited stored-EOD contract. Source verification for PDH/PDL/VWAP, owner access and live-phone acceptance are open dependencies.
+The next engineering step is the fixed-contract OI rank and wall source audit for the advanced options view. Source verification for PDH/PDL/VWAP, owner access and live-phone acceptance are open dependencies.
 
 ## Combined APK gate
 
@@ -311,3 +311,10 @@ The native UI test verified HDFC Bank at 9.95% in NIFTY 50 and 18.18% in BANKNIF
 Today has an explicit Refresh FII/DII action using the audited stored-EOD GET contract. It validates the canonical report, official source identity, ordered session dates, retrieval chronology and net totals. A typed readiness response can provide verified older EOD context while its current-readiness status is pending. The operating-hours error is shown as an unavailable refresh. A prior accepted cash-flow row retains its original trading date and retrieval time.
 
 The card displays the latest verified stored session, FII/FPI and DII net values, combined net in crore INR, fetched time, and the server's expected session at the check. Publication time and revision status are unavailable in the source. The app keeps a separate atomic cash-flow cache and prevents older or conflicting reads from replacing the accepted row. The explicit action is independent of live snapshot refresh and stream lifecycle. Android build and emulator checks are pending. The production operating-hours response observed during the source audit leaves actual stored-row acceptance open.
+
+
+## Dated FII/DII cash card accepted — 7 November 2026 IST
+
+Accepted source `e6a7d79384877dd6ea7f3e807e3d279d72587e07`. [Run 42353454288](https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/42353454288) completed SUCCESS. Downloaded XML confirms 96 JVM and 35 Android 15 tests with zero failures, errors or skips. Lint recorded zero errors and 15 warnings. Validation artifact 13566468164 SHA256 `2a316925b2dc4543595178ff977681f0f5e98385b839fed3da1c3b0ac432c9ef` matched downloaded bytes.
+
+Seven model cases covered verified historical data with pending readiness, off-hours payloads, PostgreSQL retrieval timestamps, dated history, official provenance, numeric totals and replacement ordering. Android tests confirmed the dedicated action, dated display after a failed refresh and actual atomic-cache restore with a new repository instance. Actual production row acceptance awaits an accessible operating window. This accepted app-branch increment is intended for the combined APK. Physical-device and release verification are pending.

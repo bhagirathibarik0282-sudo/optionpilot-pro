@@ -26,7 +26,7 @@ This checkpoint supersedes older candidate, signing and delivery statements belo
 | 3 | Spot/futures/reference context: previous close/open, PDH/PDL, VWAP and supported pivots | App branch CI accepted for broker OHLC and futures. PDH/PDL/VWAP sources pending | Source fields and units, reference session, futures identity/roll, basis and VWAP methodology; no invented reference values |
 | 4 | VIX and BANKNIFTY context | App branch CI accepted. BANKNIFTY research context | Separate volatility from direction; independent symbol/session/source eligibility |
 | 5 | Sectors/heavyweights and dated FII/DII | Tracked participation and separate dated top-ten weight views CI accepted. Dated FII/DII app branch CI accepted | Returned subset and coverage; verified weights before point contributions; cash/derivative scope, publication/trading date and revisions |
-| 6 | Advanced options: OI rank/walls/migration, premium/PCR view controls, expiry scope | Pending beyond released baseline | Fixed-contract/time comparisons, real before/after inventory, ranking/coverage and no full/band substitution |
+| 6 | Advanced options: OI rank/walls/migration, premium/PCR view controls, expiry scope | Band OI ranks, walls and display modes CI accepted. Full-expiry ranks and migration pending | Fixed-contract/time comparisons, real before/after inventory, ranking/coverage and no full/band substitution |
 | 7 | Recorded-session Memory/replay, multi-DTE outcomes and comparable episodes | Saved cache exists; session replay/RAG are not integrated | Available-at cutoff, shared cursor, exact contracts, real candle coverage, gaps/counterexamples and no future leakage |
 | 8 | News/history explanations, previous/current/next-session plans | Not integrated | Source publication times, attribution versus inference, supported outcome horizons and actual data coverage |
 | 9 | Existing Telegram/push and easier distribution | Future integration, not silently enabled | Shared capsule identity, routing/dedup/recovery; phone notification permissions and distribution setup separately established |
@@ -42,7 +42,7 @@ Volume PCR, Greeks/IV and extra history views may be added only when their actua
 5. Re-read the final diff and test evidence independently of the implementation claim. Mark source/test acceptance separately from runtime/phone acceptance. A failed check is unresolved work, not a pass.
 6. Continue to the next dependency only after resolving the affected code/test gate. If market/phone evidence cannot be obtained, record it explicitly; do independent reversible work without claiming the blocked gate passed.
 
-The next engineering step is the fixed-contract OI rank and wall source audit for the advanced options view. Source verification for PDH/PDL/VWAP, owner access and live-phone acceptance are open dependencies.
+The next engineering step is the recorded wall-migration source audit with fixed index, expiry and time coverage. Source verification for PDH/PDL/VWAP, owner access and live-phone acceptance are open dependencies.
 
 ## Combined APK gate
 
@@ -327,3 +327,10 @@ Source audit at deployed source b60d136524259cc1970b1f1d05d808a3cb0192cf confirm
 Live Desk offers Premium, OI and Both. It ranks positive OI within the eligible returned rows for each side. Zero OI is displayed without a rank, and equal values share competition rank. A call or put wall requires every strike in the selected band to have valid fresh OI on that side and source timestamps within 30 seconds. Equal maxima are displayed together. Exact role, symbol, expiry, strike and side checks precede the rank. OI also requires a unique positive token, integral nonnegative value and same-session timestamps. Invalid OI leaves available premium values usable. The band scope and eligible count are visible. Full-expiry wall rankings, migration and history remain open.
 
 The candidate reuses the existing read-only ladder request and age/delivery budget. Six model cases and one Android UI case were added. CI and live-phone acceptance are pending at this checkpoint.
+
+
+## Exact-expiry band OI accepted — 7 November 2026 IST
+
+Accepted source `e01275c21f99567bf6a34d81bc23c56763daa64c`. [Run 42363383344](https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/42363383344) completed SUCCESS. Downloaded XML confirms 102 JVM and 36 Android 15 tests with zero failures, errors or skips. Lint recorded zero errors and 15 warnings. Validation artifact 13570806805 SHA256 `b91245d56a3c9db8d570cee01475001240f6fa3a2fa1c9b68b779c0034079876` matched downloaded bytes.
+
+Tests exercised complete and partial bands, tied maxima, positive ranking and valid zero, invalid OI, duplicate/missing tokens, independent ladder aging, source time skew, and the Both view. The Android case confirmed 7/7 call coverage with two tied walls and 6/7 put coverage with the put wall withheld. This is bounded to the selected strike band. Actual live server and phone acceptance, full-expiry coverage, historical wall migration and the combined release remain open.

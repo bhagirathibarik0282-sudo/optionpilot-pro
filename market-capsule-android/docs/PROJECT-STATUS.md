@@ -24,7 +24,7 @@ This checkpoint supersedes older candidate, signing and delivery statements belo
 | 1 | Connection and mobile access audit | Not accepted end to end | Distinguish broker login from app authorization, runtime closure from outage; inspect existing access boundaries without bypassing them |
 | 2 | First deterministic Today capsule | App branch CI accepted | Evidence-backed what changed, comparison baseline/time, facts versus inference, contradictions and two supported watch conditions; unknown cause stays unknown |
 | 3 | Spot/futures/reference context: previous close/open, PDH/PDL, VWAP and supported pivots | App branch CI accepted for broker OHLC and futures. PDH/PDL/VWAP sources pending | Source fields and units, reference session, futures identity/roll, basis and VWAP methodology; no invented reference values |
-| 4 | VIX and BANKNIFTY context | App branch candidate. BANKNIFTY remains research context | Separate volatility from direction; independent symbol/session/source eligibility |
+| 4 | VIX and BANKNIFTY context | App branch CI accepted. BANKNIFTY research context | Separate volatility from direction; independent symbol/session/source eligibility |
 | 5 | Sectors/heavyweights and dated FII/DII | Not integrated in app | Returned subset and coverage; verified weights before point contributions; cash/derivative scope, publication/trading date and revisions |
 | 6 | Advanced options: OI rank/walls/migration, premium/PCR view controls, expiry scope | Pending beyond released baseline | Fixed-contract/time comparisons, real before/after inventory, ranking/coverage and no full/band substitution |
 | 7 | Recorded-session Memory/replay, multi-DTE outcomes and comparable episodes | Saved cache exists; session replay/RAG are not integrated | Available-at cutoff, shared cursor, exact contracts, real candle coverage, gaps/counterexamples and no future leakage |
@@ -42,7 +42,7 @@ Volume PCR, Greeks/IV and extra history views may be added only when their actua
 5. Re-read the final diff and test evidence independently of the implementation claim. Mark source/test acceptance separately from runtime/phone acceptance. A failed check is unresolved work, not a pass.
 6. Continue to the next dependency only after resolving the affected code/test gate. If market/phone evidence cannot be obtained, record it explicitly; do independent reversible work without claiming the blocked gate passed.
 
-The next engineering step is the existing data-flow/access audit (order 1), followed by a small deterministic Today capsule. Do not start by adding every context panel or rebuilding the released ladder.
+The next engineering step is the source audit for sectors/heavyweights and dated FII/DII before their native integration. Source verification for PDH/PDL/VWAP, owner access and live-phone acceptance are open dependencies.
 
 ## Combined APK gate
 
@@ -259,3 +259,12 @@ Accepted scope is the optional broker previous close/current-session OHLC and ex
 Today reads India VIX and BANKNIFTY spot from the existing snapshot. The source roles and labels were checked against deployed source b60d136524259cc1970b1f1d05d808a3cb0192cf. Both quotes use the existing reference timing and session checks independently. Day change uses each quote's broker previous close. The app labels VIX as volatility context and BANKNIFTY as research context. NIFTY and SENSEX remain the primary selections.
 
 Five model tests and one Android UI test exercise source identity, duplicate rows, stale and disconnected quotes, and withdrawal of saved readings. CI and phone acceptance are pending at this checkpoint. The latest published stable version is 0.1.10. These changes are intended for the combined milestone APK.
+
+
+## India VIX and BANKNIFTY context accepted — 7 November 2026 IST
+
+Accepted source `938644a42c4e1e5a65700b9e47d5bfb3323f5df8`. [Run 42336005862](https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/42336005862) completed SUCCESS. Downloaded XML confirms 83 JVM and31 Android15 tests with zero failures/errors/skips. Lint recorded zero errors and14 warnings. Validation artifact13559439292 SHA256 `a59e444eb2dcf0f1646e173fe82fb1d81e05b2e5889579d3c9ccc2fef077d57e` matched downloaded bytes.
+
+The integration reuses ReferenceQuote and its age/session validation for snapshot.vix and the single BANKNIFTY spot row. It requires the India VIX role/label and the BANKNIFTY spot identity. Duplicate BANKNIFTY rows, bad identities, wrong sessions and stale values withhold the affected observation. The UI checks each observation's delivery and elapsed age. Five new model tests and one UI test passed alongside the previous suite. The card displays source time and day percentage derived from the same quote's broker previous close. BANKNIFTY serves research context alongside the primary NIFTY/SENSEX views.
+
+The latest published stable release was rechecked as capsule-v0.1.10. Today capsule, spot/futures references and this context card have app-branch CI acceptance for the combined milestone. Actual phone/live data, owner access, historical levels and the combined-release checks are pending. The implementation order advances available snapshot context while the dated PDH/PDL/VWAP source contracts need verification.

@@ -28,7 +28,7 @@ class TodayCapsuleUiTest {
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("today-full-pcr"))
         ui.onNodeWithTag("today-full-pcr").assertTextEquals("Full PCR · verified: —")
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("today-reported-pcr"))
-        ui.onNodeWithTag("today-reported-pcr").assertTextContains("mixed source times")
+        ui.onNodeWithTag("today-reported-pcr").assertTextEquals("Latest reported PCR: 1.8000 · 2026-11-09 · mixed source times")
         ui.runOnIdle { s.value = s.value.copy(currentElapsedMs = 90001) }
         ui.onNodeWithTag("today-reported-pcr").assertDoesNotExist()
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("today-day-change"))
@@ -47,6 +47,6 @@ class TodayCapsuleUiTest {
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("today-full-pcr"))
         ui.onNodeWithTag("today-full-pcr").assertTextEquals("Full PCR · verified: —")
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("today-cause"))
-        ui.onNodeWithTag("today-cause").assertTextContains("Market cause unverified")
+        ui.onNodeWithTag("today-cause").assertTextEquals("Market cause unverified. News and historical matching are not connected.")
     }
 }

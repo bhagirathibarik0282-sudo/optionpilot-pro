@@ -1,6 +1,7 @@
 name: Market Capsule Stable APK (owner-approved)
 
 # A deliberate [capsule-release] commit on the Android branch starts release.
+# Use that marker only after the owner approves public APK publication.
 # Ordinary development pushes do not use signing secrets or publish an APK.
 # Manual dispatch remains available.
 on:

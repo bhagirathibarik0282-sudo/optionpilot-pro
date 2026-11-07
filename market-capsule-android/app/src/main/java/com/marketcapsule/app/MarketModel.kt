@@ -37,7 +37,8 @@ internal data class MarketSnapshot(
     val connectionState: String,
     val quotes: Map<MarketIndex, Quote>,
     val ladders: Map<MarketIndex, List<ExpiryPair>> = emptyMap(),
-    val pcrReadings: Map<MarketIndex, PcrReading> = emptyMap()
+    val pcrReadings: Map<MarketIndex, PcrReading> = emptyMap(),
+    val references: Map<MarketIndex, MarketReference> = emptyMap()
 )
 internal data class MarketUiState(
     val selected: MarketIndex = MarketIndex.NIFTY,
@@ -125,7 +126,8 @@ internal object SnapshotParser {
         }
         return MarketSnapshot(runtime, seq.toLong(), serverText, connected, root.optString("connectionState", "UNKNOWN"), quotes,
             ExpiryLadderParser.parse(snap, server, connected),
-            PcrReadingParser.parse(snap, server, connected))
+            PcrReadingParser.parse(snap, server, connected),
+            MarketReferenceParser.parse(snap, server, connected))
     }
     fun accepts(previous: MarketSnapshot?, next: MarketSnapshot): Boolean {
         if (previous == null) return true

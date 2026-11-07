@@ -149,6 +149,7 @@ class MainActivity : ComponentActivity() {
                         if (pcr?.reported != null) Text("Latest reported PCR: ${ratioText(pcr.reported.ratio)} · ${pcr.expiry} · mixed source times",
                             color = Muted, modifier = Modifier.testTag("today-reported-pcr"))
                     } }
+                    item { MarketReferenceCard(state) }
                     item { Section("Why / Watch next") {
                         Text("Market cause unverified. News and historical matching are not connected.",
                             color = Muted, modifier = Modifier.testTag("today-cause"))
@@ -308,6 +309,28 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+@Composable private fun MarketReferenceCard(state: MarketUiState) {
+    val reference = state.current?.references?.get(state.selected)
+    val spot = reference?.spot?.takeIf { reference.eligible(state, it) }
+    val future = reference?.future?.takeIf { reference.eligible(state, it) }
+    Section("Market references · broker snapshot") {
+        Text("${state.selected.name} · Spot references", color = Gold)
+        Text("Broker previous close: ${format(spot?.previousClose)}", modifier = Modifier.testTag("reference-pdc"))
+        Text("Today's open: ${format(spot?.dayOpen)}")
+        Text("Today's session high: ${format(spot?.dayHigh)}")
+        Text("Today's session low: ${format(spot?.dayLow)}")
+        Text("Futures: ${format(future?.price)}", modifier = Modifier.testTag("reference-future"))
+        Text("Futures contract: ${future?.contract ?: "Unavailable"} · expiry ${future?.expiry ?: "Unavailable"}",
+            color = Muted, modifier = Modifier.testTag("reference-future-contract"))
+        Text("Basis (future − spot): ${format(reference?.basis(state))} index points",
+            modifier = Modifier.testTag("reference-basis"))
+        Text("Spot source: ${at(spot?.observedAt)} · Futures source: ${at(future?.observedAt)}",
+            color = Muted, style = MaterialTheme.typography.bodySmall)
+        Text("PDH / PDL / VWAP: unavailable. Today's high/low are current-session values.",
+            color = Muted, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
 @Composable private fun PcrCard(state: MarketUiState) {
     val reading = state.current?.pcrReadings?.get(state.selected)
     val eligible = reading?.eligible(state) == true

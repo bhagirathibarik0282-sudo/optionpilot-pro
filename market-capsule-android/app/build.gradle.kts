@@ -42,6 +42,9 @@ android {
                 storePassword = releaseValues["MC_RELEASE_STORE_PASSWORD"]
                 keyAlias = releaseValues["MC_RELEASE_KEY_ALIAS"]
                 keyPassword = releaseValues["MC_RELEASE_KEY_PASSWORD"]
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }

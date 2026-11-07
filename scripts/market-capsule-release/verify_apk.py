@@ -27,6 +27,8 @@ def verify(badging, signature, tag, expected_cert):
     require(re.search(r"(?m)^Verifies\s*$", signature), "APK_SIGNATURE_NOT_VERIFIED")
     require(re.search(r"(?m)^Verified using v2 scheme \(APK Signature Scheme v2\): true\s*$",
                       signature), "V2_SIGNATURE_REQUIRED")
+    require(re.search(r"(?m)^Verified using v3 scheme \(APK Signature Scheme v3\): true\s*$",
+                      signature), "V3_SIGNATURE_REQUIRED")
     counts = re.findall(r"(?m)^Number of signers: (\d+)\s*$", signature)
     require(counts == ["1"], "SINGLE_STABLE_SIGNER_REQUIRED")
     certs = re.findall(r"(?m)^Signer #\d+ certificate SHA-256 digest: (\S+)\s*$", signature)

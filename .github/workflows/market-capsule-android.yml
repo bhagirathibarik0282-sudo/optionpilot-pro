@@ -7,6 +7,7 @@ on:
       - 'market-capsule-android/**'
       - '!market-capsule-android/docs/**'
       - '.github/workflows/market-capsule-android.yml'
+      - 'scripts/market-capsule-release/verify_native_alignment.py'
   workflow_dispatch:
     inputs:
       deep_apk_audit:
@@ -51,6 +52,11 @@ jobs:
         run: ./scripts/audit-old-parser.sh
       - name: Unit tests, lint and package app and instrumented tests
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:processReleaseMainManifest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Verify debug APK 16 KB native alignment
+        run: |
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 "$apk"
+          python3 ../scripts/market-capsule-release/verify_native_alignment.py "$apk"
       - name: Inspect original and corrected APK signatures and manifests
         env:
           GH_TOKEN: ${{ github.token }}

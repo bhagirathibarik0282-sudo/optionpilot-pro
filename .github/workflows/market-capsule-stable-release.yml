@@ -88,7 +88,7 @@ jobs:
       - name: Android 15 emulator acceptance
         timeout-minutes: 15
         run: ./scripts/emulator-acceptance.sh
-      - name: Verify exact release identity, version and signing certificate
+      - name: Verify release identity, signing schemes, certificate and 16 KB alignment
         env:
           TAG: ${{ steps.release_intent.outputs.tag }}
           EXPECTED_CERT_SHA256: ${{ vars.MC_RELEASE_CERT_SHA256 }}
@@ -97,6 +97,8 @@ jobs:
           apk=app/build/outputs/apk/release/app-release.apk
           test -s "$apk"
           sdk="$ANDROID_HOME/build-tools/35.0.0"
+          "$sdk/zipalign" -c -P 16 4 "$apk"
+          python3 ../scripts/market-capsule-release/verify_native_alignment.py "$apk"
           "$sdk/aapt" dump badging "$apk" > "$RUNNER_TEMP/stable-badging.txt"
           "$sdk/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/stable-signature.txt"
           python3 ../scripts/market-capsule-release/verify_apk.py \

@@ -4,6 +4,7 @@ from verify_apk import verify
 CERT = "ab" * 32
 BADGE = "package: name='com.marketcapsule.app.stable' versionCode='10' versionName='0.1.9'\n"
 SIGNATURE = ("Verifies\nVerified using v2 scheme (APK Signature Scheme v2): true\n"
+             "Verified using v3 scheme (APK Signature Scheme v3): true\n"
              "Number of signers: 1\nSigner #1 certificate SHA-256 digest: " + CERT + "\n")
 
 
@@ -44,6 +45,10 @@ class StableApkChecks(unittest.TestCase):
     def test_signature_verification_and_v2_are_required(self):
         self.check_rejected("APK_SIGNATURE_NOT_VERIFIED", signature=SIGNATURE.replace("Verifies\n", ""))
         self.check_rejected("V2_SIGNATURE_REQUIRED", signature=SIGNATURE.replace(": true", ": false"))
+
+    def test_v3_is_required(self):
+        self.check_rejected("V3_SIGNATURE_REQUIRED",
+                            signature=SIGNATURE.replace("Scheme v3): true", "Scheme v3): false"))
 
     def test_multiple_or_missing_signers(self):
         self.check_rejected("SINGLE_STABLE_SIGNER_REQUIRED", signature=SIGNATURE.replace("signers: 1", "signers: 2"))

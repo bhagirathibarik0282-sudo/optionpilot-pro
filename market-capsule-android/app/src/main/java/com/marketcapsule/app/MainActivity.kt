@@ -152,6 +152,7 @@ class MainActivity : ComponentActivity() {
                     item { MarketReferenceCard(state) }
                     item { MarketContextCard(state) }
                     item { ParticipationCard(state) }
+                    item { IndexWeightsCard() }
                     item { Section("Why / Watch next") {
                         Text("Market cause unverified. News and historical matching are not connected.",
                             color = Muted, modifier = Modifier.testTag("today-cause"))
@@ -311,6 +312,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+@Composable private fun IndexWeightsCard() {
+    var selected by rememberSaveable { mutableStateOf(IndexWeightSnapshot.NIFTY_50) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Section("Index constituent weights") {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IndexWeightSnapshot.entries.forEach { index ->
+                FilterChip(selected = selected == index, onClick = { selected = index },
+                    label = { Text(index.label) }, modifier = Modifier.testTag("index-weights-${index.name}"))
+            }
+        }
+        Text("NSE Indices factsheet · ${selected.asOf}", color = Muted,
+            modifier = Modifier.testTag("index-weight-date"))
+        Text("Top ${selected.rows.size} of ${selected.constituentCount} · ${format(selected.coveredPercent)}% combined weight",
+            modifier = Modifier.testTag("index-weight-coverage"))
+        TextButton(onClick = { expanded = !expanded }, modifier = Modifier.testTag("index-weight-toggle")) {
+            Text(if (expanded) "Hide weights" else "Show weights")
+        }
+        if (expanded) {
+            selected.rows.forEach { constituent ->
+                Text("${constituent.name} · ${format(constituent.hundredths / 100.0)}%",
+                    modifier = Modifier.testTag("weight-${constituent.symbol}"))
+            }
+            TextButton(onClick = {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(selected.sourceUrl))) }
+                    .onFailure { Toast.makeText(context, "No browser available for factsheet", Toast.LENGTH_LONG).show() }
+            }) { Text("Open NSE Indices factsheet") }
+        }
+    }
+}
+
 @Composable private fun ParticipationCard(state: MarketUiState) {
     val participation = state.current?.participation
     val eligible = participation?.eligible(state).orEmpty()

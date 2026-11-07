@@ -223,3 +223,14 @@ Concrete access gap: inspected GET mounts have no owner-specific mobile session 
 A native Today projection now reuses existing spot/PCR family eligibility. Day change is explicitly versus broker previous close, never movement since the last refresh or a cause. Verified full, ATM +/-7 band and latest-reported mixed-time PCR retain separate labels and exact PCR expiry. Two deterministic watch conditions are observations, not signals; unknown cause/news/history remain explicit. Source observation/check/interval evidence is expandable. Missing/stale/disconnected/cached/foreign-index data cannot become current facts, and eligible PCR does not depend on the shorter spot clock.
 
 Ten new JVM tests and two synthetic Android UI tests accompany the candidate. Compilation/lint/unit/emulator acceptance is pending the source-triggered Android workflow at this checkpoint; no new live/phone acceptance is claimed. Existing refresh, stream, ladder, other tabs, backend, signing and app version are untouched. No release marker or user APK publication is requested for this engineering increment.
+
+
+## Today capsule accepted in source/CI — 7 November 2026 IST
+
+Accepted source `17d78e3115aad87527fcb0a8f6610759f0281577`; [Android run 42326201897](https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/42326201897) completed SUCCESS. Downloaded XML reports independently confirm 66 JVM +28 Android15 tests, zero failures/errors/skips. Lint: zero errors,14 warnings. Validation artifact13555471233 SHA256 `6e240d65e2648382ea17a0710d69527714f3ddc086a7a084ff489b34c21dbcc0` matched downloaded bytes.
+
+The earlier run42325472307 passed all66 JVM tests and26 existing Android tests but failed the2 new UI assertions. Downloaded failure XML showed the complete expected text was present; assertions used assertTextContains without substring matching. The correction asserts each complete label with assertTextEquals; app behavior and assertions about stale withdrawal/index isolation were retained. The final full suite passed. Do not hide the failed attempt or treat the correction as a new market-data repair.
+
+This accepts the deterministic Today projection and its bounded synthetic/emulator behavior only. It does not establish actual news/causality, change since last refresh, live phone correctness, owner authentication or physical smoothness. Current stable0.1.10 remains installed unchanged; no release marker, version/signing change, public APK publication, production mutation or additional download was made. Include this increment in a future combined milestone APK after the remaining relevant checks.
+
+Next source work: inspect the existing spot/futures/reference contracts for previous close/open, PDH/PDL and VWAP provenance before selecting the next small app-context increment. Keep missing references explicit; do not derive VWAP from an unverified average-price field or duplicate an existing indicator.

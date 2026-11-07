@@ -151,6 +151,7 @@ class MainActivity : ComponentActivity() {
                     } }
                     item { MarketReferenceCard(state) }
                     item { MarketContextCard(state) }
+                    item { ParticipationCard(state) }
                     item { Section("Why / Watch next") {
                         Text("Market cause unverified. News and historical matching are not connected.",
                             color = Muted, modifier = Modifier.testTag("today-cause"))
@@ -310,6 +311,40 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+@Composable private fun ParticipationCard(state: MarketUiState) {
+    val participation = state.current?.participation
+    val eligible = participation?.eligible(state).orEmpty()
+    Section("Tracked market participation") {
+        Text("Shared market context · tracked subset", color = Muted)
+        Text("Eligible ${eligible.size} of ${participation?.returnedCount ?: 0} returned quotes",
+            modifier = Modifier.testTag("participation-coverage"))
+        Text("% versus broker previous close", color = Muted, style = MaterialTheme.typography.bodySmall)
+        var expanded by rememberSaveable { mutableStateOf(false) }
+        if (eligible.isEmpty()) {
+            Text("Participation readings unavailable. Refresh for a new observation.", color = Muted)
+        } else {
+            TextButton(onClick = { expanded = !expanded }, modifier = Modifier.testTag("participation-toggle")) {
+                Text(if (expanded) "Hide tracked movers" else "Show tracked movers")
+            }
+            if (expanded) ParticipationKind.entries.forEach { kind ->
+                Text(kind.title, color = Gold)
+                listOf(true, false).forEach { rising ->
+                    val movers = participation?.movers(state, kind, rising).orEmpty()
+                    Text(if (rising) "Gainers" else "Decliners", color = Muted)
+                    if (movers.isEmpty()) Text("No eligible readings in this group", color = Muted)
+                    movers.forEach { reading ->
+                        Text("${reading.label}: ${signed(reading.changePct)}%",
+                            color = if (rising) Up else Down,
+                            modifier = Modifier.testTag("mover-${kind.name}-${reading.token}"))
+                        Text("Source: ${at(reading.quote.observedAt)}", color = Muted,
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable private fun MarketContextCard(state: MarketUiState) {
     val context = state.current?.marketContext
     val vix = context?.indiaVix?.takeIf { it.isFresh(state) }

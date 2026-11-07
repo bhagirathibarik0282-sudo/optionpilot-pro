@@ -103,6 +103,38 @@ internal object MarketReferenceParser {
             maxOf(0, age, receiptAge), expiry, contract, token)
     }
 
+    fun parseParticipation(snapshot: JSONObject, server: Instant, connected: Boolean): ParticipationSnapshot? {
+        val date = server.atZone(india).toLocalDate()
+        if (!connected || snapshot.optString("tradeDate") != date.toString()) return null
+        val source = snapshot.optJSONArray("participation") ?: return null
+        if (source.length() > 256) return null
+
+        val readings = mutableListOf<ParticipationReading>()
+        val seenTokens = mutableSetOf<Long>()
+        val duplicateTokens = mutableSetOf<Long>()
+        val seenLabels = mutableSetOf<Pair<ParticipationKind, String>>()
+        val duplicateLabels = mutableSetOf<Pair<ParticipationKind, String>>()
+        for (position in 0 until source.length()) {
+            val row = source.optJSONObject(position) ?: continue
+            val identity = row.optJSONObject("identity") ?: continue
+            val token = number(identity, "token")?.takeIf {
+                it > 0 && it <= 9_007_199_254_740_991.0 && it % 1.0 == 0.0
+            }?.toLong() ?: continue
+            if (!seenTokens.add(token)) duplicateTokens.add(token)
+            val kind = ParticipationKind.entries.find { it.name == identity.optString("role") } ?: continue
+            val label = text(identity, "label") ?: continue
+            if (!seenLabels.add(kind to label)) duplicateLabels.add(kind to label)
+            val reading = runCatching { quote(row, null, kind.name, server, date) }.getOrNull() ?: continue
+            val previousClose = reading.previousClose ?: continue
+            val change = (reading.price / previousClose - 1) * 100
+            if (!change.isFinite()) continue
+            readings.add(ParticipationReading(kind, token, label, reading, change))
+        }
+        return ParticipationSnapshot(source.length(), readings.filter {
+            it.token !in duplicateTokens && (it.kind to it.label) !in duplicateLabels
+        })
+    }
+
     fun parseContext(snapshot: JSONObject, server: Instant, connected: Boolean): MarketContext {
         val date = server.atZone(india).toLocalDate()
         if (!connected || snapshot.optString("tradeDate") != date.toString()) return MarketContext()

@@ -20,6 +20,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -69,6 +70,10 @@ class MainActivity : ComponentActivity() {
             }
     }
 }
+private enum class StrikeDisplay(val label: String) {
+    PREMIUM("Premium"), OI("OI"), BOTH("Both")
+}
+
 @Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}, onLoadStrikes: (MarketIndex, String) -> Unit = { _, _ -> }, onRefreshFiiDii: () -> Unit = {}, onKiteLogin: () -> Unit = {}) {
     var page by rememberSaveable { mutableStateOf(Page.TODAY) }
     // Each destination owns its position; a long ladder must not scroll another tab.
@@ -86,6 +91,7 @@ class MainActivity : ComponentActivity() {
     // Persist selection through frame updates but reset on an index change.
     var expiryChoice by rememberSaveable(state.selected.name) { mutableStateOf("ALL") }
     var strikeBand by rememberSaveable { mutableIntStateOf(3) }
+    var strikeDisplay by rememberSaveable { mutableStateOf(StrikeDisplay.PREMIUM) }
     Scaffold(containerColor = Navy, bottomBar = {
         NavigationBar(containerColor = Panel) {
             Page.entries.forEach { item -> NavigationBarItem(modifier = Modifier.testTag("tab-${item.name}"), selected = page == item,
@@ -241,6 +247,12 @@ class MainActivity : ComponentActivity() {
                                     label = { Text("±$band") }, modifier = Modifier.weight(1f).testTag("strike-window-$band"))
                             }
                         }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            StrikeDisplay.entries.forEach { mode ->
+                                FilterChip(selected = strikeDisplay == mode, onClick = { strikeDisplay = mode },
+                                    label = { Text(mode.label) }, modifier = Modifier.weight(1f).testTag("strike-display-${mode.name}"))
+                            }
+                        }
                         Button(onClick = { onLoadStrikes(state.selected, target) }, modifier = Modifier.fillMaxWidth().testTag("strike-load"),
                             enabled = !state.strikeLoading && state.status == ReadingStatus.RECENT_SNAPSHOT && reference != null) {
                             Text(if (state.strikeLoading) "Loading strikes…" else "Load strikes · read only")
@@ -252,13 +264,26 @@ class MainActivity : ComponentActivity() {
                             if (visible.isEmpty()) {
                                 Text("ATM reference is unavailable in the returned exact strikes; no substitute.", color = Muted)
                             } else {
+                                val ceOi = if (strikeDisplay != StrikeDisplay.PREMIUM)
+                                    read.rankOi(state, visible, strikeBand) { it.ce } else null
+                                val peOi = if (strikeDisplay != StrikeDisplay.PREMIUM)
+                                    read.rankOi(state, visible, strikeBand) { it.pe } else null
+                                if (ceOi != null && peOi != null) {
+                                    Text("Band OI · ±$strikeBand strikes · $target", color = Gold)
+                                    Text("Fresh OI: CE ${ceOi.values.size}/${ceOi.expected} · PE ${peOi.values.size}/${peOi.expected}",
+                                        modifier = Modifier.testTag("strike-oi-coverage"))
+                                    Text("Call band wall: ${wallLabel(ceOi)}", modifier = Modifier.testTag("strike-ce-wall"))
+                                    Text("Put band wall: ${wallLabel(peOi)}", modifier = Modifier.testTag("strike-pe-wall"))
+                                    Text("Ranks use eligible returned strikes. Walls require complete, synchronized band OI.",
+                                        color = Muted, style = MaterialTheme.typography.bodySmall)
+                                }
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 3.dp),
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("CE premium", modifier = Modifier.weight(1f), color = Muted,
+                                    Text(if (strikeDisplay == StrikeDisplay.PREMIUM) "CE premium" else "CE ${strikeDisplay.label}", modifier = Modifier.weight(1f), color = Muted,
                                         style = MaterialTheme.typography.labelSmall)
                                     Text("STRIKE", modifier = Modifier.weight(1.04f), textAlign = TextAlign.Center,
                                         color = Muted, style = MaterialTheme.typography.labelSmall)
-                                    Text("PE premium", modifier = Modifier.weight(1f), textAlign = TextAlign.End,
+                                    Text(if (strikeDisplay == StrikeDisplay.PREMIUM) "PE premium" else "PE ${strikeDisplay.label}", modifier = Modifier.weight(1f), textAlign = TextAlign.End,
                                         color = Muted, style = MaterialTheme.typography.labelSmall)
                                 }
                                 visible.forEach { row ->
@@ -266,15 +291,25 @@ class MainActivity : ComponentActivity() {
                                     Row(Modifier.fillMaxWidth().background(if (atm) Navy else Panel, RoundedCornerShape(6.dp))
                                         .padding(vertical = 5.dp, horizontal = 3.dp),
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text("₹${format(if(read.isCurrent(state, row.ce)) row.ce?.price else null)}",
-                                            modifier = Modifier.weight(1f), textAlign = TextAlign.Start,
-                                            style = MaterialTheme.typography.bodySmall, color = Up)
+                                        Column(Modifier.weight(1f)) {
+                                            if (strikeDisplay != StrikeDisplay.OI) {
+                                                Text("₹${format(if (read.isCurrent(state, row.ce)) row.ce?.price else null)}",
+                                                    style = MaterialTheme.typography.bodySmall, color = Up)
+                                            }
+                                            if (ceOi != null) Text(oiLabel(ceOi, row.strike),
+                                                style = MaterialTheme.typography.bodySmall, color = Up)
+                                        }
                                         Text(strikeText(row.strike) + if (atm) " ATM" else "",
                                             modifier = Modifier.weight(1.04f), textAlign = TextAlign.Center,
                                             style = MaterialTheme.typography.bodySmall, color = Gold)
-                                        Text("₹${format(if(read.isCurrent(state, row.pe)) row.pe?.price else null)}",
-                                            modifier = Modifier.weight(1f), textAlign = TextAlign.End,
-                                            style = MaterialTheme.typography.bodySmall, color = Down)
+                                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                            if (strikeDisplay != StrikeDisplay.OI) {
+                                                Text("₹${format(if (read.isCurrent(state, row.pe)) row.pe?.price else null)}",
+                                                    textAlign = TextAlign.End, style = MaterialTheme.typography.bodySmall, color = Down)
+                                            }
+                                            if (peOi != null) Text(oiLabel(peOi, row.strike), textAlign = TextAlign.End,
+                                                style = MaterialTheme.typography.bodySmall, color = Down)
+                                        }
                                     }
                                 }
                                 Text("Only the existing source's exact strikes are shown. — means delayed/missing. Prices expire; tap Load again to refresh.",
@@ -313,6 +348,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+private fun oiLabel(reading: StrikeOiRanks, strike: Double): String {
+    val value = reading.values[strike] ?: return "—"
+    val rank = reading.ranks[strike]
+    return NumberFormat.getIntegerInstance(Locale.forLanguageTag("en-IN")).format(value) +
+        (rank?.let { " · #$it" } ?: "")
+}
+
+private fun wallLabel(reading: StrikeOiRanks): String {
+    val strike = reading.walls.firstOrNull() ?: return "—"
+    return reading.walls.joinToString(" / ") { strikeText(it) } +
+        " · OI " + NumberFormat.getIntegerInstance(Locale.forLanguageTag("en-IN")).format(reading.values.getValue(strike)) +
+        (if (reading.walls.size > 1) " · tie" else "")
+}
+
 @Composable private fun FiiDiiCard(state: MarketUiState, onRefresh: () -> Unit) {
     Section("FII/DII cash flow · EOD") {
         Text("NSE cash market · ₹ crore", color = Muted)

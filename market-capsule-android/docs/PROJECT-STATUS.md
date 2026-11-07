@@ -318,3 +318,12 @@ The card displays the latest verified stored session, FII/FPI and DII net values
 Accepted source `e6a7d79384877dd6ea7f3e807e3d279d72587e07`. [Run 42353454288](https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/42353454288) completed SUCCESS. Downloaded XML confirms 96 JVM and 35 Android 15 tests with zero failures, errors or skips. Lint recorded zero errors and 15 warnings. Validation artifact 13566468164 SHA256 `2a316925b2dc4543595178ff977681f0f5e98385b839fed3da1c3b0ac432c9ef` matched downloaded bytes.
 
 Seven model cases covered verified historical data with pending readiness, off-hours payloads, PostgreSQL retrieval timestamps, dated history, official provenance, numeric totals and replacement ordering. Android tests confirmed the dedicated action, dated display after a failed refresh and actual atomic-cache restore with a new repository instance. Actual production row acceptance awaits an accessible operating window. This accepted app-branch increment is intended for the combined APK. Physical-device and release verification are pending.
+
+
+## Exact-expiry band OI rank and walls — candidate, 7 November 2026 IST
+
+Source audit at deployed source b60d136524259cc1970b1f1d05d808a3cb0192cf confirmed the existing /api/research/dashboard-live/premiums ladder includes raw broker OI, exact identity, source/receipt times and quote state. The request uses the selected symbol and exact expiry with nearby=7. The source limits the returned strikes using its subscribed inventory. The app applies its selected ±3/±5/±7 window around the snapshot ATM within that response.
+
+Live Desk offers Premium, OI and Both. It ranks positive OI within the eligible returned rows for each side. Zero OI is displayed without a rank, and equal values share competition rank. A call or put wall requires every strike in the selected band to have valid fresh OI on that side and source timestamps within 30 seconds. Equal maxima are displayed together. Exact role, symbol, expiry, strike and side checks precede the rank. OI also requires a unique positive token, integral nonnegative value and same-session timestamps. Invalid OI leaves available premium values usable. The band scope and eligible count are visible. Full-expiry wall rankings, migration and history remain open.
+
+The candidate reuses the existing read-only ladder request and age/delivery budget. Six model cases and one Android UI case were added. CI and live-phone acceptance are pending at this checkpoint.

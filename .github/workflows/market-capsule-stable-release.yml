@@ -1,8 +1,14 @@
 name: Market Capsule Stable APK (owner-approved)
 
-# Manual only. The default branch also contains this workflow to enable the
-# GitHub Actions Run workflow button; build the existing Android feature branch.
+# A deliberate [capsule-release] commit on the Android branch starts release.
+# Ordinary development pushes do not use signing secrets or publish an APK.
+# Manual dispatch remains available.
 on:
+  push:
+    branches: [feature/market-capsule-android]
+    paths:
+      - market-capsule-android/app/build.gradle.kts
+      - .github/workflows/market-capsule-stable-release.yml
   workflow_dispatch:
     inputs:
       publish:
@@ -21,7 +27,11 @@ concurrency:
 jobs:
   verified-release:
     # Do not run against default/main or arbitrary PR/branch source code.
-    if: github.repository == 'bhagirathibarik0282-sudo/optionpilot-pro' && github.ref == 'refs/heads/feature/market-capsule-android'
+    if: >-
+      github.repository == 'bhagirathibarik0282-sudo/optionpilot-pro' &&
+      github.ref == 'refs/heads/feature/market-capsule-android' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[capsule-release]')))
     runs-on: ubuntu-24.04
     environment: market-capsule-stable-release
     timeout-minutes: 40
@@ -97,8 +107,8 @@ jobs:
           cp "$apk" release-out/Market-Capsule-Stable.apk
           (cd release-out && sha256sum Market-Capsule-Stable.apk > Market-Capsule-Stable.apk.sha256)
           echo 'Stable package and signer verified; private signing material never published.'
-      - name: Publish PUBLIC release only after explicit approval
-        if: inputs.publish == true
+      - name: Publish verified PUBLIC release for deliberate release request
+        if: (github.event_name == 'workflow_dispatch' && inputs.publish == true) || github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release_intent.outputs.tag }}

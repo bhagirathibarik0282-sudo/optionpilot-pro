@@ -20,6 +20,29 @@ class TodayCapsuleUiTest {
             "CONNECTED", mapOf(MarketIndex.NIFTY to quote), pcrReadings = mapOf(MarketIndex.NIFTY to mixed)),
             receivedElapsedMs = 0)
     }
+    @Test fun todayKeepsSourceTimeVisibleAndShowsDiagnosticsOnDemand() {
+        ui.setContent { MaterialTheme { CapsuleScreen(state(), {}, {}) } }
+        val screen = ui.onNodeWithTag("screen-content")
+        val sourceTime = hasText("Source time:", substring = true)
+        val serverTime = hasText("Server time:", substring = true)
+        val details = hasTestTag("today-quote-details")
+
+        screen.performScrollToNode(sourceTime)
+        ui.onNode(sourceTime).assertIsDisplayed()
+        ui.onNode(serverTime).assertDoesNotExist()
+        screen.performScrollToNode(details)
+        ui.onNode(details).performClick()
+        screen.performScrollToNode(serverTime)
+        ui.onNode(serverTime).assertIsDisplayed()
+        screen.performScrollToNode(details)
+        ui.onNode(details).performClick()
+        ui.onNode(serverTime).assertDoesNotExist()
+        ui.onNodeWithTag("tab-DESK").performClick()
+        screen.performScrollToNode(serverTime)
+        ui.onNode(serverTime).assertIsDisplayed()
+        ui.onNode(details).assertDoesNotExist()
+    }
+
     @Test fun capsuleNamesTheBaselineAndDoesNotPromoteReportedPcr() {
         val s = mutableStateOf(state())
         ui.setContent { MaterialTheme { CapsuleScreen(s.value, {}, {}) } }

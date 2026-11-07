@@ -116,7 +116,7 @@ private enum class StrikeDisplay(val label: String) {
                 }
             }
             if (displayedPage == Page.TODAY || displayedPage == Page.DESK) {
-                item { QuoteCard(state) }
+                item { QuoteCard(state, compact = displayedPage == Page.TODAY) }
                 item {
                     Button(onClick = onRefresh, enabled = !state.loading && !state.updatesWanted, modifier = Modifier.testTag("refresh").fillMaxWidth()) {
                         Text(if(state.loading) "Requesting…" else "Refresh snapshot")
@@ -127,11 +127,7 @@ private enum class StrikeDisplay(val label: String) {
                     }
                     Text(state.updatePhase.label, color = Gold, style = MaterialTheme.typography.labelMedium)
                     Text(state.message, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
-                    OutlinedButton(onClick = onKiteLogin, modifier = Modifier.fillMaxWidth().testTag("kite-connect")) {
-                        Text("Connect Kite · secure browser login")
-                    }
-                    Text("Zerodha login opens in your browser. Return to this app and refresh after login. The Kite access token is handled by the backend; it is never stored in the APK.",
-                        color = Muted, style = MaterialTheme.typography.labelSmall)
+                    if (displayedPage == Page.DESK) KiteConnect(onKiteLogin)
                 }
             }
             when(displayedPage) {
@@ -155,11 +151,7 @@ private enum class StrikeDisplay(val label: String) {
                         if (pcr?.reported != null) Text("Latest reported PCR: ${ratioText(pcr.reported.ratio)} · ${pcr.expiry} · mixed source times",
                             color = Muted, modifier = Modifier.testTag("today-reported-pcr"))
                     } }
-                    item { MarketReferenceCard(state) }
-                    item { MarketContextCard(state) }
-                    item { ParticipationCard(state) }
-                    item { IndexWeightsCard() }
-                    item { FiiDiiCard(state, onRefreshFiiDii) }
+                    item { KiteConnect(onKiteLogin) }
                     item { Section("Why / Watch next") {
                         Text("Market cause unverified. News and historical matching are not connected.",
                             color = Muted, modifier = Modifier.testTag("today-cause"))
@@ -167,6 +159,11 @@ private enum class StrikeDisplay(val label: String) {
                         Text("Observation only · no trade suggestion or prediction.", color = Gold,
                             style = MaterialTheme.typography.labelSmall)
                     } }
+                    item { MarketReferenceCard(state) }
+                    item { MarketContextCard(state) }
+                    item { ParticipationCard(state) }
+                    item { IndexWeightsCard() }
+                    item { FiiDiiCard(state, onRefreshFiiDii) }
                     item { Section("Source coverage") {
                         Text("Spot and PCR are checked independently. Missing data does not become zero.", color = Muted)
                         var showEvidence by rememberSaveable(state.selected.name) { mutableStateOf(false) }
@@ -546,7 +543,16 @@ private fun wallLabel(reading: StrikeOiRanks): String {
         Text(at(leg?.observedAt), color = Muted, style = MaterialTheme.typography.labelSmall)
     }
 }
-@Composable private fun QuoteCard(state: MarketUiState) {
+@Composable private fun KiteConnect(onKiteLogin: () -> Unit) {
+    OutlinedButton(onClick = onKiteLogin, modifier = Modifier.fillMaxWidth().testTag("kite-connect")) {
+        Text("Connect Kite · secure browser login")
+    }
+    Text("Zerodha login opens in your browser. Return to this app and refresh after login. The Kite access token is handled by the backend; it is never stored in the APK.",
+        color = Muted, style = MaterialTheme.typography.labelSmall)
+}
+
+@Composable private fun QuoteCard(state: MarketUiState, compact: Boolean) {
+    var showDetails by rememberSaveable(state.selected.name) { mutableStateOf(false) }
     Section(state.selected.name + " · snapshot") {
         val recent = state.status == ReadingStatus.RECENT_SNAPSHOT
         Text(when(state.status) { ReadingStatus.RECENT_SNAPSHOT -> if (state.updatesWanted && state.updatePhase == UpdatePhase.RECEIVING) "RECENT STREAM SNAPSHOT" else "RECENT SNAPSHOT — NOT A CONTINUOUS STREAM"
@@ -556,13 +562,23 @@ private fun wallLabel(reading: StrikeOiRanks): String {
         val change = if(recent) state.quote?.changePct else null
         if(change != null) Text("${signed(change)}% vs previous close", color = if(change >= 0) Up else Down)
         Text("Source time: ${at(state.quote?.observedAt)}", color = Muted)
-        Text("Server time: ${at(state.current?.serverTime)}", color = Muted)
-        state.snapshotRequestMs?.let {
-            Text("Snapshot fetch + decode: ${it / 1000.0}s", color = Muted)
-            Text("Delivery age budget: ${state.deliveryAgeMs / 1000.0}s · conservative, not exact feed latency", color = Muted,
-                style = MaterialTheme.typography.bodySmall)
+        if (compact) {
+            TextButton(
+                onClick = { showDetails = !showDetails },
+                modifier = Modifier.testTag("today-quote-details"),
+            ) {
+                Text(if (showDetails) "Hide quote details" else "Show quote details")
+            }
         }
-        Text("Quote age at server snapshot: ${state.quote?.sourceAgeMs?.let { "${it / 1000.0}s" } ?: "Unknown"}", color = Muted)
+        if (!compact || showDetails) {
+            Text("Server time: ${at(state.current?.serverTime)}", color = Muted)
+            state.snapshotRequestMs?.let {
+                Text("Snapshot fetch + decode: ${it / 1000.0}s", color = Muted)
+                Text("Delivery age budget: ${state.deliveryAgeMs / 1000.0}s · conservative, not exact feed latency", color = Muted,
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            Text("Quote age at server snapshot: ${state.quote?.sourceAgeMs?.let { "${it / 1000.0}s" } ?: "Unknown"}", color = Muted)
+        }
     }
 }
 @Composable private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {

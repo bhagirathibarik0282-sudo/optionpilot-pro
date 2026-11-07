@@ -27,6 +27,7 @@ internal class MarketViewModel @JvmOverloads constructor(
     private var ageJob: Job? = null
     private var streamJob: Job? = null
     private var strikeJob: Job? = null
+    private var fiiDiiJob: Job? = null
     private var foreground = false
     private var wasBackgrounded = false
     private var watermark: MarketSnapshot? = null
@@ -37,6 +38,11 @@ internal class MarketViewModel @JvmOverloads constructor(
             mutable.update { it.copy(saved = it.saved ?: saved) }
         }
     }
+    private val restoreFiiDii = viewModelScope.launch {
+        val saved = repository.loadSavedFiiDii()
+        if (saved != null) mutable.update { it.copy(fiiDii = saved, fiiDiiMessage = "Saved EOD reading.") }
+    }
+
     fun setForeground(active: Boolean) {
         if (foreground == active) return
         foreground = active
@@ -46,6 +52,7 @@ internal class MarketViewModel @JvmOverloads constructor(
             refreshJob?.cancel()
             streamJob?.cancel()
             strikeJob?.cancel()
+            fiiDiiJob?.cancel()
             invalidate(if (mutable.value.updatesWanted) UpdatePhase.PAUSED else UpdatePhase.OFF,
                 "App paused in background. Saved readings remain historical.")
             return
@@ -183,6 +190,39 @@ internal class MarketViewModel @JvmOverloads constructor(
             finally { mutable.update { it.copy(loading = false) } }
         }
     }
+    fun refreshFiiDii() {
+        if (!foreground || fiiDiiJob?.isCompleted == false) return
+        fiiDiiJob = viewModelScope.launch {
+            try {
+                restoreFiiDii.join()
+                mutable.update { it.copy(fiiDiiLoading = true, fiiDiiMessage = "Checking stored cash flows…") }
+                val fetched = repository.fetchFiiDii()
+                currentCoroutineContext().ensureActive()
+                require(fetched.reading.canReplace(mutable.value.fiiDii)) { "FII_DII_OLDER_OR_CONFLICTING" }
+                val message = if (fetched.reading.ready) "Stored EOD reading received."
+                    else "Stored EOD reading received. Server readiness pending."
+                mutable.update { it.copy(fiiDii = fetched.reading, fiiDiiMessage = message) }
+                if (!repository.saveFiiDii(fetched.raw)) {
+                    mutable.update { it.copy(fiiDiiMessage = "$message Local save unavailable.") }
+                }
+            } catch (cancelled: CancellationException) {
+                mutable.update { it.copy(fiiDiiMessage = "FII/DII refresh paused.") }
+                throw cancelled
+            } catch (error: Exception) {
+                val message = when (error.message) {
+                    "OUTSIDE_OPERATING_HOURS" -> "Server is outside operating hours."
+                    "RUNTIME_STARTING" -> "Server is starting."
+                    "FII_DII_OLDER_OR_CONFLICTING" -> "An older or conflicting cash-flow reading was withheld."
+                    else -> "FII/DII refresh unavailable."
+                }
+                mutable.update { it.copy(fiiDiiMessage = if (it.fiiDii == null) message
+                    else "$message Showing the last accepted EOD reading.") }
+            } finally {
+                mutable.update { it.copy(fiiDiiLoading = false) }
+            }
+        }
+    }
+
     private fun explain(error: Exception): String = when (error.message) {
         "OUTSIDE_OPERATING_HOURS" -> "Market runtime is outside its operating window. Start updates again during operating hours. Saved readings remain available."
         "RUNTIME_STARTING" -> "Market runtime is starting."

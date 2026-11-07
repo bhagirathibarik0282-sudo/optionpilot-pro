@@ -57,7 +57,10 @@ internal data class MarketUiState(
     val retryAfterMs: Long = 0,
     val strikeLadder: StrikeLadderRead? = null,
     val strikeLoading: Boolean = false,
-    val strikeMessage: String = "Load one expiry only when a recent market snapshot is available."
+    val strikeMessage: String = "Load one expiry only when a recent market snapshot is available.",
+    val fiiDii: FiiDiiCashRead? = null,
+    val fiiDiiLoading: Boolean = false,
+    val fiiDiiMessage: String = "Tap Refresh FII/DII to check stored cash flows."
 ) {
     val quote get() = current?.quotes?.get(selected)
     val savedQuote get() = saved?.quotes?.get(selected)

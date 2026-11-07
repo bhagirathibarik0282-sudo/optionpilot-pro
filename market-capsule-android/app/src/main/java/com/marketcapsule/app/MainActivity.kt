@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
         onStopOrDispose { vm.setForeground(false) }
     }
     val context = androidx.compose.ui.platform.LocalContext.current
-    CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted, vm::loadStrikes) {
+    CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted, vm::loadStrikes, vm::refreshFiiDii) {
         // User-initiated external browser only. The broker request token and API secret
         // must be exchanged and stored by the already-existing server callback.
         val route = Uri.parse(BASE_URL + "/api/kite/login")
@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
             }
     }
 }
-@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}, onLoadStrikes: (MarketIndex, String) -> Unit = { _, _ -> }, onKiteLogin: () -> Unit = {}) {
+@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}, onLoadStrikes: (MarketIndex, String) -> Unit = { _, _ -> }, onRefreshFiiDii: () -> Unit = {}, onKiteLogin: () -> Unit = {}) {
     var page by rememberSaveable { mutableStateOf(Page.TODAY) }
     // Each destination owns its position; a long ladder must not scroll another tab.
     val todayScroll = rememberLazyListState()
@@ -153,6 +153,7 @@ class MainActivity : ComponentActivity() {
                     item { MarketContextCard(state) }
                     item { ParticipationCard(state) }
                     item { IndexWeightsCard() }
+                    item { FiiDiiCard(state, onRefreshFiiDii) }
                     item { Section("Why / Watch next") {
                         Text("Market cause unverified. News and historical matching are not connected.",
                             color = Muted, modifier = Modifier.testTag("today-cause"))
@@ -176,7 +177,7 @@ class MainActivity : ComponentActivity() {
                                 if (value != null) Text("$label OI source: ${at(value.sourceMinAt)} → ${at(value.sourceMaxAt)}")
                             }
                             Text("Full refers to subscribed expiry inventory. Band and reported PCR never replace verified full PCR.", color = Muted)
-                            Text("Day change is not change since the last refresh. Sector weights, FII/DII and news context remain unavailable here.", color = Muted)
+                            Text("Day change is not change since the last refresh. Index weights and dated FII/DII have separate cards. News context remains unavailable here.", color = Muted)
                         }
                     } }
                 }
@@ -312,6 +313,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+@Composable private fun FiiDiiCard(state: MarketUiState, onRefresh: () -> Unit) {
+    Section("FII/DII cash flow · EOD") {
+        Text("NSE cash market · ₹ crore", color = Muted)
+        val reading = state.fiiDii
+        if (reading != null) {
+            val row = reading.latest
+            Text("Trading date: ${row.date}", modifier = Modifier.testTag("fii-dii-date"))
+            Text("FII/FPI net: ${signed(row.fiiNetCrore)}", modifier = Modifier.testTag("fii-net"))
+            Text("DII net: ${signed(row.diiNetCrore)}", modifier = Modifier.testTag("dii-net"))
+            Text("Combined net: ${signed(row.combinedNetCrore)}")
+            Text("Fetched: ${at(row.fetchedAt.toString())}", color = Muted)
+            Text("Expected session at server check: ${reading.expectedSession}", color = Muted)
+            Text("Publication time and revision status unavailable.", color = Muted,
+                style = MaterialTheme.typography.bodySmall)
+        }
+        Text(state.fiiDiiMessage, color = Muted, modifier = Modifier.testTag("fii-dii-status"))
+        TextButton(onClick = onRefresh, enabled = !state.fiiDiiLoading,
+            modifier = Modifier.testTag("fii-dii-refresh")) {
+            Text(if (state.fiiDiiLoading) "Checking FII/DII…" else "Refresh FII/DII")
+        }
+    }
+}
+
 @Composable private fun IndexWeightsCard() {
     var selected by rememberSaveable { mutableStateOf(IndexWeightSnapshot.NIFTY_50) }
     var expanded by rememberSaveable { mutableStateOf(false) }

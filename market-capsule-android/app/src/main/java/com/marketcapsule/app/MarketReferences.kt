@@ -19,6 +19,20 @@ internal data class ReferenceQuote(
     val expiry: String? = null,
     val contract: String? = null,
     val token: Long? = null
+) {
+    fun isFresh(state: MarketUiState): Boolean {
+        val elapsed = state.receivedElapsedMs?.let {
+            (state.currentElapsedMs - it).coerceAtLeast(0)
+        } ?: return false
+        return state.current?.connected == true && state.deliveryAgeMs >= 0 &&
+            elapsed <= RESPONSE_MAX_AGE_MS &&
+            ageMs + elapsed + state.deliveryAgeMs <= QUOTE_MAX_AGE_MS
+    }
+}
+
+internal data class MarketContext(
+    val indiaVix: ReferenceQuote? = null,
+    val bankNiftySpot: ReferenceQuote? = null
 )
 
 internal data class MarketReference(
@@ -29,13 +43,8 @@ internal data class MarketReference(
 ) {
     fun eligible(state: MarketUiState, quote: ReferenceQuote?): Boolean {
         val current = state.current ?: return false
-        val elapsed = state.receivedElapsedMs?.let {
-            (state.currentElapsedMs - it).coerceAtLeast(0)
-        } ?: return false
         return quote != null && (quote == spot || quote == future) &&
-            current.connected && state.selected == index && current.references[index] == this &&
-            state.deliveryAgeMs >= 0 && elapsed <= RESPONSE_MAX_AGE_MS &&
-            quote.ageMs + elapsed + state.deliveryAgeMs <= QUOTE_MAX_AGE_MS
+            state.selected == index && current.references[index] == this && quote.isFresh(state)
     }
     fun basis(state: MarketUiState): Double? =
         verifiedBasis?.takeIf { eligible(state, spot) && eligible(state, future) }
@@ -50,12 +59,13 @@ internal object MarketReferenceParser {
     private fun text(j: JSONObject, key: String): String? =
         (j.opt(key) as? String)?.takeIf { it.isNotBlank() }
 
-    private fun quote(j: JSONObject?, index: MarketIndex, role: String,
+    private fun quote(j: JSONObject?, symbol: String?, role: String,
                       server: Instant, date: LocalDate): ReferenceQuote? {
         j ?: return null
         val id = j.optJSONObject("identity") ?: return null
-        if (j.optString("state") != "LIVE" || id.optString("symbol") != index.name ||
+        if (j.optString("state") != "LIVE" || id.opt("symbol") != symbol ||
             id.optString("role") != role) return null
+        if (role == "VIX" && id.optString("label") != "INDIA VIX") return null
         val observed = text(j, "observedAt") ?: return null
         val received = text(j, "receivedAt") ?: return null
         val at = runCatching { Instant.parse(observed) }.getOrNull() ?: return null
@@ -93,6 +103,24 @@ internal object MarketReferenceParser {
             maxOf(0, age, receiptAge), expiry, contract, token)
     }
 
+    fun parseContext(snapshot: JSONObject, server: Instant, connected: Boolean): MarketContext {
+        val date = server.atZone(india).toLocalDate()
+        if (!connected || snapshot.optString("tradeDate") != date.toString()) return MarketContext()
+
+        val rows = snapshot.optJSONArray("indices")
+        val bankNifty = if (rows == null) null else (0 until rows.length()).asSequence()
+            .mapNotNull { rows.optJSONObject(it) }
+            .filter { it.optString("symbol") == "BANKNIFTY" }
+            .singleOrNull()
+        val vix = runCatching {
+            quote(snapshot.optJSONObject("vix"), null, "VIX", server, date)
+        }.getOrNull()
+        val bankSpot = runCatching {
+            quote(bankNifty?.optJSONObject("spot"), "BANKNIFTY", "SPOT", server, date)
+        }.getOrNull()
+        return MarketContext(vix, bankSpot)
+    }
+
     fun parse(snapshot: JSONObject, server: Instant, connected: Boolean): Map<MarketIndex, MarketReference> {
         if (!connected) return emptyMap()
         val date = server.atZone(india).toLocalDate()
@@ -105,8 +133,8 @@ internal object MarketReferenceParser {
             val row = rows.optJSONObject(n) ?: continue
             val index = MarketIndex.entries.find { it.name == row.optString("symbol") } ?: continue
             if (!seen.add(index)) { duplicates.add(index); continue }
-            val spot = runCatching { quote(row.optJSONObject("spot"), index, "SPOT", server, date) }.getOrNull()
-            val future = runCatching { quote(row.optJSONObject("future"), index, "FUTURE", server, date) }.getOrNull()
+            val spot = runCatching { quote(row.optJSONObject("spot"), index.name, "SPOT", server, date) }.getOrNull()
+            val future = runCatching { quote(row.optJSONObject("future"), index.name, "FUTURE", server, date) }.getOrNull()
             val basis = number(row, "futuresBasis")?.takeIf { value ->
                 spot != null && future != null &&
                     abs(Duration.between(Instant.parse(spot.observedAt), Instant.parse(future.observedAt)).toMillis()) <= 5_000 &&

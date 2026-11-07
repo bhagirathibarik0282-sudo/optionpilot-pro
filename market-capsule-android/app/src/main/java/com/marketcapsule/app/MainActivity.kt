@@ -150,6 +150,7 @@ class MainActivity : ComponentActivity() {
                             color = Muted, modifier = Modifier.testTag("today-reported-pcr"))
                     } }
                     item { MarketReferenceCard(state) }
+                    item { MarketContextCard(state) }
                     item { Section("Why / Watch next") {
                         Text("Market cause unverified. News and historical matching are not connected.",
                             color = Muted, modifier = Modifier.testTag("today-cause"))
@@ -173,7 +174,7 @@ class MainActivity : ComponentActivity() {
                                 if (value != null) Text("$label OI source: ${at(value.sourceMinAt)} → ${at(value.sourceMaxAt)}")
                             }
                             Text("Full refers to subscribed expiry inventory. Band and reported PCR never replace verified full PCR.", color = Muted)
-                            Text("Day change is not change since the last refresh. VIX, sector weights, FII/DII and news context remain unavailable here.", color = Muted)
+                            Text("Day change is not change since the last refresh. Sector weights, FII/DII and news context remain unavailable here.", color = Muted)
                         }
                     } }
                 }
@@ -309,6 +310,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+@Composable private fun MarketContextCard(state: MarketUiState) {
+    val context = state.current?.marketContext
+    val vix = context?.indiaVix?.takeIf { it.isFresh(state) }
+    val bankNifty = context?.bankNiftySpot?.takeIf { it.isFresh(state) }
+    Section("Market context") {
+        ContextReading("India VIX", "Volatility context", vix, "context-vix")
+        ContextReading("BANKNIFTY spot", "Research context", bankNifty, "context-banknifty")
+    }
+}
+
+@Composable private fun ContextReading(label: String, purpose: String, quote: ReferenceQuote?, tag: String) {
+    Text("$label: ${format(quote?.price)}", modifier = Modifier.testTag(tag))
+    val change = quote?.let { reading ->
+        reading.previousClose?.let { (reading.price / it - 1) * 100 }
+    }?.takeIf { it.isFinite() }
+    if (change != null) Text("${signed(change)}% vs broker previous close", color = Muted)
+    Text("$purpose · Source: ${at(quote?.observedAt)}",
+        color = Muted, style = MaterialTheme.typography.bodySmall)
+}
+
 @Composable private fun MarketReferenceCard(state: MarketUiState) {
     val reference = state.current?.references?.get(state.selected)
     val spot = reference?.spot?.takeIf { reference.eligible(state, it) }

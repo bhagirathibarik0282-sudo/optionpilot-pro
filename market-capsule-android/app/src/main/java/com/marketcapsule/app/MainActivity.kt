@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,7 +61,8 @@ class MainActivity : ComponentActivity() {
         onStopOrDispose { vm.setForeground(false) }
     }
     val context = androidx.compose.ui.platform.LocalContext.current
-    CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted, vm::loadStrikes, vm::refreshFiiDii) {
+    CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted, vm::loadStrikes, vm::refreshFiiDii,
+        vm::recordedSessions, vm::replayWindow) {
         // User-initiated external browser only. The broker request token and API secret
         // must be exchanged and stored by the already-existing server callback.
         val route = Uri.parse(BASE_URL + "/api/kite/login")
@@ -74,8 +76,20 @@ private enum class StrikeDisplay(val label: String) {
     PREMIUM("Premium"), OI("OI"), BOTH("Both")
 }
 
-@Composable internal fun CapsuleScreen(state: MarketUiState, onSelect: (MarketIndex) -> Unit, onRefresh: () -> Unit, onUpdatesWanted: (Boolean) -> Unit = {}, onLoadStrikes: (MarketIndex, String) -> Unit = { _, _ -> }, onRefreshFiiDii: () -> Unit = {}, onKiteLogin: () -> Unit = {}) {
+@Composable internal fun CapsuleScreen(
+    state: MarketUiState,
+    onSelect: (MarketIndex) -> Unit,
+    onRefresh: () -> Unit,
+    onUpdatesWanted: (Boolean) -> Unit = {},
+    onLoadStrikes: (MarketIndex, String) -> Unit = { _, _ -> },
+    onRefreshFiiDii: () -> Unit = {},
+    onRecordedSessions: suspend () -> List<RecordedSession> = { error("REPLAY_UNAVAILABLE") },
+    onReplayWindow: suspend (ReplayWindow) -> RecordedWindow = { error("REPLAY_UNAVAILABLE") },
+    onKiteLogin: () -> Unit = {},
+) {
     var page by rememberSaveable { mutableStateOf(Page.TODAY) }
+    val replay = remember { ReplayPanelState() }
+    val replayScope = rememberCoroutineScope()
     // Each destination owns its position; a long ladder must not scroll another tab.
     val todayScroll = rememberLazyListState()
     val deskScroll = rememberLazyListState()
@@ -322,14 +336,40 @@ private enum class StrikeDisplay(val label: String) {
                 item { Text("ATM can change between snapshots. Compare the same strike and expiry when tracking a move. % is versus broker previous close.",
                     color = Muted, style = MaterialTheme.typography.bodySmall) }
                 }
-                Page.MEMORY -> item { Section("Last saved server observation") {
-                    val quote = state.savedQuote
-                    Text("${state.selected.name} · ${if(quote?.price != null) "SAVED — NOT LIVE" else "No saved reading"}", color = Gold)
-                    Text("₹${format(quote?.price)}", style = MaterialTheme.typography.headlineMedium)
-                    Text("Source: ${at(quote?.observedAt)}")
-                    Text("Saved server snapshot: ${at(state.saved?.serverTime)}")
-                    Text("This is the last valid local snapshot. Recorded-session replay and comparable-event RAG are not implemented here yet.", color = Muted)
-                } }
+                Page.MEMORY -> {
+                    item { Section("Last saved server observation") {
+                        val quote = state.savedQuote
+                        Text("${state.selected.name} · ${if (quote?.price != null) "SAVED — NOT LIVE" else "No saved reading"}", color = Gold)
+                        Text("₹${format(quote?.price)}", style = MaterialTheme.typography.headlineMedium)
+                        Text("Source: ${at(quote?.observedAt)}")
+                        Text("Saved server snapshot: ${at(state.saved?.serverTime)}")
+                        Text("This is the last valid local snapshot.", color = Muted)
+                    } }
+                    item {
+                        ReplayPanel(replay,
+                            onCatalog = {
+                                replayScope.launch {
+                                    replay.load {
+                                        val sessions = onRecordedSessions()
+                                        replay.sessions = sessions
+                                        replay.select(sessions.firstOrNull {
+                                            it.index == replay.index && it.date == replay.session?.date
+                                        } ?: sessions.firstOrNull { it.index == replay.index })
+                                    }
+                                }
+                            },
+                            onWindow = { window ->
+                                replayScope.launch {
+                                    replay.load {
+                                        replay.window = window
+                                        replay.data = null
+                                        replay.data = onReplayWindow(window)
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
                 Page.PROJECT -> {
                     item { Section("Highest priority: usable app first") {
                         Text("1. Independent UI and honest snapshot states\n2. Verify read access and reconnecting SSE\n3. Capsule evidence, premium ladder and same-app replay\n4. AI questions and notifications\n5. Manual Buy/Sell only in a later verified phase")
@@ -583,7 +623,7 @@ private fun wallLabel(reading: StrikeOiRanks): String {
         }
     }
 }
-@Composable private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
+@Composable internal fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text(title, color = Gold, style = MaterialTheme.typography.titleMedium)
@@ -598,6 +638,6 @@ private fun format(value: Double?): String = value?.let { NumberFormat.getNumber
     minimumFractionDigits = 2; maximumFractionDigits = 2
 }.format(it) } ?: "—"
 private fun signed(value: Double): String = (if(value >= 0) "+" else "") + format(value)
-private fun at(value: String?): String = try {
+internal fun at(value: String?): String = try {
     value?.let { DateTimeFormatter.ofPattern("dd MMM yyyy · HH:mm:ss 'IST'").withZone(ZoneId.of("Asia/Kolkata")).format(Instant.parse(it)) } ?: "Unavailable"
 } catch (_: Exception) { "Invalid source time" }

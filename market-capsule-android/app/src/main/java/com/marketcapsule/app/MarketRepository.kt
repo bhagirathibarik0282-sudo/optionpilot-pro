@@ -32,6 +32,8 @@ internal interface MarketSource {
     suspend fun loadSavedFiiDii(): FiiDiiCashRead? = null
     suspend fun fetchFiiDii(): FetchedFiiDiiCash = error("FII_DII_UNAVAILABLE")
     suspend fun saveFiiDii(raw: String): Boolean = false
+    suspend fun recordedSessions(): List<RecordedSession> = error("REPLAY_UNAVAILABLE")
+    suspend fun replayWindow(window: ReplayWindow): RecordedWindow = error("REPLAY_UNAVAILABLE")
 }
 internal class MarketRepository(context: Context) : MarketSource {
     private val cache = AtomicFile(File(context.filesDir, "last-market-snapshot.json"))
@@ -39,6 +41,26 @@ internal class MarketRepository(context: Context) : MarketSource {
     private val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS).callTimeout(15, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).build()
+    private val replayClient = client.newBuilder()
+        .readTimeout(55, TimeUnit.SECONDS).callTimeout(60, TimeUnit.SECONDS).build()
+
+    override suspend fun recordedSessions(): List<RecordedSession> {
+        val (_, raw) = getResponse("/api/research/h1-theory-dates", allowUnavailable = true)
+        return withContext(Dispatchers.Default) { ReplayParser.dates(raw) }
+    }
+
+    override suspend fun replayWindow(window: ReplayWindow): RecordedWindow {
+        try {
+            val (_, raw) = getResponse(window.path, allowUnavailable = true, requestClient = replayClient)
+            return withContext(Dispatchers.Default) { ReplayParser.window(raw, window) }
+        } catch (failure: IllegalArgumentException) {
+            if (failure.message != "RESPONSE_TOO_LARGE" || window.from == window.to) throw failure
+            val middle = (window.from + window.to) / 2
+            val earlier = replayWindow(window.copy(to = middle))
+            val later = replayWindow(window.copy(from = middle + 1))
+            return RecordedWindow(window, earlier.frames + later.frames)
+        }
+    }
     override suspend fun loadSaved(): MarketSnapshot? = withContext(Dispatchers.IO) {
         try { SnapshotParser.parse(cache.openRead().use { readBounded(it) }) } catch (_: Exception) { null }
     }
@@ -111,9 +133,13 @@ internal class MarketRepository(context: Context) : MarketSource {
     }
     private suspend fun get(path: String): String = getResponse(path).second
 
-    private suspend fun getResponse(path: String, allowUnavailable: Boolean = false): Pair<Int, String> =
+    private suspend fun getResponse(
+        path: String,
+        allowUnavailable: Boolean = false,
+        requestClient: OkHttpClient = client,
+    ): Pair<Int, String> =
         suspendCancellableCoroutine { continuation ->
-            val call = client.newCall(Request.Builder().url(BASE_URL + path)
+            val call = requestClient.newCall(Request.Builder().url(BASE_URL + path)
                 .header("Accept", "application/json").header("Cache-Control", "no-cache").get().build())
             continuation.invokeOnCancellation { call.cancel() }
             call.enqueue(object : Callback {

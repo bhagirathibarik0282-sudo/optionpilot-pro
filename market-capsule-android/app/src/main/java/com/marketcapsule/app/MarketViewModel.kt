@@ -23,6 +23,10 @@ internal class MarketViewModel @JvmOverloads constructor(
 ) : AndroidViewModel(application) {
     private val mutable = MutableStateFlow(MarketUiState())
     val state = mutable.asStateFlow()
+
+    suspend fun recordedSessions() = repository.recordedSessions()
+    suspend fun replayWindow(window: ReplayWindow) = repository.replayWindow(window)
+
     private var refreshJob: Job? = null
     private var ageJob: Job? = null
     private var streamJob: Job? = null

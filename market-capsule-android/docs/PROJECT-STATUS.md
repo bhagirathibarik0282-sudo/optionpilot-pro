@@ -1,3 +1,57 @@
+# Locked development sequence — 7 November 2026 IST
+
+This checkpoint supersedes older candidate, signing and delivery statements below; historical entries remain intact. The owner wants incremental parameter implementation with a double-check at every step and a combined milestone APK, not a scheduled development task or an APK per parameter.
+
+## Verified released baseline
+
+- Stable 0.1.10 / versionCode 11, package `com.marketcapsule.app.stable`.
+- Published source: `3bf9a406439a16d7d52bda6e7c3a4c77bf4bb1e1`; release run [42321096322](https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/42321096322) succeeded, including unit/lint/build, 26 Android 15 tests, exact package/version/signer verification and publication.
+- Native source run 42295462800 independently supplied 56 JVM +26 Android test reports; lint had zero errors and 14 warnings. These do not establish physical-device/live acceptance.
+- Released APK SHA256: `e8e01909b27ba2c07ba94c0b74bed8fb1bf8e89032821ed84be9ec8b3e4e2826`, 12,288,517 bytes; downloaded bytes and ZIP integrity verified.
+- Owner certificate SHA256: `ba06069dd7406c612913e712542525aa545bdabd7c8743b56a42564014971516`; no private signing material is stored here.
+- The owner reports opening the app on the phone. Exact displayed version, upgrade retention, real-feed correctness/reconnect and device performance still need acceptance.
+- Daily "Market Capsule App Development" task is disabled at the owner's request. Existing market briefings/PCR audit/research tasks are separate and unchanged.
+
+## Locked capability register and order
+
+"Implemented" means released source exists; it does not mean every live source or device scenario is accepted.
+
+| Order | Parameter family / deliverable | Current boundary | Next double-check |
+| --- | --- | --- | --- |
+| 0 | Native shell, NIFTY/SENSEX, cache, refresh, foreground stream/reconnect | Implemented; saved data is historical | Offline/foreground/restart, index isolation, cancellation, actual source access and reconnect |
+| 0 | Multi-expiry ATM CE/PE, expiry filter, vertical strike ladder | Implemented; strike ladder is loaded explicitly, not continuously updated | Exact index/expiry/strike/side, independent leg age, missing ATM/legs, selection and stale withdrawal |
+| 0 | Full/band/reported PCR and CE/PE OI totals | Implemented; full is subscribed inventory; mixed timestamps explicitly labelled | Coverage and arithmetic, source chronology, separate family eligibility; ATM expiry selector does not change PCR expiry |
+| 1 | Connection and mobile access audit | Not accepted end to end | Distinguish broker login from app authorization, runtime closure from outage; inspect existing access boundaries without bypassing them |
+| 2 | First deterministic Today capsule | Not integrated | Evidence-backed what changed, comparison baseline/time, facts versus inference, contradictions and two supported watch conditions; unknown cause stays unknown |
+| 3 | Spot/futures/reference context: previous close/open, PDH/PDL, VWAP and supported pivots | Additional source/consumer mapping required | Source fields and units, reference session, futures identity/roll, basis and VWAP methodology; no invented reference values |
+| 4 | VIX and BANKNIFTY context | Not integrated in app; BANKNIFTY research/context only | Separate volatility from direction; independent symbol/session/source eligibility |
+| 5 | Sectors/heavyweights and dated FII/DII | Not integrated in app | Returned subset and coverage; verified weights before point contributions; cash/derivative scope, publication/trading date and revisions |
+| 6 | Advanced options: OI rank/walls/migration, premium/PCR view controls, expiry scope | Pending beyond released baseline | Fixed-contract/time comparisons, real before/after inventory, ranking/coverage and no full/band substitution |
+| 7 | Recorded-session Memory/replay, multi-DTE outcomes and comparable episodes | Saved cache exists; session replay/RAG are not integrated | Available-at cutoff, shared cursor, exact contracts, real candle coverage, gaps/counterexamples and no future leakage |
+| 8 | News/history explanations, previous/current/next-session plans | Not integrated | Source publication times, attribution versus inference, supported outcome horizons and actual data coverage |
+| 9 | Existing Telegram/push and easier distribution | Future integration, not silently enabled | Shared capsule identity, routing/dedup/recovery; phone notification permissions and distribution setup separately established |
+
+Volume PCR, Greeks/IV and extra history views may be added only when their actual source contract and usefulness are verified; they must not silently broaden an implementation step. Ten-year daily, intraday, option and constituent history are distinct coverage claims, none established by this register.
+
+## Step locking and double-check protocol
+
+1. Read the current source and evidence; identify the smallest missing feature or real defect. Reuse released components.
+2. Implement it on the existing Android feature branch. Preserve prior working functionality and persisted-data compatibility; keep the installed 0.1.10 unchanged during engineering.
+3. Check source identity, units/calculations, session/expiry/contract and observation chronology. Exercise valid, missing, stale, conflicting and foreign-identity cases where relevant.
+4. Run meaningful model/UI regression checks for the changed behavior, including existing navigation/cache/stream functionality. Record the source commit, commands/run IDs and exact results.
+5. Re-read the final diff and test evidence independently of the implementation claim. Mark source/test acceptance separately from runtime/phone acceptance. A failed check is unresolved work, not a pass.
+6. Continue to the next dependency only after resolving the affected code/test gate. If market/phone evidence cannot be obtained, record it explicitly; do independent reversible work without claiming the blocked gate passed.
+
+The next engineering step is the existing data-flow/access audit (order 1), followed by a small deterministic Today capsule. Do not start by adding every context panel or rebuilding the released ladder.
+
+## Combined APK gate
+
+Development commits are not user releases. No new download is needed for this ledger update. Keep the deliberate release-marker workflow for a bounded, coherent milestone only; never release every parameter or ordinary commit. Before publication, review the cumulative diff, run required unit/lint/emulator checks, verify monotonic versionCode and unchanged package/owner signer, and verify the release checksum. Preserve the previous working release on failure. Do not claim zero risk, silent phone installation or phone/live correctness from CI.
+
+Existing Railway backend, services, database, broker socket, execution authority and Telegram transport remain unchanged. Backend contract gaps require a separately scoped justified change, not an automatic production mutation. No new scheduled task is authorized by this checkpoint.
+
+---
+
 ## P2.2 candidate — source-verified read-only strike ladder (0.1.7)
 
 The separate native strike panel uses existing GET `/api/research/dashboard-live/premiums?view=ladder&nearby=7&symbol=<NIFTY|SENSEX>&expiries=<selected-date>`. The backend reads already subscribed Kite FULL in-memory tokens, not new Kite API calls or subscriptions. The user explicitly taps **Load strikes** for one expiry; no automatic polling, no extra stream, no persistence and no backend change.

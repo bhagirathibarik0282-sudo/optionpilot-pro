@@ -216,3 +216,10 @@ Bounded audit completed against released Android source 3bf9a406439a16d7d52bda6e
 Source identity/time/expiry, independent PCR clocks, saved-state withholding, explicit ladder loading and bounded foreground reconnect controls were inspected. No new reproducible Android defect was established, so no speculative code patch or APK was made. Three credential-free GETs around07:05 IST returned runtime200 with shouldRun=false and snapshot/premium503 OUTSIDE_OPERATING_HOURS. This is closed-runtime evidence, not live feed acceptance.
 
 Concrete access gap: inspected GET mounts have no owner-specific mobile session enforcement; Kite browser broker login does not supply that boundary. Owner-only access, current live phone data/reconnect and device performance remain unresolved. Production was not changed. Next independent implementation: deterministic Today capsule on already validated read-only observations, preserving these acceptance limits and no unsupported causes.
+
+
+## Deterministic Today capsule — engineering candidate, 7 November 2026 IST
+
+A native Today projection now reuses existing spot/PCR family eligibility. Day change is explicitly versus broker previous close, never movement since the last refresh or a cause. Verified full, ATM +/-7 band and latest-reported mixed-time PCR retain separate labels and exact PCR expiry. Two deterministic watch conditions are observations, not signals; unknown cause/news/history remain explicit. Source observation/check/interval evidence is expandable. Missing/stale/disconnected/cached/foreign-index data cannot become current facts, and eligible PCR does not depend on the shorter spot clock.
+
+Ten new JVM tests and two synthetic Android UI tests accompany the candidate. Compilation/lint/unit/emulator acceptance is pending the source-triggered Android workflow at this checkpoint; no new live/phone acceptance is claimed. Existing refresh, stream, ladder, other tabs, backend, signing and app version are untouched. No release marker or user APK publication is requested for this engineering increment.

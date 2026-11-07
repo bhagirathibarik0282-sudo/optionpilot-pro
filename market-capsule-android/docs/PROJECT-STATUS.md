@@ -207,3 +207,12 @@ Validation checks source identity, exact parent expiry/session, coverage, totals
 Fourteen new JVM tests cover calculations, zero/invalid/missing inputs, optional-panel isolation, identity/date, source/receipt age, contradictory totals, reported context and band membership. Two new synthetic Android UI tests cover separate labels, no reported-to-verified substitution, expiry withdrawal, index isolation and saved-cache non-promotion. Production source contract was inspected, including its separate lastReportedPcr field; prior-session last-reported context, volume PCR, BANKNIFTY app context, PCR expiry controls, OI rankings/walls and historical PCR charts are not part of this increment.
 
 Acceptance boundary: this is compiled source/emulator acceptance using synthetic PCR states. Current phone/live-session PCR and smoothness remain unverified. The installed public stable 0.1.9 is unchanged. Do not install an ephemeral debug CI APK over it. The next owner-signed stable workflow will derive capsule-v0.1.10 automatically; use the existing protected key and verify the same certificate/package before publication and a phone upgrade/data-retention check.
+
+
+## Data-flow/access audit checkpoint — 7 November 2026 IST
+
+Bounded audit completed against released Android source 3bf9a406439a16d7d52bda6e7c3a4c77bf4bb1e1 and Railway deployment metadata-confirmed backend source b60d136524259cc1970b1f1d05d808a3cb0192cf. See [DATA-FLOW-ACCESS-AUDIT-2026-11-07.md](DATA-FLOW-ACCESS-AUDIT-2026-11-07.md) for the route/parser/state map, exact observations and limits.
+
+Source identity/time/expiry, independent PCR clocks, saved-state withholding, explicit ladder loading and bounded foreground reconnect controls were inspected. No new reproducible Android defect was established, so no speculative code patch or APK was made. Three credential-free GETs around07:05 IST returned runtime200 with shouldRun=false and snapshot/premium503 OUTSIDE_OPERATING_HOURS. This is closed-runtime evidence, not live feed acceptance.
+
+Concrete access gap: inspected GET mounts have no owner-specific mobile session enforcement; Kite browser broker login does not supply that boundary. Owner-only access, current live phone data/reconnect and device performance remain unresolved. Production was not changed. Next independent implementation: deterministic Today capsule on already validated read-only observations, preserving these acceptance limits and no unsupported causes.

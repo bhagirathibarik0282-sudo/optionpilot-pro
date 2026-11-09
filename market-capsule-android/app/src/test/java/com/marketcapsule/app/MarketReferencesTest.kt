@@ -24,6 +24,27 @@ class MarketReferencesTest {
         current = MarketSnapshot("fixture",1,time,true,"CONNECTED",emptyMap(),references = mapOf(MarketIndex.NIFTY to r)),
         receivedElapsedMs = 0,currentElapsedMs = elapsed,deliveryAgeMs = delivery)
 
+    @Test fun previousSpotLevelsRequireTheExactTokenDateAndPreviousClose() {
+        val levels = JSONObject("""{
+            "source":"KITE_DAILY_CANDLE","symbol":"NIFTY","token":1001,
+            "sessionDate":"2026-11-04","high":24020,"low":23810,"close":23900
+        }""")
+        val s = fixture()
+        row(s).put("previousSpotSession", levels)
+        val valid = read(s).previousSpotSession!!
+        assertEquals("2026-11-04", valid.date.toString())
+        assertEquals(24020.0, valid.high, 0.0)
+        assertEquals(23810.0, valid.low, 0.0)
+        for ((key, value) in listOf("token" to 1002, "symbol" to "SENSEX",
+            "sessionDate" to "2026-11-05", "close" to 23901)) {
+            val invalid = fixture()
+            row(invalid).put("previousSpotSession", JSONObject(levels.toString()).put(key, value))
+            val reference = read(invalid)
+            assertNotNull(reference.spot)
+            assertNull(reference.previousSpotSession)
+        }
+    }
+
     @Test fun brokerReferencesAndExactFutureIdentityAreRetained() {
         val r = read()
         assertEquals(23900.0,r.spot!!.previousClose!!,0.0)

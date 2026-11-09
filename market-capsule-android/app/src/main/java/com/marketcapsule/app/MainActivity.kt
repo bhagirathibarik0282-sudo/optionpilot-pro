@@ -234,6 +234,7 @@ private enum class StrikeDisplay(val label: String) {
                 }
                 Page.DESK -> {
                 item(key = "pcr-${state.selected}") { PcrCard(state) }
+                item { PreviousSpotLadder(state) }
                 item { Section("Exact selected option pair") {
                     val quote = state.quote
                     val elapsed = state.receivedElapsedMs?.let { (state.currentElapsedMs - it).coerceAtLeast(0) }
@@ -558,8 +559,38 @@ private fun wallLabel(reading: StrikeOiRanks): String {
             modifier = Modifier.testTag("reference-basis"))
         Text("Spot source: ${at(spot?.observedAt)} · Futures source: ${at(future?.observedAt)}",
             color = Muted, style = MaterialTheme.typography.bodySmall)
-        Text("PDH / PDL: unavailable. Today's high/low are current-session values.",
-            color = Muted, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable private fun PreviousSpotLadder(state: MarketUiState) {
+    val reference = state.current?.references?.get(state.selected)
+    val spot = reference?.spot?.takeIf { reference.eligible(state, it) }
+    val levels = reference?.previousSpotSession?.takeIf { spot != null }
+    Section("${state.selected.name} · previous-session spot levels") {
+        if (levels == null || spot == null) {
+            Text("PDH and PDL unavailable · waiting for verified levels and a fresh spot quote.", color = Muted)
+            return@Section
+        }
+        Text("Kite daily candle · ${levels.date} IST", color = Muted,
+            style = MaterialTheme.typography.bodySmall)
+        val (position, color) = when {
+            spot.price > levels.high -> "↑ Above PDH" to Up
+            spot.price < levels.low -> "↓ Below PDL" to Down
+            spot.price == levels.high -> "At PDH" to Gold
+            spot.price == levels.low -> "At PDL" to Gold
+            else -> "Within previous range" to Muted
+        }
+        listOf("PDH" to levels.high, "Spot" to spot.price, "PDL" to levels.low)
+            .sortedByDescending { it.second }
+            .forEach { (label, value) ->
+                Text("$label · ${format(value)}", color = when (label) {
+                    "PDH" -> Up
+                    "PDL" -> Down
+                    else -> Gold
+                })
+            }
+        Text(position, color = color, modifier = Modifier.testTag("previous-spot-range"))
+        Text("Spot source: ${at(spot.observedAt)}", color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 

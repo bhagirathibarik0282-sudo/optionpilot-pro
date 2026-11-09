@@ -35,11 +35,14 @@ internal data class MarketContext(
     val bankNiftySpot: ReferenceQuote? = null
 )
 
+internal data class PreviousSpotSession(val date: LocalDate, val high: Double, val low: Double)
+
 internal data class MarketReference(
     val index: MarketIndex,
     val spot: ReferenceQuote?,
     val future: ReferenceQuote?,
-    val verifiedBasis: Double?
+    val verifiedBasis: Double?,
+    val previousSpotSession: PreviousSpotSession? = null
 ) {
     fun eligible(state: MarketUiState, quote: ReferenceQuote?): Boolean {
         val current = state.current ?: return false
@@ -153,6 +156,26 @@ internal object MarketReferenceParser {
         return MarketContext(vix, bankSpot)
     }
 
+    private fun previousSpotSession(
+        row: JSONObject, index: MarketIndex, date: LocalDate, spot: ReferenceQuote?
+    ): PreviousSpotSession? {
+        val pdc = spot?.previousClose ?: return null
+        val levels = row.optJSONObject("previousSpotSession") ?: return null
+        val identity = row.optJSONObject("spot")?.optJSONObject("identity") ?: return null
+        val token = positive(identity, "token") ?: return null
+        if (token % 1.0 != 0.0 || token > 9_007_199_254_740_991.0 ||
+            levels.opt("source") != "KITE_DAILY_CANDLE" || levels.opt("symbol") != index.name ||
+            number(levels, "token") != token) return null
+        val rawDate = text(levels, "sessionDate") ?: return null
+        val sessionDate = runCatching { LocalDate.parse(rawDate) }.getOrNull() ?: return null
+        if (sessionDate.toString() != rawDate || sessionDate >= date || sessionDate < date.minusDays(14)) return null
+        val high = positive(levels, "high") ?: return null
+        val low = positive(levels, "low") ?: return null
+        val close = positive(levels, "close") ?: return null
+        if (high < low || close !in low..high || abs(close - pdc) > 0.01) return null
+        return PreviousSpotSession(sessionDate, high, low)
+    }
+
     fun parse(snapshot: JSONObject, server: Instant, connected: Boolean): Map<MarketIndex, MarketReference> {
         if (!connected) return emptyMap()
         val date = server.atZone(india).toLocalDate()
@@ -172,7 +195,9 @@ internal object MarketReferenceParser {
                     abs(Duration.between(Instant.parse(spot.observedAt), Instant.parse(future.observedAt)).toMillis()) <= 5_000 &&
                     abs(value - (future.price - spot.price)) <= 1e-6
             }
-            if (spot != null || future != null) found[index] = MarketReference(index, spot, future, basis)
+            if (spot != null || future != null) found[index] = MarketReference(
+                index, spot, future, basis, previousSpotSession(row, index, date, spot)
+            )
         }
         duplicates.forEach { found.remove(it) }
         return found

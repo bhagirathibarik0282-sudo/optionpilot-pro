@@ -19,6 +19,30 @@ class StrikeLadderTest {
     private fun parse(rows: JSONArray) = StrikeLadderParser.parse(response(rows),
         MarketIndex.NIFTY, "2026-11-09", now, 1000, 500)
 
+    @Test fun productionEnvelopePreservesLevelsOnlyForTheExactPriorContract() {
+        val ce = quote(24650.0, "CE")
+        ce.getJSONObject("identity").put("token", 1001)
+        val levels = JSONObject("""{
+            "source":"RECORDER_CLOSE","sessionDate":"2026-11-05","symbol":"NIFTY",
+            "expiry":"2026-11-09","side":"CE","strike":24650,"token":1001,"pdh":150,"pdl":90
+        }""")
+        val snapshot = JSONObject(response(JSONArray().put(ce))).put("previousOptionSessionDate", "2026-11-05")
+        val rows = snapshot.getJSONArray("rows")
+        val envelope = JSONObject().put("connected", true).put("snapshot", snapshot)
+        fun read() = StrikeLadderParser.parse(envelope.toString(), MarketIndex.NIFTY, "2026-11-09", now, 1000)
+        rows.getJSONObject(0).put("previousOptionSession", levels)
+        assertEquals("2026-11-05", read().previousSessionDate.toString())
+        assertEquals(PreviousOptionLevels(150.0, 90.0), read().rows.single().ce?.previousLevels)
+        for ((field, value) in listOf("side" to "PE", "strike" to 24600, "token" to 1002,
+            "sessionDate" to "2026-11-04", "expiry" to "2026-11-16", "pdh" to 80)) {
+            rows.getJSONObject(0).put("previousOptionSession", JSONObject(levels.toString()).put(field, value))
+            assertNotNull(read().rows.single().ce?.price)
+            assertNull(read().rows.single().ce?.previousLevels)
+        }
+        envelope.put("connected", false)
+        assertThrows(IllegalArgumentException::class.java) { read() }
+    }
+
     @Test fun exactPairedStrikesAndBandSelectionAreSourceOnly() {
         val rows = JSONArray()
         (0..14).forEach { i ->

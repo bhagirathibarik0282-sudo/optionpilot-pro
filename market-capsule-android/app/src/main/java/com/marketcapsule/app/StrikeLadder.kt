@@ -8,11 +8,16 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** The premium endpoint is a read-only projection of already subscribed broker tokens. */
-internal data class StrikeOption(val price: Double?, val ageMs: Long?, val observedAt: String?, val oi: Long? = null)
+internal data class PreviousOptionLevels(val high: Double, val low: Double)
+internal data class StrikeOption(
+    val price: Double?, val ageMs: Long?, val observedAt: String?, val oi: Long? = null,
+    val previousLevels: PreviousOptionLevels? = null
+)
 internal data class StrikeRow(val strike: Double, val ce: StrikeOption?, val pe: StrikeOption?)
 internal data class StrikeLadderRead(
     val index: MarketIndex, val expiry: String, val tradeDate: String, val runtimeId: String,
-    val rows: List<StrikeRow>, val receivedElapsedMs: Long, val deliveryAgeMs: Long
+    val rows: List<StrikeRow>, val receivedElapsedMs: Long, val deliveryAgeMs: Long,
+    val previousSessionDate: LocalDate? = null
 ) {
     private fun isFresh(state: MarketUiState, leg: StrikeOption?): Boolean {
         val age = leg?.ageMs ?: return false
@@ -63,7 +68,11 @@ internal object StrikeLadderParser {
     fun parse(raw: String, index: MarketIndex, expiry: String, receivedWallMs: Long,
               receivedElapsedMs: Long, requestMs: Long = 0): StrikeLadderRead {
         require(requestMs in 0..QUOTE_MAX_AGE_MS) { "STRIKE_DELIVERY_TOO_OLD" }
-        val response = JSONObject(raw)
+        val envelope = JSONObject(raw)
+        val response = if (envelope.has("snapshot")) {
+            require(envelope.opt("connected") == true) { "STRIKE_LADDER_UNAVAILABLE" }
+            envelope.optJSONObject("snapshot") ?: error("STRIKE_ROWS_MISSING")
+        } else envelope
         val runtime = response.optString("runtimeId")
         require(runtime.isNotBlank()) { "STRIKE_RUNTIME_MISMATCH" }
         val date = response.optString("tradeDate")
@@ -71,6 +80,10 @@ internal object StrikeLadderParser {
         val today = Instant.ofEpochMilli(receivedWallMs).atZone(india).toLocalDate()
         require(date == today.toString() && runCatching { LocalDate.parse(expiry) >= today }.getOrDefault(false)) {
             "STRIKE_SOURCE_DATE_MISMATCH"
+        }
+        val previousDateText = response.optString("previousOptionSessionDate")
+        val previousDate = runCatching { LocalDate.parse(previousDateText) }.getOrNull()?.takeIf {
+            it.toString() == previousDateText && it < today && it >= today.minusDays(14)
         }
         val incoming = response.optJSONArray("rows") ?: error("STRIKE_ROWS_MISSING")
         // Endpoint nearby=7 yields at most 15 strikes × two option sides.
@@ -108,19 +121,29 @@ internal object StrikeLadderParser {
             val previous = token?.let { oiTokens.putIfAbsent(it, strike to side) }
             if (previous != null) {
                 val previousSides = strikes.getValue(previous.first)
-                previousSides[previous.second] = previousSides.getValue(previous.second).copy(oi = null)
+                previousSides[previous.second] = previousSides.getValue(previous.second).copy(oi = null, previousLevels = null)
             }
             val oi = if (token != null && previous == null && rawQuote.optString("state") == "LIVE" && ageValid && sameSession) {
                 number(rawQuote, "oi")?.takeIf {
                     it in 0.0..9_007_199_254_740_991.0 && it % 1.0 == 0.0
                 }?.toLong()
             } else null
-            strikes.getOrPut(strike) { mutableMapOf() }[side] = StrikeOption(price, age, observed, oi)
+            val levels = rawQuote.optJSONObject("previousOptionSession")
+                ?.takeIf { previousDate != null && token != null && previous == null &&
+                    it.opt("source") == "RECORDER_CLOSE" && it.opt("sessionDate") == previousDateText &&
+                    it.opt("symbol") == index.name && it.opt("expiry") == expiry && it.opt("side") == side &&
+                    number(it, "token") == token.toDouble() && number(it, "strike") == strike }
+                ?.let {
+                    val high = number(it, "pdh")
+                    val low = number(it, "pdl")
+                    if (high != null && low != null && high >= low && low > 0) PreviousOptionLevels(high, low) else null
+                }
+            strikes.getOrPut(strike) { mutableMapOf() }[side] = StrikeOption(price, age, observed, oi, levels)
         }
         require(strikes.size <= 15) { "STRIKE_RESPONSE_TOO_LARGE" }
         return StrikeLadderRead(index, expiry, date, runtime,
             strikes.map { (strike, sides) -> StrikeRow(strike, sides["CE"], sides["PE"]) },
-            receivedElapsedMs, requestMs)
+            receivedElapsedMs, requestMs, previousDate)
     }
 }
 

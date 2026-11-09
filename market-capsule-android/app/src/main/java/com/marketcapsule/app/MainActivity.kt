@@ -323,6 +323,12 @@ private enum class StrikeDisplay(val label: String) {
                                     Text("Ranks use eligible returned strikes. Walls require complete, synchronized band OI.",
                                         color = Muted, style = MaterialTheme.typography.bodySmall)
                                 }
+                                if (strikeDisplay != StrikeDisplay.OI) {
+                                    val hasLevels = visible.any { it.ce?.previousLevels != null || it.pe?.previousLevels != null }
+                                    Text(if (hasLevels) "Premium PDH/PDL · recorder close · ${read.previousSessionDate} IST"
+                                        else "Premium PDH/PDL · closing records unavailable for these strikes",
+                                        color = Muted, style = MaterialTheme.typography.labelSmall)
+                                }
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 3.dp),
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(if (strikeDisplay == StrikeDisplay.PREMIUM) "CE premium" else "CE ${strikeDisplay.label}", modifier = Modifier.weight(1f), color = Muted,
@@ -341,6 +347,7 @@ private enum class StrikeDisplay(val label: String) {
                                             if (strikeDisplay != StrikeDisplay.OI) {
                                                 Text("₹${format(if (read.isCurrent(state, row.ce)) row.ce?.price else null)}",
                                                     style = MaterialTheme.typography.bodySmall, color = Up)
+                                                PreviousPremiumLevels(row.ce, read.isCurrent(state, row.ce), TextAlign.Start)
                                             }
                                             if (ceOi != null) Text(oiLabel(ceOi, row.strike),
                                                 style = MaterialTheme.typography.bodySmall, color = Up)
@@ -352,6 +359,7 @@ private enum class StrikeDisplay(val label: String) {
                                             if (strikeDisplay != StrikeDisplay.OI) {
                                                 Text("₹${format(if (read.isCurrent(state, row.pe)) row.pe?.price else null)}",
                                                     textAlign = TextAlign.End, style = MaterialTheme.typography.bodySmall, color = Down)
+                                                PreviousPremiumLevels(row.pe, read.isCurrent(state, row.pe), TextAlign.End)
                                             }
                                             if (peOi != null) Text(oiLabel(peOi, row.strike), textAlign = TextAlign.End,
                                                 style = MaterialTheme.typography.bodySmall, color = Down)
@@ -560,6 +568,22 @@ private fun wallLabel(reading: StrikeOiRanks): String {
         Text("Spot source: ${at(spot?.observedAt)} · Futures source: ${at(future?.observedAt)}",
             color = Muted, style = MaterialTheme.typography.bodySmall)
     }
+}
+
+@Composable private fun PreviousPremiumLevels(leg: StrikeOption?, current: Boolean, align: TextAlign) {
+    leg ?: return
+    val levels = leg.previousLevels ?: return
+    Text("PDH ${format(levels.high)}", color = Up, textAlign = align, style = MaterialTheme.typography.labelSmall)
+    Text("PDL ${format(levels.low)}", color = Down, textAlign = align, style = MaterialTheme.typography.labelSmall)
+    val price = leg.price?.takeIf { current } ?: return
+    val (position, color) = when {
+        price > levels.high -> "↑ Above PDH" to Up
+        price < levels.low -> "↓ Below PDL" to Down
+        price == levels.high -> "At PDH" to Gold
+        price == levels.low -> "At PDL" to Gold
+        else -> "In range" to Muted
+    }
+    Text(position, color = color, textAlign = align, style = MaterialTheme.typography.labelSmall)
 }
 
 @Composable private fun PreviousSpotLadder(state: MarketUiState) {

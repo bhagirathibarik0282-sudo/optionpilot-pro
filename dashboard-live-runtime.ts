@@ -1,3 +1,4 @@
+import { loadClosingOptionLevelsFromDb, type OptionPrevDayLevel } from './option-prev-day-db-hydrator.js';
 import { fetchPreviousSpotSession, type PreviousSpotSession } from './dashboard-previous-spot-session.js';
 import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
 import { DashboardLiveStore, buildDashboardLiveInventory, type LiveSelection, type PremiumWatchFilter } from './dashboard-live-feed.js';
@@ -11,6 +12,7 @@ import { isIndianEquityMarketOpenAt, indianTradingDateAt, indianEquityMarketPhas
 export const DASHBOARD_LIVE_ENV='DASHBOARD_LIVE_ENABLED';
 let store:DashboardLiveStore|null=null,socket:KiteWebSocketTransport|null=null;
 const previousSpotSessions = new Map<number, PreviousSpotSession>();
+const previousOptionSessions = new Map<string, Promise<Map<number, OptionPrevDayLevel> | null>>();
 let pcrSampler:DashboardPcrSampler|null=null;
 let state='DISABLED',generation=0,busy=false,credential:string|null=null,lastAttempt=0;
 let timer:ReturnType<typeof setInterval>|null=null;
@@ -19,7 +21,7 @@ let sessionRefreshQueued=false;
 let sessionCheckLog='';
 function noteSessionCheck(){const value=JSON.stringify(readKiteBrokerSessionCheck());if(value!==sessionCheckLog){sessionCheckLog=value;console.info('[DASHBOARD_LIVE_SESSION_CHECK] '+value);}}
 const enabled=()=>process.env[DASHBOARD_LIVE_ENV]?.trim().toLowerCase()==='true';
-function stop(next:string){generation++;previousSpotSessions.clear();socket?.disconnect();socket=null;store=null;pcrSampler=null;credential=null;state=next;}
+function stop(next:string){generation++;previousSpotSessions.clear();previousOptionSessions.clear();socket?.disconnect();socket=null;store=null;pcrSampler=null;credential=null;state=next;}
 /** One display-only socket per server process. Never sends ticks to trading observers. */
 export async function reconcileDashboardLiveRuntime(force=false){
  if(busy)return;
@@ -101,6 +103,48 @@ export function readDashboardPremiumSnapshot(filter:PremiumWatchFilter={}){
  const connected=state==='OPEN',snapshot=store?.premiums(Date.now(),filter)||null;
  if(snapshot&&!connected)for(const q of snapshot.rows){q.price=null;q.oi=null;q.volume=null;q.bid=null;q.ask=null;q.changePct=null;q.pdc=null;q.state='STALE';if('modelDelta' in q)q.modelDelta=null;}
  return {connected,connectionState:state,brokerSession:readKiteBrokerSessionCheck(),serverTime:new Date().toISOString(),snapshot,createsOrders:false,affectsSelector:false,affectsTelegram:false,affectsExecution:false};
+}
+
+/** App-only enrichment. Ordinary premium clients keep their existing synchronous read. */
+export async function readDashboardPremiumSnapshotWithPreviousLevels(filter: PremiumWatchFilter) {
+ const target = store;
+ const symbol = filter.symbol;
+ const expiry = filter.expiries?.[0];
+ if (!target || state !== 'OPEN' || (symbol !== 'NIFTY' && symbol !== 'SENSEX') ||
+     !expiry || filter.expiries?.length !== 1) return readDashboardPremiumSnapshot(filter);
+
+ const spot = target.spotQuote(symbol, Date.now());
+ const prior = spot.identity && previousSpotSessions.get(spot.identity.token);
+ if (!prior || spot.state !== 'LIVE' || spot.pdc == null || Math.abs(spot.pdc - prior.close) > 0.01 ||
+     prior.symbol !== symbol) return readDashboardPremiumSnapshot(filter);
+
+ const instruments = target.inventory.entries.flatMap(entry =>
+  entry.role === 'OPTION' && entry.symbol === symbol && entry.expiry === expiry &&
+  entry.strike != null && entry.side ? [{ instrumentToken: entry.token, strike: entry.strike, optionType: entry.side }] : []);
+ if (!instruments.length) return readDashboardPremiumSnapshot(filter);
+
+ const key = [symbol, expiry, prior.sessionDate].join('|');
+ let pending = previousOptionSessions.get(key);
+ if (!pending) {
+  pending = loadClosingOptionLevelsFromDb({ symbol, expiryDate: expiry,
+   previousTradingDate: prior.sessionDate, instruments }).catch(() => null);
+  previousOptionSessions.set(key, pending);
+ }
+ const levels = await pending;
+ if (!levels?.size && previousOptionSessions.get(key) === pending) previousOptionSessions.delete(key);
+ const response = readDashboardPremiumSnapshot(filter);
+ if (store !== target || !response.connected || !response.snapshot || !levels?.size) return response;
+ const freshSpot = target.spotQuote(symbol, Date.now());
+ if (freshSpot.state !== 'LIVE' || freshSpot.pdc == null || Math.abs(freshSpot.pdc - prior.close) > 0.01) return response;
+ Object.assign(response.snapshot, { previousOptionSessionDate: prior.sessionDate });
+ for (const row of response.snapshot.rows) {
+  const id = row.identity;
+  if (id?.role !== 'OPTION' || id.symbol !== symbol || id.expiry !== expiry) continue;
+  const pair = levels.get(id.token);
+  if (pair) Object.assign(row, { previousOptionSession: { ...pair, source: 'RECORDER_CLOSE',
+   sessionDate: prior.sessionDate, symbol, expiry, strike: id.strike, side: id.side, token: id.token } });
+ }
+ return response;
 }
 
 /** Internal authenticated seller consumer only; never exposes account values in the public stream. */

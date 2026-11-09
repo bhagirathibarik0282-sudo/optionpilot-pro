@@ -81,7 +81,7 @@ internal class MarketRepository(context: Context) : MarketSource {
         require(Regex("\\d{4}-\\d{2}-\\d{2}").matches(expiry)) { "INVALID_EXPIRY" }
         ensureRuntime()
         val requestElapsed = SystemClock.elapsedRealtime()
-        val path = "/api/research/dashboard-live/premiums?view=ladder&nearby=7&symbol=${index.name}&expiries=$expiry"
+        val path = "/api/research/dashboard-live/premiums?view=ladder&nearby=7&previousLevels=1&symbol=${index.name}&expiries=$expiry"
         val raw = get(path)
         val receivedElapsed = SystemClock.elapsedRealtime()
         val receivedWall = System.currentTimeMillis()

@@ -62,7 +62,18 @@ class MainActivity : ComponentActivity() {
     }
     val context = androidx.compose.ui.platform.LocalContext.current
     CapsuleScreen(state, vm::select, vm::refresh, vm::setUpdatesWanted, vm::loadStrikes, vm::refreshFiiDii,
-        vm::recordedSessions, vm::replayWindow) {
+        vm::recordedSessions, vm::replayWindow,
+        onShareToday = { summary ->
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, summary)
+            }
+            runCatching { context.startActivity(Intent.createChooser(send, "Share market summary")) }
+                .onFailure {
+                    Toast.makeText(context, "No sharing app available", Toast.LENGTH_LONG).show()
+                }
+        }
+    ) {
         // User-initiated external browser only. The broker request token and API secret
         // must be exchanged and stored by the already-existing server callback.
         val route = Uri.parse(BASE_URL + "/api/kite/login")
@@ -85,6 +96,7 @@ private enum class StrikeDisplay(val label: String) {
     onRefreshFiiDii: () -> Unit = {},
     onRecordedSessions: suspend () -> List<RecordedSession> = { error("REPLAY_UNAVAILABLE") },
     onReplayWindow: suspend (ReplayWindow) -> RecordedWindow = { error("REPLAY_UNAVAILABLE") },
+    onShareToday: (String) -> Unit = {},
     onKiteLogin: () -> Unit = {},
 ) {
     var page by rememberSaveable { mutableStateOf(Page.TODAY) }
@@ -172,6 +184,11 @@ private enum class StrikeDisplay(val label: String) {
                         Text("Market cause unverified. News and historical matching are not connected.",
                             color = Muted, modifier = Modifier.testTag("today-cause"))
                         capsule.watchNext.forEachIndexed { n, condition -> Text("${n + 1}. $condition") }
+                        OutlinedButton(
+                            onClick = { onShareToday(todayShareText(capsule)) },
+                            enabled = capsule.hasObservation,
+                            modifier = Modifier.fillMaxWidth().testTag("today-share"),
+                        ) { Text("Share summary · WhatsApp") }
                         Text("Observation only · no trade suggestion or prediction.", color = Gold,
                             style = MaterialTheme.typography.labelSmall)
                     } }
@@ -526,7 +543,7 @@ private fun wallLabel(reading: StrikeOiRanks): String {
             modifier = Modifier.testTag("reference-basis"))
         Text("Spot source: ${at(spot?.observedAt)} · Futures source: ${at(future?.observedAt)}",
             color = Muted, style = MaterialTheme.typography.bodySmall)
-        Text("PDH / PDL / VWAP: unavailable. Today's high/low are current-session values.",
+        Text("PDH / PDL: unavailable. Today's high/low are current-session values.",
             color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
@@ -631,6 +648,28 @@ private fun wallLabel(reading: StrikeOiRanks): String {
         }
     }
 }
+private fun todayShareText(capsule: TodayCapsule): String = buildString {
+    appendLine("Market Capsule · ${capsule.index.name}")
+    capsule.spotObservedAt?.let { observedAt ->
+        val change = capsule.dayChangePct?.let { "${signed(it)}% vs broker previous close" }
+        appendLine(if (change == null) "Spot observed · ${at(observedAt)}"
+            else "$change · ${at(observedAt)}")
+    }
+    capsule.pcr?.let { pcr ->
+        listOf(
+            "Verified full PCR" to pcr.full,
+            "ATM ±7 band PCR" to pcr.band,
+            "Latest reported PCR (mixed source times)" to pcr.reported,
+        ).forEach { (label, value) ->
+            if (value != null) {
+                appendLine("$label: ${ratioText(value.ratio)} · expiry ${pcr.expiry}")
+                appendLine("OI source: ${at(value.sourceMinAt)} → ${at(value.sourceMaxAt)}")
+            }
+        }
+    }
+    append("Market cause unverified. Observation only.")
+}
+
 private fun ratioText(value: Double): String = String.format(Locale.ROOT, "%.4f", value)
 private fun strikeText(value: Double): String = NumberFormat.getNumberInstance(Locale.forLanguageTag("en-IN")).apply { maximumFractionDigits = 2 }.format(value)
 private fun shortExpiry(value: String): String = LocalDate.parse(value).format(DateTimeFormatter.ofPattern("dd MMM", Locale.ENGLISH))

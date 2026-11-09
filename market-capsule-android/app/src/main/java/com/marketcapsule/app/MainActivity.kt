@@ -145,7 +145,19 @@ private enum class StrikeDisplay(val label: String) {
                 }
             }
             if (displayedPage == Page.TODAY || displayedPage == Page.DESK) {
-                item { QuoteCard(state, today = capsule.takeIf { displayedPage == Page.TODAY }) }
+                item { QuoteCard(state, compact = displayedPage == Page.TODAY) }
+                item {
+                    Button(onClick = onRefresh, enabled = !state.loading && !state.updatesWanted, modifier = Modifier.testTag("refresh").fillMaxWidth()) {
+                        Text(if(state.loading) "Requesting…" else "Refresh snapshot")
+                    }
+                    OutlinedButton(onClick = { onUpdatesWanted(!state.updatesWanted) },
+                        modifier = Modifier.testTag("updates-toggle").fillMaxWidth()) {
+                        Text(if (state.updatesWanted) "Stop updates" else "Start updates")
+                    }
+                    Text(state.updatePhase.label, color = Gold, style = MaterialTheme.typography.labelMedium)
+                    Text(state.message, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+                    if (displayedPage == Page.DESK) KiteConnect(onKiteLogin)
+                }
                 if (displayedPage == Page.TODAY) {
                     item { Section("Options positioning · PCR") {
                         val pcr = capsule.pcr
@@ -156,6 +168,10 @@ private enum class StrikeDisplay(val label: String) {
                             else -> "No eligible PCR reading"
                         }
                         Text(coverageStatus, color = Gold, modifier = Modifier.testTag("today-capsule-status"))
+                        Text(capsule.dayChangePct?.let {
+                            "${capsule.index.name}: ${signed(it)}% versus broker previous close."
+                        } ?: "Day change unavailable. Refresh for a new observation.",
+                            modifier = Modifier.testTag("today-day-change"))
                         if (pcr != null) {
                             Text("Expiry ${pcr.expiry} · checked ${at(pcr.checkedAt)}", color = Muted,
                                 style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("today-pcr-checked"))
@@ -174,18 +190,6 @@ private enum class StrikeDisplay(val label: String) {
                         if (pcr?.reported != null) Text("Latest reported PCR: ${ratioText(pcr.reported.ratio)} · ${pcr.expiry} · mixed source times",
                             color = Muted, modifier = Modifier.testTag("today-reported-pcr"))
                     } }
-                }
-                item {
-                    Button(onClick = onRefresh, enabled = !state.loading && !state.updatesWanted, modifier = Modifier.testTag("refresh").fillMaxWidth()) {
-                        Text(if(state.loading) "Requesting…" else "Refresh snapshot")
-                    }
-                    OutlinedButton(onClick = { onUpdatesWanted(!state.updatesWanted) },
-                        modifier = Modifier.testTag("updates-toggle").fillMaxWidth()) {
-                        Text(if (state.updatesWanted) "Stop updates" else "Start updates")
-                    }
-                    Text(state.updatePhase.label, color = Gold, style = MaterialTheme.typography.labelMedium)
-                    Text(state.message, color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
-                    if (displayedPage == Page.DESK) KiteConnect(onKiteLogin)
                 }
             }
             when(displayedPage) {
@@ -621,8 +625,7 @@ private fun wallLabel(reading: StrikeOiRanks): String {
         color = Muted, style = MaterialTheme.typography.labelSmall)
 }
 
-@Composable private fun QuoteCard(state: MarketUiState, today: TodayCapsule?) {
-    val compact = today != null
+@Composable private fun QuoteCard(state: MarketUiState, compact: Boolean) {
     var showDetails by rememberSaveable(state.selected.name) { mutableStateOf(false) }
     Section(state.selected.name + " · snapshot") {
         val recent = state.status == ReadingStatus.RECENT_SNAPSHOT
@@ -631,15 +634,7 @@ private fun wallLabel(reading: StrikeOiRanks): String {
             ReadingStatus.UNAVAILABLE -> "NO ELIGIBLE READING" }, color = Gold, style = MaterialTheme.typography.labelMedium)
         Text(if(recent) "₹${format(state.quote?.price)}" else "—", style = MaterialTheme.typography.displaySmall)
         val change = if(recent) state.quote?.changePct else null
-        if (today != null) {
-            Text(today.dayChangePct?.let {
-                "${today.index.name}: ${signed(it)}% versus broker previous close."
-            } ?: "Day change unavailable. Refresh for a new observation.",
-                color = change?.let { if (it >= 0) Up else Down } ?: Muted,
-                modifier = Modifier.testTag("today-day-change"))
-        } else if (change != null) {
-            Text("${signed(change)}% vs previous close", color = if (change >= 0) Up else Down)
-        }
+        if (change != null) Text("${signed(change)}% vs previous close", color = if (change >= 0) Up else Down)
         Text("Source time: ${at(state.quote?.observedAt)}", color = Muted)
         if (compact) {
             TextButton(

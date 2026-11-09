@@ -52,8 +52,13 @@ class TodayCapsuleUiTest {
         ui.onNodeWithTag("today-full-pcr").assertTextEquals("Full PCR · verified: —")
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("today-reported-pcr"))
         ui.onNodeWithTag("today-reported-pcr").assertTextEquals("Latest reported PCR: 1.8000 · 2026-11-09 · mixed source times")
+        ui.onNodeWithTag("today-capsule-status").assertTextEquals("Reported OI only · mixed source times")
+        ui.onNodeWithTag("today-pcr-coverage").assertTextEquals("Fresh OI coverage: 198 / 200 contracts")
+        ui.onNodeWithTag("today-pcr-checked").assertTextContains("Expiry 2026-11-09 · checked", substring = true)
         ui.runOnIdle { s.value = s.value.copy(currentElapsedMs = 90001) }
         ui.onNodeWithTag("today-reported-pcr").assertDoesNotExist()
+        ui.onNodeWithTag("today-pcr-coverage").assertDoesNotExist()
+        ui.onNodeWithTag("today-pcr-checked").assertDoesNotExist()
         ui.onNodeWithTag("screen-content").performScrollToNode(hasTestTag("today-day-change"))
         ui.onNodeWithTag("today-day-change").assertTextEquals("Day change unavailable. Refresh for a new observation.")
     }

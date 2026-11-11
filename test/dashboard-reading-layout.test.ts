@@ -34,9 +34,9 @@ test('live text updates cause no extra style scans; new table rows get one batch
  let callback:any,queries=0;const frames:any[]=[];
  class El{
   isConnected=true;dataset:any={};
-  constructor(readonly live=false,readonly parentTable:El|null=null){}
+  constructor(readonly live=false,readonly parentTable:El|null=null,readonly isTable=false){}
   closest(selector:string){
-   if(selector==='table')return this.parentTable;
+   if(selector==='table')return this.parentTable||(this.isTable?this:null);
    if(selector.includes('#dashboard-live')&&this.live)return this;
    return null;
   }
@@ -49,7 +49,7 @@ test('live text updates cause no extra style scans; new table rows get one batch
  const textNode={nodeType:3,textContent:'Live price changed'};
  callback([{target:body,addedNodes:[textNode]}]);assert.equal(frames.length,0);assert.equal(queries,0);
  callback([{target:body,addedNodes:[new El(true)]}]);assert.equal(frames.length,0);
- const table=new El(),rowA=new El(false,table),rowB=new El(false,table);
+ const table=new El(false,null,true),rowA=new El(false,table),rowB=new El(false,table);
  callback([{target:table,addedNodes:[rowA,rowB]}]);
  assert.equal(frames.length,1,'one scheduled frame for two updated rows');
  frames[0]();assert.equal(queries,4,'table examined once (tables, headers, rows, text)');

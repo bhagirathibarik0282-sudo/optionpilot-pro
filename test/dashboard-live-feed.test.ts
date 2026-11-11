@@ -183,6 +183,10 @@ test('REST OI candidate restores separately verified exact 30 legs without promo
  const before=JSON.stringify(rest),read=deriveRestOiBandEvidence(ws,rest,now);
  assert.equal(read?.coverage.verifiedRestOi,30);
  assert.equal(read?.state,'COMPLETE_BAND');
+ assert.equal(read?.bandWallRanks?.scope,'EXACT_ATM_PLUS_MINUS_7_ONLY');
+ assert.equal(read?.bandWallRanks?.ce.length,3);
+ assert.equal(read?.bandWallRanks?.pe.length,3);
+ assert.equal(read?.bandWallRanks?.ce[0]?.tied,true,'equal CE OI is explicitly tied');
  assert.equal(read?.coverage.zeroOi,1,'real broker zero is not missing');
  assert.equal(read?.rows[0].oi,0);
  assert.equal(read?.fullPcr,null,'REST band never becomes full PCR');
@@ -204,6 +208,7 @@ test('REST OI refuses token swaps, duplicate, carried prior-session, expired cyc
   side:e.side,token:e.token,responseToken:e.token,sourceAt:at,oi:5}))};
  const changed=(fn:(a:any)=>void)=>{const a=structuredClone(base);fn(a);return deriveRestOiBandEvidence(ws,a,now);};
  assert.equal(changed(a=>a.rows[0].responseToken=123)?.coverage.verifiedRestOi,29);
+ assert.equal(changed(a=>a.rows[0].responseToken=123)?.bandWallRanks,null,'incomplete band never publishes walls');
  assert.equal(changed(a=>a.rows[0].token=123)?.rows[0].reason,'REST_IDENTITY_MISMATCH');
  assert.equal(changed(a=>a.rows[0].sourceAt='2026-10-15T04:30:00.000Z')?.coverage.verifiedRestOi,29);
  assert.equal(changed(a=>a.rows[0].oi=null)?.coverage.verifiedRestOi,29);
@@ -215,4 +220,11 @@ test('REST OI refuses token swaps, duplicate, carried prior-session, expired cyc
  assert.equal(changed(a=>a.fetchState='RATE_LIMITED')?.coverage.verifiedRestOi,0);
  assert.equal(deriveRestOiBandEvidence(ws,base,now+86400000),null,'next session never borrows today');
  assert.equal(deriveRestOiBandEvidence(null,base,now),null,'no WS band identity means no substitution');
+ const ranked=structuredClone(base);
+ ranked.rows[0].oi=30;ranked.rows[2].oi=20;ranked.rows[4].oi=10;ranked.rows[1].oi=0;
+ const order=deriveRestOiBandEvidence(ws,ranked,now);
+ assert.deepEqual(order?.bandWallRanks?.ce.map((r:any)=>[r.rank,r.strike,r.oi,r.tied]),
+  [[1,21650,30,false],[2,21700,20,false],[3,21750,10,false]],'current ATM band top-three CE ranks deterministic');
+ assert.equal(order?.bandWallRanks?.pe[0]?.tied,true,'PE ties remain labelled; valid zero is not a wall');
 });
+

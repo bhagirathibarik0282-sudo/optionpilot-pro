@@ -3,7 +3,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import vm f
 import { installDashboardLive,DASHBOARD_LIVE_HTML } from '../dashboard-live-view.js';
 import { DashboardLiveStore,type LiveEntry } from '../dashboard-live-feed.js';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
-function harness(){
+function harness(extraStrikes:number[]=[]){
  const nodes=new Map<string,any>();for(const m of DASHBOARD_LIVE_HTML.matchAll(/id="([^"]+)"/g))nodes.set(m[1],{innerHTML:'',textContent:'',hidden:false,setAttribute(){},contains(){return true;},querySelector(){return null;}});
  const streams:any[]=[],timers:any[]=[],docEvents:any={},winEvents:any={},contextEvents:any[]=[];let now=Date.parse('2026-10-16T04:30:00Z');
  class Clock extends Date{static now(){return now;}}
@@ -11,10 +11,16 @@ function harness(){
  const document:any={hidden:false,activeElement:null,getElementById:(id:string)=>nodes.get(id),addEventListener:(type:string,fn:any)=>docEvents[type]=fn};
  const ctx:any={document,window:{addEventListener:(type:string,fn:any)=>winEvents[type]=fn,dispatchEvent:(event:any)=>{contextEvents.push(event);return true;}},CustomEvent:class{type:string;detail:any;constructor(type:string,init:any){this.type=type;this.detail=init.detail;}},EventSource:Stream,URLSearchParams,Date:Clock,Map,Set,Number,String,Array,Object,Math,setInterval:(fn:any)=>timers.push(fn)};
  vm.createContext(ctx);const scripts=[...renderBusinessDashboardV1Html({} as any).matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);vm.runInContext(scripts[0],ctx);vm.runInContext(scripts.at(-1)!,ctx);
- const entries:LiveEntry[]=[{token:1,role:'SPOT',symbol:'NIFTY',label:'NIFTY 50'},...['CE','PE'].map((side,i)=>({token:2+i,role:'OPTION' as const,symbol:'NIFTY' as const,label:side,side:side as 'CE'|'PE',expiry:'2026-10-19',strike:22000}))];
+ const entries:LiveEntry[]=[
+  {token:1,role:'SPOT',symbol:'NIFTY',label:'NIFTY 50'},
+  ...[22000,...extraStrikes].flatMap((strike,i)=>(['CE','PE'] as const).map((side,j)=>({
+   token:2+i*2+j,role:'OPTION' as const,symbol:'NIFTY' as const,
+   label:side+' '+strike,side,expiry:'2026-10-19',strike
+  })))
+ ];
  const store=new DashboardLiveStore({entries,date:'2026-10-16',missing:[],omittedExpiries:[]});
  const tick=(price=22001)=>{store.ingest(entries.map(e=>({instrumentToken:e.token,lastPrice:e.role==='SPOT'?price:100,exchangeTimestamp:new Date(now).toISOString(),oi:100,mode:'full' as const,isIndex:e.role==='SPOT'})),new Date(now).toISOString());};
- const emit=(patch?:(snapshot:any)=>void)=>{const before=streams.length;const fire=()=>{const snapshot=store.snapshot(now);patch?.(snapshot);streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:new Date(now).toISOString(),snapshot})});};fire();if(streams.length>before)fire();};
+ const emit=(patch?:(snapshot:any)=>void,pins:any={})=>{const before=streams.length;const fire=()=>{const snapshot=store.snapshot(now,pins);patch?.(snapshot);streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:new Date(now).toISOString(),snapshot})});};fire();if(streams.length>before)fire();};
  return {nodes,streams,timers,docEvents,winEvents,contextEvents,document,ctx,store,tick,emit,advance:(ms:number)=>now+=ms};
 }
 test('real streamed values change the numbers and chart; selection clears old identity and reconnects exactly once',()=>{
@@ -110,6 +116,51 @@ test('same dashboard shows only exact same-session recorded PDH PDL and prior-15
  h.streams.at(-1).onerror();
  assert(!h.nodes.get('op-live-indices').innerHTML.includes('Recorded PDH / PDC / PDL · same dashboard'),
   'disconnect must hide the recorded-level panel along with the live cards');
+});
+
+test('web live card selects independent CE and PE from every listed strike, not only ATM ±2',()=>{
+ const h=harness([21750,21800,21850,21900,21950,22050,22100,22150,22200,22250]);
+ h.tick();h.emit();let html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('data-live-field="ceStrike"')&&html.includes('data-live-field="peStrike"'));
+ assert(html.includes('<option value="22250"')&&html.includes('<option value="21750"'),
+  'full exact expiry strike inventory, including distances beyond two ATM steps');
+ const n=h.streams.length;
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'ceStrike'},value:'99999'}});
+ assert.equal(h.streams.length,n,'unlisted strike cannot make a new SSE connection');
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'ceStrike'},value:'22250'}});
+ assert.equal(h.streams.length,n+1);
+ assert(h.streams.at(-2).closed,'old stream closes before exactly one new selection stream');
+ assert(h.streams.at(-1).url.includes('NIFTY_ceStrike=22250'));
+ h.tick();h.emit(undefined,{NIFTY:{ceStrike:22250}});
+ html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('CE · 22250')&&html.includes('PE · 22000'),'CE pinned separately while PE stays at shared reference');
+ const n2=h.streams.length;
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'peStrike'},value:'21750'}});
+ assert.equal(h.streams.length,n2+1);
+ assert(h.streams.at(-2).closed);
+ assert(h.streams.at(-1).url.includes('NIFTY_ceStrike=22250'));
+ assert(h.streams.at(-1).url.includes('NIFTY_peStrike=21750'));
+ h.tick();h.emit(undefined,{NIFTY:{ceStrike:22250,peStrike:21750}});
+ html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('CE · 22250')&&html.includes('PE · 21750'));
+ assert(html.includes('Pinned CE OI')&&html.includes('Pinned PE OI'));
+ assert.equal(h.streams.at(-1).closed,false);
+ assert(!html.includes('CE · 21750'),'CE and PE strikes must not be conflated');
+ const before=h.streams.length;
+ h.nodes.get('op-live-indices').onclick({target:{closest:(selector:string)=>selector==='[data-live-layer]'?{dataset:{liveIndex:'NIFTY',liveLayer:'ce'}}:null}});
+ html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('CE 22250 · ₹'),'CE chart must be labelled with exact pinned strike');
+ assert.equal(h.streams.length,before,'chart display never creates another stream');
+ const prev=h.streams.at(-1),count=h.streams.length;
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'ceStrike'},value:'22150'}});
+ assert.equal(h.streams.length,count+1);assert(prev.closed);
+ h.tick();h.emit(undefined,{NIFTY:{ceStrike:22150,peStrike:21750}});
+ html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('CE 22150 · ₹'));
+ assert(!html.includes('CE 22250 · ₹'),'old contract chart label cannot leak into new pin');
+ const newStream=h.streams.at(-1);
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'expiry'},value:'2026-12-31'}});
+ assert.equal(h.streams.at(-1),newStream,'unlisted expiry cannot change active selection');
 });
 
 test('streaming patches values without replacing dropdowns; chart cadence retains all receipt observations',()=>{

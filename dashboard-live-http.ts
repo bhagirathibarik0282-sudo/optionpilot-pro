@@ -1,6 +1,6 @@
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { readDashboardLiveSnapshot, dashboardLiveRevision, readDashboardPremiumSnapshot, readDashboardPcrAudit } from './dashboard-live-runtime.js';
+import { readDashboardLiveSnapshot, dashboardLiveRevision, readDashboardPremiumSnapshot, readDashboardPremiumSnapshotWithPreviousLevels, readDashboardPcrAudit } from './dashboard-live-runtime.js';
 import { LIVE_INDICES, type LiveSelection, type PremiumWatchFilter } from './dashboard-live-feed.js';
 
 export const DASHBOARD_LIVE_FLUSH_MS=100;
@@ -22,7 +22,7 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
   if(!(LIVE_INDICES as readonly string[]).includes(symbol)||!/^\d{4}-\d{2}-\d{2}$/.test(expiry||'')||!Number.isFinite(Date.parse(expiry+'T00:00:00Z'))||new Date(expiry+'T00:00:00Z').toISOString().slice(0,10)!==expiry)return c.json({ok:false,reason:'INVALID_PCR_AUDIT_SELECTION'},400);
   return c.json(readAudit(symbol,expiry));
  });
- app.get('/dashboard-live/premiums',c=>{
+ app.get('/dashboard-live/premiums',async c=>{
   c.header('Cache-Control','no-store');
   try{
    const q=c.req.query(),filter:PremiumWatchFilter={};
@@ -35,6 +35,11 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
    for(const key of ['ceStrike','peStrike','minDte','maxDte','offset','limit'] as const)if(q[key]!==undefined){const v=Number(q[key]);if(!/^\d+(?:\.\d+)?$/.test(q[key])||!Number.isFinite(v)||v<0||(['ceStrike','peStrike','limit'].includes(key)&&v===0)||(!['ceStrike','peStrike'].includes(key)&&!Number.isInteger(v)))throw Error();filter[key]=v;}
    if(filter.view==='ladder'&&(filter.offset||0)!==0)throw Error();
    if((filter.limit||0)>120||(filter.offset||0)>20000||(filter.maxDte!==undefined&&filter.minDte!==undefined&&filter.minDte>filter.maxDte))throw Error();
+   if (q.previousLevels !== undefined) {
+    if (q.previousLevels !== '1' || filter.view !== 'ladder' ||
+        (filter.symbol !== 'NIFTY' && filter.symbol !== 'SENSEX') || filter.expiries?.length !== 1) throw Error();
+    return c.json(await readDashboardPremiumSnapshotWithPreviousLevels(filter));
+   }
    return c.json(readDashboardPremiumSnapshot(filter));
   }catch{return c.json({ok:false,reason:'INVALID_PREMIUM_FILTER'},400);}
  });

@@ -311,13 +311,23 @@ private enum class StrikeDisplay(val label: String) {
                                 Text("ATM reference is unavailable in the returned exact strikes; no substitute.", color = Muted)
                             } else {
                                 val ceOi = if (strikeDisplay != StrikeDisplay.PREMIUM)
-                                    read.rankOi(state, visible, strikeBand) { it.ce } else null
+                                    read.rankOi(state, visible, strikeBand, "CE") { it.ce } else null
                                 val peOi = if (strikeDisplay != StrikeDisplay.PREMIUM)
-                                    read.rankOi(state, visible, strikeBand) { it.pe } else null
+                                    read.rankOi(state, visible, strikeBand, "PE") { it.pe } else null
                                 if (ceOi != null && peOi != null) {
                                     Text("Band OI · ±$strikeBand strikes · $target", color = Gold)
-                                    Text("Fresh OI: CE ${ceOi.values.size}/${ceOi.expected} · PE ${peOi.values.size}/${peOi.expected}",
+                                    val verified = ceOi.source == "REST_SNAPSHOT" && peOi.source == "REST_SNAPSHOT"
+                                    Text((if (verified) "Verified snapshot OI" else "Fresh OI") +
+                                        ": CE ${ceOi.values.size}/${ceOi.expected} · PE ${peOi.values.size}/${peOi.expected}",
                                         modifier = Modifier.testTag("strike-oi-coverage"))
+                                    Text(if (verified)
+                                        "Source: complete Kite REST expiry snapshot · checked ${at(ceOi.checkedAt)} IST · not a live tick"
+                                        else "Source: individual WebSocket quotes · 30s freshness",
+                                        color = Muted, style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.testTag("strike-oi-source"))
+                                    if (ceOi.values.isEmpty() && peOi.values.isEmpty())
+                                        Text("OI unavailable: WebSocket quotes expired or missing; no matching verified expiry snapshot. Load strikes again.",
+                                            color = Muted, style = MaterialTheme.typography.labelSmall)
                                     Text("Call band wall: ${wallLabel(ceOi)}", modifier = Modifier.testTag("strike-ce-wall"))
                                     Text("Put band wall: ${wallLabel(peOi)}", modifier = Modifier.testTag("strike-pe-wall"))
                                     Text("Ranks use eligible returned strikes. Walls require complete, synchronized band OI.",

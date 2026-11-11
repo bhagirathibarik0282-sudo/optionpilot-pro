@@ -112,9 +112,9 @@ class VerifiedBandStrikeOiTest {
     @Test fun bandWithThirtyLegsButMoreThanThirtySecondsSkewWithholdsWall() {
         val (live, audit) = observation()
         val rows = audit.getJSONObject("audit").getJSONArray("rows")
-        rows.getJSONObject(1).put("sourceAt", "2026-11-11T04:29:29Z")
+        rows.getJSONObject(1).put("sourceAt", "2026-11-11T04:29:30Z")
         rows.getJSONObject(0).put("sourceAt", "2026-11-11T04:30:01Z")
-        // All individual quotes satisfy a bounded check, but together span 32 seconds.
+        // All individual quotes satisfy a bounded check, but together span 31 seconds.
         val verified = parse(live, audit)
         assertNotNull(verified)
         val read = ladder().copy(verifiedOi = verified)

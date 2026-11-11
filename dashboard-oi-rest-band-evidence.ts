@@ -26,7 +26,7 @@ export function deriveRestOiBandEvidence(ws:WsAudit|null,rest:RestAudit|null,now
  for(const row of ws.rows){
   const id=row.strike+'|'+row.side;
   if(!Number.isFinite(row.strike)||row.strike<=0||!['CE','PE'].includes(row.side)||
-   !Number.isSafeInteger(row.token)||row.token!<=0||uniqueWsIds.has(id)||uniqueWsTokens.has(row.token!))validWs=false;
+   !Number.isSafeInteger(row.token)||(row.token??0)<=0||uniqueWsIds.has(id)||uniqueWsTokens.has(row.token!))validWs=false;
   uniqueWsIds.add(id);uniqueWsTokens.add(row.token!);uniqueStrikes.add(row.strike);
   if(row.side==='CE')ceCount++;else peCount++;
  }
@@ -48,7 +48,7 @@ export function deriveRestOiBandEvidence(ws:WsAudit|null,rest:RestAudit|null,now
    candidates.length!==1?candidates.length?'DUPLICATE_REST_LEG':'MISSING_REST_LEG':
    r!.symbol!==ws.symbol||r!.expiry!==ws.expiry||r!.strike!==w.strike||r!.side!==w.side||
    r!.token!==w.token||r!.responseToken!==w.token?'REST_IDENTITY_MISMATCH':
-   !Number.isSafeInteger(r!.oi)||r!.oi!<0?'INVALID_REST_OI':
+   !Number.isSafeInteger(r!.oi)||(r!.oi??-1)<0?'INVALID_REST_OI':
    !good?'STALE_OR_WRONG_SESSION_REST_OI':'VERIFIED_REST_OI';
   const ok=reason==='VERIFIED_REST_OI';
   return {strike:w.strike,side:w.side,token:w.token,

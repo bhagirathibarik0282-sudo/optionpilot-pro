@@ -97,11 +97,25 @@ internal class MarketRepository(context: Context) : MarketSource {
             catch (_: Exception) { null }
         val snapshotWall = System.currentTimeMillis()
         val snapshotElapsed = SystemClock.elapsedRealtime()
-        return withContext(Dispatchers.Default) {
-            reading.copy(verifiedOi = snapshotRaw?.let {
+        val full = withContext(Dispatchers.Default) {
+            snapshotRaw?.let {
                 VerifiedStrikeOiParser.parse(it, index, expiry, reading.runtimeId,
                     snapshotWall, snapshotElapsed)
-            })
+            }
+        }
+        // Full-expiry PCR can be incomplete due to outlying stale strikes.
+        // The existing read-only audit retains exact same-cycle per-contract OI.
+        // A 15-strike band may qualify independently, without changing Full PCR.
+        val auditRaw = if (full == null && snapshotRaw != null) try {
+            get("/api/research/dashboard-live/pcr-audit?symbol=${index.name}&expiry=$expiry")
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) { null } else null
+        val auditWall = System.currentTimeMillis()
+        val auditElapsed = SystemClock.elapsedRealtime()
+        return withContext(Dispatchers.Default) {
+            reading.copy(verifiedOi = full ?: if (snapshotRaw != null && auditRaw != null)
+                VerifiedStrikeOiParser.parseBandAudit(auditRaw, snapshotRaw, index,
+                    expiry, reading.runtimeId, auditWall, auditElapsed) else null)
         }
     }
     override suspend fun ensureRuntime() {

@@ -11,13 +11,13 @@ import kotlin.math.min
 internal data class PreviousOptionLevels(val high: Double, val low: Double)
 internal data class StrikeOption(
     val price: Double?, val ageMs: Long?, val observedAt: String?, val oi: Long? = null,
-    val previousLevels: PreviousOptionLevels? = null
+    val previousLevels: PreviousOptionLevels? = null, val token: Long? = null
 )
 internal data class StrikeRow(val strike: Double, val ce: StrikeOption?, val pe: StrikeOption?)
 internal data class StrikeLadderRead(
     val index: MarketIndex, val expiry: String, val tradeDate: String, val runtimeId: String,
     val rows: List<StrikeRow>, val receivedElapsedMs: Long, val deliveryAgeMs: Long,
-    val previousSessionDate: LocalDate? = null
+    val previousSessionDate: LocalDate? = null, val verifiedOi: VerifiedStrikeOi? = null
 ) {
     private fun isFresh(state: MarketUiState, leg: StrikeOption?): Boolean {
         val age = leg?.ageMs ?: return false
@@ -31,11 +31,18 @@ internal data class StrikeLadderRead(
         leg?.price != null && isFresh(state, leg)
 
     fun rankOi(state: MarketUiState, visible: List<StrikeRow>, band: Int,
-               select: (StrikeRow) -> StrikeOption?): StrikeOiRanks {
+               side: String? = null, select: (StrikeRow) -> StrikeOption?): StrikeOiRanks {
+        // A canonical read-only REST snapshot is an independent, explicitly labelled
+        // observation. Never mix it with WebSocket OI or borrow another contract.
+        val verified = verifiedOi?.takeIf {
+            (side == "CE" || side == "PE") && visible.size == 2 * band + 1 &&
+                it.eligible(state, runtimeId) && it.matches(visible)
+        }
         val eligible = visible.mapNotNull { row ->
             val leg = select(row)
-            val oi = leg?.oi
-            if (oi != null && isFresh(state, leg)) row.strike to oi else null
+            val oi = if (verified != null) verified.rows[row.strike to side]?.second
+                else leg?.oi?.takeIf { isFresh(state, leg) }
+            if (oi != null) row.strike to oi else null
         }.toMap()
         val ordered = eligible.values.filter { it > 0 }.sortedDescending()
         val ranks = eligible.filterValues { it > 0 }.mapValues { ordered.indexOf(it.value) + 1 }
@@ -44,10 +51,12 @@ internal data class StrikeLadderRead(
             select(row)?.observedAt?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
         }
         val complete = band in listOf(3, 5, 7) && eligible.size == expected &&
-            visible.size == expected && observed.size == expected &&
-            observed.maxOrNull()!! - observed.minOrNull()!! <= QUOTE_MAX_AGE_MS
+            visible.size == expected && (verified != null ||
+                observed.size == expected &&
+                observed.maxOrNull()!! - observed.minOrNull()!! <= QUOTE_MAX_AGE_MS)
         val walls = if (complete) ranks.filterValues { it == 1 }.keys.sorted() else emptyList()
-        return StrikeOiRanks(eligible, ranks, walls, expected)
+        return StrikeOiRanks(eligible, ranks, walls, expected,
+            if (verified != null) "REST_SNAPSHOT" else "WEBSOCKET_FULL", verified?.checkedAt)
     }
 }
 
@@ -55,7 +64,7 @@ internal data class StrikeOiRanks(
     val values: Map<Double, Long>,
     val ranks: Map<Double, Int>,
     val walls: List<Double>,
-    val expected: Int
+    val expected: Int, val source: String = "WEBSOCKET_FULL", val checkedAt: String? = null
 )
 
 /** A fixed strike identity cannot silently become another expiry, side or index. */
@@ -138,7 +147,7 @@ internal object StrikeLadderParser {
                     val low = number(it, "pdl")
                     if (high != null && low != null && high >= low && low > 0) PreviousOptionLevels(high, low) else null
                 }
-            strikes.getOrPut(strike) { mutableMapOf() }[side] = StrikeOption(price, age, observed, oi, levels)
+            strikes.getOrPut(strike) { mutableMapOf() }[side] = StrikeOption(price, age, observed, oi, levels, token)
         }
         require(strikes.size <= 15) { "STRIKE_RESPONSE_TOO_LARGE" }
         return StrikeLadderRead(index, expiry, date, runtime,

@@ -230,10 +230,15 @@ test('in-dashboard CE/PE OI check displays only source-labelled exact REST legs 
  }))).flat();
  h.ctx.fetch=async(url:string,init:any)=>{
   requests.push(url);assert.equal(init.cache,'no-store');
+  const rank=(side:string)=>rows.filter((r:any)=>r.side===side&&r.oi>0).slice(0,3).map((r:any)=>({
+   rank:1,strike:r.strike,oi:r.oi,sourceAt:r.sourceAt,tied:true
+  }));
   return {ok:true,json:async()=>({connected:true,restOiBand:{
    source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'COMPLETE_BAND',symbol:'NIFTY',
    expiry:'2026-10-19',tradeDate:'2026-10-16',anchorStrike:22000,checkedAt:at,
-   coverage:{expected:30,verifiedRestOi:30},rows
+   coverage:{expected:30,verifiedRestOi:30,complete:true,sourceSkewMs:0},
+   bandWallRanks:{scope:'EXACT_ATM_PLUS_MINUS_7_ONLY',source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',
+    ce:rank('CE'),pe:rank('PE')},rows
   }})};
  };
  h.nodes.get('op-live-oi-check').onclick();
@@ -242,9 +247,16 @@ test('in-dashboard CE/PE OI check displays only source-labelled exact REST legs 
  assert(html.includes('CE OI')&&html.includes('PE OI')&&html.includes('22,000'));
  assert(html.includes('REST · 10:00:00 IST'));
  assert.match(html,/>0<\/strong>/,'valid broker zero must be visible');
+ assert(html.includes('CE top 3')&&html.includes('PE top 3'),'ranked walls appear only for a complete, current band');
+ assert(html.includes('Rank 1')&&html.includes('tied'),'wall ties are labelled');
  assert.equal(requests.length,1);
  assert(requests[0].includes('symbol=NIFTY')&&requests[0].includes('expiry=2026-10-19')&&requests[0].includes('strike=22000'));
  assert.equal(h.streams.length,initial,'audit button never creates another market socket');
+ h.advance(31000);h.tick();h.emit();h.timers[0]();
+ assert(h.nodes.get('op-live-oi-band').innerHTML.includes('walls withheld'),
+  'walls and row OI must be revoked after their source packets age out');
+ assert(!h.nodes.get('op-live-oi-band').innerHTML.includes('CE top 3'),
+  'stale wall ranks cannot persist');
  h.nodes.get('op-live-oi-index').onchange();
  assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'','index change must revoke old OI');
 });
@@ -271,6 +283,7 @@ test('dashboard OI evidence rejects expired, wrong-session and unmatched contrac
  h.nodes.get('op-live-oi-check').onclick();await new Promise(resolve=>setImmediate(resolve));
  let html=h.nodes.get('op-live-oi-band').innerHTML;
  assert(html.includes('MISSING_REST_LEG')&&html.includes('>—</strong>'),'null must not become zero');
+ assert(html.includes('walls withheld')&&!html.includes('CE top 3'),'partial band cannot publish wall ranks');
  h.streams.at(-1).onerror();
  assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'','disconnection revokes all cached OI evidence');
 });

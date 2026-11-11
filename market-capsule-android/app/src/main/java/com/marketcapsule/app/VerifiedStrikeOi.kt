@@ -2,6 +2,7 @@ package com.marketcapsule.app
 
 import org.json.JSONObject
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 
 /** A complete read-only REST expiry observation; never a live WebSocket tick. */
@@ -175,7 +176,7 @@ internal object VerifiedStrikeOiParser {
             val sourceAt = ms(row.optString("sourceAt"))
             if (responseToken == token && oi != null && sourceAt != null &&
                 date(sourceAt) == today &&
-                sourceAt >= Date.parse(today + "T09:15:00+05:30") &&
+                sourceAt >= LocalDate.parse(today).atTime(9, 15).atZone(india).toInstant().toEpochMilli() &&
                 checked - sourceAt in -5_000..30_000) {
                 byContract[strike to side] = token to oi
                 sourceTimes[strike to side] = sourceAt

@@ -76,6 +76,42 @@ test('15m and FIB overlay exact recorded identities only, with independent per-i
  h.winEvents['optionpilot:recorded-levels']({detail:{date:'2026-10-15',indices:{NIFTY:{spot:ref}}}});assert(!h.nodes.get('op-live-indices').innerHTML.includes('Fib P 22,000'));assert.equal(h.streams.length,count);
 });
 
+test('same dashboard shows only exact same-session recorded PDH PDL and prior-15:30 PDC Fibonacci',()=>{
+ const h=harness();h.tick();h.emit();const sockets=h.streams.length;
+ const at='2026-10-16T04:30:00.000Z',prior='2026-10-15T10:00:00.000Z';
+ const pivot={at:prior,R3:125,R2:120,R1:115,P:110,S1:105,S2:100,S3:95};
+ const spot={source:'RECORDED_SAME_SESSION',at,pdh:22050,pdl:21950,pdc:22000,
+  pdcAt:prior,pivot:{...pivot,R3:22150,R2:22100,R1:22050,P:22000,S1:21950,S2:21900,S3:21850}};
+ const option=(type:'CE'|'PE')=>({source:'RECORDED_SAME_SESSION',at,expiry:'2026-10-19',
+  strike:22000,type,pdh:type==='CE'?140:135,pdl:70,pdc:100,pdcAt:prior,pivot});
+ const emit=(date:string,ce:any=option('CE'),pe:any=option('PE'),spotRef:any=spot)=>{
+  h.winEvents['optionpilot:recorded-levels']({detail:{date,indices:{NIFTY:{spot:spotRef,ce,pe}}}});
+  return h.nodes.get('op-live-indices').innerHTML.split('<h3>NIFTY')[1].split('</article>')[0];
+ };
+ let html=emit('2026-10-16');
+ assert(html.includes('Recorded PDH / PDC / PDL · same dashboard'));
+ assert(html.includes('PDH <b>22,050</b>')&&html.includes('PDC <b>22,000</b>')&&html.includes('PDL <b>21,950</b>'));
+ assert(html.includes('PDH <b>140</b>')&&html.includes('PDH <b>135</b>'),
+  'both CE and PE recorded identities are present');
+ assert(html.includes('Fibonacci from prior 15:30')&&html.includes('R3 125')&&html.includes('S3 95'));
+ assert.equal(h.streams.length,sockets,'reference changes never open a second broker or browser stream');
+ html=emit('2026-10-15');
+ assert(html.includes('Recording unavailable or exact date/contract mismatch'));
+ assert(!html.includes('PDH <b>140</b>')&&!html.includes('R3 125'));
+ html=emit('2026-10-16',{...option('CE'),expiry:'2026-11-17'},option('PE'),
+  {...spot,pdh:10,pdl:20,pdcAt:'2026-10-15T09:57:00Z'});
+ assert(!html.includes('PDH <b>140</b>'),'wrong expiry cannot reuse premium PDH');
+ assert(!html.includes('PDH <b>10</b>')&&!html.includes('PDL <b>20</b>'),'inverted spot references withheld');
+ assert(!html.includes('PDC <b>22,000</b>'),'non-15:30 prior close must be withheld');
+ const future={...option('CE'),at:'2026-10-16T04:32:00Z'};
+ html=emit('2026-10-16',future,{...option('PE'),source:'UNVERIFIED'});
+ assert(!html.includes('PDH <b>140</b>')&&!html.includes('PDH <b>135</b>'),
+  'future recording and unverified source are withheld');
+ h.streams.at(-1).onerror();
+ assert(!h.nodes.get('op-live-indices').innerHTML.includes('Recorded PDH / PDC / PDL · same dashboard'),
+  'disconnect must hide the recorded-level panel along with the live cards');
+});
+
 test('streaming patches values without replacing dropdowns; chart cadence retains all receipt observations',()=>{
  const h=harness(),root=h.nodes.get('dashboard-live'),parent=h.nodes.get('op-live-indices'),fragments=new Map<string,any>();let mounted=false,parentWrites=0,parentHtml='';
  Object.defineProperty(parent,'innerHTML',{get:()=>parentHtml,set:(html:string)=>{parentHtml=html;parentWrites++;mounted=html.includes('data-live-card=');}});

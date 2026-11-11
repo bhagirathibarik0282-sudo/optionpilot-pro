@@ -130,7 +130,7 @@ class VerifiedBandStrikeOiTest {
                 .put("responseToken", 9999) },
             { l, _ -> l.getJSONObject("snapshot").put("runtimeId", "another") },
             { l, _ -> l.put("connected", false) },
-            { _, a -> a.getJSONObject("audit").put("connected", false) },
+            { _, a -> a.put("readOnly", false) },
             { _, a -> a.put("extraBrokerRequests", 1) },
             { l, _ -> l.getJSONObject("snapshot").getJSONArray("indices").getJSONObject(0)
                 .put("expiry", "2026-11-24") }

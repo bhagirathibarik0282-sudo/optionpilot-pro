@@ -35,7 +35,7 @@ internal data class StrikeLadderRead(
         // A canonical read-only REST snapshot is an independent, explicitly labelled
         // observation. Never mix it with WebSocket OI or borrow another contract.
         val verified = verifiedOi?.takeIf {
-            (side == "CE" || side == "PE") && visible.size == 2 * band + 1 &&
+            state.selected == index && (side == "CE" || side == "PE") && visible.size == 2 * band + 1 &&
                 it.eligible(state, runtimeId) && it.matches(visible)
         }
         val eligible = visible.mapNotNull { row ->

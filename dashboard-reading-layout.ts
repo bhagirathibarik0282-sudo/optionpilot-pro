@@ -44,6 +44,17 @@ body[data-op-reading] .mb-more-rows{padding:10px;border:1px solid #536681;border
  body[data-op-tables=cards] table[data-op-card-table] td:last-child{border-bottom:0}
  body[data-op-tables=cards] .mb-table{overflow:visible;max-height:none}
 }
+/* Coarse touchscreens use the page as the one vertical scroller.
+   Keep the sideways table scrollers only where the table itself needs them. */
+@media(max-width:900px),(pointer:coarse){
+ body[data-op-reading]{background-attachment:scroll}
+ #premium-ladder,#event-feed,#wall-chart,#wall-events,#break-table,#contract-table,#oi-days-table,#oi-relation-table{
+  max-height:none;overflow-y:visible
+ }
+ #ladder .table,#premium-ladder .table{
+  max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch
+ }
+}
 `;
 
 /** Browser installer, deliberately self-contained for serialized dashboards. */
@@ -85,7 +96,14 @@ export function installDashboardReading() {
   if (typeof MutationObserver !== 'undefined') {
     const pending = new Set<Element>();let scheduled = false;
     const observer = new MutationObserver(records=>{
-      records.forEach(r=>{if(r.target instanceof Element&&!r.target.closest('#dashboard-live')&&!r.target.closest('#op-one-stop')&&!r.target.closest('#op-premium-workspace')&&!r.target.closest('#op-workspace-nav')&&!r.target.closest('#op-workspace-top')&&!r.target.closest('#op-workspace-ticker'))pending.add(r.target);});
+      // Respond to inserted elements only. Live price text updates must not trigger
+      // a full layout measurement of their parent table or chapter.
+      for (const record of records) for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        const root = node.closest('table') || node;
+        if (root.closest('#dashboard-live,#op-one-stop,#op-premium-workspace,#op-workspace-nav,#op-workspace-top,#op-workspace-ticker')) continue;
+        pending.add(root);
+      }
       if(!pending.size||scheduled)return;scheduled=true;
       window.requestAnimationFrame(()=>{scheduled=false;const roots=[...pending].filter(root=>root.isConnected);pending.clear();for(const root of roots)if(!roots.some(parent=>parent!==root&&parent.contains(root)))decorate(root);});
     });

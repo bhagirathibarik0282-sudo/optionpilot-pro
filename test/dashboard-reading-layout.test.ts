@@ -30,14 +30,37 @@ test('reading font decoration measures all unmarked text before writing style at
  log.length=0;vm.runInContext(script,ctx);assert.deepEqual(log,[],'already marked text needs no repeated font read/write');
 });
 
-test('known live subtree uses explicit readable CSS and does not schedule font-measurement frames',()=>{
+test('live text updates cause no extra style scans; new table rows get one batched pass',()=>{
  let callback:any,queries=0;const frames:any[]=[];
- class El{isConnected=true;dataset:any={};constructor(readonly live=false){}closest(selector:string){return this.live&&selector==='#dashboard-live'?{}:null;}querySelectorAll(){queries++;return [];}contains(){return false;}}
+ class El{
+  isConnected=true;dataset:any={};
+  constructor(readonly live=false,readonly parentTable:El|null=null,readonly isTable=false){}
+  closest(selector:string){
+   if(selector==='table')return this.parentTable||(this.isTable?this:null);
+   if(selector.includes('#dashboard-live')&&this.live)return this;
+   return null;
+  }
+  querySelectorAll(){queries++;return [];}
+  contains(){return false;}
+ }
  const body:any=new El(),size:any={value:'comfortable'},tables:any={value:'cards'};
  const ctx:any={Element:El,MutationObserver:class{constructor(fn:any){callback=fn;}observe(){}},document:{body,querySelectorAll:()=>[],getElementById:(id:string)=>id==='op-reading-size'?size:tables},window:{localStorage:{getItem:()=>null,setItem(){}},requestAnimationFrame:(fn:any)=>frames.push(fn)}};
  vm.createContext(ctx);const script=[...withDashboardReading('<html><head></head><body></body></html>').matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)![1];vm.runInContext(script,ctx);queries=0;
- callback([{target:new El(true)}]);assert.equal(frames.length,0);assert.equal(queries,0);
- callback([{target:new El(false)},{target:new El(true)}]);assert.equal(frames.length,1);frames[0]();assert.equal(queries,2,'only the ordinary subtree is decorated');
+ const textNode={nodeType:3,textContent:'Live price changed'};
+ callback([{target:body,addedNodes:[textNode]}]);assert.equal(frames.length,0);assert.equal(queries,0);
+ callback([{target:body,addedNodes:[new El(true)]}]);assert.equal(frames.length,0);
+ const table=new El(false,null,true),rowA=new El(false,table),rowB=new El(false,table);
+ callback([{target:table,addedNodes:[rowA,rowB]}]);
+ assert.equal(frames.length,1,'one scheduled frame for two updated rows');
+ frames[0]();assert.equal(queries,4,'table examined once (tables, headers, rows, text)');
+ callback([{target:body,addedNodes:[textNode]}]);assert.equal(frames.length,1,'another live text update adds no frame');
+});
+test('mobile reading stylesheet uses one vertical scroller without fixed backgrounds',()=>{
+ const html=withDashboardReading('<html><head></head><body></body></html>');
+ assert.match(html,/body\[data-op-reading\]\{background-attachment:scroll\}/);
+ assert.match(html,/#premium-ladder,#event-feed,#wall-chart,#wall-events/);
+ assert.match(html,/overflow-y:visible/);
+ assert.match(html,/overscroll-behavior-x:contain/);
 });
 
 test('notes default to hidden, toggle immediately, and restore across refresh including blocked storage',()=>{

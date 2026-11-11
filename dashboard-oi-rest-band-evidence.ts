@@ -13,6 +13,13 @@ export function deriveRestOiBandEvidence(ws:WsAudit|null,rest:RestAudit|null,now
  if(!ws||ws.source!=='KITE_WEBSOCKET_FULL'||ws.rows.length!==30||ws.coverage.returned!==30||
    ws.anchorStrike===null||ws.state==='EDGE_BAND_INCOMPLETE'||ws.tradeDate!==istDate(now)||
    !Number.isFinite(now)||ws.scope!=='LISTED_ATM_PLUS_MINUS_7')return null;
+ // At 09:15 the sampler may still be warming up: no pre-open, after-close,
+ // or old WS audit is allowed to authorize an OI snapshot.
+ const openAt=Date.parse(ws.tradeDate+'T09:15:00+05:30');
+ const closeAt=Date.parse(ws.tradeDate+'T15:30:00+05:30');
+ const wsCheckedAt=validTime(ws.checkedAt);
+ if(now<openAt||now>=closeAt||!Number.isFinite(wsCheckedAt)||
+   wsCheckedAt>now+5000||now-wsCheckedAt>5000)return null;
  const source='KITE_REST_FULL_EXPIRY_SNAPSHOT' as const;
  const legitimate=rest?.source===source&&rest.symbol===ws.symbol&&rest.expiry===ws.expiry&&
    rest.fetchState==='OK'&&['COMPLETE','INCOMPLETE'].includes(rest.freshnessState)&&

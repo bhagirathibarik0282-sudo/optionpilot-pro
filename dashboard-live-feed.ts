@@ -86,6 +86,47 @@ export class DashboardLiveStore {
   return this.quote(this.inventory.entries.find(e=>e.role==='SPOT'&&e.symbol===symbol),now);
  }
 
+ /** Read-only audit of 15 listed strikes, CE and PE, from this WS token cache.
+  * Never fetches, repairs, persists or promotes quote data. A supplied strike
+  * must match a listed contract; stale spot cannot silently re-anchor it. */
+ auditOiBand(symbol:LiveIndex,expiry:string,now:number,focusStrike?:number){
+  const options=this.inventory.entries.filter(e=>e.role==='OPTION'&&e.symbol===symbol&&e.expiry===expiry);
+  const strikes=[...new Set(options.map(e=>e.strike).filter((v):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>0))].sort((a,b)=>a-b);
+  const spot=this.spotQuote(symbol,now);
+  const anchorStrike=focusStrike===undefined
+   ?spot.state==='LIVE'&&spot.price!==null&&strikes.length
+    ?strikes.reduce((best,k)=>Math.abs(k-spot.price!)<Math.abs(best-spot.price!)?k:best,strikes[0])
+    :null
+   :focusStrike;
+  const bad=anchorStrike===null?'NO_FRESH_SPOT_OR_STRIKES':!strikes.includes(anchorStrike)?'FOCUS_STRIKE_NOT_LISTED':null;
+  const common={source:'KITE_WEBSOCKET_FULL',runtimeId:this.runtimeId,tradeDate:this.inventory.date,checkedAt:new Date(now).toISOString(),
+   symbol,expiry,anchorStrike,spotState:spot.state,scope:'LISTED_ATM_PLUS_MINUS_7',expected:30};
+  if(bad)return {...common,state:bad,coverage:{expected:30,returned:0,freshOi:0},rows:[]};
+  const index=strikes.indexOf(anchorStrike!),band=strikes.slice(Math.max(0,index-7),index+8);
+  const rows=band.flatMap(strike=>(['CE','PE'] as const).map(side=>{
+   const found=options.filter(e=>e.strike===strike&&e.side===side);
+   const entry=found.length===1?found[0]:undefined,q=this.quote(entry,now);
+   const sourceAgeMs=typeof q.ageMs==='number'&&Number.isFinite(q.ageMs)?Math.round(q.ageMs):null;
+   const receiptAt=Date.parse(q.receivedAt||'');
+   const receiptAgeMs=Number.isFinite(receiptAt)?Math.round(now-receiptAt):null;
+   const reason=found.length!==1?'CONTRACT_IDENTITY_MISSING_OR_DUPLICATE'
+    :q.state==='WAITING'?'NO_WS_PACKET'
+    :q.state==='STALE'?sourceAgeMs===null?'WS_SOURCE_TIME_INVALID'
+     :sourceAgeMs>30000?'WS_SOURCE_STALE'
+     :sourceAgeMs< -5000?'WS_SOURCE_FUTURE'
+     :receiptAgeMs===null?'WS_RECEIPT_INVALID'
+     :receiptAgeMs>30000?'WS_RECEIPT_STALE'
+     :receiptAgeMs<0?'WS_RECEIPT_FUTURE':'WS_NOT_FRESH'
+    :q.oi===null?'OI_NOT_IN_FRESH_WS_PACKET':'FRESH_OI';
+   return {strike,side,token:entry?.token??null,state:q.state,reason,
+    oiPresent:q.state==='LIVE'&&q.oi!==null,zeroOi:q.state==='LIVE'&&q.oi===0,
+    sourceAt:q.observedAt??null,receivedAt:q.receivedAt??null,sourceAgeMs,receiptAgeMs};
+  }));
+  const freshOi=rows.filter(r=>r.reason==='FRESH_OI').length;
+  return {...common,state:band.length!==15?'EDGE_BAND_INCOMPLETE':freshOi===30?'COMPLETE':'PARTIAL',
+   fromStrike:band[0],toStrike:band.at(-1),coverage:{expected:30,returned:rows.length,freshOi},rows};
+ }
+
  private modelDelta(e:LiveEntry,now:number){
   const tick=this.ticks.get(e.token),spotEntry=this.inventory.entries.find(s=>s.role==='SPOT'&&s.symbol===e.symbol),spot=spotEntry?this.ticks.get(spotEntry.token):null;
   if(!tick||!spot||!spotEntry)return null;

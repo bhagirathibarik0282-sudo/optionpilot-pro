@@ -18,9 +18,10 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
 
  app.get('/dashboard-live/pcr-audit',c=>{
   c.header('Cache-Control','no-store');
-  const {symbol,expiry}=c.req.query();
-  if(!(LIVE_INDICES as readonly string[]).includes(symbol)||!/^\d{4}-\d{2}-\d{2}$/.test(expiry||'')||!Number.isFinite(Date.parse(expiry+'T00:00:00Z'))||new Date(expiry+'T00:00:00Z').toISOString().slice(0,10)!==expiry)return c.json({ok:false,reason:'INVALID_PCR_AUDIT_SELECTION'},400);
-  return c.json(readAudit(symbol,expiry));
+  const {symbol,expiry,strike}=c.req.query();
+  if(!(LIVE_INDICES as readonly string[]).includes(symbol)||!/^\d{4}-\d{2}-\d{2}$/.test(expiry||'')||!Number.isFinite(Date.parse(expiry+'T00:00:00Z'))||new Date(expiry+'T00:00:00Z').toISOString().slice(0,10)!==expiry||
+   strike!==undefined&&(!/^\d+(?:\.\d+)?$/.test(strike)||!Number.isFinite(Number(strike))||Number(strike)<=0))return c.json({ok:false,reason:'INVALID_PCR_AUDIT_SELECTION'},400);
+  return c.json(readAudit(symbol,expiry,strike===undefined?undefined:Number(strike)));
  });
  app.get('/dashboard-live/premiums',c=>{
   c.header('Cache-Control','no-store');

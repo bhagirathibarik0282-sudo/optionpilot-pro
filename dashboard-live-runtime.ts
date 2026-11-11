@@ -2,7 +2,7 @@ import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
 import { tickTelegramLadderShadow } from './telegram-ladder-shadow-host.js';
 import { createParticipationMinuteRecorder } from './participation-minute-recorder.js';
 import { dbSaveParticipationMinuteOnce } from './db.js';
-import { DashboardLiveStore, buildDashboardLiveInventory, type LiveSelection, type PremiumWatchFilter } from './dashboard-live-feed.js';
+import { DashboardLiveStore, buildDashboardLiveInventory, type LiveSelection, type PremiumWatchFilter, type LiveIndex } from './dashboard-live-feed.js';
 import { fetchH1KiteLiveInstrumentMaster } from './h1-kite-live-instrument-master-adapter.js';
 import { subscribeKiteAuthoritySessionPersisted } from './kite-session-authority.js';
 import { resolveVerifiedKiteAuthoritySession, readKiteBrokerSessionCheck, markKiteBrokerSessionRejected } from './kite-broker-session-guard.js';
@@ -90,10 +90,12 @@ export function readDashboardLiveSnapshot(selection:LiveSelection={}){
 export function dashboardLiveRevision(){return state+':'+(store?.runtimeId||'none')+':'+(store?.revision()||0)+':'+(pcrSampler?.version()||0);}
 
 /** Read the existing REST attempt only. No broker request or fresh-data promotion. */
-export function readDashboardPcrAudit(symbol:string,expiry:string){
- const connected=enabled()&&state==='OPEN'&&isIndianEquityMarketOpenAt(new Date());
- return {readOnly:true,extraBrokerRequests:0,connected,connectionState:state,serverTime:new Date().toISOString(),
-  audit:connected?pcrSampler?.readAudit(symbol,expiry)??null:null};
+export function readDashboardPcrAudit(symbol:string,expiry:string,focusStrike?:number){
+ const now=Date.now(),connected=enabled()&&state==='OPEN'&&isIndianEquityMarketOpenAt(new Date(now));
+ const sessionMatches=store?.inventory.date===indianTradingDateAt(new Date(now));
+ return {readOnly:true,extraBrokerRequests:0,connected,connectionState:state,serverTime:new Date(now).toISOString(),
+  audit:connected?pcrSampler?.readAudit(symbol,expiry)??null:null,
+  wsAudit:connected&&sessionMatches&&typeof store?.auditOiBand==='function'?store.auditOiBand(symbol as LiveIndex,expiry,now,focusStrike):null};
 }
 
 /** Display-only view of the same socket cache; disconnection revokes all values. */

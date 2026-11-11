@@ -123,3 +123,44 @@ test('daily Open/High in ATM expiry quote are broker packet fields only, gated b
  assert.equal(store.snapshot(now+1000).atmExpiryLadder[0].rows.find(r=>r.expiry===expiry)?.ce?.dayOpen,null);
  assert.equal(store.snapshot(now+1000).atmExpiryLadder[0].rows.find(r=>r.expiry===expiry)?.ce?.dayHigh,null);
 });
+
+
+test('read-only WS OI diagnostic distinguishes fresh, valid zero, missing OI and stale quotes for exact 15 CE/PE strikes',()=>{
+ const options:LiveEntry[]=Array.from({length:15},(_,i)=>['CE','PE'].map((side,j)=>({
+  token:800+i*2+j,label:'TEST'+i+side,role:'OPTION' as const,symbol:'NIFTY' as const,expiry,
+  strike:22000+(i-7)*50,side:side as 'CE'|'PE'
+ }))).flat();
+ const s=new DashboardLiveStore({date,missing:[],omittedExpiries:[],entries:[entries[0],...options]});
+ s.ingest([packet(1),...options.map(e=>packet(e.token))],at);
+ const before=s.revision(),audit=s.auditOiBand('NIFTY',expiry,now,22000);
+ assert.equal(audit.state,'COMPLETE');assert.equal(audit.coverage.expected,30);assert.equal(audit.coverage.freshOi,30);
+ assert.equal(audit.rows.length,30);assert.equal(audit.rows[0].strike,21650);
+ assert.equal(s.revision(),before,'read-only audit cannot mutate cache');
+ s.ingest([packet(800,{oi:0}),packet(801,{oi:undefined})],at);
+ const partial=s.auditOiBand('NIFTY',expiry,now,22000);
+ assert.equal(partial.state,'PARTIAL');assert.equal(partial.coverage.freshOi,29);
+ assert.equal(partial.rows.find(r=>r.token===800)?.zeroOi,true,'real zero is valid');
+ assert.equal(partial.rows.find(r=>r.token===801)?.reason,'OI_NOT_IN_FRESH_WS_PACKET');
+ assert.equal(s.auditOiBand('NIFTY',expiry,now+31000,22000).rows[0].reason,'WS_SOURCE_STALE');
+ assert.equal(s.auditOiBand('NIFTY',expiry,now,99999).state,'FOCUS_STRIKE_NOT_LISTED');
+ const noSpot=new DashboardLiveStore({date,missing:[],omittedExpiries:[],entries:[entries[0],...options]});
+ noSpot.ingest(options.map(e=>packet(e.token)),at);
+ assert.equal(noSpot.auditOiBand('NIFTY',expiry,now).state,'NO_FRESH_SPOT_OR_STRIKES');
+ assert.equal(noSpot.auditOiBand('NIFTY',expiry,now,22000).coverage.freshOi,30,'explicit focus remains auditable without spot');
+});
+
+test('PCR audit optional focus strike is validated and forwarded without invoking a broker',async()=>{
+ const app=new Hono(),seen:(number|undefined)[]=[];
+ mountDashboardLiveRoutes(app,undefined,undefined,((_symbol:string,_expiry:string,focus?:number)=>{
+  seen.push(focus);return {readOnly:true,extraBrokerRequests:0,wsAudit:null};
+ }) as any);
+ const base='/dashboard-live/pcr-audit?symbol=NIFTY&expiry='+expiry;
+ assert.equal((await app.request(base+'&strike=22000')).status,200);
+ assert.deepEqual(seen,[22000]);
+ for(const invalid of ['0','NaN','-1','2e4','Infinity']){
+  assert.equal((await app.request(base+'&strike='+invalid)).status,400);
+ }
+ assert.deepEqual(seen,[22000],'bad audit selections never reach the read side');
+ assert.equal((await app.request(base)).status,200);
+ assert.deepEqual(seen,[22000,undefined],'existing audit clients remain compatible');
+});

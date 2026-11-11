@@ -95,7 +95,7 @@ export function readDashboardPcrAudit(symbol:string,expiry:string,focusStrike?:n
  const sessionMatches=store?.inventory.date===indianTradingDateAt(new Date(now));
  return {readOnly:true,extraBrokerRequests:0,connected,connectionState:state,serverTime:new Date(now).toISOString(),
   audit:connected?pcrSampler?.readAudit(symbol,expiry)??null:null,
-  wsAudit:connected&&sessionMatches?store?.auditOiBand(symbol as LiveIndex,expiry,now,focusStrike)??null:null};
+  wsAudit:connected&&sessionMatches&&typeof store?.auditOiBand==='function'?store.auditOiBand(symbol as LiveIndex,expiry,now,focusStrike):null};
 }
 
 /** Display-only view of the same socket cache; disconnection revokes all values. */

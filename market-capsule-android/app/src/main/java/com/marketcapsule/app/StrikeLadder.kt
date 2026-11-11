@@ -56,7 +56,7 @@ internal data class StrikeLadderRead(
                 observed.maxOrNull()!! - observed.minOrNull()!! <= QUOTE_MAX_AGE_MS)
         val walls = if (complete) ranks.filterValues { it == 1 }.keys.sorted() else emptyList()
         return StrikeOiRanks(eligible, ranks, walls, expected,
-            if (verified != null) "REST_SNAPSHOT" else "WEBSOCKET_FULL", verified?.checkedAt)
+            if (verified?.scope == "BAND_AUDIT") "REST_BAND" else if (verified != null) "REST_SNAPSHOT" else "WEBSOCKET_FULL", verified?.checkedAt)
     }
 }
 

@@ -10,7 +10,8 @@ internal data class VerifiedStrikeOi(
     val ageAtReceiptMs: Long,
     val receivedElapsedMs: Long,
     val rows: Map<Pair<Double, String>, Pair<Long, Long>>,
-    val scope: String = "FULL_EXPIRY"
+    val scope: String = "FULL_EXPIRY",
+    val sourceTimes: Map<Pair<Double, String>, Long> = emptyMap()
 ) {
     fun eligible(state: MarketUiState, runtimeId: String): Boolean {
         val elapsed = state.currentElapsedMs - receivedElapsedMs
@@ -20,13 +21,21 @@ internal data class VerifiedStrikeOi(
     }
 
     /** Both sides must have exact contract identities before using this source. */
-    fun matches(visible: List<StrikeRow>): Boolean =
-        visible.isNotEmpty() && visible.all { row ->
+    fun matches(visible: List<StrikeRow>): Boolean {
+        if (visible.isEmpty()) return false
+        val keys = visible.flatMap { row -> listOf(row.strike to "CE", row.strike to "PE") }
+        val paired = visible.all { row ->
             listOf("CE" to row.ce, "PE" to row.pe).all { (side, leg) ->
                 val verified = rows[row.strike to side]
                 leg?.token != null && verified != null && verified.first == leg.token
             }
         }
+        if (!paired) return false
+        if (scope != "BAND_AUDIT") return true
+        val times = keys.mapNotNull { sourceTimes[it] }
+        return times.size == keys.size &&
+            (times.maxOrNull()!! - times.minOrNull()!!) <= QUOTE_MAX_AGE_MS
+    }
 }
 
 /** Parses existing /dashboard-live PCR strikeRows. No fresh Kite request is made. */
@@ -150,6 +159,7 @@ internal object VerifiedStrikeOiParser {
         val byContract = mutableMapOf<Pair<Double, String>, Pair<Long, Long>>()
         val tokens = mutableSetOf<Long>()
         val contracts = mutableSetOf<Pair<Double, String>>()
+        val sourceTimes = mutableMapOf<Pair<Double, String>, Long>()
         var matched = 0
         for (i in 0 until evidence.length()) {
             val row = evidence.getJSONObject(i)
@@ -168,6 +178,7 @@ internal object VerifiedStrikeOiParser {
                 sourceAt >= Date.parse(today + "T09:15:00+05:30") &&
                 checked - sourceAt in -5_000..30_000) {
                 byContract[strike to side] = token to oi
+                sourceTimes[strike to side] = sourceAt
                 matched++
             }
         }
@@ -175,6 +186,6 @@ internal object VerifiedStrikeOiParser {
         // The ladder will independently demand BOTH exact tokens at EVERY
         // visible strike, and only then mark this as one synchronized source.
         VerifiedStrikeOi(checkedText, receivedWallMs - checked,
-            receivedElapsedMs, byContract, "BAND_AUDIT")
+            receivedElapsedMs, byContract, "BAND_AUDIT", sourceTimes)
     }.getOrNull()
 }

@@ -58,10 +58,25 @@ export function deriveRestOiBandEvidence(ws:WsAudit|null,rest:RestAudit|null,now
  const qualified=rows.filter(r=>r.reason==='VERIFIED_REST_OI');
  const sourceTimes=qualified.map(r=>validTime(r.sourceAt)),skew=sourceTimes.length?Math.max(...sourceTimes)-Math.min(...sourceTimes):null;
  const complete=qualified.length===30&&skew!==null&&skew<=30000;
+ // Ranked walls are band-only snapshot observations: not a whole-expiry wall,
+ // trading signal or migration claim. No ranking with partial/stale coverage.
+ const bandWallRanks=complete?{
+  scope:'EXACT_ATM_PLUS_MINUS_7_ONLY' as const,source,
+  ce:rankSide('CE'),pe:rankSide('PE')
+ }:null;
+ function rankSide(side:'CE'|'PE'){
+  const ranked=qualified.filter(r=>r.side===side&&r.oi!==null&&r.oi>0)
+   .sort((a,b)=>b.oi!-a.oi!||a.strike-b.strike);
+  return ranked.slice(0,3).map(r=>({
+   rank:ranked.findIndex(q=>q.oi===r.oi)+1,
+   strike:r.strike,oi:r.oi!,sourceAt:r.sourceAt!,
+   tied:ranked.filter(q=>q.oi===r.oi).length>1
+  }));
+ }
  return {readOnly:true,source,observation:'QUALIFIED_REST_OI_SNAPSHOT_NOT_WEBSOCKET_TICK',
   symbol:ws.symbol,expiry:ws.expiry,anchorStrike:ws.anchorStrike,tradeDate:ws.tradeDate,
   checkedAt:cycleFresh?rest!.checkedAt:null,state:complete?'COMPLETE_BAND':'INCOMPLETE_BAND',
   coverage:{expected:30,verifiedRestOi:qualified.length,zeroOi:qualified.filter(r=>r.oi===0).length,
-   complete,sourceSkewMs:skew},rows,
+   complete,sourceSkewMs:skew},rows,bandWallRanks,
   fullPcr:null,createsOrders:false,affectsExecution:false,affectsSelector:false,affectsTelegram:false};
 }

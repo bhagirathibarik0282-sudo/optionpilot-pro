@@ -233,10 +233,14 @@ export function installDashboardLive(){
   publish();if(!mountedAll&&!editing){writeHtml(get('op-live-indices'),cards);for(const key of Object.keys(desiredShapes))cardShapes[key]=desiredShapes[key];}
   writeHtml(get('op-live-vix'),'<div class="op-live-kpis">'+quote('INDIA VIX',s.vix)+'</div>');
   renderParticipation(s);
-  if(oiEvidence)paintOiEvidence();
  }
  get('op-live-oi-check').onclick=()=>{void checkOiEvidence();};
  get('op-live-oi-index').onchange=()=>clearOiEvidence('Index changed. Tap Check verified OI.');
+ // The OI panel is opt-in. Closing it releases cached rows and cancels any in-flight
+ // read-only GET; it must never redraw on high-frequency market SSE messages.
+ get('op-live-oi-evidence').ontoggle=()=>{
+  if(!get('op-live-oi-evidence').open)clearOiEvidence('Open panel and tap Check verified OI.');
+ };
  if(typeof window.addEventListener==='function')window.addEventListener('optionpilot:live-selection',((event:any)=>{
   const next=event.detail,index=next?.symbol;if(!indices.includes(index)||!latest?.snapshot)return;
   const a=latest.snapshot.indices.find((r:any)=>r.symbol===index);if(!a)return;
@@ -257,7 +261,7 @@ export function installDashboardLive(){
  get('op-live-toggle').onclick=()=>{on=!on;get('op-live-toggle').setAttribute('aria-pressed',String(on));get('op-live-toggle').textContent=on?'Live view ON':'Live view OFF';get('op-live-body').hidden=!on;if(on)connect();else{close();latest=null;render();get('op-live-status').textContent='Live stream paused';}};
  document.addEventListener('visibilitychange',()=>{if(document.hidden){close();latest=null;render();}else connect();});
  window.addEventListener('online',()=>connect());window.addEventListener('pageshow',()=>{disposed=false;connect();});window.addEventListener('pagehide',()=>{disposed=true;close();latest=null;render();});
- setInterval(()=>{if(oiEvidence)paintOiEvidence();if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect(true);}},1000);
+ setInterval(()=>{if(oiEvidence&&get('op-live-oi-evidence').open)paintOiEvidence();if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect(true);}},1000);
  if(typeof CustomEvent!=='undefined'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent('optionpilot:request-recorded-levels',{detail:null}));
  connect();
 }

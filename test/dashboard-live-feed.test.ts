@@ -233,4 +233,3 @@ test('REST OI refuses token swaps, duplicate, carried prior-session, expired cyc
   [[1,21650,30,false],[2,21700,20,false],[3,21750,10,false]],'current ATM band top-three CE ranks deterministic');
  assert.equal(order?.bandWallRanks?.pe[0]?.tied,true,'PE ties remain labelled; valid zero is not a wall');
 });
-

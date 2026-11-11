@@ -220,6 +220,12 @@ test('REST OI refuses token swaps, duplicate, carried prior-session, expired cyc
  assert.equal(changed(a=>a.fetchState='RATE_LIMITED')?.coverage.verifiedRestOi,0);
  assert.equal(deriveRestOiBandEvidence(ws,base,now+86400000),null,'next session never borrows today');
  assert.equal(deriveRestOiBandEvidence(null,base,now),null,'no WS band identity means no substitution');
+ assert.equal(deriveRestOiBandEvidence(ws,base,Date.parse(date+'T09:14:59+05:30')),null,
+  '09:15 opening check cannot promote pre-open evidence');
+ assert.equal(deriveRestOiBandEvidence(ws,base,Date.parse(date+'T15:30:00+05:30')),null,
+  'market-close check must withhold OI');
+ assert.equal(deriveRestOiBandEvidence({...ws,checkedAt:'2026-10-16T04:28:00Z'},base,now),null,
+  'a stale WebSocket audit cannot authenticate a fresh REST result');
  const ranked=structuredClone(base);
  ranked.rows[0].oi=30;ranked.rows[2].oi=20;ranked.rows[4].oi=10;ranked.rows[1].oi=0;
  const order=deriveRestOiBandEvidence(ws,ranked,now);

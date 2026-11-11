@@ -92,7 +92,7 @@ internal class MarketRepository(context: Context) : MarketSource {
         }
         // Read the already-collected expiry OI from the existing dashboard cache.
         // This GET makes no extra Kite broker request. Failure preserves the WS ladder.
-        val snapshotRaw = try { get("/api/research/dashboard-live") }
+        val snapshotRaw = try { get("/api/research/dashboard-live?${index.name}_expiry=$expiry") }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }
         val snapshotWall = System.currentTimeMillis()

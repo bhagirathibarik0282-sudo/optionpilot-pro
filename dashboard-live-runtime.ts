@@ -97,7 +97,7 @@ export function readDashboardPcrAudit(symbol:string,expiry:string,focusStrike?:n
  const audit=connected&&sessionMatches?pcrSampler?.readAudit(symbol,expiry)??null:null;
  const wsAudit=connected&&sessionMatches&&typeof store?.auditOiBand==='function'?store.auditOiBand(symbol as LiveIndex,expiry,now,focusStrike):null;
  return {readOnly:true,extraBrokerRequests:0,connected,connectionState:state,serverTime:new Date(now).toISOString(),
-  audit,wsAudit,restOiBand:deriveRestOiBandEvidence(wsAudit,audit,now)};
+  audit,wsAudit,restOiBand:wsAudit&&audit?deriveRestOiBandEvidence(wsAudit,audit,now):null};
 }
 
 /** Display-only view of the same socket cache; disconnection revokes all values. */

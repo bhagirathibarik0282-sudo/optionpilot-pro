@@ -489,7 +489,7 @@ export function installMarketBook(api:any) {
   if(typeof CustomEvent==='undefined'||typeof window.dispatchEvent!=='function')return;
   const data:any={date:date,indices:{}};
   for(const index of ['NIFTY','SENSEX','BANKNIFTY']){
-   const a=models[index];if(!a||!/^\d{4}-\d{2}-\d{2}$/.test(a.tradeDate))continue;
+   const a=models[index];if(!a||a.tradeDate!==date||!/^\d{4}-\d{2}-\d{2}$/.test(a.tradeDate))continue;
    const option=(p:any)=>{
     if(!p)return null;const end=Date.parse(a.tradeDate+'T09:30:00+05:30'),values:number[]=[];
     for(let i=0;i<5;i++){const at=end-900000+i*180000,rows=(p.points||[]).filter((r:any)=>Date.parse(r.at)===at),v=rows[0]?.value;if(!rows.length||typeof v!=='number'||!Number.isFinite(v)||v<=0||rows.some((r:any)=>r.value!==v))break;values.push(v);}

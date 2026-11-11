@@ -229,7 +229,7 @@ export function installDashboardLive(){
   let mountedAll=true;const desiredShapes:any={};const cards=s.indices.map((a:any)=>{
    const pcr=pcrSample(a);
    for(const side of ['ce','pe']){
-    const key=a.symbol+'|'+side,id=a.expiry+'|'+a[side+'Strike'];
+    const key=a.symbol+'|'+side,id=s.tradeDate+'|'+a.expiry+'|'+a[side+'Strike'];
     if(chartIdentities[key]!==id){delete buffers[key];delete chartPaints[a.symbol];chartIdentities[key]=id;}
    }
    append(a.symbol,'spot',a.spot.price,a.spot.receivedAt);
@@ -287,9 +287,40 @@ export function installDashboardLive(){
   const changed=Object.keys(next).some(field=>field!=='symbol'&&selection[index]?.[field]!==next[field]);if(!changed)return;
   selection[index]={...selection[index],...(next.expiry?{expiry:next.expiry}:{}),...(next.ceStrike!==undefined?{ceStrike:next.ceStrike}:{}),...(next.peStrike!==undefined?{peStrike:next.peStrike}:{})};
   if(next.expiry&&next.expiry!==a.expiry){delete selection[index].strike;delete selection[index].ceStrike;delete selection[index].peStrike;}
-  delete sampled[index];delete chartPaints[index];latest=null;render();connect(true);
+  // Pin changes have no authority over the whole-expiry PCR. Reset just the
+  // selected side's chart so quotes from separate contracts never join.
+  if(next.expiry&&next.expiry!==a.expiry){
+   for(const side of ['ce','pe','pcr'])delete buffers[index+'|'+side];
+   delete sampled[index];
+  }else{
+   if(next.ceStrike!==undefined)delete buffers[index+'|ce'];
+   if(next.peStrike!==undefined)delete buffers[index+'|pe'];
+  }
+  delete chartPaints[index];latest=null;render();connect(true);
  }) as EventListener);
- get('op-live-indices').onchange=(event:any)=>{const e=event.target,index=e.dataset.liveIndex,field=e.dataset.liveField;if(indices.includes(index)&&field==='cadence'){if(!['60000','180000'].includes(e.value))return;cadences[index]=Number(e.value);delete sampled[index];delete buffers[index+'|pcr'];delete chartPaints[index];render();return;}if(!indices.includes(index)||!['expiry','strike'].includes(field)||!e.value)return;delete sampled[index];delete chartPaints[index];selection[index]={...selection[index],[field]:field==='strike'?Number(e.value):e.value};if(field==='expiry')delete selection[index].strike;for(const key of ['pcr','ce','pe'])delete buffers[index+'|'+key];latest=null;render();connect(true);};
+ get('op-live-indices').onchange=(event:any)=>{
+  const e=event.target,index=e?.dataset?.liveIndex,field=e?.dataset?.liveField;
+  if(indices.includes(index)&&field==='cadence'){
+   if(!['60000','180000'].includes(e.value))return;
+   cadences[index]=Number(e.value);delete sampled[index];delete buffers[index+'|pcr'];
+   delete chartPaints[index];render();return;
+  }
+  if(!indices.includes(index)||!['expiry','strike','ceStrike','peStrike'].includes(field)||!e.value)return;
+  const a=latest?.snapshot?.indices?.find((r:any)=>r.symbol===index);
+  if(!a)return;
+  const numeric=field!=='expiry',value=numeric?Number(e.value):e.value;
+  if(field==='expiry'?!a.expiries.includes(value):
+    !Number.isFinite(value)||!a.strikes.includes(value))return;
+  const old=selection[index]||{},next={...old,[field]:value};
+  if(field==='expiry'){
+   delete next.strike;delete next.ceStrike;delete next.peStrike;
+   delete sampled[index];
+   for(const key of ['pcr','ce','pe'])delete buffers[index+'|'+key];
+  }else if(field==='strike'){
+   for(const side of ['ce','pe'])if(old[side+'Strike']===undefined)delete buffers[index+'|'+side];
+  }else delete buffers[index+'|'+(field==='ceStrike'?'ce':'pe')];
+  selection[index]=next;delete chartPaints[index];latest=null;render();connect(true);
+ };
  get('op-live-indices').onclick=(event:any)=>{const ref=event.target.closest?.('[data-live-reference]');if(ref){const index=ref.dataset.liveIndex,key=ref.dataset.liveReference;if(indices.includes(index)&&/^(spot|pcr|ce|pe)Opening$|^(spot|ce|pe)Fib$/.test(key)){levelSettings[index][key]=!levelSettings[index][key];render();}return;}const e=event.target.closest?.('[data-live-layer]');if(!e||!indices.includes(e.dataset.liveIndex)||!['spot','pcr','ce','pe'].includes(e.dataset.liveLayer))return;layers[e.dataset.liveIndex][e.dataset.liveLayer]=!layers[e.dataset.liveIndex][e.dataset.liveLayer];render();};
  get('op-live-participation-panel').ontoggle=()=>{
   const panel=get('op-live-participation-panel');

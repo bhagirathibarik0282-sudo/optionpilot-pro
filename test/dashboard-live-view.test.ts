@@ -15,7 +15,7 @@ function harness(){
  const store=new DashboardLiveStore({entries,date:'2026-10-16',missing:[],omittedExpiries:[]});
  const tick=(price=22001)=>{store.ingest(entries.map(e=>({instrumentToken:e.token,lastPrice:e.role==='SPOT'?price:100,exchangeTimestamp:new Date(now).toISOString(),oi:100,mode:'full' as const,isIndex:e.role==='SPOT'})),new Date(now).toISOString());};
  const emit=(patch?:(snapshot:any)=>void)=>{const before=streams.length;const fire=()=>{const snapshot=store.snapshot(now);patch?.(snapshot);streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:new Date(now).toISOString(),snapshot})});};fire();if(streams.length>before)fire();};
- return {nodes,streams,timers,docEvents,winEvents,contextEvents,document,store,tick,emit,advance:(ms:number)=>now+=ms};
+ return {nodes,streams,timers,docEvents,winEvents,contextEvents,document,ctx,store,tick,emit,advance:(ms:number)=>now+=ms};
 }
 test('real streamed values change the numbers and chart; selection clears old identity and reconnects exactly once',()=>{
  const h=harness();assert.equal(h.streams.length,1);assert(h.streams[0].url.startsWith('/api/research/dashboard-live/stream?'));
@@ -216,4 +216,61 @@ test('PR7 structural memory and cadence audit: 600 chart points max per series, 
  assert.match(src,/Date.now\(\)-paint.at>=250/);
  assert.match(src,/Date.now\(\)-lastReceived>4000/);
  assert.match(DASHBOARD_LIVE_HTML,/id="op-live-participation-panel"/);
+});
+
+
+test('in-dashboard CE/PE OI check displays only source-labelled exact REST legs without another stream',async()=>{
+ const h=harness();h.tick();h.emit();
+ const initial=h.streams.length,requests:string[]=[];
+ const at='2026-10-16T04:30:00.000Z';
+ const rows=Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({
+  strike:22000+(i-7)*50,side,token:100+i*2+(side==='PE'?1:0),
+  oi:side==='PE'&&i===7?0:100,sourceAt:at,source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',
+  reason:'VERIFIED_REST_OI',wsReason:'NO_WS_PACKET'
+ }))).flat();
+ h.ctx.fetch=async(url:string,init:any)=>{
+  requests.push(url);assert.equal(init.cache,'no-store');
+  return {ok:true,json:async()=>({connected:true,restOiBand:{
+   source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'COMPLETE_BAND',symbol:'NIFTY',
+   expiry:'2026-10-19',tradeDate:'2026-10-16',anchorStrike:22000,checkedAt:at,
+   coverage:{expected:30,verifiedRestOi:30},rows
+  }})};
+ };
+ h.nodes.get('op-live-oi-check').onclick();
+ await new Promise(resolve=>setImmediate(resolve));
+ const html=h.nodes.get('op-live-oi-band').innerHTML;
+ assert(html.includes('CE OI')&&html.includes('PE OI')&&html.includes('22,000'));
+ assert(html.includes('REST · 10:00:00 IST'));
+ assert.match(html,/>0<\/strong>/,'valid broker zero must be visible');
+ assert.equal(requests.length,1);
+ assert(requests[0].includes('symbol=NIFTY')&&requests[0].includes('expiry=2026-10-19')&&requests[0].includes('strike=22000'));
+ assert.equal(h.streams.length,initial,'audit button never creates another market socket');
+ h.nodes.get('op-live-oi-index').onchange();
+ assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'','index change must revoke old OI');
+});
+
+test('dashboard OI evidence rejects expired, wrong-session and unmatched contracts',async()=>{
+ const h=harness();h.tick();h.emit();let value:any=null;
+ h.ctx.fetch=async()=>({ok:true,json:async()=>value});
+ const at='2026-10-16T04:30:00.000Z';
+ const rows=Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({
+  strike:22000+(i-7)*50,side,token:i,oi:100,reason:'VERIFIED_REST_OI',
+  source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',sourceAt:at
+ }))).flat();
+ const band={source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'COMPLETE_BAND',
+  symbol:'NIFTY',expiry:'2026-10-19',anchorStrike:22000,tradeDate:'2026-10-16',
+  checkedAt:at,coverage:{expected:30,verifiedRestOi:30},rows};
+ value={connected:true,restOiBand:{...band,expiry:'2026-10-26'}};
+ h.nodes.get('op-live-oi-check').onclick();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'');
+ value={connected:true,restOiBand:{...band,checkedAt:'2026-10-16T04:28:00Z'}};
+ h.nodes.get('op-live-oi-check').onclick();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'');
+ const missing=[...rows];missing[0]={...missing[0],oi:null,reason:'MISSING_REST_LEG',sourceAt:null};
+ value={connected:true,restOiBand:{...band,rows:missing,coverage:{expected:30,verifiedRestOi:29}}};
+ h.nodes.get('op-live-oi-check').onclick();await new Promise(resolve=>setImmediate(resolve));
+ let html=h.nodes.get('op-live-oi-band').innerHTML;
+ assert(html.includes('MISSING_REST_LEG')&&html.includes('>—</strong>'),'null must not become zero');
+ h.streams.at(-1).onerror();
+ assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'','disconnection revokes all cached OI evidence');
 });

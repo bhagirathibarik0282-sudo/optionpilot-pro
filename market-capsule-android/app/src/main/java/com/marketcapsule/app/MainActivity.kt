@@ -316,12 +316,12 @@ private enum class StrikeDisplay(val label: String) {
                                     read.rankOi(state, visible, strikeBand, "PE") { it.pe } else null
                                 if (ceOi != null && peOi != null) {
                                     Text("Band OI · ±$strikeBand strikes · $target", color = Gold)
-                                    val verified = ceOi.source == "REST_SNAPSHOT" && peOi.source == "REST_SNAPSHOT"
+                                    val verified = ceOi.source.startsWith("REST_") && peOi.source == ceOi.source
                                     Text((if (verified) "Verified snapshot OI" else "Fresh OI") +
                                         ": CE ${ceOi.values.size}/${ceOi.expected} · PE ${peOi.values.size}/${peOi.expected}",
                                         modifier = Modifier.testTag("strike-oi-coverage"))
                                     Text(if (verified)
-                                        "Source: complete Kite REST expiry snapshot · checked ${at(ceOi.checkedAt)} IST · not a live tick"
+                                        "Source: ${if (ceOi.source == "REST_BAND") "verified 15-strike Kite REST band" else "complete Kite REST expiry snapshot"} · checked ${at(ceOi.checkedAt)} IST · not a live tick"
                                         else "Source: individual WebSocket quotes · 30s freshness",
                                         color = Muted, style = MaterialTheme.typography.labelSmall,
                                         modifier = Modifier.testTag("strike-oi-source"))

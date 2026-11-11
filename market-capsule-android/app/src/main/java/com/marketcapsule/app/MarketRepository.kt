@@ -3,6 +3,7 @@ package com.marketcapsule.app
 import android.content.Context
 import android.os.SystemClock
 import android.util.AtomicFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -85,9 +86,22 @@ internal class MarketRepository(context: Context) : MarketSource {
         val raw = get(path)
         val receivedElapsed = SystemClock.elapsedRealtime()
         val receivedWall = System.currentTimeMillis()
-        return withContext(Dispatchers.Default) {
+        val reading = withContext(Dispatchers.Default) {
             StrikeLadderParser.parse(raw, index, expiry, receivedWall, receivedElapsed,
                 (receivedElapsed - requestElapsed).coerceAtLeast(0))
+        }
+        // Read the already-collected expiry OI from the existing dashboard cache.
+        // This GET makes no extra Kite broker request. Failure preserves the WS ladder.
+        val snapshotRaw = try { get("/api/research/dashboard-live") }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        val snapshotWall = System.currentTimeMillis()
+        val snapshotElapsed = SystemClock.elapsedRealtime()
+        return withContext(Dispatchers.Default) {
+            reading.copy(verifiedOi = snapshotRaw?.let {
+                VerifiedStrikeOiParser.parse(it, index, expiry, reading.runtimeId,
+                    snapshotWall, snapshotElapsed)
+            })
         }
     }
     override suspend fun ensureRuntime() {

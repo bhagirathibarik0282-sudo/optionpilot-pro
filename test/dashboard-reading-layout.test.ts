@@ -45,7 +45,7 @@ test('live text updates cause no extra style scans; new table rows get one batch
  }
  const body:any=new El(),size:any={value:'comfortable'},tables:any={value:'cards'};
  const ctx:any={Element:El,MutationObserver:class{constructor(fn:any){callback=fn;}observe(){}},document:{body,querySelectorAll:()=>[],getElementById:(id:string)=>id==='op-reading-size'?size:tables},window:{localStorage:{getItem:()=>null,setItem(){}},requestAnimationFrame:(fn:any)=>frames.push(fn)}};
- vm.createContext(ctx);const script=[...withDashboardReading('<html><head></head><body></body></html>').matchAll(/<script>([\\s\\S]*?)<\\/script>/g)].at(-1)![1];vm.runInContext(script,ctx);queries=0;
+ vm.createContext(ctx);const script=[...withDashboardReading('<html><head></head><body></body></html>').matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)![1];vm.runInContext(script,ctx);queries=0;
  const textNode={nodeType:3,textContent:'Live price changed'};
  callback([{target:body,addedNodes:[textNode]}]);assert.equal(frames.length,0);assert.equal(queries,0);
  callback([{target:body,addedNodes:[new El(true)]}]);assert.equal(frames.length,0);
@@ -57,7 +57,7 @@ test('live text updates cause no extra style scans; new table rows get one batch
 });
 test('mobile reading stylesheet uses one vertical scroller without fixed backgrounds',()=>{
  const html=withDashboardReading('<html><head></head><body></body></html>');
- assert.match(html,/body\\[data-op-reading\\]\\{background-attachment:scroll\\}/);
+ assert.match(html,/body\[data-op-reading\]\{background-attachment:scroll\}/);
  assert.match(html,/#premium-ladder,#event-feed,#wall-chart,#wall-events/);
  assert.match(html,/overflow-y:visible/);
  assert.match(html,/overscroll-behavior-x:contain/);

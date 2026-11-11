@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {recordedOiRankFrame,deriveOiRankedLadder,renderOiRankedLadder} from '../oi-ranked-ladder.js';
+import {recordedOiRankFrame,deriveOiRankedLadder,renderOiRankedLadder,paintOiRankedLadder,OI_RANKED_LADDER_CSS} from '../oi-ranked-ladder.js';
 const date='2026-11-05',expiry='2026-11-09',at=(n:number)=>Date.parse(date+'T03:45:00Z')+n*60000;
 function snapshot(minute:number,ois=[100,300,200],runtime='r'){
  return {symbol:'NIFTY',date,expiry,runtime,cycle:at(minute),checked:at(minute),anchor:24000,rows:ois.map((oi,i)=>({strike:23950+i*50,...Object.fromEntries(['CE','PE'].map((side,j)=>[side,{symbol:'NIFTY',expiry,strike:23950+i*50,side,token:i*2+j+1,oi:side==='CE'?oi:400-oi,sourceAt:new Date(at(minute)).toISOString(),price:100+i+minute,priceAt:new Date(at(minute)).toISOString(),pdh:120,pdl:90}]))}))};
@@ -117,4 +117,24 @@ test('all display provides independent OI, premium and PCR arrows with visible l
  const html=renderOiRankedLadder(deriveOiRankedLadder(c,snapshot(0),{mode:'RECORDED'}));
  for(const view of ['OI','PCR','PREMIUM','ALL'])assert(html.includes('data-oir-view-option="'+view+'"'));
  assert.match(html,/↑ \+50 ADD/);assert.match(html,/Premium ↓ -1/);assert.match(html,/IN RANGE/);assert.match(html,/Strike PE OI ÷ CE OI/);assert.match(html,/qualified full-chain source unavailable/);
+});
+
+test('mobile ranked ladder uses the document scroller rather than a 65vh nested scroller',()=>{
+ assert.match(OI_RANKED_LADDER_CSS,/@media\(max-width:900px\),\(pointer:coarse\)/);
+ assert.match(OI_RANKED_LADDER_CSS,/\.oir-scroll\{max-height:none;overflow-y:visible;overflow-x:visible;overscroll-behavior:auto\}/);
+});
+test('natural page scrolling does not attempt to reposition a nested ranked ladder viewport',()=>{
+ const oldScroll:any={scrollTop:0,scrollHeight:700,clientHeight:700,getBoundingClientRect:()=>({top:0}),querySelectorAll:()=>[]};
+ let repositioned=false;
+ const newScroll:any={...oldScroll,querySelector:()=>{repositioned=true;return null;}};
+ const panel:any={getAttribute:()=> 'unchanged',setAttribute:()=>{}};
+ const node:any={
+  innerHTML:'old',addEventListener:()=>{},contains:()=>true,
+  querySelector(selector:string){if(selector==='.oir-scroll')return this.innerHTML==='old'?oldScroll:newScroll;if(selector==='.oir-panel')return panel;return null;},
+  querySelectorAll:()=>[]
+ };
+ paintOiRankedLadder(node,'updated');
+ assert.equal(node.innerHTML,'updated');
+ assert.equal(newScroll.scrollTop,0);
+ assert.equal(repositioned,false);
 });

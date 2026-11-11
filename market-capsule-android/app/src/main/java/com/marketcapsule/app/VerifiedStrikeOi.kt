@@ -9,7 +9,8 @@ internal data class VerifiedStrikeOi(
     val checkedAt: String,
     val ageAtReceiptMs: Long,
     val receivedElapsedMs: Long,
-    val rows: Map<Pair<Double, String>, Pair<Long, Long>>
+    val rows: Map<Pair<Double, String>, Pair<Long, Long>>,
+    val scope: String = "FULL_EXPIRY"
 ) {
     fun eligible(state: MarketUiState, runtimeId: String): Boolean {
         val elapsed = state.currentElapsedMs - receivedElapsedMs
@@ -92,5 +93,88 @@ internal object VerifiedStrikeOiParser {
         }
         require(ce > 0 && pe > 0 && latest - earliest <= 30_000)
         VerifiedStrikeOi(checkedText, age, receivedElapsedMs, rows)
+    }.getOrNull()
+
+    /** Independent ±7 OI band from the SAME existing full-chain REST attempt.
+     * The audit can be partial outside the band; no extra Kite request or
+     * full-expiry PCR eligibility is inferred from its band rows.
+     * Matching the cycle to the dashboard snapshot prevents runtime mixing.
+     */
+    fun parseBandAudit(auditRaw: String, snapshotRaw: String, index: MarketIndex,
+                       expiry: String, runtimeId: String, receivedWallMs: Long,
+                       receivedElapsedMs: Long): VerifiedStrikeOi? = runCatching {
+        val root = JSONObject(snapshotRaw)
+        require(root.opt("connected") == true &&
+            root.optString("source") == "KITE_WEBSOCKET_FULL")
+        val server = ms(root.optString("serverTime")) ?: error("MISSING_SERVER_TIME")
+        require(receivedWallMs - server in -5_000..QUOTE_MAX_AGE_MS)
+        val snap = root.getJSONObject("snapshot")
+        val today = date(server)
+        require(snap.optString("runtimeId") == runtimeId &&
+            snap.optString("tradeDate") == today && date(receivedWallMs) == today &&
+            expiry >= today)
+        val indices = snap.getJSONArray("indices")
+        val candidates = (0 until indices.length()).mapNotNull { indices.optJSONObject(it) }
+            .filter { it.optString("symbol") == index.name }
+        require(candidates.size == 1 && candidates.single().optString("expiry") == expiry)
+        val q = candidates.single().getJSONObject("pcrSnapshot")
+        require(q.optString("source") == "KITE_REST_FULL_EXPIRY_SNAPSHOT" &&
+            q.optString("fetchState") == "OK" && q.optString("state") != "STALE")
+        val auditRoot = JSONObject(auditRaw)
+        require(auditRoot.opt("readOnly") == true &&
+            auditRoot.opt("extraBrokerRequests") == 0 &&
+            auditRoot.opt("connected") == true)
+        val auditServer = ms(auditRoot.optString("serverTime")) ?: error("NO_AUDIT_TIME")
+        require(date(auditServer) == today && auditServer - server in -5_000..QUOTE_MAX_AGE_MS &&
+            receivedWallMs - auditServer in -5_000..QUOTE_MAX_AGE_MS)
+        val audit = auditRoot.getJSONObject("audit")
+        val checkedText = q.getString("checkedAt")
+        val checked = ms(checkedText) ?: error("NO_CHECK_TIME")
+        val cycleText = q.getString("cycleStartedAt")
+        val cycle = ms(cycleText) ?: error("NO_CYCLE")
+        require(checkedText == audit.optString("checkedAt") &&
+            cycleText == audit.optString("cycleStartedAt") &&
+            audit.optString("source") == q.optString("source") &&
+            audit.optString("symbol") == index.name &&
+            audit.optString("expiry") == expiry &&
+            audit.optString("fetchState") == "OK" &&
+            checked - cycle in 0..60_000 &&
+            checked <= server + 5_000 && date(checked) == today &&
+            server - checked in 0..PCR_SNAPSHOT_MAX_AGE_MS &&
+            receivedWallMs - checked in 0..PCR_SNAPSHOT_MAX_AGE_MS)
+        val coverage = q.getJSONObject("coverage")
+        val expected = integer(coverage, "expected") ?: error("NO_COVERAGE")
+        require(expected in 30..3000 && integer(audit, "expected") == expected)
+        val evidence = audit.getJSONArray("rows")
+        require(evidence.length().toLong() == expected)
+        val byContract = mutableMapOf<Pair<Double, String>, Pair<Long, Long>>()
+        val tokens = mutableSetOf<Long>()
+        val contracts = mutableSetOf<Pair<Double, String>>()
+        var matched = 0
+        for (i in 0 until evidence.length()) {
+            val row = evidence.getJSONObject(i)
+            val strike = n(row, "strike")?.takeIf { it > 0 } ?: error("BAD_STRIKE")
+            val side = row.optString("side")
+            val token = integer(row, "token")?.takeIf { it > 0 } ?: error("BAD_TOKEN")
+            require(row.optString("symbol") == index.name &&
+                row.optString("expiry") == expiry &&
+                (side == "CE" || side == "PE") && tokens.add(token) &&
+                contracts.add(strike to side))
+            val responseToken = integer(row, "responseToken")
+            val oi = integer(row, "oi")
+            val sourceAt = ms(row.optString("sourceAt"))
+            if (responseToken == token && oi != null && sourceAt != null &&
+                date(sourceAt) == today &&
+                sourceAt >= Date.parse(today + "T09:15:00+05:30") &&
+                checked - sourceAt in -5_000..30_000) {
+                byContract[strike to side] = token to oi
+                matched++
+            }
+        }
+        require(matched >= 2)
+        // The ladder will independently demand BOTH exact tokens at EVERY
+        // visible strike, and only then mark this as one synchronized source.
+        VerifiedStrikeOi(checkedText, receivedWallMs - checked,
+            receivedElapsedMs, byContract, "BAND_AUDIT")
     }.getOrNull()
 }

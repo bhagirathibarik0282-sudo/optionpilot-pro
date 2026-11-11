@@ -17,6 +17,76 @@ export function installDashboardLive(){
  const indices=['NIFTY','SENSEX','BANKNIFTY'];
  const selection:any={},buffers:any={},layers:any={},cadences:any={},sampled:any={},levelSettings:any={};let recorded:any=null;for(const symbol of indices){layers[symbol]={spot:true,pcr:true,ce:false,pe:false};cadences[symbol]=60000;levelSettings[symbol]={};}
  let source:any=null,sourceUrl='',on=true,lastReceived=0,latest:any=null,runtime:string|null=null,disposed=false;
+
+ let oiRequest=0,oiEvidence:any=null,oiIdentity='',oiLoadedAt=0;
+ function clearOiEvidence(reason:string){
+  oiRequest++;oiEvidence=null;oiIdentity='';oiLoadedAt=0;
+  renderedHtml.delete(get('op-live-oi-band'));get('op-live-oi-band').innerHTML='';
+  get('op-live-oi-status').textContent=reason;
+ }
+ function paintOiEvidence(){
+  if(!oiEvidence)return;
+  const [symbol,expiry,strike,runtimeId]=oiIdentity.split('|');
+  const a=latest?.snapshot?.indices?.find((r:any)=>r.symbol===symbol);
+  const checkAt=Date.parse(oiEvidence.checkedAt||'');
+  if(!on||!latest?.connected||!a||a.expiry!==expiry||String(a.strike)!==strike||
+   latest.snapshot.runtimeId!==runtimeId||!Number.isFinite(checkAt)||
+   Date.now()-checkAt>90000||Date.now()-oiLoadedAt>90000){
+   clearOiEvidence('Snapshot expired or selection changed. Tap Check verified OI again.');return;
+  }
+  const evidence=oiEvidence;
+  const map=new Map<string,any>();
+  for(const r of evidence.rows||[])map.set(String(r.strike)+'|'+r.side,r);
+  const strikes=[...new Set((evidence.rows||[]).map((r:any)=>r.strike))].sort((x:any,y:any)=>x-y);
+  const cell=(row:any)=>{
+   const sourceAt=Date.parse(row?.sourceAt||'');
+   const valid=row?.reason==='VERIFIED_REST_OI'&&row.source==='KITE_REST_FULL_EXPIRY_SNAPSHOT'&&
+    Number.isSafeInteger(row.oi)&&row.oi>=0&&Number.isFinite(sourceAt)&&
+    Date.now()-sourceAt>=-5000&&Date.now()-sourceAt<=30000;
+   return '<td><strong>'+(valid?fmt(row.oi,0):'—')+'</strong><small>'+
+    esc(valid?'REST · '+time(row.sourceAt)+' IST':row?.reason||'MISSING_LEG')+'</small></td>';
+  };
+  const rows=strikes.map((s:any)=>'<tr>'+cell(map.get(s+'|CE'))+'<th scope="row">'+esc(s)+
+   '</th>'+cell(map.get(s+'|PE'))+'</tr>').join('');
+  get('op-live-oi-status').textContent=evidence.state+' · '+evidence.coverage?.verifiedRestOi+
+   '/30 checked at '+time(evidence.checkedAt)+' IST · REST snapshot, not a live tick or Full PCR';
+  writeHtml(get('op-live-oi-band'),'<table class="op-live-oi-band" aria-label="Verified CE and PE REST OI by strike"><thead><tr><th>CE OI</th><th>Strike</th><th>PE OI</th></tr></thead><tbody>'+rows+'</tbody></table>');
+ }
+ async function checkOiEvidence(){
+  const symbol=get('op-live-oi-index').value||'NIFTY';
+  const a=latest?.snapshot?.indices?.find((r:any)=>r.symbol===symbol);
+  const ticket=++oiRequest;
+  oiEvidence=null;renderedHtml.delete(get('op-live-oi-band'));get('op-live-oi-band').innerHTML='';
+  if(!['NIFTY','SENSEX'].includes(symbol)||!on||!latest?.connected||
+    !a?.expiry||!Number.isFinite(a.strike)||a.strike<=0){
+   get('op-live-oi-status').textContent='No verified connected index / expiry / strike. OI withheld.';return;
+  }
+  const identity=[symbol,a.expiry,a.strike,latest.snapshot.runtimeId].join('|');
+  get('op-live-oi-status').textContent='Checking cached REST evidence · no new broker request…';
+  const query=new URLSearchParams({symbol,expiry:a.expiry,strike:String(a.strike)});
+  try{
+   const response=await fetch('/api/research/dashboard-live/pcr-audit?'+query.toString(),{cache:'no-store'});
+   if(!response.ok)throw Error('AUDIT_RESPONSE');
+   const result=await response.json(),b=result?.restOiBand;
+   if(ticket!==oiRequest||!on||!latest?.connected)return;
+   const current=latest.snapshot.indices.find((r:any)=>r.symbol===symbol);
+   if(!current||[symbol,current.expiry,current.strike,latest.snapshot.runtimeId].join('|')!==identity)return;
+   if(!result.connected||!b||b.source!=='KITE_REST_FULL_EXPIRY_SNAPSHOT'||
+    b.symbol!==symbol||b.expiry!==a.expiry||b.anchorStrike!==a.strike||
+    b.tradeDate!==latest.snapshot.tradeDate||b.coverage?.expected!==30||
+    !Array.isArray(b.rows)||b.rows.length!==30){
+    get('op-live-oi-status').textContent='No verified REST OI band for this exact selection. OI withheld.';return;
+   }
+   const at=Date.parse(b.checkedAt||'');
+   if(!Number.isFinite(at)||Date.now()-at<0||Date.now()-at>90000){
+    get('op-live-oi-status').textContent='REST snapshot is stale. OI withheld.';return;
+   }
+   oiEvidence=b;oiIdentity=identity;oiLoadedAt=Date.now();paintOiEvidence();
+  }catch{
+   if(ticket===oiRequest)get('op-live-oi-status').textContent='OI evidence check failed. Other dashboard readings unchanged.';
+  }
+ }
+
  if(typeof window.addEventListener==='function')window.addEventListener('optionpilot:recorded-levels',((event:any)=>{recorded=event.detail;render();}) as EventListener);
  function references(a:any,kind:string){
   const row=recorded?.indices?.[a.symbol];if(!row||recorded.date!==latest?.snapshot?.tradeDate)return null;
@@ -93,7 +163,7 @@ export function installDashboardLive(){
  function render(){
   const d=latest,s=d?.snapshot;
   const publish=()=>{if(typeof CustomEvent!=='undefined'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent('optionpilot:live-context',{detail:d?{...d,pcrDisplay:{...sampled}}:null}));};
-  if(!d||!s){for(const id of ['op-live-indices','op-live-participation','op-live-vix'])renderedHtml.delete(get(id));for(const key of Object.keys(sampled))delete sampled[key];for(const key of Object.keys(cardShapes))delete cardShapes[key];publish();get('op-live-indices').innerHTML='<p class="op-live-stale">'+esc(d?'Feed '+d.connectionState+' · live values unavailable':'Waiting for a fresh live connection')+'</p>';renderParticipation(null);get('op-live-vix').textContent='India VIX: unavailable';if(d)get('op-live-status').textContent='Feed '+d.connectionState+' · live values unavailable';return;}
+  if(!d||!s){if(oiEvidence)clearOiEvidence('Disconnected. REST OI withheld.');for(const id of ['op-live-indices','op-live-participation','op-live-vix'])renderedHtml.delete(get(id));for(const key of Object.keys(sampled))delete sampled[key];for(const key of Object.keys(cardShapes))delete cardShapes[key];publish();get('op-live-indices').innerHTML='<p class="op-live-stale">'+esc(d?'Feed '+d.connectionState+' · live values unavailable':'Waiting for a fresh live connection')+'</p>';renderParticipation(null);get('op-live-vix').textContent='India VIX: unavailable';if(d)get('op-live-status').textContent='Feed '+d.connectionState+' · live values unavailable';return;}
   get('op-live-status').textContent='Feed '+d.connectionState+' · server '+time(d.serverTime,true)+' IST · '+(s.omittedExpiries.length?s.omittedExpiries.length+' whole expiries outside subscription capacity · ':'')+'Live packet times below';
   const focused=document.activeElement as HTMLElement|null,editing=!!focused&&root!.contains(focused)&&focused.tagName==='SELECT';
   const quote=(label:string,q:any)=>'<div><span>'+esc(label)+'</span><strong>'+fmt(q.price)+'</strong><small>'+esc(q.state+' · '+time(q.observedAt)+' IST · received '+time(q.receivedAt,true))+'</small></div>';
@@ -133,7 +203,10 @@ export function installDashboardLive(){
   publish();if(!mountedAll&&!editing){writeHtml(get('op-live-indices'),cards);for(const key of Object.keys(desiredShapes))cardShapes[key]=desiredShapes[key];}
   writeHtml(get('op-live-vix'),'<div class="op-live-kpis">'+quote('INDIA VIX',s.vix)+'</div>');
   renderParticipation(s);
+  if(oiEvidence)paintOiEvidence();
  }
+ get('op-live-oi-check').onclick=()=>{void checkOiEvidence();};
+ get('op-live-oi-index').onchange=()=>clearOiEvidence('Index changed. Tap Check verified OI.');
  if(typeof window.addEventListener==='function')window.addEventListener('optionpilot:live-selection',((event:any)=>{
   const next=event.detail,index=next?.symbol;if(!indices.includes(index)||!latest?.snapshot)return;
   const a=latest.snapshot.indices.find((r:any)=>r.symbol===index);if(!a)return;
@@ -154,7 +227,7 @@ export function installDashboardLive(){
  get('op-live-toggle').onclick=()=>{on=!on;get('op-live-toggle').setAttribute('aria-pressed',String(on));get('op-live-toggle').textContent=on?'Live view ON':'Live view OFF';get('op-live-body').hidden=!on;if(on)connect();else{close();latest=null;render();get('op-live-status').textContent='Live stream paused';}};
  document.addEventListener('visibilitychange',()=>{if(document.hidden){close();latest=null;render();}else connect();});
  window.addEventListener('online',()=>connect());window.addEventListener('pageshow',()=>{disposed=false;connect();});window.addEventListener('pagehide',()=>{disposed=true;close();latest=null;render();});
- setInterval(()=>{if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect(true);}},1000);
+ setInterval(()=>{if(oiEvidence)paintOiEvidence();if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect(true);}},1000);
  if(typeof CustomEvent!=='undefined'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent('optionpilot:request-recorded-levels',{detail:null}));
  connect();
 }

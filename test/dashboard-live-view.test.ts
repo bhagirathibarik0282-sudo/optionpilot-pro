@@ -220,7 +220,7 @@ test('PR7 structural memory and cadence audit: 600 chart points max per series, 
 
 
 test('in-dashboard CE/PE OI check displays only source-labelled exact REST legs without another stream',async()=>{
- const h=harness();h.tick();h.emit();
+ const h=harness();h.tick();h.emit();h.nodes.get('op-live-oi-evidence').open=true;
  const initial=h.streams.length,requests:string[]=[];
  const at='2026-10-16T04:30:00.000Z';
  const rows=Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({
@@ -262,7 +262,7 @@ test('in-dashboard CE/PE OI check displays only source-labelled exact REST legs 
 });
 
 test('dashboard OI evidence rejects expired, wrong-session and unmatched contracts',async()=>{
- const h=harness();h.tick();h.emit();let value:any=null;
+ const h=harness();h.tick();h.emit();h.nodes.get('op-live-oi-evidence').open=true;let value:any=null;
  h.ctx.fetch=async()=>({ok:true,json:async()=>value});
  const at='2026-10-16T04:30:00.000Z';
  const rows=Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({
@@ -286,4 +286,34 @@ test('dashboard OI evidence rejects expired, wrong-session and unmatched contrac
  assert(html.includes('walls withheld')&&!html.includes('CE top 3'),'partial band cannot publish wall ranks');
  h.streams.at(-1).onerror();
  assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'','disconnection revokes all cached OI evidence');
+});
+
+
+test('collapsed OI panel revokes cached evidence, cancels pending GET, and avoids per-tick repaints',async()=>{
+ const h=harness();h.tick();h.emit();
+ const panel=h.nodes.get('op-live-oi-evidence'),node=h.nodes.get('op-live-oi-band');
+ const expected={connected:true,restOiBand:{source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',
+  symbol:'NIFTY',expiry:'2026-10-19',anchorStrike:22000,tradeDate:'2026-10-16',
+  checkedAt:'2026-10-16T04:30:00.000Z',state:'INCOMPLETE_BAND',
+  coverage:{expected:30,verifiedRestOi:0,complete:false,sourceSkewMs:null},
+  rows:Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({
+   strike:22000+(i-7)*50,side,token:200+i*2+(side==='PE'?1:0),
+   oi:null,sourceAt:null,source:null,reason:'NO_SAME_EXPIRY_REST_AUDIT'
+  }))).flat()}};
+ let complete:any=()=>{};h.ctx.fetch=()=>new Promise(resolve=>{complete=resolve;});
+ panel.open=true;h.nodes.get('op-live-oi-check').onclick();
+ panel.open=false;panel.ontoggle();
+ complete({ok:true,json:async()=>expected});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(node.innerHTML,'','closing panel must cancel an outstanding REST GET');
+ assert(h.nodes.get('op-live-oi-status').textContent.includes('Open panel'));
+ let writes=0,html='';
+ Object.defineProperty(node,'innerHTML',{configurable:true,get(){return html;},set(x:string){html=x;writes++;}});
+ for(let i=0;i<100;i++){h.advance(100);h.tick(22001+i);h.emit();}
+ assert.equal(writes,0,'100 market ticks cannot redraw a collapsed OI panel');
+ const src=readFileSync(new URL('../dashboard-live-view.ts',import.meta.url),'utf8');
+ assert(!/renderParticipation\(s\);\s*if\(oiEvidence\)paintOiEvidence\(\)/.test(src),
+  'market SSE renderer must not reprocess the 30-leg OI table');
+ assert.match(src,/oiEvidence&&get\('op-live-oi-evidence'\)\.open/,
+  'freshness work is gated behind an open disclosure');
 });

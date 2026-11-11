@@ -46,7 +46,7 @@ export function installDashboardLive(){
    return '<td><strong>'+(valid?fmt(row.oi,0):'—')+'</strong><small>'+
     esc(valid?'REST · '+time(row.sourceAt)+' IST':row?.reason||'MISSING_LEG')+'</small></td>';
   };
-  const rows=strikes.map((s:any)=>'<tr>'+cell(map.get(s+'|CE'))+'<th scope="row">'+esc(s)+
+  const rows=strikes.map((s:any)=>'<tr>'+cell(map.get(s+'|CE'))+'<th scope="row">'+fmt(s,0)+
    '</th>'+cell(map.get(s+'|PE'))+'</tr>').join('');
   get('op-live-oi-status').textContent=evidence.state+' · '+evidence.coverage?.verifiedRestOi+
    '/30 checked at '+time(evidence.checkedAt)+' IST · REST snapshot, not a live tick or Full PCR';

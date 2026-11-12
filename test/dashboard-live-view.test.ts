@@ -306,6 +306,28 @@ test('PR7 structural memory and cadence audit: 600 chart points max per series, 
 });
 
 
+test('BANKNIFTY uses the same exact read-only OI audit and never creates another market stream',async()=>{
+ assert(DASHBOARD_LIVE_HTML.includes('<option value="BANKNIFTY">BANKNIFTY</option>'));
+ const h=harness();h.tick();
+ h.emit((snapshot:any)=>{
+  const nifty=snapshot.indices.find((r:any)=>r.symbol==='NIFTY');
+  const bank=snapshot.indices.find((r:any)=>r.symbol==='BANKNIFTY');
+  const exact={...nifty,symbol:'BANKNIFTY'};
+  if(bank)Object.assign(bank,exact);else snapshot.indices.push(exact);
+ });
+ const streams=h.streams.length,requests:string[]=[];
+ h.nodes.get('op-live-oi-index').value='BANKNIFTY';
+ h.ctx.fetch=async(url:string,init:any)=>{requests.push(url);assert.equal(init.cache,'no-store');
+  return {ok:true,json:async()=>({connected:true,restOiBand:null})};};
+ h.nodes.get('op-live-oi-check').onclick();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(requests.length,1,'BANKNIFTY is eligible for the existing audit');
+ assert(requests[0].includes('symbol=BANKNIFTY')&&requests[0].includes('expiry=2026-10-19')&&requests[0].includes('strike=22000'));
+ assert.equal(h.streams.length,streams,'read-only audit cannot start a second market stream');
+ assert(h.nodes.get('op-live-oi-status').textContent.includes('No verified REST OI band'),
+  'missing OI remains withheld, never assumed to be zero');
+});
+
 test('in-dashboard CE/PE OI check displays only source-labelled exact REST legs without another stream',async()=>{
  const h=harness();h.tick();h.emit();h.nodes.get('op-live-oi-evidence').open=true;
  const initial=h.streams.length,requests:string[]=[];

@@ -14,7 +14,7 @@ ${OI_RANKED_LADDER_CSS}</style></head><body><main><header><div><span class="tag"
 <section class="panel"><div class="controls"><button id="ar-play" class="primary" disabled>▶ Play</button><button id="ar-prev" disabled>← Record</button><button id="ar-next" disabled>Record →</button><button id="ar-reset" disabled>Reset day</button><label>Speed <select id="ar-speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option></select></label></div><input type="range" id="ar-seek" min="0" max="0" value="0" disabled aria-label="Replay recorded time"><p id="clock">No saved session loaded</p><p id="ar-coverage" class="note"></p></section>
 <section class="panel" id="ar-sixty"><h2>60-point option premium finder · recorded observations</h2><p class="note">Selected index · CE and PE · exact expiry and strike · observed same-day moves of ₹60+. Only archived ATM ±7 strikes; missing minutes and OHLC are not inferred. BANKNIFTY monthly = research only.</p><div class="controls"><button type="button" id="ar-60-week">Find this week</button><button type="button" id="ar-60-all">Find all recorded days</button><button type="button" id="ar-60-cancel" disabled>Cancel scan</button><label>Scan indices <select id="ar-60-index"><option value="CURRENT">Selected index</option><option value="ALL">All 3 indices</option></select></label><label>Side <select id="ar-60-side"><option value="BOTH">Both</option><option>CE</option><option>PE</option></select></label><label>Movement <select id="ar-60-direction"><option value="BOTH">Rise + fall</option><option value="RISE">Rise ≥₹60</option><option value="FALL">Fall ≥₹60</option></select></label></div><p id="ar-60-status" class="note" role="status" aria-live="polite">Choose a scan. This week uses trading dates in the current IST calendar week.</p><p id="ar-60-coverage" class="note"></p><div id="ar-60-results" class="scroll" aria-live="polite"></div><div class="controls"><button type="button" id="ar-60-prev" disabled>← Previous</button><span id="ar-60-pages" class="note"></span><button type="button" id="ar-60-next" disabled>Next →</button></div></section>
 <section class="panel"><h2>Spot · Futures · Positioning</h2><div id="ar-metrics" class="metrics"></div><div class="controls"><label>Contract <select id="ar-contract-mode"><option value="SESSION">Session ATM · reset each day</option><option value="PINNED">Same contract across days</option></select></label><label>Expiry <select id="ar-expiry" aria-label="Pinned exact expiry"></select></label><label>Strike <select id="ar-strike" aria-label="Pinned CE and PE strike"></select></label><button id="ar-atm">Pin ATM at cursor</button></div><p id="ar-contract" class="note"></p><div id="ar-charts"></div></section>
-<section class="panel" id="ar-oi-ranked"><h2>OI ranked ladder · CE / Strike / PE</h2><div class="controls"><label>Compare<select id="ar-oi-window"><option value="1">1m</option><option value="3" selected>3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="OPEN">From 09:15</option></select></label><label>Range<select id="ar-oi-band"><option value="3">ATM ±3</option><option value="5">ATM ±5</option><option value="7" selected>ATM ±7</option></select></label><label>Rank focus<select id="ar-oi-focus"><option value="TOTAL">Total OI</option><option value="ADD">OI Addition</option><option value="SHED">OI Shedding</option></select></label></div><p class="note">Selected expiry above · shared replay time · rank within eligible returned contracts, separately for CE and PE. No full-chain or buyer/seller claim.</p><button type="button" id="ar-oi-atm">Center ATM</button><div id="ar-oi-output"></div></section><section class="panel" id="ar-premium-session"><h2>Full-session premium · 09:15 to EOD</h2><div class="controls"><label>Expiries <select id="ar-premium-scope"><option value="ALL">All saved expiries · fixed strike</option><option value="SELECTED">Selected expiry</option></select></label><label>Sample display <select id="ar-premium-interval"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">60m</option></select></label></div><p class="note">Uses the expiry / strike selection above and the same replay clock. Point titles and observation tables show source times. No new broker/data requests.</p><div id="ar-premium-output"></div></section>
+<details class="panel" id="ar-minute-history"><summary>Minute history · OI, PCR and walls</summary><div id="ar-minute-table"></div></details><section class="panel" id="ar-oi-ranked"><h2>OI ranked ladder · CE / Strike / PE</h2><div class="controls"><label>Compare<select id="ar-oi-window"><option value="1">1m</option><option value="3" selected>3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="OPEN">From 09:15</option></select></label><label>Range<select id="ar-oi-band"><option value="3">ATM ±3</option><option value="5">ATM ±5</option><option value="7" selected>ATM ±7</option></select></label><label>Rank focus<select id="ar-oi-focus"><option value="TOTAL">Total OI</option><option value="ADD">OI Addition</option><option value="SHED">OI Shedding</option></select></label></div><p class="note">Selected expiry above · shared replay time · rank within eligible returned contracts, separately for CE and PE. No full-chain or buyer/seller claim.</p><button type="button" id="ar-oi-atm">Center ATM</button><div id="ar-oi-output"></div></section><section class="panel" id="ar-premium-session"><h2>Full-session premium · 09:15 to EOD</h2><div class="controls"><label>Expiries <select id="ar-premium-scope"><option value="ALL">All saved expiries · fixed strike</option><option value="SELECTED">Selected expiry</option></select></label><label>Sample display <select id="ar-premium-interval"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">60m</option></select></label></div><p class="note">Uses the expiry / strike selection above and the same replay clock. Point titles and observation tables show source times. No new broker/data requests.</p><div id="ar-premium-output"></div></section>
 <section class="panel"><h2>CE / PE ladder · ATM ±7 saved strikes</h2><p class="note">Exact replay timestamp only · PDH green / PDC yellow / PDL red · ΔOI uses the preceding saved bucket only when ≤3 minutes apart.</p><div id="ar-ladder" class="scroll"></div></section><footer class="note">1× = one recorded step / second. Gaps remain gaps; samples are not OHLC candles. Session ATM pins the opening saved contract separately each day. Choose Same contract to keep expiry / strike across days; missing contracts remain unavailable. BANKNIFTY is monthly research only. No orders or Telegram messages.</footer>
 ${RAG_CARD_HTML}</main><script>const __name=(fn,_name)=>fn;const recordedOiRankFrame=${recordedOiRankFrame.toString()};const deriveOiRankedLadder=${deriveOiRankedLadder.toString()};const renderOiRankedLadder=${renderOiRankedLadder.toString()};const paintOiRankedLadder=${paintOiRankedLadder.toString()};const renderRecordedPremiumSession=${renderRecordedPremiumSession.toString()};const mergeRecordedParts=${mergeRecordedParts.toString()};const recordedSession=${recordedSession.toString()};const recordedFrame=${recordedFrame.toString()};const createRecordedPlayback=${createRecordedPlayback.toString()};const standardIndexObservationClose=${standardIndexObservationClose.toString()};const scanRecordedSixtyPointMoves=${scanRecordedSixtyPointMoves.toString()};(${installRecordedDashboard.toString()})();</script><script>${RAG_CARD_SCRIPT}</script></body></html>`;}
 
@@ -67,6 +67,81 @@ export function installRecordedDashboard(){
   let prev:any=null,lines='',dots='';for(const row of points){if(number(row[field])===null){prev=null;continue;}if(prev&&Date.parse(row.minute_bucket)-Date.parse(prev.minute_bucket)<=180000)lines+='<path d="M '+x(prev.minute_bucket)+' '+y(prev[field])+' L '+x(row.minute_bucket)+' '+y(row[field])+'"/>';dots+='<circle cx="'+x(row.minute_bucket)+'" cy="'+y(row[field])+'" r="2"/>';prev=row;}
   return '<h2>'+esc(title)+'</h2><svg class="chart" viewBox="0 0 580 175" role="img" aria-label="'+esc(title)+' recorded sample graph"><g fill="'+color+'" stroke="'+color+'" stroke-width="2">'+lines+dots+'</g><g fill="#53625a" font-size="11"><text x="0" y="30">'+fmt(hi)+'</text><text x="0" y="145">'+fmt(lo)+'</text><text x="60" y="170">'+clock(latest.session.timeline[0])+'</text><text x="490" y="170">'+clock(at)+'</text></g></svg>';
  }
+ let minuteKey:any[]=[],minuteRows:string[]=[];
+ function renderMinuteHistory(state:any){
+  const panel=$('ar-minute-history'),table=$('ar-minute-table');
+  if(!panel?.open||!table)return;
+  const records=state.session,date=records?.date,key=[records,symbol,expiry,state.loading];
+  if(key.every((value,i)=>value===minuteKey[i]))return;
+  minuteKey=key;
+  minuteRows=[];
+  if(state.loading||!date||!expiry){table.textContent='Choose a recorded expiry.';return;}
+  const start=Date.parse(date+'T09:15:00+05:30'),end=Date.parse(date+'T'+standardIndexObservationClose(date)+':00+05:30');
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end<start){table.textContent='Recorded session times unavailable.';return;}
+  const cadence=date>='2026-10-19'?60000:180000;
+  const byMinute=(rows:any[],match:(r:any)=>boolean)=>{
+   const groups=new Map<number,any[]>();
+   for(const row of rows||[]){
+    const at=Date.parse(row.minute_bucket);
+    if(row.symbol!==symbol||at<start||at>end||!Number.isFinite(at)||!match(row))continue;
+    const group=groups.get(at)||[];group.push(row);groups.set(at,group);
+   }
+   return groups;
+  };
+  const chosen=(r:any)=>String(r.expiry).slice(0,10)===expiry;
+  const market=byMinute(records?.market,()=>true),chains=byMinute(records?.chain,chosen);
+  const options=byMinute(records?.options,r=>chosen(r)&&r.atm_offset!=null&&Math.abs(Number(r.atm_offset))<=7);
+  const exact=(rows:any[]|undefined)=>rows?.length===1&&rows[0].truth_verdict==='TRUE'?rows[0]:null;
+  const num=(v:any)=>v!=null&&v!==''&&Number.isFinite(Number(v))?Number(v):null;
+  const delta=(a:number|null,b:number|null)=>a===null||b===null?null:a-b;
+  const shown=(v:any)=>num(v)===null?'—':fmt(Number(v));
+  const frames=new Map<number,any>();
+  const observed=[...market.keys(),...chains.keys(),...options.keys()];
+  if(!observed.length){table.textContent='No saved minutes for this selection.';return;}
+  const last=Math.max(...observed);
+  const cursorByTime=new Map(records.timeline.map((value:string)=>[Date.parse(value),value]));
+  const body=[];
+  for(let at=start;at<=last;at+=cadence){
+   const m=exact(market.get(at)),c=exact(chains.get(at)),legs=options.get(at)||[];
+   const usable=legs.filter(r=>r.truth_verdict==='TRUE'&&r.snapshot_id!=null&&r.snapshot_id===m?.snapshot_id&&
+    (r.option_type==='CE'||r.option_type==='PE')&&(num(r.strike)??0)>0&&
+    Number.isSafeInteger(num(r.oi))&&(num(r.oi)??-1)>=0&&
+    Number.isFinite(Date.parse(r.quote_timestamp))&&num(r.quote_age_seconds)!==null&&
+    Number(r.quote_age_seconds)>=-5&&Number(r.quote_age_seconds)<=30);
+   const calls=usable.filter(r=>r.option_type==='CE'),puts=usable.filter(r=>r.option_type==='PE');
+   const strikes=new Set(calls.map(r=>Number(r.strike)));
+   const ids=legs.length===30&&calls.length===15&&puts.length===15&&strikes.size===15&&
+    new Set(puts.map(r=>Number(r.strike))).size===15&&puts.every(r=>strikes.has(Number(r.strike)))?
+    [...strikes].sort((a,b)=>a-b).join('|'):null;
+   const sum=(side:any[])=>ids===null?null:side.reduce((total,r)=>total+Number(r.oi),0);
+   const full=num(c?.full_chain_oi_pcr),band=num(c?.band7_oi_pcr),ce=sum(calls),pe=sum(puts);
+   const previous=frames.get(at-180000),sameBand=ids!==null&&ids===previous?.ids;
+   frames.set(at,{ids,full,fullSource:c?.full_pcr_source,band,ce,pe});
+   const prior=exact(market.get(at-cadence)),spot=num(m?.spot_ltp),before=num(prior?.spot_ltp);
+   const pdh=num(m?.pdh),pdl=num(m?.pdl);
+   const event=spot===null||before===null?'':pdh!==null&&pdh>0&&pdh===num(prior?.pdh)&&before<=pdh&&spot>pdh?'Spot above PDH':
+    pdl!==null&&pdl>0&&pdl===num(prior?.pdl)&&before>=pdl&&spot<pdl?'Spot below PDL':'';
+   const stamp=cursorByTime.get(at),index=minuteRows.length;
+   minuteRows.push(stamp||'');
+   const label=clock(new Date(at).toISOString()).slice(0,5),timeCell=stamp?'<button type="button" data-ar-minute="'+index+'">'+label+'</button>':label;
+   const previousChain=exact(chains.get(at-cadence));
+   const wall=(field:string)=>{
+    const value=num(c?.[field]),priorValue=num(previousChain?.[field]);
+    return priorValue!==null&&value!==null&&priorValue!==value?shown(priorValue)+' → '+shown(value):shown(value);
+   };
+   const quality=c||m?(ids?'30/30 OI':usable.length+'/'+legs.length+' eligible'):(market.has(at)||chains.has(at)||legs.length?'Partial':'Gap');
+   body.push('<tr><th scope="row">'+timeCell+'</th>'+[
+    shown(full),shown(band),shown(ce),shown(pe),
+    shown(previous&&c?.full_pcr_source&&c.full_pcr_source===previous.fullSource?delta(full,previous.full):null),
+    shown(sameBand?delta(band,previous.band):null),shown(sameBand?delta(ce,previous.ce):null),shown(sameBand?delta(pe,previous.pe):null),
+    wall('call_wall_strike'),wall('put_wall_strike'),event||'—',quality
+   ].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>');
+  }
+  table.innerHTML='<p class="mb-note">'+esc(symbol+' · '+expiry)+' · '+(cadence/60000)+'m archive. Δ values compare exact 3m endpoints. Wall arrows and spot breaks show changes between consecutive saved samples.</p>'+
+   '<div style="overflow-x:auto"><table><caption>Recorded minute history</caption><thead><tr>'+[
+    'IST','Full PCR','±7 PCR','CE OI','PE OI','Δ Full PCR','Δ ±7 PCR','Δ CE OI','Δ PE OI','CE wall','PE wall','Spot PDH / PDL','OI coverage'
+   ].map(label=>'<th scope="col">'+label+'</th>').join('')+'</tr></thead><tbody>'+body.join('')+'</tbody></table></div>';
+ }
  function render(state:any){
   latest=state;const frame=state.frame,session=state.session,at=frame.at;
   $('error').textContent=state.error;$('ar-play').textContent=state.playing?'Ⅱ Pause':'▶ Play';
@@ -75,9 +150,9 @@ export function installRecordedDashboard(){
   if(state.days.length)$('queue').textContent='Day '+(state.dayIndex+1)+' / '+state.days.length+' · '+state.days.join(' → ');
   $('clock').textContent=state.loading?'Loading recorded '+state.days[state.dayIndex]+'…':at?frame.date+' · '+clock(at)+' IST · '+(state.playing?'REPLAY':'SAVED / PAUSED'):'No TRUE saved samples loaded';
   $('ar-coverage').innerHTML=at?(state.index+1)+' / '+session.timeline.length+' saved steps · '+session.cadenceMinutes+'m recorder cadence'+(frame.gapMinutes>session.cadenceMinutes?' · <span class="gap">Gap '+frame.gapMinutes+' minutes since previous step; no values filled</span>':''):'Missing data stays unavailable.';
-  if(!at){invalidate('empty|'+symbol);$('ar-metrics').innerHTML='';$('ar-charts').innerHTML='';$('ar-ladder').innerHTML='';$('ar-contract').textContent='';$('ar-premium-output').innerHTML='';$('ar-oi-output').innerHTML='';return;}
+  if(!at){renderMinuteHistory(state);invalidate('empty|'+symbol);$('ar-metrics').innerHTML='';$('ar-charts').innerHTML='';$('ar-ladder').innerHTML='';$('ar-contract').textContent='';$('ar-premium-output').innerHTML='';$('ar-oi-output').innerHTML='';return;}
   if(renderedDate!==frame.date){if($('ar-contract-mode').value!=='PINNED'){expiry='';strike=null;}renderedDate=frame.date;}
-  pin(frame);invalidate([symbol,frame.date,at,expiry,strike,state.loading].join('|'));
+  pin(frame);renderMinuteHistory(state);invalidate([symbol,frame.date,at,expiry,strike,state.loading].join('|'));
   const ex=[...new Set<string>([expiry,...session.options.map((r:any)=>String(r.expiry).slice(0,10))])].filter(Boolean).sort();$('ar-expiry').innerHTML=ex.map(v=>'<option>'+esc(v)+'</option>').join('');$('ar-expiry').value=expiry;
   const strikes=[...new Set<number>([strike,...session.options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry).map((r:any)=>r.strike)])].filter((v:any)=>number(v)!==null).sort((a:any,b:any)=>a-b);$('ar-strike').innerHTML=strikes.map(v=>'<option>'+v+'</option>').join('');$('ar-strike').value=String(strike);
   const market=frame.market.length===1?frame.market[0]:{},chainRows=frame.chain.filter((r:any)=>String(r.expiry).slice(0,10)===expiry),chain=chainRows.length===1?chainRows[0]:{};
@@ -190,6 +265,13 @@ export function installRecordedDashboard(){
  };
  for(const count of [1,3,5])$('ar-last'+count).onclick=()=>void start(dates.slice(-count));
  $('ar-all').onclick=()=>void start(dates);$('ar-selected').onclick=()=>void start(Array.from($('ar-dates').selectedOptions).map((o:any)=>o.value));$('ar-latest').onclick=()=>void start(dates.slice(-1),false);
+ $('ar-minute-history').ontoggle=()=>renderMinuteHistory(controller.snapshot());
+ $('ar-minute-table').onclick=(event:any)=>{
+  const button=event.target.closest?.('[data-ar-minute]');
+  const stamp=button&&minuteRows[Number(button.dataset.arMinute)];
+  const state=controller.snapshot(),index=state.session?.timeline.indexOf(stamp)??-1;
+  if(!state.loading&&index>=0)controller.seek(index);
+ };
  $('ar-play').onclick=()=>controller.toggle();$('ar-prev').onclick=()=>controller.seek(controller.snapshot().index-1);$('ar-next').onclick=()=>void controller.next();$('ar-reset').onclick=()=>controller.seek(0);$('ar-seek').oninput=()=>controller.seek(Number($('ar-seek').value));$('ar-speed').onchange=()=>controller.speed(Number($('ar-speed').value));
  $('ar-index').onchange=()=>{controller.pause();stopScan(true);symbol=$('ar-index').value;expiry='';strike=null;available();void start(dates.slice(-1),false);};
  $('ar-contract-mode').onchange=()=>{controller.pause();if($('ar-contract-mode').value!=='PINNED'){expiry='';strike=null;}render(controller.snapshot());};

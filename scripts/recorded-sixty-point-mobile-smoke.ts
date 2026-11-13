@@ -31,6 +31,21 @@ try{
    const page=await context.newPage(),errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
    await page.route('**/*',r=>new URL(r.request().url()).origin===base?r.continue():r.abort());
    await page.goto(base);await page.waitForFunction(()=>document.getElementById('clock')?.textContent?.includes('SAVED'));
+   await page.locator('#ar-minute-history summary').click();
+   const minuteTable=page.locator('#ar-minute-table');
+   await minuteTable.getByRole('button',{name:'09:16',exact:true}).waitFor();
+   assert.equal(await minuteTable.locator('tbody tr').count(),3);
+   const scroll=minuteTable.locator('div').first();
+   assert(await scroll.evaluate(node=>{
+    if(node.scrollWidth<=node.clientWidth)return true;
+    node.scrollLeft=100;
+    const moved=node.scrollLeft>0;
+    node.scrollLeft=0;
+    return moved;
+   }),'minute table scrolls when wider than the viewport');
+   await minuteTable.getByRole('button',{name:'09:16',exact:true}).click();
+   assert.match(await page.locator('#clock').innerText(),/09:16:00 IST · SAVED \/ PAUSED/);
+   await page.locator('#ar-reset').click();
    assert.equal(await page.locator('#ar-premium-output svg').count(),4);
    assert((await page.locator('#ar-premium-output').innerText()).includes('09:15–15:40'));
    assert((await page.locator('#ar-premium-output').innerText()).includes('OHLC unavailable'));

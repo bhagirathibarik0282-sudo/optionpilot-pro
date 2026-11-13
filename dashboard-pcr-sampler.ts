@@ -120,7 +120,7 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
 }
 export class DashboardPcrSampler {
  private lastDiagnostic='';private lastDiagnosticAt=0;
- private auditRows=new Map<string,Array<{symbol:string|undefined;expiry:string|undefined;strike:number|undefined;side:string|undefined;token:number;responseToken:number|null;key:string;oi:number|null;sourceAt:string|null}>>();
+ private auditRows=new Map<string,Array<{symbol:string|undefined;expiry:string|undefined;strike:number|undefined;side:string|undefined;token:number;responseToken:number|null;key:string;oi:number|null;sourceAt:string|null;batchReceivedAt:string|null}>>();
  private busy=false;private due=0;private revision=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string;batchesRequested:number;batchesCompleted:number}>();
  constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;readSpot?(symbol:string):any;onDiagnostic?(summary:any):void}){}
  async tick(){
@@ -128,6 +128,7 @@ export class DashboardPcrSampler {
   this.busy=true;this.due=now+PCR_REFRESH_MS;
   const entries=this.inventory.entries.filter(e=>e.role==='OPTION'),quotes:Record<string,any>={};
   let fetchState='OK',batchesRequested=0,batchesCompleted=0;
+  const batchReceivedAt=new Map<string,number>();
   const completedAt=new Map<string,number>(),completedSpot=new Map<string,any>();
   try{
    // Sequential requests at <=1 req/s, with bounded encoded URL size as well as count.
@@ -140,7 +141,11 @@ export class DashboardPcrSampler {
    batches.forEach((keys,i)=>keys.forEach(key=>{const group=quoteGroup.get(key);if(group)lastBatch.set(group,i);}));
    for(const [i,keys] of batches.entries()){
     if(batchesRequested)await this.deps.wait(1100);if(!this.deps.active())return;
-    batchesRequested++;Object.assign(quotes,await this.deps.fetchQuotes(keys));batchesCompleted++;
+    batchesRequested++;
+    Object.assign(quotes,await this.deps.fetchQuotes(keys));
+    const receivedAt=this.deps.now();
+    for(const key of keys)batchReceivedAt.set(key,receivedAt);
+    batchesCompleted++;
     for(const [group,last] of lastBatch)if(last===i){
      completedAt.set(group,this.deps.now());
      try{completedSpot.set(group,this.deps.readSpot?.(group.split('|')[0]));}catch{/* Band stays unavailable without matching spot. */}
@@ -169,9 +174,11 @@ export class DashboardPcrSampler {
      // it to the frequently broadcast snapshot or retain it after an HTTP failure.
      if(fetchState==='OK')this.auditRows.set(key,group.map(e=>{
       const quoteKey=e.exchange+':'+e.label,q=quotes[quoteKey],sourceAt=quoteTime(q?.timestamp);
+      const receivedAt=batchReceivedAt.get(quoteKey);
       return {symbol:e.symbol,expiry:e.expiry,strike:e.strike,side:e.side,token:e.token,key:quoteKey,
        responseToken:Number.isSafeInteger(q?.instrument_token)?q.instrument_token:null,
-       oi:finite(q?.oi)&&q.oi>=0?q.oi:null,sourceAt:Number.isFinite(sourceAt)?new Date(sourceAt).toISOString():null};
+       oi:finite(q?.oi)&&q.oi>=0?q.oi:null,sourceAt:Number.isFinite(sourceAt)?new Date(sourceAt).toISOString():null,
+       batchReceivedAt:q&&receivedAt!==undefined?new Date(receivedAt).toISOString():null};
      }));else this.auditRows.delete(key);
     }
     this.revision++;

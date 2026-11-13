@@ -3,7 +3,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import vm f
 import { installDashboardLive,DASHBOARD_LIVE_HTML } from '../dashboard-live-view.js';
 import { DashboardLiveStore,type LiveEntry } from '../dashboard-live-feed.js';
 import { renderBusinessDashboardV1Html } from '../business-dashboard-v1-view.js';
-function harness(){
+function harness(extraStrikes:number[]=[]){
  const nodes=new Map<string,any>();for(const m of DASHBOARD_LIVE_HTML.matchAll(/id="([^"]+)"/g))nodes.set(m[1],{innerHTML:'',textContent:'',hidden:false,setAttribute(){},contains(){return true;},querySelector(){return null;}});
  const streams:any[]=[],timers:any[]=[],docEvents:any={},winEvents:any={},contextEvents:any[]=[];let now=Date.parse('2026-10-16T04:30:00Z');
  class Clock extends Date{static now(){return now;}}
@@ -11,11 +11,17 @@ function harness(){
  const document:any={hidden:false,activeElement:null,getElementById:(id:string)=>nodes.get(id),addEventListener:(type:string,fn:any)=>docEvents[type]=fn};
  const ctx:any={document,window:{addEventListener:(type:string,fn:any)=>winEvents[type]=fn,dispatchEvent:(event:any)=>{contextEvents.push(event);return true;}},CustomEvent:class{type:string;detail:any;constructor(type:string,init:any){this.type=type;this.detail=init.detail;}},EventSource:Stream,URLSearchParams,Date:Clock,Map,Set,Number,String,Array,Object,Math,setInterval:(fn:any)=>timers.push(fn)};
  vm.createContext(ctx);const scripts=[...renderBusinessDashboardV1Html({} as any).matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]);vm.runInContext(scripts[0],ctx);vm.runInContext(scripts.at(-1)!,ctx);
- const entries:LiveEntry[]=[{token:1,role:'SPOT',symbol:'NIFTY',label:'NIFTY 50'},...['CE','PE'].map((side,i)=>({token:2+i,role:'OPTION' as const,symbol:'NIFTY' as const,label:side,side:side as 'CE'|'PE',expiry:'2026-10-19',strike:22000}))];
+ const entries:LiveEntry[]=[
+  {token:1,role:'SPOT',symbol:'NIFTY',label:'NIFTY 50'},
+  ...[22000,...extraStrikes].flatMap((strike,i)=>(['CE','PE'] as const).map((side,j)=>({
+   token:2+i*2+j,role:'OPTION' as const,symbol:'NIFTY' as const,
+   label:side+' '+strike,side,expiry:'2026-10-19',strike
+  })))
+ ];
  const store=new DashboardLiveStore({entries,date:'2026-10-16',missing:[],omittedExpiries:[]});
  const tick=(price=22001)=>{store.ingest(entries.map(e=>({instrumentToken:e.token,lastPrice:e.role==='SPOT'?price:100,exchangeTimestamp:new Date(now).toISOString(),oi:100,mode:'full' as const,isIndex:e.role==='SPOT'})),new Date(now).toISOString());};
- const emit=(patch?:(snapshot:any)=>void)=>{const before=streams.length;const fire=()=>{const snapshot=store.snapshot(now);patch?.(snapshot);streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:new Date(now).toISOString(),snapshot})});};fire();if(streams.length>before)fire();};
- return {nodes,streams,timers,docEvents,winEvents,contextEvents,document,store,tick,emit,advance:(ms:number)=>now+=ms};
+ const emit=(patch?:(snapshot:any)=>void,pins:any={})=>{const before=streams.length;const fire=()=>{const snapshot=store.snapshot(now,pins);patch?.(snapshot);streams.at(-1).handlers.snapshot({data:JSON.stringify({connected:true,connectionState:'OPEN',source:'KITE_WEBSOCKET_FULL',serverTime:new Date(now).toISOString(),snapshot})});};fire();if(streams.length>before)fire();};
+ return {nodes,streams,timers,docEvents,winEvents,contextEvents,document,ctx,store,tick,emit,advance:(ms:number)=>now+=ms};
 }
 test('real streamed values change the numbers and chart; selection clears old identity and reconnects exactly once',()=>{
  const h=harness();assert.equal(h.streams.length,1);assert(h.streams[0].url.startsWith('/api/research/dashboard-live/stream?'));
@@ -74,6 +80,87 @@ test('15m and FIB overlay exact recorded identities only, with independent per-i
  click('spotFib');click('spotOpening');let html=h.nodes.get('op-live-indices').innerHTML;assert(html.includes('Fib P 22,000'));assert(html.includes('15m H 22,050'));assert(!html.split('<h3>SENSEX')[1].split('</article>')[0].includes('Fib P 22,000'));
  h.nodes.get('op-live-indices').onclick({target:{closest:(selector:string)=>selector==='[data-live-layer]'?{dataset:{liveIndex:'NIFTY',liveLayer:'ce'}}:null}});click('ceFib');html=h.nodes.get('op-live-indices').innerHTML;assert(html.includes('FIB unavailable; load exact previous session'));
  h.winEvents['optionpilot:recorded-levels']({detail:{date:'2026-10-15',indices:{NIFTY:{spot:ref}}}});assert(!h.nodes.get('op-live-indices').innerHTML.includes('Fib P 22,000'));assert.equal(h.streams.length,count);
+});
+
+test('same dashboard shows only exact same-session recorded PDH PDL and prior-15:30 PDC Fibonacci',()=>{
+ const h=harness();h.tick();h.emit();const sockets=h.streams.length;
+ const at='2026-10-16T04:30:00.000Z',prior='2026-10-15T10:00:00.000Z';
+ const pivot={at:prior,R3:125,R2:120,R1:115,P:110,S1:105,S2:100,S3:95};
+ const spot={source:'RECORDED_SAME_SESSION',at,pdh:22050,pdl:21950,pdc:22000,
+  pdcAt:prior,pivot:{...pivot,R3:22150,R2:22100,R1:22050,P:22000,S1:21950,S2:21900,S3:21850}};
+ const option=(type:'CE'|'PE')=>({source:'RECORDED_SAME_SESSION',at,expiry:'2026-10-19',
+  strike:22000,type,pdh:type==='CE'?140:135,pdl:70,pdc:100,pdcAt:prior,pivot});
+ const emit=(date:string,ce:any=option('CE'),pe:any=option('PE'),spotRef:any=spot)=>{
+  h.winEvents['optionpilot:recorded-levels']({detail:{date,indices:{NIFTY:{spot:spotRef,ce,pe}}}});
+  return h.nodes.get('op-live-indices').innerHTML.split('<h3>NIFTY')[1].split('</article>')[0];
+ };
+ let html=emit('2026-10-16');
+ assert(html.includes('Recorded PDH / PDC / PDL · same dashboard'));
+ assert(html.includes('PDH <b>22,050</b>')&&html.includes('PDC <b>22,000</b>')&&html.includes('PDL <b>21,950</b>'));
+ assert(html.includes('PDH <b>140</b>')&&html.includes('PDH <b>135</b>'),
+  'both CE and PE recorded identities are present');
+ assert(html.includes('Fibonacci from prior 15:30')&&html.includes('R3 125')&&html.includes('S3 95'));
+ assert.equal(h.streams.length,sockets,'reference changes never open a second broker or browser stream');
+ html=emit('2026-10-15');
+ assert(html.includes('Recording unavailable or exact date/contract mismatch'));
+ assert(!html.includes('PDH <b>140</b>')&&!html.includes('R3 125'));
+ html=emit('2026-10-16',{...option('CE'),expiry:'2026-11-17'},option('PE'),
+  {...spot,pdh:10,pdl:20,pdcAt:'2026-10-15T09:57:00Z'});
+ assert(!html.includes('PDH <b>140</b>'),'wrong expiry cannot reuse premium PDH');
+ assert(!html.includes('PDH <b>10</b>')&&!html.includes('PDL <b>20</b>'),'inverted spot references withheld');
+ assert(!html.includes('PDC <b>22,000</b>'),'non-15:30 prior close must be withheld');
+ const future={...option('CE'),at:'2026-10-16T04:32:00Z'};
+ html=emit('2026-10-16',future,{...option('PE'),source:'UNVERIFIED'});
+ assert(!html.includes('PDH <b>140</b>')&&!html.includes('PDH <b>135</b>'),
+  'future recording and unverified source are withheld');
+ h.streams.at(-1).onerror();
+ assert(!h.nodes.get('op-live-indices').innerHTML.includes('Recorded PDH / PDC / PDL · same dashboard'),
+  'disconnect must hide the recorded-level panel along with the live cards');
+});
+
+test('web live card selects independent CE and PE from every listed strike, not only ATM ±2',()=>{
+ const h=harness([21750,21800,21850,21900,21950,22050,22100,22150,22200,22250]);
+ h.tick();h.emit();let html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('data-live-field="ceStrike"')&&html.includes('data-live-field="peStrike"'));
+ assert(html.includes('<option value="22250"')&&html.includes('<option value="21750"'),
+  'full exact expiry strike inventory, including distances beyond two ATM steps');
+ const n=h.streams.length;
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'ceStrike'},value:'99999'}});
+ assert.equal(h.streams.length,n,'unlisted strike cannot make a new SSE connection');
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'ceStrike'},value:'22250'}});
+ assert.equal(h.streams.length,n+1);
+ assert(h.streams.at(-2).closed,'old stream closes before exactly one new selection stream');
+ assert(h.streams.at(-1).url.includes('NIFTY_ceStrike=22250'));
+ h.tick();h.emit(undefined,{NIFTY:{ceStrike:22250}});
+ html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('CE · 22250')&&html.includes('PE · 22000'),'CE pinned separately while PE stays at shared reference');
+ const n2=h.streams.length;
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'peStrike'},value:'21750'}});
+ assert.equal(h.streams.length,n2+1);
+ assert(h.streams.at(-2).closed);
+ assert(h.streams.at(-1).url.includes('NIFTY_ceStrike=22250'));
+ assert(h.streams.at(-1).url.includes('NIFTY_peStrike=21750'));
+ h.tick();h.emit(undefined,{NIFTY:{ceStrike:22250,peStrike:21750}});
+ html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('CE · 22250')&&html.includes('PE · 21750'));
+ assert(html.includes('Pinned CE OI')&&html.includes('Pinned PE OI'));
+ assert.equal(h.streams.at(-1).closed,false);
+ assert(!html.includes('CE · 21750'),'CE and PE strikes must not be conflated');
+ const before=h.streams.length;
+ h.nodes.get('op-live-indices').onclick({target:{closest:(selector:string)=>selector==='[data-live-layer]'?{dataset:{liveIndex:'NIFTY',liveLayer:'ce'}}:null}});
+ html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('CE 22250 · ₹'),'CE chart must be labelled with exact pinned strike');
+ assert.equal(h.streams.length,before,'chart display never creates another stream');
+ const prev=h.streams.at(-1),count=h.streams.length;
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'ceStrike'},value:'22150'}});
+ assert.equal(h.streams.length,count+1);assert(prev.closed);
+ h.tick();h.emit(undefined,{NIFTY:{ceStrike:22150,peStrike:21750}});
+ html=h.nodes.get('op-live-indices').innerHTML;
+ assert(html.includes('CE 22150 · ₹'));
+ assert(!html.includes('CE 22250 · ₹'),'old contract chart label cannot leak into new pin');
+ const newStream=h.streams.at(-1);
+ h.nodes.get('op-live-indices').onchange({target:{dataset:{liveIndex:'NIFTY',liveField:'expiry'},value:'2026-12-31'}});
+ assert.equal(h.streams.at(-1),newStream,'unlisted expiry cannot change active selection');
 });
 
 test('streaming patches values without replacing dropdowns; chart cadence retains all receipt observations',()=>{
@@ -216,4 +303,126 @@ test('PR7 structural memory and cadence audit: 600 chart points max per series, 
  assert.match(src,/Date.now\(\)-paint.at>=250/);
  assert.match(src,/Date.now\(\)-lastReceived>4000/);
  assert.match(DASHBOARD_LIVE_HTML,/id="op-live-participation-panel"/);
+});
+
+
+test('BANKNIFTY uses the same exact read-only OI audit and never creates another market stream',async()=>{
+ assert(DASHBOARD_LIVE_HTML.includes('<option value="BANKNIFTY">BANKNIFTY</option>'));
+ const h=harness();h.tick();
+ h.emit((snapshot:any)=>{
+  const nifty=snapshot.indices.find((r:any)=>r.symbol==='NIFTY');
+  const bank=snapshot.indices.find((r:any)=>r.symbol==='BANKNIFTY');
+  const exact={...nifty,symbol:'BANKNIFTY'};
+  if(bank)Object.assign(bank,exact);else snapshot.indices.push(exact);
+ });
+ const streams=h.streams.length,requests:string[]=[];
+ h.nodes.get('op-live-oi-index').value='BANKNIFTY';
+ h.ctx.fetch=async(url:string,init:any)=>{requests.push(url);assert.equal(init.cache,'no-store');
+  return {ok:true,json:async()=>({connected:true,restOiBand:null})};};
+ h.nodes.get('op-live-oi-check').onclick();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(requests.length,1,'BANKNIFTY is eligible for the existing audit');
+ assert(requests[0].includes('symbol=BANKNIFTY')&&requests[0].includes('expiry=2026-10-19')&&requests[0].includes('strike=22000'));
+ assert.equal(h.streams.length,streams,'read-only audit cannot start a second market stream');
+ assert(h.nodes.get('op-live-oi-status').textContent.includes('No verified REST OI band'),
+  'missing OI remains withheld, never assumed to be zero');
+});
+
+test('in-dashboard CE/PE OI check displays only source-labelled exact REST legs without another stream',async()=>{
+ const h=harness();h.tick();h.emit();h.nodes.get('op-live-oi-evidence').open=true;
+ const initial=h.streams.length,requests:string[]=[];
+ const at='2026-10-16T04:30:00.000Z';
+ const rows=Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({
+  strike:22000+(i-7)*50,side,token:100+i*2+(side==='PE'?1:0),
+  oi:side==='PE'&&i===7?0:100,sourceAt:at,source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',
+  reason:'VERIFIED_REST_OI',wsReason:'NO_WS_PACKET'
+ }))).flat();
+ h.ctx.fetch=async(url:string,init:any)=>{
+  requests.push(url);assert.equal(init.cache,'no-store');
+  const rank=(side:string)=>rows.filter((r:any)=>r.side===side&&r.oi>0).slice(0,3).map((r:any)=>({
+   rank:1,strike:r.strike,oi:r.oi,sourceAt:r.sourceAt,tied:true
+  }));
+  return {ok:true,json:async()=>({connected:true,restOiBand:{
+   source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'COMPLETE_BAND',symbol:'NIFTY',
+   expiry:'2026-10-19',tradeDate:'2026-10-16',anchorStrike:22000,checkedAt:at,
+   coverage:{expected:30,verifiedRestOi:30,complete:true,sourceSkewMs:0},
+   bandWallRanks:{scope:'EXACT_ATM_PLUS_MINUS_7_ONLY',source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',
+    ce:rank('CE'),pe:rank('PE')},rows
+  }})};
+ };
+ h.nodes.get('op-live-oi-check').onclick();
+ await new Promise(resolve=>setImmediate(resolve));
+ const html=h.nodes.get('op-live-oi-band').innerHTML;
+ assert(html.includes('CE OI')&&html.includes('PE OI')&&html.includes('22,000'));
+ assert(html.includes('REST · 10:00:00 IST'));
+ assert.match(html,/>0<\/strong>/,'valid broker zero must be visible');
+ assert(html.includes('CE top 3')&&html.includes('PE top 3'),'ranked walls appear only for a complete, current band');
+ assert(html.includes('Rank 1')&&html.includes('tied'),'wall ties are labelled');
+ assert.equal(requests.length,1);
+ assert(requests[0].includes('symbol=NIFTY')&&requests[0].includes('expiry=2026-10-19')&&requests[0].includes('strike=22000'));
+ assert.equal(h.streams.length,initial,'audit button never creates another market socket');
+ h.advance(31000);h.tick();h.emit();h.timers[0]();
+ assert(h.nodes.get('op-live-oi-band').innerHTML.includes('walls withheld'),
+  'walls and row OI must be revoked after their source packets age out');
+ assert(!h.nodes.get('op-live-oi-band').innerHTML.includes('CE top 3'),
+  'stale wall ranks cannot persist');
+ h.nodes.get('op-live-oi-index').onchange();
+ assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'','index change must revoke old OI');
+});
+
+test('dashboard OI evidence rejects expired, wrong-session and unmatched contracts',async()=>{
+ const h=harness();h.tick();h.emit();h.nodes.get('op-live-oi-evidence').open=true;let value:any=null;
+ h.ctx.fetch=async()=>({ok:true,json:async()=>value});
+ const at='2026-10-16T04:30:00.000Z';
+ const rows=Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({
+  strike:22000+(i-7)*50,side,token:i,oi:100,reason:'VERIFIED_REST_OI',
+  source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',sourceAt:at
+ }))).flat();
+ const band={source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',state:'COMPLETE_BAND',
+  symbol:'NIFTY',expiry:'2026-10-19',anchorStrike:22000,tradeDate:'2026-10-16',
+  checkedAt:at,coverage:{expected:30,verifiedRestOi:30},rows};
+ value={connected:true,restOiBand:{...band,expiry:'2026-10-26'}};
+ h.nodes.get('op-live-oi-check').onclick();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'');
+ value={connected:true,restOiBand:{...band,checkedAt:'2026-10-16T04:28:00Z'}};
+ h.nodes.get('op-live-oi-check').onclick();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'');
+ const missing=[...rows];missing[0]={...missing[0],oi:null,reason:'MISSING_REST_LEG',sourceAt:null};
+ value={connected:true,restOiBand:{...band,rows:missing,coverage:{expected:30,verifiedRestOi:29}}};
+ h.nodes.get('op-live-oi-check').onclick();await new Promise(resolve=>setImmediate(resolve));
+ let html=h.nodes.get('op-live-oi-band').innerHTML;
+ assert(html.includes('MISSING_REST_LEG')&&html.includes('>—</strong>'),'null must not become zero');
+ assert(html.includes('walls withheld')&&!html.includes('CE top 3'),'partial band cannot publish wall ranks');
+ h.streams.at(-1).onerror();
+ assert.equal(h.nodes.get('op-live-oi-band').innerHTML,'','disconnection revokes all cached OI evidence');
+});
+
+
+test('collapsed OI panel revokes cached evidence, cancels pending GET, and avoids per-tick repaints',async()=>{
+ const h=harness();h.tick();h.emit();
+ const panel=h.nodes.get('op-live-oi-evidence'),node=h.nodes.get('op-live-oi-band');
+ const expected={connected:true,restOiBand:{source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',
+  symbol:'NIFTY',expiry:'2026-10-19',anchorStrike:22000,tradeDate:'2026-10-16',
+  checkedAt:'2026-10-16T04:30:00.000Z',state:'INCOMPLETE_BAND',
+  coverage:{expected:30,verifiedRestOi:0,complete:false,sourceSkewMs:null},
+  rows:Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({
+   strike:22000+(i-7)*50,side,token:200+i*2+(side==='PE'?1:0),
+   oi:null,sourceAt:null,source:null,reason:'NO_SAME_EXPIRY_REST_AUDIT'
+  }))).flat()}};
+ let complete:any=()=>{};h.ctx.fetch=()=>new Promise(resolve=>{complete=resolve;});
+ panel.open=true;h.nodes.get('op-live-oi-check').onclick();
+ panel.open=false;panel.ontoggle();
+ complete({ok:true,json:async()=>expected});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(node.innerHTML,'','closing panel must cancel an outstanding REST GET');
+ assert(h.nodes.get('op-live-oi-status').textContent.includes('Open panel'));
+ let writes=0,html='';
+ Object.defineProperty(node,'innerHTML',{configurable:true,get(){return html;},set(x:string){html=x;writes++;}});
+ for(let i=0;i<100;i++){h.advance(100);h.tick(22001+i);h.emit();}
+ assert.equal(writes,0,'100 market ticks cannot redraw a collapsed OI panel');
+ const src=readFileSync(new URL('../dashboard-live-view.ts',import.meta.url),'utf8');
+ assert(!/renderParticipation\(s\);\s*if\(oiEvidence\)paintOiEvidence\(\)/.test(src),
+  'market SSE renderer must not reprocess the 30-leg OI table');
+ assert.match(src,/oiEvidence&&get\('op-live-oi-evidence'\)\.open/,
+  'freshness work is gated behind an open disclosure');
 });

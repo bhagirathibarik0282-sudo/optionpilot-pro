@@ -47,9 +47,17 @@ try{
    await page.goto(base+'/live');await page.locator('#ows-chart .oir-table').waitFor();
    assert.equal(await page.locator('#ows-chart tbody tr').count(),15);
    assert(await page.locator('#ows-chart .oir-scroll').evaluate(el=>{const a=el.querySelector('.oir-atm')!.getBoundingClientRect(),b=el.getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom;}),'ATM row visible on initial paint');
-   await page.locator('#ows-chart .oir-scroll').evaluate(el=>el.scrollTop=20);
-   await page.waitForTimeout(1100);
-   assert(Math.abs(await page.locator('#ows-chart .oir-scroll').evaluate(el=>el.scrollTop)-20)<2,'heartbeat preserves ladder scroll');
+   if(width<=900){
+    assert(await page.locator('#ows-chart .oir-scroll').evaluate(el=>getComputedStyle(el).overflowY==='visible'&&el.scrollHeight<=el.clientHeight+1),'mobile ladder has no nested vertical scroller');
+    const beforeY=await page.evaluate(()=>{window.scrollTo(0,180);return window.scrollY;});
+    assert(beforeY>0,'mobile document can scroll');
+    await page.waitForTimeout(1100);
+    assert(Math.abs(await page.evaluate(()=>window.scrollY)-beforeY)<2,'heartbeat preserves mobile document scroll');
+   }else{
+    await page.locator('#ows-chart .oir-scroll').evaluate(el=>el.scrollTop=20);
+    await page.waitForTimeout(1100);
+    assert(Math.abs(await page.locator('#ows-chart .oir-scroll').evaluate(el=>el.scrollTop)-20)<2,'heartbeat preserves desktop ladder scroll');
+   }
    for(const mode of ['OI','PCR','PREMIUM','ALL']){
     await page.locator('#ows-chart [data-oir-view-option="'+mode+'"]').click();
     assert.equal(await page.locator('#ows-chart .oir-panel').getAttribute('data-oir-view'),mode);

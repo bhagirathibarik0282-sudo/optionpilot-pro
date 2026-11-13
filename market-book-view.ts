@@ -489,14 +489,38 @@ export function installMarketBook(api:any) {
   if(typeof CustomEvent==='undefined'||typeof window.dispatchEvent!=='function')return;
   const data:any={date:date,indices:{}};
   for(const index of ['NIFTY','SENSEX','BANKNIFTY']){
-   const a=models[index];if(!a||!/^\d{4}-\d{2}-\d{2}$/.test(a.tradeDate))continue;
+   const a=models[index];if(!a||a.tradeDate!==date||!/^\d{4}-\d{2}-\d{2}$/.test(a.tradeDate))continue;
    const option=(p:any)=>{
     if(!p)return null;const end=Date.parse(a.tradeDate+'T09:30:00+05:30'),values:number[]=[];
     for(let i=0;i<5;i++){const at=end-900000+i*180000,rows=(p.points||[]).filter((r:any)=>Date.parse(r.at)===at),v=rows[0]?.value;if(!rows.length||typeof v!=='number'||!Number.isFinite(v)||v<=0||rows.some((r:any)=>r.value!==v))break;values.push(v);}
     const complete=values.length===5&&Date.parse(p.at)>=end;
-    return {expiry:p.expiry,strike:p.strike,type:p.type,pivot:p.pivot,opening:{complete,high:complete?Math.max(...values):null,low:complete?Math.min(...values):null,fromAt:new Date(end-900000).toISOString(),at:new Date(end).toISOString()}};
+    const goodLevels=typeof p.pdh==='number'&&Number.isFinite(p.pdh)&&p.pdh>0&&
+     typeof p.pdl==='number'&&Number.isFinite(p.pdl)&&p.pdl>0&&p.pdh>p.pdl;
+    const pivotAt=Date.parse(p.pivot?.at||'');
+    const priorAt=Date.parse(p.prior?.at||'');
+    const exactClose=Number.isFinite(pivotAt)&&priorAt===pivotAt&&
+     new Date(priorAt+19800000).toISOString().slice(11,16)==='15:30';
+    return {expiry:p.expiry,strike:p.strike,type:p.type,source:'RECORDED_SAME_SESSION',at:p.at,
+     pdh:goodLevels?p.pdh:null,pdl:goodLevels?p.pdl:null,
+     pdc:exactClose&&typeof p.prior?.value==='number'&&p.prior.value>0?p.prior.value:null,
+     pdcAt:exactClose?p.prior.at:null,pivot:p.pivot,
+     opening:{complete,high:complete?Math.max(...values):null,low:complete?Math.min(...values):null,fromAt:new Date(end-900000).toISOString(),at:new Date(end).toISOString()}};
    };
-   data.indices[index]={spot:{pivot:a.spot.pivot,opening:a.spotPcr.opening.spot},pcr:{expiry:a.expiry,pivot:null,opening:a.spotPcr.opening.pcr},ce:option(a.ce),pe:option(a.pe)};
+   const sp=a.spot,spotLevels=typeof sp.pdh==='number'&&Number.isFinite(sp.pdh)&&sp.pdh>0&&
+    typeof sp.pdl==='number'&&Number.isFinite(sp.pdl)&&sp.pdl>0&&sp.pdh>sp.pdl;
+   const spotPivotAt=Date.parse(sp.pivot?.at||'');
+   const spotPriorAt=Date.parse(sp.prior?.at||'');
+   const spotClose=Number.isFinite(spotPivotAt)&&spotPriorAt===spotPivotAt&&
+    new Date(spotPriorAt+19800000).toISOString().slice(11,16)==='15:30'&&
+    typeof sp.day?.from==='number'&&sp.day.from>0&&sp.prior?.value===sp.day.from;
+   data.indices[index]={
+    spot:{source:'RECORDED_SAME_SESSION',at:sp.at,
+     pdh:spotLevels?sp.pdh:null,pdl:spotLevels?sp.pdl:null,
+     pdc:spotClose?sp.day.from:null,pdcAt:spotClose?sp.prior.at:null,
+     pivot:sp.pivot,opening:a.spotPcr.opening.spot},
+    pcr:{expiry:a.expiry,pivot:null,opening:a.spotPcr.opening.pcr},
+    ce:option(a.ce),pe:option(a.pe)};
+
   }
   window.dispatchEvent(new CustomEvent('optionpilot:recorded-levels',{detail:data}));
  }

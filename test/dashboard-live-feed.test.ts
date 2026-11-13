@@ -5,6 +5,7 @@ import type { KiteDecodedPacket } from '../kite-websocket-binary-decoder.js';
 import { Hono } from 'hono';import { mountDashboardLiveRoutes } from '../dashboard-live-http.js';
 import { KiteWebSocketTransport,registerKiteTickObserver } from '../kite-websocket-transport.js';
 import { deriveDashboardModelDelta } from '../dashboard-model-delta.js';
+import { deriveRestOiBandEvidence } from '../dashboard-oi-rest-band-evidence.js';
 const date='2026-10-16',at='2026-10-16T04:30:00.000Z',now=Date.parse(at),expiry='2026-10-19';
 const entries:LiveEntry[]=[{token:1,label:'NIFTY 50',symbol:'NIFTY',role:'SPOT'},{token:2,label:'FUT',symbol:'NIFTY',role:'FUTURE',expiry:'2026-10-27'},...['CE','PE'].flatMap((side,i)=>[22000,22100].map((strike,j)=>({token:10+i*2+j,label:side+strike,symbol:'NIFTY' as const,role:'OPTION' as const,expiry,strike,side:side as 'CE'|'PE'})))];
 function packet(token:number,extra:Partial<KiteDecodedPacket>={}):KiteDecodedPacket{return {mode:'full',isIndex:token===1,instrumentToken:token,lastPrice:token===1?22005:token===2?22015:100,exchangeTimestamp:at,oi:100,close:90,...extra};}
@@ -163,4 +164,72 @@ test('PCR audit optional focus strike is validated and forwarded without invokin
  assert.deepEqual(seen,[22000],'bad audit selections never reach the read side');
  assert.equal((await app.request(base)).status,200);
  assert.deepEqual(seen,[22000,undefined],'existing audit clients remain compatible');
+});
+
+
+test('REST OI candidate restores separately verified exact 30 legs without promoting incomplete full PCR',()=>{
+ const legs:LiveEntry[]=Array.from({length:15},(_,i)=>['CE','PE'].map((side,j)=>({
+  token:900+i*2+j,label:'L'+i+side,symbol:'NIFTY' as const,role:'OPTION' as const,expiry,
+  strike:22000+(i-7)*50,side:side as 'CE'|'PE'
+ }))).flat();
+ const store=new DashboardLiveStore({entries:[entries[0],...legs],date,missing:[],omittedExpiries:[]});
+ store.ingest([packet(1)],at);
+ const ws=store.auditOiBand('NIFTY',expiry,now,22000);
+ assert.equal(ws.coverage.freshOi,0,'WebSocket remains independently missing');
+ const rest:any={source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',symbol:'NIFTY',expiry,fetchState:'OK',
+  freshnessState:'INCOMPLETE',expected:30,checkedAt:at,cycleStartedAt:at,
+  rows:legs.map((e,i)=>({symbol:e.symbol,expiry:e.expiry,strike:e.strike,side:e.side,token:e.token,
+   responseToken:e.token,sourceAt:at,oi:i===0?0:100}))};
+ const before=JSON.stringify(rest),read=deriveRestOiBandEvidence(ws,rest,now);
+ assert.equal(read?.coverage.verifiedRestOi,30);
+ assert.equal(read?.state,'COMPLETE_BAND');
+ assert.equal(read?.bandWallRanks?.scope,'EXACT_ATM_PLUS_MINUS_7_ONLY');
+ assert.equal(read?.bandWallRanks?.ce.length,3);
+ assert.equal(read?.bandWallRanks?.pe.length,3);
+ assert.equal(read?.bandWallRanks?.ce[0]?.tied,true,'equal CE OI is explicitly tied');
+ assert.equal(read?.coverage.zeroOi,1,'real broker zero is not missing');
+ assert.equal(read?.rows[0].oi,0);
+ assert.equal(read?.fullPcr,null,'REST band never becomes full PCR');
+ assert.equal(read?.rows[0].source,'KITE_REST_FULL_EXPIRY_SNAPSHOT');
+ assert.equal(JSON.stringify(rest),before,'derivation is pure');
+ assert.equal(store.premiums(now,{view:'ladder'}).rows.every(r=>r.oi===null),true,'WS quote and UI contract are not silently changed');
+});
+
+test('REST OI refuses token swaps, duplicate, carried prior-session, expired cycle and wrong expiry independently',()=>{
+ const legs:LiveEntry[]=Array.from({length:15},(_,i)=>['CE','PE'].map((side,j)=>({
+  token:950+i*2+j,label:'P'+i+side,symbol:'NIFTY' as const,role:'OPTION' as const,expiry,
+  strike:22000+(i-7)*50,side:side as 'CE'|'PE'
+ }))).flat();
+ const store=new DashboardLiveStore({entries:[entries[0],...legs],date,missing:[],omittedExpiries:[]});
+ store.ingest([packet(1)],at);
+ const ws=store.auditOiBand('NIFTY',expiry,now,22000);
+ const base:any={source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',symbol:'NIFTY',expiry,fetchState:'OK',freshnessState:'INCOMPLETE',
+  expected:30,checkedAt:at,cycleStartedAt:at,rows:legs.map(e=>({symbol:e.symbol,expiry:e.expiry,strike:e.strike,
+  side:e.side,token:e.token,responseToken:e.token,sourceAt:at,oi:5}))};
+ const changed=(fn:(a:any)=>void)=>{const a=structuredClone(base);fn(a);return deriveRestOiBandEvidence(ws,a,now);};
+ assert.equal(changed(a=>a.rows[0].responseToken=123)?.coverage.verifiedRestOi,29);
+ assert.equal(changed(a=>a.rows[0].responseToken=123)?.bandWallRanks,null,'incomplete band never publishes walls');
+ assert.equal(changed(a=>a.rows[0].token=123)?.rows[0].reason,'REST_IDENTITY_MISMATCH');
+ assert.equal(changed(a=>a.rows[0].sourceAt='2026-10-15T04:30:00.000Z')?.coverage.verifiedRestOi,29);
+ assert.equal(changed(a=>a.rows[0].oi=null)?.coverage.verifiedRestOi,29);
+ assert.equal(changed(a=>a.rows[0].oi=-1)?.coverage.verifiedRestOi,29);
+ assert.equal(changed(a=>a.rows[1]={...a.rows[0]})?.coverage.verifiedRestOi,28);
+ assert.equal(changed(a=>a.checkedAt='2026-10-16T04:28:00.000Z')?.coverage.verifiedRestOi,0);
+ assert.equal(changed(a=>a.expiry='2026-11-17')?.coverage.verifiedRestOi,0);
+ assert.equal(changed(a=>a.source='OTHER_SOURCE')?.coverage.verifiedRestOi,0);
+ assert.equal(changed(a=>a.fetchState='RATE_LIMITED')?.coverage.verifiedRestOi,0);
+ assert.equal(deriveRestOiBandEvidence(ws,base,now+86400000),null,'next session never borrows today');
+ assert.equal(deriveRestOiBandEvidence(null,base,now),null,'no WS band identity means no substitution');
+ assert.equal(deriveRestOiBandEvidence(ws,base,Date.parse(date+'T09:14:59+05:30')),null,
+  '09:15 opening check cannot promote pre-open evidence');
+ assert.equal(deriveRestOiBandEvidence(ws,base,Date.parse(date+'T15:30:00+05:30')),null,
+  'market-close check must withhold OI');
+ assert.equal(deriveRestOiBandEvidence({...ws,checkedAt:'2026-10-16T04:28:00Z'},base,now),null,
+  'a stale WebSocket audit cannot authenticate a fresh REST result');
+ const ranked=structuredClone(base);
+ ranked.rows[0].oi=30;ranked.rows[2].oi=20;ranked.rows[4].oi=10;ranked.rows[1].oi=0;
+ const order=deriveRestOiBandEvidence(ws,ranked,now);
+ assert.deepEqual(order?.bandWallRanks?.ce.map((r:any)=>[r.rank,r.strike,r.oi,r.tied]),
+  [[1,21650,30,false],[2,21700,20,false],[3,21750,10,false]],'current ATM band top-three CE ranks deterministic');
+ assert.equal(order?.bandWallRanks?.pe[0]?.tied,true,'PE ties remain labelled; valid zero is not a wall');
 });

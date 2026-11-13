@@ -1,4 +1,5 @@
 import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
+import { deriveRestOiBandEvidence } from './dashboard-oi-rest-band-evidence.js';
 import { tickTelegramLadderShadow } from './telegram-ladder-shadow-host.js';
 import { createParticipationMinuteRecorder } from './participation-minute-recorder.js';
 import { dbSaveParticipationMinuteOnce } from './db.js';
@@ -93,9 +94,10 @@ export function dashboardLiveRevision(){return state+':'+(store?.runtimeId||'non
 export function readDashboardPcrAudit(symbol:string,expiry:string,focusStrike?:number){
  const now=Date.now(),connected=enabled()&&state==='OPEN'&&isIndianEquityMarketOpenAt(new Date(now));
  const sessionMatches=store?.inventory.date===indianTradingDateAt(new Date(now));
+ const audit=connected&&sessionMatches?pcrSampler?.readAudit(symbol,expiry)??null:null;
+ const wsAudit=connected&&sessionMatches&&typeof store?.auditOiBand==='function'?store.auditOiBand(symbol as LiveIndex,expiry,now,focusStrike):null;
  return {readOnly:true,extraBrokerRequests:0,connected,connectionState:state,serverTime:new Date(now).toISOString(),
-  audit:connected?pcrSampler?.readAudit(symbol,expiry)??null:null,
-  wsAudit:connected&&sessionMatches&&typeof store?.auditOiBand==='function'?store.auditOiBand(symbol as LiveIndex,expiry,now,focusStrike):null};
+  audit,wsAudit,restOiBand:wsAudit&&audit?deriveRestOiBandEvidence(wsAudit,audit,now):null};
 }
 
 /** Display-only view of the same socket cache; disconnection revokes all values. */

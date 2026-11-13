@@ -1,6 +1,6 @@
 import {deriveLiveThreeIndexPcr} from './live-three-index-pcr.js';
-export const DASHBOARD_LIVE_HTML=`<section id="dashboard-live" class="panel op-live" aria-label="Live Kite market data"><div class="op-live-heading"><h2>LIVE · Kite market</h2><button id="op-live-toggle" type="button" aria-pressed="true">Live view ON</button></div><p id="op-live-status" role="status">Connecting to the live data service…</p><div id="op-live-body"><p data-op-explanation>Spot · premiums · OI · expiry-specific full PCR · walls · futures · VIX · heavyweight / sector quotes</p><div id="op-live-vix"></div><div id="op-live-indices" class="op-live-grid"></div><details id="op-live-participation-panel"><summary>Heavyweights & sectors · live quotes</summary><div id="op-live-participation"></div></details><p class="op-live-note" data-op-explanation>Live prices update from incoming Kite FULL packets. Live numbers follow incoming snapshots at up to 10 updates/second (100ms target, not guaranteed end-to-end latency). Charts redraw at up to 4 frames/second and retain actual received samples. All figures carry source times; stale values become unavailable. Full PCR / walls require every instrument in the subscribed expiry inventory. IV / Greeks are not supplied by these packets. Recorded research remains below; live ticks are not inserted into historical evidence.</p></div></section>`;
-export const DASHBOARD_LIVE_CSS=`#dashboard-live{display:block}#op-live-body{width:100%;min-width:0}.op-live{font-size:18px;order:-5;border-top:3px solid #edc86c;background:#091528}.op-live-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}.op-live-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.op-live-card{min-width:0;padding:12px;border:1px solid #344b69;border-radius:10px;background:#0b1c33}.op-live-card h3{font-size:24px;margin:6px 0}.op-live-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.op-live-kpis>div{min-width:0}.op-live-kpis strong{display:block;font-size:26px;color:#66f1e2;font-variant-numeric:tabular-nums}.op-live-card select{width:100%;font-size:18px;min-height:48px;margin:6px 0}.op-live-card label{display:block;font-size:17px}.op-live-note,.op-live-card small{display:block;font-size:16px;color:#b7c9df;overflow-wrap:anywhere}.op-live-chart{display:block;width:100%;height:auto;background:#071121;margin:8px 0}.op-live-chart text{font-size:16px}.op-live-stale{color:#f3c577}.op-live-quotes{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}.op-live-quotes>div{padding:8px;border-bottom:1px solid #344b69}.op-live-quotes strong{display:block;font-size:21px}.op-live-layers{display:flex;flex-wrap:wrap;gap:6px}.op-live-layers button{font-size:16px;min-height:44px}.op-live-layers button[aria-pressed=true]{border-color:#edc86c;color:#edc86c}@media(max-width:1100px){.op-live-grid{grid-template-columns:1fr}.op-live-kpis strong{font-size:30px}}@media(max-width:480px){.op-live-kpis{grid-template-columns:1fr}}`;
+export const DASHBOARD_LIVE_HTML=`<section id="dashboard-live" class="panel op-live" aria-label="Live Kite market data"><div class="op-live-heading"><h2>LIVE · Kite market</h2><button id="op-live-toggle" type="button" aria-pressed="true">Live view ON</button></div><p id="op-live-status" role="status">Connecting to the live data service…</p><div id="op-live-body"><p data-op-explanation>Spot · premiums · OI · expiry-specific full PCR · walls · futures · VIX · heavyweight / sector quotes</p><div id="op-live-vix"></div><div id="op-live-indices" class="op-live-grid"></div><details id="op-live-oi-evidence"><summary>CE / PE OI · verified REST snapshot · ATM ±7</summary><p class="op-live-note">Read-only 15-strike CE/PE evidence. REST OI snapshot is not a WebSocket tick or Full PCR. Missing data is not zero.</p><div class="op-live-oi-controls"><label>Index <select id="op-live-oi-index" aria-label="OI evidence index"><option value="NIFTY">NIFTY</option><option value="SENSEX">SENSEX</option><option value="BANKNIFTY">BANKNIFTY</option></select></label><button type="button" id="op-live-oi-check">Check verified OI</button></div><p id="op-live-oi-status" role="status">Select index and tap Check verified OI.</p><div id="op-live-oi-band"></div></details><details id="op-live-participation-panel"><summary>Heavyweights & sectors · live quotes</summary><div id="op-live-participation"></div></details><p class="op-live-note" data-op-explanation>Live prices update from incoming Kite FULL packets. Live numbers follow incoming snapshots at up to 10 updates/second (100ms target, not guaranteed end-to-end latency). Charts redraw at up to 4 frames/second and retain actual received samples. All figures carry source times; stale values become unavailable. Full PCR / walls require every instrument in the subscribed expiry inventory. IV / Greeks are not supplied by these packets. Recorded research remains below; live ticks are not inserted into historical evidence.</p></div></section>`;
+export const DASHBOARD_LIVE_CSS=`#dashboard-live{display:block}#op-live-body{width:100%;min-width:0}.op-live{font-size:18px;order:-5;border-top:3px solid #edc86c;background:#091528}.op-live-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}.op-live-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.op-live-card{min-width:0;padding:12px;border:1px solid #344b69;border-radius:10px;background:#0b1c33}.op-live-card h3{font-size:24px;margin:6px 0}.op-live-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.op-live-kpis>div{min-width:0}.op-live-kpis strong{display:block;font-size:26px;color:#66f1e2;font-variant-numeric:tabular-nums}.op-live-card select{width:100%;font-size:18px;min-height:48px;margin:6px 0}.op-live-strike-pins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.op-live-strike-pins label{min-width:0}.op-live-strike-pins select{min-width:0}.op-live-pin-note{font-size:13px;color:#b7c9df;margin:5px 0}.op-live-card label{display:block;font-size:17px}.op-live-note,.op-live-card small{display:block;font-size:16px;color:#b7c9df;overflow-wrap:anywhere}.op-live-chart{display:block;width:100%;height:auto;background:#071121;margin:8px 0}.op-live-chart text{font-size:16px}.op-live-stale{color:#f3c577}.op-live-quotes{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}.op-live-quotes>div{padding:8px;border-bottom:1px solid #344b69}.op-live-quotes strong{display:block;font-size:21px}.op-live-layers{display:flex;flex-wrap:wrap;gap:6px}.op-live-layers button{font-size:16px;min-height:44px}.op-live-layers button[aria-pressed=true]{border-color:#edc86c;color:#edc86c}.op-live-oi-controls{display:flex;align-items:end;flex-wrap:wrap;gap:10px;padding:8px 0}.op-live-oi-controls select,.op-live-oi-controls button{min-height:44px;font-size:16px}.op-live-oi-band{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.op-live-oi-band th,.op-live-oi-band td{padding:8px 4px;border-bottom:1px solid #344b69;text-align:center}.op-live-oi-band th{color:#b7c9df}.op-live-oi-band td:first-child{color:#66f1e2}.op-live-oi-band td:last-child{color:#ff81cb}.op-live-oi-band td strong{display:block}.op-live-oi-band td small{display:block;color:#b7c9df;font-size:12px;overflow-wrap:anywhere}.op-live-wall-ranks{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:10px 0}.op-live-wall-ranks>div{border:1px solid #344b69;border-radius:6px;padding:8px}.op-live-wall-ranks strong{color:#edc86c}.op-live-wall-ranks ol{padding-left:25px;margin:6px 0}.op-live-wall-ranks li{padding:4px 0;font-variant-numeric:tabular-nums}.op-live-levels{margin:8px 0;padding:8px;border:1px solid #344b69;border-radius:8px}.op-live-levels h4{margin:0 0 6px;font-size:16px}.op-live-level-row{border-bottom:1px solid #344b69;padding:7px 0}.op-live-level-row strong{display:block;font-size:15px;color:#edc86c}.op-live-level-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;font-size:15px;font-variant-numeric:tabular-nums}.op-live-level-values span{text-align:center}.op-live-levels small{display:block;font-size:12px;color:#b7c9df}.op-live-levels details{margin:5px 0}.op-live-levels summary{cursor:pointer;min-height:35px}.op-live-level-fib{font-size:13px;overflow-wrap:anywhere}#op-live-oi-evidence{margin:12px 0;padding:10px;border:1px solid #344b69;border-radius:8px}#op-live-oi-evidence>summary{cursor:pointer;min-height:44px}@media(max-width:1100px){.op-live-grid{grid-template-columns:1fr}.op-live-kpis strong{font-size:30px}}@media(max-width:480px){.op-live-kpis{grid-template-columns:1fr}.op-live-strike-pins{grid-template-columns:1fr}}`;
 
 /** Browser only: one stream, bounded chart buffers, no broker credentials. */
 export function installDashboardLive(){
@@ -15,14 +15,143 @@ export function installDashboardLive(){
  const renderedHtml=new WeakMap<object,string>();
  const writeHtml=(node:any,html:string)=>{if(node&&renderedHtml.get(node)!==html){node.innerHTML=html;renderedHtml.set(node,html);}};
  const indices=['NIFTY','SENSEX','BANKNIFTY'];
- const selection:any={},buffers:any={},layers:any={},cadences:any={},sampled:any={},levelSettings:any={};let recorded:any=null;for(const symbol of indices){layers[symbol]={spot:true,pcr:true,ce:false,pe:false};cadences[symbol]=60000;levelSettings[symbol]={};}
+ const selection:any={},buffers:any={},chartIdentities:any={},layers:any={},cadences:any={},sampled:any={},levelSettings:any={};let recorded:any=null;for(const symbol of indices){layers[symbol]={spot:true,pcr:true,ce:false,pe:false};cadences[symbol]=60000;levelSettings[symbol]={};}
  let source:any=null,sourceUrl='',on=true,lastReceived=0,latest:any=null,runtime:string|null=null,disposed=false;
+
+ let oiRequest=0,oiEvidence:any=null,oiIdentity='',oiLoadedAt=0;
+ function clearOiEvidence(reason:string){
+  oiRequest++;oiEvidence=null;oiIdentity='';oiLoadedAt=0;
+  renderedHtml.delete(get('op-live-oi-band'));get('op-live-oi-band').innerHTML='';
+  get('op-live-oi-status').textContent=reason;
+ }
+ function paintOiEvidence(){
+  if(!oiEvidence)return;
+  const [symbol,expiry,strike,runtimeId]=oiIdentity.split('|');
+  const a=latest?.snapshot?.indices?.find((r:any)=>r.symbol===symbol);
+  const checkAt=Date.parse(oiEvidence.checkedAt||'');
+  if(!on||!latest?.connected||!a||a.expiry!==expiry||String(a.strike)!==strike||
+   latest.snapshot.runtimeId!==runtimeId||!Number.isFinite(checkAt)||
+   Date.now()-checkAt>90000||Date.now()-oiLoadedAt>90000){
+   clearOiEvidence('Snapshot expired or selection changed. Tap Check verified OI again.');return;
+  }
+  const evidence=oiEvidence;
+  const map=new Map<string,any>();
+  for(const r of evidence.rows||[])map.set(String(r.strike)+'|'+r.side,r);
+  const strikes=[...new Set((evidence.rows||[]).map((r:any)=>r.strike))].sort((x:any,y:any)=>x-y);
+  const cell=(row:any)=>{
+   const sourceAt=Date.parse(row?.sourceAt||'');
+   const valid=row?.reason==='VERIFIED_REST_OI'&&row.source==='KITE_REST_FULL_EXPIRY_SNAPSHOT'&&
+    Number.isSafeInteger(row.oi)&&row.oi>=0&&Number.isFinite(sourceAt)&&
+    Date.now()-sourceAt>=-5000&&Date.now()-sourceAt<=30000;
+   return '<td><strong>'+(valid?fmt(row.oi,0):'—')+'</strong><small>'+
+    esc(valid?'REST · '+time(row.sourceAt)+' IST':row?.reason||'MISSING_LEG')+'</small></td>';
+  };
+  const rows=strikes.map((s:any)=>'<tr>'+cell(map.get(s+'|CE'))+'<th scope="row">'+fmt(s,0)+
+   '</th>'+cell(map.get(s+'|PE'))+'</tr>').join('');
+  const currentFresh=(evidence.rows||[]).filter((r:any)=>{
+   const at=Date.parse(r.sourceAt||'');
+   return r.reason==='VERIFIED_REST_OI'&&r.source==='KITE_REST_FULL_EXPIRY_SNAPSHOT'&&
+    Number.isSafeInteger(r.oi)&&r.oi>=0&&Number.isFinite(at)&&Date.now()-at>=-5000&&Date.now()-at<=30000;
+  }).length;
+  const walls=evidence.bandWallRanks;
+  const safeWalls=evidence.state==='COMPLETE_BAND'&&evidence.coverage?.complete===true&&
+   evidence.coverage?.verifiedRestOi===30&&currentFresh===30&&
+   typeof evidence.coverage?.sourceSkewMs==='number'&&evidence.coverage.sourceSkewMs<=30000&&
+   walls?.scope==='EXACT_ATM_PLUS_MINUS_7_ONLY'&&walls.source==='KITE_REST_FULL_EXPIRY_SNAPSHOT';
+  const wallSide=(side:'CE'|'PE')=>{
+   const list=walls?.[side.toLowerCase()];
+   if(!Array.isArray(list)||list.length>3)return null;
+   const checked=list.every((w:any)=>{
+    const r=map.get(String(w.strike)+'|'+side);
+    return Number.isSafeInteger(w.rank)&&w.rank>=1&&w.rank<=15&&r&&
+     r.oi===w.oi&&r.sourceAt===w.sourceAt&&r.reason==='VERIFIED_REST_OI'&&
+     Number.isSafeInteger(w.oi)&&w.oi>0;
+   });
+   if(!checked)return null;
+   return '<div><strong>'+side+' top 3 · ATM ±7</strong><ol>'+
+    (list.length?list.map((w:any)=>'<li>Rank '+esc(w.rank)+' · '+fmt(w.strike,0)+' · OI '+fmt(w.oi,0)+
+     (w.tied?' · tied':'')+'</li>').join(''):'<li>No positive OI wall</li>')+
+    '</ol></div>';
+  };
+  const ceWalls=safeWalls?wallSide('CE'):null,peWalls=safeWalls?wallSide('PE'):null;
+  const wallHtml=ceWalls!==null&&peWalls!==null?
+   '<div class="op-live-wall-ranks" aria-label="Verified band-only CE and PE OI wall rankings">'+ceWalls+peWalls+'</div>':
+   '<p class="op-live-note">Top-three CE/PE band walls withheld until all 30 exact REST OI legs are current and synchronized. Not full-chain walls.</p>';
+  get('op-live-oi-status').textContent=evidence.state+' · '+currentFresh+
+   '/30 current OI · REST checked '+time(evidence.checkedAt)+' IST · snapshot, not live tick / Full PCR';
+  writeHtml(get('op-live-oi-band'),wallHtml+
+   '<table class="op-live-oi-band" aria-label="Verified CE and PE REST OI by strike"><thead><tr><th>CE OI</th><th>Strike</th><th>PE OI</th></tr></thead><tbody>'+rows+'</tbody></table>');
+ }
+ async function checkOiEvidence(){
+  const symbol=get('op-live-oi-index').value||'NIFTY';
+  const a=latest?.snapshot?.indices?.find((r:any)=>r.symbol===symbol);
+  const ticket=++oiRequest;
+  oiEvidence=null;renderedHtml.delete(get('op-live-oi-band'));get('op-live-oi-band').innerHTML='';
+  if(!indices.includes(symbol)||!on||!latest?.connected||
+    !a?.expiry||!Number.isFinite(a.strike)||a.strike<=0){
+   get('op-live-oi-status').textContent='No verified connected index / expiry / strike. OI withheld.';return;
+  }
+  const identity=[symbol,a.expiry,a.strike,latest.snapshot.runtimeId].join('|');
+  get('op-live-oi-status').textContent='Checking cached REST evidence · no new broker request…';
+  const query=new URLSearchParams({symbol,expiry:a.expiry,strike:String(a.strike)});
+  try{
+   const response=await fetch('/api/research/dashboard-live/pcr-audit?'+query.toString(),{cache:'no-store'});
+   if(!response.ok)throw Error('AUDIT_RESPONSE');
+   const result=await response.json(),b=result?.restOiBand;
+   if(ticket!==oiRequest||!on||!latest?.connected)return;
+   const current=latest.snapshot.indices.find((r:any)=>r.symbol===symbol);
+   if(!current||[symbol,current.expiry,current.strike,latest.snapshot.runtimeId].join('|')!==identity)return;
+   if(!result.connected||!b||b.source!=='KITE_REST_FULL_EXPIRY_SNAPSHOT'||
+    b.symbol!==symbol||b.expiry!==a.expiry||b.anchorStrike!==a.strike||
+    b.tradeDate!==latest.snapshot.tradeDate||b.coverage?.expected!==30||
+    !Array.isArray(b.rows)||b.rows.length!==30){
+    get('op-live-oi-status').textContent='No verified REST OI band for this exact selection. OI withheld.';return;
+   }
+   const at=Date.parse(b.checkedAt||'');
+   if(!Number.isFinite(at)||Date.now()-at<0||Date.now()-at>90000){
+    get('op-live-oi-status').textContent='REST snapshot is stale. OI withheld.';return;
+   }
+   oiEvidence=b;oiIdentity=identity;oiLoadedAt=Date.now();paintOiEvidence();
+  }catch{
+   if(ticket===oiRequest)get('op-live-oi-status').textContent='OI evidence check failed. Other dashboard readings unchanged.';
+  }
+ }
+
  if(typeof window.addEventListener==='function')window.addEventListener('optionpilot:recorded-levels',((event:any)=>{recorded=event.detail;render();}) as EventListener);
  function references(a:any,kind:string){
   const row=recorded?.indices?.[a.symbol];if(!row||recorded.date!==latest?.snapshot?.tradeDate)return null;
   const ref=row[kind];if(!ref)return null;
-  if((kind==='pcr'&&ref.expiry!==a.expiry)||(['ce','pe'].includes(kind)&&(ref.expiry!==a.expiry||ref.strike!==a.strike||ref.type!==kind.toUpperCase())))return null;
+  if((kind==='pcr'&&ref.expiry!==a.expiry)||(['ce','pe'].includes(kind)&&(ref.expiry!==a.expiry||ref.strike!==(kind==='ce'?a.ceStrike:a.peStrike)||ref.type!==kind.toUpperCase())))return null;
   return ref;
+ }
+ function recordedLevelStrip(a:any){
+  const ist=(v:any)=>{const t=Date.parse(v||'');return Number.isFinite(t)?new Date(t+19800000).toISOString():null;};
+  const current=(ref:any)=>ref?.source==='RECORDED_SAME_SESSION'&&ist(ref.at)?.slice(0,10)===latest.snapshot.tradeDate&&
+   Date.parse(ref.at)<=Date.parse(latest.serverTime);
+  const close=(ref:any)=>ref?.pdcAt===ref?.pivot?.at&&ist(ref?.pdcAt)?.slice(0,10)<latest.snapshot.tradeDate&&
+   ist(ref?.pdcAt)?.slice(11,16)==='15:30';
+  const fibOk=(ref:any)=>ist(ref?.pivot?.at)?.slice(0,10)<latest.snapshot.tradeDate&&
+   ist(ref?.pivot?.at)?.slice(11,16)==='15:30'&&
+   ['R3','R2','R1','P','S1','S2','S3'].every(k=>Number.isFinite(ref?.pivot?.[k])&&ref.pivot[k]>0);
+  const row=(kind:'spot'|'ce'|'pe')=>{
+   const ref=references(a,kind),match=current(ref);
+   const pair=match&&Number.isFinite(ref.pdh)&&Number.isFinite(ref.pdl)&&ref.pdh>ref.pdl&&ref.pdl>0;
+   const pdc=match&&close(ref)&&Number.isFinite(ref.pdc)&&ref.pdc>0?ref.pdc:null;
+   const pivot=match&&fibOk(ref)?ref.pivot:null;
+   const data='<div class="op-live-level-values"><span>PDH <b>'+fmt(pair?ref.pdh:null)+'</b></span>'+
+    '<span>PDC <b>'+fmt(pdc)+'</b></span><span>PDL <b>'+fmt(pair?ref.pdl:null)+'</b></span></div>';
+   const label=match?'Recorded '+time(ref.at)+' IST · '+(kind==='spot'?'spot':a.expiry+' / '+a.strike+' '+kind.toUpperCase()):
+    'Recording unavailable or exact date/contract mismatch';
+   const fib=pivot?'<details><summary>Fibonacci from prior 15:30 · '+time(pivot.at)+' IST</summary>'+
+    '<div class="op-live-level-fib">'+['R3','R2','R1','P','S1','S2','S3'].map(k=>k+' '+fmt(pivot[k])).join(' · ')+
+    '</div></details>':'<small>Fibonacci withheld until previous-session 15:30 is verified</small>';
+   return '<div class="op-live-level-row"><strong>'+kind.toUpperCase()+'</strong>'+data+
+    '<small>'+esc(label)+'</small>'+fib+'</div>';
+  };
+  return '<div class="op-live-levels" aria-label="Recorded previous-session PDH PDC PDL">'+
+   '<h4>Recorded PDH / PDC / PDL · same dashboard</h4>'+
+   '<small>Stored observations, not live Kite ticks. Missing is not zero.</small>'+
+   row('spot')+row('ce')+row('pe')+'</div>';
  }
  function pcrSample(a:any){
   const q=a.pcrSnapshot,at=Date.parse(q?.checkedAt||''),cycleAt=Date.parse(q?.cycleStartedAt||q?.checkedAt||''),now=Date.parse(latest?.serverTime||''),period=cadences[a.symbol];
@@ -93,14 +222,21 @@ export function installDashboardLive(){
  function render(){
   const d=latest,s=d?.snapshot;
   const publish=()=>{if(typeof CustomEvent!=='undefined'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent('optionpilot:live-context',{detail:d?{...d,pcrDisplay:{...sampled}}:null}));};
-  if(!d||!s){for(const id of ['op-live-indices','op-live-participation','op-live-vix'])renderedHtml.delete(get(id));for(const key of Object.keys(sampled))delete sampled[key];for(const key of Object.keys(cardShapes))delete cardShapes[key];publish();get('op-live-indices').innerHTML='<p class="op-live-stale">'+esc(d?'Feed '+d.connectionState+' · live values unavailable':'Waiting for a fresh live connection')+'</p>';renderParticipation(null);get('op-live-vix').textContent='India VIX: unavailable';if(d)get('op-live-status').textContent='Feed '+d.connectionState+' · live values unavailable';return;}
+  if(!d||!s){if(oiEvidence)clearOiEvidence('Disconnected. REST OI withheld.');for(const id of ['op-live-indices','op-live-participation','op-live-vix'])renderedHtml.delete(get(id));for(const key of Object.keys(sampled))delete sampled[key];for(const key of Object.keys(cardShapes))delete cardShapes[key];publish();get('op-live-indices').innerHTML='<p class="op-live-stale">'+esc(d?'Feed '+d.connectionState+' · live values unavailable':'Waiting for a fresh live connection')+'</p>';renderParticipation(null);get('op-live-vix').textContent='India VIX: unavailable';if(d)get('op-live-status').textContent='Feed '+d.connectionState+' · live values unavailable';return;}
   get('op-live-status').textContent='Feed '+d.connectionState+' · server '+time(d.serverTime,true)+' IST · '+(s.omittedExpiries.length?s.omittedExpiries.length+' whole expiries outside subscription capacity · ':'')+'Live packet times below';
   const focused=document.activeElement as HTMLElement|null,editing=!!focused&&root!.contains(focused)&&focused.tagName==='SELECT';
   const quote=(label:string,q:any)=>'<div><span>'+esc(label)+'</span><strong>'+fmt(q.price)+'</strong><small>'+esc(q.state+' · '+time(q.observedAt)+' IST · received '+time(q.receivedAt,true))+'</small></div>';
   let mountedAll=true;const desiredShapes:any={};const cards=s.indices.map((a:any)=>{
-   const pcr=pcrSample(a);append(a.symbol,'spot',a.spot.price,a.spot.receivedAt);append(a.symbol,'ce',a.ce.price,a.ce.receivedAt);append(a.symbol,'pe',a.pe.price,a.pe.receivedAt);
+   const pcr=pcrSample(a);
+   for(const side of ['ce','pe']){
+    const key=a.symbol+'|'+side,id=s.tradeDate+'|'+a.expiry+'|'+a[side+'Strike'];
+    if(chartIdentities[key]!==id){delete buffers[key];delete chartPaints[a.symbol];chartIdentities[key]=id;}
+   }
+   append(a.symbol,'spot',a.spot.price,a.spot.receivedAt);
+   append(a.symbol,'ce',a.studioCE.price,a.studioCE.receivedAt);
+   append(a.symbol,'pe',a.studioPE.price,a.studioPE.receivedAt);
    const selected=selection[a.symbol]||{},expiry=selected.expiry||a.expiry,strike=selected.strike||a.strike;
-   const select=(field:string,values:any[],value:any)=>'<label>'+field+'<select data-live-index="'+a.symbol+'" data-live-field="'+field.toLowerCase()+'">'+(!values.length?'<option value="">Unavailable</option>':values.map(v=>'<option value="'+esc(v)+'"'+(String(v)===String(value)?' selected':'')+'>'+esc(v)+'</option>').join(''))+'</select></label>';
+   const select=(field:string,values:any[],value:any)=>'<label>'+field+'<select data-live-index="'+a.symbol+'" data-live-field="'+(field==='CE strike'?'ceStrike':field==='PE strike'?'peStrike':field.toLowerCase())+'">'+(!values.length?'<option value="">Unavailable</option>':values.map(v=>'<option value="'+esc(v)+'"'+(String(v)===String(value)?' selected':'')+'>'+esc(v)+'</option>').join(''))+'</select></label>';
    const metric=(label:string,value:any,digits=2)=>'<div>'+esc(label)+'<strong>'+fmt(value,digits)+'</strong></div>';
    const pcrRaw=a.pcrSnapshot,diag=pcrRaw?.coverage;
    const reported=deriveLiveThreeIndexPcr({...d,pcrDisplay:{...sampled}}).rows.find((r:any)=>r.symbol===a.symbol)?.reportedPcr;
@@ -108,32 +244,41 @@ export function installDashboardLive(){
     pcrRaw?.state==='STALE'?'SOURCE_STALE':diag?.complete?'CE_OI_ZERO_OR_CADENCE_PENDING':
     diag?.sourceSkewMs>30000?'OI_TIME_SKEW':
     diag?('M:'+diag.missing+' S:'+diag.stale+' I:'+diag.invalid):'NOT_SAMPLED';
-   const valuesInner=quote('SPOT',a.spot)+quote('FUTURES · '+(a.future.identity?.expiry||'unavailable'),a.future)+quote('CE · '+(a.strike||'—'),a.ce)+quote('PE · '+(a.strike||'—'),a.pe)+'<div>FULL PCR · '+cadences[a.symbol]/60000+' min snapshot<strong>'+fmt(pcr?.fullPcr??reported?.value,4)+'</strong><small>'+esc(pcr?'Snapshot checked '+time(pcr.checkedAt)+' IST · source '+time(pcr.sourceMinAt)+' → '+time(pcr.sourceMaxAt):reported?reported.displayLabel+' · checked '+time(reported.checkedAt)+' IST · source '+time(reported.sourceMinAt)+' → '+time(reported.sourceMaxAt)+' IST · '+reported.sourceNote:'Waiting for a complete Kite snapshot')+'</small><small>'+esc((pcr?.coverage?.freshOi??a.pcrSnapshot?.coverage?.freshOi??0)+'/'+(pcr?.coverage?.expected??a.pcrSnapshot?.coverage?.expected??a.coverage.expected)+' verified OI · '+(pcr?'VERIFIED SNAPSHOT':(a.pcrSnapshot?.state||'WAITING')+' · '+pcrWhy))+'</small></div>'+metric('Futures basis',a.futuresBasis)+metric('Futures OI',a.future.oi,0)+metric('Futures volume',a.future.volume,0)+metric('CE OI',a.ce.oi,0)+metric('PE OI',a.pe.oi,0)+metric('Snapshot CE wall strike',pcr?.callWall?.strike,0)+metric('Snapshot CE wall OI',pcr?.callWall?.oi,0)+metric('Snapshot PE wall strike',pcr?.putWall?.strike,0)+metric('Snapshot PE wall OI',pcr?.putWall?.oi,0)+metric('CE volume',a.ce.volume,0)+metric('PE volume',a.pe.volume,0)+metric('CE bid',a.ce.bid)+metric('CE ask',a.ce.ask)+metric('PE bid',a.pe.bid)+metric('PE ask',a.pe.ask);
+   const valuesInner=quote('SPOT',a.spot)+quote('FUTURES · '+(a.future.identity?.expiry||'unavailable'),a.future)+quote('CE · '+(a.ceStrike||'—'),a.studioCE)+quote('PE · '+(a.peStrike||'—'),a.studioPE)+'<div>FULL PCR · '+cadences[a.symbol]/60000+' min snapshot<strong>'+fmt(pcr?.fullPcr??reported?.value,4)+'</strong><small>'+esc(pcr?'Snapshot checked '+time(pcr.checkedAt)+' IST · source '+time(pcr.sourceMinAt)+' → '+time(pcr.sourceMaxAt):reported?reported.displayLabel+' · checked '+time(reported.checkedAt)+' IST · source '+time(reported.sourceMinAt)+' → '+time(reported.sourceMaxAt)+' IST · '+reported.sourceNote:'Waiting for a complete Kite snapshot')+'</small><small>'+esc((pcr?.coverage?.freshOi??a.pcrSnapshot?.coverage?.freshOi??0)+'/'+(pcr?.coverage?.expected??a.pcrSnapshot?.coverage?.expected??a.coverage.expected)+' verified OI · '+(pcr?'VERIFIED SNAPSHOT':(a.pcrSnapshot?.state||'WAITING')+' · '+pcrWhy))+'</small></div>'+metric('Futures basis',a.futuresBasis)+metric('Futures OI',a.future.oi,0)+metric('Futures volume',a.future.volume,0)+metric('Pinned CE OI',a.studioCE.oi,0)+metric('Pinned PE OI',a.studioPE.oi,0)+metric('Snapshot CE wall strike',pcr?.callWall?.strike,0)+metric('Snapshot CE wall OI',pcr?.callWall?.oi,0)+metric('Snapshot PE wall strike',pcr?.putWall?.strike,0)+metric('Snapshot PE wall OI',pcr?.putWall?.oi,0)+metric('CE volume',a.ce.volume,0)+metric('PE volume',a.pe.volume,0)+metric('CE bid',a.ce.bid)+metric('CE ask',a.ce.ask)+metric('PE bid',a.pe.bid)+metric('PE ask',a.pe.ask);
    const valuesHtml='<div class="op-live-kpis" data-live-values="'+a.symbol+'">'+valuesInner+'</div>';
+   const levelHtml=recordedLevelStrip(a);
    const referenceNotes=['spot','pcr','ce','pe'].filter(key=>layers[a.symbol][key]&&(levelSettings[a.symbol][key+'Opening']||levelSettings[a.symbol][key+'Fib'])).map(key=>{const r=references(a,key),opening=r?.opening;return '<p class="op-live-note">'+esc(key.toUpperCase()+' references · '+(levelSettings[a.symbol][key+'Opening']?'15m '+(opening?.complete?'sampled '+time(opening.fromAt)+' → '+time(opening.at):'unavailable / incomplete')+' · ':'')+(levelSettings[a.symbol][key+'Fib']?'FIB '+(r?.pivot?'previous stored session '+r.pivot.at:'unavailable; load exact previous session'):'') )+'</p>';}).join('');
    const layerControls='<div class="op-live-layers">'+['spot','pcr','ce','pe'].map(key=>'<button type="button" data-live-layer="'+key+'" data-live-index="'+a.symbol+'" aria-pressed="'+layers[a.symbol][key]+'">'+key.toUpperCase()+' chart · '+(layers[a.symbol][key]?'ON':'OFF')+'</button>').join('')+'</div>';
    const referenceControls='<div class="op-live-layers" aria-label="'+a.symbol+' reference controls">'+['spot','pcr','ce','pe'].filter(key=>layers[a.symbol][key]).flatMap(key=>[['Opening','15m H / L'],...(key==='pcr'?[]:[['Fib','FIB P / R / S']])].map(([suffix,label])=>'<button type="button" data-live-reference="'+key+suffix+'" data-live-index="'+a.symbol+'" aria-pressed="'+!!levelSettings[a.symbol][key+suffix]+'">'+key.toUpperCase()+' '+label+' · '+(levelSettings[a.symbol][key+suffix]?'ON':'OFF')+'</button>')).join('')+'</div>';
-   const chartKey=JSON.stringify([layers[a.symbol],levelSettings[a.symbol],['spot','pcr','ce','pe'].map(key=>references(a,key)),runtime]);
+   const chartKey=JSON.stringify([layers[a.symbol],levelSettings[a.symbol],a.expiry,a.ceStrike,a.peStrike,['spot','pcr','ce','pe'].map(key=>references(a,key)),runtime]);
    let paint=chartPaints[a.symbol];
    if(!paint||paint.key!==chartKey||Date.now()-paint.at>=250){
-    const html=['spot','pcr','ce','pe'].filter(key=>layers[a.symbol][key]).map(key=>chart(a.symbol,key,key==='pcr'?'Full PCR · '+cadences[a.symbol]/60000+' min snapshots':key.toUpperCase()+' · ₹ / points',key==='pcr'?4:2,a)).join('')+referenceNotes;paint=chartPaints[a.symbol]={key:chartKey,at:Date.now(),html};
+    const html=['spot','pcr','ce','pe'].filter(key=>layers[a.symbol][key]).map(key=>chart(a.symbol,key,key==='pcr'?'Full PCR · '+cadences[a.symbol]/60000+' min snapshots':key==='ce'?'CE '+a.ceStrike+' · ₹':key==='pe'?'PE '+a.peStrike+' · ₹':key.toUpperCase()+' · ₹ / points',key==='pcr'?4:2,a)).join('')+referenceNotes;paint=chartPaints[a.symbol]={key:chartKey,at:Date.now(),html};
    }
    const chartsHtml=paint.html;
-   const shape=JSON.stringify([expiry,strike,a.expiries,a.strikes]);
+   const shape=JSON.stringify([expiry,strike,a.ceStrike,a.peStrike,a.expiries,a.strikes]);
    const mounted=root!.querySelector('[data-live-card="'+a.symbol+'"]');
    if(mounted&&(cardShapes[a.symbol]===shape||editing)){
     writeHtml(root!.querySelector('[data-live-values="'+a.symbol+'"]'),valuesInner);
+    writeHtml(root!.querySelector('[data-live-recorded-levels="'+a.symbol+'"]'),levelHtml);
     writeHtml(root!.querySelector('[data-live-charts="'+a.symbol+'"]'),chartsHtml);
     writeHtml(root!.querySelector('[data-live-controls="'+a.symbol+'"]'),layerControls+referenceControls);
    }
    if(!mounted||cardShapes[a.symbol]!==shape)mountedAll=false;
    desiredShapes[a.symbol]=shape;
-   return '<article class="op-live-card" data-live-card="'+a.symbol+'"><h3>'+a.symbol+(a.symbol==='BANKNIFTY'?' · monthly observation':'')+'</h3>'+select('Expiry',a.expiries,expiry)+select('Strike',a.strikes,strike)+'<label>PCR update<select data-live-index="'+a.symbol+'" data-live-field="cadence"><option value="60000"'+(cadences[a.symbol]===60000?' selected':'')+'>1 min</option><option value="180000"'+(cadences[a.symbol]===180000?' selected':'')+'>3 min</option></select></label>'+valuesHtml+'<div data-live-controls="'+a.symbol+'">'+layerControls+referenceControls+'</div>'+'<div data-live-charts="'+a.symbol+'">'+chartsHtml+'</div><small>IV / Greeks: unavailable from Kite tick. Chart time = backend receipt, including milliseconds. History starts when this view connects; gaps stay disconnected. PCR is a periodic full-expiry snapshot, not tick PCR. Source checks run each minute; this view samples at your selected 1/3 min cadence. 15m = five recorded opening samples; FIB = existing previous-session pivots for Spot/CE/PE only. References require the same session and exact contract; load recorded data/earlier sessions below.</small></article>';
+   return '<article class="op-live-card" data-live-card="'+a.symbol+'"><h3>'+a.symbol+(a.symbol==='BANKNIFTY'?' · monthly observation':'')+'</h3>'+select('Expiry',a.expiries,expiry)+'<div class="op-live-strike-pins">'+select('Strike',a.strikes,strike)+select('CE strike',a.strikes,a.ceStrike)+select('PE strike',a.strikes,a.peStrike)+'</div><p class="op-live-pin-note">CE and PE may use different listed strikes in this exact expiry. Full PCR remains whole-expiry.</p><label>PCR update<select data-live-index="'+a.symbol+'" data-live-field="cadence"><option value="60000"'+(cadences[a.symbol]===60000?' selected':'')+'>1 min</option><option value="180000"'+(cadences[a.symbol]===180000?' selected':'')+'>3 min</option></select></label>'+valuesHtml+'<div data-live-recorded-levels="'+a.symbol+'">'+levelHtml+'</div><div data-live-controls="'+a.symbol+'">'+layerControls+referenceControls+'</div>'+'<div data-live-charts="'+a.symbol+'">'+chartsHtml+'</div><small>IV / Greeks: unavailable from Kite tick. Chart time = backend receipt, including milliseconds. History starts when this view connects; gaps stay disconnected. PCR is a periodic full-expiry snapshot, not tick PCR. Source checks run each minute; this view samples at your selected 1/3 min cadence. 15m = five recorded opening samples; FIB = existing previous-session pivots for Spot/CE/PE only. References require the same session and exact contract; load recorded data/earlier sessions below.</small></article>';
   }).join('');
   publish();if(!mountedAll&&!editing){writeHtml(get('op-live-indices'),cards);for(const key of Object.keys(desiredShapes))cardShapes[key]=desiredShapes[key];}
   writeHtml(get('op-live-vix'),'<div class="op-live-kpis">'+quote('INDIA VIX',s.vix)+'</div>');
   renderParticipation(s);
  }
+ get('op-live-oi-check').onclick=()=>{void checkOiEvidence();};
+ get('op-live-oi-index').onchange=()=>clearOiEvidence('Index changed. Tap Check verified OI.');
+ // The OI panel is opt-in. Closing it releases cached rows and cancels any in-flight
+ // read-only GET; it must never redraw on high-frequency market SSE messages.
+ get('op-live-oi-evidence').ontoggle=()=>{
+  if(!get('op-live-oi-evidence').open)clearOiEvidence('Open panel and tap Check verified OI.');
+ };
  if(typeof window.addEventListener==='function')window.addEventListener('optionpilot:live-selection',((event:any)=>{
   const next=event.detail,index=next?.symbol;if(!indices.includes(index)||!latest?.snapshot)return;
   const a=latest.snapshot.indices.find((r:any)=>r.symbol===index);if(!a)return;
@@ -142,9 +287,40 @@ export function installDashboardLive(){
   const changed=Object.keys(next).some(field=>field!=='symbol'&&selection[index]?.[field]!==next[field]);if(!changed)return;
   selection[index]={...selection[index],...(next.expiry?{expiry:next.expiry}:{}),...(next.ceStrike!==undefined?{ceStrike:next.ceStrike}:{}),...(next.peStrike!==undefined?{peStrike:next.peStrike}:{})};
   if(next.expiry&&next.expiry!==a.expiry){delete selection[index].strike;delete selection[index].ceStrike;delete selection[index].peStrike;}
-  delete sampled[index];delete chartPaints[index];latest=null;render();connect(true);
+  // Pin changes have no authority over the whole-expiry PCR. Reset just the
+  // selected side's chart so quotes from separate contracts never join.
+  if(next.expiry&&next.expiry!==a.expiry){
+   for(const side of ['ce','pe','pcr'])delete buffers[index+'|'+side];
+   delete sampled[index];
+  }else{
+   if(next.ceStrike!==undefined)delete buffers[index+'|ce'];
+   if(next.peStrike!==undefined)delete buffers[index+'|pe'];
+  }
+  delete chartPaints[index];latest=null;render();connect(true);
  }) as EventListener);
- get('op-live-indices').onchange=(event:any)=>{const e=event.target,index=e.dataset.liveIndex,field=e.dataset.liveField;if(indices.includes(index)&&field==='cadence'){if(!['60000','180000'].includes(e.value))return;cadences[index]=Number(e.value);delete sampled[index];delete buffers[index+'|pcr'];delete chartPaints[index];render();return;}if(!indices.includes(index)||!['expiry','strike'].includes(field)||!e.value)return;delete sampled[index];delete chartPaints[index];selection[index]={...selection[index],[field]:field==='strike'?Number(e.value):e.value};if(field==='expiry')delete selection[index].strike;for(const key of ['pcr','ce','pe'])delete buffers[index+'|'+key];latest=null;render();connect(true);};
+ get('op-live-indices').onchange=(event:any)=>{
+  const e=event.target,index=e?.dataset?.liveIndex,field=e?.dataset?.liveField;
+  if(indices.includes(index)&&field==='cadence'){
+   if(!['60000','180000'].includes(e.value))return;
+   cadences[index]=Number(e.value);delete sampled[index];delete buffers[index+'|pcr'];
+   delete chartPaints[index];render();return;
+  }
+  if(!indices.includes(index)||!['expiry','strike','ceStrike','peStrike'].includes(field)||!e.value)return;
+  const a=latest?.snapshot?.indices?.find((r:any)=>r.symbol===index);
+  if(!a)return;
+  const numeric=field!=='expiry',value=numeric?Number(e.value):e.value;
+  if(field==='expiry'?!a.expiries.includes(value):
+    !Number.isFinite(value)||!a.strikes.includes(value))return;
+  const old=selection[index]||{},next={...old,[field]:value};
+  if(field==='expiry'){
+   delete next.strike;delete next.ceStrike;delete next.peStrike;
+   delete sampled[index];
+   for(const key of ['pcr','ce','pe'])delete buffers[index+'|'+key];
+  }else if(field==='strike'){
+   for(const side of ['ce','pe'])if(old[side+'Strike']===undefined)delete buffers[index+'|'+side];
+  }else delete buffers[index+'|'+(field==='ceStrike'?'ce':'pe')];
+  selection[index]=next;delete chartPaints[index];latest=null;render();connect(true);
+ };
  get('op-live-indices').onclick=(event:any)=>{const ref=event.target.closest?.('[data-live-reference]');if(ref){const index=ref.dataset.liveIndex,key=ref.dataset.liveReference;if(indices.includes(index)&&/^(spot|pcr|ce|pe)Opening$|^(spot|ce|pe)Fib$/.test(key)){levelSettings[index][key]=!levelSettings[index][key];render();}return;}const e=event.target.closest?.('[data-live-layer]');if(!e||!indices.includes(e.dataset.liveIndex)||!['spot','pcr','ce','pe'].includes(e.dataset.liveLayer))return;layers[e.dataset.liveIndex][e.dataset.liveLayer]=!layers[e.dataset.liveIndex][e.dataset.liveLayer];render();};
  get('op-live-participation-panel').ontoggle=()=>{
   const panel=get('op-live-participation-panel');
@@ -154,7 +330,7 @@ export function installDashboardLive(){
  get('op-live-toggle').onclick=()=>{on=!on;get('op-live-toggle').setAttribute('aria-pressed',String(on));get('op-live-toggle').textContent=on?'Live view ON':'Live view OFF';get('op-live-body').hidden=!on;if(on)connect();else{close();latest=null;render();get('op-live-status').textContent='Live stream paused';}};
  document.addEventListener('visibilitychange',()=>{if(document.hidden){close();latest=null;render();}else connect();});
  window.addEventListener('online',()=>connect());window.addEventListener('pageshow',()=>{disposed=false;connect();});window.addEventListener('pagehide',()=>{disposed=true;close();latest=null;render();});
- setInterval(()=>{if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect(true);}},1000);
+ setInterval(()=>{if(oiEvidence&&get('op-live-oi-evidence').open)paintOiEvidence();if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect(true);}},1000);
  if(typeof CustomEvent!=='undefined'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent('optionpilot:request-recorded-levels',{detail:null}));
  connect();
 }

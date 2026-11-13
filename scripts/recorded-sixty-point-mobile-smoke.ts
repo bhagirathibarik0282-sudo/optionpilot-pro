@@ -33,6 +33,7 @@ try{
    await page.goto(base);await page.waitForFunction(()=>document.getElementById('clock')?.textContent?.includes('SAVED'));
    await page.locator('#ar-minute-history summary').click();
    const minuteTable=page.locator('#ar-minute-table');
+   await minuteTable.getByRole('button',{name:'09:16',exact:true}).waitFor();
    assert.equal(await minuteTable.locator('tbody tr').count(),3);
    const scroll=minuteTable.locator('div').first();
    assert(await scroll.evaluate(node=>{

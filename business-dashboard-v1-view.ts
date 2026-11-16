@@ -23,6 +23,56 @@ import { MARKET_BOOK_HTML, MARKET_BOOK_CSS, installMarketBook } from './market-b
 import type { BusinessDashboardV1Model } from './business-dashboard-v1.js';
 import { standardIndexObservationClose } from './index-observation-session.js';
 
+export function deriveRecordedVixPcrRows(
+  symbols: string[],
+  data: Record<string, { market?: any[]; chain?: any[] }>,
+  expiries: Record<string, string>,
+) {
+  function collect(records: any[], field: string, minimum: number) {
+    const values = new Map<number, number | null>();
+    for (const record of records) {
+      const minute = Date.parse(record.minute_bucket);
+      const value = record[field];
+      if (!Number.isFinite(minute) || minute % 60_000 !== 0) continue;
+      const usable = record.truth_verdict === 'TRUE' && typeof value === 'number'
+        && Number.isFinite(value) && value >= minimum;
+      if (values.has(minute)) {
+        if (!usable || values.get(minute) !== value) values.set(minute, null);
+      } else {
+        values.set(minute, usable ? value : null);
+      }
+    }
+    return values;
+  }
+  function point(values: Map<number, number | null>, minute: number) {
+    const value = values.get(minute) ?? null;
+    const previous = values.get(minute - 60_000) ?? null;
+    return { value, delta: value === null || previous === null ? null : value - previous };
+  }
+  const vix = collect((data.NIFTY?.market ?? []).filter(row => row.symbol === 'NIFTY'), 'india_vix', Number.MIN_VALUE);
+  const pcr = symbols.map(symbol => collect((data[symbol]?.chain ?? []).filter(row =>
+    row.symbol === symbol && Boolean(expiries[symbol]) && String(row.expiry).slice(0, 10) === expiries[symbol]
+    && ['Normalized full-chain source', 'Exact archived full-chain source'].includes(row.full_pcr_source)
+  ), 'full_chain_oi_pcr', 0));
+  const minutes = new Set([...vix.keys(), ...pcr.flatMap(values => [...values.keys()])]);
+  return [...minutes].sort((a, b) => b - a).map(minute => {
+    const volatility = point(vix, minute);
+    return {
+      at: new Date(minute).toISOString(),
+      vix: volatility,
+      indices: pcr.map(values => {
+        const ratio = point(values, minute);
+        const delta = ratio.delta, vixDelta = volatility.delta;
+        const alignment = ratio.value === null || delta === null || vixDelta === null ? 'Unavailable'
+          : delta === 0 || vixDelta === 0 || (ratio.value >= 0.85 && ratio.value <= 1.10) ? 'Neutral'
+          : ratio.value > 1.10 && delta > 0 && vixDelta < 0 ? 'CE aligned'
+          : ratio.value < 0.85 && delta < 0 && vixDelta > 0 ? 'PE aligned' : 'Mixed';
+        return { ...ratio, alignment };
+      }),
+    };
+  });
+}
+
 /** Repair the known legacy band/full label in the read-only view, never in storage. */
 export function resolveRecordedFullPcr(input: any): any[] {
   const rows=(t:any):any[]=>Array.isArray(t)?t:t?.columns&&t?.rows?t.rows.map((r:any[])=>Object.fromEntries(t.columns.map((c:string,i:number)=>[c,r[i]]))):[];
@@ -407,7 +457,7 @@ ${MARKET_BOOK_CSS}${RAG_CARD_CSS}${DASHBOARD_LIVE_CSS}${DASHBOARD_READING_CSS}${
 <section id="statistical-overview" class="panel"><h2>Measured changes · Statistical context</h2><p id="statistics-scope" class="tiny">Load a session and choose an exact premium.</p><div id="statistics-cards" class="statistics-grid"></div><details><summary>Calculation, sample coverage & limitations</summary><p id="statistics-definition" class="tiny"></p><div id="statistics-coverage" class="table"></div></details></section>
 <section id="reading-checklist" class="panel" lang="or"><h2>ତଥ୍ୟ ପଢ଼ିବାର ସରଳ Checklist</h2><p class="tiny">ଚୟନ କରିଥିବା contract ର measured facts · candidate ବା score ନୁହେଁ</p><div id="reading-facts"></div><details id="reading-guide"><summary>ଏହି ତଥ୍ୟ କେମିତି ବୁଝିବି?</summary><p>PDH/PDL = ଏହି exact premium ର source previous-day reference levels। Break ପରେ ପରବର୍ତ୍ତୀ recorded samples ଦେଖନ୍ତୁ; sample ମଝିର movement ଅଜଣା। OI କମିବାରୁ buyer exit ବା seller covering ନିଶ୍ଚିତ କହିହେବନି। PCR ବଦଳିବା market direction ର ନିଶ୍ଚିତ ପ୍ରମାଣ ନୁହେଁ।</p><p>IV = selected option ର implied volatility; India VIX = NIFTY options ଆଧାରିତ 30-calendar-day expected volatility। DTE = source ର days-to-expiry। ପ୍ରତ୍ୟେକ expiry ର ନିଜ change ଅଲଗା ଦେଖନ୍ତୁ।</p><p>LTP = ଶେଷ recorded trade price; ଏବେ ସେହି price ରେ fill guaranteed ନୁହେଁ। Spread = ask − bid; volume ଏଠାରେ cumulative daily total। ନିଜ ଧାରଣା, କଣ ହେଲେ ଭୁଲ୍ ଓ loss limit ଲେଖନ୍ତୁ। ଏହା eligibility checklist ନୁହେଁ।</p><p>ସବୁଜ = measured increase; pink = measured decrease; cyan = recorded current value; amber = warning। From Open = exact 09:15 sampled observation। Recording cadence 3m; refresh 60s tick-by-tick alert ନୁହେଁ।</p><p class="tiny">Definitions: <a href="https://www.optionseducation.org/optionsoverview/options-pricing" target="_blank" rel="noopener">OIC pricing</a> · <a href="https://www.optionseducation.org/news/open-interest-why-it-matters" target="_blank" rel="noopener">OIC open interest</a> · <a href="https://www.optionseducation.org/news/understanding-the-bid-and-ask-prices-for-options" target="_blank" rel="noopener">OIC bid/ask</a> · <a href="https://www.nseindia.com/static/products-services/indices-indiavix-index" target="_blank" rel="noopener">NSE India VIX</a></p></details></section>
 <section id="market-context" class="panel" style="order:7"><h2>Saved market context</h2><p class="tiny">FII/DII cash data = latest stored session context; independent of selected replay date. Context only · no trade signals.</p><div id="cash-context">Loading saved FII/DII…</div><details><summary>Manual GIFT context · this device only</summary><p class="tiny">ଆପଣଙ୍କ sourceର quote ଓ ସମୟ ଲେଖନ୍ତୁ। ଏହା live API ବା exchange-verified data ନୁହେଁ; ଏହି deviceରେ save ହେବ।</p><form id="gift-context-form" class="controls"><label>GIFT price<input id="gift-price" type="number" step="any" min="0.01" required></label><label>Reported change %<input id="gift-change" type="number" step="any" required></label><label>Observed time IST<input id="gift-time" type="datetime-local" required></label><label>Source / note<input id="gift-source" type="text" maxlength="200" required></label><button type="submit">Save manual context</button><button id="gift-clear" type="button">Clear</button></form><div id="gift-context-output" aria-live="polite">No manual GIFT context saved.</div></details></section>
-<section id="all-index-overview" class="panel"><h2>All indices · Spot & Full PCR</h2><p class="tiny">Recorded session observations · exact PCR expiry per index · separate scales · missing values and gaps remain unavailable.</p><div id="all-index-grid"></div></section>
+<section id="all-index-overview" class="panel"><h2>All indices · Spot & Full PCR</h2><p class="tiny">Recorded session observations · exact PCR expiry per index · separate scales · missing values and gaps remain unavailable.</p><details><summary>India VIX × Full PCR · 1m alignment</summary><p class="tiny">Exact recorded minute and expiry. The PCR/VIX badge uses a descriptive rule from the demo. Latest 10 recorded minutes in the selected window.</p><div id="recorded-vix-pcr" class="table"></div></details><div id="all-index-grid"></div></section>
 <section id="session-panel" class="panel"><details id="session-settings"><summary>Session & filters <span id="session-brief">· select dates, index and expiry</span></summary><form id="data-form" class="controls"><label>Observation date<input id="date" type="date" required></label><label>Swing baseline date (optional)<input id="baseline" type="date"></label><label>From IST<input id="from" type="time" value="09:15" required></label><label>To IST<input id="to" type="time" value="15:30" required></label><button class="primary" id="load">Load all three indices</button><label class="check"><input id="auto" type="checkbox" checked>Refresh recorded data / 60s</label></form><div class="notice" id="status">Finding recorded dates…</div><small>Immediate = previous returned observation; intraday = first returned observation in your window; swing = last recorded observation on the selected earlier date. Every comparison exposes both timestamps. This is sampled history, not a tick-by-tick alert service.</small><p class="tiny" id="coverage"></p><div class="controls"><label>Detail index<select id="detail-symbol"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>Detail expiry<select id="expiry-filter"><option value="">All recorded expiries</option></select></label><button id="export" disabled>Export displayed observations</button></div></details></section>
 <section id="session-summary" class="panel priority"><div class="summary-top"><div><span class="eyebrow">DATA · READ ONLY</span><h2>NOTABLE NOW</h2></div><div class="controls"><label>Index<select id="summary-index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>Session view<select id="summary-mode"><option value="pre">Pre-market reference</option><option value="after" selected>After-open review</option></select></label><label>Exact expiry<select id="summary-expiry"></select></label><label>Premium<select id="summary-contract"></select></label></div></div><p id="summary-source" class="tiny">Recorded session not loaded.</p><div id="annex-headline" aria-live="polite"></div><div class="annex-bridge"><div><b>Yesterday → Today Bridge</b><div id="annex-bridge"></div></div><div><b>What persisted?</b><div id="annex-persisted"></div></div></div><div id="annex-mode-body"></div><div id="summary-one-line" class="summary-neon">Waiting for recorded data.</div><div id="summary-tiles" class="summary-grid"></div><div id="summary-links" class="summary-links"><button data-view="ladder">Premium breaks</button><button data-view="pcr-spot">PCR graph</button><button data-view="oi">OI journal</button><button data-view="memory">Day memory</button><button data-view="participation">Sectors</button><button data-view="indices">Index details</button></div><details><summary>Latest events, sources & readiness</summary><div id="summary-events" class="summary-events"></div><p id="summary-quality" class="tiny"></p><p id="summary-participation" class="tiny"></p><p id="summary-definitions" class="tiny"></p></details></section>
 <details id="annex-raw" class="panel"><summary>Raw tables, charts & definitions</summary><section id="futures" class="section"><h2><span class="gold">03</span> NIFTY · SENSEX · BANKNIFTY alignment</h2><p class="muted">Spot and futures observed percentage moves, basis and futures OI. Direction agreement is descriptive only.</p><div class="grid" id="index-cards"></div><details><summary>Full futures comparison</summary><div class="panel table" id="future-table"></div></details><small>Futures expiry identity is not exposed by this historical route. Cross-day futures-series changes may contain rollover effects and are not a verified same-contract swing return.</small></section>
@@ -426,7 +476,7 @@ ${MARKET_BOOK_CSS}${RAG_CARD_CSS}${DASHBOARD_LIVE_CSS}${DASHBOARD_READING_CSS}${
 
 const CLIENT = String.raw`(function(){
 installDashboardReading();
-'use strict';const observationSessionClose=${standardIndexObservationClose.toString()};let book=null;const $=id=>document.getElementById(id),symbols=['NIFTY','SENSEX','BANKNIFTY'];let data={},raw={},sources={},busy=false,datesLoading=true,liveBusy=false,livePrevious={},loadedScope={},recordedDates=[],memory={},memoryBusy=false,memoryVersion=0,memoryView=null,pcrCache={},pcrExpiries={},pcrMemoryBusy=false,ladderView=[],oiView=null,oiPage=0,activeTab="observations",summaryView=null,latestSectors=null,indexLoadState={},baselineCache=new Map(),lastRefreshStartedAt=null,lastRefreshFinishedAt=null,lastQuoteRefreshStartedAt=null,annexWindow='3m',annexView=null,eodCache=new Map(),replayPreview=null;
+'use strict';const observationSessionClose=${standardIndexObservationClose.toString()};const deriveRecordedVixPcrRows=${deriveRecordedVixPcrRows.toString()};let book=null;const $=id=>document.getElementById(id),symbols=['NIFTY','SENSEX','BANKNIFTY'];let data={},raw={},sources={},busy=false,datesLoading=true,liveBusy=false,livePrevious={},loadedScope={},recordedDates=[],memory={},memoryBusy=false,memoryVersion=0,memoryView=null,pcrCache={},pcrExpiries={},pcrMemoryBusy=false,ladderView=[],oiView=null,oiPage=0,activeTab="observations",summaryView=null,latestSectors=null,indexLoadState={},baselineCache=new Map(),lastRefreshStartedAt=null,lastRefreshFinishedAt=null,lastQuoteRefreshStartedAt=null,annexWindow='3m',annexView=null,eodCache=new Map(),replayPreview=null;
 const n=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v);
 const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(v,d=2)=>n(v)===null?'—':Number(v).toLocaleString('en-IN',{maximumFractionDigits:typeof d==='number'?d:2});
@@ -647,7 +697,22 @@ function renderAllIndexGraphs(){
  if(!expiries.includes(pcrExpiries[symbol]))pcrExpiries[symbol]=expiries.find(e=>e>=loadedScope.date)||expiries.at(-1)||'';
  const chain=rows.filter(r=>exp(r.expiry)===pcrExpiries[symbol]).sort((a,b)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket)),market=(d.market||[]).filter(r=>r.symbol===symbol).slice().sort((a,b)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket)),c=chain.at(-1),m=market.at(-1);
  return '<article class="index-graph"><h3>'+symbol+'</h3><small data-index-freshness="'+symbol+'"></small><div class="kpi"><div>Spot · points<strong class="annex-current">'+fmt(m?.spot_ltp,2)+'</strong><small>'+esc(when(m?.minute_bucket))+'</small></div><div>Full PCR · ratio<strong class="annex-current">'+fmt(c?.full_chain_oi_pcr,3)+'</strong><small>'+esc(when(c?.minute_bucket))+'</small></div></div><label class="tiny">Exact PCR expiry <select data-all-index-expiry="'+symbol+'" aria-label="'+symbol+' overview PCR expiry">'+(expiries.map(e=>'<option value="'+esc(e)+'" '+(e===pcrExpiries[symbol]?'selected':'')+'>'+esc(e)+'</option>').join('')||'<option value="">Unavailable</option>')+'</select></label><details data-index-graph="'+symbol+'"'+(openGraphs.has(symbol)?' open':'')+'><summary>Spot & PCR graphs · '+market.length+' market / '+chain.length+' chain observations</summary><div class="chart">'+lineChart([{label:symbol+' spot · points',field:'spot_ltp',color:'#67deed',rows:market}])+'</div><div class="chart">'+lineChart([{label:symbol+' Full PCR · ratio · '+pcrExpiries[symbol],field:'full_chain_oi_pcr',color:'#67deed',rows:chain}])+'</div></details></article>';
- }).join('');syncFreshnessLabels();
+ }).join('');renderRecordedVixPcr();syncFreshnessLabels();
+}
+function renderRecordedVixPcr(){
+ const target=$('recorded-vix-pcr');
+ if(!target)return;
+ const rows=deriveRecordedVixPcrRows(symbols,data,pcrExpiries).slice(0,10);
+ function reading(point,digits){
+  if(point.value===null)return '—';
+  const arrow=point.delta===null?'—':point.delta>0?'↑':point.delta<0?'↓':'→';
+  return fmt(point.value,digits)+' '+arrow+(point.delta===null?'':' '+sign(point.delta,digits));
+ }
+ const colors={'CE aligned':'#77ffd1','PE aligned':'#ff9caf',Mixed:'#ffdc8c',Neutral:'#bacbdf',Unavailable:'#bacbdf'};
+ const headings=symbols.map(symbol=>'<th>'+esc(symbol+' · '+(pcrExpiries[symbol]||'Expiry unavailable'))+'</th>').join('');
+ const body=rows.map(row=>'<tr><th scope="row">'+esc(when(row.at))+'</th><td>'+esc(reading(row.vix,2))+'</td>'+row.indices.map(index=>
+  '<td>'+esc(reading(index,3))+' <small style="color:'+colors[index.alignment]+'">'+esc(index.alignment)+'</small></td>').join('')+'</tr>').join('');
+ target.innerHTML=rows.length?'<table><thead><tr><th>Observed IST</th><th>India VIX · Δ1m</th>'+headings+'</tr></thead><tbody>'+body+'</tbody></table>':'<p class="tiny">Recorded India VIX and PCR observations unavailable.</p>';
 }
 $('all-index-grid').onchange=e=>{const symbol=e.target.dataset.allIndexExpiry;if(symbols.includes(symbol)){pcrExpiries[symbol]=e.target.value;renderAllIndexGraphs();}};
 function renderPcrGraphs(){

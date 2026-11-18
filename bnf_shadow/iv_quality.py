@@ -101,7 +101,21 @@ def _validate_signal_iv(signal, cfg, now, evidence):
         tolerance = min(0.05, signal.contract.tick_size/2)
         if residual > tolerance: raise ValueError('IV_REPRICING_RESIDUAL_FAILED')
         results[key] = {'residual_points': residual, 'iv_percent': iv}
-    return {'profile': PROFILE, 'parameters': expected, 'instrument_token': signal.contract.instrument_token,
+    opposite_receipt = None
+    opposite = evidence.get('opposite')
+    if opposite is not None:
+        if type(opposite) is not dict or opposite.get('tradingsymbol') != signal.opposite_tradingsymbol:
+            raise ValueError('OPPOSITE_IDENTITY_MISMATCH')
+        clean = {}
+        for key, ts in (('current', signal.signal_ts), ('baseline', signal.baseline_ts)):
+            row = opposite[key]
+            if timestamp(row['quote_ts']) != timestamp(ts) or type(row['oi']) is not int or row['oi'] < 0:
+                raise ValueError('OPPOSITE_CLOCK_OR_OI_INVALID')
+            clean[key] = {'quote_ts':timestamp(ts).isoformat(), 'premium':number(row['premium'],'opposite_premium',positive=True), 'oi':row['oi']}
+        if abs(clean['current']['premium']-clean['baseline']['premium']-signal.opp_ltp_chg_3m) > 1e-8 or clean['current']['oi']-clean['baseline']['oi'] != signal.opp_oi_chg_3m:
+            raise ValueError('OPPOSITE_SIGNAL_EVIDENCE_MISMATCH')
+        opposite_receipt = {'tradingsymbol':signal.opposite_tradingsymbol, **clean}
+    return {'opposite_evidence': opposite_receipt, 'profile': PROFILE, 'parameters': expected, 'instrument_token': signal.contract.instrument_token,
         'tradingsymbol': signal.contract.tradingsymbol, 'expiry_clock_source': 'INDEX_EXPIRY_CLOCK',
         'expiry_ts': expiry.isoformat(), 'samples': {key: {
             'asof_ts': timestamp(evidence[key]['asof_ts']).isoformat(),

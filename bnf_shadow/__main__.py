@@ -22,8 +22,10 @@ def main():
     parser.add_argument('--replay',action='store_true',help='Use explicit event now timestamps; no real-time assumptions')
     parser.add_argument('--instrument-master',help='Local Kite-format CSV; required for replay')
     parser.add_argument('--master-date',help='YYYY-MM-DD CSV as-of date; required for replay')
+    parser.add_argument('--preflight',action='store_true',help='Check runtime/auth/master/journal read-only and exit')
     parser.add_argument('--init-schema',action='store_true',help='Apply additive SHADOW schema and exit')
     args=parser.parse_args()
+    if args.preflight and (args.replay or args.init_schema or args.input): raise ValueError('preflight is a separate read-only mode')
     cfg=BNFConfig(**json.loads(Path(args.config).read_text()))
     if os.environ.get('EXECUTION_MODE','SHADOW').strip().upper()!='SHADOW':
         raise ValueError('LIVE_DISABLED')
@@ -40,6 +42,15 @@ def main():
         session=provider.resolve(); provider.verify(session)
         account=session.user_id
         master=InstrumentMaster(provider.get('/instruments/NFO',session).decode(),datetime.now(IST).date())
+    if args.preflight:
+        from .runtime_preflight import check_journal
+        nearest=min((c.expiry_date for c in master.records.values() if c.expiry_date>=datetime.now(IST).date()),default=None)
+        if nearest is None or any(c.contract_lot_size!=cfg.contract_lot_size for c in master.records.values() if c.expiry_date==nearest):
+            print(json.dumps({'status':'CONTRACT_LOT_CONFIG_MISMATCH','ready':False,'broker_orders':0,'journal_writes':0}),flush=True)
+            raise SystemExit(2)
+        report=check_journal(db_url); print(json.dumps(report),flush=True)
+        if not report['ready']: raise SystemExit(2)
+        return
     # One account/strategy/mode owner, regardless of configuration differences.
     store=TradeStore.connect(db_url,f'BNF_V1:{account}:SHADOW')
     try:
@@ -52,6 +63,7 @@ def main():
                 startup_now=timestamp(json.loads(first_input.readline())['now'])
         engine=OrderStateMachine(cfg,store,startup_now=startup_now)
         bridge=OptionPilotLiveBridge(engine,master,require_iv_evidence=not args.replay,derive_live_signals=not args.replay)
+        if not args.replay: print(json.dumps({'status':'SHADOW_WORKER_READY','mode':'SHADOW','broker_orders':0}),flush=True)
         stream=open(args.input) if args.input else sys.stdin
         try:
             if args.replay:
@@ -91,6 +103,8 @@ def main():
                 if time.monotonic()-checked>=30:
                     current=provider.resolve(); provider.verify(current)
                     if current.user_id!=account: raise ValueError('session account changed')
+                    if current.token!=session.token and bridge.producer: bridge.producer.reset()
+                    session=current
                     checked=time.monotonic()
                     if bridge.producer: print(json.dumps({"status":"SHADOW_SOURCE_STATUS",**bridge.producer.status()}),file=sys.stderr)
                 try: event=events.get(timeout=1)

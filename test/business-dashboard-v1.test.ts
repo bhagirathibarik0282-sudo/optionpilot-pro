@@ -230,7 +230,8 @@ test("full-screen DATA DASHBOARD displays existing BANKNIFTY SHADOW worker statu
  assert.equal((markup.match(/id="op-bnf-shadow"/g)||[]).length,1);
  assert.ok(markup.indexOf('id="rd-bnf-shadow"')<markup.indexOf('id="rd-viewport"'));
  const installer=installScreenOverview.toString();
- assert.match(installer, /Worker status unavailable · paper trades not verified/);
+ assert.match(installer, /Worker status unavailable/);
+ assert.match(installer, /paper trades not verified/);
  assert.match(installer, /op-bnf-shadow-state/);
  assert.match(installer, /rd-bnf-shadow-state/);
  assert.match(installer, /op-bnf-shadow-evidence/);

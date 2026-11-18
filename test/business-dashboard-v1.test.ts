@@ -143,7 +143,9 @@ test("observation terminal exposes compact views, bounded replay loading and exp
   assert.match(html, /getReplay\(s\+' session'/);
   assert.match(html, /sameScope&&oldData\[s\]/);
   assert.match(html, /CORE covers recorded ATM ±7/);
-  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  // Scripts contain future dynamic card templates; count only IDs in the actual HTML DOM.
+  const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  const ids = [...markup.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length);
 });
 
@@ -207,12 +209,13 @@ test("recorded PCR and VIX require the same adjacent minute and exact expiry", (
 
 test("existing dashboard contains one live BANKNIFTY SHADOW card and its browser PCR helper", () => {
  const html=renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY"));
- assert.equal((html.match(/id="dashboard-live"/g)||[]).length,1);
- assert.equal((html.match(/id="op-bnf-shadow"/g)||[]).length,1);
+ const markup=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+ assert.equal((markup.match(/id="dashboard-live"/g)||[]).length,1);
+ assert.equal((markup.match(/id="op-bnf-shadow"/g)||[]).length,1);
  assert.match(html, /BANKNIFTY · SHADOW PAPER/);
  assert.match(html, /const deriveLiveThreeIndexPcr=/);
  assert.match(html, /\/api\/research\/dashboard-live\/bnf-shadow/);
- const index=html.indexOf('id="op-bnf-shadow"');
- assert.ok(index>html.indexOf('id="observations-view"'));
- assert.ok(index<html.indexOf('id="op-workspace-advanced"'));
+ const index=markup.indexOf('id="op-bnf-shadow"');
+ assert.ok(index>markup.indexOf('id="observations-view"'));
+ assert.ok(index<markup.indexOf('id="op-workspace-advanced"'));
 });

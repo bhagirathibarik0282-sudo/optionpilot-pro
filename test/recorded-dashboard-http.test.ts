@@ -75,3 +75,34 @@ test('normal recorded replay does not mislabel an operating-hours worker as off-
  const r=await fetch(url+'/recorded-dashboard');assert.equal(r.status,200);
  assert.doesNotMatch(await r.text(),/id="ar-bnf-shadow"/);
 });
+
+
+test('GET-only day-wise SHADOW journal endpoint works after hours without touching trading or replay',async t=>{
+ let reads=0;
+ const report={ok:true,mode:'BNF_SHADOW_DAYWISE_READ_ONLY_V1',source:'DURABLE_PAPER_JOURNAL',lots:[1,2,4,6],days:[],reason:'NO_VERIFIED_SHADOW_JOURNAL_EVENTS',estimatedOnly:true,brokerOrders:0,fillsNotScaled:true};
+ const url=await serve(t,{daywise:async()=>{reads++;return report}},false);
+ const response=await fetch(url+'/api/research/recorded-dashboard/bnf-shadow-daywise');
+ assert.equal(response.status,200);
+ assert.equal(response.headers.get('x-optionpilot-mode'),'RECORDED_READ_ONLY');
+ assert.deepEqual(await response.json(),report);
+ assert.equal(reads,1);
+ const post=await fetch(url+'/api/research/recorded-dashboard/bnf-shadow-daywise',{method:'POST'});
+ assert.equal(post.status,405);
+ assert.equal(reads,1);
+});
+
+test('day-wise SHADOW journal evidence failure never renders fictitious P&L',async t=>{
+ const url=await serve(t,{daywise:async()=>({ok:false,mode:'BNF_SHADOW_DAYWISE_READ_ONLY_V1',reason:'SHADOW_JOURNAL_UNAVAILABLE',days:[],lots:[1,2,4,6],brokerOrders:0})});
+ const response=await fetch(url+'/api/research/recorded-dashboard/bnf-shadow-daywise');
+ assert.equal(response.status,503);
+ const body=await response.json();
+ assert.equal(body.days.length,0);
+ assert.equal(body.reason,'SHADOW_JOURNAL_UNAVAILABLE');
+});
+
+test('after-hours dashboard mounts the same read-only lot comparison on the existing page',()=>{
+ const html=renderRecordedDashboard(true);
+ assert.equal((html.match(/class="op-bnf-daywise"/g)||[]).length,1);
+ assert.match(html,/1 \/ 2 \/ 4 \/ 6 lots/);
+ assert.match(html,/recorded-dashboard\/bnf-shadow-daywise/);
+});

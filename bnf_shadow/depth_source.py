@@ -21,6 +21,8 @@ class KiteDepthSource:
         # Do not impose ATM selection on existing positions; the signal bridge does that.
         exchange = timestamp(packet['exchangeTimestamp'])
         if context.get('symbol') != 'BANKNIFTY': raise ValueError('wrong market context')
+        if context.get('vwap_basis') != 'NEAR_FUTURES_AVERAGE_PRICE' or context.get('comparison_policy') != 'LEGACY_SPOT_VS_NEAR_FUTURES_AVERAGE':
+            raise ValueError('explicit legacy futures-reference provenance required')
         for name in ('spot_ts', 'vwap_ts'):
             ts = timestamp(context[name])
             if ts.date() != now.date() or not 0 <= (received-ts).total_seconds() <= self.cfg.max_quote_age_sec:

@@ -11,6 +11,7 @@ type Config = {
   contractFor: (token: number) => { instrument_token: number; tradingsymbol: string } | null;
   contextFor: (token: number) => Context | null;
   now?: () => number;
+  expiryClockFor?: (token: number, observedAt: string) => { expiry_clock_source: 'INDEX_EXPIRY_CLOCK'; expiry_ts: string } | null;
 };
 
 function awareMs(value: unknown): number {
@@ -66,10 +67,16 @@ export function installBnfShadowFeedRelay(config: Config) {
             Number.isInteger(l.quantity) && l.quantity >= 0 && Number.isInteger(l.orders) && l.orders >= 0))) {
           status.rejected++; continue;
         }
+        let signalSource = null;
+        try {
+          const clock = config.expiryClockFor?.(packet.instrumentToken, packet.exchangeTimestamp!);
+          if (clock?.expiry_clock_source === 'INDEX_EXPIRY_CLOCK' && Number.isFinite(awareMs(clock.expiry_ts)) && awareMs(clock.expiry_ts) > exchange)
+            signalSource = { expiry_clock_source: clock.expiry_clock_source, expiry_ts: clock.expiry_ts };
+        } catch { /* Missing source metadata blocks new signals, not valid position depth. */ }
         // Allowlist fields. Never serialize the caller's object, session or credentials.
-        const line = JSON.stringify({ type: 'kite_depth', tradingsymbol: contract.tradingsymbol, receive_ts: receivedAt,
+        const line = JSON.stringify({ signal_source: signalSource, type: 'kite_depth', tradingsymbol: contract.tradingsymbol, receive_ts: receivedAt,
           packet: { mode: packet.mode, isIndex: packet.isIndex, instrumentToken: packet.instrumentToken,
-            lastPrice: packet.lastPrice, exchangeTimestamp: packet.exchangeTimestamp,
+            lastPrice: packet.lastPrice, oi: Number.isInteger(packet.oi) && packet.oi! >= 0 ? packet.oi : undefined, exchangeTimestamp: packet.exchangeTimestamp,
             marketDepth: { buy: depth.buy.map(l => ({ price: l.price, quantity: l.quantity, orders: l.orders })),
               sell: depth.sell.map(l => ({ price: l.price, quantity: l.quantity, orders: l.orders })) } },
           market_context: { symbol: context.symbol, vwap_basis: context.vwap_basis, comparison_policy: context.comparison_policy, spot_ltp: context.spot_ltp, vwap: context.vwap,

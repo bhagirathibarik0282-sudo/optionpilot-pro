@@ -25,6 +25,7 @@ export function summarizeBnfShadowDaywise(scopePayload:unknown,events:JournalEve
  const snapshot=object(scopePayload);
  if(!snapshot||!Array.isArray(events))return blocked('JOURNAL_SNAPSHOT_INVALID');
  const buckets=new Map<string,Map<BnfLot,{intents:Set<string>;entryFills:number;exitFills:number;closed:Set<string>;}>>();
+ const observedLots=new Set<BnfLot>();
  for(const event of events){
   const day=date(event.occurred_at),payload=object(event.payload);
   if(!day||!payload||typeof event.kind!=='string')return blocked('JOURNAL_EVENT_INVALID');
@@ -38,6 +39,7 @@ export function summarizeBnfShadowDaywise(scopePayload:unknown,events:JournalEve
   let group=buckets.get(day);
   if(!group){group=new Map();buckets.set(day,group);}
   const l=lots as BnfLot;
+  observedLots.add(l); if(observedLots.size>1)return blocked('MIXED_LOTS_IN_SINGLE_PAPER_SCOPE');
   let stats=group.get(l);
   if(!stats){stats={intents:new Set(),entryFills:0,exitFills:0,closed:new Set()};group.set(l,stats);}
   if(event.kind==='ENTRY_INTENT_RECORDED_AND_PAPER_ORDER_CREATED')stats.intents.add(id);

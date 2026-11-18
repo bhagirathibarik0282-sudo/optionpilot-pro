@@ -28,3 +28,11 @@ test('host binding updates reference before emitting option JSONL in same batch'
  observer([option,future(),spot()],iso(instant));assert.equal(lines.length,1);const event=JSON.parse(lines[0]);assert.equal(event.market_context.vwap,62000);assert.equal(event.market_context.vwap_basis,'NEAR_FUTURES_AVERAGE_PRICE');assert.equal(binding.status().extraBrokerConnections,0);binding.stop();assert.equal(detached,1);assert.equal(writer.writableEnded,false);
 });
 test('disabled binding does not inspect master, register or write',()=>{let registered=0;const writer=new Writable({write(){throw Error('must not write');}});const binding=installBnfShadowTradingFeed({enabled:false,writer,entries:[],masterDate:'',connected:()=>false,registerObserver:()=>{registered++;return()=>{};},contractFor:()=>null});assert.equal(registered,0);assert.equal(binding.identity(),null);binding.stop();});
+
+test('reference callback failure stays contained and latches output off',()=>{
+ let observer;const writer=new Writable({write(){throw Error('must not write');}});
+ const binding=installBnfShadowTradingFeed({enabled:true,writer,entries,masterDate:'2026-11-18',now:()=>instant,
+ connected:()=>{throw Error('synthetic-private-error');},registerObserver:fn=>{observer=fn;return()=>{};},contractFor:()=>null});
+ assert.doesNotThrow(()=>observer([spot(),future()],iso(instant)));
+ assert.equal(binding.status().referenceFault,'REFERENCE_CALLBACK_FAILED');assert.equal(binding.status().accepted,0);binding.stop();
+});

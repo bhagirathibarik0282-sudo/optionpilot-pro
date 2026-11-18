@@ -2,7 +2,7 @@
 
 A complete standalone **paper execution core and validated JSONL bridge**, with a manual runner and the existing dashboard's encrypted Kite-session reader. No broker execution adapter exists. LIVE modes are rejected before any connection. No dashboard, scheduler, Telegram, npm start command, existing table or production service is changed by adding this directory.
 
-This is not a production LIVE trading release. The read-only snapshot source can derive qualified signal events, but it is not automatically wired into dashboard startup or execution. Connecting the existing signal/feed producer and observing it in Railway remain deployment work. The JSONL boundary is explicit so missing IV or opposite-contract evidence is rejected rather than invented.
+This is not a production LIVE trading release. The read-only snapshot source can derive qualified signal events, but it is not automatically wired into dashboard startup or execution. A bounded in-memory live producer is also available through the manual non-replay runner. Binding the existing production host/clock/reset authority and observing it in Railway remain deployment work. The JSONL boundary is explicit so missing IV or opposite-contract evidence is rejected rather than invented.
 
 ## What is implemented
 
@@ -83,7 +83,7 @@ Producer responsibilities:
 - Configuration changes are blocked within an existing account scope by a persisted config hash. Do not delete or edit existing evidence to bypass this guard; use an explicitly reviewed versioned strategy scope for a changed experiment.
 - PostgreSQL event storage grows with economic/state events. No automatic archive, purge, VACUUM or deletion is introduced. A verified retention policy remains separate work.
 
-Before wiring a production SHADOW producer: run psycopg/advisory-lock integration tests, validate actual signal/feed schema, confirm IV/opposite-contract definitions, observe fresh-input and reconnect behavior, and compare recorded decisions against the fixed backtest rule set. Before any future LIVE work, implement broker fills/cancel-race/ambiguous-submit reconciliation and broker protection separately.
+The isolated psycopg/advisory-lock integration tests now pass. Before production SHADOW activation, bind the verified current master, authoritative expiry clock, transport reset authority and worker input; observe fresh-input/reconnect behavior and compare recorded decisions against the fixed rule set. Before any future LIVE work, implement broker fills/cancel-race/ambiguous-submit reconciliation and broker protection separately.
 
 References: https://kite.trade/docs/connect/v3/orders/ and https://kite.trade/docs/connect/v3/market-quotes/
 
@@ -208,3 +208,24 @@ Historical replay remains compatible with the old event fixtures. Direct bridge 
 Validation: fourteen new IV tests cover bounds, expired/unbracketed prices, both option sides, independent QuantLib reference values, model parameters/units, identity, missing baseline, input ages/skew, signal mismatches, positive-but-wrong IV, clamped endpoints, malformed metadata and strict bridge admission with durable receipt. The two numerical reference values were independently evaluated using QuantLib 1.44 `blackFormula`; differences from this model were below 2e-15 points. QuantLib was used only for that development cross-check and is not a runtime/CI dependency. Local core/source tests now total 79 passed; the existing six real PostgreSQL and twenty Node tests remain part of CI.
 
 Limits: a producer's declaration of `INDEX_EXPIRY_CLOCK` does not authenticate its origin. The host must actually use the authoritative expiry resolver and verified current master, and supply true synchronized observations. Numerical consistency does not prove truthful inputs or 109-trade parity. Production activation, verified IV producer wiring/observation and the stored-minute admission delay remain unresolved. No automatic production dataset approval is granted by this profile.
+
+
+## Direct live-clock signal producer and full paper execution path
+
+`live_signal_source.py` derives Quad-Align signal events directly from validated `kite_depth` observations. It does not read the delayed minute tables or stored opaque IV. The manual non-replay runner enables this producer together with the strict IV gate; historical replay remains opt-in and keeps its existing semantics. Direct library bridge construction keeps automatic derivation disabled unless `derive_live_signals=True`, which also requires `require_iv_evidence=True`.
+
+The relay now forwards actual packet `oi` when it is a nonnegative integer. An optional `expiryClockFor(token, observedAt)` callback must call the existing authoritative `resolveIndexExpiryClock` for that verified contract and observed quote time, returning `{expiry_clock_source:"INDEX_EXPIRY_CLOCK", expiry_ts:...}`. Missing, invalid or throwing expiry callbacks omit signal metadata while still forwarding valid position-management depth. No default expiry time is guessed. The caller must actually bind this callback; this package does not authenticate a string declaration.
+
+Producer requirements and behavior:
+
+- Current and baseline observations for both the selected option and its same-strike/expiry opposite must exist at the **exact same two exchange clocks, 180 seconds apart**. There is no nearest-row fallback, interpolation or timestamp relabelling. Pair completion evaluates both sides, so arrival order cannot lose the qualifying side. Irregular exchange ticks may legitimately yield no exact pair.
+- Current-master nearest-expiry ATM±1 qualification, fresh positive prices, integer OI and synchronized spot are required. Spot must be at or before the option exchange clock with at most two seconds skew; a newer spot value cannot be used to reconstruct earlier IV. IV is computed by the strict declared legacy solver independently for both observations.
+- Source observations expire after 180 seconds plus the existing quote-age allowance. Retention is bounded to 32 contract histories and 256 observations per contract; old evidence is discarded without creating a substitute baseline. Duplicate/out-of-order clocks cannot overwrite first accepted observations. Day or expiry-clock changes invalidate the relevant history.
+- Opposite premium/OI observations and clocks accompany derived IV evidence. The quality gate reconciles their exact deltas and places an allowlisted opposite-evidence receipt in the existing atomic entry journal event.
+- Valid depth manages an existing paper position before new signal derivation. An absent OI/expiry clock blocks new derivation and leaves otherwise valid depth available. A signal's own quote does not retroactively fill its newly created order; the existing engine requires a later valid quote and configured latency.
+
+The host must send `{"type":"source_reset"}` on disconnect, authority rotation or registry replacement. This clears only the observation warmup cache and invokes the existing watchdog; it does not discard journaled positions. Recreating the worker also starts with empty source history. Connection/reset handling still needs verification in the actual production host. Every 30-second successful session recheck prints bounded `SHADOW_SOURCE_STATUS` counts/reasons, without payloads or credentials.
+
+Fourteen new Python tests cover exact-pair signal derivation, arrival ordering, no interpolation, missing metadata, future spot rejection, duplicate clocks, day/expiry resets, retention caps, opposite OI qualification, source reset, opposite receipt mismatch and complete strict-bridge paper entry/fill/journal integration. Two new Node tests verify OI/expiry forwarding and that expiry-callback failure preserves valid depth. Local totals: 93 Python core/source tests and 22 Node tests passed. Six real PostgreSQL tests remain in CI.
+
+This direct path removes dependence on minute-row write latency in the implementation while retaining the 10-second signal-age and five-second quote-age rules. It does not make the old delayed snapshot path fresh and does not claim observed production latency or fills. Deployment still requires explicit current-host input/expiry/reset wiring and live SHADOW observation; no extra broker connection, automatic worker start, merge, production DDL, purge or real order was performed.

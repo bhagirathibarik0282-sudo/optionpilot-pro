@@ -51,7 +51,7 @@ def main():
             with open(args.input) as first_input:
                 startup_now=timestamp(json.loads(first_input.readline())['now'])
         engine=OrderStateMachine(cfg,store,startup_now=startup_now)
-        bridge=OptionPilotLiveBridge(engine,master,require_iv_evidence=not args.replay)
+        bridge=OptionPilotLiveBridge(engine,master,require_iv_evidence=not args.replay,derive_live_signals=not args.replay)
         stream=open(args.input) if args.input else sys.stdin
         try:
             if args.replay:
@@ -92,6 +92,7 @@ def main():
                     current=provider.resolve(); provider.verify(current)
                     if current.user_id!=account: raise ValueError('session account changed')
                     checked=time.monotonic()
+                    if bridge.producer: print(json.dumps({"status":"SHADOW_SOURCE_STATUS",**bridge.producer.status()}),file=sys.stderr)
                 try: event=events.get(timeout=1)
                 except queue.Empty: continue
                 if event is done: engine.stop(now,'INPUT_EOF'); break

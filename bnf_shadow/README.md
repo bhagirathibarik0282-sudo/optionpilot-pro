@@ -9,7 +9,7 @@ This is not a production LIVE trading release. It does not automatically derive 
 - Frozen config with strict integers, finite numbers, compatible `contract_lot_size` and `qty`, exact contract/master matching, nearest-expiry ATM±1 selection and Decimal BUY-limit rounding down.
 - Original -6 pullback, -22 stop, +15 trigger, +2 trail, +32 target and 20-minute holding parameters are retained by default. The configurable 15:20 IST cleanup is new operational policy, not a claim about the old backtest. Entry windows retain 09:20–11:30 and 13:00–14:45; expiry afternoon entry ends at 13:30.
 - One active paper intent per account/strategy, price-times-quantity plus estimated cost capital reservation, unique signal IDs, symbol cooldown and persisted daily stop counts.
-- Depth-limited partial entries/exits in whole contract lots. Entry fills use observed ask at or below the limit after minimum simulated latency. Stops/targets use executable-side bid. Exits wait for a later valid depth event and can fill partially. No stale-LTP emergency fill is invented when quotes disappear.
+- Depth-limited partial entries/exits in whole contract lots. Entry fills use observed ask at or below the limit after minimum simulated latency measured from paper-order creation, using both exchange and receive timestamps. Pre-intent quotes cannot fill or invalidate an order. Stops/targets use bid with positive displayed quantity. VWAP invalidation applies only while an entry remainder is pending, not as a new exit rule after full fill. Exits wait for a valid depth event whose exchange timestamp is later than the exit request and can fill partially. No stale-LTP emergency fill is invented when quotes disappear.
 - Independent watchdog thread, quote validation, duplicate/out-of-order rejection, expiry checks, entry/holding deadlines, day rollover and shutdown cleanup.
 - PostgreSQL session advisory ownership lock, transactional compare-and-swap snapshots, separate append-only events and a unique signal ledger. No raw tick retention. SQL migration is additive and explicit. SQLite is used only by tests.
 - Restart conservatively cancels an unfilled paper entry. Filled paper exposure enters reconciliation and exits only against fresh valid bid depth; it is not discarded. This is **paper recovery**, not broker-position reconciliation.
@@ -86,3 +86,7 @@ Producer responsibilities:
 Before wiring a production SHADOW producer: run psycopg/advisory-lock integration tests, validate actual signal/feed schema, confirm IV/opposite-contract definitions, observe fresh-input and reconnect behavior, and compare recorded decisions against the fixed backtest rule set. Before any future LIVE work, implement broker fills/cancel-race/ambiguous-submit reconciliation and broker protection separately.
 
 References: https://kite.trade/docs/connect/v3/orders/ and https://kite.trade/docs/connect/v3/market-quotes/
+
+## Double-check regression coverage
+
+The follow-up review added tests for full-fill versus partial-entry VWAP behavior, delayed signal admission, order-creation-based deadlines, pre-exit-request quotes, zero displayed bid depth and conservative recovery-exit sequencing. The Python suite now contains 40 tests; the separate PostgreSQL-engine SQL smoke test remains one test.

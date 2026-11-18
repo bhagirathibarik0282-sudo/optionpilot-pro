@@ -3,7 +3,7 @@ import { resolveIndexExpiryClock } from './index-expiry-clock.js';
 import { createBnfShadowHost } from './bnf_shadow/host.ts';
 
 let current:ReturnType<typeof createBnfShadowHost>|null=null;
-export function readBnfShadowHostStatus(){return current?.status()??{enabled:false,phase:'DISABLED',brokerOrders:0};}
+export function readBnfShadowHostStatus(){return current?.status()??{enabled:process.env.BNF_SHADOW_ENABLED==='true',phase:process.env.BNF_SHADOW_ENABLED==='true'?'NOT_ATTACHED':'DISABLED',reason:'NO_HOST_STATUS',lots:null,feedConnected:false,sourceCounts:null,paper:null,childRunning:false,brokerOrders:0};}
 export async function prepareBnfShadowHostRuntime(entries:any[],masterDate:string,apiKey:string,accessToken:string){
   if(process.env.BNF_SHADOW_ENABLED!=='true')return null;
   if(!process.env.BNF_SHADOW_CONFIG_PATH){console.warn('[BNF_SHADOW_HOST] CONFIG_PATH_REQUIRED');return null;}

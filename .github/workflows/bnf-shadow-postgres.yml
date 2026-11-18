@@ -5,6 +5,9 @@ on:
     paths:
       - 'bnf_shadow/**'
       - 'bnf-shadow-host-runtime.ts'
+      - 'dashboard-live-http.ts'
+      - 'dashboard-live-view.ts'
+      - 'test/bnf-shadow-dashboard-status.test.ts'
       - 'h1-dynamic-readonly-live-chain.ts'
       - 'h1-live-exact-readonly-websocket-service.ts'
       - 'test/bnf-shadow-host-wiring.test.ts'
@@ -37,7 +40,7 @@ jobs:
       - name: Install test-only dependencies
         run: python -m pip install -r bnf_shadow/requirements.txt pgserver==0.1.4
       - name: Core and input-source tests
-        run: python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source bnf_shadow.test_depth_source bnf_shadow.test_iv_quality bnf_shadow.test_live_signal_source bnf_shadow.test_runtime_preflight -v
+        run: python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source bnf_shadow.test_depth_source bnf_shadow.test_iv_quality bnf_shadow.test_live_signal_source bnf_shadow.test_runtime_preflight bnf_shadow.test_paper_status -v
       - name: Real PostgreSQL ownership, rollback and restart tests
         env:
           BNF_SHADOW_REAL_PG_TEST: '1'
@@ -49,7 +52,7 @@ jobs:
       - name: Existing read-only feed and optional BNF host regressions
         env:
           NODE_ENV: test
-        run: node --import tsx --test test/bnf-shadow-host-wiring.test.ts test/h1-live-exact-readonly-websocket-service.test.ts test/h1-live-selector-authority-quarantine.test.ts test/h1-dynamic-readonly-server-bootstrap.test.ts
+        run: node --import tsx --test test/bnf-shadow-host-wiring.test.ts test/bnf-shadow-dashboard-status.test.ts test/h1-live-exact-readonly-websocket-service.test.ts test/h1-live-selector-authority-quarantine.test.ts test/h1-dynamic-readonly-server-bootstrap.test.ts
   host-image-smoke:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -61,5 +64,5 @@ jobs:
         run: git archive HEAD | docker build -t bnf-shadow-host -f bnf_shadow/Dockerfile.host -
       - name: Verify Node, Python and both input runtimes inside image
         run: |
-          docker run --rm bnf-shadow-host python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source bnf_shadow.test_depth_source bnf_shadow.test_iv_quality bnf_shadow.test_live_signal_source bnf_shadow.test_runtime_preflight -q
+          docker run --rm bnf-shadow-host python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source bnf_shadow.test_depth_source bnf_shadow.test_iv_quality bnf_shadow.test_live_signal_source bnf_shadow.test_runtime_preflight bnf_shadow.test_paper_status -q
           docker run --rm bnf-shadow-host node --import tsx --test bnf_shadow/test_feed_relay.mjs bnf_shadow/test_market_context.mjs bnf_shadow/test_host.mjs

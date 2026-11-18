@@ -219,3 +219,18 @@ test("existing dashboard contains one live BANKNIFTY SHADOW card and its browser
  assert.ok(index>markup.indexOf('id="observations-view"'));
  assert.ok(index<markup.indexOf('id="op-workspace-advanced"'));
 });
+
+test("full-screen DATA DASHBOARD displays existing BANKNIFTY SHADOW worker status", () => {
+ const html=renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY"));
+ const markup=html.replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi, '');
+ assert.equal((markup.match(/id="rd-bnf-shadow"/g)||[]).length,1);
+ assert.equal((markup.match(/id="rd-bnf-shadow-state"/g)||[]).length,1);
+ assert.equal((markup.match(/id="rd-bnf-shadow-evidence"/g)||[]).length,1);
+ assert.equal((markup.match(/id="op-bnf-shadow"/g)||[]).length,1);
+ assert.ok(markup.indexOf('id="rd-bnf-shadow"')<markup.indexOf('id="rd-viewport"'));
+ assert.match(html, /Worker status unavailable · paper trades not verified/);
+ assert.match(html, /'op-bnf-shadow-state','rd-bnf-shadow-state'/);
+ assert.match(html, /'op-bnf-shadow-evidence','rd-bnf-shadow-evidence'/);
+ assert.match(html, /'op-bnf-shadow-state','op-bnf-shadow-evidence'/);
+ assert.equal((html.match(/fetch\\('\\/api\\/research\\/dashboard-live\\/bnf-shadow'/g)||[]).length,1);
+});

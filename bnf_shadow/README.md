@@ -2,7 +2,7 @@
 
 A complete standalone **paper execution core and validated JSONL bridge**, with a manual runner and the existing dashboard's encrypted Kite-session reader. No broker execution adapter exists. LIVE modes are rejected before any connection. No dashboard, scheduler, Telegram, npm start command, existing table or production service is changed by adding this directory.
 
-This is not a production LIVE trading release. It does not automatically derive or publish Quad-Align signals from the current dashboard. Connecting the existing signal/feed producer and observing it in Railway remain deployment work. The JSONL boundary is explicit so missing IV or opposite-contract evidence is rejected rather than invented.
+This is not a production LIVE trading release. The read-only snapshot source can derive qualified signal events, but it is not automatically wired into dashboard startup or execution. Connecting the existing signal/feed producer and observing it in Railway remain deployment work. The JSONL boundary is explicit so missing IV or opposite-contract evidence is rejected rather than invented.
 
 ## What is implemented
 
@@ -22,7 +22,7 @@ From repository root, Python 3.10+:
 
 ```sh
 python -m pip install -r bnf_shadow/requirements.txt
-python -m unittest bnf_shadow.test_bnf_shadow -v
+python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source -v
 ```
 
 The Python suite uses temporary SQLite journals and synthetic broker/auth fixtures. No Railway connection or real order is used. It covers validation, caps, signal deduplication, partial fills, exit confirmation, zero depth, watchdog, stale/duplicate ticks, timeouts, restart, CAS conflicts, concurrent signals, stop counters, session compatibility and broker-method isolation.
@@ -89,4 +89,25 @@ References: https://kite.trade/docs/connect/v3/orders/ and https://kite.trade/do
 
 ## Double-check regression coverage
 
-The follow-up review added tests for full-fill versus partial-entry VWAP behavior, delayed signal admission, order-creation-based deadlines, pre-exit-request quotes, zero displayed bid depth and conservative recovery-exit sequencing. The Python suite now contains 40 tests; the separate PostgreSQL-engine SQL smoke test remains one test.
+The follow-up review added tests for full-fill versus partial-entry VWAP behavior, delayed signal admission, order-creation-based deadlines, pre-exit-request quotes, zero displayed bid depth and conservative recovery-exit sequencing. The core Python suite contains 40 tests; the snapshot-source suite adds 13 tests; the separate PostgreSQL-engine SQL smoke test remains one test.
+
+
+## Read-only snapshot source/preflight
+
+`snapshot_source.py` reads the existing `option_snapshot_1m` and `market_snapshot_1m` tables in one bounded read-only repeatable-read transaction. It performs no schema or journal writes and does not start an execution engine. `SnapshotSignalSource.produce()` returns the existing bridge's signal-event format plus a compact rejection report. It emits **no depth ticks**, because these stored tables have no displayed bid/ask quantities.
+
+```sh
+python -m bnf_shadow.snapshot_source --config bnf_shadow/examples/one_lot.json
+```
+
+The command uses the same existing encrypted authority and current instrument master. Its default approved IV-version set is empty. After independently confirming the exact IV units, calculation method and input lineage, a reviewer may explicitly supply `--approved-calculation-version EXACT_VERIFIED_VERSION`; an opaque version string is not itself proof. No production IV version has been approved by this change.
+
+Signal timestamps retain minute-bucket semantics with an exact three-minute bucket baseline. The source requires all four contiguous minute observations on both sides, same strike/expiry, increasing current-side IV, decreasing opposite premium/OI, matching current snapshot IDs with market spot/VWAP, approved calculation lineage, valid row status, in-bucket quote timestamps and fresh current quotes. It never substitutes futures VWAP, reconstructs missing IV, guesses depth, or moves a delayed row to the current clock. Normal bridge/master/strategy qualification still applies.
+
+Read-only Railway inspection on 2026-11-18 observed:
+
+- Recent BANKNIFTY buckets had 78 option rows. Across the observed 11:27–11:31 IST buckets, each bucket's oldest quote timestamp was **2026-11-12 13:59:21 IST**. This does not mean all 78 rows were stale; individual quote freshness must be checked.
+- The 11:31 bucket's newest quote was 11:31:10 IST and its first write was approximately 11:31:13.405 IST. The 11:30 bucket's newest quote was 11:30:12 IST and first write approximately 11:30:13.990 IST. Those bucket labels are already older than the unchanged 10-second signal-age limit when first written.
+- Nonzero IV and market spot/VWAP were observed. Their presence alone does not verify the IV method or all contract inputs.
+
+**Consequence:** the inspected stored-minute path cannot yet be asserted to meet the current real-time admission deadline. The source fails closed on delayed buckets and old quotes. The preflight code was tested with synthetic fixtures, not run inside production. No production source activation, fresh-depth integration, schema migration, worker launch, merge or deployment was performed by this step. A fresh source with verified IV lineage and real bid/ask quantities is still required before observing end-to-end SHADOW fills. Adjusting strategy freshness policy requires a separately reviewed strategy change; this adapter does not relax it.

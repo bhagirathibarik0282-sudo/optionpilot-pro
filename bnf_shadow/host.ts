@@ -59,7 +59,7 @@ export function createBnfShadowHost(config:any,deps:any={}) {
     if(state.feedConnected&&observer)try{observer(ticks,receivedAt);}catch{endWorker();note('BLOCKED','HOST_PACKET_CALLBACK_FAILED');}
   },onState:(value:string)=>{
     const wasOpen=state.feedConnected;state.feedConnected=value==='OPEN';
-    if(!state.feedConnected){generation++;attempted=false;endWorker();if(!stopped&&state.enabled)note('WAIT_FEED','FEED_NOT_OPEN');}
+    if(!state.feedConnected){generation++;attempted=false;state.sourceCounts=null;state.paper=null;endWorker();if(!stopped&&state.enabled)note('WAIT_FEED','FEED_NOT_OPEN');}
     else if(!wasOpen)void start();
   }};
   if(!state.enabled)return result;
@@ -102,6 +102,8 @@ export function createBnfShadowHost(config:any,deps:any={}) {
       const line=(raw:string)=>{
         let value:any;try{value=JSON.parse(raw);}catch{return;}
         if(value.status==='SHADOW_WORKER_READY'&&value.mode==='SHADOW'&&value.broker_orders===0&&state.phase==='STARTING'&&!binding&&child===owned&&state.feedConnected&&!stopped){
+          // A new worker must never inherit yesterday's or previous connection's counts.
+          state.sourceCounts=null;state.paper=null;
           binding=installBnfShadowTradingFeed({enabled:true,writer:owned.stdin,entries:prepared.entries,masterDate:config.masterDate,
             connected:()=>state.feedConnected&&!stopped,now,registerObserver:fn=>{observer=fn;return()=>{observer=null;};},
             contractFor:token=>{const row=prepared.options.get(token);return row?{instrument_token:token,tradingsymbol:row.tradingsymbol}:null;},
@@ -132,7 +134,7 @@ export function createBnfShadowHost(config:any,deps:any={}) {
       };
       owned.stdout.on('data',(c:any)=>receive('out',c));owned.stderr.on('data',(c:any)=>receive('err',c));
       owned.on('error',()=>{if(child===owned){child=null;binding?.stop();binding=null;observer=null;note('BLOCKED','WORKER_START_FAILED');}});
-      owned.on('exit',()=>{if(child===owned){child=null;binding?.stop();binding=null;observer=null;
+      owned.on('exit',()=>{if(child===owned){child=null;binding?.stop();binding=null;observer=null;state.sourceCounts=null;state.paper=null;
         if(!stopped){if(epoch!==generation&&state.feedConnected){attempted=false;void start();}else note('WAIT_FEED','WORKER_EXITED_NO_AUTO_RETRY');}}});
     }catch{note('BLOCKED','HOST_START_FAILED');}
     finally{pending=false;if(epoch!==generation&&state.feedConnected&&!stopped)void start();}

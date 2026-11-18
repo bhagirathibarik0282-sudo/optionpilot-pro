@@ -54,3 +54,24 @@ test('archive facade serves existing RAG readers with GET-only methods and uncha
 test('after-hours dashboard embeds the same evidence panel without navigating to another page',()=>{
  const html=renderRecordedDashboard();assert.equal((html.match(/id="rag-evidence-card"/g)||[]).length,1);assert.match(html,/id="rag-time"[^>]*step="60"/);
 });
+
+
+test('after-hours main dashboard shows an honest BANKNIFTY SHADOW status without starting a worker',async t=>{
+ const url=await serve(t,{},false);
+ for(const path of ['/','/api/research/business-dashboard/view','/recorded-dashboard']){
+  const r=await fetch(url+path);assert.equal(r.status,200);
+  const html=await r.text();
+  assert.equal((html.match(/id="ar-bnf-shadow"/g)||[]).length,1);
+  assert.match(html,/BANKNIFTY · SHADOW PAPER/);
+  assert.match(html,/OFF HOURS/);
+  assert.match(html,/paper signals, entries and exits are not verified/);
+  assert.match(html,/All recorded days/);
+  assert.doesNotMatch(html,/\/api\/kite\/orders|<form[^>]*action="\/orders/);
+ }
+});
+
+test('normal recorded replay does not mislabel an operating-hours worker as off-hours',async t=>{
+ const url=await serve(t,{},true);
+ const r=await fetch(url+'/recorded-dashboard');assert.equal(r.status,200);
+ assert.doesNotMatch(await r.text(),/id="ar-bnf-shadow"/);
+});

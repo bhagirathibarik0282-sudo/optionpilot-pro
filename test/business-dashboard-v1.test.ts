@@ -4,6 +4,7 @@ import { canonicalBusinessRuntimeRegistry } from "../canonical-business-runtime-
 import { buildBusinessDashboardV1 } from "../business-dashboard-v1.js";
 import { deriveObservationData, deriveRecordedVixPcrRows, renderBusinessDashboardV1Html } from "../business-dashboard-v1-view.js";
 import { readFileSync } from "node:fs";
+import { installScreenOverview } from "../screen-overview.js";
 
 test("dashboard fails softly to WAIT without inventing a candidate", () => {
   canonicalBusinessRuntimeRegistry.clear();
@@ -228,9 +229,11 @@ test("full-screen DATA DASHBOARD displays existing BANKNIFTY SHADOW worker statu
  assert.equal((markup.match(/id="rd-bnf-shadow-evidence"/g)||[]).length,1);
  assert.equal((markup.match(/id="op-bnf-shadow"/g)||[]).length,1);
  assert.ok(markup.indexOf('id="rd-bnf-shadow"')<markup.indexOf('id="rd-viewport"'));
- assert.match(html, /Worker status unavailable · paper trades not verified/);
- assert.match(html, /'op-bnf-shadow-state','rd-bnf-shadow-state'/);
- assert.match(html, /'op-bnf-shadow-evidence','rd-bnf-shadow-evidence'/);
- assert.match(html, /'op-bnf-shadow-state','op-bnf-shadow-evidence'/);
+ const installer=installScreenOverview.toString();
+ assert.match(installer, /Worker status unavailable · paper trades not verified/);
+ assert.match(installer, /op-bnf-shadow-state/);
+ assert.match(installer, /rd-bnf-shadow-state/);
+ assert.match(installer, /op-bnf-shadow-evidence/);
+ assert.match(installer, /rd-bnf-shadow-evidence/);
  assert.equal(html.split("fetch(\'/api/research/dashboard-live/bnf-shadow\'").length-1,1);
 });

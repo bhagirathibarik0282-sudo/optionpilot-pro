@@ -87,7 +87,7 @@ class OrderStateMachine:
         else:
             self._finish(snapshot, 'CANCELLED', reason, now)
 
-    def on_signal(self, signal, now):
+    def on_signal(self, signal, now, iv_quality_receipt=None):
         with self.lock:
             if not self.logging_healthy: raise RuntimeError(self.fault)
             now = aware(now)
@@ -116,7 +116,8 @@ class OrderStateMachine:
                 'last_receive_ts':None,'entry_cancelled':False,'trailed':False,
                 'sl_pts':-self.cfg.sl_pts,'reason':None}
             self._commit(candidate,'ENTRY_INTENT_RECORDED_AND_PAPER_ORDER_CREATED',now,signal.signal_id,
-                {'baseline_ts':aware(signal.baseline_ts).isoformat(),'signal':{k:v for k,v in asdict(signal).items() if k not in ('contract','signal_ts','baseline_ts')}})
+                {'baseline_ts':aware(signal.baseline_ts).isoformat(),'signal':{k:v for k,v in asdict(signal).items() if k not in ('contract','signal_ts','baseline_ts')},
+                 'iv_quality_receipt':deepcopy(iv_quality_receipt)})
             return intent
 
     def heartbeat(self, now):

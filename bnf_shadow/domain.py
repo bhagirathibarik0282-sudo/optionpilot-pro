@@ -25,7 +25,11 @@ def aware(value):
     return value.astimezone(IST)
 
 def timestamp(value):
-    return aware(datetime.fromisoformat(value)) if isinstance(value, str) else aware(value)
+    # The existing TypeScript decoder emits ISO UTC with Z; normalize for Python 3.10.
+    if isinstance(value, str):
+        value = value[:-1]+'+00:00' if value.endswith('Z') else value
+        return aware(datetime.fromisoformat(value))
+    return aware(value)
 
 def text(value, name, maximum=120):
     if type(value) is not str or not value.strip() or len(value) > maximum:

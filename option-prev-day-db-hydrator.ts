@@ -85,3 +85,29 @@ export async function loadPreviousDayOptionLevelsFromDb(args: {
   if (!result) return null;
   return mapPreviousDayDbRowsToTokens(args.instruments, result.rows);
 }
+
+/** Closing recorder observations for the app. Intraday-only rows cannot supply a final range. */
+export async function loadClosingOptionLevelsFromDb(args: {
+  symbol: string;
+  previousTradingDate: string;
+  expiryDate: string;
+  instruments: OptionIdentity[];
+}): Promise<Map<number, OptionPrevDayLevel> | null> {
+  if (!dbIsConfigured()) return null;
+  const result = await dbQuerySafe<OptionPrevDayDbRow>(
+    `
+      SELECT strike, option_type, day_high AS pdh, day_low AS pdl
+      FROM option_snapshot_1m
+      WHERE symbol = $1
+        AND expiry = $3::date
+        AND minute_bucket >= (($2::date + TIME '15:30') AT TIME ZONE 'Asia/Kolkata')
+        AND minute_bucket < (($2::date + TIME '15:31') AT TIME ZONE 'Asia/Kolkata')
+        AND quote_timestamp >= (($2::date + TIME '15:29:55') AT TIME ZONE 'Asia/Kolkata')
+        AND quote_timestamp < (($2::date + TIME '15:31') AT TIME ZONE 'Asia/Kolkata')
+        AND validation_status = 'RESEARCH_ELIGIBLE'
+        AND day_high >= ltp AND ltp >= day_low AND day_low > 0
+    `,
+    [args.symbol, args.previousTradingDate, args.expiryDate],
+  );
+  return result ? mapPreviousDayDbRowsToTokens(args.instruments, result.rows) : null;
+}

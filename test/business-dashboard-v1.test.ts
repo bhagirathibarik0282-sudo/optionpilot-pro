@@ -203,3 +203,16 @@ test("recorded PCR and VIX require the same adjacent minute and exact expiry", (
   assert.equal(minute1.indices[2].value, null);
   assert.equal(minute0.indices[2].value, null);
 });
+
+
+test("existing dashboard contains one live BANKNIFTY SHADOW card and its browser PCR helper", () => {
+ const html=renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY"));
+ assert.equal((html.match(/id="dashboard-live"/g)||[]).length,1);
+ assert.equal((html.match(/id="op-bnf-shadow"/g)||[]).length,1);
+ assert.match(html, /BANKNIFTY · SHADOW PAPER/);
+ assert.match(html, /const deriveLiveThreeIndexPcr=/);
+ assert.match(html, /\/api\/research\/dashboard-live\/bnf-shadow/);
+ const index=html.indexOf('id="op-bnf-shadow"');
+ assert.ok(index>html.indexOf('id="observations-view"'));
+ assert.ok(index<html.indexOf('id="op-workspace-advanced"'));
+});

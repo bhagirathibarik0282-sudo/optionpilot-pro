@@ -51,7 +51,7 @@ def main():
             with open(args.input) as first_input:
                 startup_now=timestamp(json.loads(first_input.readline())['now'])
         engine=OrderStateMachine(cfg,store,startup_now=startup_now)
-        bridge=OptionPilotLiveBridge(engine,master)
+        bridge=OptionPilotLiveBridge(engine,master,require_iv_evidence=not args.replay)
         stream=open(args.input) if args.input else sys.stdin
         try:
             if args.replay:

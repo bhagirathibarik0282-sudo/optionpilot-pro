@@ -186,3 +186,25 @@ The cache reads futures `averageTradePrice`, never futures LTP, as the explicitl
 The IV source is also identified: the legacy server path uses local Black-Scholes bisection, a coded 10% annual rate assumption, no dividend-yield term, a 365-day year and percentage-point output. That describes the code, not an independently verified prevailing rate or exchange-published IV. Its solver does not explicitly reject an unbracketed root or check final repricing residual; source/storage versions alone also do not prove synchronized option/spot inputs. No production IV lineage is automatically approved.
 
 Local validation: 65 Python core/source tests passed, and 20 Node tests passed (nine relay plus eleven market-reference/binding cases). The existing six real PostgreSQL tests remain enabled in CI. Reference callback exceptions are contained before reaching shared feed fanout and latch this binding's output off with a fixed status code. The source implementation and tests are synthetic-fixture verified; no production binding or live fills are claimed. This resolves construction and labelling of the fresh market reference from an existing correctly subscribed trading feed; IV-quality, minute-path delay and production activation/observation remain pending.
+
+
+## IV quality gate and durable input evidence
+
+`iv_quality.py` implements the explicitly audited legacy profile `LEGACY_BS_R10_Q0_ACT365_V1`: annual rate 0.10, dividend yield zero, ACT/365 seconds and annualized percentage-point IV. This is a declared compatibility model, not a claim about prevailing interest rates, market dividends, exchange IV or future performance. The new solver rejects nonpositive/nonfinite prices, expired contracts, premiums outside European-option arbitrage bounds, unbracketed roots, endpoint-clamped IV and failed repricing residuals. It does not modify the old dashboard solver.
+
+Every non-replay manual SHADOW worker now constructs the bridge with `require_iv_evidence=True`. Signal input must include an `iv_evidence` object with:
+
+- `profile`, exact contract `instrument_token` and `tradingsymbol`;
+- `parameters`: `annual_rate:0.10`, `dividend_yield:0`, `year_days:365`, `units:"PERCENT_POINTS"`;
+- `expiry_clock_source:"INDEX_EXPIRY_CLOCK"` and aware `expiry_ts` matching the contract's expiry date;
+- `current` and `baseline` samples, each containing `asof_ts`, `quote_ts`, `spot_ts`, `premium`, `spot` and `iv_percent`.
+
+Sample as-of times must match the signal's exact current/three-minute baseline clocks. Input ages must meet the existing quote-age limit at calculation; current input must still be fresh at admission. Option/spot skew is capped at two seconds. Signal premium, spot, IV and IV-change must match the supplied samples. Both samples are independently repriced, with allowed premium residual capped at half a contract tick and at most 0.05 points. No missing baseline, expiry instant or spot value is reconstructed. Malformed evidence yields a fixed validation error rather than an unhandled missing-key error.
+
+On admission, the allowlisted evidence and repricing residuals are written in the same existing journal transaction as the entry intent. Arbitrary producer fields are omitted from the receipt. The additive `iv_quality_receipt` event detail introduces no new table, migration or raw-tick storage.
+
+Historical replay remains compatible with the old event fixtures. Direct bridge construction defaults to trusted-producer compatibility; callers needing the quality boundary must opt in. The shipped non-replay CLI opts in automatically, so old live signal producers without IV evidence now reject deliberately. The snapshot-only source still cannot manufacture these per-input evidence timestamps and does not become production-ready merely by approving a storage version.
+
+Validation: fourteen new IV tests cover bounds, expired/unbracketed prices, both option sides, independent QuantLib reference values, model parameters/units, identity, missing baseline, input ages/skew, signal mismatches, positive-but-wrong IV, clamped endpoints, malformed metadata and strict bridge admission with durable receipt. The two numerical reference values were independently evaluated using QuantLib 1.44 `blackFormula`; differences from this model were below 2e-15 points. QuantLib was used only for that development cross-check and is not a runtime/CI dependency. Local core/source tests now total 79 passed; the existing six real PostgreSQL and twenty Node tests remain part of CI.
+
+Limits: a producer's declaration of `INDEX_EXPIRY_CLOCK` does not authenticate its origin. The host must actually use the authoritative expiry resolver and verified current master, and supply true synchronized observations. Numerical consistency does not prove truthful inputs or 109-trade parity. Production activation, verified IV producer wiring/observation and the stored-minute admission delay remain unresolved. No automatic production dataset approval is granted by this profile.

@@ -37,6 +37,7 @@ test('day-wise journal dates are descending, bounded and do not invent market-da
 test('1-lot receipts stay 1-lot and never become 2-lot facts',()=>{
  const report=summarizeBnfShadowDaywise({days:{'2026-11-18':{realized_estimated:180}}},[
   event('2026-11-18','ENTRY_INTENT_RECORDED_AND_PAPER_ORDER_CREATED','ENTRY_PENDING',30),
+  event('2026-11-18','ENTRY_FILL','OPEN',30),
   event('2026-11-18','EXIT_FILL','CLOSED',30)
  ]);
  assert.equal(report.days[0].scenarios[0].estimatedNetPnlInr,180);
@@ -50,6 +51,14 @@ test('mixed lot sizes within a single journal scope never share estimated daily 
  ]);
  assert.equal(report.ok,false);
  assert.equal(report.reason,'MIXED_LOTS_IN_SINGLE_PAPER_SCOPE');
+});
+
+test('exit evidence without matching paper entry refuses to report P&L',()=>{
+ const result=summarizeBnfShadowDaywise({days:{'2026-11-18':{realized_estimated:500}}},[
+  event('2026-11-18','EXIT_FILL','CLOSED',60)
+ ]);
+ assert.equal(result.ok,false);
+ assert.equal(result.reason,'EXIT_RECEIPT_WITHOUT_ENTRY_PROOF');
 });
 
 test('invalid contract quantity or broken evidence blocks every reported lot',()=>{

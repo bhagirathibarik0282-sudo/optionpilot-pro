@@ -87,12 +87,16 @@ export function installBnfShadowTradingFeed(config: {
   contractFor: (token: number) => { instrument_token: number; tradingsymbol: string } | null;
 }) {
   const cache = config.enabled ? new BnfMarketReferenceCache(config.entries, config.masterDate, config.connected, config.now) : null;
+  let referenceFault: string | null = null;
   const relay = installBnfShadowFeedRelay({ ...config,
     contextFor: () => cache?.read() ?? null,
     registerObserver: observer => config.registerObserver((ticks, receivedAt) => {
-      cache!.ingest(ticks, receivedAt); observer(ticks, receivedAt);
+      if (referenceFault) return;
+      try { cache!.ingest(ticks, receivedAt); }
+      catch { referenceFault = 'REFERENCE_CALLBACK_FAILED'; cache!.clear(); return; }
+      observer(ticks, receivedAt);
     }),
   });
-  return { status: relay.status, identity: () => cache?.identity() ?? null,
+  return { status: () => ({ ...relay.status(), referenceFault }), identity: () => cache?.identity() ?? null,
     stop: () => { relay.stop(); cache?.clear(); } };
 }

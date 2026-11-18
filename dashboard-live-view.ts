@@ -6,10 +6,10 @@ export const DASHBOARD_LIVE_CSS=`#op-bnf-shadow{margin:12px 0;border-left:4px so
 export function installDashboardLive(){
  const root=document.getElementById('dashboard-live');if(!root)return;
  const get=(id:string)=>document.getElementById(id)!;
- let bnfChecking=false;
+ let bnfChecking=false,lastBnfStatusCheckAt=0;
  async function checkBnfPaperStatus(){
   if(bnfChecking||document.hidden)return;
-  bnfChecking=true;
+  bnfChecking=true;lastBnfStatusCheckAt=Date.now();
   const label=get('op-bnf-shadow-state'),evidence=get('op-bnf-shadow-evidence');
   try{
    const response=await fetch('/api/research/dashboard-live/bnf-shadow',{cache:'no-store',credentials:'same-origin'});
@@ -19,7 +19,6 @@ export function installDashboardLive(){
    const phase=String(data.phase||'UNKNOWN').slice(0,40),reason=String(data.reason||'UNVERIFIED').slice(0,70);
    const ready=data.workerRunning===true&&data.feedConnected===true&&phase==='READY';
    label.textContent=(ready?'● READY · feed OPEN':'● NOT READY · '+phase)+' · '+(data.lots===2?'2 lots':data.lots===1?'1 lot':'lot configuration unverified');
-   label.style.color=ready?'#85f4ad':'#f5ce7b';
    const n=(v:any)=>Number.isSafeInteger(v)&&v>=0?String(v):'—';
    const active=data.paper?.active,last=data.paper?.lastResult,counts=data.sourceCounts||{};
    const age=data.paper?.reportedAt?Date.now()-Date.parse(data.paper.reportedAt):NaN;
@@ -30,7 +29,6 @@ export function installDashboardLive(){
    evidence.textContent='Generated signals: '+n(counts.signals)+' · Observations: '+n(counts.observations)+' · '+paper+' · Broker orders: 0 · '+reason;
   }catch{
    label.textContent='● Status unavailable · paper execution not verified';
-   label.style.color='#f5ce7b';
    evidence.textContent='Read-only monitor could not confirm worker, signal, entry or exit. No order controls.';
   }finally{bnfChecking=false;}
  }
@@ -359,9 +357,8 @@ export function installDashboardLive(){
  get('op-live-toggle').onclick=()=>{on=!on;get('op-live-toggle').setAttribute('aria-pressed',String(on));get('op-live-toggle').textContent=on?'Live view ON':'Live view OFF';get('op-live-body').hidden=!on;if(on)connect();else{close();latest=null;render();get('op-live-status').textContent='Live stream paused';}};
  document.addEventListener('visibilitychange',()=>{if(document.hidden){close();latest=null;render();}else connect();});
  window.addEventListener('online',()=>connect());window.addEventListener('pageshow',()=>{disposed=false;connect();});window.addEventListener('pagehide',()=>{disposed=true;close();latest=null;render();});
- setInterval(()=>{if(oiEvidence&&get('op-live-oi-evidence').open)paintOiEvidence();if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect(true);}},1000);
+ setInterval(()=>{if(oiEvidence&&get('op-live-oi-evidence').open)paintOiEvidence();if(latest&&Date.now()-lastReceived>4000){latest=null;get('op-live-status').textContent='Live updates delayed · values withheld';render();connect(true);}if(!document.hidden&&!disposed&&Date.now()-lastBnfStatusCheckAt>=15000)void checkBnfPaperStatus();},1000);
  if(typeof CustomEvent!=='undefined'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent('optionpilot:request-recorded-levels',{detail:null}));
  void checkBnfPaperStatus();
- setInterval(()=>{if(!document.hidden&&!disposed)void checkBnfPaperStatus();},15000);
  connect();
 }

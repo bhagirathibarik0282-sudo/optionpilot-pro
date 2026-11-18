@@ -10,8 +10,6 @@ on:
       - 'test/bnf-shadow-host-wiring.test.ts'
       - 'test/bnf-shadow-status-card.test.ts'
       - 'bnf-shadow-status-card.ts'
-      - 'research-server-hook.ts'
-      - 'business-dashboard-v1-view.ts'
       - '.github/workflows/bnf-shadow-postgres.yml'
   workflow_dispatch:
 permissions:

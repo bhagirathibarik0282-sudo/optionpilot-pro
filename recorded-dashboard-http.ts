@@ -21,7 +21,7 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
   if(!view&&!dateRoute&&!replayRoute&&!ragView&&!ragRoute&&!historyRoute)return false;
   const send=(code:number,value:any,html=false)=>{response.writeHead(code,{'Content-Type':html?'text/html; charset=utf-8':'application/json','Cache-Control':'no-store','X-OptionPilot-Mode':'RECORDED_READ_ONLY','X-Content-Type-Options':'nosniff'});response.end(html?value:JSON.stringify(value));return true;};
   if(request.method!=='GET')return send(405,{ok:false,error:'READ_ONLY_GET_REQUIRED'});
-  if(view)return send(200,renderRecordedDashboard(),true);
+  if(view)return send(200,renderRecordedDashboard(status?.shouldRun===false),true);
   if(ragView)return send(200,renderRagEvidencePage(),true);
   if(active>=2){response.setHeader('Retry-After','2');return send(429,{ok:false,error:'ARCHIVE_BUSY_RETRY'});}
   active++;

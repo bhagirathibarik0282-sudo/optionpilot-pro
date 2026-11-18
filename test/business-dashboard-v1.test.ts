@@ -4,6 +4,7 @@ import { canonicalBusinessRuntimeRegistry } from "../canonical-business-runtime-
 import { buildBusinessDashboardV1 } from "../business-dashboard-v1.js";
 import { deriveObservationData, deriveRecordedVixPcrRows, renderBusinessDashboardV1Html } from "../business-dashboard-v1-view.js";
 import { readFileSync } from "node:fs";
+import { installScreenOverview } from "../screen-overview.js";
 
 test("dashboard fails softly to WAIT without inventing a candidate", () => {
   canonicalBusinessRuntimeRegistry.clear();
@@ -218,4 +219,22 @@ test("existing dashboard contains one live BANKNIFTY SHADOW card and its browser
  const index=markup.indexOf('id="op-bnf-shadow"');
  assert.ok(index>markup.indexOf('id="observations-view"'));
  assert.ok(index<markup.indexOf('id="op-workspace-advanced"'));
+});
+
+test("full-screen DATA DASHBOARD displays existing BANKNIFTY SHADOW worker status", () => {
+ const html=renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY"));
+ const markup=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+ assert.equal((markup.match(/id="rd-bnf-shadow"/g)||[]).length,1);
+ assert.equal((markup.match(/id="rd-bnf-shadow-state"/g)||[]).length,1);
+ assert.equal((markup.match(/id="rd-bnf-shadow-evidence"/g)||[]).length,1);
+ assert.equal((markup.match(/id="op-bnf-shadow"/g)||[]).length,1);
+ assert.ok(markup.indexOf('id="rd-bnf-shadow"')<markup.indexOf('id="rd-viewport"'));
+ const installer=installScreenOverview.toString();
+ assert.match(installer, /Worker status unavailable/);
+ assert.match(installer, /paper trades not verified/);
+ assert.match(installer, /op-bnf-shadow-state/);
+ assert.match(installer, /rd-bnf-shadow-state/);
+ assert.match(installer, /op-bnf-shadow-evidence/);
+ assert.match(installer, /rd-bnf-shadow-evidence/);
+ assert.equal((html.match(/\/api\/research\/dashboard-live\/bnf-shadow/g)||[]).length,1);
 });

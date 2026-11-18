@@ -6,6 +6,7 @@ import io
 import json
 from .domain import ContractSpec, QuadAlignSignal, TickSnapshot, timestamp
 from .depth_source import KiteDepthSource
+from .iv_quality import validate_signal_iv
 
 class InstrumentMaster:
     def __init__(self, csv_text, asof):
@@ -40,7 +41,9 @@ class OptionPilotLiveBridge:
     Producer must supply synchronized IV/spot/VWAP/opposite-contract evidence.
     This module does not claim to derive those values from Kite quote packets.
     """
-    def __init__(self, engine, master): self.engine,self.master=engine,master
+    def __init__(self, engine, master, require_iv_evidence=False):
+        self.engine,self.master=engine,master
+        self.require_iv_evidence=require_iv_evidence
 
     def consume(self, event, now):
         kind = event.get('type')
@@ -50,11 +53,16 @@ class OptionPilotLiveBridge:
             raw['signal_ts'],raw['baseline_ts'] = timestamp(raw['signal_ts']),timestamp(raw['baseline_ts'])
             signal = QuadAlignSignal(**raw)
             signal.validate(self.engine.cfg,now)
+            iv_receipt = None
+            if self.require_iv_evidence:
+                iv_receipt = validate_signal_iv(signal,self.engine.cfg,now,event.get("iv_evidence"))
             self.master.verify(signal.contract,now)
             self.master.verify_selection(signal.contract,signal.spot_ltp,now)
             opposite = self.master.records.get(signal.opposite_tradingsymbol)
             if not opposite or opposite.option_type == signal.contract.option_type or opposite.expiry_date != signal.contract.expiry_date or opposite.strike != signal.contract.strike:
                 raise ValueError('opposite contract must be same strike/expiry and other option type')
+            if self.require_iv_evidence:
+                return self.engine.on_signal(signal,now,iv_quality_receipt=iv_receipt)
             return self.engine.on_signal(signal,now)
         if kind == 'kite_depth':
             tick = KiteDepthSource(self.engine.cfg, self.master).to_tick(event, now)

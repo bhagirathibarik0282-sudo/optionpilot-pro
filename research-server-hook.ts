@@ -1,5 +1,6 @@
 import { withDashboardReading } from './dashboard-reading-layout.js';
 import { mountLadderAcceptanceRoutes } from './telegram-ladder-acceptance.js';
+import { readBnfShadowHostStatus } from './bnf-shadow-host-runtime.js';
 import type { Hono } from "hono";
 import { dbLoadRecent } from "./db.js";
 import { H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, type H1LiveExactRawDepthRecord, type H1LiveExactGreekTimingRecord } from "./h1-live-exact-raw-evidence-store.js";
@@ -261,6 +262,15 @@ export function mountResearchRoutes(app: Hono): void {
     }
     const result = await runLegacyRecorderRecoveryHttp(parsed.symbol, parsed.tradeDate);
     return c.json(result, result.ok || result.reason === "DATABASE_URL_NOT_CONFIGURED" ? 200 : 503);
+  });
+
+  app.get("/api/research/bnf-shadow-paper-status", (c) => {
+    c.header("Cache-Control", "no-store");
+    c.header("X-Content-Type-Options", "nosniff");
+    return c.json({mode:"BNF_PAPER_SHADOW_STATUS_V1",readOnly:true,brokerOrders:0,
+      semantics:"HOST_AND_SOURCE_COUNTERS_NOT_JOURNAL_PROOF",
+      paperSignalEntryExitJournalVerified:false,
+      host:readBnfShadowHostStatus()});
   });
 
   app.get("/api/research/h1-dynamic-readonly-live-status", (c) => {

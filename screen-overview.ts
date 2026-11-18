@@ -288,8 +288,9 @@ export function installScreenOverview(){
  const showBnfStatus=()=>{
   const state=$('op-bnf-shadow-state')?.textContent?.trim();
   const evidence=$('op-bnf-shadow-evidence')?.textContent?.trim();
-  $('rd-bnf-state').textContent=state||'Worker status unavailable · no trade evidence';
-  $('rd-bnf-evidence').textContent=evidence||'Paper only · no verified fill or exit';
+  const stateDisplay=$('rd-bnf-state'),evidenceDisplay=$('rd-bnf-evidence');
+  if(stateDisplay)stateDisplay.textContent=state||'Worker status unavailable · no trade evidence';
+  if(evidenceDisplay)evidenceDisplay.textContent=evidence||'Paper only · no verified fill or exit';
  };
  if(shadowSource){const observer=new MutationObserver(showBnfStatus);observer.observe(shadowSource,{childList:true,characterData:true,subtree:true});}
  showBnfStatus();

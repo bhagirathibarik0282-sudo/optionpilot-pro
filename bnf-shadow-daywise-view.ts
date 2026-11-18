@@ -21,6 +21,7 @@ export const BNF_SHADOW_DAYWISE_CSS =
 
 /** No timer, no state mutation outside the DOM; one same-origin read-only request. */
 export async function installBnfShadowDaywise(){
+ if(typeof document.querySelectorAll!=='function')return;
  const roots=Array.from(document.querySelectorAll('.op-bnf-daywise')) as HTMLElement[];
  if(!roots.length)return;
  const status=(msg:string)=>{for(const root of roots){const p=root.querySelector('[data-bnf-daywise-status]');if(p)p.textContent=msg;}};

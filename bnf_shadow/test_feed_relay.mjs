@@ -39,3 +39,11 @@ test('relay JSONL is accepted by the Python depth adapter',()=>{
  const r=spawnSync(process.env.PYTHON||'python',['-c',script],{input:f.lines[0],encoding:'utf8',cwd:new URL('../',import.meta.url)});
  assert.equal(r.status,0,r.stderr);assert.deepEqual(JSON.parse(r.stdout),{token:101,ask_qty:30,bid:199.95});
 });
+
+test('optional signal metadata preserves real OI and uses observed quote clock',()=>{
+ let observed=null;const expiry='2026-11-23T10:00:00Z';const f=fixture({expiryClockFor:(token,ts)=>{observed=ts;return {expiry_clock_source:'INDEX_EXPIRY_CLOCK',expiry_ts:expiry};}});
+ const p=packet();p.oi=0;f.send(p);const e=JSON.parse(f.lines[0]);assert.equal(e.packet.oi,0);assert.equal(e.signal_source.expiry_ts,expiry);assert.equal(observed,time);f.relay.stop();
+});
+test('expiry callback failure does not suppress valid depth for existing positions',()=>{
+ const f=fixture({expiryClockFor:()=>{throw Error('synthetic-private-error');}});f.send();assert.equal(f.lines.length,1);assert.equal(JSON.parse(f.lines[0]).signal_source,null);assert.equal(f.relay.status().fault,null);f.relay.stop();
+});

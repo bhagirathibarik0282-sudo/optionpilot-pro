@@ -21,7 +21,7 @@ def depth_event(seconds=1):
     return dict(type='kite_depth', tradingsymbol=C.tradingsymbol, receive_ts=ts.isoformat(),
         packet=dict(mode='full', isIndex=False, instrumentToken=101, lastPrice=200,
             exchangeTimestamp=ts.isoformat(), marketDepth=dict(buy=levels(199.95, -.05), sell=levels(200, .05))),
-        market_context=dict(symbol='BANKNIFTY', spot_ltp=62100, vwap=62000, spot_ts=ts.isoformat(), vwap_ts=ts.isoformat()))
+        market_context=dict(symbol='BANKNIFTY', vwap_basis='NEAR_FUTURES_AVERAGE_PRICE', comparison_policy='LEGACY_SPOT_VS_NEAR_FUTURES_AVERAGE', spot_ltp=62100, vwap=62000, spot_ts=ts.isoformat(), vwap_ts=ts.isoformat()))
 
 
 class DepthSourceTests(unittest.TestCase):
@@ -104,6 +104,10 @@ class DepthSourceTests(unittest.TestCase):
                 self.assertEqual(snapshot['active']['filled_qty'], 30)
                 self.assertEqual(version, engine.version)
             finally: store.close()
+
+    def test_futures_reference_cannot_be_mislabeled_as_spot_vwap(self):
+        self.event['market_context']['vwap_basis'] = 'SPOT_VWAP'
+        with self.assertRaises(ValueError): self.source.to_tick(self.event, self.now)
 
     def test_wrong_master_day_rejected(self):
         with self.assertRaises(ValueError): self.source.to_tick(self.event, self.now+timedelta(days=1))

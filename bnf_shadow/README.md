@@ -142,3 +142,32 @@ The dedicated `BANKNIFTY isolated PostgreSQL` GitHub Actions workflow runs the e
 
 
 Verified CI result: [run 44251212799](https://github.com/bhagirathibarik0282-sudo/optionpilot-pro/actions/runs/44251212799), tested commit `fec0787d019f49034f4929618a56cb0fdd8e2235`, completed successfully. Both Python 3.10 and 3.12 jobs logged `Ran 64 tests ... OK` followed by `Ran 6 tests ... OK` with no skips. All six real PostgreSQL ownership/recovery/rollback tests therefore passed in CI. The independent Permanent Guardrails CI also passed on that commit. This clears the isolated PostgreSQL integration gate, not the remaining production feed/IV/freshness and live SHADOW observation gates. No production database, worker or broker order was involved.
+
+
+## Existing trading-feed JSONL relay
+
+`feed_relay.ts` provides `installBnfShadowFeedRelay` for an explicitly enabled, same-process observer of the existing trading WebSocket transport. The caller supplies the existing `registerKiteTickObserver` function, a caller-owned SHADOW worker stdin/Writable, a current-master contract lookup and a timestamped BANKNIFTY spot/VWAP lookup. There is no socket creation, child-process spawn, database mutation, credential forwarding or automatic startup in this module.
+
+The binding contract is:
+
+```ts
+installBnfShadowFeedRelay({
+  enabled: relayExplicitlyEnabled,
+  registerObserver: registerKiteTickObserver,
+  writer: callerOwnedShadowWorkerStdin,
+  contractFor: currentMasterContractForToken,
+  contextFor: independentlyVerifiedFreshBankniftySpotVwapForToken,
+});
+```
+
+These are caller-owned integration inputs, not implicit globals. No production caller has been installed by this change. The dashboard display-only transport retains `broadcastObservers:false`; it is not repurposed as a trading feed. Existing trading-feed observers can be used only in their own process with the corresponding master/context authority. If that feed is disabled, this relay receives nothing; it does not start a substitute connection.
+
+Relay output allowlists packet fields and displayed depth quantities. Missing context, stale/future/naive clocks, wrong contracts and incomplete depth reject without output. Writes are at most 32 KiB per line; a sink already buffering 64 KiB drops incoming packets. `write(false)` counts the accepted line once, drops subsequent input until drain and never queues/replays old quotes. Sink/callback failures detach the observer and expose only a fixed status code. Stop detaches the relay without closing caller-owned stdin. A stalled relay cannot block the dashboard or accumulate an unbounded packet queue; the Python watchdog still owns no-feed handling.
+
+Nine Node tests cover disabled mode, field allowlisting, actual quantities, freshness, context gaps, backpressure, sink failures, cleanup and TypeScript-relay JSONL consumption by the real Python depth converter. The end-to-end relay test uses synthetic packets and no broker connection. Run with Node 24 and the Python dependencies installed:
+
+```sh
+node --test bnf_shadow/test_feed_relay.mjs
+```
+
+Production activation is still blocked by the unverified fresh spot/VWAP authority, approved IV signal lineage and stored-minute admission delay. No claim of live SHADOW fills is made. Passing relay fixtures cannot resolve those source issues.

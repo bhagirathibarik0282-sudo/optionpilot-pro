@@ -32,7 +32,7 @@ export function bindBnfHostMaster(entries:Entry[], rows:Row[], asof:string) {
 }
 
 export function createBnfShadowHost(config:any,deps:any={}) {
-  const state={enabled:config.enabled===true,phase:'DISABLED',reason:'DISABLED',workerStarts:0,feedConnected:false,sourceCounts:null as any,brokerOrders:0};
+  const state={enabled:config.enabled===true,phase:'DISABLED',reason:'DISABLED',workerStarts:0,feedConnected:false,lots:null as number|null,sourceCounts:null as any,paper:null as any,brokerOrders:0};
   let child:any=null,endingChild:any=null,binding:any=null,observer:any=null,stopped=false,pending=false,generation=0,attempted=false;
   const now:()=>number=deps.now||Date.now;
   const spawnChild=deps.spawn||spawn;
@@ -72,6 +72,7 @@ export function createBnfShadowHost(config:any,deps:any={}) {
     if(!config.configPath||statSync(config.configPath).size>32768)throw Error('CONFIG_FILE_REQUIRED');
     const cfg=JSON.parse(readFileSync(config.configPath,'utf8'));
     if(cfg.mode!=='SHADOW'||![1,2].includes(cfg.lots))throw Error('CONFIG_MUST_BE_SHADOW');
+    state.lots=cfg.lots;
     for(const key of ['DATABASE_URL','KITE_API_KEY','KITE_SESSION_ENCRYPTION_KEY'])if(!outputEnv[key])throw Error('EXISTING_WORKER_VARIABLES_REQUIRED');
     prepared=bindBnfHostMaster(config.entries,config.masterRows,config.masterDate);result.referenceTokens=prepared.referenceTokens;
     note('WAIT_FEED','PREFLIGHT_PENDING');
@@ -107,6 +108,17 @@ export function createBnfShadowHost(config:any,deps:any={}) {
             expiryClockFor:(token,observedAt)=>{const row=prepared.options.get(token);const clock=row?config.resolveClock('BANKNIFTY',row.expiry,observedAt):null;
               return clock&&!clock.expired?{expiry_clock_source:'INDEX_EXPIRY_CLOCK',expiry_ts:new Date(clock.expiryMs).toISOString()}:null;}});
           clearTimeout(readyTimer);note('READY','WAIT_EXACT_180S_WARMUP');
+        }
+        if(value.status==='SHADOW_EXECUTION_STATUS'&&value.broker_orders===0){
+          const leg=(row:any)=>{
+            if(!row||typeof row!=='object'||Array.isArray(row))return null;
+            const allowed=['OPEN','PARTIALLY_FILLED','RECONCILIATION_REQUIRED','EXIT_PENDING','PENDING','CANCELLED','CLOSED','STOPPED','EXPIRED','FILLED'];
+            const stateName=typeof row.state==='string'&&allowed.includes(row.state)?row.state:'OTHER';
+            const qty=(x:any)=>Number.isSafeInteger(x)&&x>=0?x:null;
+            return {state:stateName,requestedQty:qty(row.requested_qty),filledQty:qty(row.filled_qty),exitedQty:qty(row.exited_qty)};
+          };
+          const reportedAt=typeof value.reported_at==='string'&&Number.isFinite(Date.parse(value.reported_at))?value.reported_at:null;
+          state.paper={reportedAt,active:leg(value.active),lastResult:leg(value.last_result)};
         }
         if(value.status==='SHADOW_SOURCE_STATUS'){
           const counts:any={};for(const key of ['observations','signals','rejected','warmup','contracts','retained_observations'])if(Number.isSafeInteger(value[key])&&value[key]>=0)counts[key]=value[key];

@@ -236,5 +236,5 @@ test("full-screen DATA DASHBOARD displays existing BANKNIFTY SHADOW worker statu
  assert.match(installer, /rd-bnf-shadow-state/);
  assert.match(installer, /op-bnf-shadow-evidence/);
  assert.match(installer, /rd-bnf-shadow-evidence/);
- assert.equal(html.split("fetch(\'/api/research/dashboard-live/bnf-shadow\'").length-1,1);
+ assert.equal((html.match(/\/api\/research\/dashboard-live\/bnf-shadow/g)||[]).length,1);
 });

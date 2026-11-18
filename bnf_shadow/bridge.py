@@ -7,6 +7,7 @@ import json
 from .domain import ContractSpec, QuadAlignSignal, TickSnapshot, timestamp
 from .depth_source import KiteDepthSource
 from .iv_quality import validate_signal_iv
+from .live_signal_source import LiveSignalProducer
 
 class InstrumentMaster:
     def __init__(self, csv_text, asof):
@@ -38,15 +39,21 @@ class InstrumentMaster:
 class OptionPilotLiveBridge:
     """A real-time event consumer for SHADOW execution, not a broker order bridge.
 
-    Producer must supply synchronized IV/spot/VWAP/opposite-contract evidence.
-    This module does not claim to derive those values from Kite quote packets.
+    Accepts validated external signals or the optional bounded live producer.
+    Live IV is locally model-computed from synchronized declared inputs, never
+    presented as a broker-published IV field.
     """
-    def __init__(self, engine, master, require_iv_evidence=False):
+    def __init__(self, engine, master, require_iv_evidence=False, derive_live_signals=False):
         self.engine,self.master=engine,master
         self.require_iv_evidence=require_iv_evidence
+        if derive_live_signals and not require_iv_evidence: raise ValueError("live producer requires IV quality gate")
+        self.producer=LiveSignalProducer(engine.cfg,master) if derive_live_signals else None
 
     def consume(self, event, now):
         kind = event.get('type')
+        if kind == 'source_reset':
+            if self.producer: self.producer.reset()
+            return self.engine.heartbeat(now)
         if kind == 'signal':
             raw = dict(event['signal'])
             raw['contract'] = ContractSpec.from_wire(raw['contract'])
@@ -66,7 +73,11 @@ class OptionPilotLiveBridge:
             return self.engine.on_signal(signal,now)
         if kind == 'kite_depth':
             tick = KiteDepthSource(self.engine.cfg, self.master).to_tick(event, now)
-            return self.engine.on_tick(tick, now)
+            result = self.engine.on_tick(tick, now)
+            if self.producer:
+                for signal_event in self.producer.observe(event,tick,now):
+                    self.consume(signal_event,now)
+            return result
         if kind == 'tick':
             raw = dict(event['tick'])
             raw['exchange_ts'],raw['receive_ts'] = timestamp(raw['exchange_ts']),timestamp(raw['receive_ts'])

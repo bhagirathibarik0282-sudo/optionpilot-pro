@@ -150,6 +150,8 @@ class EngineTests(unittest.TestCase):
         self.e=OrderStateMachine(self.cfg,self.store)
         self.assertEqual(self.e.active['state'],'RECONCILIATION_REQUIRED')
         self.send(tick(2))
+        self.assertEqual(self.e.active['state'],'EXIT_PENDING')
+        self.send(tick(3))
         self.assertIsNone(self.e.active)
         self.assertEqual(self.e.snapshot['last_result']['reason'],'RESTART_RECOVERY')
 
@@ -264,6 +266,7 @@ class EngineTests(unittest.TestCase):
         self.e.stop(NOW+timedelta(seconds=3))
         self.e=OrderStateMachine(self.cfg,self.store,startup_now=NOW+timedelta(seconds=4))
         self.send(tick(5,best_bid=177,best_ask=177.05))
+        self.send(tick(6,best_bid=177,best_ask=177.05))
         self.assertEqual(self.e.snapshot['last_result']['reason'],'STOP_LOSS')
         self.assertEqual(self.e.snapshot['days'][NOW.date().isoformat()]['sl_count'],1)
 
@@ -298,6 +301,54 @@ class EngineTests(unittest.TestCase):
             master.verify_selection(master.records['TEST_NEXT'],62100,NOW)
         with self.assertRaisesRegex(ValueError,'stale'):
             master.verify(master.records['TEST_62000'],NOW+timedelta(days=1))
+
+    def test_full_fill_vwap_flip_is_not_a_new_exit_rule(self):
+        self.enter()
+        self.send(tick(2,spot_ltp=61900,vwap=62000))
+        self.assertEqual(self.e.active['state'],'OPEN')
+        self.assertIsNone(self.e.active['reason'])
+
+    def test_partial_entry_vwap_flip_still_cancels_and_requests_exit(self):
+        self.store.scope='vwap-partial-two-lot'
+        self.e=OrderStateMachine(replace(self.cfg,lots=2,max_capital_inr=45000),self.store)
+        self.e.on_signal(sig(),NOW);self.send(tick(best_ask_qty=30))
+        self.send(tick(2,spot_ltp=61900,vwap=62000))
+        self.assertEqual(self.e.active['state'],'EXIT_PENDING')
+        self.assertEqual(self.e.active['reason'],'VWAP_INVALIDATED')
+
+    def test_entry_cannot_fill_from_quote_before_order_creation(self):
+        admitted=NOW+timedelta(seconds=5)
+        self.e.on_signal(sig(),admitted)
+        received=NOW+timedelta(seconds=6)
+        self.e.on_tick(tick(6,exchange_ts=NOW+timedelta(seconds=4),spot_ltp=61900),received)
+        self.assertEqual(self.e.active['filled_qty'],0)
+        self.assertEqual(self.e.active['state'],'ENTRY_PENDING')
+        self.send(tick(7))
+        self.assertEqual(self.e.active['filled_qty'],30)
+
+    def test_entry_timeout_starts_at_order_creation(self):
+        admitted=NOW+timedelta(seconds=5)
+        self.e.on_signal(sig(),admitted)
+        for seconds in (100,200,300):self.send(tick(seconds,best_ask=201))
+        self.e.heartbeat(NOW+timedelta(seconds=301))
+        self.assertIsNotNone(self.e.active)
+        self.e.heartbeat(NOW+timedelta(seconds=305))
+        self.assertEqual(self.e.snapshot['last_result']['reason'],'ENTRY_TIMEOUT')
+
+    def test_exit_cannot_reuse_pre_request_quote(self):
+        self.enter()
+        requested=NOW+timedelta(seconds=3)
+        self.e.stop(requested)
+        self.e.on_tick(tick(4,exchange_ts=NOW+timedelta(seconds=2)),NOW+timedelta(seconds=4))
+        self.assertEqual(self.e.active['exited_qty'],0)
+        self.send(tick(5))
+        self.assertIsNone(self.e.active)
+
+    def test_zero_bid_depth_cannot_trigger_a_profit_target(self):
+        self.enter()
+        self.send(tick(2,best_bid=240,best_ask=240.05,best_bid_qty=0))
+        self.assertEqual(self.e.active['state'],'OPEN')
+        self.assertFalse(self.e.active['trailed'])
 
     def test_package_cannot_submit_real_orders(self):
         for path in Path(__file__).parent.glob('*.py'):

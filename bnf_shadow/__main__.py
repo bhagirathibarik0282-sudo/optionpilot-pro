@@ -15,6 +15,23 @@ from .engine import OrderStateMachine
 from .session import SessionProvider
 from .store import TradeStore
 
+def paper_status(engine):
+    """Read-only, allowlisted paper fill receipt; never publishes account or order payloads."""
+    def leg(value):
+        if not isinstance(value, dict):
+            return None
+        return {
+            'state': str(value.get('state', 'UNKNOWN'))[:40],
+            'requested_qty': int(value.get('requested_qty') or 0),
+            'filled_qty': int(value.get('filled_qty') or 0),
+            'exited_qty': int(value.get('exited_qty') or 0),
+        }
+    with engine.lock:
+        active = leg(engine.snapshot.get('active'))
+        last_result = leg(engine.snapshot.get('last_result'))
+    return {'status': 'SHADOW_EXECUTION_STATUS', 'reported_at': datetime.now(IST).isoformat(),
+            'active': active, 'last_result': last_result, 'broker_orders': 0}
+
 def main():
     parser=argparse.ArgumentParser(description='BANKNIFTY SHADOW only; accepts validated JSONL signals and depth ticks')
     parser.add_argument('--config',required=True,help='JSON BNFConfig file')
@@ -64,6 +81,7 @@ def main():
         engine=OrderStateMachine(cfg,store,startup_now=startup_now)
         bridge=OptionPilotLiveBridge(engine,master,require_iv_evidence=not args.replay,derive_live_signals=not args.replay)
         if not args.replay: print(json.dumps({'status':'SHADOW_WORKER_READY','mode':'SHADOW','broker_orders':0}),flush=True)
+        if not args.replay: print(json.dumps(paper_status(engine)),flush=True)
         stream=open(args.input) if args.input else sys.stdin
         try:
             if args.replay:
@@ -107,6 +125,7 @@ def main():
                     session=current
                     checked=time.monotonic()
                     if bridge.producer: print(json.dumps({"status":"SHADOW_SOURCE_STATUS",**bridge.producer.status()}),file=sys.stderr)
+                    print(json.dumps(paper_status(engine)),flush=True)
                 try: event=events.get(timeout=1)
                 except queue.Empty: continue
                 if event is done: engine.stop(now,'INPUT_EOF'); break

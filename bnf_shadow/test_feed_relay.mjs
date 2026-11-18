@@ -13,7 +13,7 @@ function fixture(overrides={}){
  const writer=new Writable({write(chunk,encoding,done){lines.push(chunk.toString());done();}});
  const cfg={enabled:true,writer,registerObserver:fn=>{observer=fn;return()=>{observer=null;unsubscribed++;};},
  contractFor:()=>({instrument_token:101,tradingsymbol:'BANKNIFTY_TEST_CE'}),
- contextFor:()=>({symbol:'BANKNIFTY',spot_ltp:62100,vwap:62000,spot_ts:time,vwap_ts:time}),now:()=>now,...overrides};
+ contextFor:()=>({symbol:'BANKNIFTY',vwap_basis:'NEAR_FUTURES_AVERAGE_PRICE',comparison_policy:'LEGACY_SPOT_VS_NEAR_FUTURES_AVERAGE',spot_ltp:62100,vwap:62000,spot_ts:time,vwap_ts:time}),now:()=>now,...overrides};
  const relay=installBnfShadowFeedRelay(cfg);
  return {relay,writer,lines,send:(p=packet(),ts=time)=>observer?.([p],ts),unsubscribed:()=>unsubscribed};
 }
@@ -24,7 +24,7 @@ test('allowlisted packet shape preserves actual quantity and strips unrelated da
  assert.equal(f.lines[0].includes('synthetic-secret'),false);assert.equal(f.relay.status().extraBrokerConnections,0);f.relay.stop();
 });
 test('stale quotes and missing context produce no output',()=>{const f=fixture();const p=packet();p.exchangeTimestamp='2026-11-12T04:30:01Z';f.send(p);assert.equal(f.lines.length,0);f.relay.stop();const g=fixture({contextFor:()=>null});g.send();assert.equal(g.lines.length,0);g.relay.stop();});
-test('stale VWAP cannot be promoted by a fresh packet receipt',()=>{const f=fixture({contextFor:()=>({symbol:'BANKNIFTY',spot_ltp:62100,vwap:62000,spot_ts:time,vwap_ts:'2026-11-18T04:29:00Z'})});f.send();assert.equal(f.lines.length,0);f.relay.stop();});
+test('stale VWAP cannot be promoted by a fresh packet receipt',()=>{const f=fixture({contextFor:()=>({symbol:'BANKNIFTY',vwap_basis:'NEAR_FUTURES_AVERAGE_PRICE',comparison_policy:'LEGACY_SPOT_VS_NEAR_FUTURES_AVERAGE',spot_ltp:62100,vwap:62000,spot_ts:time,vwap_ts:'2026-11-18T04:29:00Z'})});f.send();assert.equal(f.lines.length,0);f.relay.stop();});
 test('partial packets, future clocks and mismatched token are rejected',()=>{for(const change of [p=>p.mode='quote',p=>p.instrumentToken=102,p=>p.exchangeTimestamp='2026-11-18T04:30:02Z',p=>p.exchangeTimestamp='2026-11-18T04:30:01']){const f=fixture();let p=packet();change(p);f.send(p);assert.equal(f.lines.length,0);f.relay.stop();}});
 test('write(false) accepted once, drops until drain, never replays old packets',()=>{
  let calls=0;const writer=new Writable({highWaterMark:1,write(chunk,encoding,done){calls++;}});

@@ -39,4 +39,4 @@ jobs:
           BNF_SHADOW_REAL_PG_TEST: '1'
         run: python -m unittest bnf_shadow.test_real_postgres -v
       - name: Existing-feed relay and Python boundary
-        run: node --test bnf_shadow/test_feed_relay.mjs
+        run: node --test bnf_shadow/test_feed_relay.mjs bnf_shadow/test_market_context.mjs

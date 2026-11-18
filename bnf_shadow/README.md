@@ -22,7 +22,7 @@ From repository root, Python 3.10+:
 
 ```sh
 python -m pip install -r bnf_shadow/requirements.txt
-python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source -v
+python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source bnf_shadow.test_depth_source -v
 ```
 
 The Python suite uses temporary SQLite journals and synthetic broker/auth fixtures. No Railway connection or real order is used. It covers validation, caps, signal deduplication, partial fills, exit confirmation, zero depth, watchdog, stale/duplicate ticks, timeouts, restart, CAS conflicts, concurrent signals, stop counters, session compatibility and broker-method isolation.
@@ -111,3 +111,12 @@ Read-only Railway inspection on 2026-11-18 observed:
 - Nonzero IV and market spot/VWAP were observed. Their presence alone does not verify the IV method or all contract inputs.
 
 **Consequence:** the inspected stored-minute path cannot yet be asserted to meet the current real-time admission deadline. The source fails closed on delayed buckets and old quotes. The preflight code was tested with synthetic fixtures, not run inside production. No production source activation, fresh-depth integration, schema migration, worker launch, merge or deployment was performed by this step. A fresh source with verified IV lineage and real bid/ask quantities is still required before observing end-to-end SHADOW fills. Adjusting strategy freshness policy requires a separately reviewed strategy change; this adapter does not relax it.
+
+
+## Existing full-depth packet adapter
+
+`depth_source.py` consumes the actual `KiteDecodedPacket` field names from `kite-websocket-binary-decoder.ts`: `instrumentToken`, `exchangeTimestamp`, `lastPrice`, `mode`, `isIndex` and five-level `marketDepth.buy/sell`. The JSONL bridge now accepts `type: kite_depth` with `tradingsymbol`, `receive_ts`, `packet`, and a separately timestamped `market_context` (`symbol`, `spot_ltp`, `vwap`, `spot_ts`, `vwap_ts`). The market context must refer to BANKNIFTY and meet the existing five-second freshness bound at receipt and consumption. A new receipt timestamp cannot make an old market context valid.
+
+Only full non-index option packets matching the current master are accepted. The adapter takes the actual first bid/ask price and displayed quantity, never total book quantity, last-trade quantity or configured lot size. It validates all five levels, order/quantity types, sorting, crossed books and aware timestamps. Missing/invalid depth is rejected. A zero best-level quantity remains zero, even if deeper levels display liquidity. Duplicate receipt attempts produce a stable content-based event ID. Existing engine timestamp/depth/latency guards remain in force. This converter does not open a WebSocket, call a broker, or write a database.
+
+Validation now includes **64 Python tests** (40 core, 13 snapshot-source, 11 depth-source), including decoded packet -> JSONL bridge -> durable simulated entry fill using a temporary SQLite journal. All packet fixtures are synthetic. UTC timestamps ending in `Z`, as emitted by the TypeScript decoder, are normalized explicitly for Python 3.10 compatibility. The PostgreSQL-engine smoke test remains separate. The existing production WebSocket has not been tapped/piped into this worker; no new production socket/subscription or dashboard-startup hook was introduced. Real-time spot/VWAP evidence, approved IV signal lineage, the stored-minute delay issue, isolated real PostgreSQL ownership testing and live SHADOW observation remain release gates.

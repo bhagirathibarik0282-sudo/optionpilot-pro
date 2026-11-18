@@ -20,11 +20,14 @@ def paper_status(engine):
     def leg(value):
         if not isinstance(value, dict):
             return None
+        def qty(key):
+            val = value.get(key)
+            return val if type(val) is int and val >= 0 else None
         return {
             'state': str(value.get('state', 'UNKNOWN'))[:40],
-            'requested_qty': int(value.get('requested_qty') or 0),
-            'filled_qty': int(value.get('filled_qty') or 0),
-            'exited_qty': int(value.get('exited_qty') or 0),
+            'requested_qty': qty('requested_qty'),
+            'filled_qty': qty('filled_qty'),
+            'exited_qty': qty('exited_qty'),
         }
     with engine.lock:
         active = leg(engine.snapshot.get('active'))

@@ -6,7 +6,7 @@ import { dbIsConfigured, dbQuerySafe } from './db.js';
 export const BNF_SHADOW_COMPARISON_LOTS = [1, 2, 4, 6] as const;
 export type BnfLot = typeof BNF_SHADOW_COMPARISON_LOTS[number];
 type Query = (sql:string, params?:unknown[])=>Promise<{rows:any[]}|null>;
-type JournalEvent = {occurred_at:unknown; kind:unknown; payload:unknown};
+type JournalEvent = {occurred_at:unknown; kind:unknown; intent_id?:unknown; payload:unknown};
 type Slot = {lots:BnfLot; verdict:'PAPER_JOURNAL'|'NOT_SIMULATED'; intents:number|null; entryFills:number|null; exitFills:number|null; closedTrades:number|null; estimatedNetPnlInr:number|null; stopLosses:number|null};
 export type BnfDaywiseReport = {ok:boolean; mode:'BNF_SHADOW_DAYWISE_READ_ONLY_V1'; source:'DURABLE_PAPER_JOURNAL'; lots:readonly BnfLot[]; days:Array<{date:string; scenarios:Slot[]}>; reason:string; estimatedOnly:true; brokerOrders:0; fillsNotScaled:true};
 
@@ -71,7 +71,7 @@ export async function readBnfShadowDaywise(query:Query=dbQuerySafe):Promise<BnfD
  if(scopes.rows.length!==1)return blocked('AMBIGUOUS_SHADOW_ACCOUNT_SCOPE');
  const scope=scopes.rows[0].scope;
  if(typeof scope!=='string')return blocked('SHADOW_SCOPE_INVALID');
- const result=await query('SELECT occurred_at, kind, payload FROM bnf_shadow_event_v1 WHERE scope=$1 ORDER BY occurred_at DESC LIMIT 1001',[scope]);
+ const result=await query('SELECT occurred_at, kind, intent_id, payload FROM bnf_shadow_event_v1 WHERE scope=$1 ORDER BY occurred_at DESC LIMIT 1001',[scope]);
  if(!result)return blocked('SHADOW_EVENTS_UNAVAILABLE');
  if(result.rows.length>1000)return blocked('JOURNAL_ROW_LIMIT_REACHED');
  return summarizeBnfShadowDaywise(scopes.rows[0].payload,result.rows);

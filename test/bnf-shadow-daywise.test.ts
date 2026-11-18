@@ -43,6 +43,15 @@ test('1-lot receipts stay 1-lot and never become 2-lot facts',()=>{
  assert.equal(report.days[0].scenarios[1].verdict,'NOT_SIMULATED');
 });
 
+test('mixed lot sizes within a single journal scope never share estimated daily P&L',()=>{
+ const report=summarizeBnfShadowDaywise({days:{}},[
+  event('2026-11-17','ENTRY_FILL','OPEN',30),
+  event('2026-11-18','ENTRY_FILL','OPEN',60)
+ ]);
+ assert.equal(report.ok,false);
+ assert.equal(report.reason,'MIXED_LOTS_IN_SINGLE_PAPER_SCOPE');
+});
+
 test('invalid contract quantity or broken evidence blocks every reported lot',()=>{
  const report=summarizeBnfShadowDaywise({days:{}},[event('2026-11-18','ENTRY_FILL','OPEN',45)]);
  assert.equal(report.ok,false);

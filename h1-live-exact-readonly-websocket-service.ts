@@ -71,6 +71,9 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
   fixedContractWatchlistRegistry?: KiteImmediateTokenEntry[];
   selectorPolicyEnv?: NodeJS.ProcessEnv;
   selectorPolicyValidation?: H1SelectorCanonicalValidationProof;
+  bnfReferenceTokens?: number[];
+  onBnfShadowPackets?: (ticks: KiteDecodedPacket[], receivedAt: string) => void;
+  onBnfShadowState?: (state: string) => void;
   rawDepthPersist?: (record: H1LiveExactRawDepthRecord) => void | Promise<void>;
   rawGreekTimingPersist?: (record: H1LiveExactGreekTimingRecord) => void | Promise<void>;
   greekMathCrosscheckPersist?: (record: H1KiteGreekMathCrosscheckPersistRecord) => void | Promise<void>;
@@ -79,6 +82,8 @@ export interface H1LiveExactReadOnlyWebSocketServiceConfig {
 }
 
 export interface H1LiveExactReadOnlyWebSocketStatus {
+  bnfShadowPaperHostAttached: boolean;
+  bnfReferenceTokenCount: number;
   version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1";
   started: boolean;
   connected: boolean;
@@ -132,6 +137,8 @@ export interface H1LiveExactReadOnlyWebSocketStatus {
 export const H1_MARKET_OPEN_DIRECTION_POLICY = { maxObservationGapMs: 180_000, minAbsoluteSpotMovePct: 0 } as const;
 
 export class H1LiveExactReadOnlyWebSocketService {
+  private bnfReferenceTokens = new Set<number>();
+  private bnfHookFailed = false;
   private transport: KiteWebSocketTransport | null = null;
   private readonly allowedTokens: Set<number>;
   private readonly constituentEvidence: CanonicalConstituentTickStore | null;
@@ -192,13 +199,17 @@ export class H1LiveExactReadOnlyWebSocketService {
     this.fixedContractWatchlistRegistry = uniqueWatchlist.length > 0 ? new KiteImmediateTokenRegistry(uniqueWatchlist) : null;
     this.fixedContractWatchlistEvidence = this.fixedContractWatchlistRegistry ? new H1LiveExactRawEvidenceStore(this.fixedContractWatchlistRegistry) : null;
     this.fixedContractWatchlistSelectorOverlapTokens = new Set(configuredWatchlist.filter((entry) => registryTokens.includes(entry.instrumentToken)).map((entry) => entry.instrumentToken));
-    this.allowedTokens = new Set([...registryTokens, ...constituentTokens, ...uniqueWatchlist.map((entry) => entry.instrumentToken)]);
+    const bnfTokens=config.bnfReferenceTokens??[];
+    if(bnfTokens.length>4||bnfTokens.some(token=>!Number.isInteger(token)||token<=0)||new Set(bnfTokens).size!==bnfTokens.length)throw new Error("BNF_REFERENCE_TOKENS_INVALID");
+    this.bnfReferenceTokens=new Set(bnfTokens.filter(token=>!registryTokens.includes(token)&&!constituentTokens.includes(token)&&!uniqueWatchlist.some(entry=>entry.instrumentToken===token)));
+    this.allowedTokens = new Set([...registryTokens, ...constituentTokens, ...uniqueWatchlist.map((entry) => entry.instrumentToken), ...this.bnfReferenceTokens]);
     this.rawEvidence = new H1LiveExactRawEvidenceStore(config.readiness.registry);
     this.rawDepthPersist = config.rawDepthPersist ?? ((record) => dbInsert(H1_LIVE_EXACT_RAW_DEPTH_PERSIST_KIND, record));
     this.rawGreekTimingPersist = config.rawGreekTimingPersist ?? ((record) => dbInsert(H1_LIVE_EXACT_GREEK_TIMING_PERSIST_KIND, record));
     this.greekMathCrosscheckPersist = config.greekMathCrosscheckPersist ?? ((record) => dbInsert(H1_KITE_GREEK_MATH_CROSSCHECK_PERSIST_KIND, record));
     this.fixedContractOptionSnapshotPersist = config.fixedContractOptionSnapshotPersist ?? dbUpsertOptionSnapshot1mObservationalFill;
     this.value = {
+      bnfShadowPaperHostAttached: Boolean(config.onBnfShadowPackets), bnfReferenceTokenCount: this.bnfReferenceTokens.size,
       version: "H1_LIVE_EXACT_READONLY_WEBSOCKET_SERVICE_V1", started: false, connected: false, state: "READY",
       subscribedTokenCount: this.allowedTokens.size, receivedPacketCount: 0, rejectedPacketCount: 0, lastPacketTimestamp: null,
       rawEvidenceReady: false, rawEvidenceExpectedTokenCount: registryTokens.length, rawEvidenceFreshTokenCount: 0,
@@ -533,10 +544,17 @@ export class H1LiveExactReadOnlyWebSocketService {
       reconnect: { enabled: true, delayMs: this.config.reconnectDelayMs ?? 1_000, maxAttempts: this.config.reconnectMaxAttempts ?? 10 },
       onTicks: (ticks, receivedAt) => {
         this.value.lastPacketTimestamp = receivedAt;
+        if(this.config.onBnfShadowPackets&&!this.bnfHookFailed)try{
+          this.config.onBnfShadowPackets(ticks.filter(tick=>this.allowedTokens.has(tick.instrumentToken)),receivedAt);
+        }catch{
+          this.bnfHookFailed=true;
+          try{this.config.onBnfShadowState?.("ERROR");}catch{/* isolate optional paper worker */}
+        }
         for (const tick of ticks) this.observeRawSpotTiming(tick, receivedAt);
         for (const tick of ticks) {
           if (!this.allowedTokens.has(tick.instrumentToken)) { this.value.rejectedPacketCount += 1; continue; }
           this.value.receivedPacketCount += 1;
+          if(this.bnfReferenceTokens.has(tick.instrumentToken))continue;
           if (this.constituentEvidence?.hasToken(tick.instrumentToken)) {
             if (!this.constituentEvidence.ingest(tick, receivedAt)) this.value.rejectedPacketCount += 1;
             continue;
@@ -625,7 +643,9 @@ export class H1LiveExactReadOnlyWebSocketService {
         this.value.readOnlyShadowInputReadySymbolCount = this.value.readOnlyShadowInputObservations.filter((row) => row.ready).length;
       },
       onTextMessage: () => {},
-      onState: (state) => { this.value.state = state; this.value.connected = state === "OPEN"; },
+      onState: (state) => { this.value.state = state; this.value.connected = state === "OPEN";
+        if(!this.bnfHookFailed)try{this.config.onBnfShadowState?.(state);}catch{this.bnfHookFailed=true;}
+      },
     });
     this.value.started = true;
     this.transport.connect();
@@ -633,6 +653,7 @@ export class H1LiveExactReadOnlyWebSocketService {
   }
 
   stop(): H1LiveExactReadOnlyWebSocketStatus {
+    try{this.config.onBnfShadowState?.("CLOSED");}catch{/* contain optional worker shutdown */}
     this.selectorCoordinator?.clear(); this.selectorCoordinator = null;
     this.selectorPeerStore?.clear(); this.selectorPeerStore = null;
     this.validationEvidenceCoordinator?.clear(); this.validationEvidenceCoordinator = null;

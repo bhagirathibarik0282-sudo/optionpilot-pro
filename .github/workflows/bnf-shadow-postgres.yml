@@ -7,6 +7,8 @@ on:
       - 'bnf-shadow-host-runtime.ts'
       - 'dashboard-live-http.ts'
       - 'dashboard-live-view.ts'
+      - 'business-dashboard-v1-view.ts'
+      - 'test/business-dashboard-v1.test.ts'
       - 'test/bnf-shadow-dashboard-status.test.ts'
       - 'h1-dynamic-readonly-live-chain.ts'
       - 'h1-live-exact-readonly-websocket-service.ts'
@@ -52,7 +54,7 @@ jobs:
       - name: Existing read-only feed and optional BNF host regressions
         env:
           NODE_ENV: test
-        run: node --import tsx --test test/bnf-shadow-host-wiring.test.ts test/bnf-shadow-dashboard-status.test.ts test/h1-live-exact-readonly-websocket-service.test.ts test/h1-live-selector-authority-quarantine.test.ts test/h1-dynamic-readonly-server-bootstrap.test.ts
+        run: node --import tsx --test test/bnf-shadow-host-wiring.test.ts test/bnf-shadow-dashboard-status.test.ts test/business-dashboard-v1.test.ts test/h1-live-exact-readonly-websocket-service.test.ts test/h1-live-selector-authority-quarantine.test.ts test/h1-dynamic-readonly-server-bootstrap.test.ts
   host-image-smoke:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

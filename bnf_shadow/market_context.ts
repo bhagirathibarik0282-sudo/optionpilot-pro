@@ -83,6 +83,7 @@ type Observer = (ticks: KiteDecodedPacket[], receivedAt: string) => void;
 export function installBnfShadowTradingFeed(config: {
   enabled: boolean; writer: Writable; entries: KiteImmediateTokenEntry[]; masterDate: string;
   connected: () => boolean; now?: () => number;
+  expiryClockFor?: (token: number, observedAt: string) => { expiry_clock_source: 'INDEX_EXPIRY_CLOCK'; expiry_ts: string } | null;
   registerObserver: (observer: Observer) => () => void;
   contractFor: (token: number) => { instrument_token: number; tradingsymbol: string } | null;
 }) {

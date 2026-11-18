@@ -5,7 +5,7 @@ import { LIVE_INDICES, type LiveSelection, type PremiumWatchFilter } from './das
 import { readBnfShadowHostStatus } from './bnf-shadow-host-runtime.js';
 
 export const DASHBOARD_LIVE_FLUSH_MS=100;
-export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot,revision=dashboardLiveRevision,readAudit=readDashboardPcrAudit){
+export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot,revision=dashboardLiveRevision,readAudit=readDashboardPcrAudit,readBnfStatus:()=>any=readBnfShadowHostStatus){
  let clients=0;
  const parse=(query:Record<string,string>)=>{
   const selection:LiveSelection={};
@@ -20,7 +20,7 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
  // Read-only paper status. No broker credentials, tradingsymbols, event payloads or order actions.
  app.get('/dashboard-live/bnf-shadow',c=>{
   c.header('Cache-Control','no-store');
-  const raw:any=readBnfShadowHostStatus();
+  const raw:any=readBnfStatus();
   const ready=raw.phase==='READY'&&raw.childRunning===true&&raw.feedConnected===true;
   const cnt=(x:any)=>Number.isSafeInteger(x)&&x>=0?x:null;
   const counts=ready?(raw.sourceCounts||{}):{};

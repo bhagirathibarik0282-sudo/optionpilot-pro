@@ -5,6 +5,7 @@ from datetime import date
 import io
 import json
 from .domain import ContractSpec, QuadAlignSignal, TickSnapshot, timestamp
+from .depth_source import KiteDepthSource
 
 class InstrumentMaster:
     def __init__(self, csv_text, asof):
@@ -55,6 +56,9 @@ class OptionPilotLiveBridge:
             if not opposite or opposite.option_type == signal.contract.option_type or opposite.expiry_date != signal.contract.expiry_date or opposite.strike != signal.contract.strike:
                 raise ValueError('opposite contract must be same strike/expiry and other option type')
             return self.engine.on_signal(signal,now)
+        if kind == 'kite_depth':
+            tick = KiteDepthSource(self.engine.cfg, self.master).to_tick(event, now)
+            return self.engine.on_tick(tick, now)
         if kind == 'tick':
             raw = dict(event['tick'])
             raw['exchange_ts'],raw['receive_ts'] = timestamp(raw['exchange_ts']),timestamp(raw['receive_ts'])

@@ -32,7 +32,7 @@ export function bindBnfHostMaster(entries:Entry[], rows:Row[], asof:string) {
 }
 
 export function createBnfShadowHost(config:any,deps:any={}) {
-  const state={enabled:config.enabled===true,phase:'DISABLED',reason:'DISABLED',workerStarts:0,feedConnected:false,sourceCounts:null as any,brokerOrders:0};
+  const state={enabled:config.enabled===true,phase:'DISABLED',reason:'DISABLED',workerStarts:0,feedConnected:false,sourceCounts:null as any,sourceUpdatedAt:null as string|null,brokerOrders:0};
   let child:any=null,endingChild:any=null,binding:any=null,observer:any=null,stopped=false,pending=false,generation=0,attempted=false;
   const now:()=>number=deps.now||Date.now;
   const spawnChild=deps.spawn||spawn;
@@ -59,7 +59,7 @@ export function createBnfShadowHost(config:any,deps:any={}) {
     if(state.feedConnected&&observer)try{observer(ticks,receivedAt);}catch{endWorker();note('BLOCKED','HOST_PACKET_CALLBACK_FAILED');}
   },onState:(value:string)=>{
     const wasOpen=state.feedConnected;state.feedConnected=value==='OPEN';
-    if(!state.feedConnected){generation++;attempted=false;endWorker();if(!stopped&&state.enabled)note('WAIT_FEED','FEED_NOT_OPEN');}
+    if(!state.feedConnected){state.sourceCounts=null;state.sourceUpdatedAt=null;generation++;attempted=false;endWorker();if(!stopped&&state.enabled)note('WAIT_FEED','FEED_NOT_OPEN');}
     else if(!wasOpen)void start();
   }};
   if(!state.enabled)return result;
@@ -93,6 +93,7 @@ export function createBnfShadowHost(config:any,deps:any={}) {
       const report=await preflight();
       if(stopped||epoch!==generation||!state.feedConnected)return;
       if(!report?.ready){note('BLOCKED',['JOURNAL_SCHEMA_REQUIRED','CONTRACT_LOT_CONFIG_MISMATCH','PYTHON_UNAVAILABLE'].includes(report?.status)?report.status:'PREFLIGHT_FAILED');return;}
+      state.sourceCounts=null;state.sourceUpdatedAt=null;
       const owned=spawnChild(python,args,{cwd:config.cwd||process.cwd(),env:outputEnv,stdio:['pipe','pipe','pipe'],shell:false});
       child=owned;state.workerStarts++;note('STARTING','WAIT_WORKER_READY');
       const readyTimer=setTimeout(()=>{if(child===owned&&state.phase==='STARTING'){endWorker();note('BLOCKED','WORKER_READY_TIMEOUT');}},45000);readyTimer.unref();
@@ -110,7 +111,7 @@ export function createBnfShadowHost(config:any,deps:any={}) {
         }
         if(value.status==='SHADOW_SOURCE_STATUS'){
           const counts:any={};for(const key of ['observations','signals','rejected','warmup','contracts','retained_observations'])if(Number.isSafeInteger(value[key])&&value[key]>=0)counts[key]=value[key];
-          state.sourceCounts=counts;
+          state.sourceCounts=counts;state.sourceUpdatedAt=new Date(now()).toISOString();
         }
       };
       const receive=(key:'out'|'err',chunk:any)=>{

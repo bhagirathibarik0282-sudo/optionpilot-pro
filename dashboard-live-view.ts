@@ -12,7 +12,7 @@ export function installDashboardLive(){
   bnfChecking=true;
   const label=get('op-bnf-shadow-state'),evidence=get('op-bnf-shadow-evidence');
   try{
-   const response=await fetch('/api/dashboard-live/bnf-shadow',{cache:'no-store',credentials:'same-origin'});
+   const response=await fetch('/api/research/dashboard-live/bnf-shadow',{cache:'no-store',credentials:'same-origin'});
    if(!response.ok)throw Error('STATUS_HTTP');
    const data=await response.json();
    if(data?.mode!=='SHADOW')throw Error('INVALID_STATUS');

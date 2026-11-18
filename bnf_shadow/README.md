@@ -120,3 +120,22 @@ Read-only Railway inspection on 2026-11-18 observed:
 Only full non-index option packets matching the current master are accepted. The adapter takes the actual first bid/ask price and displayed quantity, never total book quantity, last-trade quantity or configured lot size. It validates all five levels, order/quantity types, sorting, crossed books and aware timestamps. Missing/invalid depth is rejected. A zero best-level quantity remains zero, even if deeper levels display liquidity. Duplicate receipt attempts produce a stable content-based event ID. Existing engine timestamp/depth/latency guards remain in force. This converter does not open a WebSocket, call a broker, or write a database.
 
 Validation now includes **64 Python tests** (40 core, 13 snapshot-source, 11 depth-source), including decoded packet -> JSONL bridge -> durable simulated entry fill using a temporary SQLite journal. All packet fixtures are synthetic. UTC timestamps ending in `Z`, as emitted by the TypeScript decoder, are normalized explicitly for Python 3.10 compatibility. The PostgreSQL-engine smoke test remains separate. The existing production WebSocket has not been tapped/piped into this worker; no new production socket/subscription or dashboard-startup hook was introduced. Real-time spot/VWAP evidence, approved IV signal lineage, the stored-minute delay issue, isolated real PostgreSQL ownership testing and live SHADOW observation remain release gates.
+
+
+## Isolated real PostgreSQL ownership/recovery tests
+
+Six opt-in tests in `test_real_postgres.py` cover independent-session ownership exclusion and release, independent strategy scopes, filled-position recovery on a new connection, duplicate-event transaction rollback, duplicate-signal transaction rollback, and termination of the owner's database session. They create a disposable local PostgreSQL cluster through `pgserver` and connect with real psycopg2. They do not accept/read `DATABASE_URL` and do not connect to Railway. `pgserver` is a test-only optional dependency, not a production worker dependency.
+
+Run on a machine/CI runner that permits local Unix-domain sockets and PostgreSQL child processes:
+
+```sh
+python -m pip install psycopg2-binary pgserver==0.1.4
+BNF_SHADOW_REAL_PG_TEST=1 python -m unittest bnf_shadow.test_real_postgres -v
+```
+
+Without the explicit opt-in, all six tests are skipped. Do not count skipped tests as passed.
+
+Validation attempt in this workspace: PostgreSQL cluster initialization reached socket setup, but the host rejected `socket(AF_UNIX, SOCK_STREAM)` with `PermissionError: [Errno 1] Operation not permitted`. `setUpClass` failed and **zero real PostgreSQL tests executed**. The disposable fixture was cleaned up. This is an execution-environment restriction, not evidence of PostgreSQL correctness or a strategy failure. The previously passed 64 Python tests and one PGlite SQL smoke test remain separate evidence. These six new tests still require a successful isolated PostgreSQL run before deployment. No production schema/data/service was touched for this attempt.
+
+
+The dedicated `BANKNIFTY isolated PostgreSQL` GitHub Actions workflow runs the existing 64 Python tests and these six opt-in PostgreSQL tests on Python 3.10 and 3.12. It is restricted to pull requests targeting `production` with changes in this package or its own workflow; manual dispatch is also supported. It uses read-only repository permissions, no persisted checkout credentials, no production secrets, isolated disposable databases and a ten-minute job timeout. Workflow availability/execution must be checked separately; adding its YAML does not prove a successful run.

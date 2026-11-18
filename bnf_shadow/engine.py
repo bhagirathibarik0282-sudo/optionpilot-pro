@@ -71,8 +71,9 @@ class OrderStateMachine:
         od['closed_at'] = aware(now).isoformat()
         snapshot['last_result'], snapshot['active'] = od, None
 
-    def _request_exit(self, od, reason):
+    def _request_exit(self, od, reason, now):
         od['entry_cancelled'] = True
+        od.setdefault('exit_requested_ts', aware(now).isoformat())
         reason = od.get('exit_reason') or reason
         od['exit_reason'] = reason
         od['state'], od['reason'] = 'EXIT_PENDING', reason
@@ -82,7 +83,7 @@ class OrderStateMachine:
         od = snapshot['active']
         od['entry_cancelled'] = True
         if od['filled_qty'] > od['exited_qty']:
-            self._request_exit(od, reason)
+            self._request_exit(od, reason, now)
         else:
             self._finish(snapshot, 'CANCELLED', reason, now)
 
@@ -111,7 +112,7 @@ class OrderStateMachine:
                 'contract':signal.contract.wire(),'state':'ENTRY_PENDING','requested_qty':self.cfg.qty,
                 'filled_qty':0,'exited_qty':0,'entry_notional':0.0,'exit_notional':0.0,
                 'entry_order_id':'SHD_ENTRY_'+intent,'limit_price':price,'capital_reserved_inr':reserve,
-                'signal_ts':aware(signal.signal_ts).isoformat(),'entry_ts':None,'last_quote_ts':None,
+                'signal_ts':aware(signal.signal_ts).isoformat(),'order_created_ts':now.isoformat(),'entry_ts':None,'last_quote_ts':None,
                 'last_receive_ts':None,'entry_cancelled':False,'trailed':False,
                 'sl_pts':-self.cfg.sl_pts,'reason':None}
             self._commit(candidate,'ENTRY_INTENT_RECORDED_AND_PAPER_ORDER_CREATED',now,signal.signal_id,
@@ -126,13 +127,13 @@ class OrderStateMachine:
             candidate = deepcopy(self.snapshot)
             od = candidate['active']
             if od['state'] in ('EXIT_PENDING','RECONCILIATION_REQUIRED'): return
-            latest = timestamp(od['last_receive_ts'] or od['signal_ts'])
+            latest = timestamp(od['last_receive_ts'] or od.get('order_created_ts',od['signal_ts']))
             reason = None
             if now.date() != timestamp(od['signal_ts']).date(): reason = 'DAY_ROLLOVER'
             elif now.time() >= time.fromisoformat(self.cfg.flatten_at_ist): reason = 'SESSION_CLOSE'
             elif (now-latest).total_seconds() >= self.cfg.feed_gap_lock_sec: reason = 'FEED_GAP'
             elif od['entry_ts'] and (now-timestamp(od['entry_ts'])).total_seconds() >= self.cfg.max_hold_sec: reason = 'TIME_EXIT'
-            elif not od['entry_cancelled'] and od['filled_qty'] < od['requested_qty'] and (now-timestamp(od['signal_ts'])).total_seconds() >= self.cfg.pending_timeout_sec: reason = 'ENTRY_TIMEOUT'
+            elif not od['entry_cancelled'] and od['filled_qty'] < od['requested_qty'] and (now-timestamp(od.get('order_created_ts',od['signal_ts']))).total_seconds() >= self.cfg.pending_timeout_sec: reason = 'ENTRY_TIMEOUT'
             if reason:
                 self._cancel_remainder(candidate,reason,now)
                 self._commit(candidate,reason,now)
@@ -145,6 +146,7 @@ class OrderStateMachine:
             if not self.active: return
             od = self.active
             if tick.instrument_token != od['contract']['instrument_token']: return
+            if ex < timestamp(od.get('order_created_ts',od['signal_ts'])): return
             previous = self.last_ticks.get(tick.instrument_token)
             durable_ts = timestamp(od['last_quote_ts']) if od['last_quote_ts'] else None
             if (previous and (ex <= previous[0] or tick.event_id == previous[1])) or (durable_ts and ex <= durable_ts): return
@@ -155,9 +157,15 @@ class OrderStateMachine:
             od = candidate['active']
             self.last_ticks[tick.instrument_token] = (ex,tick.event_id)
             od['last_quote_ts'], od['last_receive_ts'] = ex.isoformat(), aware(tick.receive_ts).isoformat()
-            if od['state'] == 'RECONCILIATION_REQUIRED': self._request_exit(od,'RESTART_RECOVERY')
+            if od['state'] == 'RECONCILIATION_REQUIRED':
+                self._request_exit(od,'RESTART_RECOVERY',now)
+                self._commit(candidate,'RECOVERY_EXIT_REQUESTED',now)
+                return
             kind = None
             if od['state'] == 'EXIT_PENDING':
+                if ex <= timestamp(od['exit_requested_ts']):
+                    self.snapshot = candidate
+                    return
                 lot = od['contract']['contract_lot_size']
                 amount = min(od['filled_qty']-od['exited_qty'],tick.best_bid_qty) // lot * lot
                 if amount:
@@ -175,22 +183,23 @@ class OrderStateMachine:
                 else: self.snapshot = candidate  # Only quote timestamps changed.
                 return
             aligned = tick.spot_ltp > tick.vwap if od['contract']['option_type'] == 'CE' else tick.spot_ltp < tick.vwap
-            if not aligned and not od['entry_cancelled']:
+            if not aligned and not od['entry_cancelled'] and od['filled_qty'] < od['requested_qty']:
                 self._cancel_remainder(candidate,'VWAP_INVALIDATED',now)
                 self._commit(candidate,'VWAP_INVALIDATED',now)
                 return  # Never reuse this quote for both entry and exit fills.
             # Protect already filled exposure before adding any further entry quantity.
-            if od['filled_qty']:
+            if od['filled_qty'] and tick.best_bid_qty > 0:
                 pnl_points = tick.best_bid - od['entry_notional']/od['filled_qty']
                 if pnl_points >= self.cfg.trail_trigger_pts and not od['trailed']:
                     od['trailed'], od['sl_pts'] = True,self.cfg.trail_lock_pts
                     kind = 'TRAIL_ACTIVATED'
                 reason = 'TARGET' if pnl_points >= self.cfg.target_pts else ('TRAIL_STOP' if od['trailed'] else 'STOP_LOSS') if pnl_points <= od['sl_pts'] else None
                 if reason:
-                    self._request_exit(od,reason)
+                    self._request_exit(od,reason,now)
                     self._commit(candidate,'EXIT_REQUESTED',now)
                     return  # A later fresh depth event must confirm the simulated exit.
-            latency_ms = (aware(tick.receive_ts)-timestamp(od['signal_ts'])).total_seconds()*1000
+            created = timestamp(od.get('order_created_ts',od['signal_ts']))
+            latency_ms = min((aware(tick.receive_ts)-created).total_seconds(),(ex-created).total_seconds())*1000
             if not od['entry_cancelled'] and latency_ms >= self.cfg.min_fill_latency_ms and tick.best_ask <= od['limit_price']:
                 lot = od['contract']['contract_lot_size']
                 amount = min(od['requested_qty']-od['filled_qty'],tick.best_ask_qty) // lot * lot

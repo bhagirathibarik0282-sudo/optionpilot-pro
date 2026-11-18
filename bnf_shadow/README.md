@@ -171,3 +171,18 @@ node --test bnf_shadow/test_feed_relay.mjs
 ```
 
 Production activation is still blocked by the unverified fresh spot/VWAP authority, approved IV signal lineage and stored-minute admission delay. No claim of live SHADOW fills is made. Passing relay fixtures cannot resolve those source issues.
+
+
+## Verified market-reference lineage and concrete host binding
+
+The source audit found that `server.ts` blob `1b2b4e65138b0e28f514b379ebd78f9a718b378c`, line 6706, assigns `baseMetrics.vwap = nearQuote?.average_price || 0`. The nearest futures contract is selected immediately above it. `storage-v3-adapter.ts` copies this generic field into `market_snapshot_1m.vwap` while setting `futureVwap` to null. A populated generic `vwap` field therefore does not prove spot-index VWAP. See `source_lineage_audit.json` for exact model/source facts and limitations.
+
+This package retains the supplied spot-versus-reference rule, now explicitly labelled `LEGACY_SPOT_VS_NEAR_FUTURES_AVERAGE`; it does not silently replace it with a futures-versus-futures strategy. The original 109-trade backtest is not re-certified by this naming or integration change.
+
+`market_context.ts` provides a fresh in-memory reference cache and the concrete `installBnfShadowTradingFeed` binding. Supply the current verified trading-feed registry (including the BANKNIFTY SPOT and futures identities), its as-of date, a live connection-state callback, the existing `registerKiteTickObserver`, current option-contract mapping and caller-owned SHADOW worker stdin. The binding registers one observer, updates spot/futures references first for each received batch, then invokes the existing bounded relay. It opens no new socket, starts no worker and mutates no existing service. The nearest futures identity is selected by unexpired registry expiry; missing or ambiguous identities fail. This does not fabricate master data or add missing subscriptions.
+
+The cache reads futures `averageTradePrice`, never futures LTP, as the explicitly labelled reference. Both reference clocks must be fresh within five seconds. Disconnect clears both values; reconnect requires fresh observations. Invalid new reference data revokes the old value, old/out-of-order packets cannot overwrite newer evidence, and day rollover requires a new current registry. The depth relay and Python converter now require the explicit reference-basis and comparison-policy fields. Old `kite_depth` producers without these fields reject; they must update deliberately. Raw `tick` events remain a trusted-producer interface and do not independently establish source provenance.
+
+The IV source is also identified: the legacy server path uses local Black-Scholes bisection, a coded 10% annual rate assumption, no dividend-yield term, a 365-day year and percentage-point output. That describes the code, not an independently verified prevailing rate or exchange-published IV. Its solver does not explicitly reject an unbracketed root or check final repricing residual; source/storage versions alone also do not prove synchronized option/spot inputs. No production IV lineage is automatically approved.
+
+Local validation: 65 Python core/source tests passed, and 19 Node tests passed (nine relay plus ten market-reference/binding cases). The existing six real PostgreSQL tests remain enabled in CI. The source implementation and tests are synthetic-fixture verified; no production binding or live fills are claimed. This resolves construction and labelling of the fresh market reference from an existing correctly subscribed trading feed; IV-quality, minute-path delay and production activation/observation remain pending.

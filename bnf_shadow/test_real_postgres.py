@@ -72,6 +72,13 @@ class RealPostgresTests(unittest.TestCase):
         self.assertTrue(other.owned)
         self.assertEqual(other.load({})[0], 0)
 
+    def test_runtime_preflight_reads_real_schema_without_journal_writes(self):
+        from .runtime_preflight import check_journal
+        before=self.scalar('SELECT count(*) FROM bnf_shadow_event_v1')
+        report=check_journal(self.url)
+        self.assertTrue(report['ready']);self.assertEqual(report['journal_writes'],0)
+        self.assertEqual(self.scalar('SELECT count(*) FROM bnf_shadow_event_v1'),before)
+
     def test_different_scopes_can_run_independently(self):
         other = self.connect(self.scope+':independent')
         other.acquire(); other.load({'test': 'independent'})

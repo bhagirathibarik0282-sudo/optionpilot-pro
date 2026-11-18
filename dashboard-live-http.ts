@@ -21,8 +21,9 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
  app.get('/dashboard-live/bnf-shadow',c=>{
   c.header('Cache-Control','no-store');
   const raw:any=readBnfShadowHostStatus();
+  const ready=raw.phase==='READY'&&raw.childRunning===true&&raw.feedConnected===true;
   const cnt=(x:any)=>Number.isSafeInteger(x)&&x>=0?x:null;
-  const counts=raw.sourceCounts||{};
+  const counts=ready?(raw.sourceCounts||{}):{};
   const leg=(x:any)=>{
    if(!x||typeof x!=='object')return null;
    return {state:typeof x.state==='string'?x.state:'UNKNOWN',requestedQty:cnt(x.requestedQty),filledQty:cnt(x.filledQty),exitedQty:cnt(x.exitedQty)};
@@ -31,7 +32,7 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
    lots:raw.lots===1||raw.lots===2?raw.lots:null,
    workerRunning:raw.childRunning===true,feedConnected:raw.feedConnected===true,
    sourceCounts:{observations:cnt(counts.observations),signals:cnt(counts.signals),rejected:cnt(counts.rejected),warmup:cnt(counts.warmup)},
-   paper:raw.paper?{reportedAt:raw.paper.reportedAt||null,active:leg(raw.paper.active),lastResult:leg(raw.paper.lastResult)}:null,
+   paper:ready&&raw.paper?{reportedAt:raw.paper.reportedAt||null,active:leg(raw.paper.active),lastResult:leg(raw.paper.lastResult)}:null,
    brokerOrders:0,checkedAt:new Date().toISOString()});
  });
  app.get('/dashboard-live/pcr-audit',c=>{

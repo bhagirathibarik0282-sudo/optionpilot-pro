@@ -26,6 +26,7 @@ export function summarizeBnfShadowDaywise(scopePayload:unknown,events:JournalEve
  if(!snapshot||!Array.isArray(events))return blocked('JOURNAL_SNAPSHOT_INVALID');
  const buckets=new Map<string,Map<BnfLot,{intents:Set<string>;entryFills:number;exitFills:number;closed:Set<string>;}>>();
  const observedLots=new Set<BnfLot>();
+ const intentProof=new Set<string>(),entryProof=new Set<string>(),exitProof=new Set<string>();
  for(const event of events){
   const day=date(event.occurred_at),payload=object(event.payload);
   if(!day||!payload||typeof event.kind!=='string')return blocked('JOURNAL_EVENT_INVALID');
@@ -42,13 +43,15 @@ export function summarizeBnfShadowDaywise(scopePayload:unknown,events:JournalEve
   observedLots.add(l); if(observedLots.size>1)return blocked('MIXED_LOTS_IN_SINGLE_PAPER_SCOPE');
   let stats=group.get(l);
   if(!stats){stats={intents:new Set(),entryFills:0,exitFills:0,closed:new Set()};group.set(l,stats);}
-  if(event.kind==='ENTRY_INTENT_RECORDED_AND_PAPER_ORDER_CREATED')stats.intents.add(id);
-  if(event.kind==='ENTRY_FILL')stats.entryFills++;
+  if(event.kind==='ENTRY_INTENT_RECORDED_AND_PAPER_ORDER_CREATED'){stats.intents.add(id);intentProof.add(id);}
+  if(event.kind==='ENTRY_FILL'){stats.entryFills++;entryProof.add(id);}
   if(event.kind==='EXIT_FILL'){
-   stats.exitFills++;
+   exitProof.add(id);stats.exitFills++;
    if(trade?.state==='CLOSED')stats.closed.add(id);
   }
  }
+ for(const id of entryProof)if(!intentProof.has(id))return blocked('ENTRY_RECEIPT_WITHOUT_INTENT');
+ for(const id of exitProof)if(!intentProof.has(id)||!entryProof.has(id))return blocked('EXIT_RECEIPT_WITHOUT_ENTRY_PROOF');
  const savedDays=object(snapshot.days)||{};
  const rows=[...buckets.keys()].sort().reverse().slice(0,5).map(day=>{
   const group=buckets.get(day)!;

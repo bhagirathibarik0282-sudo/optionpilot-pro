@@ -1,0 +1,30 @@
+name: Schema contract read-only CI
+on:
+  push:
+    branches: [main, production]
+    paths:
+      - schema-contract.ts
+      - schema-contract-debug-http.ts
+      - scripts/dump_schema.ts
+      - scripts/optionpilot-service-supervisor.mjs
+      - test/schema-contract-debug.test.ts
+      - .github/workflows/schema-contract-ci.yml
+  pull_request:
+    paths:
+      - schema-contract.ts
+      - schema-contract-debug-http.ts
+      - scripts/dump_schema.ts
+      - scripts/optionpilot-service-supervisor.mjs
+      - test/schema-contract-debug.test.ts
+      - .github/workflows/schema-contract-ci.yml
+jobs:
+  schema-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --omit=dev --no-package-lock
+      - run: node --check scripts/optionpilot-service-supervisor.mjs
+      - run: node --import tsx --test test/schema-contract-debug.test.ts

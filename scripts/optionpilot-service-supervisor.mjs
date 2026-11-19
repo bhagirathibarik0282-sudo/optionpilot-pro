@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createSchemaContractDebugApp } from '../schema-contract-debug-http.ts';
 import { spawn } from 'node:child_process';
 import { timingSafeEqual } from 'node:crypto';
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
@@ -17,6 +18,7 @@ export function createSupervisor({
 } = {}) {
 if (port === childPort) throw new Error('SUPERVISOR_PORT_COLLISION');
 const statePath = join(stateDir, 'runtime-maintenance-window.json');
+const schemaDebugApp = createSchemaContractDebugApp(env);
 let overrideUntil = 0;
 try { overrideUntil = maintenanceExpiry(JSON.parse(readFileSync(statePath, 'utf8')).until, now()); } catch {}
 let child = null, draining = false, ready = false, retryAt = 0, stopping = false, requests = 0;
@@ -66,6 +68,21 @@ async function reconcile() {
   }
 }
 const server = http.createServer(async (request, response) => {
+  // Always available, even when market runtime is stopped; strictly read-only and admin-protected.
+  if (new URL(request.url || '/', 'http://localhost').pathname === '/api/debug/schema-contract') {
+    if (request.method !== 'GET') return reply(response, 405, { error: 'METHOD_NOT_ALLOWED' });
+    try {
+      const headers = new Headers();
+      if (request.headers.authorization) headers.set('Authorization', request.headers.authorization);
+      const url = new URL(request.url || '/', 'http://localhost');
+      const result = await schemaDebugApp.request(url.toString(), { method: 'GET', headers });
+      response.writeHead(result.status, Object.fromEntries(result.headers.entries()));
+      response.end(await result.text());
+    } catch {
+      reply(response, 503, { error: 'SCHEMA_DEBUG_UNAVAILABLE' });
+    }
+    return;
+  }
   const path = new URL(request.url || '/', 'http://localhost').pathname;
   if (path === '/ops/runtime-status') return reply(response, 200, status());
   if (path === '/ops/runtime-window') {

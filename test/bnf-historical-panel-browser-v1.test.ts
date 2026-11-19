@@ -57,6 +57,7 @@ test('real Chromium: local historical JSON import, all dates, source audit, no e
   page.on('pageerror',e=>unexpected.push('JS_ERROR:'+e.message));
   await page.goto(base,{waitUntil:'load'});
   assert.equal(await page.locator('#bnf-historical-evidence').count(),1);
+  await page.locator('#bnf-historical-evidence > summary').click(); // Expand the actual user-visible panel before checking innerText.
   await page.locator('#bnf-history-file').setInputFiles({name:'synthetic-ledger.json',mimeType:'application/json',buffer:original});
   try{
    await page.waitForFunction(()=>document.querySelector('#bnf-history-status')?.textContent?.includes('HISTORICAL BACKTEST'),null,{timeout:8000});

@@ -184,8 +184,8 @@ export function installBnfHistoricalPanel(){
     const digest=await crypto.subtle.digest('SHA-256',await selected.arrayBuffer());
     loadedSha=Array.from(new Uint8Array(digest)).map(n=>n.toString(16).padStart(2,'0')).join('');
    }
-   status.textContent='Read locally: '+selected.name+' · HISTORICAL BACKTEST, not SHADOW.';
    render(report);
+   status.textContent='Read locally: '+selected.name+' · HISTORICAL BACKTEST, not SHADOW.';
   }catch{loaded=null;loadedSha=null;status.textContent='Invalid JSON or local file read failed.';}
  });
  auditFile.addEventListener('change',async()=>{

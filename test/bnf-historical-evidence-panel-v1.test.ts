@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {deriveBnfHistoricalReview,BNF_HISTORY_PANEL_HTML} from '../bnf-historical-evidence-panel-v1.js';
+import {deriveBnfHistoricalReview,attachBnfHistoricalSourceAudit,BNF_HISTORY_PANEL_HTML} from '../bnf-historical-evidence-panel-v1.js';
 
 function fixture(){
  const dates=Array.from({length:35},(_,i)=>new Date(Date.UTC(2026,0,1+i)).toISOString().slice(0,10));
@@ -55,4 +55,35 @@ test('do not certify arithmetic or strategy from a doctored file',()=>{
 test('reject unsupported symbol, no derivatives inference',()=>{
  const f=fixture();f.parameters.symbol='NIFTY';
  assert.equal(deriveBnfHistoricalReview(f).reason,'INVALID_BANKNIFTY_QUANTITY_OR_COST');
+});
+
+
+test('join an exact, independently supplied prior Drive audit only after SHA and identity checks',()=>{
+ const ledger=deriveBnfHistoricalReview(fixture());
+ const f=fixture(), day=f.daily_ledger[0].trade_date;
+ const audit={schema:'OPTIONPILOT_BNF_35DAY_DRIVE_AUDIT_COMPARISON_V1',source_ledger_sha256:'fixture-sha',
+  counts:{exit_price_match:1,exit_price_mismatch:1},
+  per_traded_day:[{date:day,trades_in_report:2,all_three_match_common_expiry_count:1,
+    source_option_minute_count:177,minute_denominator:375}],
+  per_trade:[
+   {trade_id:1,date:day,strike:55000,option_type:'PE',reported_exit_ltp:132,archived_exit_ltp:132,
+    exit_price_status:'MATCH',signal_and_entry_match_codes:'M / M',inferred_expiry_from_source_match:'2026-01-29'},
+   {trade_id:2,date:day,strike:55100,option_type:'PE',reported_exit_ltp:98,archived_exit_ltp:97.5,
+    exit_price_status:'PRICE_MISMATCH',signal_and_entry_match_codes:'M / M',inferred_expiry_from_source_match:'2026-01-29'}
+  ]};
+ assert.equal(attachBnfHistoricalSourceAudit(ledger,audit,'wrong-sha').reason,'AUDIT_SCHEMA_OR_LEDGER_HASH_MISMATCH');
+ const joined=attachBnfHistoricalSourceAudit(ledger,audit,'fixture-sha');
+ assert.equal(joined.ok,true);
+ assert.equal(joined.stats.sourcePriceMatch,1);
+ assert.equal(joined.stats.sourcePriceMismatch,1);
+ assert.equal(joined.days[0].sourceOptionMinuteCount,177);
+ assert.equal(joined.days[0].tradeDetails[1].sourceExitLtp,97.5);
+ assert.equal(joined.sourceAuditStatus,'PREVIOUS_DRIVE_AUDIT_NOT_FILL_PROOF');
+ const edited=structuredClone(audit);
+ edited.per_trade[1].strike=99999;
+ assert.equal(attachBnfHistoricalSourceAudit(ledger,edited,'fixture-sha').reason,'AUDIT_TRADE_IDENTITY_MISMATCH');
+ const doctored=structuredClone(audit);
+ doctored.per_trade[1].exit_price_status='MATCH';
+ assert.equal(attachBnfHistoricalSourceAudit(ledger,doctored,'fixture-sha').reason,'AUDIT_PRICE_STATUS_MISMATCH');
+ assert.match(BNF_HISTORY_PANEL_HTML,/bnf-history-audit-file/);
 });

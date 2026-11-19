@@ -177,5 +177,19 @@ return { server, status, reconcile, close };
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const supervisor = createSupervisor();
+  // One-shot, read-only schema inspection; dashboard startup never awaits it.
+  console.log('[SCHEMA_DUMP] STARTUP_HOOK_ACTIVE');
+  if (process.env.DATABASE_URL?.trim()) {
+    const schemaDump = spawn(process.execPath, ['--import', 'tsx', 'scripts/dump_schema.ts'], {
+      env: { DATABASE_URL: process.env.DATABASE_URL, PATH: process.env.PATH },
+      stdio: ['ignore', 'inherit', 'inherit'],
+    });
+    schemaDump.on('error', () => console.error('[SCHEMA_DUMP] LAUNCH_FAILED'));
+    schemaDump.on('exit', code => {
+      if (code !== 0) console.warn('[SCHEMA_DUMP] EXIT_CODE_' + String(code));
+    });
+  } else {
+    console.warn('[SCHEMA_DUMP] DATABASE_URL_MISSING');
+  }
   process.on('SIGTERM', () => { void supervisor.close().then(() => process.exit(0)); });
 }

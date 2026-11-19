@@ -42,7 +42,11 @@ export function installBnfShadowTimeline(){
   const elem=document.createElement(tag);elem.textContent=value;if(cls)elem.className=cls;parent.appendChild(elem);return elem;
  };
  const money=(n:any)=>typeof n==='number'&&Number.isFinite(n)?'₹'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}):'NOT VERIFIED';
- const ts=(v:any)=>typeof v==='string'&&v.length>=19?v.slice(11,19)+' IST':'—';
+ const ts=(v:any)=>{
+  const millis=typeof v==='string'&&/T/.test(v)?Date.parse(v):NaN;
+  if(!Number.isFinite(millis))return '—';
+  return new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false,timeZone:'Asia/Kolkata'}).format(new Date(millis))+' IST';
+ };
  const render=(report:any)=>{
   host.replaceChildren();
   add(host,'p','Trade-level paper records · '+report.date+' · NOT actual fills');

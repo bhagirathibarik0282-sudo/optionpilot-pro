@@ -151,6 +151,7 @@ return { server, status, reconcile, close };
 if (import.meta.url === `file://${process.argv[1]}`) {
   const supervisor = createSupervisor();
   // One-shot, read-only schema inspection; dashboard startup never awaits it.
+  console.log('[SCHEMA_DUMP] STARTUP_HOOK_ACTIVE');
   if (process.env.DATABASE_URL?.trim()) {
     const schemaDump = spawn(process.execPath, ['--import', 'tsx', 'scripts/dump_schema.ts'], {
       env: { DATABASE_URL: process.env.DATABASE_URL, PATH: process.env.PATH },

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "start": "node --import tsx scripts/optionpilot-service-supervisor.mjs",
+    "schema:dump": "tsx scripts/dump_schema.ts",
     "start:kite-shadow": "tsx kite-shadow-runtime-service.ts",
     "start:option-recorder": "tsx option-recorder-service.ts",
     "eod:archive": "tsx eod-archive-job.ts",

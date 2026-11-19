@@ -8,6 +8,8 @@ export const BNF_HISTORY_PANEL_HTML =
  '<summary><strong>BANKNIFTY · Historical 35-day evidence audit</strong> <small>read-only · separate from SHADOW</small></summary>'+
  '<p class="op-bnf-history-note">Import your existing 35-day backtest JSON from this device. Parsed locally in the browser; not uploaded or stored. Ledger profit is modeled, not an executable fill proof.</p>'+
  '<label>Choose backtest JSON <input type="file" id="bnf-history-file" accept=".json,application/json"></label>'+
+ '<label>Optional source-price audit JSON <input type="file" id="bnf-history-audit-file" accept=".json,application/json"></label>'+
+ '<p class="op-bnf-history-note">The prior Drive LTP audit is not proof of executable fills. Import the ledger first.</p>'+
  '<p id="bnf-history-status" role="status">No historical JSON selected. SHADOW paper journal stays independent.</p>'+
  '<div id="bnf-history-summary"></div>'+
  '<div id="bnf-history-days" class="op-bnf-history-scroll"></div>'+
@@ -115,10 +117,12 @@ export function installBnfHistoricalPanel(){
  if(!root)return;
  const file=root.querySelector('#bnf-history-file') as HTMLInputElement|null;
  const status=root.querySelector('#bnf-history-status');
+ const auditFile=root.querySelector('#bnf-history-audit-file') as HTMLInputElement|null;
+ let loaded:any=null,loadedSha:string|null=null,ledgerName='';
  const summary=root.querySelector('#bnf-history-summary');
  const daysHost=root.querySelector('#bnf-history-days');
  const tradesHost=root.querySelector('#bnf-history-trades');
- if(!file||!status||!summary||!daysHost||!tradesHost)return;
+ if(!file||!auditFile||!status||!summary||!daysHost||!tradesHost)return;
  const el=(tag:string,value:string)=>{const node=document.createElement(tag);node.textContent=value;return node;};
  const table=(headings:string[],rows:string[][])=>{
   const out=document.createElement('table'),thead=document.createElement('thead'),tr=document.createElement('tr');
@@ -142,7 +146,9 @@ export function installBnfHistoricalPanel(){
    'Peak concurrent positions: '+s.peakPositions+'; peak entry-premium commitment: ₹'+fmt(s.peakEntryPremium),
    'Arithmetic errors: '+s.priceArithmeticErrors+' trade / '+s.dailyReconciliationErrors+' daily; summary matched: '+(s.summaryReconciled?'yes':'no'),
    'Zero-trade partial-feed dates: '+s.zeroTradePartialDays+'. No-trade does not prove no opportunity.',
-   'Archived exact-minute exit matches: NOT INCLUDED in this JSON; separate Drive source audit required.'
+   s.sourceAuditAttached
+    ? '18 Nov Drive audit: '+s.sourcePriceMatch+' matching / '+s.sourcePriceMismatch+' mismatched archived exit LTPs; no executable fill certification.'
+    : 'Archived exact-minute exit matches: NOT INCLUDED in this JSON; separate Drive source audit required.'
   ];
   for(const msg of warnings){const p=el('p',msg);p.className='op-bnf-warning';summary.appendChild(p);}
   daysHost.appendChild(el('strong','All selected dates · modeled ledger, not shadow paper receipts'));
@@ -156,24 +162,91 @@ export function installBnfHistoricalPanel(){
   const show=()=>{const day=report.days.find((d:any)=>d.date===select.value);detail.replaceChildren();
    if(!day)return;
    if(!day.tradeDetails.length){detail.appendChild(el('p','No trades reported in this partial/recorded session; valid opportunities NOT ruled out.'));return;}
-   detail.appendChild(table(['ID','Side / strike','Signal IST','Entry IST','Exit IST','Entry LTP','Modeled exit','Net ₹'],
+   detail.appendChild(table(['ID','Side / strike','Signal IST','Entry IST','Exit IST','Entry LTP','Modeled exit','Archived exit','Price check','Net ₹'],
     day.tradeDetails.map((t:any)=>[String(t.id),t.side+' '+t.strike,t.signalIst.slice(11,16),
-     t.entryIst.slice(11,16),t.exitIst.slice(11,16),fmt(t.entryLtp),fmt(t.modeledExit),fmt(t.modeledNet)])));
-   detail.appendChild(el('p','Source-matched exit LTP and exact expiry/security ID are unavailable in this ledger. Do not infer fills.'));
+     t.entryIst.slice(11,16),t.exitIst.slice(11,16),fmt(t.entryLtp),fmt(t.modeledExit),fmt(t.sourceExitLtp),t.sourceMatch,fmt(t.modeledNet)])));
+   detail.appendChild(el('p',s.sourceAuditAttached?'Previous Drive audit LTP shown. Expiry is inferred, not recorded; matching LTP does not certify fills.':'Source-matched exit LTP and exact expiry/security ID are unavailable in this ledger. Do not infer fills.'));
   };
   select.addEventListener('change',show);show();
  };
  file.addEventListener('change',async()=>{
   summary.replaceChildren();daysHost.replaceChildren();tradesHost.replaceChildren();
-  const selected=file.files?.[0];
+  loaded=null;loadedSha=null;ledgerName='';
+ const selected=file.files?.[0];
   if(!selected){status.textContent='No file selected.';return;}
   if(selected.size>10_000_000){status.textContent='File too large (10 MB limit).';return;}
   try{
    const data=JSON.parse(await selected.text());
    const report=deriveBnfHistoricalReview(data);
    if(!report.ok){status.textContent='Rejected: '+report.reason;return;}
+   loaded=report;ledgerName=selected.name;
+   if(typeof crypto!=='undefined'&&crypto.subtle){
+    const digest=await crypto.subtle.digest('SHA-256',await selected.arrayBuffer());
+    loadedSha=Array.from(new Uint8Array(digest)).map(n=>n.toString(16).padStart(2,'0')).join('');
+   }
    status.textContent='Read locally: '+selected.name+' · HISTORICAL BACKTEST, not SHADOW.';
    render(report);
-  }catch{status.textContent='Invalid JSON or local file read failed.';}
+  }catch{loaded=null;loadedSha=null;status.textContent='Invalid JSON or local file read failed.';}
  });
+ auditFile.addEventListener('change',async()=>{
+  const selected=auditFile.files?.[0];if(!selected)return;
+  if(!loaded||!loadedSha){status.textContent='Load original ledger first. Secure SHA-256 verification is required.';return;}
+  if(selected.size>10_000_000){status.textContent='Audit JSON exceeds 10 MB limit.';return;}
+  try{
+   const joined=attachBnfHistoricalSourceAudit(loaded,JSON.parse(await selected.text()),loadedSha);
+   if(!joined.ok){status.textContent='Audit rejected: '+joined.reason;return;}
+   loaded=joined;render(joined);
+   status.textContent='Local historical audit matched: '+ledgerName+' + '+selected.name+' · not executable fills.';
+  }catch{status.textContent='Audit file cannot be parsed.';}
+ });
+}
+
+/** Join the PREVIOUS 18-Nov Drive audit, never claim independently rerun source data. */
+export function attachBnfHistoricalSourceAudit(base:any,audit:any,ledgerSha:string){
+ const fail=(reason:string)=>({ok:false,reason});
+ const finite=(x:any)=>typeof x==='number'&&Number.isFinite(x);
+ if(!base?.ok||base.mode!=='HISTORICAL_BACKTEST_LEDGER_ONLY')return fail('LEDGER_REQUIRED');
+ if(!audit||audit.schema!=='OPTIONPILOT_BNF_35DAY_DRIVE_AUDIT_COMPARISON_V1'||
+    audit.source_ledger_sha256!==ledgerSha||!Array.isArray(audit.per_trade)||
+    !Array.isArray(audit.per_traded_day))return fail('AUDIT_SCHEMA_OR_LEDGER_HASH_MISMATCH');
+ const originals=new Map<number,any>();
+ for(const day of base.days)for(const trade of day.tradeDetails)originals.set(trade.id,{...trade,date:day.date});
+ if(originals.size!==base.stats.trades||audit.per_trade.length!==originals.size)return fail('AUDIT_TRADE_COUNT_MISMATCH');
+ const byId=new Map<number,any>();let matched=0,mismatched=0;
+ for(const a of audit.per_trade){
+  const orig=originals.get(a?.trade_id);
+  if(!orig||byId.has(a.trade_id)||orig.date!==a.date||orig.strike!==a.strike||orig.side!==a.option_type||
+    !finite(a.reported_exit_ltp)||Math.abs(orig.modeledExit-a.reported_exit_ltp)>.011||
+    !finite(a.archived_exit_ltp)||a.signal_and_entry_match_codes!=='M / M')return fail('AUDIT_TRADE_IDENTITY_MISMATCH');
+  const status=Math.abs(a.reported_exit_ltp-a.archived_exit_ltp)<=.011?'MATCH':'PRICE_MISMATCH';
+  if(a.exit_price_status!==status)return fail('AUDIT_PRICE_STATUS_MISMATCH');
+  if(status==='MATCH')matched++;else mismatched++;
+  byId.set(a.trade_id,a);
+ }
+ if(!audit.counts||audit.counts.exit_price_match!==matched||audit.counts.exit_price_mismatch!==mismatched)return fail('AUDIT_SUMMARY_COUNTS_MISMATCH');
+ const covered=base.days.filter((d:any)=>d.trades>0);
+ if(audit.per_traded_day.length!==covered.length)return fail('AUDIT_DATE_COUNT_MISMATCH');
+ const byDate=new Map<string,any>();
+ for(const d of audit.per_traded_day){
+  if(!d||byDate.has(d.date)||!Number.isSafeInteger(d.source_option_minute_count)||
+     d.source_option_minute_count<0||d.source_option_minute_count>375||d.minute_denominator!==375||
+     !Number.isSafeInteger(d.all_three_match_common_expiry_count))return fail('AUDIT_DATE_INVALID');
+  byDate.set(d.date,d);
+ }
+ for(const day of covered){
+  const d=byDate.get(day.date);
+  if(!d||d.trades_in_report!==day.trades||
+    d.all_three_match_common_expiry_count!==day.tradeDetails.filter((t:any)=>byId.get(t.id)?.exit_price_status==='MATCH').length)
+    return fail('AUDIT_DAILY_COVERAGE_MISMATCH');
+ }
+ return {...base,sourceAuditStatus:'PREVIOUS_DRIVE_AUDIT_NOT_FILL_PROOF',
+  stats:{...base.stats,sourceAuditAttached:true,sourcePriceMatch:matched,sourcePriceMismatch:mismatched},
+  days:base.days.map((d:any)=>({...d,sourceOptionMinuteCount:byDate.get(d.date)?.source_option_minute_count??null,
+   tradeDetails:d.tradeDetails.map((t:any)=>{
+     const a=byId.get(t.id);
+     return {...t,sourceExitLtp:a?.archived_exit_ltp??null,
+       sourceMatch:a?.exit_price_status??'NOT_CHECKED',
+       inferredExpiry:a?.inferred_expiry_from_source_match??null};
+   })
+  }))};
 }

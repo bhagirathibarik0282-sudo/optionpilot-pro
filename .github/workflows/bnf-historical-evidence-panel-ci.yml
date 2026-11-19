@@ -1,0 +1,19 @@
+name: BNF 35-Day Historical Evidence Panel CI
+on:
+  pull_request:
+    paths:
+      - 'bnf-historical-evidence-panel-v1.ts'
+      - 'business-dashboard-v1-view.ts'
+      - 'recorded-dashboard-view.ts'
+      - 'test/bnf-historical-evidence-panel-v1.test.ts'
+      - '.github/workflows/bnf-historical-evidence-panel-ci.yml'
+jobs:
+  quality-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/bnf-historical-evidence-panel-v1.test.ts

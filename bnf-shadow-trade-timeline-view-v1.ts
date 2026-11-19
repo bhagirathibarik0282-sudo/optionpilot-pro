@@ -82,7 +82,7 @@ export function installBnfShadowTimeline(){
   go.disabled=true;state.textContent='Reading private paper journal (read-only)…';
   try{
    const response=await fetch('/api/research/recorded-dashboard/bnf-shadow-timeline?date='+encodeURIComponent(selected),
-    {method:'GET',headers:{Authorization:'Bearer '+token},cache:'no-store',credentials:'same-origin',redirect:'error'});
+    {headers:{Authorization:'Bearer '+token},cache:'no-store',credentials:'same-origin',redirect:'error'});
    if(response.status===401){state.textContent='Admin key rejected. No private trade data released.';return;}
    if(!response.ok){state.textContent='Paper journal unavailable: HTTP '+response.status;return;}
    const report=await response.json();

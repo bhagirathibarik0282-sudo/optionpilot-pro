@@ -6,6 +6,7 @@ on:
       - 'business-dashboard-v1-view.ts'
       - 'recorded-dashboard-view.ts'
       - 'test/bnf-historical-evidence-panel-v1.test.ts'
+      - 'test/bnf-historical-panel-render-smoke-v1.test.ts'
       - '.github/workflows/bnf-historical-evidence-panel-ci.yml'
 jobs:
   quality-gate:
@@ -16,4 +17,4 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - run: npx tsx --test test/bnf-historical-evidence-panel-v1.test.ts
+      - run: npx tsx --test test/bnf-historical-evidence-panel-v1.test.ts test/bnf-historical-panel-render-smoke-v1.test.ts

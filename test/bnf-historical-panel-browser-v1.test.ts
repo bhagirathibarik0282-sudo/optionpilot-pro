@@ -39,7 +39,7 @@ test('real Chromium: local historical JSON import, all dates, source audit, no e
    {trade_id:2,date:day,strike:55100,option_type:'PE',reported_exit_ltp:98,archived_exit_ltp:97.5,
     exit_price_status:'PRICE_MISMATCH',signal_and_entry_match_codes:'M / M',inferred_expiry_from_source_match:'2026-09-29'}
   ]};
- const script='const deriveBnfHistoricalReview='+deriveBnfHistoricalReview.toString()+';\n'+
+ const script='const __name=(fn,_name)=>fn;\n'+'const deriveBnfHistoricalReview='+deriveBnfHistoricalReview.toString()+';\n'+
   'const attachBnfHistoricalSourceAudit='+attachBnfHistoricalSourceAudit.toString()+';\n'+
   '('+installBnfHistoricalPanel.toString()+')();';
  const html='<!doctype html><html><head><meta charset="utf-8"><style>'+BNF_HISTORY_PANEL_CSS+
@@ -58,7 +58,12 @@ test('real Chromium: local historical JSON import, all dates, source audit, no e
   await page.goto(base,{waitUntil:'load'});
   assert.equal(await page.locator('#bnf-historical-evidence').count(),1);
   await page.locator('#bnf-history-file').setInputFiles({name:'synthetic-ledger.json',mimeType:'application/json',buffer:original});
-  await page.waitForFunction(()=>document.querySelector('#bnf-history-status')?.textContent?.includes('HISTORICAL BACKTEST'));
+  try{
+   await page.waitForFunction(()=>document.querySelector('#bnf-history-status')?.textContent?.includes('HISTORICAL BACKTEST'),null,{timeout:8000});
+  }catch(error){
+   const current=await page.locator('#bnf-history-status').innerText();
+   throw Error('HISTORICAL_IMPORT_FAILED: status='+current+'; page errors='+unexpected.join(' | ')+'; cause='+String(error));
+  }
   assert.match(await page.locator('#bnf-history-summary').innerText(),/₹450/);
   assert.match(await page.locator('#bnf-history-summary').innerText(),/35 selected dates/);
   assert.equal(await page.locator('#bnf-history-days tbody tr').count(),35);

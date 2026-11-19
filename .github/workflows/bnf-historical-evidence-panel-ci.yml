@@ -1,0 +1,36 @@
+name: BNF 35-Day Historical Evidence Panel CI
+on:
+  pull_request:
+    paths:
+      - 'bnf-historical-evidence-panel-v1.ts'
+      - 'business-dashboard-v1-view.ts'
+      - 'recorded-dashboard-view.ts'
+      - 'test/bnf-historical-evidence-panel-v1.test.ts'
+      - 'test/bnf-historical-panel-render-smoke-v1.test.ts'
+      - 'test/bnf-historical-panel-browser-v1.test.ts'
+      - '.github/workflows/bnf-historical-evidence-panel-ci.yml'
+jobs:
+  quality-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/bnf-historical-evidence-panel-v1.test.ts test/bnf-historical-panel-render-smoke-v1.test.ts
+
+  chromium-browser-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Install isolated browser harness
+        run: npm install --no-save --no-package-lock playwright@1.56.1
+      - name: Verify runner Chrome
+        run: command -v google-chrome
+      - name: Verify local file import and hash-joined source-price audit
+        run: CHROME_BIN=/usr/bin/google-chrome npx tsx --test test/bnf-historical-panel-browser-v1.test.ts

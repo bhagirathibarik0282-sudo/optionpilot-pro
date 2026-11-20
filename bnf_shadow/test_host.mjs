@@ -41,3 +41,15 @@ test('no packet forwarding until worker READY; same-feed spot/future/option then
 test('feed disconnect closes child input and reconnect restarts a fresh worker',async()=>{const f=fixture();f.host.onState('OPEN');await flush();f.host.onState('CLOSED');await flush();assert.equal(f.children[0].stdin.writableEnded,true);f.host.onState('OPEN');await flush();assert.equal(f.starts.length,2);await f.cleanup();});
 test('reconnect during preflight never starts obsolete worker',async()=>{const pending=[];const f=fixture({}, {preflight:()=>new Promise(resolve=>pending.push(resolve))});f.host.onState('OPEN');f.host.onState('CLOSED');f.host.onState('OPEN');pending[0]({ready:true});await flush();assert.equal(f.starts.length,0);assert.equal(pending.length,2);pending[1]({ready:true});await flush();assert.equal(f.starts.length,1);await f.cleanup();});
 test('raw child output is not echoed and sanitized source metrics exclude arbitrary fields',async()=>{const f=fixture();f.host.onState('OPEN');await flush();const c=f.children[0];c.stderr.write('synthetic-private-error\n');c.stderr.write(JSON.stringify({status:'SHADOW_SOURCE_STATUS',observations:3,signals:1,token:'synthetic-private-error'})+'\n');assert.deepEqual(f.host.status().sourceCounts,{observations:3,signals:1});assert.equal(JSON.stringify(f.statuses).includes('synthetic-private-error'),false);await f.cleanup();});
+
+test('worker exit preserves historical diagnostics while live counts remain cleared and no retry is invented',async()=>{
+ const f=fixture();f.host.onState('OPEN');await flush();const c=f.children[0];
+ c.stderr.write(JSON.stringify({status:'SHADOW_SOURCE_STATUS',observations:12,signals:0,rejected:3,warmup:9,reason:'EXACT_180S_PAIR_WARMUP'})+'\n');
+ c.stderr.write(JSON.stringify({status:'SHADOW_WORKER_STOPPED',broker_orders:0,stage:'SESSION_CHECK',reason:'SESSION_CHECK_FAILED',secret:'never-publish'})+'\n');
+ c.emit('exit',1,null);await flush();
+ const s=f.host.status();assert.equal(s.phase,'BLOCKED');assert.equal(s.reason,'WORKER_EXITED_NO_AUTO_RETRY');
+ assert.equal(s.sourceCounts,null);assert.equal(s.childRunning,false);assert.equal(s.health.lastReportedCounts.observations,12);
+ assert.equal(s.health.failureStage,'SESSION_CHECK');assert.equal(s.health.failureReason,'SESSION_CHECK_FAILED');
+ assert.equal(s.health.exitCode,1);assert.equal(s.health.lastExitAt,stamp);assert.equal(s.health.sourceReason,'EXACT_180S_PAIR_WARMUP');
+ assert.equal(f.starts.length,1);assert.ok(!JSON.stringify(s).includes('never-publish'));await f.cleanup();
+});

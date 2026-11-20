@@ -33,13 +33,17 @@ export function bindBnfHostMaster(entries:Entry[], rows:Row[], asof:string) {
 
 export function createBnfShadowHost(config:any,deps:any={}) {
   const state={enabled:config.enabled===true,phase:'DISABLED',reason:'DISABLED',workerStarts:0,feedConnected:false,lots:null as number|null,sourceCounts:null as any,paper:null as any,brokerOrders:0};
+  const health={date:'',updatedAt:null as string|null,startedAt:null as string|null,lastReportAt:null as string|null,
+    lastExitAt:null as string|null,exitCode:null as number|null,exitSignal:null as string|null,
+    failureStage:null as string|null,failureReason:null as string|null,sourceReason:null as string|null,lastReportedCounts:null as any};
   let child:any=null,endingChild:any=null,binding:any=null,observer:any=null,stopped=false,pending=false,generation=0,attempted=false;
   const now:()=>number=deps.now||Date.now;
   const spawnChild=deps.spawn||spawn;
   const modeEnv=config.env||process.env;
   let prepared:any=null;
-  const status=()=>({...state,childRunning:child!==null,relay:binding?.status()??null});
-  const note=(phase:string,reason:string)=>{state.phase=phase;state.reason=reason;try{config.onStatus?.(status());}catch{/* fixed status sink is optional */}};
+  const status=()=>({...state,childRunning:child!==null,relay:binding?.status()??null,health:{...health}});
+  const publish=()=>{health.date=dateAt(now());health.updatedAt=new Date(now()).toISOString();try{config.onStatus?.(status());}catch{/* diagnostics must not interrupt feed */}};
+  const note=(phase:string,reason:string)=>{state.phase=phase;state.reason=reason;publish();};
   const outputEnv:any={};
   const python=config.python||'python';
   const args=['-m','bnf_shadow','--config',config.configPath];
@@ -95,6 +99,7 @@ export function createBnfShadowHost(config:any,deps:any={}) {
       if(stopped||epoch!==generation||!state.feedConnected)return;
       if(!report?.ready){note('BLOCKED',['JOURNAL_SCHEMA_REQUIRED','CONTRACT_LOT_CONFIG_MISMATCH','PYTHON_UNAVAILABLE'].includes(report?.status)?report.status:'PREFLIGHT_FAILED');return;}
       const owned=spawnChild(python,args,{cwd:config.cwd||process.cwd(),env:outputEnv,stdio:['pipe','pipe','pipe'],shell:false});
+      health.startedAt=new Date(now()).toISOString();health.failureStage=null;health.failureReason=null;
       child=owned;state.workerStarts++;note('STARTING','WAIT_WORKER_READY');
       const readyTimer=setTimeout(()=>{if(child===owned&&state.phase==='STARTING'){endWorker();note('BLOCKED','WORKER_READY_TIMEOUT');}},45000);readyTimer.unref();
       owned.once('exit',()=>clearTimeout(readyTimer));owned.once('error',()=>clearTimeout(readyTimer));
@@ -121,10 +126,21 @@ export function createBnfShadowHost(config:any,deps:any={}) {
           };
           const reportedAt=typeof value.reported_at==='string'&&Number.isFinite(Date.parse(value.reported_at))?value.reported_at:null;
           state.paper={reportedAt,active:leg(value.active),lastResult:leg(value.last_result)};
+          health.lastReportAt=new Date(now()).toISOString();publish();
         }
         if(value.status==='SHADOW_SOURCE_STATUS'){
           const counts:any={};for(const key of ['observations','signals','rejected','warmup','contracts','retained_observations'])if(Number.isSafeInteger(value[key])&&value[key]>=0)counts[key]=value[key];
           state.sourceCounts=counts;
+          health.lastReportedCounts={...counts};
+          const allowed=['WARMUP','SOURCE_RESET_WARMUP','SIGNAL_EVIDENCE_READY','SOURCE_EVIDENCE_REJECTED','DUPLICATE_OR_OUT_OF_ORDER','CROSS_SESSION_BASELINE','OPPOSITE_CONTRACT_MISSING','EXACT_180S_PAIR_WARMUP','EXPIRY_CLOCK_CHANGED','QUAD_ALIGN_NOT_QUALIFIED'];
+          health.sourceReason=allowed.includes(value.reason)?value.reason:null;
+          health.lastReportAt=new Date(now()).toISOString();publish();
+        }
+        if(value.status==='SHADOW_WORKER_STOPPED'&&value.broker_orders===0){
+          const stages=['BOOTSTRAP','SESSION_CHECK','JOURNAL_OPEN','ENGINE_START','INPUT_CONSUME','WATCHDOG','SHUTDOWN'];
+          const reasons=['SESSION_CHECK_FAILED','JOURNAL_UNAVAILABLE_OR_CONFLICT','CONFIGURATION_INVALID','INPUT_OR_STRATEGY_FAILED','WORKER_INTERNAL_ERROR'];
+          health.failureStage=stages.includes(value.stage)?value.stage:null;
+          health.failureReason=reasons.includes(value.reason)?value.reason:'WORKER_INTERNAL_ERROR';publish();
         }
       };
       const receive=(key:'out'|'err',chunk:any)=>{
@@ -134,8 +150,11 @@ export function createBnfShadowHost(config:any,deps:any={}) {
       };
       owned.stdout.on('data',(c:any)=>receive('out',c));owned.stderr.on('data',(c:any)=>receive('err',c));
       owned.on('error',()=>{if(child===owned){child=null;binding?.stop();binding=null;observer=null;note('BLOCKED','WORKER_START_FAILED');}});
-      owned.on('exit',()=>{if(child===owned){child=null;binding?.stop();binding=null;observer=null;state.sourceCounts=null;state.paper=null;
-        if(!stopped){if(epoch!==generation&&state.feedConnected){attempted=false;void start();}else note('WAIT_FEED','WORKER_EXITED_NO_AUTO_RETRY');}}});
+      owned.on('exit',(exitCode:any,signal:any)=>{if(child===owned){child=null;binding?.stop();binding=null;observer=null;state.sourceCounts=null;state.paper=null;
+        health.lastExitAt=new Date(now()).toISOString();health.exitCode=Number.isSafeInteger(exitCode)&&exitCode>=0?exitCode:null;
+        health.exitSignal=typeof signal==='string'&&/^SIG[A-Z0-9]{1,12}$/.test(signal)?signal:null;
+        if(!stopped){if(epoch!==generation&&state.feedConnected){attempted=false;void start();}else note('BLOCKED','WORKER_EXITED_NO_AUTO_RETRY');}
+        else publish();}});
     }catch{note('BLOCKED','HOST_START_FAILED');}
     finally{pending=false;if(epoch!==generation&&state.feedConnected&&!stopped)void start();}
   }

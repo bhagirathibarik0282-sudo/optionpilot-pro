@@ -1,7 +1,7 @@
 """Allowlisted SHADOW paper receipt stays read-only and credential-free."""
 import threading
 import unittest
-from .__main__ import paper_status
+from .__main__ import paper_status, worker_failure_report
 
 
 class _Engine:
@@ -11,6 +11,14 @@ class _Engine:
 
 
 class PaperStatusTest(unittest.TestCase):
+    def test_failures_publish_fixed_stage_codes_without_exception_text(self):
+        error = RuntimeError('postgres://private-user:private-password@private-host')
+        report = worker_failure_report(error, 'SESSION_CHECK')
+        self.assertEqual(report['stage'], 'SESSION_CHECK')
+        self.assertEqual(report['reason'], 'SESSION_CHECK_FAILED')
+        self.assertNotIn('private', str(report))
+        self.assertEqual(worker_failure_report(error, 'not-a-stage')['stage'], 'BOOTSTRAP')
+
     def test_empty_is_not_a_claim_of_fills(self):
         result = paper_status(_Engine())
         self.assertEqual(result['status'], 'SHADOW_EXECUTION_STATUS')

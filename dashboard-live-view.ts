@@ -27,7 +27,10 @@ export function installDashboardLive(){
    const paper=recent?(active?'Active '+active.state+' · filled '+n(active.filledQty)+' / exited '+n(active.exitedQty):
     last?'Last '+last.state+' · filled '+n(last.filledQty)+' / exited '+n(last.exitedQty):
     'No active/last paper position in latest receipt'):'Paper fill/exit receipt missing or stale';
-   evidence.textContent='Generated signals: '+n(counts.signals)+' · Observations: '+n(counts.observations)+' · '+paper+' · Broker orders: 0 · '+reason;
+   const health=data.workerEvidence;
+   const exit=health?.lastExitAt?' · Last exit '+new Date(health.lastExitAt).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false})+' IST · code '+n(health.exitCode)+
+    ' · '+String(health.failureStage||'cause unverified')+' / '+String(health.failureReason||'reason unverified'):'';
+   evidence.textContent='Generated signals: '+n(counts.signals)+' · Observations: '+n(counts.observations)+' · '+paper+' · Broker orders: 0 · '+reason+exit;
   }catch{
    label.textContent='● Status unavailable · paper execution not verified';
    evidence.textContent='Read-only monitor could not confirm worker, signal, entry or exit. No order controls.';

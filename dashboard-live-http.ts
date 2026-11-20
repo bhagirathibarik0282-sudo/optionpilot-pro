@@ -3,6 +3,7 @@ import { streamSSE } from 'hono/streaming';
 import { readDashboardLiveSnapshot, dashboardLiveRevision, readDashboardPremiumSnapshot, readDashboardPcrAudit } from './dashboard-live-runtime.js';
 import { LIVE_INDICES, type LiveSelection, type PremiumWatchFilter } from './dashboard-live-feed.js';
 import { readBnfShadowHostStatus } from './bnf-shadow-host-runtime.js';
+import {cleanBnfHealth} from './bnf-shadow-health.js';
 
 export const DASHBOARD_LIVE_FLUSH_MS=100;
 export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot,revision=dashboardLiveRevision,readAudit=readDashboardPcrAudit,readBnfStatus:()=>any=readBnfShadowHostStatus){
@@ -33,6 +34,7 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
    workerRunning:raw.childRunning===true,feedConnected:raw.feedConnected===true,
    sourceCounts:{observations:cnt(counts.observations),signals:cnt(counts.signals),rejected:cnt(counts.rejected),warmup:cnt(counts.warmup)},
    paper:ready&&raw.paper?{reportedAt:raw.paper.reportedAt||null,active:leg(raw.paper.active),lastResult:leg(raw.paper.lastResult)}:null,
+   workerEvidence:cleanBnfHealth({...raw.health,phase:raw.phase,reason:raw.reason,workerRunning:raw.childRunning,feedConnected:raw.feedConnected}),
    brokerOrders:0,checkedAt:new Date().toISOString()});
  });
  app.get('/dashboard-live/pcr-audit',c=>{

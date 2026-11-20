@@ -142,11 +142,23 @@ async function verifyDriveFile(token: string, fileId: string, fileName: string, 
 }
 
 export async function uploadEodArchiveToDrive(tradingDate: string, payloadJson: string): Promise<DriveUploadResult> {
+  return uploadArchiveBytes(tradingDate, `optionpilot-eod-${tradingDate}.json`, Buffer.from(payloadJson),
+    "application/json", JSON.parse(payloadJson).schemaVersion || "EOD_ARCHIVE_V1");
+}
+
+/** Dedicated immutable SHADOW sidecar; never replaces a market EOD archive. */
+export async function uploadBnfReplayToDrive(tradingDate:string,fileName:string,bytes:Buffer):Promise<DriveUploadResult>{
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(tradingDate)||
+     !new RegExp('^bnf-shadow-replay-'+tradingDate+'-[a-f0-9]{32}\\.jsonl\\.gz$').test(fileName)||
+     bytes.length===0||bytes.length>64*1024*1024)throw Error('BNF_REPLAY_ARTIFACT_INVALID');
+  return uploadArchiveBytes(tradingDate,fileName,bytes,'application/gzip','BNF_SHADOW_REPLAY_V1');
+}
+
+async function uploadArchiveBytes(tradingDate:string,fileName:string,bytes:Buffer,mimeType:string,schemaVersion:string):Promise<DriveUploadResult>{
   const folderId = requiredEnv("GOOGLE_DRIVE_EOD_FOLDER_ID");
   const token = await getDriveAccessToken();
-  const fileName = `optionpilot-eod-${tradingDate}.json`;
-  const checksumSha256 = eodArchiveChecksum(payloadJson);
-  const checksumMd5 = md5(payloadJson);
+  const checksumSha256 = createHash("sha256").update(bytes).digest("hex");
+  const checksumMd5 = createHash("md5").update(bytes).digest("hex");
 
   const q = encodeURIComponent(`trashed = false and '${folderId}' in parents and appProperties has { key='tradingDate' and value='${tradingDate}' } and appProperties has { key='checksumSha256' and value='${checksumSha256}' }`);
   const existingResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,size,md5Checksum,trashed,parents,appProperties)&pageSize=10`, {
@@ -171,13 +183,13 @@ export async function uploadEodArchiveToDrive(tradingDate: string, payloadJson: 
   const metadata = JSON.stringify({
     name: fileName,
     parents: [folderId],
-    appProperties: { tradingDate, checksumSha256, schemaVersion: JSON.parse(payloadJson).schemaVersion || "EOD_ARCHIVE_V1" },
+    appProperties: { tradingDate, checksumSha256, schemaVersion },
   });
-  const multipart = [
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`,
-    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${payloadJson}\r\n`,
-    `--${boundary}--`,
-  ].join("");
+  const multipart = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Type: ${mimeType}\r\n\r\n`), bytes,
+    Buffer.from(`\r\n--${boundary}--`),
+  ]);
 
   const upload = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,md5Checksum,trashed,appProperties", {
     method: "POST",

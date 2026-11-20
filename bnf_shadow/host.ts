@@ -32,7 +32,7 @@ export function bindBnfHostMaster(entries:Entry[], rows:Row[], asof:string) {
 }
 
 export function createBnfShadowHost(config:any,deps:any={}) {
-  const state={enabled:config.enabled===true,phase:'DISABLED',reason:'DISABLED',workerStarts:0,feedConnected:false,lots:null as number|null,sourceCounts:null as any,paper:null as any,brokerOrders:0};
+  const state={enabled:config.enabled===true,phase:'DISABLED',reason:'DISABLED',workerStarts:0,feedConnected:false,lots:null as number|null,sourceCounts:null as any,paper:null as any,replayCapture:null as any,brokerOrders:0};
   const health={date:'',updatedAt:null as string|null,startedAt:null as string|null,lastReportAt:null as string|null,
     lastExitAt:null as string|null,exitCode:null as number|null,exitSignal:null as string|null,
     failureStage:null as string|null,failureReason:null as string|null,sourceReason:null as string|null,lastReportedCounts:null as any};
@@ -69,6 +69,11 @@ export function createBnfShadowHost(config:any,deps:any={}) {
   if(!state.enabled)return result;
   for(const name of ['PATH','DATABASE_URL','KITE_API_KEY','KITE_SESSION_ENCRYPTION_KEY'])if(typeof modeEnv[name]==='string')outputEnv[name]=modeEnv[name];
   outputEnv.EXECUTION_MODE='SHADOW';outputEnv.PYTHONUNBUFFERED='1';
+  if(modeEnv.BNF_SHADOW_REPLAY_CAPTURE_ENABLED==='true'){
+    outputEnv.BNF_SHADOW_REPLAY_CAPTURE_ENABLED='true';
+    if(typeof modeEnv.RAILWAY_VOLUME_MOUNT_PATH==='string')outputEnv.RAILWAY_VOLUME_MOUNT_PATH=modeEnv.RAILWAY_VOLUME_MOUNT_PATH;
+    if(typeof modeEnv.RAILWAY_GIT_COMMIT_SHA==='string'&&/^[a-f0-9]{40}$/.test(modeEnv.RAILWAY_GIT_COMMIT_SHA))outputEnv.RAILWAY_GIT_COMMIT_SHA=modeEnv.RAILWAY_GIT_COMMIT_SHA;
+  }
 
   try{
     if(modeEnv.EXECUTION_MODE&&modeEnv.EXECUTION_MODE!=='SHADOW')throw Error('MODE_MUST_BE_SHADOW');
@@ -126,6 +131,14 @@ export function createBnfShadowHost(config:any,deps:any={}) {
           };
           const reportedAt=typeof value.reported_at==='string'&&Number.isFinite(Date.parse(value.reported_at))?value.reported_at:null;
           state.paper={reportedAt,active:leg(value.active),lastResult:leg(value.last_result)};
+          const capture=value.replay_capture;
+          if(capture?.mode==='BNF_SHADOW_REPLAY_V1'){
+            const n=(v:any)=>Number.isSafeInteger(v)&&v>=0?v:null;
+            const code=(v:any)=>typeof v==='string'&&/^[A-Z][A-Z0-9_]{0,79}$/.test(v)?v:null;
+            state.replayCapture={mode:capture.mode,state:code(capture.state),fault:code(capture.fault),
+              recordsWritten:n(capture.recordsWritten),recordsDropped:n(capture.recordsDropped),
+              uncompressedBytes:n(capture.uncompressedBytes),completeSessionVerified:false};
+          }
           health.lastReportAt=new Date(now()).toISOString();publish();
         }
         if(value.status==='SHADOW_SOURCE_STATUS'){

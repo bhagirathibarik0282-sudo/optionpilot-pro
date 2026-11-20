@@ -70,7 +70,7 @@ export class BnfMarketReferenceCache {
       now < o.exchange || now < o.received || now - o.exchange > 5000 || now - o.received > 5000)) return null;
     return { symbol: 'BANKNIFTY' as const, spot_ltp: this.spot.value, vwap: this.future.value,
       spot_ts: new Date(this.spot.exchange).toISOString(), vwap_ts: new Date(this.future.exchange).toISOString(),
-      vwap_basis: BASIS, comparison_policy: POLICY };
+      vwap_basis: BASIS, comparison_policy: POLICY, reference_identity: this.identity() };
   }
 
   identity() { return { spotToken: this.spotEntry.instrumentToken, nearFutureToken: this.futureEntry.instrumentToken,

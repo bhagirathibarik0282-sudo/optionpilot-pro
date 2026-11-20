@@ -14,6 +14,7 @@ from .domain import BNFConfig, IST, timestamp
 from .engine import OrderStateMachine
 from .session import SessionProvider
 from .store import TradeStore
+from .replay_capture import make_capture
 
 _worker_stage = 'BOOTSTRAP'
 
@@ -48,7 +49,9 @@ def paper_status(engine):
         active = leg(engine.snapshot.get('active'))
         last_result = leg(engine.snapshot.get('last_result'))
     return {'status': 'SHADOW_EXECUTION_STATUS', 'reported_at': datetime.now(IST).isoformat(),
-            'active': active, 'last_result': last_result, 'broker_orders': 0}
+            'active': active, 'last_result': last_result, 'broker_orders': 0,
+            'replay_capture': getattr(getattr(engine, 'store', None), 'replay_recorder', None).status()
+                if getattr(getattr(engine, 'store', None), 'replay_recorder', None) else None}
 
 def main():
     global _worker_stage
@@ -91,6 +94,8 @@ def main():
     # One account/strategy/mode owner, regardless of configuration differences.
     _worker_stage = 'JOURNAL_OPEN'
     store=TradeStore.connect(db_url,f'BNF_V1:{account}:SHADOW')
+    capture = make_capture(cfg, master) if not args.replay and not args.init_schema else None
+    store.replay_recorder = capture
     try:
         store.acquire()
         if args.init_schema:
@@ -100,6 +105,7 @@ def main():
             with open(args.input) as first_input:
                 startup_now=timestamp(json.loads(first_input.readline())['now'])
         _worker_stage = 'ENGINE_START'
+        if capture: capture.startup_now = startup_now
         engine=OrderStateMachine(cfg,store,startup_now=startup_now)
         bridge=OptionPilotLiveBridge(engine,master,require_iv_evidence=not args.replay,derive_live_signals=not args.replay)
         if not args.replay: print(json.dumps({'status':'SHADOW_WORKER_READY','mode':'SHADOW','broker_orders':0}),flush=True)
@@ -132,7 +138,11 @@ def main():
             watchdog_errors=[]
             def watchdog():
                 while not halted.wait(1):
-                    try: engine.heartbeat(datetime.now(IST))
+                    try:
+                        with engine.lock:
+                            beat_now = datetime.now(IST)
+                            if capture: capture.operation('HEARTBEAT', beat_now)
+                            engine.heartbeat(beat_now)
                     except Exception:
                         watchdog_errors.append(True); halted.set()
             watcher=threading.Thread(target=watchdog,daemon=True)
@@ -149,7 +159,10 @@ def main():
                     _worker_stage = 'SESSION_CHECK'
                     current=provider.resolve(); provider.verify(current)
                     if current.user_id!=account: raise ValueError('session account changed')
-                    if current.token!=session.token and bridge.producer: bridge.producer.reset()
+                    if current.token!=session.token and bridge.producer:
+                        with engine.lock:
+                            if capture: capture.operation('SOURCE_RESET', datetime.now(IST))
+                            bridge.producer.reset()
                     session=current
                     checked=time.monotonic()
                 _worker_stage = 'INPUT_CONSUME'
@@ -157,22 +170,40 @@ def main():
                 except queue.Empty: continue
                 if event is done:
                     _worker_stage = 'SHUTDOWN'
-                    engine.stop(now,'INPUT_EOF'); break
+                    with engine.lock:
+                        end_now = datetime.now(IST)
+                        if capture: capture.operation('STOP', end_now, reason='INPUT_EOF')
+                        engine.stop(end_now,'INPUT_EOF')
+                    break
                 if isinstance(event,Exception): raise event
-                try: bridge.consume_line(event,datetime.now(IST))
+                try:
+                    with engine.lock:
+                        consume_now = datetime.now(IST)
+                        if capture:
+                            try: capture.operation('INPUT', consume_now, json.loads(event))
+                            except Exception: capture.fail('CAPTURE_INPUT_UNSUPPORTED')
+                        bridge.consume_line(event, consume_now)
                 except ValueError:
                     # Invalid producer evidence never enters the strategy. Do not print payloads.
                     print(json.dumps({'status':'INPUT_REJECTED','mode':'SHADOW'}),file=sys.stderr)
         except BaseException:
             if not args.replay and bridge.producer:
                 print(json.dumps({"status":"SHADOW_SOURCE_STATUS",**bridge.producer.status()}),file=sys.stderr,flush=True)
-            engine.stop(datetime.now(IST),'WORKER_STOPPED')
+            with engine.lock:
+                stop_now = datetime.now(IST)
+                if capture: capture.operation('STOP', stop_now, reason='WORKER_STOPPED')
+                engine.stop(stop_now,'WORKER_STOPPED')
             raise
         finally:
             if 'halted' in locals():
                 halted.set(); watcher.join(timeout=5)
             if args.input: stream.close()
-    finally: store.close()
+    finally:
+        if capture:
+            capture.close(engine.snapshot if 'engine' in locals() else None,
+                          bridge.producer.status() if 'bridge' in locals() and bridge.producer else None)
+            if 'engine' in locals(): print(json.dumps(paper_status(engine)),flush=True)
+        store.close()
 
 if __name__=='__main__':
     try: main()

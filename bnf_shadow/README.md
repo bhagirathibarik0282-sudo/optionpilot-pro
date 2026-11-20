@@ -257,3 +257,60 @@ Rollout sequence, still unperformed:
 No merge, deployment, schema initialization, purge, extra service, volume change or real order was performed while preparing this wiring.
 
 The host preserves the existing option subscription universe. It adds the verified futures reference only; it does not fabricate or subscribe missing opposite option legs. Actual nearest-expiry/ATM±1 pair coverage must therefore be observed before interpreting zero-signal warmup as strategy evidence. Missing pairs fail closed in the producer.
+
+## Optional replay evidence capture
+
+`BNF_SHADOW_REPLAY_CAPTURE_ENABLED=true` on the **main supervisor service** opts
+into the new consumer-boundary capture. It defaults off. No existing EOD job,
+PostgreSQL schema or strategy parameter changes are required. Deploy and enable
+only after owner approval and passing tests.
+
+Each worker run creates a private `bnf-shadow-replay-<IST date>-<run id>.jsonl.gz`
+sidecar under the existing data volume's `bnf-shadow-replay` directory. It records:
+
+- The actual config, source commit/hashes, current verified option master, and
+  initial durable state/version and deduplication signal IDs.
+- Ordered consumer times, five bid/ask levels with displayed quantities, option
+  exchange/receive clocks, spot and near-futures average-price context and clocks,
+  reference identities, OI, and the authoritative expiry-clock input.
+- Source resets, watchdog heartbeats, shutdown operations, and the original
+  engine-generated economic journal events after their database commit.
+- A final state checkpoint and explicit completeness flag. No account scope,
+  auth/session credentials, unrelated instruments or raw binary broker frames.
+
+A bounded asynchronous queue prevents disk I/O on the market callback. Capture
+queue, disk, size or startup failures mark the capture INCOMPLETE; they do not
+stop/change the paper engine or invent missing samples. Defaults are a 256 MiB
+uncompressed run cap, 1 GiB local capture budget, and at least the run cap plus
+64 MiB of free disk at startup. These are limits, **not a guarantee of full-day
+coverage**. No capture or prior market/journal data is automatically deleted.
+Review observed capture rates before promising a full-session replay.
+
+The existing supervisor's timer checks sealed sidecars in single flight. It uploads
+at most one pending file per minute to the existing EOD Drive folder, retaining
+all local files. The gzip bytes must pass local SHA-256 and remote metadata,
+MD5, size and **actual downloaded SHA-256** verification before a local
+DRIVE_VERIFIED receipt is written. Failed uploads back off five minutes. An
+incomplete sealed file can be archived for diagnosis, but cannot become replay
+proof. Unsealed interrupted files remain local and are not mislabeled verified.
+The main market EOD filename/payload/checksum and archive service stay unchanged.
+
+The same dashboard's date/refresh control shows capture/drop counts and archive
+verification status without exposing private file IDs or replay payloads. An
+active checkpoint older than 120 seconds is STALE_OR_INTERRUPTED. Existing
+`NO_JOURNAL_EVENTS` semantics remain unchanged.
+
+To verify a downloaded sealed sidecar offline at its recorded source commit:
+
+```sh
+python -m bnf_shadow.replay_verify /absolute/path/bnf-shadow-replay-DATE-RUN.jsonl.gz
+```
+
+This runs the original producer and engine using the recorded clock, config,
+master, initial state, deduplication seed and heartbeat/reset/stop operations in
+an in-memory store. It requires the recorded code hashes and a complete footer.
+Economic journal order/fields and final state must match; generated nonce IDs
+are excluded from comparison. It performs no DB reads/writes, network calls,
+Telegram sends or broker orders. MATCHES_CAPTURED_RUN proves only that captured
+run's reconciliation; it does not recover the missing 19-Nov worker journal,
+verify a complete market session, or represent real broker execution.

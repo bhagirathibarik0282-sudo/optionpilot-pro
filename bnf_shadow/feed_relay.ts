@@ -2,7 +2,7 @@
 import type { Writable } from 'node:stream';
 import type { KiteDecodedPacket } from '../kite-websocket-binary-decoder.js';
 
-type Context = { symbol: 'BANKNIFTY'; vwap_basis: 'NEAR_FUTURES_AVERAGE_PRICE'; comparison_policy: 'LEGACY_SPOT_VS_NEAR_FUTURES_AVERAGE'; spot_ltp: number; vwap: number; spot_ts: string; vwap_ts: string };
+type Context = { symbol: 'BANKNIFTY'; vwap_basis: 'NEAR_FUTURES_AVERAGE_PRICE'; comparison_policy: 'LEGACY_SPOT_VS_NEAR_FUTURES_AVERAGE'; spot_ltp: number; vwap: number; spot_ts: string; vwap_ts: string; reference_identity?: Record<string,unknown> };
 type Observer = (ticks: KiteDecodedPacket[], receivedAt: string) => void;
 type Config = {
   enabled?: boolean;
@@ -80,7 +80,8 @@ export function installBnfShadowFeedRelay(config: Config) {
             marketDepth: { buy: depth.buy.map(l => ({ price: l.price, quantity: l.quantity, orders: l.orders })),
               sell: depth.sell.map(l => ({ price: l.price, quantity: l.quantity, orders: l.orders })) } },
           market_context: { symbol: context.symbol, vwap_basis: context.vwap_basis, comparison_policy: context.comparison_policy, spot_ltp: context.spot_ltp, vwap: context.vwap,
-            spot_ts: context.spot_ts, vwap_ts: context.vwap_ts } })+'\n';
+            spot_ts: context.spot_ts, vwap_ts: context.vwap_ts,
+            ...(context.reference_identity?{reference_identity:Object.fromEntries(['spotToken','nearFutureToken','nearFutureLabel','nearFutureExpiry','masterDate','vwapBasis','comparisonPolicy'].map(k=>[k,context.reference_identity![k]]))}:{}) } })+'\n';
         if (Buffer.byteLength(line) > 32768) { status.rejected++; continue; }
         const writable = config.writer.write(line);
         status.accepted++;

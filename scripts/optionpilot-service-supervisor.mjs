@@ -28,6 +28,14 @@ const peers = new Set();
 const streams = new Set();
 // Import the SELECT-only archive viewer on demand. The market runtime remains stopped.
 let archiveHandler = recordedHandler;
+let replayArchiver;
+function archiveReplaySidecars(){
+  if(env.BNF_SHADOW_REPLAY_CAPTURE_ENABLED!=='true')return;
+  replayArchiver ||= import('../bnf-replay-archive.ts').then(module=>module.createBnfReplayArchiver({root:join(stateDir,'bnf-shadow-replay')}));
+  void replayArchiver.then(run=>run()).then(result=>{
+    if(result.status==='DRIVE_VERIFIED'||result.status==='REPLAY_ARCHIVE_FAILED')console.log('[BNF_REPLAY_ARCHIVE] '+JSON.stringify(result));
+  }).catch(()=>console.warn('[BNF_REPLAY_ARCHIVE] UNAVAILABLE'));
+}
 async function recorded(request, response) {
   const path = new URL(request.url || '/', 'http://localhost').pathname;
   if (!(path === '/recorded-dashboard' || path.startsWith('/api/research/recorded-dashboard/') ||
@@ -55,6 +63,7 @@ function authorized(request) {
 }
 async function reconcile() {
   if (stopping) return;
+  archiveReplaySidecars();
   const wanted = status().shouldRun;
   if (!wanted) {
     for (const response of streams) response.end();

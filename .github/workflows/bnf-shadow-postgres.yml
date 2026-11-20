@@ -21,6 +21,8 @@ on:
       - 'h1-live-exact-readonly-websocket-service.ts'
       - 'test/bnf-shadow-host-wiring.test.ts'
       - '.github/workflows/bnf-shadow-postgres.yml'
+      - 'bnf-replay-archive.ts'
+      - 'eod-drive-upload.ts'
   workflow_dispatch:
 permissions:
   contents: read
@@ -49,7 +51,7 @@ jobs:
       - name: Install test-only dependencies
         run: python -m pip install -r bnf_shadow/requirements.txt pgserver==0.1.4
       - name: Core and input-source tests
-        run: python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source bnf_shadow.test_depth_source bnf_shadow.test_iv_quality bnf_shadow.test_live_signal_source bnf_shadow.test_runtime_preflight bnf_shadow.test_paper_status -v
+        run: python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source bnf_shadow.test_depth_source bnf_shadow.test_iv_quality bnf_shadow.test_live_signal_source bnf_shadow.test_runtime_preflight bnf_shadow.test_paper_status bnf_shadow.test_replay_capture -v
       - name: Real PostgreSQL ownership, rollback and restart tests
         env:
           BNF_SHADOW_REAL_PG_TEST: '1'
@@ -73,5 +75,5 @@ jobs:
         run: git archive HEAD | docker build -t bnf-shadow-host -f bnf_shadow/Dockerfile.host -
       - name: Verify Node, Python and both input runtimes inside image
         run: |
-          docker run --rm bnf-shadow-host python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source bnf_shadow.test_depth_source bnf_shadow.test_iv_quality bnf_shadow.test_live_signal_source bnf_shadow.test_runtime_preflight bnf_shadow.test_paper_status -q
+          docker run --rm bnf-shadow-host python -m unittest bnf_shadow.test_bnf_shadow bnf_shadow.test_snapshot_source bnf_shadow.test_depth_source bnf_shadow.test_iv_quality bnf_shadow.test_live_signal_source bnf_shadow.test_runtime_preflight bnf_shadow.test_paper_status bnf_shadow.test_replay_capture -q
           docker run --rm bnf-shadow-host node --import tsx --test bnf_shadow/test_feed_relay.mjs bnf_shadow/test_market_context.mjs bnf_shadow/test_host.mjs

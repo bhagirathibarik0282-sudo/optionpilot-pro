@@ -1,0 +1,37 @@
+name: BNF SHADOW Trade Timeline Read-only CI
+on:
+  pull_request:
+    paths:
+      - 'bnf-shadow-trade-timeline-v1.ts'
+      - 'bnf-shadow-trade-timeline-view-v1.ts'
+      - 'recorded-dashboard-http.ts'
+      - 'recorded-dashboard-view.ts'
+      - 'business-dashboard-v1-view.ts'
+      - 'test/bnf-shadow-trade-timeline-v1.test.ts'
+      - 'test/bnf-shadow-trade-timeline-http-v1.test.ts'
+      - 'test/bnf-shadow-timeline-browser-v1.test.ts'
+      - '.github/workflows/bnf-shadow-trade-timeline-ci.yml'
+jobs:
+  owner-gated-trade-timeline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npx tsx --test test/bnf-shadow-trade-timeline-v1.test.ts test/bnf-shadow-trade-timeline-http-v1.test.ts test/bnf-shadow-daywise.test.ts test/recorded-dashboard-http.test.ts test/bnf-historical-panel-render-smoke-v1.test.ts
+
+  private-chromium-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Install isolated Chromium test harness
+        run: npm install --no-save --no-package-lock playwright@1.56.1
+      - run: command -v google-chrome
+      - name: Verify private owner flow using synthetic events only
+        run: CHROME_BIN=/usr/bin/google-chrome npx tsx --test test/bnf-shadow-timeline-browser-v1.test.ts

@@ -4,7 +4,10 @@
 export const BNF_SHADOW_DAYWISE_HTML =
  '<section class="op-bnf-daywise" aria-label="BANKNIFTY SHADOW day-wise lot comparison">'+
  '<details open><summary><strong>BANKNIFTY SHADOW · Day-wise 1 / 2 / 4 / 6 lots</strong></summary>'+
+ '<label>Check date (IST) <input data-bnf-daywise-date type="date" aria-label="SHADOW journal date"></label> '+
+ '<button data-bnf-daywise-refresh type="button">Check / Refresh</button>'+
  '<p data-bnf-daywise-status role="status">Checking verified paper journal…</p>'+
+ '<p data-bnf-daywise-worker></p>'+
  '<div data-bnf-daywise-table class="op-bnf-daywise-scroll"></div>'+
  '<small>Paper estimates only · 4/6 lots are NOT SIMULATED without independent depth receipts · no real orders</small>'+
  '</details></section>';
@@ -19,21 +22,40 @@ export const BNF_SHADOW_DAYWISE_CSS =
  '.op-bnf-daywise .op-bnf-unverified{color:#ffc993}'+
  '@media(max-width:480px){.op-bnf-daywise{padding:5px}.op-bnf-daywise table{font-size:11px}}';
 
-/** No timer, no state mutation outside the DOM; one same-origin read-only request. */
+/** One initial read and explicit refresh; no background polling or broker actions. */
 export async function installBnfShadowDaywise(){
  if(typeof document.querySelectorAll!=='function')return;
  const roots=Array.from(document.querySelectorAll('.op-bnf-daywise')) as HTMLElement[];
  if(!roots.length)return;
  const status=(msg:string)=>{for(const root of roots){const p=root.querySelector('[data-bnf-daywise-status]');if(p)p.textContent=msg;}};
  const el=(tag:string,text:string)=>{const node=document.createElement(tag);node.textContent=text;return node;};
+ const yesterday=new Date(Date.now()+19800000-86400000).toISOString().slice(0,10);
+ let checking=false;
+ const load=async(date:string)=>{
+ if(checking)return;checking=true;
+ for(const root of roots){const input=root.querySelector('[data-bnf-daywise-date]') as HTMLInputElement|null;if(input)input.value=date;}
+ status('Checking '+date+' paper journal…');
  try{
-  const response=await fetch('/api/research/recorded-dashboard/bnf-shadow-daywise',{cache:'no-store',credentials:'same-origin'});
-  if(!response.ok)throw Error('JOURNAL_HTTP_UNAVAILABLE');
+  const response=await fetch('/api/research/recorded-dashboard/bnf-shadow-daywise?date='+encodeURIComponent(date),{cache:'no-store',credentials:'same-origin'});
   const report=await response.json();
   if(report?.mode!=='BNF_SHADOW_DAYWISE_READ_ONLY_V1'||report?.brokerOrders!==0||!Array.isArray(report.days)||!Array.isArray(report.lots)||report.lots.join(',')!=='1,2,4,6')throw Error('JOURNAL_RESPONSE_INVALID');
-  if(!report.ok){status('Not verified: '+String(report.reason||'JOURNAL_UNAVAILABLE').slice(0,70));return;}
-  if(!report.days.length){status('No verified BANKNIFTY SHADOW paper-journal days yet. No P&L inferred.');return;}
-  status('Last '+Math.min(report.days.length,5)+' journal dates · P&L is estimated, not actual broker P&L');
+  if(!response.ok||!report.ok)throw Error('JOURNAL_UNAVAILABLE');
+  const selected=report.selectedDay;
+  if(!selected||selected.date!==date)throw Error('DAILY_STATUS_MISSING');
+  status(date+' · '+String(selected.status||'UNVERIFIED').replaceAll('_',' ')+' · '+String(selected.explanation||'')+
+   ' Latest journal date: '+(report.latestJournalDate||'none')+'. P&L is estimated.');
+  const health=selected.workerEvidence;
+  const time=(s:any)=>typeof s==='string'&&Number.isFinite(Date.parse(s))?new Date(s).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false})+' IST':'unverified';
+  const n=(v:any)=>Number.isSafeInteger(v)&&v>=0?String(v):'unverified';
+  const worker=health?'Last saved worker checkpoint: '+String(health.phase||'UNKNOWN')+' / '+String(health.reason||'UNKNOWN')+
+   ' at '+time(health.updatedAt)+'. Last source report '+time(health.lastReportAt)+
+   ' · observations '+n(health.lastReportedCounts?.observations)+' · generated signals '+n(health.lastReportedCounts?.signals)+
+   ' · rejected '+n(health.lastReportedCounts?.rejected)+' · source '+String(health.sourceReason||'unverified')+
+   ' · last exit '+time(health.lastExitAt)+' · exit code '+n(health.exitCode)+
+   ' · failure '+String(health.failureStage||'unverified')+' / '+String(health.failureReason||'unverified')+
+   '. Counts describe the last reported worker run; full session coverage is unverified.':
+   'No saved worker diagnostics for this date. EOD market data cannot establish paper entries, exits or a zero-trade day.';
+  for(const root of roots){const p=root.querySelector('[data-bnf-daywise-worker]');if(p)p.textContent=worker;}
   for(const root of roots){
    const host=root.querySelector('[data-bnf-daywise-table]');if(!host)continue;
    const table=document.createElement('table');
@@ -58,5 +80,11 @@ export async function installBnfShadowDaywise(){
    }
    table.appendChild(body);host.replaceChildren(table);
   }
- }catch{status('SHADOW day-wise journal unavailable · no inferred fills or P&L');}
+ }catch{status('SHADOW day-wise journal unavailable · no inferred fills or P&L');
+  for(const root of roots){root.querySelector('[data-bnf-daywise-table]')?.replaceChildren();const p=root.querySelector('[data-bnf-daywise-worker]');if(p)p.textContent='Worker diagnostics not verified for the requested date.';}
+ }finally{checking=false;}
+ };
+ for(const root of roots){const button=root.querySelector('[data-bnf-daywise-refresh]') as HTMLButtonElement|null;
+  if(button)button.onclick=()=>{const input=root.querySelector('[data-bnf-daywise-date]') as HTMLInputElement|null;if(input?.value)void load(input.value);};}
+ await load(yesterday);
 }

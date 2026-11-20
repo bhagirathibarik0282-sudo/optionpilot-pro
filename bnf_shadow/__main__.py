@@ -15,6 +15,21 @@ from .engine import OrderStateMachine
 from .session import SessionProvider
 from .store import TradeStore
 
+_worker_stage = 'BOOTSTRAP'
+
+def worker_failure_report(error, stage):
+    """Fixed diagnostic codes only; never stringify driver/auth/input exceptions."""
+    stages = {'BOOTSTRAP', 'SESSION_CHECK', 'JOURNAL_OPEN', 'ENGINE_START',
+              'INPUT_CONSUME', 'WATCHDOG', 'SHUTDOWN'}
+    stage = stage if stage in stages else 'BOOTSTRAP'
+    reason = ('SESSION_CHECK_FAILED' if stage == 'SESSION_CHECK' else
+              'JOURNAL_UNAVAILABLE_OR_CONFLICT' if stage in ('JOURNAL_OPEN', 'WATCHDOG') else
+              'CONFIGURATION_INVALID' if stage in ('BOOTSTRAP', 'ENGINE_START') else
+              'INPUT_OR_STRATEGY_FAILED' if stage == 'INPUT_CONSUME' else
+              'WORKER_INTERNAL_ERROR')
+    return {'status': 'SHADOW_WORKER_STOPPED', 'broker_orders': 0,
+            'stage': stage, 'reason': reason}
+
 def paper_status(engine):
     """Read-only, allowlisted paper fill receipt; never publishes account or order payloads."""
     def leg(value):
@@ -36,6 +51,7 @@ def paper_status(engine):
             'active': active, 'last_result': last_result, 'broker_orders': 0}
 
 def main():
+    global _worker_stage
     parser=argparse.ArgumentParser(description='BANKNIFTY SHADOW only; accepts validated JSONL signals and depth ticks')
     parser.add_argument('--config',required=True,help='JSON BNFConfig file')
     parser.add_argument('--input',help='JSONL file; defaults to stdin')
@@ -58,6 +74,7 @@ def main():
         account='REPLAY'
         master=InstrumentMaster(Path(args.instrument_master).read_text(),args.master_date)
     else:
+        _worker_stage = 'SESSION_CHECK'
         provider=SessionProvider(db_url,os.environ.get('KITE_API_KEY',''),os.environ.get('KITE_SESSION_ENCRYPTION_KEY',''))
         session=provider.resolve(); provider.verify(session)
         account=session.user_id
@@ -72,6 +89,7 @@ def main():
         if not report['ready']: raise SystemExit(2)
         return
     # One account/strategy/mode owner, regardless of configuration differences.
+    _worker_stage = 'JOURNAL_OPEN'
     store=TradeStore.connect(db_url,f'BNF_V1:{account}:SHADOW')
     try:
         store.acquire()
@@ -81,6 +99,7 @@ def main():
         if args.replay:
             with open(args.input) as first_input:
                 startup_now=timestamp(json.loads(first_input.readline())['now'])
+        _worker_stage = 'ENGINE_START'
         engine=OrderStateMachine(cfg,store,startup_now=startup_now)
         bridge=OptionPilotLiveBridge(engine,master,require_iv_evidence=not args.replay,derive_live_signals=not args.replay)
         if not args.replay: print(json.dumps({'status':'SHADOW_WORKER_READY','mode':'SHADOW','broker_orders':0}),flush=True)
@@ -119,25 +138,34 @@ def main():
             watcher=threading.Thread(target=watchdog,daemon=True)
             watcher.start()
             while True:
-                if watchdog_errors: raise RuntimeError('WATCHDOG_JOURNAL_FAILED')
+                if watchdog_errors:
+                    _worker_stage = 'WATCHDOG'
+                    raise RuntimeError('WATCHDOG_JOURNAL_FAILED')
                 now=datetime.now(IST)
                 if time.monotonic()-checked>=30:
+                    # Report observed decisions before a session read can fail.
+                    if bridge.producer: print(json.dumps({"status":"SHADOW_SOURCE_STATUS",**bridge.producer.status()}),file=sys.stderr,flush=True)
+                    print(json.dumps(paper_status(engine)),flush=True)
+                    _worker_stage = 'SESSION_CHECK'
                     current=provider.resolve(); provider.verify(current)
                     if current.user_id!=account: raise ValueError('session account changed')
                     if current.token!=session.token and bridge.producer: bridge.producer.reset()
                     session=current
                     checked=time.monotonic()
-                    if bridge.producer: print(json.dumps({"status":"SHADOW_SOURCE_STATUS",**bridge.producer.status()}),file=sys.stderr)
-                    print(json.dumps(paper_status(engine)),flush=True)
+                _worker_stage = 'INPUT_CONSUME'
                 try: event=events.get(timeout=1)
                 except queue.Empty: continue
-                if event is done: engine.stop(now,'INPUT_EOF'); break
+                if event is done:
+                    _worker_stage = 'SHUTDOWN'
+                    engine.stop(now,'INPUT_EOF'); break
                 if isinstance(event,Exception): raise event
                 try: bridge.consume_line(event,datetime.now(IST))
                 except ValueError:
                     # Invalid producer evidence never enters the strategy. Do not print payloads.
                     print(json.dumps({'status':'INPUT_REJECTED','mode':'SHADOW'}),file=sys.stderr)
         except BaseException:
+            if not args.replay and bridge.producer:
+                print(json.dumps({"status":"SHADOW_SOURCE_STATUS",**bridge.producer.status()}),file=sys.stderr,flush=True)
             engine.stop(datetime.now(IST),'WORKER_STOPPED')
             raise
         finally:
@@ -148,7 +176,7 @@ def main():
 
 if __name__=='__main__':
     try: main()
-    except Exception:
+    except Exception as error:
         # Never print raw driver errors, auth responses or input payloads.
-        print(json.dumps({'status':'SHADOW_WORKER_STOPPED','broker_orders':0,'action':'Check configuration, input, journal and dashboard session'}),file=sys.stderr)
+        print(json.dumps(worker_failure_report(error, _worker_stage)),file=sys.stderr,flush=True)
         sys.exit(1)

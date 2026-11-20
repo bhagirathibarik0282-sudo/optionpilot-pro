@@ -84,7 +84,12 @@ test('GET-only day-wise SHADOW journal endpoint works after hours without touchi
  const response=await fetch(url+'/api/research/recorded-dashboard/bnf-shadow-daywise');
  assert.equal(response.status,200);
  assert.equal(response.headers.get('x-optionpilot-mode'),'RECORDED_READ_ONLY');
- assert.deepEqual(await response.json(),report);
+ const body=await response.json();
+ const {selectedDay,latestJournalDate,...original}=body;
+ assert.deepEqual(original,report);
+ assert.equal(latestJournalDate,null);
+ assert.equal(selectedDay.status,'NO_JOURNAL_EVENTS');
+ assert.equal(selectedDay.completeSessionVerified,false);
  assert.equal(reads,1);
  const post=await fetch(url+'/api/research/recorded-dashboard/bnf-shadow-daywise',{method:'POST'});
  assert.equal(post.status,405);
@@ -98,6 +103,20 @@ test('day-wise SHADOW journal evidence failure never renders fictitious P&L',asy
  const body=await response.json();
  assert.equal(body.days.length,0);
  assert.equal(body.reason,'SHADOW_JOURNAL_UNAVAILABLE');
+});
+
+test('selected SHADOW date is validated before DB reads and worker history cannot masquerade as live proof',async t=>{
+ let reads=0;
+ const url=await serve(t,{daywise:async()=>{reads++;return {ok:true,days:[],lots:[1,2,4,6],brokerOrders:0};},
+  shadowHealth:(date:string)=>({date,phase:'BLOCKED',reason:'WORKER_EXITED_NO_AUTO_RETRY',lastExitAt:date+'T04:00:00Z',
+   exitCode:1,account:'PRIVATE',lastReportedCounts:{observations:12,signals:0}})});
+ assert.equal((await fetch(url+'/api/research/recorded-dashboard/bnf-shadow-daywise?date=2026-11-31')).status,400);
+ assert.equal(reads,0);
+ const response=await fetch(url+'/api/research/recorded-dashboard/bnf-shadow-daywise?date=2026-11-19');
+ const body=await response.json();assert.equal(response.status,200);assert.equal(reads,1);
+ assert.equal(body.selectedDay.date,'2026-11-19');assert.equal(body.selectedDay.status,'NO_JOURNAL_EVENTS');
+ assert.equal(body.selectedDay.workerEvidence.exitCode,1);assert.equal(body.selectedDay.completeSessionVerified,false);
+ assert.ok(!JSON.stringify(body).includes('PRIVATE'));
 });
 
 test('after-hours dashboard mounts the same read-only lot comparison on the existing page',()=>{

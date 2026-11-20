@@ -2,6 +2,7 @@
  * No inferred fills, no lot scaling, no new broker or database writes.
  */
 import { dbIsConfigured, dbQuerySafe } from './db.js';
+import {readBnfShadowHealth,validBnfHealthDate,cleanBnfHealth} from './bnf-shadow-health.js';
 
 export const BNF_SHADOW_COMPARISON_LOTS = [1, 2, 4, 6] as const;
 export type BnfLot = typeof BNF_SHADOW_COMPARISON_LOTS[number];
@@ -80,4 +81,18 @@ export async function readBnfShadowDaywise(query:Query=dbQuerySafe):Promise<BnfD
  if(!result)return blocked('SHADOW_EVENTS_UNAVAILABLE');
  if(result.rows.length>1000)return blocked('JOURNAL_ROW_LIMIT_REACHED');
  return summarizeBnfShadowDaywise(scopes.rows[0].payload,result.rows);
+}
+
+/** Missing economic events are unknown activity, never an invented zero-trade day. */
+export function withBnfShadowDailyStatus(report:BnfDaywiseReport,date:string,health:any=readBnfShadowHealth(date)){
+ if(!validBnfHealthDate(date))return {...report,ok:false,reason:'INVALID_DATE',selectedDay:null};
+ const day=report.days.find(d=>d.date===date);
+ const outside=!day&&report.days.length===5&&date<report.days[report.days.length-1].date;
+ return {...report,latestJournalDate:report.days[0]?.date??null,selectedDay:{date,
+  status:!report.ok?'JOURNAL_UNAVAILABLE':day?'PAPER_EVENTS_RECORDED':outside?'OUTSIDE_REPORT_WINDOW':'NO_JOURNAL_EVENTS',
+  explanation:!report.ok?'Journal could not be verified.':day?'Recorded paper receipts only.':
+   outside?'Date is outside the latest five journal dates. Use the private timeline to inspect older receipts.':
+   'No paper journal events found for this date. This does not prove zero trades or a healthy full session.',
+  scenarios:day?.scenarios??null,workerEvidence:health?.date===date?cleanBnfHealth(health):null,
+  completeSessionVerified:false,marketArchiveProvesPaperTrades:false}};
 }

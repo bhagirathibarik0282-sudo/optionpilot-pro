@@ -6,23 +6,39 @@ import { listH1TheoryRecordedDates } from './h1-theory-history.js';
 import { compactRows } from './h1-replay-compact-v1.js';
 import { resolveRecordedFullPcr, resolveRecordedOptionPdc } from './business-dashboard-v1-view.js';
 import { renderRecordedDashboard } from './recorded-dashboard-view.js';
-import { readBnfShadowDaywise } from './bnf-shadow-daywise.js';
+import { readBnfShadowDaywise,withBnfShadowDailyStatus } from './bnf-shadow-daywise.js';
+import {bnfIstDay,validBnfHealthDate,readBnfShadowHealth} from './bnf-shadow-health.js';
+import {readBnfShadowTimeline,validBnfTimelineDate} from './bnf-shadow-trade-timeline-v1.js';
+import {timingSafeEqual} from 'node:crypto';
 
 /** Narrow supervisor entry: SELECT-only archive readers. Never import server/runtime/router. */
 export function createRecordedDashboardHandler(dependencies:any={}) {
  const dates=dependencies.dates||listH1TheoryRecordedDates, replay=dependencies.replay||runH1ReplayHttp;
  const ragEvidence=dependencies.ragEvidence||readRagEventEvidence,ragHistory=dependencies.ragHistory||readSameDteHistory;
- const daywise=dependencies.daywise||readBnfShadowDaywise;
+ const daywise=dependencies.daywise||readBnfShadowDaywise,timeline=dependencies.timeline||readBnfShadowTimeline;
  let active=0;
  return async function handle(request:any,response:any,status:any) {
   const url=new URL(request.url||'/','http://localhost'),path=url.pathname;
   const view=path==='/recorded-dashboard'||path==='/api/research/recorded-dashboard/view'||
    (!status.shouldRun&&(path==='/'||path==='/api/research/business-dashboard/view'));
-  const dateRoute=path==='/api/research/recorded-dashboard/dates',replayRoute=path==='/api/research/recorded-dashboard/replay',daywiseRoute=path==='/api/research/recorded-dashboard/bnf-shadow-daywise';
+  const dateRoute=path==='/api/research/recorded-dashboard/dates',replayRoute=path==='/api/research/recorded-dashboard/replay',daywiseRoute=path==='/api/research/recorded-dashboard/bnf-shadow-daywise',timelineRoute=path==='/api/research/recorded-dashboard/bnf-shadow-timeline';
   const ragView=path==='/api/research/rag-event-evidence/view',ragRoute=path==='/api/research/rag-event-evidence',historyRoute=path==='/api/research/rag-same-dte-history';
-  if(!view&&!dateRoute&&!replayRoute&&!daywiseRoute&&!ragView&&!ragRoute&&!historyRoute)return false;
+  if(!view&&!dateRoute&&!replayRoute&&!daywiseRoute&&!timelineRoute&&!ragView&&!ragRoute&&!historyRoute)return false;
   const send=(code:number,value:any,html=false)=>{response.writeHead(code,{'Content-Type':html?'text/html; charset=utf-8':'application/json','Cache-Control':'no-store','X-OptionPilot-Mode':'RECORDED_READ_ONLY','X-Content-Type-Options':'nosniff'});response.end(html?value:JSON.stringify(value));return true;};
   if(request.method!=='GET')return send(405,{ok:false,error:'READ_ONLY_GET_REQUIRED'});
+  // Trade-level paper receipts are PRIVATE. Existing recorded dashboard routes are public;
+  // this endpoint alone requires the pre-existing RESEARCH_ADMIN_TOKEN before any SELECT.
+  if(timelineRoute){
+   const secret=process.env.RESEARCH_ADMIN_TOKEN,header=request.headers.authorization;
+   if(!secret)return send(503,{ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'});
+   if(typeof header!=='string'||!header.startsWith('Bearer ')){
+    return send(401,{ok:false,error:'ADMIN_AUTH_REQUIRED'});
+   }
+   const expected=Buffer.from('Bearer '+secret,'utf8'),actual=Buffer.from(header,'utf8');
+   if(expected.length!==actual.length||!timingSafeEqual(expected,actual))return send(401,{ok:false,error:'ADMIN_AUTH_REQUIRED'});
+   const selected=url.searchParams.get('date');
+   if(!validBnfTimelineDate(selected))return send(400,{ok:false,error:'INVALID_SHADOW_TRADE_DATE'});
+  }
   if(view)return send(200,renderRecordedDashboard(status?.shouldRun===false),true);
   if(ragView)return send(200,renderRagEvidencePage(),true);
   if(active>=2){response.setHeader('Retry-After','2');return send(429,{ok:false,error:'ARCHIVE_BUSY_RETRY'});}
@@ -32,7 +48,14 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
   try{
    if(ragRoute){const parsed=parseRagEventRequest(Object.fromEntries(url.searchParams));if(!parsed.ok)return send(400,{ok:false,status:'BLOCKED',reason:parsed.reason});const result=await ragEvidence(parsed.value);return send(result.ok?200:422,result);}
    if(historyRoute){const result=await ragHistory(Object.fromEntries(url.searchParams));return send(result.ok?200:422,result);}
-   if(daywiseRoute){const result=await daywise();return send(result.ok?200:503,result);}
+   if(daywiseRoute){
+    const date=url.searchParams.get('date')??bnfIstDay(Date.now()-86400000);
+    if(!validBnfHealthDate(date))return send(400,{ok:false,reason:'INVALID_DATE'});
+    const result=await daywise();
+    const health=(dependencies.shadowHealth||readBnfShadowHealth)(date);
+    return send(result.ok?200:503,withBnfShadowDailyStatus(result,date,health));
+   }
+   if(timelineRoute){const result=await timeline(url.searchParams.get('date'));return send(result.ok?200:503,result);}
    if(dateRoute){const result=await dates();return send(result.ok?200:503,result);}
    const parsed=parseH1ReplayRequest({symbol:url.searchParams.get('symbol'),tradeDate:url.searchParams.get('date'),fromTime:url.searchParams.get('from'),toTime:url.searchParams.get('to'),scope:'CORE'});
    if(!parsed.ok)return send(400,{ok:false,error:parsed.reason});

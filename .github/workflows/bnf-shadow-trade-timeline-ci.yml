@@ -20,6 +20,9 @@ on:
       - 'bnf_shadow/**'
       - 'test/bnf-shadow-health.test.ts'
       - 'test/bnf-shadow-daywise-browser.test.ts'
+      - 'bnf-shadow-page.ts'
+      - 'screen-overview.ts'
+      - 'test/bnf-shadow-page-browser.test.ts'
       - 'bnf-replay-archive.ts'
       - 'eod-drive-upload.ts'
       - 'scripts/optionpilot-service-supervisor.mjs'
@@ -52,4 +55,4 @@ jobs:
         run: npm install --no-save --no-package-lock playwright@1.56.1
       - run: command -v google-chrome
       - name: Verify private owner flow using synthetic events only
-        run: CHROME_BIN=/usr/bin/google-chrome npx tsx --test test/bnf-shadow-timeline-browser-v1.test.ts test/bnf-shadow-daywise-browser.test.ts
+        run: CHROME_BIN=/usr/bin/google-chrome npx tsx --test test/bnf-shadow-timeline-browser-v1.test.ts test/bnf-shadow-daywise-browser.test.ts test/bnf-shadow-page-browser.test.ts

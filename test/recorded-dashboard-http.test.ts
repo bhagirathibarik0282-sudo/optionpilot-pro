@@ -119,9 +119,15 @@ test('selected SHADOW date is validated before DB reads and worker history canno
  assert.ok(!JSON.stringify(body).includes('PRIVATE'));
 });
 
-test('after-hours dashboard mounts the same read-only lot comparison on the existing page',()=>{
+test('after-hours market dashboard links to the dedicated SHADOW page without large panels',()=>{
  const html=renderRecordedDashboard(true);
- assert.equal((html.match(/class="op-bnf-daywise"/g)||[]).length,1);
- assert.match(html,/1 \/ 2 \/ 4 \/ 6 lots/);
- assert.match(html,/recorded-dashboard\/bnf-shadow-daywise/);
+ assert.equal((html.match(/class="op-bnf-daywise"/g)||[]).length,0);
+ assert.match(html,/href="\/banknifty-shadow"/);
 });
+
+ test('dedicated SHADOW viewer is GET-only and available while the market worker is stopped',async t=>{
+ let reads=0;const url=await serve(t,{daywise:async()=>{reads++;}},false);
+ const response=await fetch(url+'/banknifty-shadow');assert.equal(response.status,200);
+ const html=await response.text();assert.match(html,/BANKNIFTY · SHADOW PAPER/);assert.match(html,/est = estimated/);
+ assert.equal(reads,0);assert.equal((await fetch(url+'/banknifty-shadow',{method:'POST'})).status,405);
+ });

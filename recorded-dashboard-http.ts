@@ -6,6 +6,7 @@ import { listH1TheoryRecordedDates } from './h1-theory-history.js';
 import { compactRows } from './h1-replay-compact-v1.js';
 import { resolveRecordedFullPcr, resolveRecordedOptionPdc } from './business-dashboard-v1-view.js';
 import { renderRecordedDashboard } from './recorded-dashboard-view.js';
+import {renderBnfShadowPage} from './bnf-shadow-page.js';
 import { readBnfShadowDaywise,withBnfShadowDailyStatus } from './bnf-shadow-daywise.js';
 import {bnfIstDay,validBnfHealthDate,readBnfShadowHealth} from './bnf-shadow-health.js';
 import {readBnfReplayStatus} from './bnf-replay-archive.js';
@@ -20,13 +21,15 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
  let active=0;
  return async function handle(request:any,response:any,status:any) {
   const url=new URL(request.url||'/','http://localhost'),path=url.pathname;
+  const shadowPage=path==='/banknifty-shadow';
   const view=path==='/recorded-dashboard'||path==='/api/research/recorded-dashboard/view'||
    (!status.shouldRun&&(path==='/'||path==='/api/research/business-dashboard/view'));
   const dateRoute=path==='/api/research/recorded-dashboard/dates',replayRoute=path==='/api/research/recorded-dashboard/replay',daywiseRoute=path==='/api/research/recorded-dashboard/bnf-shadow-daywise',timelineRoute=path==='/api/research/recorded-dashboard/bnf-shadow-timeline';
   const ragView=path==='/api/research/rag-event-evidence/view',ragRoute=path==='/api/research/rag-event-evidence',historyRoute=path==='/api/research/rag-same-dte-history';
-  if(!view&&!dateRoute&&!replayRoute&&!daywiseRoute&&!timelineRoute&&!ragView&&!ragRoute&&!historyRoute)return false;
+  if(!view&&!shadowPage&&!dateRoute&&!replayRoute&&!daywiseRoute&&!timelineRoute&&!ragView&&!ragRoute&&!historyRoute)return false;
   const send=(code:number,value:any,html=false)=>{response.writeHead(code,{'Content-Type':html?'text/html; charset=utf-8':'application/json','Cache-Control':'no-store','X-OptionPilot-Mode':'RECORDED_READ_ONLY','X-Content-Type-Options':'nosniff'});response.end(html?value:JSON.stringify(value));return true;};
   if(request.method!=='GET')return send(405,{ok:false,error:'READ_ONLY_GET_REQUIRED'});
+  if(shadowPage)return send(200,renderBnfShadowPage(),true);
   // Trade-level paper receipts are PRIVATE. Existing recorded dashboard routes are public;
   // this endpoint alone requires the pre-existing RESEARCH_ADMIN_TOKEN before any SELECT.
   if(timelineRoute){

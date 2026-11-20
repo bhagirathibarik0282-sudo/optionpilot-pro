@@ -105,6 +105,7 @@ export function createBnfShadowHost(config:any,deps:any={}) {
       if(!report?.ready){note('BLOCKED',['JOURNAL_SCHEMA_REQUIRED','CONTRACT_LOT_CONFIG_MISMATCH','PYTHON_UNAVAILABLE'].includes(report?.status)?report.status:'PREFLIGHT_FAILED');return;}
       const owned=spawnChild(python,args,{cwd:config.cwd||process.cwd(),env:outputEnv,stdio:['pipe','pipe','pipe'],shell:false});
       health.startedAt=new Date(now()).toISOString();health.failureStage=null;health.failureReason=null;
+      state.replayCapture=null;
       child=owned;state.workerStarts++;note('STARTING','WAIT_WORKER_READY');
       const readyTimer=setTimeout(()=>{if(child===owned&&state.phase==='STARTING'){endWorker();note('BLOCKED','WORKER_READY_TIMEOUT');}},45000);readyTimer.unref();
       owned.once('exit',()=>clearTimeout(readyTimer));owned.once('error',()=>clearTimeout(readyTimer));

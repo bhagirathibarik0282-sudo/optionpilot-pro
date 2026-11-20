@@ -38,7 +38,7 @@ export function installBnfShadowTimeline(){
  const state=root.querySelector('#bnf-shadow-timeline-state');
  const host=root.querySelector('#bnf-shadow-timeline-data');
  if(!date||!key||!go||!state||!host)return;
- date.value=new Date(Date.now()+19800000-86400000).toISOString().slice(0,10);
+ date.value=new Date(Date.now()+19800000).toISOString().slice(0,10);
  const add=(parent:Element,tag:string,value:string,cls='')=>{
   const elem=document.createElement(tag);elem.textContent=value;if(cls)elem.className=cls;parent.appendChild(elem);return elem;
  };

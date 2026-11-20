@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import {once} from 'node:events';
 import {createRecordedDashboardHandler} from '../recorded-dashboard-http.js';
+import {renderBnfShadowPage} from '../bnf-shadow-page.js';
 import {renderRecordedDashboard} from '../recorded-dashboard-view.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 
@@ -39,8 +40,8 @@ test('missing admin token blocks the private timeline (no automatic public fallb
  const response=await fetch(url+'/api/research/recorded-dashboard/bnf-shadow-timeline?date=2026-11-18');
  assert.equal(response.status,503);assert.equal(reads,0);
 });
-test('main and recorded dashboard each contain exactly one private timeline and no credential auto-send',()=>{
- const pages=[renderRecordedDashboard(true),renderBusinessDashboardV1Html({} as any)];
+test('dedicated SHADOW page contains the private timeline with no credential auto-send',()=>{
+ const pages=[renderBnfShadowPage()];
  for(const html of pages){
   assert.equal((html.match(/id="bnf-shadow-timeline"/g)||[]).length,1);
   assert.match(html,/BANKNIFTY · SHADOW Signal/);

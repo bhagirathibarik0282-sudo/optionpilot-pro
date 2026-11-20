@@ -40,9 +40,11 @@ test('mobile SHADOW date refresh distinguishes missing records, past P&L and fai
   await select('2026-11-19');
   assert.match(await page.locator('[data-bnf-daywise-status]').innerText(),/NO JOURNAL EVENTS.*does not prove zero trades/);
   assert.match(await page.locator('[data-bnf-daywise-worker]').innerText(),/No saved worker diagnostics/);
+  assert.equal(await page.locator('tbody tr').count(),0);
+  await select('2026-11-18');
   assert.equal(await page.locator('tbody tr').count(),1);
   assert.equal(await page.locator('tbody tr td').first().innerText(),'2026-11-18');
-  assert.equal(await page.locator('tbody tr td').nth(2).innerText(),'₹-3093.00 est · intents 2 · entry/exit receipts 2/3');
+  assert.equal(await page.locator('tbody tr td').nth(2).innerText(),'₹3,093.00 estimated paper loss · entry intents 2 · closed paper trades — · entry/exit receipts 2/3');
   assert.equal(await page.locator('tbody tr td').nth(3).innerText(),'NOT SIMULATED');
   await select('2026-11-20');
   const worker=await page.locator('[data-bnf-daywise-worker]').innerText();
@@ -50,6 +52,6 @@ test('mobile SHADOW date refresh distinguishes missing records, past P&L and fai
   assert.match(worker,/full session coverage is unverified/);
   const widths=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
   assert.ok(widths.scroll<=widths.width,'table must scroll inside its own container on mobile');
-  assert.deepEqual(errors,[]);assert.equal(requests.length,3);
+  assert.deepEqual(errors,[]);assert.equal(requests.length,4);
  }finally{await browser?.close();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });

@@ -8,6 +8,7 @@ export const BNF_SHADOW_DAYWISE_HTML =
  '<button data-bnf-daywise-refresh type="button">Check / Refresh</button>'+
  '<p data-bnf-daywise-status role="status">Checking verified paper journal…</p>'+
  '<p data-bnf-daywise-worker></p>'+
+ '<p>“est” means estimated paper profit or loss, after the recorded cost reserve. This is not broker-account P&amp;L.</p>'+
  '<div data-bnf-daywise-table class="op-bnf-daywise-scroll"></div>'+
  '<small>Paper estimates only · 4/6 lots are NOT SIMULATED without independent depth receipts · no real orders</small>'+
  '</details></section>';
@@ -20,7 +21,7 @@ export const BNF_SHADOW_DAYWISE_CSS =
  '.op-bnf-daywise th,.op-bnf-daywise td{padding:6px;border-bottom:1px solid #345064;text-align:left;white-space:normal;min-width:100px}'+
  '.op-bnf-daywise td:first-child{min-width:90px;font-weight:700}'+
  '.op-bnf-daywise .op-bnf-unverified{color:#ffc993}'+
- '@media(max-width:480px){.op-bnf-daywise{padding:5px}.op-bnf-daywise table{font-size:11px}}';
+ '@media(max-width:600px){.op-bnf-daywise{padding:8px}.op-bnf-daywise table{font-size:13px;min-width:0}.op-bnf-daywise thead{display:none}.op-bnf-daywise tbody{display:block}.op-bnf-daywise tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.op-bnf-daywise td{display:block;min-width:0;padding:9px;border:1px solid #345064;border-radius:6px;overflow-wrap:anywhere}.op-bnf-daywise td:first-child{grid-column:1/-1}.op-bnf-daywise td[data-label]::before{content:attr(data-label);display:block;font-weight:700;color:#6cf0db;margin-bottom:5px}}';
 
 /** One initial read and explicit refresh; no background polling or broker actions. */
 export async function installBnfShadowDaywise(){
@@ -29,7 +30,7 @@ export async function installBnfShadowDaywise(){
  if(!roots.length)return;
  const status=(msg:string)=>{for(const root of roots){const p=root.querySelector('[data-bnf-daywise-status]');if(p)p.textContent=msg;}};
  const el=(tag:string,text:string)=>{const node=document.createElement(tag);node.textContent=text;return node;};
- const yesterday=new Date(Date.now()+19800000-86400000).toISOString().slice(0,10);
+ const today=new Date(Date.now()+19800000).toISOString().slice(0,10);
  let checking=false;
  const load=async(date:string)=>{
  if(checking)return;checking=true;
@@ -67,17 +68,22 @@ export async function installBnfShadowDaywise(){
    for(const column of ['Date','1 Lot','2 Lots','4 Lots','6 Lots'])tr.appendChild(el('th',column));
    head.appendChild(tr);table.appendChild(head);
    const body=document.createElement('tbody');
-   for(const day of report.days.slice(0,5)){
+   // Never put another day's P&L beneath a selected date with no journal events.
+   for(const day of report.days.filter((d:any)=>d.date===date).slice(0,1)){
     const line=document.createElement('tr');line.appendChild(el('td',typeof day.date==='string'?day.date:'Invalid date'));
     for(const lots of [1,2,4,6]){
      const item=Array.isArray(day.scenarios)?day.scenarios.find((x:any)=>x?.lots===lots):null;
      const verified=item?.verdict==='PAPER_JOURNAL';
      const cell=el('td',verified?
-      ((typeof item.estimatedNetPnlInr==='number'&&Number.isFinite(item.estimatedNetPnlInr)?'₹'+item.estimatedNetPnlInr.toFixed(2)+' est':'P&L unverified')+
-       ' · intents '+(Number.isSafeInteger(item.intents)?item.intents:'—')+
+      ((typeof item.estimatedNetPnlInr==='number'&&Number.isFinite(item.estimatedNetPnlInr)?
+        '₹'+Math.abs(item.estimatedNetPnlInr).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})+
+         (item.estimatedNetPnlInr>0?' estimated paper profit':item.estimatedNetPnlInr<0?' estimated paper loss':' estimated paper net'):'Paper P&L unverified')+
+       ' · entry intents '+(Number.isSafeInteger(item.intents)?item.intents:'—')+
+       ' · closed paper trades '+(Number.isSafeInteger(item.closedTrades)?item.closedTrades:'—')+
        ' · entry/exit receipts '+(Number.isSafeInteger(item.entryFills)?item.entryFills:'—')+'/'+(Number.isSafeInteger(item.exitFills)?item.exitFills:'—'))
       :'NOT SIMULATED');
      if(!verified)cell.classList.add('op-bnf-unverified');
+     cell.setAttribute('data-label',lots===1?'1 Lot':lots+' Lots');
      line.appendChild(cell);
     }
     body.appendChild(line);
@@ -90,5 +96,5 @@ export async function installBnfShadowDaywise(){
  };
  for(const root of roots){const button=root.querySelector('[data-bnf-daywise-refresh]') as HTMLButtonElement|null;
   if(button)button.onclick=()=>{const input=root.querySelector('[data-bnf-daywise-date]') as HTMLInputElement|null;if(input?.value)void load(input.value);};}
- await load(yesterday);
+ await load(today);
 }

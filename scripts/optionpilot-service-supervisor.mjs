@@ -38,7 +38,7 @@ function archiveReplaySidecars(){
 }
 async function recorded(request, response) {
   const path = new URL(request.url || '/', 'http://localhost').pathname;
-  if (!(path === '/recorded-dashboard' || path.startsWith('/api/research/recorded-dashboard/') ||
+  if (!(path === '/banknifty-shadow' || path === '/recorded-dashboard' || path.startsWith('/api/research/recorded-dashboard/') ||
       (!status().shouldRun && (path === '/' || path === '/api/research/business-dashboard/view' ||
         ['/api/research/rag-event-evidence','/api/research/rag-event-evidence/view','/api/research/rag-same-dte-history'].includes(path))))) return false;
   archiveHandler ||= import('../recorded-dashboard-http.ts').then(module => module.createRecordedDashboardHandler());

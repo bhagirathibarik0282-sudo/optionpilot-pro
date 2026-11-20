@@ -10,6 +10,7 @@ class TradeStore:
     def __init__(self, connection, scope, postgres=True):
         self.connection, self.scope, self.postgres = connection, text(scope, 'scope') , postgres
         self.owned = False
+        self.replay_recorder = None
 
     @classmethod
     def connect(cls, url, scope):
@@ -51,8 +52,22 @@ class TradeStore:
                     (self.scope, json.dumps(initial, allow_nan=False)))
                 self._query(cur, 'SELECT version,payload FROM bnf_shadow_scope_v1 WHERE scope=%s', (self.scope,))
                 version, payload = cur.fetchone()
-                return int(version), json.loads(payload)
+                result = int(version), json.loads(payload)
             finally: cur.close()
+        # Optional observational read runs after the original load transaction commits.
+        # Its rollback/failure cannot roll back journal initialization or stop the engine.
+        if self.replay_recorder:
+            try:
+                with self.connection:
+                    cur = self.connection.cursor()
+                    try:
+                        self._query(cur, 'SELECT signal_id FROM bnf_shadow_signal_v1 WHERE scope=%s ORDER BY signal_id LIMIT 10001', (self.scope,))
+                        signals = [r[0] for r in cur.fetchall()]
+                    finally: cur.close()
+                self.replay_recorder.start(result[0], result[1], signals)
+            except Exception:
+                self.replay_recorder.fail('CAPTURE_SEED_UNAVAILABLE')
+        return result
 
     def has_signal(self, signal_id):
         with self.connection:
@@ -86,6 +101,8 @@ class TradeStore:
                     self._query(cur, 'INSERT INTO bnf_shadow_signal_v1(scope,signal_id,intent_id) VALUES (%s,%s,%s)',
                         (self.scope, signal_id, event['intent_id']))
             finally: cur.close()
+        if self.replay_recorder:
+            self.replay_recorder.journal(event)
         return expected_version + 1
 
     def close(self):

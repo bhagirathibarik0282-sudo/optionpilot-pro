@@ -56,6 +56,10 @@ export async function installBnfShadowDaywise(){
    '. Counts describe the last reported worker run; full session coverage is unverified.':
    'No saved worker diagnostics for this date. EOD market data cannot establish paper entries, exits or a zero-trade day.';
   for(const root of roots){const p=root.querySelector('[data-bnf-daywise-worker]');if(p)p.textContent=worker;}
+  const replay=selected.replayEvidence;
+  if(replay?.ok&&Array.isArray(replay.runs))for(const root of roots){const p=root.querySelector('[data-bnf-daywise-worker]');
+   if(p)p.textContent+=' Replay capture: '+(replay.runs.length?replay.runs.map((r:any)=>String(r.state)+' · '+n(r.recordsWritten)+' records · '+n(r.recordsDropped)+' dropped · '+String(r.archive)).join('; '):'none for this date')+'. Full-session replay remains unverified.';
+  }
   for(const root of roots){
    const host=root.querySelector('[data-bnf-daywise-table]');if(!host)continue;
    const table=document.createElement('table');

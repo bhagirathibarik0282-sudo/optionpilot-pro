@@ -8,6 +8,7 @@ import { resolveRecordedFullPcr, resolveRecordedOptionPdc } from './business-das
 import { renderRecordedDashboard } from './recorded-dashboard-view.js';
 import { readBnfShadowDaywise,withBnfShadowDailyStatus } from './bnf-shadow-daywise.js';
 import {bnfIstDay,validBnfHealthDate,readBnfShadowHealth} from './bnf-shadow-health.js';
+import {readBnfReplayStatus} from './bnf-replay-archive.js';
 import {readBnfShadowTimeline,validBnfTimelineDate} from './bnf-shadow-trade-timeline-v1.js';
 import {timingSafeEqual} from 'node:crypto';
 
@@ -53,7 +54,9 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
     if(!validBnfHealthDate(date))return send(400,{ok:false,reason:'INVALID_DATE'});
     const result=await daywise();
     const health=(dependencies.shadowHealth||readBnfShadowHealth)(date);
-    return send(result.ok?200:503,withBnfShadowDailyStatus(result,date,health));
+    const report=withBnfShadowDailyStatus(result,date,health);
+    if(report.selectedDay)Object.assign(report.selectedDay,{replayEvidence:await (dependencies.replayStatus||readBnfReplayStatus)(date)});
+    return send(result.ok?200:503,report);
    }
    if(timelineRoute){const result=await timeline(url.searchParams.get('date'));return send(result.ok?200:503,result);}
    if(dateRoute){const result=await dates();return send(result.ok?200:503,result);}

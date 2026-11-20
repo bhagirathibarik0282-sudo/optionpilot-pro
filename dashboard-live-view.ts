@@ -30,7 +30,8 @@ export function installDashboardLive(){
    const health=data.workerEvidence;
    const exit=health?.lastExitAt?' · Last exit '+new Date(health.lastExitAt).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false})+' IST · code '+n(health.exitCode)+
     ' · '+String(health.failureStage||'cause unverified')+' / '+String(health.failureReason||'reason unverified'):'';
-   evidence.textContent='Generated signals: '+n(counts.signals)+' · Observations: '+n(counts.observations)+' · '+paper+' · Broker orders: 0 · '+reason+exit;
+   const capture=data.replayCapture?' · Replay capture '+String(data.replayCapture.state)+' · '+n(data.replayCapture.recordsWritten)+' records / '+n(data.replayCapture.recordsDropped)+' dropped':' · Replay capture not enabled or unverified';
+   evidence.textContent='Generated signals: '+n(counts.signals)+' · Observations: '+n(counts.observations)+' · '+paper+' · Broker orders: 0 · '+reason+exit+capture;
   }catch{
    label.textContent='● Status unavailable · paper execution not verified';
    evidence.textContent='Read-only monitor could not confirm worker, signal, entry or exit. No order controls.';

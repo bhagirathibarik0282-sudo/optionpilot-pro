@@ -55,3 +55,13 @@ test('READY worker exposes only explicitly allowlisted paper quantities', async 
   assert.ok(!JSON.stringify(data).includes('DO_NOT_LEAK'));
   assert.equal(data.brokerOrders,0);
 });
+
+test('a stopped worker cannot leave a replay recorder falsely labelled RECORDING',async()=>{
+ const app=new Hono();
+ mountDashboardLiveRoutes(app,undefined,undefined,undefined,()=>({phase:'BLOCKED',childRunning:false,
+  replayCapture:{state:'RECORDING',recordsWritten:100,recordsDropped:0,token:'PRIVATE'}}));
+ const data=await (await app.request('/dashboard-live/bnf-shadow')).json();
+ assert.equal(data.replayCapture.state,'STALE_OR_INTERRUPTED');
+ assert.equal(data.replayCapture.completeSessionVerified,false);
+ assert.ok(!JSON.stringify(data).includes('PRIVATE'));
+});

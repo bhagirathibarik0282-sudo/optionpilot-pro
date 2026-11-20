@@ -32,6 +32,10 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
   return c.json({mode:'SHADOW',enabled:raw.enabled===true,phase:raw.phase||'UNKNOWN',reason:raw.reason||'UNVERIFIED',
    lots:raw.lots===1||raw.lots===2?raw.lots:null,
    workerRunning:raw.childRunning===true,feedConnected:raw.feedConnected===true,
+   replayCapture:raw.replayCapture?{mode:'BNF_SHADOW_REPLAY_V1',
+    state:raw.childRunning!==true&&raw.replayCapture.state==='RECORDING'?'STALE_OR_INTERRUPTED':
+     ['NOT_STARTED','RECORDING','SEALED','INCOMPLETE'].includes(raw.replayCapture.state)?raw.replayCapture.state:'INCOMPLETE',
+    recordsWritten:cnt(raw.replayCapture.recordsWritten),recordsDropped:cnt(raw.replayCapture.recordsDropped),completeSessionVerified:false}:null,
    sourceCounts:{observations:cnt(counts.observations),signals:cnt(counts.signals),rejected:cnt(counts.rejected),warmup:cnt(counts.warmup)},
    paper:ready&&raw.paper?{reportedAt:raw.paper.reportedAt||null,active:leg(raw.paper.active),lastResult:leg(raw.paper.lastResult)}:null,
    workerEvidence:cleanBnfHealth({...raw.health,phase:raw.phase,reason:raw.reason,workerRunning:raw.childRunning,feedConnected:raw.feedConnected}),

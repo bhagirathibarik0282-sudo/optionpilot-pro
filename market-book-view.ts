@@ -109,12 +109,73 @@ export function installMarketBook(api:any) {
  const replay=installRecordedReplay(api);
  const oiStudio=installOiWallStudio();
  const oiReplay=installOiWallReplay(api,replay);
+ // Watch uses the existing live-context event and canonical PCR validation.
+ const watchPanel=document.createElement('details');
+ watchPanel.innerHTML='<summary>Watch · Live minutes</summary><label>Index <select aria-label="Watch index"><option>NIFTY</option><option>BANKNIFTY</option><option>SENSEX</option></select></label><p role="status">Waiting for a fresh live connection</p><div style="max-height:24rem;overflow:auto"><table><thead><tr><th scope="col">IST minute</th><th scope="col">Spot</th><th scope="col">Full OI PCR</th><th scope="col">PCR expiry</th><th scope="col">India VIX</th></tr></thead><tbody></tbody></table></div>';
+ $('op-live-status')?.insertAdjacentElement('afterend',watchPanel);
+ const watchIndex=watchPanel.querySelector('select')!;
+ const watchBody=watchPanel.querySelector('tbody')!;
+ const watchStatus=watchPanel.querySelector('[role=status]')!;
+ const watchHistory=new Map<string,Map<string,{spot:number|null,pcr:number|null,expiry:string|null,vix:number|null}>>();
+ let watchSession='', watchState='Waiting for a fresh live connection';
+ const renderWatch=()=>{
+  if(!watchPanel.open)return;
+  watchStatus.textContent=watchState;
+  const rows=[...(watchHistory.get(watchIndex.value)?.entries()??[])].reverse();
+  const html=rows.map(([minute,values])=>'<tr><th scope="row">'+minute+'</th><td>'+
+   (values.spot?.toFixed(2)??'Gap')+'</td><td>'+(values.pcr?.toFixed(6)??'Gap')+
+   '</td><td>'+(values.expiry??'—')+'</td><td>'+(values.vix?.toFixed(2)??'Gap')+'</td></tr>').join('');
+  if(watchBody.innerHTML!==html)watchBody.innerHTML=html;
+ };
+ watchPanel.addEventListener('toggle',renderWatch);
+ watchIndex.addEventListener('change',renderWatch);
+ const recordWatch=(payload:any,canonical:any)=>{
+  const snapshot=payload?.snapshot, serverAt=Date.parse(payload?.serverTime??'');
+  const asOf=Date.parse(snapshot?.asOf??'');
+  const dateTime=Number.isFinite(serverAt)?new Date(serverAt+19800000).toISOString():'';
+  const date=dateTime.slice(0,10), minute=dateTime.slice(11,16);
+  const isLive=payload?.connected===true&&payload.source==='KITE_WEBSOCKET_FULL'&&
+   typeof snapshot?.runtimeId==='string'&&snapshot.runtimeId.length>0&&snapshot.tradeDate===date&&
+   minute>='09:15'&&minute<'15:30'&&serverAt-asOf>=0&&serverAt-asOf<=4000;
+  if(!isLive){
+   watchState='Live data unavailable · recorded minutes below';
+   renderWatch();return;
+  }
+  const session=snapshot.tradeDate+'|'+snapshot.runtimeId;
+  if(watchSession!==session){watchHistory.clear();watchSession=session;}
+  const q=snapshot.vix, observed=Date.parse(q?.observedAt??''),received=Date.parse(q?.receivedAt??'');
+  const sameDay=(time:number)=>Number.isFinite(time)&&new Date(time+19800000).toISOString().slice(0,10)===date;
+  const vix=q?.identity?.role==='VIX'&&q.state==='LIVE'&&typeof q.price==='number'&&Number.isFinite(q.price)&&q.price>0&&
+   sameDay(observed)&&sameDay(received)&&serverAt-observed>=-5000&&serverAt-observed<=30000&&serverAt-received>=0&&serverAt-received<=30000
+   ?q.price:null;
+  for(const row of canonical?.rows??[]){
+   if(!['NIFTY','BANKNIFTY','SENSEX'].includes(row.symbol))continue;
+   const history=watchHistory.get(row.symbol)??new Map();
+   const last=[...history.keys()].at(-1);
+   if(last&&minute<last)continue;
+   // Fill skipped minutes with explicit gaps, never with a carried quote.
+   if(last&&minute>last){
+    const toMinute=(value:string)=>Number(value.slice(0,2))*60+Number(value.slice(3));
+    for(let i=toMinute(last)+1;i<toMinute(minute);i++){
+     const key=String(Math.floor(i/60)).padStart(2,'0')+':'+String(i%60).padStart(2,'0');
+     history.set(key,{spot:null,pcr:null,expiry:null,vix:null});
+    }
+   }
+   const sameMinute=(time:number)=>sameDay(time)&&new Date(time+19800000).toISOString().slice(11,16)===minute;
+   const spot=sameMinute(Date.parse(row.spotAt??''))&&Number.isFinite(row.spotValue)?row.spotValue:null;
+   const pcr=sameMinute(row.current?.sourceMax)&&Number.isFinite(row.value)?row.value:null;
+   history.set(minute,{spot,pcr,expiry:pcr===null?null:row.expiry,vix:sameMinute(observed)?vix:null});
+   watchHistory.set(row.symbol,history);
+  }
+  watchState='India time · captured since this browser connected · Gap indicates missing or unverified data';
+  renderWatch();
+ };
  const emptyHistory:any[]=[];let lastRenderKey:any[]|null=null;
  let futureMetric='ALL';let latestLive:any=null;let livePcr:any=deriveLiveThreeIndexPcr(null);
  const updateLiveContext=()=>{oiStudio?.setPage(page);oiReplay?.setPage(page);const strip=$('mb-full-pcr-strip');if(strip){strip.hidden=![5,9].includes(page)||(page===5&&!!oiReplay?.isReplay());if(!strip.hidden){const html=renderLiveThreeIndexPcr(livePcr);if(strip.innerHTML!==html)strip.innerHTML=html;}}const shell=$('mb-live-context-shell');if(shell)shell.hidden=[3,6,7,10,12].includes(page)||(page===8&&latestLive?.connected!==true);const controls=$('mb-live-controls');if(controls)controls.hidden=![0,2,9,12].includes(page);const target=$('mb-live-context');if(target){target.hidden=page===5;const tabs=$('mb-future-metrics');if(tabs){tabs.hidden=page!==4;tabs.querySelectorAll?.('[data-mb-future]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.mbFuture===futureMetric)));}const next=renderMarketBookLiveContext(latestLive,symbol,page,[5,9].includes(page),{metric:page===4?futureMetric:'ALL'});if(target.innerHTML!==next){const open=new Set(Array.from(target.querySelectorAll?.('details[data-live-detail][open]')||[]).map((e:any)=>e.getAttribute('data-live-detail')));target.innerHTML=next;target.querySelectorAll?.('details[data-live-detail]').forEach((e:any)=>{if(open.has(e.getAttribute('data-live-detail')))e.open=true;});}const title=$('mb-live-title');if(title)title.textContent='Kite live values'+' · '+chapters[page];}};
  $('mb-future-metrics').onclick=(e:any)=>{const value=e.target.closest?.('[data-mb-future]')?.dataset.mbFuture;if(['ALL','future','futureOi','futureVolume','basis'].includes(value)){futureMetric=value;updateLiveContext();}};
  if(typeof window!=='undefined')window.addEventListener('optionpilot:oi-mode',(()=>updateLiveContext()) as EventListener);
- if(typeof window!=='undefined')window.addEventListener('optionpilot:live-context',((event:any)=>{latestLive=event.detail;oiStudio?.update(latestLive);livePcr=deriveLiveThreeIndexPcr(latestLive,livePcr);updateLiveContext();}) as EventListener);
+ if(typeof window!=='undefined')window.addEventListener('optionpilot:live-context',((event:any)=>{latestLive=event.detail;oiStudio?.update(latestLive);livePcr=deriveLiveThreeIndexPcr(latestLive,livePcr);recordWatch(latestLive,livePcr);updateLiveContext();}) as EventListener);
  const chapters=['Overview','Spot + pivots','Premium comparison','Four expiries','Futures','OI + walls','Notable changes','Premium behaviour','Sectors + stocks','Spot + full PCR','FII / DII','India VIX','Market agreement'];
  if(typeof window!=='undefined')window.addEventListener('optionpilot:oi-recorded-scope',((event:any)=>{const scope=event.detail;if(!['NIFTY','SENSEX','BANKNIFTY'].includes(scope?.symbol))return;symbol=scope.symbol;expiry=scope.expiry||'';opposite=expiry;strike=undefined;compareStrike=null;$('mb-tools').open=true;$('mb-settings').open=true;render();$('mb-date').focus?.();$('mb-settings').scrollIntoView?.({block:'center',behavior:'smooth'});}) as EventListener);
  const spotSettings:any={};

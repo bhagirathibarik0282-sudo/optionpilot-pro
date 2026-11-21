@@ -31,6 +31,17 @@ test("production Business Dashboard V1 HTML view exposes a supported read-only d
   assert.equal(response.ok, true, `HTTP_${response.status}`);
   const html = await response.text();
   assert.match(html, /viewport/);
+  // The recorded-only shell can remain available during a verified runtime closure.
+  // A 200 from that shell is never evidence for live dashboard readiness.
+  const recordedShell = html.includes("<title>OptionPilot · Recorded Replay</title>") &&
+    /<h1>Saved sessions &(?:amp;)? Replay<\/h1>/.test(html) &&
+    html.includes('id="ar-minute-history"');
+  if (recordedShell && new URL(response.url).origin === new URL(BASE).origin) {
+    const runtimeResponse = await fetch(`${BASE}?symbol=NIFTY`, {
+      headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000),
+    });
+    if (await productionVerificationPending(runtimeResponse, t)) return;
+  }
   // Production may still serve the previous release while this PR is checked.
   if (html.includes('Market observations')) {
     assert.match(html, /DATA ONLY/);

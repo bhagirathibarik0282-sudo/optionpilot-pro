@@ -40,6 +40,44 @@ try {
    const directWatch=watchDialog.locator('#mb-live-watch');
    assert.equal(await directWatch.isVisible(),true);
    assert.equal(await directWatch.getByLabel('Source').inputValue(),'Live');
+   const participation=directWatch.locator('#mb-watch-participation');
+   assert.equal(await participation.isVisible(),false);
+   // Exercise the production renderer with a local, deterministic quote event.
+   await directWatch.getByLabel('Metrics').selectOption('spot');
+   await page.evaluate(()=>{
+    const serverTime='2026-11-23T06:30:00.000Z';
+    const quotes=[
+     ['NIFTY PSU BANK','SECTOR',-8],['HDFCBANK','STOCK',-1],['ICICIBANK','STOCK',2],
+     ['AXISBANK','STOCK',-3],['KOTAKBANK','STOCK',0],['SBIN','STOCK',4],
+     ['RELIANCE','STOCK',8],['NIFTY IT','SECTOR',-2],['NIFTY SMLCAP 100','SECTOR',0],['NIFTY MIDCAP 100','SECTOR',1]
+    ].map(([label,role,move])=>({identity:{label,role},price:100+Number(move),pdc:100,observedAt:serverTime,receivedAt:serverTime,state:'LIVE'}));
+    const indices=['NIFTY','BANKNIFTY','SENSEX'].map(symbol=>({symbol,expiry:'2026-11-26',expiries:['2026-11-26']}));
+    window.dispatchEvent(new CustomEvent('optionpilot:live-context',{detail:{
+     connected:true,source:'KITE_WEBSOCKET_FULL',serverTime,snapshot:{runtimeId:'mobile-smoke',tradeDate:'2026-11-23',asOf:serverTime,indices,participation:quotes}
+    }}));
+   });
+   for(const [index,names] of [
+    ['BANKNIFTY',['PSU Bank','HDFC Bank','ICICI Bank','Axis Bank','Kotak Bank','SBI']],
+    ['NIFTY',['HDFC Bank','Reliance','Nifty IT','Smallcap 100','Midcap 100']],
+    ['SENSEX',['HDFC Bank','Reliance','Nifty IT','Smallcap 100','Midcap 100']],
+   ] as const){
+    await directWatch.getByLabel('Index').selectOption(index);
+    assert.equal(await participation.isVisible(),true);
+    const tiles=participation.locator('.mb-watch-instrument');
+    assert.deepEqual(await tiles.locator(':scope > span').allTextContents(),[...names]);
+    assert.equal((await tiles.locator('strong').allTextContents()).filter(v=>/^[+-]?[0-9]+\\.[0-9]{2}%$/.test(v)).length,names.length);
+    assert.match((await participation.textContent())??'',/Mixed/);
+    assert.equal(await tiles.evaluateAll(elements=>elements.every(element=>{
+     const name=element.querySelector('span')!,value=element.querySelector('strong')!;
+     const a=name.getBoundingClientRect(),b=value.getBoundingClientRect(),tile=element.getBoundingClientRect();
+     return a.width>0&&b.width>0&&a.right<=b.left&&b.right<=tile.right+1&&tile.right<=window.innerWidth+1&&
+      name.scrollWidth<=name.clientWidth+1&&value.scrollWidth<=value.clientWidth+1;
+    })),true,label+' '+index+': clipped label or percentage');
+    const colorCount=await tiles.locator('strong').evaluateAll(values=>new Set(values.map(value=>getComputedStyle(value).color)).size);
+    assert.equal(colorCount,3,label+' '+index+': positive, negative and flat colours');
+   }
+   await directWatch.getByLabel('Index').selectOption('ALL');
+   assert.equal(await participation.isVisible(),false);
    await directWatch.getByLabel('Source').selectOption('Replay');
    assert.equal(await directWatch.getByLabel('Recorded date').isVisible(),true);
    await watchDialog.locator('#os-screen-close').click();

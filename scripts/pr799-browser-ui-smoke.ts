@@ -34,6 +34,17 @@ try {
    await page.locator('#op-command-chapters [data-op-group]').first().waitFor({timeout:15000,state:'attached'});
    assert.equal(await page.locator('#op-command-chapters [data-op-group]').count(),6);
    assert.equal(await page.locator('#mb-chapter option').count(),6);
+   const watchEntry=page.getByRole('button',{name:'Watch · Live / Replay',exact:true});
+   await watchEntry.click();
+   const watchDialog=page.locator('#os-screen-detail');
+   const directWatch=watchDialog.locator('#mb-live-watch');
+   assert.equal(await directWatch.isVisible(),true);
+   assert.equal(await directWatch.getByLabel('Source').inputValue(),'Live');
+   await directWatch.getByLabel('Source').selectOption('Replay');
+   assert.equal(await directWatch.getByLabel('Recorded date').isVisible(),true);
+   await watchDialog.locator('#os-screen-close').click();
+   assert.equal(await watchDialog.isVisible(),false);
+   assert.equal(await watchEntry.evaluate(el=>document.activeElement===el),true);
    await page.locator('#rd-source-tables').click();
    await page.locator('#op-research-open-data').click({timeout:10000});
    assert.equal(await page.locator('#mb-tools').evaluate((n:any)=>n.open),true);

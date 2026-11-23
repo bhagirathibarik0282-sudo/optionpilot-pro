@@ -51,30 +51,31 @@ try {
    ] as const){
     await directWatch.locator('#mb-watch-index').selectOption(index);
     assert.equal(await participation.isVisible(),true);
-    const proof=await page.evaluate(()=>{
-    const serverTime='2026-11-23T06:30:00.000Z';
-    const quotes=[
-     ['NIFTY PSU BANK','SECTOR',-8],['HDFCBANK','STOCK',-1],['ICICIBANK','STOCK',2],
-     ['AXISBANK','STOCK',-3],['KOTAKBANK','STOCK',0],['SBIN','STOCK',4],
-     ['RELIANCE','STOCK',8],['NIFTY IT','SECTOR',-2],['NIFTY SMLCAP 100','SECTOR',0],['NIFTY MIDCAP 100','SECTOR',1]
-    ].map(([label,role,move])=>({identity:{label,role},price:100+Number(move),pdc:100,observedAt:serverTime,receivedAt:serverTime,state:'LIVE'}));
-    const indices=['NIFTY','BANKNIFTY','SENSEX'].map(symbol=>({symbol,expiry:'2026-11-26',expiries:['2026-11-26']}));
-    window.dispatchEvent(new CustomEvent('optionpilot:live-context',{detail:{
-     connected:true,source:'KITE_WEBSOCKET_FULL',serverTime,snapshot:{runtimeId:'mobile-smoke',tradeDate:'2026-11-23',asOf:serverTime,indices,participation:quotes}
-    }}));
-    const panel=document.querySelector('#mb-watch-participation')!;
-    const tiles=[...panel.querySelectorAll('.mb-watch-instrument')];
-    const names=tiles.map(el=>el.querySelector('span')!.textContent);
-    const values=tiles.map(el=>el.querySelector('strong')!);
-    const fits=tiles.every((element,i)=>{
-     const name=element.querySelector('span')!,value=values[i];
-     const a=name.getBoundingClientRect(),b=value.getBoundingClientRect(),tile=element.getBoundingClientRect();
-     return a.width>0&&b.width>0&&a.right<=b.left&&b.right<=tile.right+1&&tile.right<=window.innerWidth+1&&
-      name.scrollWidth<=name.clientWidth+1&&value.scrollWidth<=value.clientWidth+1;
-    });
-    return {names,values:values.map(el=>el.textContent),text:panel.textContent??'',fits,
-     colorCount:new Set(values.map(value=>getComputedStyle(value).color)).size};
-   });
+    const proof=await page.evaluate(index=>{
+     const minute={BANKNIFTY:'30',NIFTY:'31',SENSEX:'32'}[index];
+     const serverTime='2026-11-23T06:'+minute+':00.000Z';
+     const quotes=[
+      ['NIFTY PSU BANK','SECTOR',-8],['HDFCBANK','STOCK',-1],['ICICIBANK','STOCK',2],
+      ['AXISBANK','STOCK',-3],['KOTAKBANK','STOCK',0],['SBIN','STOCK',4],
+      ['RELIANCE','STOCK',8],['NIFTY IT','SECTOR',-2],['NIFTY SMLCAP 100','SECTOR',0],['NIFTY MIDCAP 100','SECTOR',1]
+     ].map(([label,role,move])=>({identity:{label,role},price:100+Number(move),pdc:100,observedAt:serverTime,receivedAt:serverTime,state:'LIVE'}));
+     const indices=['NIFTY','BANKNIFTY','SENSEX'].map(symbol=>({symbol,expiry:'2026-11-26',expiries:['2026-11-26']}));
+     window.dispatchEvent(new CustomEvent('optionpilot:live-context',{detail:{
+      connected:true,source:'KITE_WEBSOCKET_FULL',serverTime,snapshot:{runtimeId:'mobile-smoke',tradeDate:'2026-11-23',asOf:serverTime,indices,participation:quotes}
+     }}));
+     const panel=document.querySelector('#mb-watch-participation')!;
+     const tiles=[...panel.querySelectorAll('.mb-watch-instrument')];
+     const names=tiles.map(el=>el.querySelector('span')!.textContent);
+     const values=tiles.map(el=>el.querySelector('strong')!);
+     const fits=tiles.every((element,i)=>{
+      const name=element.querySelector('span')!,value=values[i];
+      const a=name.getBoundingClientRect(),b=value.getBoundingClientRect(),tile=element.getBoundingClientRect();
+      return a.width>0&&b.width>0&&a.right<=b.left&&b.right<=tile.right+1&&tile.right<=window.innerWidth+1&&
+       name.scrollWidth<=name.clientWidth+1&&value.scrollWidth<=value.clientWidth+1;
+     });
+     return {names,values:values.map(el=>el.textContent),text:panel.textContent??'',fits,
+      colorCount:new Set(values.map(value=>getComputedStyle(value).color)).size};
+    },index);
     assert.deepEqual(proof.names,[...names]);
     assert.equal(proof.values.filter(v=>v&&/^[+-]?[0-9]+\.[0-9]{2}%$/.test(v)).length,names.length,proof.text);
     assert.match(proof.text,/Mixed/);

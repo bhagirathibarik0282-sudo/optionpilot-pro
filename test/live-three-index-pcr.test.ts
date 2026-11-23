@@ -223,3 +223,51 @@ test('Live Watch refreshes late archive minutes and preserves history after a re
  assert.match(body.innerHTML,/24001\.00/);
  assert.doesNotMatch(nodes.get('mb-watch-status').textContent,/Archive read failed/);
 });
+
+test('Watch participation scopes quotes by index and uses recorded snapshots at the Replay cursor',async()=>{
+ const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>(),handlers:any={};
+ for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},getAttribute(){return null;},offsetWidth:0});
+ const date='2026-10-16',at=(minute:string)=>date+'T'+minute+':00+05:30';
+ const quote=(symbol:string,price:number,minute:string)=>({symbol:'NSE:'+symbol,price,previousClose:100,exchangeTimestamp:at(minute)});
+ const snapshot=(minute:string,price:number)=>({source:'SERVER_BACKGROUND_KITE_QUOTES',tradingDate:date,timestamp:at(minute),
+  stocks:{NIFTY:[quote('HDFCBANK',price,minute)]},sectors:[]});
+ const ctx=vm.createContext({document:{getElementById:(id:string)=>nodes.get(id)},window:{addEventListener:(name:string,fn:any)=>handlers[name]=fn,dispatchEvent(){}},
+  setTimeout:()=>1,clearTimeout(){},AbortSignal,fetch:async(url:string)=>{
+   assert.equal(url,'/api/research/background-quotes/history?date='+date);
+   return {ok:true,json:async()=>({date,snapshots:[snapshot('09:15',98),snapshot('09:16',111)]})};
+  }});
+ vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)![1],ctx);
+ const market=[{symbol:'NIFTY',minute_bucket:at('09:15'),truth_verdict:'TRUE',spot_ltp:24000}];
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({date,current:{NIFTY:{market}},recordedDates:[date],history:{},baseline:{},health:{}}),refresh(){},memory:async()=>{}};
+ vm.runInContext('installMarketBook(api)',ctx);
+ const panel=nodes.get('mb-live-watch'),source=nodes.get('mb-watch-source'),index=nodes.get('mb-watch-index'),strip=nodes.get('mb-watch-participation');
+ source.value='Live';index.value='BANKNIFTY';nodes.get('mb-watch-metrics').value='spot';panel.open=true;
+ const p=fixture();
+ const breadth=(label:string,role:string,price:number,observedAt=iso(start))=>
+  ({identity:{label,role},price,pdc:100,observedAt,receivedAt:iso(start),state:'LIVE'});
+ p.snapshot.participation=[
+  breadth('NIFTY PSU BANK','SECTOR',101),breadth('HDFCBANK','STOCK',102),breadth('ICICIBANK','STOCK',103),
+  breadth('AXISBANK','STOCK',104),breadth('KOTAKBANK','STOCK',105),breadth('SBIN','STOCK',106),
+  breadth('RELIANCE','STOCK',98),breadth('NIFTY IT','SECTOR',100),breadth('NIFTY SMLCAP 100','SECTOR',102),
+  breadth('NIFTY MIDCAP 100','SECTOR',103,iso(start-31000)),
+ ];
+ handlers['optionpilot:live-context']({detail:p});
+ assert.match(strip.innerHTML,/6 ↑ · 0 ↓ · Aligned up/);
+ assert.match(strip.innerHTML,/PSU Bank.*HDFC Bank.*ICICI Bank.*Axis Bank.*Kotak Bank.*SBI/);
+ assert.doesNotMatch(strip.innerHTML,/Reliance|Nifty IT/);
+ for(const symbol of ['NIFTY','SENSEX']){
+  index.value=symbol;index.onchange();
+  assert.match(strip.innerHTML,/2 ↑ · 1 ↓ · 1 ↔ · 4\/5 quotes/);
+  assert.match(strip.innerHTML,/Reliance<\/span><strong data-move="down">-2\.00%/);
+  assert.match(strip.innerHTML,/Midcap 100<\/span><strong data-move="missing">—/);
+  assert.doesNotMatch(strip.innerHTML,/Aligned|ICICI Bank/);
+ }
+ index.value='ALL';index.onchange();assert.equal(strip.hidden,true);
+ index.value='NIFTY';index.onchange();
+ handlers['optionpilot:live-context']({detail:null});
+ assert.match(strip.innerHTML,/Quotes unavailable/);
+ assert.doesNotMatch(strip.innerHTML,/\+2\.00%/);
+ source.value='Replay';source.onchange();await new Promise(resolve=>setImmediate(resolve));
+ assert.match(strip.innerHTML,/09:15 IST.*HDFC Bank<\/span><strong data-move="down">-2\.00%/);
+ assert.doesNotMatch(strip.innerHTML,/\+11\.00%/);
+});

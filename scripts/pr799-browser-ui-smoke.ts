@@ -61,7 +61,7 @@ try {
     ['NIFTY',['HDFC Bank','Reliance','Nifty IT','Smallcap 100','Midcap 100']],
     ['SENSEX',['HDFC Bank','Reliance','Nifty IT','Smallcap 100','Midcap 100']],
    ] as const){
-    await directWatch.getByLabel('Index').selectOption(index);
+    await directWatch.locator('#mb-watch-index').selectOption(index);
     assert.equal(await participation.isVisible(),true);
     const tiles=participation.locator('.mb-watch-instrument');
     assert.deepEqual(await tiles.locator(':scope > span').allTextContents(),[...names]);
@@ -76,7 +76,7 @@ try {
     const colorCount=await tiles.locator('strong').evaluateAll(values=>new Set(values.map(value=>getComputedStyle(value).color)).size);
     assert.equal(colorCount,3,label+' '+index+': positive, negative and flat colours');
    }
-   await directWatch.getByLabel('Index').selectOption('ALL');
+   await directWatch.locator('#mb-watch-index').selectOption('ALL');
    assert.equal(await participation.isVisible(),false);
    await directWatch.getByLabel('Source').selectOption('Replay');
    assert.equal(await directWatch.getByLabel('Recorded date').isVisible(),true);

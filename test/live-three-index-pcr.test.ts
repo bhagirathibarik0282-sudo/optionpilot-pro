@@ -88,6 +88,24 @@ test('actual serialized live event updates all three PCR values and revokes them
  turn(9);assert.equal(nodes.get('mb-full-pcr-strip').hidden,false);assert(!nodes.get('mb-live-context').innerHTML.includes('data-live-kind="pcr"'));
  handlers['optionpilot:live-context']({detail:null});content=nodes.get('mb-full-pcr-strip').innerHTML;assert(!content.includes('1.5000'));assert(!content.includes('ALL RISING'));assert(content.includes('UNAVAILABLE'));
  turn(4);assert.equal(nodes.get('mb-full-pcr-strip').hidden,true);assert.deepEqual(data,before);assert.equal(requests,0);
+
+ const watch=nodes.get('mb-live-watch'),watchBody=nodes.get('mb-watch-body');
+ watch.open=true;
+ nodes.get('mb-watch-index').value='NIFTY';
+ nodes.get('mb-watch-source').value='Live';
+ nodes.get('mb-watch-metrics').value='pcr';
+ watch.ontoggle();
+ assert.match(watchBody.innerHTML,/<th scope="row">09:31<\/th><td>Live<\/td><td>1\.100000<\/td><td>2026-10-20<\/td>/);
+
+ const later=fixture(120000);
+ later.pcrDisplay.NIFTY.sourceMinAt=iso(start+119000);
+ later.pcrDisplay.NIFTY.sourceMaxAt=iso(start+119000);
+ handlers['optionpilot:live-context']({detail:later});
+ assert.match(watchBody.innerHTML,/<th scope="row">09:32<\/th><td>Live<\/td><td>Gap<\/td>/);
+
+ nodes.get('mb-watch-source').value='Replay';
+ nodes.get('mb-watch-source').onchange();
+ assert.equal(watchBody.innerHTML,'');
 });
 function withBand(p:any,values=[2.1,2,1.9]){
  for(const [i,symbol] of symbols.entries()){const q=p.pcrDisplay[symbol];q.bandPcr={state:'COMPLETE',value:values[i],halfWidth:7,strikeCount:15,expected:30,freshOi:30,anchorStrike:24000,fromStrike:23650,toStrike:24350,ceTotal:200,peTotal:values[i]*200,anchorAt:q.checkedAt};}return p;

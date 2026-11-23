@@ -44,7 +44,14 @@ try {
    assert.equal(await participation.isVisible(),false);
    // Exercise the production renderer with a local, deterministic quote event.
    await directWatch.getByLabel('Metrics').selectOption('spot');
-   await page.evaluate(()=>{
+   for(const [index,names] of [
+    ['BANKNIFTY',['PSU Bank','HDFC Bank','ICICI Bank','Axis Bank','Kotak Bank','SBI']],
+    ['NIFTY',['HDFC Bank','Reliance','Nifty IT','Smallcap 100','Midcap 100']],
+    ['SENSEX',['HDFC Bank','Reliance','Nifty IT','Smallcap 100','Midcap 100']],
+   ] as const){
+    await directWatch.locator('#mb-watch-index').selectOption(index);
+    assert.equal(await participation.isVisible(),true);
+    const proof=await page.evaluate(()=>{
     const serverTime='2026-11-23T06:30:00.000Z';
     const quotes=[
      ['NIFTY PSU BANK','SECTOR',-8],['HDFCBANK','STOCK',-1],['ICICIBANK','STOCK',2],
@@ -55,26 +62,24 @@ try {
     window.dispatchEvent(new CustomEvent('optionpilot:live-context',{detail:{
      connected:true,source:'KITE_WEBSOCKET_FULL',serverTime,snapshot:{runtimeId:'mobile-smoke',tradeDate:'2026-11-23',asOf:serverTime,indices,participation:quotes}
     }}));
-   });
-   for(const [index,names] of [
-    ['BANKNIFTY',['PSU Bank','HDFC Bank','ICICI Bank','Axis Bank','Kotak Bank','SBI']],
-    ['NIFTY',['HDFC Bank','Reliance','Nifty IT','Smallcap 100','Midcap 100']],
-    ['SENSEX',['HDFC Bank','Reliance','Nifty IT','Smallcap 100','Midcap 100']],
-   ] as const){
-    await directWatch.locator('#mb-watch-index').selectOption(index);
-    assert.equal(await participation.isVisible(),true);
-    const tiles=participation.locator('.mb-watch-instrument');
-    assert.deepEqual(await tiles.locator(':scope > span').allTextContents(),[...names]);
-    assert.equal((await tiles.locator('strong').allTextContents()).filter(v=>/^[+-]?[0-9]+\\.[0-9]{2}%$/.test(v)).length,names.length);
-    assert.match((await participation.textContent())??'',/Mixed/);
-    assert.equal(await tiles.evaluateAll(elements=>elements.every(element=>{
-     const name=element.querySelector('span')!,value=element.querySelector('strong')!;
+    const panel=document.querySelector('#mb-watch-participation')!;
+    const tiles=[...panel.querySelectorAll('.mb-watch-instrument')];
+    const names=tiles.map(el=>el.querySelector('span')!.textContent);
+    const values=tiles.map(el=>el.querySelector('strong')!);
+    const fits=tiles.every((element,i)=>{
+     const name=element.querySelector('span')!,value=values[i];
      const a=name.getBoundingClientRect(),b=value.getBoundingClientRect(),tile=element.getBoundingClientRect();
      return a.width>0&&b.width>0&&a.right<=b.left&&b.right<=tile.right+1&&tile.right<=window.innerWidth+1&&
       name.scrollWidth<=name.clientWidth+1&&value.scrollWidth<=value.clientWidth+1;
-    })),true,label+' '+index+': clipped label or percentage');
-    const colorCount=await tiles.locator('strong').evaluateAll(values=>new Set(values.map(value=>getComputedStyle(value).color)).size);
-    assert.equal(colorCount,3,label+' '+index+': positive, negative and flat colours');
+    });
+    return {names,values:values.map(el=>el.textContent),text:panel.textContent??'',fits,
+     colorCount:new Set(values.map(value=>getComputedStyle(value).color)).size};
+   });
+    assert.deepEqual(proof.names,[...names]);
+    assert.equal(proof.values.filter(v=>v&&/^[+-]?[0-9]+\.[0-9]{2}%$/.test(v)).length,names.length,proof.text);
+    assert.match(proof.text,/Mixed/);
+    assert.equal(proof.fits,true,label+' '+index+': clipped label or percentage');
+    assert.equal(proof.colorCount,3,label+' '+index+': positive, negative and flat colours');
    }
    await directWatch.locator('#mb-watch-index').selectOption('ALL');
    assert.equal(await participation.isVisible(),false);

@@ -10,7 +10,7 @@ import { renderMarketBookReadingGuide, renderMarketBookLiveContext } from './mar
 import { RAG_CARD_HTML } from './rag-evidence-card.js';
 import { derivePremiumBreakConsensus } from './market-book-model.js';
 /** Book charts observe existing state; the separate RAG card performs manual read-only requests. */
-export const MARKET_BOOK_HTML = `<section id="market-book" aria-label="Market book">${WORKSPACE_NAV_HTML}<div class="mb-top"><div><span class="mb-kicker">OPTIONPILOT / RECORDED MARKET BOOK</span><h2>Context → change → confirmation</h2></div><button id="mb-legacy" type="button" aria-pressed="false">Show detailed terminal</button></div><details id="op-feed-detail" open><summary>LIVE · BANKNIFTY SHADOW PAPER + three-index feed</summary>${DASHBOARD_LIVE_HTML}</details><details id="mb-tools"><summary>Tools · session, replay &amp; evidence</summary><details id="mb-live-watch"><summary>Watch · Replay / Live</summary><div class="mb-controls"><label>Source<select id="mb-watch-source"><option>Replay</option><option>Live</option></select></label><label>Index<select id="mb-watch-index"><option value="ALL">All 3 indices</option><option>NIFTY</option><option>BANKNIFTY</option><option>SENSEX</option></select></label><label>Interval<select id="mb-watch-interval"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">60m</option></select></label><label>Metrics<select id="mb-watch-metrics"><option value="all">Spot + PCR + VIX</option><option value="spot">Spot</option><option value="pcr">Full OI PCR</option><option value="vix">India VIX</option><option value="spot,pcr">Spot + PCR</option><option value="spot,vix">Spot + VIX</option><option value="pcr,vix">PCR + VIX</option><option value="custom">Custom combination</option></select></label></div><fieldset id="mb-watch-custom" hidden><legend>Watch metrics</legend><label><input type="checkbox" value="spot" checked>Spot</label><label><input type="checkbox" value="pcr" checked>Full OI PCR</label><label><input type="checkbox" value="vix" checked>India VIX</label><label><input type="checkbox" value="ceOi">Full CE OI</label><label><input type="checkbox" value="peOi">Full PE OI</label><label><input type="checkbox" value="walls">CE / PE walls</label><label><input type="checkbox" value="levels">Spot PDH / PDL breaks</label><label><input type="checkbox" value="sector">Sector movers</label></fieldset><div class="mb-controls" id="mb-watch-replay"><label>Recorded date<input type="date" id="mb-watch-date"></label><button type="button" id="mb-watch-play">Play</button><label>Replay minute<input type="range" id="mb-watch-seek" min="0" max="375" value="0"></label></div><button type="button" id="mb-watch-retry" hidden>Reload recorded minutes</button><p id="mb-watch-status" role="status"></p><div class="mb-scroll mb-watch-scroll" tabindex="0" aria-label="Scroll minute observations"><table aria-label="Minute observations in IST"><thead><tr id="mb-watch-head"></tr></thead><tbody id="mb-watch-body"></tbody></table></div></details>${WORKSPACE_TICKER_HTML}${RAG_CARD_HTML}<details id="mb-settings"><summary>Session, expiry & strike settings</summary><div class="mb-controls"><label>Session date<input id="mb-date" type="date"></label><label>Window<select id="mb-window"><option value="1m">1 min</option><option value="3m">3 min</option><option value="5m">5 min</option><option value="6m">6 min</option><option value="15m">15 min</option><option value="30m">30 min</option><option value="60m">60 min</option><option value="1s">1 prior session</option><option value="3s">3 prior sessions</option><option value="5s">5 prior sessions</option><option value="9s">9 prior sessions</option></select></label><button id="mb-memory" type="button">Load earlier sessions · all 3</button><button id="mb-refresh" type="button">Refresh recorded data</button></div><div id="mb-selection" class="mb-controls mb-selection" aria-label="Pinned index, expiry and strike selectors"><label>Index<select id="mb-index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>CE expiry<select id="mb-expiry"></select></label><label>PE expiry<select id="mb-opposite"></select></label><label>Strike<select id="mb-strike"></select></label><label>Strike B<select id="mb-pinned-compare"></select></label></div></details><details id="mb-health-details"><summary>Data status</summary><p id="mb-health" role="status"></p></details>${RECORDED_REPLAY_HTML}</details><details id="mb-chapters"><summary>All chapters</summary><nav id="mb-nav" aria-label="Book chapters"></nav></details><div class="mb-turn"><button id="mb-prev" type="button" aria-label="Previous chapter">←</button><div class="mb-current-chapter"><span id="mb-page-count"></span><select id="mb-chapter" aria-label="Choose chapter"></select></div><span class="mb-detail-toolbar"><button id="mb-details-toggle" type="button" aria-expanded="false" aria-controls="mb-page mb-live-context op-premium-workspace">Details · Show</button></span><button id="mb-next" type="button" aria-label="Next chapter">→</button></div><p id="mb-scope" class="mb-scope" aria-live="polite"></p><details id="mb-live-context-shell" open><summary id="mb-live-title">Kite live values · Overview</summary><button id="mb-live-controls" type="button">Live expiry / strike &amp; charts</button><div id="mb-full-pcr-strip" hidden></div><div id="mb-future-metrics" class="mb-controls" role="group" aria-label="Futures live metric" hidden><button type="button" data-mb-future="ALL" aria-pressed="true">All</button><button type="button" data-mb-future="future" aria-pressed="false">LTP</button><button type="button" data-mb-future="futureOi" aria-pressed="false">OI</button><button type="button" data-mb-future="futureVolume" aria-pressed="false">Volume</button><button type="button" data-mb-future="basis" aria-pressed="false">Basis</button></div><div id="mb-live-context">Live data ଅପେକ୍ଷାରେ · recorded data ତଳେ ଅଲଗା</div></details>${PREMIUM_WORKSPACE_HTML}<div id="mb-load-status" role="status" aria-live="polite" hidden></div>${OI_WALL_STUDIO_HTML}<article id="mb-page" aria-live="polite"></article><p class="mb-foot" data-op-explanation>Read-only context. Neon green = synchronized CE-supporting change; neon red = synchronized PE-supporting change. Missing or conflicting evidence stays neutral. Premium blinking red/green describes that contract’s PDH/PDL behaviour; it is separate from index agreement. Stars describe observed agreement.</p><dialog id="mb-chart-dialog" aria-labelledby="mb-chart-title"><div class="mb-dialog-top"><h2 id="mb-chart-title">Premium chart</h2><button id="mb-chart-close" type="button">Close chart</button></div><div id="mb-chart-body"></div></dialog></section>`;
+export const MARKET_BOOK_HTML = `<section id="market-book" aria-label="Market book">${WORKSPACE_NAV_HTML}<div class="mb-top"><div><span class="mb-kicker">OPTIONPILOT / RECORDED MARKET BOOK</span><h2>Context → change → confirmation</h2></div><button id="mb-legacy" type="button" aria-pressed="false">Show detailed terminal</button></div><details id="op-feed-detail" open><summary>LIVE · BANKNIFTY SHADOW PAPER + three-index feed</summary>${DASHBOARD_LIVE_HTML}</details><details id="mb-tools"><summary>Tools · session, replay &amp; evidence</summary><details id="mb-live-watch"><summary>Watch · Replay / Live</summary><div class="mb-controls"><label>Source<select id="mb-watch-source"><option>Replay</option><option>Live</option></select></label><label>Index<select id="mb-watch-index"><option value="ALL">All 3 indices</option><option>NIFTY</option><option>BANKNIFTY</option><option>SENSEX</option></select></label><label>Interval<select id="mb-watch-interval"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">60m</option></select></label><label>Metrics<select id="mb-watch-metrics"><option value="all">Spot + PCR + VIX</option><option value="spot">Spot</option><option value="pcr">Full OI PCR</option><option value="vix">India VIX</option><option value="spot,pcr">Spot + PCR</option><option value="spot,vix">Spot + VIX</option><option value="pcr,vix">PCR + VIX</option><option value="custom">Custom combination</option></select></label></div><fieldset id="mb-watch-custom" hidden><legend>Watch metrics</legend><label><input type="checkbox" value="spot" checked>Spot</label><label><input type="checkbox" value="pcr" checked>Full OI PCR</label><label><input type="checkbox" value="vix" checked>India VIX</label><label><input type="checkbox" value="ceOi">Full CE OI</label><label><input type="checkbox" value="peOi">Full PE OI</label><label><input type="checkbox" value="walls">CE / PE walls</label><label><input type="checkbox" value="levels">Spot PDH / PDL breaks</label><label><input type="checkbox" value="sector">Sector movers</label></fieldset><div class="mb-controls" id="mb-watch-replay"><label>Recorded date<input type="date" id="mb-watch-date"></label><button type="button" id="mb-watch-play">Play</button><label>Replay minute<input type="range" id="mb-watch-seek" min="0" max="375" value="0"></label></div><button type="button" id="mb-watch-retry" hidden>Reload recorded minutes</button><p id="mb-watch-status" role="status"></p><div id="mb-watch-participation" role="group" aria-label="Selected index participation" hidden></div><div class="mb-scroll mb-watch-scroll" tabindex="0" aria-label="Scroll minute observations"><table aria-label="Minute observations in IST"><thead><tr id="mb-watch-head"></tr></thead><tbody id="mb-watch-body"></tbody></table></div></details>${WORKSPACE_TICKER_HTML}${RAG_CARD_HTML}<details id="mb-settings"><summary>Session, expiry & strike settings</summary><div class="mb-controls"><label>Session date<input id="mb-date" type="date"></label><label>Window<select id="mb-window"><option value="1m">1 min</option><option value="3m">3 min</option><option value="5m">5 min</option><option value="6m">6 min</option><option value="15m">15 min</option><option value="30m">30 min</option><option value="60m">60 min</option><option value="1s">1 prior session</option><option value="3s">3 prior sessions</option><option value="5s">5 prior sessions</option><option value="9s">9 prior sessions</option></select></label><button id="mb-memory" type="button">Load earlier sessions · all 3</button><button id="mb-refresh" type="button">Refresh recorded data</button></div><div id="mb-selection" class="mb-controls mb-selection" aria-label="Pinned index, expiry and strike selectors"><label>Index<select id="mb-index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>CE expiry<select id="mb-expiry"></select></label><label>PE expiry<select id="mb-opposite"></select></label><label>Strike<select id="mb-strike"></select></label><label>Strike B<select id="mb-pinned-compare"></select></label></div></details><details id="mb-health-details"><summary>Data status</summary><p id="mb-health" role="status"></p></details>${RECORDED_REPLAY_HTML}</details><details id="mb-chapters"><summary>All chapters</summary><nav id="mb-nav" aria-label="Book chapters"></nav></details><div class="mb-turn"><button id="mb-prev" type="button" aria-label="Previous chapter">←</button><div class="mb-current-chapter"><span id="mb-page-count"></span><select id="mb-chapter" aria-label="Choose chapter"></select></div><span class="mb-detail-toolbar"><button id="mb-details-toggle" type="button" aria-expanded="false" aria-controls="mb-page mb-live-context op-premium-workspace">Details · Show</button></span><button id="mb-next" type="button" aria-label="Next chapter">→</button></div><p id="mb-scope" class="mb-scope" aria-live="polite"></p><details id="mb-live-context-shell" open><summary id="mb-live-title">Kite live values · Overview</summary><button id="mb-live-controls" type="button">Live expiry / strike &amp; charts</button><div id="mb-full-pcr-strip" hidden></div><div id="mb-future-metrics" class="mb-controls" role="group" aria-label="Futures live metric" hidden><button type="button" data-mb-future="ALL" aria-pressed="true">All</button><button type="button" data-mb-future="future" aria-pressed="false">LTP</button><button type="button" data-mb-future="futureOi" aria-pressed="false">OI</button><button type="button" data-mb-future="futureVolume" aria-pressed="false">Volume</button><button type="button" data-mb-future="basis" aria-pressed="false">Basis</button></div><div id="mb-live-context">Live data ଅପେକ୍ଷାରେ · recorded data ତଳେ ଅଲଗା</div></details>${PREMIUM_WORKSPACE_HTML}<div id="mb-load-status" role="status" aria-live="polite" hidden></div>${OI_WALL_STUDIO_HTML}<article id="mb-page" aria-live="polite"></article><p class="mb-foot" data-op-explanation>Read-only context. Neon green = synchronized CE-supporting change; neon red = synchronized PE-supporting change. Missing or conflicting evidence stays neutral. Premium blinking red/green describes that contract’s PDH/PDL behaviour; it is separate from index agreement. Stars describe observed agreement.</p><dialog id="mb-chart-dialog" aria-labelledby="mb-chart-title"><div class="mb-dialog-top"><h2 id="mb-chart-title">Premium chart</h2><button id="mb-chart-close" type="button">Close chart</button></div><div id="mb-chart-body"></div></dialog></section>`;
 export const MARKET_BOOK_CSS = `
 .mb-research-section{min-width:0;margin:8px 0;border:1px solid #31546b;border-radius:10px;padding:8px}
 #market-book .mb-research-section h3{margin:0 0 6px;color:#79f8e9;font-size:18px}
@@ -108,6 +108,18 @@ body{font-size:18px}main,#observations-view{width:100%;max-width:none;margin:0;p
 #market-book .mb-watch-scroll thead th{position:sticky;top:0;z-index:1;background:#172335}
 #market-book .mb-watch-scroll td small{display:block}
 .mb-watch-mobile-label{display:none}
+#mb-watch-participation:not([hidden]){margin:6px 0 8px;font-size:.84rem}
+#mb-watch-participation .mb-watch-breadth{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;column-gap:8px;color:#b9cedb;margin-bottom:4px}
+#mb-watch-participation .mb-watch-instruments{display:flex;flex-wrap:wrap;gap:3px}
+#mb-watch-participation .mb-watch-instrument{flex:1 1 90px;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;align-items:center;padding:4px 6px;background:#102435;border-radius:4px;color:#ebf5fa}
+#mb-watch-participation .mb-watch-instrument strong{white-space:nowrap;font-variant-numeric:tabular-nums}
+#mb-watch-participation [data-move=up]{color:#8df2b3}
+#mb-watch-participation [data-move=down]{color:#ff9baa}
+#mb-watch-participation [data-move=flat]{color:#e7d293}
+#mb-watch-participation [data-move=missing]{color:#b9cedb}
+@media(max-width:540px){
+ #mb-watch-participation .mb-watch-instrument{flex-basis:97px;padding:3px 5px;font-size:.76rem}
+}
 @media(max-width:800px),(pointer:coarse){.mb-watch-mobile-label{display:block;color:#8fe2ef;margin-bottom:3px}}
 #market-book .mb-vix-layout{max-width:100%;min-width:0}
 `;
@@ -128,6 +140,16 @@ export function installMarketBook(api:any) {
  const watchPanel=$('mb-live-watch'),watchIndex=$('mb-watch-index'),watchSource=$('mb-watch-source');
  const watchSeek=$('mb-watch-seek'),watchPlay=$('mb-watch-play'),watchRetry=$('mb-watch-retry'),watchDateInput=$('mb-watch-date');
  const watchBody=$('mb-watch-body'),watchStatus=$('mb-watch-status'),watchHead=$('mb-watch-head');
+ const watchParticipation=$('mb-watch-participation');
+ const broadWatchGroup=[
+  ['HDFC Bank','HDFCBANK','STOCK'],['Reliance','RELIANCE','STOCK'],['Nifty IT','NIFTY IT','SECTOR'],
+  ['Smallcap 100','NIFTY SMLCAP 100','SECTOR'],['Midcap 100','NIFTY MIDCAP 100','SECTOR'],
+ ];
+ const watchGroups:Record<string,string[][]>={
+  NIFTY:broadWatchGroup,SENSEX:broadWatchGroup,
+  BANKNIFTY:[['PSU Bank','NIFTY PSU BANK','SECTOR'],['HDFC Bank','HDFCBANK','STOCK'],['ICICI Bank','ICICIBANK','STOCK'],
+   ['Axis Bank','AXISBANK','STOCK'],['Kotak Bank','KOTAKBANK','STOCK'],['SBI','SBIN','STOCK']],
+ };
  const watchMetrics=$('mb-watch-metrics'),watchCustom=$('mb-watch-custom');
  const watchHistory=new Map<string,Map<string,WatchRow>>();
  const watchExpiries=new Map<string,string>();
@@ -136,7 +158,8 @@ export function installMarketBook(api:any) {
  const archiveCache=new WeakMap<object,Map<string,Map<number,WatchRow>>>();
  const liveSectors=new Map<number,string>();
  const oiCache=new Map<string,{rows?:Map<string,Map<number,WatchRow>>,loadedAt?:number,error?:boolean}>();
- const sectorCache=new Map<string,{rows?:Map<number,string>,loadedAt?:number,error?:boolean}>();
+ const sectorCache=new Map<string,{rows?:Map<number,string>,snapshots?:any[],loadedAt?:number,error?:boolean}>();
+ let watchLiveQuotes:any=null;
  const currentWatchSymbols=()=>watchSymbols.includes(watchIndex?.value)?[watchIndex.value]:watchSymbols;
  const selectedWatchMetrics=()=>watchMetrics?.value==='custom'
   ?Array.from(watchCustom?.querySelectorAll?.('input:checked')??[],(input:any)=>input.value)
@@ -221,17 +244,19 @@ export function installMarketBook(api:any) {
   }
   return new Map([...latest].map(([bucket,{value}])=>[bucket,value]));
  };
- const loadWatchSectors=(date:string,live:boolean)=>{
-  if(!date||typeof fetch==='undefined'||!selectedWatchMetrics().includes('sector'))return;
+ const loadWatchSectors=(date:string,live:boolean,participation:boolean)=>{
+  if(!date||typeof fetch==='undefined'||(!participation&&!selectedWatchMetrics().includes('sector')))return;
   const saved=sectorCache.get(date);
   if(saved&&(!saved.loadedAt||!live||Date.now()-saved.loadedAt<180000))return;
-  sectorCache.set(date,{rows:saved?.rows});
+  sectorCache.set(date,{rows:saved?.rows,snapshots:saved?.snapshots});
   void fetch('/api/research/background-quotes/history?date='+encodeURIComponent(date),{cache:'no-store',signal:AbortSignal.timeout(15000)})
    .then(async response=>{if(!response.ok)throw Error('Sector history unavailable');return response.json();})
    .then(body=>{
     if(body.date!==date||!Array.isArray(body.snapshots)||body.snapshots.length>256)throw Error('Invalid sector history');
-    sectorCache.set(date,{rows:watchSectorRows(body.snapshots,date),loadedAt:Date.now()});renderWatch();
-   }).catch(()=>{sectorCache.set(date,{rows:saved?.rows,loadedAt:Date.now(),error:true});renderWatch();});
+    const snapshots=body.snapshots.filter((s:any)=>s?.source==='SERVER_BACKGROUND_KITE_QUOTES'&&s.tradingDate===date&&watchAt(s.timestamp,date,false)!==null)
+     .sort((a:any,b:any)=>watchTime(b.timestamp)-watchTime(a.timestamp));
+    sectorCache.set(date,{rows:watchSectorRows(snapshots,date),snapshots,loadedAt:Date.now()});renderWatch();
+   }).catch(()=>{sectorCache.set(date,{rows:saved?.rows,snapshots:saved?.snapshots,loadedAt:Date.now(),error:true});renderWatch();});
  };
  const wantsWatchTotals=(metrics:string[])=>metrics.includes('ceOi')||metrics.includes('peOi');
  const wantsWatchOi=(metrics:string[])=>wantsWatchTotals(metrics)||metrics.includes('pcr')||metrics.includes('walls');
@@ -254,6 +279,49 @@ export function installMarketBook(api:any) {
     }
     oiCache.set(date,{rows,loadedAt:Date.now()});renderWatch();
    }).catch(()=>{oiCache.set(date,{rows:saved?.rows,loadedAt:Date.now(),error:true});renderWatch();});
+ };
+ const renderWatchParticipation=(date:string,index:string,isReplay:boolean,bucket:number)=>{
+  if(!watchParticipation)return;
+  const group=watchGroups[index];
+  watchParticipation.hidden=!group;
+  if(!group)return;
+  const archive=sectorCache.get(date);
+  const cursorEnd=Date.parse(date+'T'+watchMinute(bucket)+':00+05:30')+59999;
+  const saved=isReplay&&bucket>=0?archive?.snapshots?.find(s=>{
+   const at=watchTime(s.timestamp);
+   return at<=cursorEnd&&cursorEnd-at<=4*60000;
+  }):undefined;
+  const live=!isReplay&&watchLiveQuotes?.snapshot?.tradeDate===date?watchLiveQuotes:null;
+  const asOf=watchTime(saved?.timestamp??live?.serverTime);
+  const moves=group.map(([label,symbol,role])=>{
+   const sources=saved?(role==='STOCK'?saved.stocks?.[index]:saved.sectors):live?.snapshot?.participation;
+   const quotes=(Array.isArray(sources)?sources:[]).filter(q=>saved?q?.symbol==='NSE:'+symbol:
+    q?.identity?.label===symbol&&q.identity.role===role);
+   const quote=quotes.length===1?quotes[0]:null;
+   const sourceTime=saved?quote?.exchangeTimestamp:quote?.observedAt;
+   const at=watchTime(sourceTime),receivedAt=watchTime(quote?.receivedAt);
+   const price=watchValue(quote?.price,Number.MIN_VALUE),close=watchValue(saved?quote?.previousClose:quote?.pdc,Number.MIN_VALUE);
+   const usable=watchAt(sourceTime,date,false)!==null&&asOf-at>=0&&asOf-at<=(saved?90000:30000)&&
+    (saved||(quote?.state==='LIVE'&&asOf-receivedAt>=0&&asOf-receivedAt<=30000));
+   const pct=usable&&price!==null&&close!==null?Number(((price/close-1)*100).toFixed(2)):null;
+   return {label,pct:Number.isFinite(pct)?pct:null};
+  });
+  const up=moves.filter(r=>r.pct!==null&&r.pct>0).length,down=moves.filter(r=>r.pct!==null&&r.pct<0).length;
+  const flat=moves.filter(r=>r.pct===0).length,valid=up+down+flat;
+  const counts=[up+' ↑',down+' ↓',...(flat?[flat+' ↔']:[])].join(' · ');
+  const alignment=valid<group.length?'':up===valid?' · Aligned up':down===valid?' · Aligned down':flat===valid?' · Flat':' · Mixed';
+  const availability=valid===group.length?'':valid?' · '+valid+'/'+group.length+' quotes':
+   isReplay&&archive?.error?'Archive read failed':isReplay&&date&&!archive?.loadedAt?'Loading quotes…':'Quotes unavailable';
+  const source=saved?' · '+watchStamp(asOf).slice(11,16)+' IST':'';
+  const summary='<div class="mb-watch-breadth"><span>vs previous close'+source+'</span><strong>'+
+   esc((valid?counts:'')+alignment+availability)+'</strong></div>';
+  const tiles=moves.map(({label,pct})=>{
+   const move=pct===null?'missing':pct>0?'up':pct<0?'down':'flat';
+   const value=pct===null?'—':(pct>0?'+':'')+pct.toFixed(2)+'%';
+   return '<span class="mb-watch-instrument"><span>'+esc(label)+'</span><strong data-move="'+move+'">'+value+'</strong></span>';
+  }).join('');
+  const html=summary+'<div class="mb-watch-instruments">'+tiles+'</div>';
+  if(watchParticipation.innerHTML!==html)watchParticipation.innerHTML=html;
  };
  const renderWatch=()=>{
   if(!watchPanel?.open||!watchBody||!watchStatus||!watchHead)return;
@@ -282,6 +350,7 @@ export function installMarketBook(api:any) {
   const today=watchStamp(Date.now()).slice(0,10);
   const replayEnd=archiveEnd>=0&&date<today&&!state.archiveLoading?watchClose:archiveEnd;
   const end=isReplay?Math.min(Number(watchSeek.value),replayEnd):watchLatest;
+  renderWatchParticipation(date,indices.length===1?indices[0]:'',isReplay,end);
   watchSeek.max=String(Math.max(0,replayEnd));
   watchSeek.setAttribute('aria-valuetext',end>=0?watchMinute(end)+' IST':'No recorded minutes');
   watchSeek.disabled=replayEnd<1;
@@ -354,7 +423,7 @@ export function installMarketBook(api:any) {
   if(!watchPanel?.open)return;
   const isReplay=watchSource.value!=='Live',state=api.getState();
   const date=isReplay?state.loadingDate||state.date:watchDate;
-  loadWatchSectors(date,!isReplay);
+  loadWatchSectors(date,!isReplay||date===watchStamp(Date.now()).slice(0,10),isReplay&&currentWatchSymbols().length===1);
   loadWatchOi(date,!isReplay||date===watchStamp(Date.now()).slice(0,10));
   if(!isReplay&&date&&watchLatest>0&&api.watchHistory&&!document.hidden){
    const through=watchLatest-1;
@@ -410,14 +479,14 @@ export function installMarketBook(api:any) {
   const snapshot=payload?.snapshot,serverAt=Date.parse(payload?.serverTime??''),asOf=Date.parse(snapshot?.asOf??'');
   const dateTime=watchStamp(serverAt),date=dateTime.slice(0,10),minute=dateTime.slice(11,16),bucket=watchIndexOf(minute);
   if(!canonical?.live||snapshot.tradeDate!==date||!(bucket>=0&&bucket<=watchClose)||!(serverAt-asOf>=0&&serverAt-asOf<=4000)){
-   watchState='Live data unavailable · last observed minutes below';renderWatch();return;
+   watchLiveQuotes=null;watchState='Live data unavailable · last observed minutes below';renderWatch();return;
   }
   const session=date+'|'+snapshot.runtimeId;
   if((watchDate&&date<watchDate)||serverAt<watchLastServer)return;
   watchLastServer=serverAt;
   const newBucket=date!==watchDate||bucket!==watchLatest||watchSession!==session;
   if(watchSession!==session){watchHistory.clear();watchExpiries.clear();liveSectors.clear();backfill.clear();watchSession=session;}
-  watchDate=date;watchLatest=bucket;
+  watchDate=date;watchLatest=bucket;watchLiveQuotes=payload;
   const q=snapshot.vix,received=Date.parse(q?.receivedAt??'');
   const vix=q?.identity?.role==='VIX'&&q.state==='LIVE'&&watchAt(q.observedAt,date,false)===bucket&&
    watchStamp(received).slice(0,10)===date&&serverAt-Date.parse(q.observedAt)>=-5000&&serverAt-received>=0&&serverAt-received<=30000

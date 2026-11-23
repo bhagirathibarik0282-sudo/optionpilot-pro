@@ -547,7 +547,7 @@ async function getReplay(label,symbol,date,from,to,replayScope='CORE',onPart=nul
  const today=new Date(Date.now()+19800000).toISOString().slice(0,10),now=new Date(Date.now()+19800000),nowMinute=now.getUTCHours()*60+now.getUTCMinutes(),requestedTo=minuteNumber(to),effectiveTo=date===today&&requestedTo!==null&&requestedTo>nowMinute?minuteText(nowMinute):to,windows=replayWindows(from,effectiveTo);if(!windows.length)throw Error('No completed replay minute exists in the selected window yet.');
  if(onPart&&date<today&&replayScope==='CORE'&&windows.length>2){const newest=windows.pop();windows.splice(0,windows.length,...replayWindows(from,newest[0],120),newest);}
  if(onPart)windows.reverse();const parts=[],request={symbol,tradeDate:date,fromTime:from,toTime:effectiveTo,requestedToTime:to,scope:replayScope};
- for(const [a,b] of windows){const suffix=windows.length>1?' '+a+'–'+b:'';parts.push(await getReplayWindow(label+suffix,symbol,date,a,b,0,replayScope));if(onPart)onPart({...mergeReplayParts(parts,request),loadingProgress:{completed:parts.length,total:windows.length}});}
+ for(const [a,b] of windows){const suffix=windows.length>1?' '+a+'–'+b:'';parts.push(await getReplayWindow(label+suffix,symbol,date,a,b,0,replayScope));if(onPart)onPart({...mergeReplayParts(parts,request),loadingProgress:{completed:parts.length,total:windows.length,fromTime:a}});}
  return mergeReplayParts(parts,request);
 }
 function latestObservedAt(parsed){const times=[...(parsed?.market||[]),...(parsed?.options||[]),...(parsed?.chain||[])].map(r=>Date.parse(r.minute_bucket)).filter(Number.isFinite);return times.length?new Date(Math.max(...times)).toISOString():null;}
@@ -881,10 +881,14 @@ try{const v=JSON.parse(localStorage.getItem(giftStorageKey)||'null');if(validGif
 $('gift-context-form').onsubmit=e=>{e.preventDefault();const value={version:1,price:Number($('gift-price').value),changePct:Number($('gift-change').value),source:$('gift-source').value.trim(),observedAt:$('gift-time').value+'+05:30'};if(!validGiftContext(value)){$('gift-context-output').textContent='Enter a positive price, change, source and a valid non-future IST timestamp.';return;}value.observedAt=new Date(value.observedAt).toISOString();try{localStorage.setItem(giftStorageKey,JSON.stringify(value));giftContext=value;renderGiftContext();}catch{$('gift-context-output').textContent='Device storage unavailable; manual context was not saved.';}};
 $('gift-clear').onclick=()=>{try{localStorage.removeItem(giftStorageKey);giftContext=null;renderGiftContext();}catch{$('gift-context-output').textContent='Could not clear device storage.';}};
 const bookBaselineCache=new Map(),emptyBookHistory=[];
-book=installMarketBook({watchHistory:async(symbol,date,to,from,previous)=>{
- const part=await getReplay(symbol+' Watch '+date,symbol,date,from,to,'CORE');
- const raw=previous?.raw?mergeReplayParts([previous.raw,part],{...part.request,fromTime:'09:15'}):part;
- return {raw,observations:deriveObservationData(raw)};
+book=installMarketBook({watchHistory:async(symbol,date,to,from,previous,onPart)=>{
+ const combine=part=>{
+  const raw=previous?.raw?mergeReplayParts([previous.raw,part],{...part.request,fromTime:'09:15'}):part;
+  return {raw,observations:deriveObservationData(raw)};
+ };
+ const part=await getReplay(symbol+' Watch '+date,symbol,date,from,to,'CORE',
+  partial=>onPart(combine(partial),partial.loadingProgress.fromTime));
+ return combine(part);
 },replay:async(symbol,date)=>deriveObservationData(await getReplay(symbol+' investigation '+date,symbol,date,'09:15',observationSessionClose(date),'FULL')),derive:deriveMarketBook,getState:()=>{const preview=busy&&replayPreview,activeRaw=preview?preview.raw:raw,activeScope=preview?preview.scope:loadedScope,history={},baseline={};for(const s of symbols){history[s]=preview&&activeScope.date!==loadedScope.date?emptyBookHistory:memory[s]?.sessions||emptyBookHistory;const b=activeRaw[s]?.baseline;if(b&&!bookBaselineCache.has(b))bookBaselineCache.set(b,deriveObservationData(b));baseline[s]=b?bookBaselineCache.get(b):null;}return {current:preview?preview.data:data,history,baseline,date:activeScope.date||'',recordedDates,scope:activeScope.scope||'CORE',health:preview?preview.health:indexLoadState,stocks:livePrevious,sectors:latestSectors,quoteStatus:{...Object.fromEntries(symbols.map(s=>[s,sources[s+' key-stock quotes']?.status||'Quote snapshot not requested.'])),sectors:sources['Sector index quotes']?.status||'Quote snapshot not requested.'},quoteLoading:liveBusy,cash:cashContext,cashLoading:cashContextBusy,cashError:cashContextError,ratings:memoryView?.events||[],loading:busy||memoryBusy||pcrMemoryBusy||datesLoading,archiveLoading:busy||datesLoading,loadingDate:busy?$('date').value:null};},setDate:async(date,options={})=>{if(busy)return;$('date').value=date;$('baseline').value=recordedDates.filter(d=>d<date).at(-1)||'';if(options.fullSession){$('from').value='09:15';$('to').value=observationSessionClose(date);}await load(null,options);},refresh:()=>load(),refreshCash:()=>loadCashContext(),refreshQuotes:()=>live(),memory:async count=>{$('pcr-days').value=count;await loadPcrMemory();}});
 loadCashContext();renderGiftContext();
 restoreRefreshPreference();renderSourceHealth();

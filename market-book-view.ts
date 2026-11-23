@@ -107,6 +107,8 @@ body{font-size:18px}main,#observations-view{width:100%;max-width:none;margin:0;p
 #market-book .mb-watch-scroll th,#market-book .mb-watch-scroll td{white-space:nowrap;vertical-align:top}
 #market-book .mb-watch-scroll thead th{position:sticky;top:0;z-index:1;background:#172335}
 #market-book .mb-watch-scroll td small{display:block}
+.mb-watch-mobile-label{display:none}
+@media(max-width:800px),(pointer:coarse){.mb-watch-mobile-label{display:block;color:#8fe2ef;margin-bottom:3px}}
 #market-book .mb-vix-layout{max-width:100%;min-width:0}
 `;
 
@@ -120,7 +122,7 @@ export function installMarketBook(api:any) {
  // Both sources share the same IST grid. Each metric requires evidence in that minute.
  const watchSymbols=['NIFTY','BANKNIFTY','SENSEX'];
  const watchOpen=555, watchClose=375;
- type WatchRow={spot:number|null,vix:number|null,pcr:number|null,expiry:string|null,ceOi:number|null,peOi:number|null,ceWall:number|null,peWall:number|null,pdh:number|null,pdl:number|null};
+ type WatchRow={reported?:{value:number,expiry:string,checkedAt:string},spot:number|null,vix:number|null,pcr:number|null,expiry:string|null,ceOi:number|null,peOi:number|null,ceWall:number|null,peWall:number|null,pdh:number|null,pdl:number|null};
  const emptyWatchRow=():WatchRow=>({spot:null,vix:null,pcr:null,expiry:null,ceOi:null,peOi:null,ceWall:null,peWall:null,pdh:null,pdl:null});
  const watchGap=emptyWatchRow();
  const watchPanel=$('mb-live-watch'),watchIndex=$('mb-watch-index'),watchSource=$('mb-watch-source');
@@ -129,7 +131,7 @@ export function installMarketBook(api:any) {
  const watchMetrics=$('mb-watch-metrics'),watchCustom=$('mb-watch-custom');
  const watchHistory=new Map<string,Map<string,WatchRow>>();
  const watchExpiries=new Map<string,string>();
- type WatchBackfill={data?:any,through?:number,attempted?:number,pending?:boolean,error?:boolean};
+ type WatchBackfill={data?:any,loadedFrom?:number,through?:number,attempted?:number,pending?:boolean,error?:boolean};
  const backfill=new Map<string,WatchBackfill>();
  const archiveCache=new WeakMap<object,Map<string,Map<number,WatchRow>>>();
  const liveSectors=new Map<number,string>();
@@ -287,7 +289,7 @@ export function installMarketBook(api:any) {
   $('mb-watch-replay').hidden=!isReplay;
   const errors=multis.filter(m=>m.saved?.error).map(m=>m.index);
   watchRetry.hidden=isReplay||errors.length===0;
-  const backfillStatus=errors.length?' · Archive read failed for '+errors.join(', '):multis.some(m=>m.saved?.pending&&!m.saved.data)?' · Loading earlier minutes':'';
+  const backfillStatus=errors.length?' · Archive read failed for '+errors.join(', '):multis.some(m=>m.saved?.pending&&m.saved.through===undefined)?' · Loading earlier minutes':'';
   const sectorStatus=sectorCache.get(date);
   const label=isReplay?(end>=0?date+' · Recorded · '+watchMinute(end)+' IST':state.archiveLoading?'Loading recordings…':'Select a session with recorded minutes'):
    (date?date+' · ':'')+watchState+backfillStatus;
@@ -299,12 +301,18 @@ export function installMarketBook(api:any) {
    (showVix?'<th scope="col">India VIX</th>':'')+(sector?'<th scope="col">Sector movers <small>vs previous close</small></th>':'');
   if(watchHead.innerHTML!==head)watchHead.innerHTML=head;
   const format=(value:number|null,decimals:number)=>value?.toFixed(decimals)??'Gap';
+  const mobileLabel=(name:string)=>'<strong class="mb-watch-mobile-label">'+name+'</strong>';
+  const isLoadingMinute=(saved:WatchBackfill|undefined,bucket:number)=>
+   !isReplay&&!!saved?.pending&&!saved.error&&saved.through===undefined&&bucket<(saved.loadedFrom??watchLatest);
   const compact=indexFields.length===1&&indexFields[0]==='spot';
   const cell=(m:typeof multis[number],bucket:number)=>{
    const values=watchValues(m.archive,m.live,m.oi,bucket),previous=watchValues(m.archive,m.live,m.oi,bucket-1);
    const live=m.live?.get(watchMinute(bucket)),recorded=m.archive.get(bucket)??m.oi?.get(bucket);
+   const reported=values.pcr===null?live?.reported:undefined;
+   const pending=isLoadingMinute(m.saved,bucket);
    const renderMetric=(label:string,value:string,fromLive:boolean)=>{
     const source=isReplay||value==='Gap'?'':fromLive?' · Live':' · Recorded';
+    if(value==='Gap'&&pending)value='Loading…';
     return '<small title="'+label+source+'">'+(compact?'':label+' ')+value+'</small>';
    };
    const movement=(current:number|null,prior:number|null)=>{
@@ -320,22 +328,24 @@ export function installMarketBook(api:any) {
     values.spot!<low&&previous.spot!>=low?'↓ PDL '+low:'—'):'Gap';
    const fields:Record<string,string>={
     spot:renderMetric('Spot',format(values.spot,2),live?.spot!=null),
-    pcr:renderMetric('PCR',format(values.pcr,6)+(values.pcr!==null&&values.expiry?' · '+values.expiry:''),live?.pcr!=null),
+    pcr:reported?renderMetric('PCR',reported.value.toFixed(6)+' · '+reported.expiry,true)+
+     '<small>Reported · mixed times</small>':
+     renderMetric('PCR',format(values.pcr,6)+(values.pcr!==null&&values.expiry?' · '+values.expiry:''),live?.pcr!=null),
     ceOi:renderMetric('CE OI',format(values.ceOi,0),live?.ceOi!=null),
     peOi:renderMetric('PE OI',format(values.peOi,0),live?.peOi!=null),
     walls:renderMetric('CE wall',movement(values.ceWall,previous.ceWall),live?.ceWall!=null)+renderMetric('PE wall',movement(values.peWall,previous.peWall),live?.peWall!=null),
     levels:renderMetric('Spot break',level,live?.spot!=null),
    };
    const source=isReplay?'':live&&recorded?'Live / Recorded':live?'Live':recorded?'Recorded':'';
-   return '<td>'+indexFields.map((field:string)=>fields[field]??'').join('')+(source?'<small class="mb-note">'+source+'</small>':'')+'</td>';
+   return '<td>'+mobileLabel(m.index)+indexFields.map((field:string)=>fields[field]??'').join('')+(source?'<small class="mb-note">'+source+'</small>':'')+'</td>';
   };
   const interval=Number($('mb-watch-interval')?.value)||1,rows:string[]=[];
   for(let first=0;metrics.length&&first<=end;first+=interval){
    const bucket=Math.min(first+interval-1,end),minute=watchMinute(bucket);
    const vix=showVix?[...new Set(multis.map(m=>watchValues(m.archive,m.live,m.oi,bucket).vix).filter(value=>value!==null))]:[];
    rows.push('<tr><th scope="row">'+minute+'</th>'+(indexFields.length?multis.map(m=>cell(m,bucket)).join(''):'')+
-    (showVix?'<td>'+(vix.length===1?format(vix[0],2):vix.length?'Mismatch':'Gap')+'</td>':'')+
-    (sector?'<td>'+esc((isReplay?undefined:liveSectors.get(bucket))??sectorStatus?.rows?.get(bucket)??'Gap')+'</td>':'')+'</tr>');
+    (showVix?'<td>'+mobileLabel('India VIX')+(vix.length===1?format(vix[0],2):vix.length?'Mismatch':multis.some(m=>isLoadingMinute(m.saved,bucket))?'Loading…':'Gap')+'</td>':'')+
+    (sector?'<td>'+mobileLabel('Sector movers')+esc((isReplay?undefined:liveSectors.get(bucket))??sectorStatus?.rows?.get(bucket)??'Gap')+'</td>':'')+'</tr>');
   }
   const html=(isReplay?rows:rows.reverse()).join('');
   if(watchBody.innerHTML!==html)watchBody.innerHTML=html;
@@ -354,10 +364,16 @@ export function installMarketBook(api:any) {
     const from=Math.max(0,(previous?.through??0)-4);
     const pending:WatchBackfill={...previous,attempted:through,pending:true,error:false};
     backfill.set(key,pending);
-    void api.watchHistory(index,date,watchMinute(through),watchMinute(from),previous?.data).then((data:any)=>{
+    const showLoadedMinutes=(data:any,loadedFrom:string)=>{
+     if(backfill.get(key)!==pending)return;
+     pending.data=data;
+     pending.loadedFrom=watchIndexOf(loadedFrom);
+     renderWatch();
+    };
+    void api.watchHistory(index,date,watchMinute(through),watchMinute(from),previous?.data,showLoadedMinutes).then((data:any)=>{
      if(backfill.get(key)===pending){backfill.set(key,{data,through,attempted:through});renderWatch();}
     }).catch(()=>{
-     if(backfill.get(key)===pending){backfill.set(key,{...previous,attempted:through,error:true});renderWatch();}
+     if(backfill.get(key)===pending){backfill.set(key,{data:pending.data,through:previous?.through,attempted:through,error:true});renderWatch();}
     });
    }
   }
@@ -418,7 +434,16 @@ export function installMarketBook(api:any) {
     ceWall:watchValue(raw?.callWall?.strike,Number.MIN_VALUE),peWall:watchValue(raw?.putWall?.strike,Number.MIN_VALUE)}:
     row.expiry===prior.expiry?prior:emptyWatchRow();
    history.set(minute,{...emptyWatchRow(),pcr:chain.pcr,expiry:chain.expiry,ceOi:chain.ceOi,peOi:chain.peOi,ceWall:chain.ceWall,peWall:chain.peWall,
-    spot:spot??prior.spot,vix:vix??prior.vix});
+    spot:spot??prior.spot,vix:vix??prior.vix,reported:prior.reported?.expiry===row.expiry?prior.reported:undefined});
+   const reported=row.reportedPcr;
+   const checkedBucket=reported?.basis==='LATEST_REPORTED_MIXED_TIMESTAMPS'?watchAt(reported.checkedAt,date,false):null;
+   if(checkedBucket!==null&&!(checkedBucket===watchClose&&row.expiry===date)){
+    const checkedMinute=watchMinute(checkedBucket),sample=history.get(checkedMinute)??emptyWatchRow();
+    if((!sample.expiry||sample.expiry===reported.expiry)&&
+      (!sample.reported||watchTime(reported.checkedAt)>=watchTime(sample.reported.checkedAt))){
+     history.set(checkedMinute,{...sample,reported:{value:reported.value,expiry:reported.expiry,checkedAt:reported.checkedAt}});
+    }
+   }
    watchHistory.set(row.symbol,history);
   }
   if(newBucket||serverAt-lastLiveDraw>=1000){

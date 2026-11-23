@@ -122,7 +122,7 @@ export class DashboardPcrSampler {
  private lastDiagnostic='';private lastDiagnosticAt=0;
  private auditRows=new Map<string,Array<{symbol:string|undefined;expiry:string|undefined;strike:number|undefined;side:string|undefined;token:number;responseToken:number|null;key:string;oi:number|null;sourceAt:string|null;batchReceivedAt:string|null}>>();
  private busy=false;private due=0;private revision=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string;batchesRequested:number;batchesCompleted:number}>();
- constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;readSpot?(symbol:string):any;onDiagnostic?(summary:any):void}){}
+ constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;readSpot?(symbol:string):any;onDiagnostic?(summary:any):void;onCycle?(date:string,cycleAt:string,results:ReadonlyMap<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string}>):void}){}
  async tick(){
   const now=this.deps.now();if(this.busy||now<this.due||!this.deps.active()||day(now)!==this.inventory.date)return;
   this.busy=true;this.due=now+PCR_REFRESH_MS;
@@ -182,6 +182,7 @@ export class DashboardPcrSampler {
      }));else this.auditRows.delete(key);
     }
     this.revision++;
+    try{this.deps.onCycle?.(this.inventory.date,new Date(now).toISOString(),this.results);}catch{/* A history sink cannot block the sampler. */}
     const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
     const signature=JSON.stringify(rows);
     if(signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){

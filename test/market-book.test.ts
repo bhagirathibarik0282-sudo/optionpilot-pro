@@ -470,3 +470,41 @@ test('reference selector updates the actual recorded event and memory source wit
  assert.match(memory,/Spot · SENSEX/);assert.doesNotMatch(memory,/Spot · NIFTY/);
  ctx.chooseResearchIndex('NOT_AN_INDEX');assert.equal(nodes.get('mb-index').value,'SENSEX');assert.equal(requests,0);
 });
+
+test('Watch replay aligns indices, exposes a custom metric selection and preserves gaps through the close',async()=>{
+ const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>();
+ for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
+ const custom=nodes.get('mb-watch-custom');
+ let metrics=['spot','pcr','vix','ceOi','peOi','walls','levels','sector'];
+ custom.querySelectorAll=()=>metrics.map(value=>({value}));
+ const other='BANKNIFTY',indices=['NIFTY',other,'SENSEX'];
+ const state:any={date:tradeDate,recordedDates,current:{},history:{},baseline:{},health:{}};
+ for(const [i,index] of indices.entries()){
+  const market=[0,1,3].filter(n=>!(i===1&&n===1)).map(n=>({symbol:index,minute_bucket:at(n),truth_verdict:'TRUE',spot_ltp:22000+i*10000+n*10,pdh:22005+i*10000,pdl:21950+i*10000,india_vix:14}));
+  state.current[index]={market,chain:market.map(r=>({...r,expiry,full_chain_oi_pcr:1+i/10,full_pcr_source:i===2?'Unverified':'Exact archived full-chain source',call_wall_strike:r.spot_ltp===22000?22100:22200,put_wall_strike:21900})),options:[]};
+ }
+ const sectorAt=new Date(Date.parse(at(1))+10000).toISOString();
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math,AbortSignal,
+  fetch:async(url:string)=>({ok:true,json:async()=>url.includes('/oi-history')?{date:tradeDate,rows:[{symbol:'NIFTY',sourceAt:at(3),expiry,pcr:0.5,ceOi:260,peOi:130,ceWall:22200,peWall:21900}]} : ({date:tradeDate,snapshots:[{source:'SERVER_BACKGROUND_KITE_QUOTES',tradingDate:tradeDate,timestamp:sectorAt,sectors:[{symbol:'NSE:BANK',name:'Bank',price:101,previousClose:100,exchangeTimestamp:tradeDate+' 09:16:00'}]}]})})};
+ vm.createContext(ctx);vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)![1],ctx);
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){},memory:async()=>{},setDate:(date:string,options:any)=>{ctx.selected=[date,options.fullSession];}};
+ vm.runInContext('installMarketBook(api)',ctx);
+ const watch=nodes.get('mb-live-watch'),head=nodes.get('mb-watch-head'),body=nodes.get('mb-watch-body'),seek=nodes.get('mb-watch-seek');
+ nodes.get('mb-watch-source').value='Replay';nodes.get('mb-watch-index').value='ALL';nodes.get('mb-watch-interval').value='1';
+ nodes.get('mb-watch-metrics').value='custom';watch.open=true;watch.ontoggle();
+ assert.match(head.innerHTML,/>NIFTY<.*>BANKNIFTY<.*>SENSEX<.*>India VIX<.*>Sector movers/);
+ assert.equal(seek.max,'375');assert.doesNotMatch(body.innerHTML,/09:16/);
+ seek.value='1';seek.oninput();await new Promise(resolve=>setImmediate(resolve));
+ const row=body.innerHTML.split('09:16')[1];
+ assert.match(row,/22010\.00.*PCR 1\.000000.*CE OI Gap.*PE OI Gap.*22100 → 22200.*↑ PDH 22005/);
+ assert.match(row,/Spot Gap.*42010\.00.*PCR Gap.*14\.00.*Bank \+1\.00%/);
+ assert.doesNotMatch(body.innerHTML,/09:17/);
+ seek.value='3';seek.oninput();
+ assert.match(body.innerHTML.split('09:18')[1],/PCR 0\.500000.*CE OI 260.*PE OI 130/);
+ const date=nodes.get('mb-watch-date');date.value='2026-10-07';date.onchange();assert.deepEqual(ctx.selected,['2026-10-07',true]);
+ metrics=['spot'];custom.onchange();seek.value='375';seek.oninput();
+ assert.equal((body.innerHTML.match(/scope="row"/g)||[]).length,376);
+ assert.match(body.innerHTML,/09:15.*09:16.*09:17.*15:30/);
+ assert.doesNotMatch(head.innerHTML,/India VIX|Sector movers/);
+ assert.match(body.innerHTML,/15:30<\/th>.*Gap/);
+});

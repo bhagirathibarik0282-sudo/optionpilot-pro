@@ -166,3 +166,35 @@ test('new one-minute archive compares adjacent minutes and withholds arrows acro
  assert.equal(deriveRecorded(state,'2026-10-19T04:01:00Z').rows[0].direction,'UP');
  assert.equal(deriveRecorded(state).rows[0].direction,'WAIT');
 });
+
+test('Live Watch refreshes late archive minutes and preserves history after a read failure',async()=>{
+ const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>(),handlers:any={};
+ for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},getAttribute(){return null;},offsetWidth:0});
+ const ctx=vm.createContext({document:{getElementById:(id:string)=>nodes.get(id)},window:{addEventListener:(name:string,fn:any)=>handlers[name]=fn,dispatchEvent(){}},setTimeout:()=>1,clearTimeout(){}});
+ vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)![1],ctx);
+ const calls:any[]=[];
+ const record=(offset:number,spot:number)=>({symbol:'NIFTY',minute_bucket:iso(start+offset),truth_verdict:'TRUE',spot_ltp:spot});
+ const initial={observations:{market:[record(-60000,24001)],chain:[]}};
+ const refreshed={observations:{market:[...initial.observations.market,record(60000,24002)],chain:[]}};
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({current:{},recordedDates:[],history:{},baseline:{},health:{}}),refresh(){},memory:async()=>{},
+  watchHistory:async(...args:any[])=>{calls.push(args);if(calls.length===2)throw Error('temporary archive failure');return calls.length===1?initial:refreshed;}};
+ vm.runInContext('installMarketBook(api)',ctx);
+ const panel=nodes.get('mb-live-watch'),body=nodes.get('mb-watch-body');
+ nodes.get('mb-watch-source').value='Live';nodes.get('mb-watch-index').value='NIFTY';nodes.get('mb-watch-metrics').value='spot';panel.open=true;
+ const frame=(offset:number)=>handlers['optionpilot:live-context']({detail:fixture(offset)});
+ const settle=()=>new Promise(resolve=>setImmediate(resolve));
+ frame(0);await settle();
+ assert.deepEqual(calls[0].slice(0,4),['NIFTY','2026-10-16','09:29','09:15']);
+ assert.match(body.innerHTML,/24001\.00/);
+ frame(60000);frame(120000);assert.equal(calls.length,1);
+ frame(180000);await settle();
+ assert.deepEqual(calls[1].slice(0,4),['NIFTY','2026-10-16','09:32','09:25']);
+ assert.equal(calls[1][4],initial);
+ assert.match(body.innerHTML,/24001\.00/);
+ assert.match(nodes.get('mb-watch-status').textContent,/Archive read failed/);
+ nodes.get('mb-watch-retry').onclick();await settle();
+ assert.equal(calls[2][4],initial);
+ assert.match(body.innerHTML,/24002\.00/);
+ assert.match(body.innerHTML,/24001\.00/);
+ assert.doesNotMatch(nodes.get('mb-watch-status').textContent,/Archive read failed/);
+});

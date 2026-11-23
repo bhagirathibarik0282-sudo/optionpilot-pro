@@ -129,7 +129,8 @@ export function installMarketBook(api:any) {
  const watchMetrics=$('mb-watch-metrics'),watchCustom=$('mb-watch-custom');
  const watchHistory=new Map<string,Map<string,WatchRow>>();
  const watchExpiries=new Map<string,string>();
- const backfill=new Map<string,{data?:any,error?:boolean}>();
+ type WatchBackfill={data?:any,through?:number,attempted?:number,pending?:boolean,error?:boolean};
+ const backfill=new Map<string,WatchBackfill>();
  const archiveCache=new WeakMap<object,Map<string,Map<number,WatchRow>>>();
  const liveSectors=new Map<number,string>();
  const oiCache=new Map<string,{rows?:Map<string,Map<number,WatchRow>>,loadedAt?:number,error?:boolean}>();
@@ -269,7 +270,7 @@ export function installMarketBook(api:any) {
    const saved=backfill.get(date+'|'+index);
    const live=isReplay?undefined:watchHistory.get(index);
    const expiry=isReplay?null:watchExpiries.get(index)??null;
-   const archive=archiveWatch(isReplay?(state.date===date?state.current?.[index]:null):saved?.data,date,index,expiry);
+   const archive=archiveWatch(isReplay?(state.date===date?state.current?.[index]:null):saved?.data?.observations,date,index,expiry);
    const levelRows=!isReplay&&indexFields.includes('levels')?[...archive].filter(([,row])=>row.pdh!==null):[];
    const levelBucket=Math.max(-1,...levelRows.map(([bucket])=>bucket));
    const levels=levelBucket>=0&&new Set(levelRows.map(([,row])=>row.pdh+'|'+row.pdl)).size===1?{bucket:levelBucket,row:archive.get(levelBucket)!}:null;
@@ -286,7 +287,7 @@ export function installMarketBook(api:any) {
   $('mb-watch-replay').hidden=!isReplay;
   const errors=multis.filter(m=>m.saved?.error).map(m=>m.index);
   watchRetry.hidden=isReplay||errors.length===0;
-  const backfillStatus=errors.length?' · Archive read failed for '+errors.join(', '):multis.some(m=>m.saved&&!m.saved.data)?' · Loading earlier minutes':'';
+  const backfillStatus=errors.length?' · Archive read failed for '+errors.join(', '):multis.some(m=>m.saved?.pending&&!m.saved.data)?' · Loading earlier minutes':'';
   const sectorStatus=sectorCache.get(date);
   const label=isReplay?(end>=0?date+' · Recorded · '+watchMinute(end)+' IST':state.archiveLoading?'Loading recordings…':'Select a session with recorded minutes'):
    (date?date+' · ':'')+watchState+backfillStatus;
@@ -345,15 +346,18 @@ export function installMarketBook(api:any) {
   const date=isReplay?state.loadingDate||state.date:watchDate;
   loadWatchSectors(date,!isReplay);
   loadWatchOi(date,!isReplay||date===watchStamp(Date.now()).slice(0,10));
-  if(!isReplay&&date&&watchLatest>0&&api.watchHistory){
+  if(!isReplay&&date&&watchLatest>0&&api.watchHistory&&!document.hidden){
+   const through=watchLatest-1;
    for(const index of currentWatchSymbols()){
-    const key=date+'|'+index;
-    if(backfill.has(key))continue;
-    const pending={};backfill.set(key,pending);
-    void api.watchHistory(index,date,watchMinute(watchLatest-1)).then((data:any)=>{
-     if(backfill.get(key)===pending){backfill.set(key,{data});renderWatch();}
+    const key=date+'|'+index,previous=backfill.get(key);
+    if(previous?.pending||through-(previous?.attempted??-Infinity)<3)continue;
+    const from=Math.max(0,(previous?.through??0)-4);
+    const pending:WatchBackfill={...previous,attempted:through,pending:true,error:false};
+    backfill.set(key,pending);
+    void api.watchHistory(index,date,watchMinute(through),watchMinute(from),previous?.data).then((data:any)=>{
+     if(backfill.get(key)===pending){backfill.set(key,{data,through,attempted:through});renderWatch();}
     }).catch(()=>{
-     if(backfill.get(key)===pending){backfill.set(key,{error:true});renderWatch();}
+     if(backfill.get(key)===pending){backfill.set(key,{...previous,attempted:through,error:true});renderWatch();}
     });
    }
   }
@@ -362,7 +366,13 @@ export function installMarketBook(api:any) {
  if(watchPanel)watchPanel.ontoggle=()=>{if(!watchPanel.open)stopWatch();refreshWatch();};
  if(watchSource)watchSource.onchange=()=>{stopWatch();refreshWatch();};
  if(watchIndex)watchIndex.onchange=()=>{stopWatch();refreshWatch();};
- if(watchRetry)watchRetry.onclick=()=>{for(const index of currentWatchSymbols())if(backfill.get(watchDate+'|'+index)?.error)backfill.delete(watchDate+'|'+index);refreshWatch();};
+ if(watchRetry)watchRetry.onclick=()=>{
+  for(const index of currentWatchSymbols()){
+   const key=watchDate+'|'+index,saved=backfill.get(key);
+   if(saved?.error)backfill.set(key,{data:saved.data,through:saved.through});
+  }
+  refreshWatch();
+ };
  if(watchDateInput)watchDateInput.onchange=()=>{if(watchDateInput.value){stopWatch();void api.setDate(watchDateInput.value,{fullSession:true});}};
  if(watchSeek)watchSeek.oninput=()=>{stopWatch();renderWatch();};
  if($('mb-watch-interval'))$('mb-watch-interval').onchange=renderWatch;

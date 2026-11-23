@@ -89,19 +89,20 @@ test('actual serialized live event updates all three PCR values and revokes them
  handlers['optionpilot:live-context']({detail:null});content=nodes.get('mb-full-pcr-strip').innerHTML;assert(!content.includes('1.5000'));assert(!content.includes('ALL RISING'));assert(content.includes('UNAVAILABLE'));
  turn(4);assert.equal(nodes.get('mb-full-pcr-strip').hidden,true);assert.deepEqual(data,before);assert.equal(requests,0);
 
- const watch=nodes.get('mb-live-watch'),watchBody=nodes.get('mb-watch-body');
+ const watch=nodes.get('mb-live-watch'),watchBody=nodes.get('mb-watch-body'),watchHead=nodes.get('mb-watch-head');
  watch.open=true;
- nodes.get('mb-watch-index').value='NIFTY';
+ nodes.get('mb-watch-index').value='ALL';
  nodes.get('mb-watch-source').value='Live';
  nodes.get('mb-watch-metrics').value='pcr';
  watch.ontoggle();
- assert.match(watchBody.innerHTML,/<th scope="row">09:31<\/th><td>Live<\/td><td>1\.100000<\/td><td>2026-10-20<\/td>/);
+ assert.match(watchHead.innerHTML,/>NIFTY<.*>BANKNIFTY<.*>SENSEX</);
+ assert.match(watchBody.innerHTML,/<th scope="row">09:31<\/th>.*?PCR 1\.100000 · 2026-10-20.*?PCR 1\.500000.*?PCR 1\.300000/);
 
  const later=fixture(120000);
  later.pcrDisplay.NIFTY.sourceMinAt=iso(start+119000);
  later.pcrDisplay.NIFTY.sourceMaxAt=iso(start+119000);
  handlers['optionpilot:live-context']({detail:later});
- assert.match(watchBody.innerHTML,/<th scope="row">09:32<\/th><td>Live<\/td><td>Gap<\/td>/);
+ assert.match(watchBody.innerHTML,/<th scope="row">09:32<\/th><td><small title="PCR">PCR Gap<\/small>/);
 
  nodes.get('mb-watch-source').value='Replay';
  nodes.get('mb-watch-source').onchange();

@@ -2,7 +2,8 @@ import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
 import { deriveRestOiBandEvidence } from './dashboard-oi-rest-band-evidence.js';
 import { tickTelegramLadderShadow } from './telegram-ladder-shadow-host.js';
 import { createParticipationMinuteRecorder } from './participation-minute-recorder.js';
-import { dbSaveParticipationMinuteOnce } from './db.js';
+import { dbSaveParticipationMinuteOnce, dbSaveResearchMemoryOnce } from './db.js';
+import { dashboardWatchOiCycle } from './dashboard-watch-oi.js';
 import { DashboardLiveStore, buildDashboardLiveInventory, type LiveSelection, type PremiumWatchFilter, type LiveIndex } from './dashboard-live-feed.js';
 import { fetchH1KiteLiveInstrumentMaster } from './h1-kite-live-instrument-master-adapter.js';
 import { subscribeKiteAuthoritySessionPersisted } from './kite-session-authority.js';
@@ -62,6 +63,9 @@ export async function reconcileDashboardLiveRuntime(force=false){
     if(response.status===401||response.status===403){markKiteBrokerSessionRejected(apiKey,sessionToken);if(attempt===generation)stop('KITE_SESSION_REQUIRED');}
     if(!response.ok)throw Error('PCR_QUOTE_HTTP_'+response.status);const body=await response.json() as any;
     if(body?.status!=='success'||!body.data||typeof body.data!=='object'||Array.isArray(body.data))throw Error('PCR_QUOTE_INVALID_RESPONSE');return body.data;
+   },onCycle:(date,cycleAt,results)=>{
+    const payload=dashboardWatchOiCycle(date,cycleAt,results);
+    if(payload)void dbSaveResearchMemoryOnce(payload).catch(()=>console.warn('[DASHBOARD_WATCH_OI] SAVE_FAILED'));
    },onDiagnostic:summary=>console.info('[DASHBOARD_LIVE_PCR_DIAGNOSTIC] '+JSON.stringify(summary))
   });
   socket.connect();

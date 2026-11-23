@@ -48,6 +48,16 @@ try {
     assert.equal(await page.locator('#mb-chapter').inputValue(),String(n));
    }
    await page.locator('#mb-chapter').selectOption('0',{timeout:10000});
+   const watch=page.locator('#mb-live-watch');
+   await watch.locator('summary').click();
+   await watch.getByLabel('Metrics').selectOption('spot');
+   assert.deepEqual(await watch.locator('thead th').allTextContents(),['IST','NIFTY','BANKNIFTY','SENSEX']);
+   await watch.getByLabel('Metrics').selectOption('custom');
+   await watch.getByLabel('Full CE OI',{exact:true}).check();
+   assert.equal(await watch.getByLabel('Full CE OI',{exact:true}).isChecked(),true);
+   assert.equal(await watch.getByLabel('Recorded date').isVisible(),true);
+   await watch.getByLabel('Source').selectOption('Live');
+   assert.equal(await watch.getByLabel('Recorded date').isVisible(),false);
    await page.screenshot({path:'pr799-browser-smoke-artifacts/'+label+'-absence-only.png',fullPage:true,timeout:15000});
    const dimensions=await page.evaluate(()=>({viewport:innerWidth,root:document.documentElement.scrollWidth}));
    assert(dimensions.root<=dimensions.viewport+5,JSON.stringify(dimensions));

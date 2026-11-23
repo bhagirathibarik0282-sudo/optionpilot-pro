@@ -1,3 +1,4 @@
+import { DASHBOARD_WATCH_OI_KIND } from './dashboard-watch-oi.js';
 import pg from "pg";
 import { withStartupDatabaseClient } from "./db-startup-query.js";
 import { ensureFiiDiiSchema } from "./fii-dii-store.js";
@@ -612,7 +613,7 @@ export function dbSharedPoolForLadder() { return getPool(); }
  * committed row is visible under READ COMMITTED. Errors never claim persistence.
  */
 export async function dbSaveResearchMemoryOnce(payload: { memoryKey: string; version: string }): Promise<boolean> {
-  if (!['CAS_CLOSING_FIXED_CONTRACT_MEMORY_V1','INTRADAY_NOTABLE_EVENT_V1','INTRADAY_PREMIUM_RESPONSE_V1','INTRADAY_MEMORY_SESSION_RECEIPT_V1'].includes(payload.version)) throw new Error('RESEARCH_MEMORY_VERSION_INVALID');
+  if (!['CAS_CLOSING_FIXED_CONTRACT_MEMORY_V1','INTRADAY_NOTABLE_EVENT_V1','INTRADAY_PREMIUM_RESPONSE_V1','INTRADAY_MEMORY_SESSION_RECEIPT_V1',DASHBOARD_WATCH_OI_KIND].includes(payload.version)) throw new Error('RESEARCH_MEMORY_VERSION_INVALID');
   const p = getPool();
   if (!p) throw new Error('CAS_MEMORY_DATABASE_UNAVAILABLE');
   const client = await p.connect();
@@ -620,7 +621,9 @@ export async function dbSaveResearchMemoryOnce(payload: { memoryKey: string; ver
     await client.query('BEGIN');
     await client.query("SET LOCAL statement_timeout = '15s'");
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))', [payload.version, payload.memoryKey]);
-    const prior = await client.query("SELECT id FROM app_state_log WHERE kind=$1 AND payload->>'memoryKey'=$2 LIMIT 1", [payload.version, payload.memoryKey]);
+    const prior = payload.version===DASHBOARD_WATCH_OI_KIND
+      ? await client.query("SELECT id FROM app_state_log WHERE kind=$1 AND created_at >= ($2::text)::timestamptz - interval '1 hour' AND created_at < ($2::text)::timestamptz + interval '1 hour' AND payload->>'memoryKey'=$2::text LIMIT 1", [payload.version, payload.memoryKey])
+      : await client.query("SELECT id FROM app_state_log WHERE kind=$1 AND payload->>'memoryKey'=$2 LIMIT 1", [payload.version, payload.memoryKey]);
     if (prior.rows.length) { await client.query('COMMIT'); return false; }
     await client.query('INSERT INTO app_state_log (kind,payload) VALUES ($1,$2::jsonb)', [payload.version, JSON.stringify(payload)]);
     await client.query('COMMIT');

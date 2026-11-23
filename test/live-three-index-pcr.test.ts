@@ -102,7 +102,21 @@ test('actual serialized live event updates all three PCR values and revokes them
  later.pcrDisplay.NIFTY.sourceMinAt=iso(start+119000);
  later.pcrDisplay.NIFTY.sourceMaxAt=iso(start+119000);
  handlers['optionpilot:live-context']({detail:later});
- assert.match(watchBody.innerHTML,/<th scope="row">09:32<\/th><td><small title="PCR">PCR Gap<\/small>/);
+ assert.match(watchBody.innerHTML,/<th scope="row">09:32<\/th><td><strong class="mb-watch-mobile-label">NIFTY<\/strong><small title="PCR">PCR Gap<\/small>/);
+
+ const checked=start+180000;
+ const mixed=fixture(checked-start+60000);
+ delete mixed.pcrDisplay.NIFTY;
+ const expiry=expiries[0];
+ mixed.snapshot.indices[0].pcrSnapshot={source:'KITE_REST_FULL_EXPIRY_SNAPSHOT',fetchState:'OK',state:'INCOMPLETE',expiry,
+  checkedAt:iso(checked),cycleStartedAt:iso(checked-1000),coverage:{expected:316,freshOi:311,stale:5,missing:0,invalid:0},
+  reportedPcr:{basis:'LATEST_REPORTED_MIXED_TIMESTAMPS',symbol:'NIFTY',expiry,checkedAt:iso(checked),sourceMinAt:iso(checked-64000),
+   sourceMaxAt:iso(checked),expected:316,reported:316,olderThan30s:5,value:.6697,ceTotal:10000,peTotal:6697}};
+ handlers['optionpilot:live-context']({detail:mixed});
+ const watchRow=(minute:string)=>watchBody.innerHTML.split('<tr>').find((row:string)=>row.includes('>'+minute+'</th>'))??'';
+ assert.match(watchRow('09:33'),/PCR 0\.669700.*Reported · mixed times/);
+ assert.doesNotMatch(watchRow('09:34'),/0\.669700/);
+ assert.equal((watchRow('09:33').match(/mb-watch-mobile-label/g)||[]).length,3);
 
  nodes.get('mb-watch-source').value='Replay';
  nodes.get('mb-watch-source').onchange();
@@ -176,8 +190,14 @@ test('Live Watch refreshes late archive minutes and preserves history after a re
  const record=(offset:number,spot:number)=>({symbol:'NIFTY',minute_bucket:iso(start+offset),truth_verdict:'TRUE',spot_ltp:spot});
  const initial={observations:{market:[record(-60000,24001)],chain:[]}};
  const refreshed={observations:{market:[...initial.observations.market,record(60000,24002)],chain:[]}};
+ let finishInitial:()=>void=()=>{};
  ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>({current:{},recordedDates:[],history:{},baseline:{},health:{}}),refresh(){},memory:async()=>{},
-  watchHistory:async(...args:any[])=>{calls.push(args);if(calls.length===2)throw Error('temporary archive failure');return calls.length===1?initial:refreshed;}};
+  watchHistory:async(...args:any[])=>{
+   calls.push(args);
+   if(calls.length===2)throw Error('temporary archive failure');
+   if(calls.length!==1)return refreshed;
+   return new Promise(resolve=>{finishInitial=()=>resolve(initial);});
+  }};
  vm.runInContext('installMarketBook(api)',ctx);
  const panel=nodes.get('mb-live-watch'),body=nodes.get('mb-watch-body');
  nodes.get('mb-watch-source').value='Live';nodes.get('mb-watch-index').value='NIFTY';nodes.get('mb-watch-metrics').value='spot';panel.open=true;
@@ -185,7 +205,12 @@ test('Live Watch refreshes late archive minutes and preserves history after a re
  const settle=()=>new Promise(resolve=>setImmediate(resolve));
  frame(0);await settle();
  assert.deepEqual(calls[0].slice(0,4),['NIFTY','2026-10-16','09:29','09:15']);
+ assert.match(body.innerHTML,/Loading…/);
+ calls[0][5](initial,'09:25');
  assert.match(body.innerHTML,/24001\.00/);
+ assert.match(nodes.get('mb-watch-status').textContent,/Loading earlier minutes/);
+ finishInitial();await settle();
+ assert.doesNotMatch(body.innerHTML,/Loading…/);
  frame(60000);frame(120000);assert.equal(calls.length,1);
  frame(180000);await settle();
  assert.deepEqual(calls[1].slice(0,4),['NIFTY','2026-10-16','09:32','09:25']);

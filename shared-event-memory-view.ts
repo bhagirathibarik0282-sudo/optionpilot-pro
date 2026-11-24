@@ -100,8 +100,8 @@ export function installSharedEventMemory(getClock:()=>any,project:typeof project
   const c=getClock(),date=c?.active?c.date||'':'';
   if(date!==selectedDate){contextVersion++;contextAbort?.abort();contextAbort=null;contextBody=null;contextBusy=false;contextError=false;if(contextView)contextView.innerHTML='';selectedDate=date;version++;active?.abort();active=null;busy=false;body=null;error='';clearTimeline();}
   root.hidden=!c?.active;button.disabled=busy||!date||!c?.at;
-  if(!c?.active||!c.at){clearTimeline();results.innerHTML='';status.textContent='Select a valid shared replay timestamp.';return;}
   if(contextLoad)contextLoad.disabled=!body||contextBusy||!date||!c?.at;
+  if(!c?.active||!c.at){if(contextView)contextView.innerHTML='';clearTimeline();results.innerHTML='';status.textContent='Select a valid shared replay timestamp.';return;}
   if(!body){if(contextView)contextView.innerHTML='';clearTimeline();results.innerHTML='';status.textContent=busy?'Loading saved memory…':error||'Load saved events for '+date+'.';return;}
   const p=project(body,date,c.at,index.value||'ALL'),byKey=new Map(p.responses.map(r=>[r.eventKey+'|'+r.minutes,r]));
   if(eventSelect&&timeline&&getState&&build){
@@ -156,7 +156,7 @@ export function installSharedEventMemory(getClock:()=>any,project:typeof project
   catch{if(mine===version){body=null;error='Saved event memory unavailable. Load to retry.';}}
   finally{if(mine===version){busy=false;active=null;render();}}
  };
- if(contextLoad)contextLoad.onclick=async()=>{const c=getClock();if(!c?.active||!c.at||contextBusy)return;const date=c.date,mine=++contextVersion;contextBusy=true;contextError=false;const controller=new AbortController();contextAbort=controller;render();
+ if(contextLoad)contextLoad.onclick=async()=>{const c=getClock();if(!c?.active||!c.at||!body||contextBusy)return;const date=c.date,mine=++contextVersion;contextBusy=true;contextError=false;const controller=new AbortController();contextAbort=controller;render();
   try{const res=await fetch('/api/research/background-quotes/history?date='+encodeURIComponent(date),{cache:'no-store',signal:controller.signal});const d=await res.json();if(mine!==contextVersion)return;if(!res.ok||d.date!==date||!Array.isArray(d.snapshots)||d.snapshots.length>256)throw Error('Invalid saved participation');contextBody=d;}
   catch{if(mine===contextVersion){contextError=true;contextBody=null;}}
   finally{if(mine===contextVersion){contextBusy=false;contextAbort=null;render();}}

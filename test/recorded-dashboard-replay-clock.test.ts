@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {projectDashboardReplay,replayWatchMinute} from '../recorded-dashboard-replay-clock.ts';
+import {projectDashboardReplay,replayWatchMinute,sharedFullOiRows,sharedBandOiRows} from '../recorded-dashboard-replay-clock.ts';
 const date='2026-11-20', t=(m:number)=>new Date(Date.parse(date+'T09:15:00+05:30')+m*60000).toISOString();
 const row=(m:number, extra:any={})=>({symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:t(m),ltp:100+m,...extra});
 function fixture(){
@@ -32,4 +32,21 @@ test('Watch uses the exact IST minute with session bounds, no rounding',()=>{
   assert.equal(replayWatchMinute(date,t(-1)),null);assert.equal(replayWatchMinute(date,t(376)),null);
   assert.equal(replayWatchMinute(date,'2026-11-20T09:15:01+05:30'),null);
   assert.equal(replayWatchMinute('2026-11-19',t(0)),null);assert.equal(replayWatchMinute(date,null),null);
+});
+
+test('full OI archive requires same expiry, arithmetic, source and storage cutoff and rejects duplicate minutes',()=>{
+ const expiry='2026-11-26',r={symbol:'NIFTY',expiry,sourceAt:new Date(Date.parse(t(0))+10000).toISOString(),recordedAt:new Date(Date.parse(t(0))+20000).toISOString(),ceOi:100,peOi:75,pcr:.75};
+ assert.equal(sharedFullOiRows([r],date,'NIFTY',expiry,t(0)).size,0);
+ assert.equal(sharedFullOiRows([r],date,'NIFTY',expiry,t(1)).get(0)?.pcr,.75);
+ for(const x of [{...r,recordedAt:undefined},{...r,recordedAt:t(2)},{...r,expiry:'2026-12-01'},{...r,pcr:2}])assert.equal(sharedFullOiRows([x],date,'NIFTY',expiry,t(3)).size,0);
+ assert.equal(sharedFullOiRows([r,r],date,'NIFTY',expiry,t(1)).size,0);
+});
+test('band totals are calculated from exactly 30 same-snapshot legs, never full PCR or reported band',()=>{
+ const expiry='2026-11-26',market=[{symbol:'NIFTY',minute_bucket:t(0),truth_verdict:'TRUE',snapshot_id:'S'}];
+ const options=Array.from({length:15},(_,i)=>['CE','PE'].map(side=>({symbol:'NIFTY',expiry,minute_bucket:t(0),truth_verdict:'TRUE',snapshot_id:'S',atm_offset:i-7,option_type:side,strike:25000+i*50,oi:side==='CE'?100:80,quote_timestamp:t(0),quote_age_seconds:0}))).flat();
+ const read=(legs:any[])=>sharedBandOiRows({market,options:legs},date,'NIFTY',expiry,t(0)).get(0);
+ assert.deepEqual(read(options),{expiry,ceOi:1500,peOi:1200,pcr:.8,basket:Array.from({length:15},(_,i)=>25000+i*50).join('|'),coverage:30});
+ assert.equal(read(options.slice(1)),undefined);
+ for(const change of [{snapshot_id:'X'},{quote_timestamp:t(1)},{quote_age_seconds:31},{oi:-1},{strike:99999},{atm_offset:null}])assert.equal(read([{...options[0],...change},...options.slice(1)]),undefined);
+ assert.equal(read([options[1],...options.slice(1)]),undefined);
 });

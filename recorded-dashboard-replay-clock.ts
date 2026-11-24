@@ -38,3 +38,54 @@ export function replayWatchMinute(date:string, at:string|null):number|null {
   const minute=Number(ist.slice(11,13))*60+Number(ist.slice(14,16));
   return minute>=555&&minute<=930?minute-555:null;
 }
+
+/** A full-expiry archived sample is not a band sample. Qualify its source
+ * and storage-row timestamps independently. Storage time is not a fill or
+ * a guarantee of transaction-commit availability. No timestamp rounding. */
+export function sharedFullOiRows(rows:any[],date:string,symbol:string,expiry:string,at:string|null){
+ const out=new Map<number,any>(),ambiguous=new Set<number>();
+ const stamp=(v:any)=>typeof v==='string'&&/(?:Z|[+-]\d{2}:\d{2})$/.test(v)?Date.parse(v):NaN;
+ const cutoff=stamp(at),open=Date.parse(date+'T09:15:00+05:30'),close=Date.parse(date+'T15:30:00+05:30');
+ if(!Number.isFinite(cutoff)||cutoff<open||cutoff>close||!expiry)return out;
+ for(const r of rows||[]){
+  const source=stamp(r?.sourceAt),stored=stamp(r?.recordedAt);
+  if(r?.symbol!==symbol||r.expiry!==expiry||!(source>=open&&source<=cutoff&&source<close&&stored>=source&&stored<=cutoff)||
+   !Number.isSafeInteger(r.ceOi)||r.ceOi<=0||!Number.isSafeInteger(r.peOi)||r.peOi<0||
+   typeof r.pcr!=='number'||!Number.isFinite(r.pcr)||r.pcr<0||Math.abs(r.pcr-r.peOi/r.ceOi)>Math.max(1,r.pcr)*1e-12)continue;
+  const bucket=Math.floor((source-open)/60000);
+  if(stored>=open+(bucket+1)*60000)continue;
+  if(out.has(bucket)){ambiguous.add(bucket);continue;}
+  out.set(bucket,r);
+ }
+ for(const bucket of ambiguous)out.delete(bucket);
+ return out;
+}
+
+/** Exact archived 30-leg band, separated from full-expiry OI. Require the
+ * same market snapshot, one CE and PE per integer offset, same strike by
+ * offset and valid OI/quote timestamps. Never substitute missing legs. */
+export function sharedBandOiRows(data:any,date:string,symbol:string,expiry:string,at:string|null){
+ const out=new Map<number,any>(),market=new Map<number,any[]>(),options=new Map<number,any[]>();
+ const stamp=(v:any)=>typeof v==='string'&&/(?:Z|[+-]\d{2}:\d{2})$/.test(v)?Date.parse(v):NaN;
+ const cutoff=stamp(at),open=Date.parse(date+'T09:15:00+05:30'),close=Date.parse(date+'T15:30:00+05:30');
+ if(!Number.isFinite(cutoff)||cutoff<open||cutoff>close||!expiry)return out;
+ const number=(v:any)=>typeof v==='number'||typeof v==='string'&&v.trim()!==''?Number(v):NaN;
+ const group=(map:Map<number,any[]>,r:any)=>{const t=stamp(r.minute_bucket);if(!(t>=open&&t<=close&&t<=cutoff&&(t-open)%60000===0)||r.symbol!==symbol)return;const list=map.get(t)||[];list.push(r);map.set(t,list);};
+ for(const r of data?.market||[])group(market,r);
+ for(const r of data?.options||[])if(String(r.expiry).slice(0,10)===expiry&&Number.isInteger(number(r.atm_offset))&&Math.abs(number(r.atm_offset))<=7)group(options,r);
+ for(const [t,legs] of options){
+  const ms=market.get(t);if(ms?.length!==1||ms[0].truth_verdict!=='TRUE'||!ms[0].snapshot_id||legs.length!==30)continue;
+  const ce=new Map<number,any>(),pe=new Map<number,any>();let valid=true;
+  for(const r of legs){
+   const side=r.option_type==='CE'?ce:r.option_type==='PE'?pe:null,offset=number(r.atm_offset),oi=number(r.oi),strike=number(r.strike),q=stamp(r.quote_timestamp),age=number(r.quote_age_seconds);
+   if(!side||side.has(offset)||r.truth_verdict!=='TRUE'||r.snapshot_id!==ms[0].snapshot_id||!Number.isSafeInteger(oi)||oi<0||!(strike>0&&Number.isFinite(strike))||!(age>=0&&age<=30)||!(q>=open&&q<=cutoff&&q<t+60000)){valid=false;break;}
+   side.set(offset,{oi,strike});
+  }
+  if(!valid||ce.size!==15||pe.size!==15)continue;
+  let ceOi=0,peOi=0,previous=-Infinity;const strikes:number[]=[];
+  for(let k=-7;k<=7;k++){const c=ce.get(k),p=pe.get(k);if(!c||!p||c.strike!==p.strike||c.strike<=previous){valid=false;break;}previous=c.strike;strikes.push(c.strike);ceOi+=c.oi;peOi+=p.oi;}
+  if(!valid||!Number.isSafeInteger(ceOi)||ceOi<=0||!Number.isSafeInteger(peOi))continue;
+  out.set((t-open)/60000,{expiry,ceOi,peOi,pcr:peOi/ceOi,basket:strikes.join('|'),coverage:30});
+ }
+ return out;
+}

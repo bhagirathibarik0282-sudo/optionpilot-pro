@@ -36,18 +36,20 @@ export function dashboardWatchOiCycle(date: string, cycleAt: string, results: Re
 export async function readDashboardWatchOi(date: string, query: (sql:string,params:unknown[])=>Promise<{rows:any[]}|null>, now=new Date()) {
  if(!validDate(date)||date>new Date(now.getTime()+19_800_000).toISOString().slice(0,10))throw Error('INVALID_DATE');
  const start=Date.parse(date+'T00:00:00+05:30');
- const result=await query('SELECT payload FROM app_state_log WHERE kind=$1 AND created_at >= $2 AND created_at < $3 ORDER BY created_at DESC,id DESC LIMIT 376',
+ const result=await query('SELECT payload,created_at AS recorded_at FROM app_state_log WHERE kind=$1 AND created_at >= $2 AND created_at < $3 ORDER BY created_at DESC,id DESC LIMIT 376',
   [DASHBOARD_WATCH_OI_KIND,new Date(start).toISOString(),new Date(start+86_400_000).toISOString()]);
  if(!result)throw Error('STORAGE_UNAVAILABLE');
- const rows=new Map<string,WatchOiSample>();
- for(const {payload} of result.rows){
+ const rows=new Map<string,WatchOiSample & {recordedAt?:string}>();
+ for(const {payload,recorded_at} of result.rows){
   if(payload?.version!==DASHBOARD_WATCH_OI_KIND||payload.tradeDate!==date||!Array.isArray(payload.rows)||payload.rows.length>3)continue;
   for(const raw of payload.rows){
    const row=watchOiSample(date,raw);
    if(!row||stamp(row.sourceAt)>now.getTime())continue;
    const key=row.symbol+'|'+row.expiry+'|'+row.sourceAt.slice(0,16);
    const prior=rows.get(key);
-   if(!prior||row.sourceAt>prior.sourceAt)rows.set(key,row);
+   const recorded=recorded_at instanceof Date?recorded_at.getTime():stamp(recorded_at);
+   const qualified=Number.isFinite(recorded)&&recorded>=stamp(row.sourceAt)&&recorded<=now.getTime();
+   if(!prior||row.sourceAt>prior.sourceAt)rows.set(key,qualified?{...row,recordedAt:new Date(recorded).toISOString()}:row);
   }
  }
  return {date,rows:[...rows.values()]};

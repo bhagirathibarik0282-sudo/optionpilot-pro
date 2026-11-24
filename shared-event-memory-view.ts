@@ -57,14 +57,38 @@ export function buildSharedEventTimeline(state:any,event:any,eventStoredAt:strin
  });
 }
 
-export const SHARED_EVENT_MEMORY_HTML='<details id="mb-shared-memory" hidden><summary>Event Intelligence · Before / Event / After</summary><p class="mb-note">Saved event facts and separate +3/+15/+30m responses. Load once for the selected session; moving the master clock does not request data.</p><div class="mb-controls"><label>Index<select id="mb-shared-memory-index"><option>ALL</option><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><button id="mb-shared-memory-load" type="button">Load saved events</button></div><p id="mb-shared-memory-status" role="status"></p><label>Selected event<select id="mb-shared-memory-event"></select></label><div id="mb-shared-memory-timeline"></div><details><summary>Saved event list and responses</summary><div id="mb-shared-memory-results"></div></details></details>';
+/** Compare explicit fixed contracts using the same qualified checkpoint builder.
+ * Event identity and event-time freeze never change. No ATM substitution, expiry
+ * classification, causal claim, or trade signal. */
+export function buildSharedEventComparison(state:any,event:any,eventStoredAt:string,secondStrike:unknown,secondExpiry:unknown,build:typeof buildSharedEventTimeline){
+ const validDate=(v:any)=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(Date.parse(v+'T00:00:00Z')).toISOString().slice(0,10)===v;
+ const strike=(v:any)=>typeof v==='number'||typeof v==='string'&&/^\d+$/.test(v)?Number(v):NaN;
+ const first=strike(event?.strike),other=strike(secondStrike),date=event?.tradeDate,expiry=event?.expiry;
+ if(!validDate(date)||!validDate(expiry)||expiry<date||!Number.isSafeInteger(first)||first<=0)return [];
+ const strikes=[first],expiries=[expiry];
+ if(Number.isSafeInteger(other)&&other>0&&other<=1000000&&other!==first)strikes.push(other);
+ if(validDate(secondExpiry)&&String(secondExpiry)>=date&&secondExpiry!==expiry)expiries.push(String(secondExpiry));
+ return expiries.flatMap(exp=>strikes.map(k=>{
+  const rows=build(state,{...event,expiry:exp,strike:k},eventStoredAt);
+  const before=rows.find(r=>r.offset===-3),now=rows.find(r=>r.offset===0);
+  const crossing=(side:'ce'|'pe')=>{
+   const a=before?.[side],b=now?.[side];
+   if(!a||!b||typeof a.pdl!=='number'||!Number.isFinite(a.pdl)||a.pdl<=0||a.pdl!==b.pdl)return 'UNAVAILABLE';
+   return a.price>=a.pdl&&b.price<a.pdl?'OBSERVED_PDL_CROSSING':b.price<b.pdl?'ALREADY_BELOW_PDL':'NO_DOWN_CROSSING';
+  };
+  return {symbol:event.symbol,expiry:exp,strike:k,dte:(Date.parse(exp+'T00:00:00Z')-Date.parse(date+'T00:00:00Z'))/86400000,rows,ceCrossing:crossing('ce'),peCrossing:crossing('pe')};
+ }));
+}
+
+export const SHARED_EVENT_MEMORY_HTML='<details id="mb-shared-memory" hidden><summary>Event Intelligence · Before / Event / After</summary><p class="mb-note">Saved event facts and separate +3/+15/+30m responses. Load once for the selected session; moving the master clock does not request data.</p><div class="mb-controls"><label>Index<select id="mb-shared-memory-index"><option>ALL</option><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><button id="mb-shared-memory-load" type="button">Load saved events</button></div><p id="mb-shared-memory-status" role="status"></p><label>Selected event<select id="mb-shared-memory-event"></select></label><div id="mb-shared-memory-timeline"></div><details id="mb-shared-memory-compare"><summary>Fixed premium pairs · Multi-DTE</summary><p class="mb-note">Event strike and expiry stay locked. Enter an optional second strike and exact expiry. No automatic ATM replacement.</p><div class="mb-controls"><label>Second strike<input id="mb-shared-memory-strike" type="number" min="1" max="1000000" step="1" placeholder="Optional"></label><label>Second expiry<input id="mb-shared-memory-expiry" type="date"></label><label>Checkpoint<select id="mb-shared-memory-offset"><option value="-15">-15m</option><option value="-10">-10m</option><option value="-5">-5m</option><option value="-3">-3m</option><option value="-1">-1m</option><option value="0" selected>0m</option><option value="1">+1m</option><option value="3">+3m</option><option value="5">+5m</option><option value="10">+10m</option><option value="15">+15m</option><option value="30">+30m</option></select></label></div><div id="mb-shared-memory-comparison"></div></details><details><summary>Saved event list and responses</summary><div id="mb-shared-memory-results"></div></details></details>';
 
 /** Browser-only display. No automatic requests, timers, persistence or order authority. */
-export function installSharedEventMemory(getClock:()=>any,project:typeof projectSharedEventMemory,getState?:()=>any,build?:typeof buildSharedEventTimeline){
+export function installSharedEventMemory(getClock:()=>any,project:typeof projectSharedEventMemory,getState?:()=>any,build?:typeof buildSharedEventTimeline,compare?:typeof buildSharedEventComparison){
  const $=(id:string)=>document.getElementById('mb-shared-memory'+id) as any,root=$(''),button=$('-load'),status=$('-status'),results=$('-results'),index=$('-index');
  if(!root||!button||!status||!results||!index)return null;
- const eventSelect=$('-event'),timeline=$('-timeline');let chosen='';
- const clearTimeline=()=>{chosen='';if(eventSelect)eventSelect.innerHTML='';if(timeline)timeline.innerHTML='';};
+ const eventSelect=$('-event'),timeline=$('-timeline'),secondStrike=$('-strike'),secondExpiry=$('-expiry'),checkpoint=$('-offset'),comparison=$('-comparison');let chosen='',comparisonIdentity='';
+ const resetComparison=()=>{comparisonIdentity='';if(secondStrike)secondStrike.value='';if(secondExpiry)secondExpiry.value='';if(checkpoint)checkpoint.value='0';if(comparison)comparison.innerHTML='';};
+ const clearTimeline=()=>{chosen='';if(eventSelect)eventSelect.innerHTML='';if(timeline)timeline.innerHTML='';resetComparison();};
  let body:any=null,selectedDate='',version=0,busy=false,error='',active:AbortController|null=null;
  const esc=(v:any)=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
  const time=(v:any)=>Number.isFinite(Date.parse(v))?new Date(Date.parse(v)+19800000).toISOString().slice(11,16):'—';
@@ -86,6 +110,25 @@ export function installSharedEventMemory(getClock:()=>any,project:typeof project
    const lane=(phase:string)=>'<details'+(phase==='EVENT'?' open':'')+'><summary>'+phase+' · exact checkpoints</summary><div class="mb-scroll"><table><thead><tr>'+['IST / offset','Spot','VIX','Futures','Spot PDH','Spot PDL','Full PCR','CE wall','PE wall','CE ₹','PE ₹','CE OI','PE OI','CE PDH','CE PDL','PE PDH','PE PDL','Evidence'].map(v=>'<th>'+v+'</th>').join('')+'</tr></thead><tbody>'+rows.filter(r=>r.phase===phase).map(r=>'<tr><th>'+esc(time(r.at)+' / '+(r.offset>0?'+':'')+r.offset+'m')+'</th>'+cells(r)+'<td>'+esc(r.status)+'</td></tr>').join('')+'</tbody></table></div></details>';
    const html=e?'<p class="mb-note">Event '+esc(time(e.at))+' IST · saved '+esc(time(body.availability?.events?.[e.memoryKey]))+' IST · exact fixed expiry and strike. Before/event evidence freezes at saved-event time; after is separate.</p><p><strong>WHY track:</strong> '+e.facts.map((f:any)=>esc(f.field)+' '+esc(f.before)+' → '+esc(f.after)).join(' · ')+'</p><p><strong>WHY NOT trade yet:</strong> no validated entry/exit model, fill evidence or risk gate. Missing quote/receipt/chain provenance stays blank.</p>'+lane('BEFORE')+lane('EVENT')+lane('AFTER'):'<p>Choose a qualified saved event.</p>';
    if(timeline.innerHTML!==html)timeline.innerHTML=html;
+   if(comparison&&secondStrike&&secondExpiry&&checkpoint&&compare){
+    if(comparisonIdentity!==(e?.memoryKey||'')){resetComparison();comparisonIdentity=e?.memoryKey||'';}
+    const offset=Number(checkpoint.value||0),pairs=e?compare(getState(),e,body.availability?.events?.[e.memoryKey],secondStrike.value,secondExpiry.value,build):[];
+    const fmtCross=(x:string)=>x==='OBSERVED_PDL_CROSSING'?'Observed own-PDL crossing':x==='ALREADY_BELOW_PDL'?'Already below own PDL':x==='NO_DOWN_CROSSING'?'No down-crossing':'PDL evidence missing';
+    const groups=[...new Set(pairs.map(p=>p.expiry))];
+    let view=e?'<p class="mb-note">Locked event '+esc(e.symbol+' '+e.strike+' · '+e.expiry)+' · '+esc(time(e.at))+' IST. Each expiry is separate; DTE is calendar days, not weekly/monthly classification.</p>':'<p>Choose a qualified event.</p>';
+    for(const exp of groups){
+     const items=pairs.filter(p=>p.expiry===exp);
+     view+='<details class="mb-box" open><summary>'+esc(exp)+' · DTE '+esc(items[0].dte)+'</summary>'+items.map(p=>{
+      const row=p.rows.find(r=>r.offset===offset);
+      return '<section class="mb-box"><strong>'+esc(p.strike)+' CE / PE · '+esc(row?time(row.at):'—')+' IST</strong><table><thead><tr><th>Side</th><th>Premium ₹</th><th>Own PDH</th><th>Own PDL</th><th>OI</th></tr></thead><tbody>'+['ce','pe'].map(side=>{const q=row?.[side];return '<tr><th>'+side.toUpperCase()+'</th><td>'+value(q?.price)+'</td><td>'+value(q?.pdh)+'</td><td>'+value(q?.pdl)+'</td><td>'+value(q?.oi)+'</td></tr>';}).join('')+'</tbody></table><p class="mb-note">Evidence: '+esc(row?.status||'GAP')+' · event -3m → 0m: CE '+esc(fmtCross(p.ceCrossing))+'; PE '+esc(fmtCross(p.peCrossing))+'</p></section>';
+     }).join('')+'</details>';
+    }
+    if(e&&groups.length===2)for(const k of [...new Set(pairs.map(p=>p.strike))]){
+     const ps=pairs.filter(p=>p.strike===k),ce=ps.filter(p=>p.ceCrossing==='OBSERVED_PDL_CROSSING').length,pe=ps.filter(p=>p.peCrossing==='OBSERVED_PDL_CROSSING').length;
+     view+='<p class="mb-note">'+esc(k)+' · same-strike observed PDL crossings across selected expiries: CE '+ce+'/'+ps.length+' · PE '+pe+'/'+ps.length+'. Missing is not a negative signal; no buyer entry authorized.</p>';
+    }
+    if(comparison.innerHTML!==view)comparison.innerHTML=view;
+   }
   }
   status.textContent=date+' · '+time(c.at)+' IST · '+p.events.length+' saved events available by cutoff · archive read limit '+(body.readLimitEvents??'unknown')+' · recovered/late records excluded'+(error?' · '+error:'');
   let html=p.events.slice(0,40).map(e=>'<details class="mb-box"><summary>'+esc(time(e.at)+' · '+e.symbol+' · '+e.expiry+' · '+e.strike+' CE/PE')+'</summary><p>Event CE ₹'+value(e.pair?.ce?.ltp)+' · PE ₹'+value(e.pair?.pe?.ltp)+'</p><p>'+e.facts.map((f:any)=>esc(f.field)+' '+esc(f.before)+' → '+esc(f.after)).join('<br>')+'</p><p class="mb-note">After-event observations only · not entry evidence</p><div class="mb-scroll"><table><thead><tr><th>Window</th><th>CE %</th><th>PE %</th><th>Status</th></tr></thead><tbody>'+[3,15,30].map(m=>{const r=byKey.get(e.memoryKey+'|'+m);return '<tr><td>+'+m+'m</td><td>'+value(r?.ceReturnPct)+'</td><td>'+value(r?.peReturnPct)+'</td><td>'+esc(r?.status||'Not available at cursor')+'</td></tr>';}).join('')+'</tbody></table></div></details>').join('')||'<p>No saved events qualified at this cursor. This does not establish no market events occurred.</p>';
@@ -97,5 +140,5 @@ export function installSharedEventMemory(getClock:()=>any,project:typeof project
   catch{if(mine===version){body=null;error='Saved event memory unavailable. Load to retry.';}}
   finally{if(mine===version){busy=false;active=null;render();}}
  };
- index.onchange=render;if(eventSelect)eventSelect.onchange=()=>{chosen=eventSelect.value;render();};render();return {render};
+ index.onchange=render;for(const control of [secondStrike,secondExpiry,checkpoint])if(control)control.onchange=render;if(eventSelect)eventSelect.onchange=()=>{chosen=eventSelect.value;render();};render();return {render};
 }

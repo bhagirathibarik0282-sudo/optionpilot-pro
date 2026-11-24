@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {projectSharedEventMemory,installSharedEventMemory,buildSharedEventTimeline} from '../shared-event-memory-view.js';
+import {projectSharedEventMemory,installSharedEventMemory,buildSharedEventTimeline,buildSharedEventComparison} from '../shared-event-memory-view.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 import vm from 'node:vm';
 const date='2026-11-24',t=(m:number)=>new Date(Date.parse(date+'T09:15:00+05:30')+m*60000).toISOString();
@@ -49,4 +49,18 @@ test('event timeline freezes before/event at event storage time and keeps future
  const duplicate={...state,current:{NIFTY:{...state.current.NIFTY,options:[...state.current.NIFTY.options,leg(3,'CE')]}}};assert.equal(read(duplicate).find(r=>r.offset===0).ce,null);
  assert.deepEqual(read({...state,replay:{active:true,at:t(3)}}),[]);
  assert.equal(read(state).find(r=>r.offset===-15).status,'OUTSIDE_SESSION');
+});
+
+test('comparison keeps two fixed strikes and two exact expiries separate, without substituting missing legs',()=>{
+ const date=e.tradeDate,second='2026-12-03',market=[0,3,6].map(m=>({symbol:e.symbol,minute_bucket:t(m),backend_timestamp:t(m),snapshot_id:'s'+m,truth_verdict:'TRUE'}));
+ const options=[e.expiry,second].flatMap(exp=>[25500,25400].flatMap(strike=>[0,3,6].flatMap(m=>['CE','PE'].filter(side=>!(exp===second&&strike===25400&&side==='PE')).map(side=>({symbol:e.symbol,expiry:exp,strike,option_type:side,minute_bucket:t(m),snapshot_id:'s'+m,truth_verdict:'TRUE',ltp:side==='CE'?(m===0?110:90):100,pdl:100,quote_timestamp:t(m),quote_age_seconds:0})))));
+ const state={date,replay:{active:true,at:t(7)},current:{NIFTY:{market,options,chain:[]}}};
+ const compare=(strike:any,expiry:any)=>buildSharedEventComparison(state,e,t(4),strike,expiry,buildSharedEventTimeline);
+ const pairs=compare(25400,second);assert.equal(pairs.length,4);
+ assert.deepEqual(pairs.map(p=>[p.expiry,p.strike,p.dte]),[[e.expiry,25500,2],[e.expiry,25400,2],[second,25500,9],[second,25400,9]]);
+ assert.ok(pairs.every(p=>p.ceCrossing==='OBSERVED_PDL_CROSSING'));
+ assert.equal(pairs[3].rows.find(r=>r.offset===0).pe,null);assert.equal(pairs[3].peCrossing,'UNAVAILABLE');
+ assert.equal(pairs[0].rows.find(r=>r.offset===5).status,'FUTURE');
+ assert.equal(compare(25500,e.expiry).length,1);assert.equal(compare('25400.5','2026-11-31').length,1);
+ assert.equal(compare('', '2026-11-23').length,1);
 });

@@ -147,3 +147,24 @@ test('invalid native selection opens manual details and explains the window with
  b.events['optionpilot:rag-selection']({detail:{symbol:'NIFTY',date:'2026-11-04',expiry:'2026-11-09',strike:23900,side:'CE',time:'15:40'}});
  assert.equal(reported,true);assert.equal(b.requests.length,0);assert.match(b.node('status').textContent,/09:15–15:30/);
 });
+
+test('shared replay locks cutoff, blocks future or wrong-date requests, and invalidates late results',async()=>{
+ const b=browser(async()=>success()),detail={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
+ b.events['optionpilot:rag-replay-clock']({detail:{active:true,date:detail.date,at:'2026-10-13T04:09:00Z'}});
+ b.events['optionpilot:rag-selection']({detail});await new Promise(r=>setImmediate(r));
+ assert.equal(b.requests.length,1);const p=new URL(b.requests[0],'https://example.test').searchParams;assert.equal(p.get('asOf'),'2026-10-13T09:39:00');assert.equal(p.has('includeOutcomes'),false);
+ assert.equal(b.node('asof').disabled,true);assert.equal(b.node('result').innerHTML,'','unqualified response rejected');
+ b.node('asof').value='2026-10-13T15:30';b.node('outcomes').checked=true;await b.submit();
+ assert.equal(new URL(b.requests[1],'https://example.test').searchParams.get('asOf'),'2026-10-13T09:39:00');assert.equal(new URL(b.requests[1],'https://example.test').searchParams.has('includeOutcomes'),false);
+ b.node('after').onclick();b.node('history').onclick();assert.equal(b.requests.length,2);
+ b.events['optionpilot:rag-selection']({detail:{...detail,time:'09:42'}});await new Promise(r=>setImmediate(r));assert.equal(b.requests.length,2);
+ b.events['optionpilot:rag-selection']({detail:{...detail,date:'2026-10-12'}});await new Promise(r=>setImmediate(r));assert.equal(b.requests.length,2);
+ b.events['optionpilot:rag-replay-clock']({detail:{active:true,date:detail.date,at:null}});b.events['optionpilot:rag-selection']({detail});await new Promise(r=>setImmediate(r));assert.equal(b.requests.length,2);
+ b.events['optionpilot:rag-replay-clock']({detail:{active:false}});assert.equal(b.node('asof').disabled,false);
+});
+test('shared replay accepts qualified response and clears it on clock movement',async()=>{
+ const cutoff='2026-10-13T04:09:00Z',detail={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
+ const b=browser(async()=>{const res=success(),data:any=await res.json();data.cutoff=cutoff;data.event.timeIst='09:36';const point=data.beforeAndAt[1];point.bucketAt='2026-10-13T04:06:00Z';for(const q of Object.values(point.pair) as any[])q.receiptAt=point.receiptAt;return {...res,json:async()=>data};});
+ b.events['optionpilot:rag-replay-clock']({detail:{active:true,date:detail.date,at:cutoff}});b.events['optionpilot:rag-selection']({detail});await new Promise(r=>setImmediate(r));assert.match(b.node('result').innerHTML,/210\.65/);
+ b.events['optionpilot:rag-replay-clock']({detail:{active:true,date:detail.date,at:'2026-10-13T04:06:00Z'}});assert.equal(b.node('result').innerHTML,'');
+});

@@ -149,6 +149,12 @@ export function installMarketBook(api:any) {
   if(!sharedProjection||key.some((v,i)=>v!==sharedProjectionKey[i])){sharedProjectionKey=key;sharedProjection=projectDashboardReplay(state,sharedWatchFrame);}
   return sharedProjection;
  };
+ let lastRagClockKey='';
+ const publishRagClock=()=>{
+  const s=sharedWatch()?watchStateAtCursor():null,detail={active:!!s,date:s?.date||'',at:s?.replay?.at||null};
+  const key=JSON.stringify(detail);if(key===lastRagClockKey)return;lastRagClockKey=key;
+  if(typeof window!=='undefined'&&typeof CustomEvent!=='undefined')window.dispatchEvent(new CustomEvent('optionpilot:rag-replay-clock',{detail}));
+ };
  const watchBody=$('mb-watch-body'),watchStatus=$('mb-watch-status'),watchHead=$('mb-watch-head');
  const watchParticipation=$('mb-watch-participation');
  const broadWatchGroup=[
@@ -442,7 +448,7 @@ export function installMarketBook(api:any) {
  };
  const refreshWatch=()=>{
   if(!watchPanel?.open)return;
-  if(sharedWatch()){const state=watchStateAtCursor();if(state.replay?.at)loadWatchOi(state.date,false);renderWatch();return;}
+  if(sharedWatch()){const state=watchStateAtCursor();publishRagClock();if(state.replay?.at)loadWatchOi(state.date,false);renderWatch();return;}
   const isReplay=watchSource.value!=='Live',state=api.getState();
   const date=isReplay?state.loadingDate||state.date:watchDate;
   loadWatchSectors(date,!isReplay||date===watchStamp(Date.now()).slice(0,10),isReplay&&currentWatchSymbols().length===1);
@@ -478,7 +484,7 @@ export function installMarketBook(api:any) {
    const tools=$('mb-tools'),panel=$('recorded-replay');if(tools)tools.open=true;if(panel)panel.open=true;
    replay?.render(true);
   }else if(sharedWatchSelected){sharedWatchSelected=false;replay?.stop();}
-  refreshWatch();refreshSharedPremium();
+  publishRagClock();refreshWatch();refreshSharedPremium();
  };
  if(watchIndex)watchIndex.onchange=()=>{stopWatch();refreshWatch();};
  if(watchRetry)watchRetry.onclick=()=>{
@@ -506,7 +512,7 @@ export function installMarketBook(api:any) {
    const scroll=watchBody.closest?.('.mb-watch-scroll');if(scroll)scroll.scrollTop=scroll.scrollHeight;
   },500);
  };
- replay?.subscribe((frame:any)=>{sharedWatchFrame=frame;if(sharedWatch()){stopWatch();renderWatch();refreshSharedPremium();}});
+ replay?.subscribe((frame:any)=>{sharedWatchFrame=frame;if(sharedWatch()){publishRagClock();stopWatch();renderWatch();refreshSharedPremium();}});
  const recordWatch=(payload:any,canonical:any)=>{
   const snapshot=payload?.snapshot,serverAt=Date.parse(payload?.serverTime??''),asOf=Date.parse(snapshot?.asOf??'');
   const dateTime=watchStamp(serverAt),date=dateTime.slice(0,10),minute=dateTime.slice(11,16),bucket=watchIndexOf(minute);

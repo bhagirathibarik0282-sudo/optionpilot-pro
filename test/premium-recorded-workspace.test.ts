@@ -316,7 +316,7 @@ test('strike PCR is separate from Full PCR and refuses asynchronous recorded leg
  h.change('pw-minutes','3');assert.match(h.node('pw-results').innerHTML,/separate from Full PCR">PCR —/);
 });
 
-test('shared premium follows recorder cursor, disables independent playback and withholds future rows and RAG outcomes',async()=>{
+test('shared premium follows recorder cursor, disables independent playback and sends selected evidence identity',async()=>{
  const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
  const state=h.state(),times=['04:00','04:03','04:06'].map(x=>'2026-10-13T'+x+':00.000Z'),key='NIFTY|2026-10-19|22000|CE';
  const at=(i:number)=>({...state,current:{NIFTY:{...state.current.NIFTY,options:state.current.NIFTY.options.filter((r:any)=>r.minute_bucket<=times[i])}},replay:{active:true,at:times[i],timeline:times,playing:false}});
@@ -325,7 +325,7 @@ test('shared premium follows recorder cursor, disables independent playback and 
  const requests=h.requests.length,calls=h.calls.length;
  h.click('pw-play');h.change('pw-at',times[2]);h.click('',{pwSource:'LIVE'});h.timers[0]();await settle();
  assert.match(h.node('pw-status').textContent,/09:33/);assert.equal(h.requests.length,requests);assert.equal(h.calls.length,calls);
- const count=h.events.filter((e:any)=>e.type==='optionpilot:rag-selection').length;h.click('',{pwRag:key});assert.equal(h.events.filter((e:any)=>e.type==='optionpilot:rag-selection').length,count);
+ const count=h.events.filter((e:any)=>e.type==='optionpilot:rag-selection').length;h.click('',{pwRag:key});assert.equal(h.events.filter((e:any)=>e.type==='optionpilot:rag-selection').length,count+1);assert.equal(h.events.findLast((e:any)=>e.type==='optionpilot:rag-selection').detail.time,'09:33');
  h.setShared(at(0));h.click('',{pwRecords:key});assert.match(h.node('pw-records').innerHTML,/1 source rows/);
  h.setShared(at(2));assert.match(h.node('pw-status').textContent,/09:36/);
  h.setShared(null);assert.doesNotMatch(h.node('pw-status').textContent,/SHARED REPLAY/);assert.equal(h.node('pw-play').disabled,false);

@@ -40,7 +40,7 @@ async function recorded(request, response) {
   const path = new URL(request.url || '/', 'http://localhost').pathname;
   if (!(path === '/banknifty-shadow' || path === '/recorded-dashboard' || path.startsWith('/api/research/recorded-dashboard/') ||
       (!status().shouldRun && (path === '/' || path === '/api/research/business-dashboard/view' ||
-        ['/api/research/rag-event-evidence','/api/research/rag-event-evidence/view','/api/research/rag-same-dte-history'].includes(path))))) return false;
+        ['/api/research/rag-event-evidence','/api/research/rag-event-evidence/view','/api/research/rag-same-dte-history','/api/research/h1-theory-dates','/api/research/h1-replay','/api/research/dashboard-watch/oi-history','/api/research/background-quotes/history','/api/research/intraday-memory','/api/research/fii-dii/production-readiness'].includes(path))))) return false;
   archiveHandler ||= import('../recorded-dashboard-http.ts').then(module => module.createRecordedDashboardHandler());
   try { return await (await archiveHandler)(request, response, status()); }
   catch { reply(response, 503, { error: 'RECORDED_VIEW_UNAVAILABLE' }); return true; }

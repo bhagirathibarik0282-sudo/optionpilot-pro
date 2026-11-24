@@ -11,8 +11,8 @@ async function serve(t:any,dependencies:any={},shouldRun=false){
  await once(server,'listening');t.after(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
  return 'http://127.0.0.1:'+(server.address() as any).port;
 }
-test('saved viewer works before/after hours and at the normal dashboard address after close',async t=>{
- const url=await serve(t);for(const path of ['/','/recorded-dashboard','/api/research/business-dashboard/view']){const r=await fetch(url+path);assert.equal(r.status,200);assert.equal(r.headers.get('x-optionpilot-mode'),'RECORDED_READ_ONLY');assert.match(await r.text(),/All recorded days/);}
+test('unified terminal and legacy saved viewer work at their existing addresses after close',async t=>{
+ const url=await serve(t);for(const path of ['/','/recorded-dashboard','/api/research/business-dashboard/view']){const r=await fetch(url+path);assert.equal(r.status,200);assert.equal(r.headers.get('x-optionpilot-mode'),'RECORDED_READ_ONLY');const html=await r.text();assert.match(html,/All recorded days/);if(path!=='/recorded-dashboard'){assert.match(html,/id="op-recorded-mode"/);assert.match(html,/id="mb-live-watch" open/);assert.match(html,/id="mb-watch-chart"/);assert.match(html,/id="mb-shared-memory"/);assert.match(html,/const recordedOnly=true/);}}
  assert.equal((await fetch(url+'/api/orders')).status,404);
 });
 test('every archive route rejects writes and a 60+ minute request never queries storage',async t=>{
@@ -58,7 +58,7 @@ test('after-hours dashboard embeds the same evidence panel without navigating to
 
 test('after-hours main dashboard shows an honest BANKNIFTY SHADOW status without starting a worker',async t=>{
  const url=await serve(t,{},false);
- for(const path of ['/','/api/research/business-dashboard/view','/recorded-dashboard']){
+ for(const path of ['/recorded-dashboard']){
   const r=await fetch(url+path);assert.equal(r.status,200);
   const html=await r.text();
   assert.equal((html.match(/id="ar-bnf-shadow"/g)||[]).length,1);
@@ -131,3 +131,32 @@ test('after-hours market dashboard links to the dedicated SHADOW page without la
  const html=await response.text();assert.match(html,/BANKNIFTY · SHADOW PAPER/);assert.match(html,/est = estimated/);
  assert.equal(reads,0);assert.equal((await fetch(url+'/banknifty-shadow',{method:'POST'})).status,405);
  });
+
+
+test('off-hours unified terminal routes admit only bounded GET readback without invoking the market runtime',async t=>{
+ let calls:any[]=[];
+ const date='2025-10-30';
+ const url=await serve(t,{
+  dates:async()=>({ok:true,dates:[{symbol:'NIFTY',tradeDate:date}]}),
+  replay:async(request:any,provenance:any)=>{calls.push({request,provenance});return {ok:true,request,market:[],options:[],chain:[],canonical:[]};},
+  oiHistory:async(d:string)=>{calls.push(['oi',d]);return {date:d,rows:[]};},
+  quoteHistory:async(d:string)=>{calls.push(['quotes',d]);return {date:d,snapshots:[]};},
+  memory:async(d:string,s:string)=>{calls.push(['memory',d,s]);return {ok:true,tradeDate:d,events:[],responses:[],availability:{events:{},responses:{}}};},
+  cash:async()=>{calls.push(['cash']);return {status:200,body:{ok:true,contextOnly:true}};}
+ });
+ const paths=['/api/research/h1-theory-dates','/api/research/dashboard-watch/oi-history?date='+date,'/api/research/background-quotes/history?date='+date,'/api/research/intraday-memory?date='+date+'&symbol=NIFTY','/api/research/fii-dii/production-readiness'];
+ for(const path of paths){const r=await fetch(url+path);assert.equal(r.status,200,path);assert.equal(r.headers.get('x-optionpilot-mode'),'RECORDED_READ_ONLY');assert.equal((await fetch(url+path,{method:'POST'})).status,405);}
+ const route='/api/research/h1-replay?symbol=NIFTY&date='+date+'&from=09:15&to=11:15&scope=CORE&format=compact&canonical=pcr-provenance';
+ const r=await fetch(url+route);assert.equal(r.status,200);assert.equal((await r.json()).canonicalProjection,'PCR_PROVENANCE_V1');
+ assert.equal(calls.at(-1).request.scope,'CORE');assert.equal(calls.at(-1).provenance,true);
+ const before=calls.length;
+ for(const path of [route.replace('11:15','11:16'),route.replace('scope=CORE','scope=FULL'),route.replace('&canonical=pcr-provenance',''),'/api/research/intraday-memory?date=2025-02-30','/api/research/background-quotes/history?date='+date+'&symbol=WRONG'])assert.equal((await fetch(url+path)).status,400,path);
+ assert.equal((await fetch(url+route,{method:'POST'})).status,405);assert.equal(calls.length,before);
+ assert.equal((await fetch(url+'/api/research/background-quotes')).status,404);
+ assert.equal((await fetch(url+'/api/orders')).status,404);
+});
+test('operating-hours dashboard routes stay with the existing market child',async t=>{
+ const url=await serve(t,{},true);
+ for(const path of ['/','/api/research/business-dashboard/view','/api/research/h1-theory-dates','/api/research/intraday-memory?date=2025-10-30'])assert.equal((await fetch(url+path)).status,404,path);
+ assert.equal((await fetch(url+'/recorded-dashboard')).status,200);
+});

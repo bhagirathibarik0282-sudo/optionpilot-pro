@@ -31,7 +31,11 @@ test('off-hours deploy has explicit maintenance health; app stays stopped', asyn
   const health = await fetch(`${url}/health`); assert.equal(health.status, 200);
   assert.equal((await health.json()).mode, 'SUPERVISOR');
   const archive=await fetch(url);assert.equal(archive.status, 200);
-  assert.match(await archive.text(), /Saved sessions & Replay/);
+  const html=await archive.text();assert.match(html,/id="op-recorded-mode"/);assert.match(html,/id="mb-live-watch" open/);assert.match(html,/id="mb-shared-memory"/);
+  const old=await fetch(url+'/recorded-dashboard');assert.equal(old.status,200);assert.match(await old.text(),/Saved sessions & Replay/);
+  assert.equal((await fetch(url+'/api/research/h1-replay?symbol=WRONG')).status,400);
+  assert.equal((await fetch(url+'/api/research/intraday-memory?date=invalid')).status,400);
+  assert.equal((await fetch(url+'/api/research/fii-dii/production-readiness',{method:'POST'})).status,405);
   assert.equal(instance.status().running,false,'viewing recordings cannot start the market child');
   assert.equal((await fetch(`${url}/ops/runtime-window`, { method: 'POST', body: '{"minutes":30}' })).status, 401);
 });

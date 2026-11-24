@@ -1,5 +1,5 @@
 import {projectSharedEventMemory,buildSharedEventTimeline,buildSharedEventComparison} from './shared-event-memory-view.js';
-import {evaluateEventBuyerHypothesis} from './event-buyer-hypothesis.js';
+import {evaluateEventBuyerHypothesis,BUYER_TIMING_POLICIES} from './event-buyer-hypothesis.js';
 /** Offline read-only batch evaluator. One explicit preselected expiry pair per
  * index/date. Counts sampled outcomes, not fills or portfolio trades.
  * No reconstruction of missing minutes or retrospective event admission. */
@@ -7,7 +7,7 @@ export function auditEventBuyerSession(input:any){
  const date=input?.date,symbol=input?.symbol,expiries=input?.expiries,raw=input?.recorded,memory=input?.memory;
  const validDate=(x:any)=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x+'T00:00:00Z'))&&new Date(Date.parse(x+'T00:00:00Z')).toISOString().slice(0,10)===x;
  const valid=validDate(date)&&['NIFTY','SENSEX','BANKNIFTY'].includes(symbol)&&Array.isArray(expiries)&&expiries.length===2&&expiries.every((x:any)=>validDate(x)&&x>=date)&&expiries[0]<expiries[1];
- const out:any={date,symbol,expiries,status:'UNAVAILABLE',expectedMinutes:376,trueMarketMinutes:0,eligibleSavedEvents:0,excludedSavedEvents:null,results:[],netPnl:null,profitFactor:null,portfolioDrawdown:null,verifiedFills:0};
+ const out:any={date,symbol,expiries,status:'UNAVAILABLE',expectedMinutes:376,trueMarketMinutes:0,eligibleSavedEvents:0,excludedSavedEvents:null,results:[],timingResults:[],timingComparison:null,netPnl:null,profitFactor:null,portfolioDrawdown:null,verifiedFills:0};
  if(!valid){out.reason='INVALID_PRESELECTED_EXPIRIES_OR_IDENTITY';return out;}
  if(raw?.ok!==true||raw.request?.symbol!==symbol||raw.request?.tradeDate!==date||!Array.isArray(raw.market)||!Array.isArray(raw.options)||!Array.isArray(raw.chain)||memory?.ok!==true||memory.tradeDate!==date||!memory.availability||!Array.isArray(memory.events)||!Array.isArray(memory.responses)){out.reason='RAW_REPLAY_OR_MEMORY_UNAVAILABLE';return out;}
  const open=Date.parse(date+'T09:15:00+05:30'),close=Date.parse(date+'T15:30:00+05:30');
@@ -28,6 +28,12 @@ export function auditEventBuyerSession(input:any){
   // Expiry pair is supplied externally before outcome evaluation. Never pick
   // the better-performing expiry or substitute a nearby strike.
   const pairs=buildSharedEventComparison(state,event,known,null,expiries[1],buildSharedEventTimeline);
+  for(const policy of BUYER_TIMING_POLICIES){
+   for(const r of evaluateEventBuyerHypothesis(state,event,known,pairs,buildSharedEventTimeline,policy)){
+    const points=r.status==='OBSERVED_EXIT'&&r.entry&&r.exit?r.exit.price-r.entry.price:null;
+    out.timingResults.push({...r,eventKey:original.memoryKey,eventAt:original.at,eventStoredAt:known,sampledPremiumPoints:points,sampledR:points===null?null:points/r.riskPoints});
+   }
+  }
   for(const r of evaluateEventBuyerHypothesis(state,event,known,pairs,buildSharedEventTimeline)){
    const points=r.status==='OBSERVED_EXIT'&&r.entry&&r.exit?r.exit.price-r.entry.price:null;
    out.results.push({...r,eventKey:original.memoryKey,eventAt:original.at,eventStoredAt:known,sampledPremiumPoints:points,sampledR:points===null?null:points/r.riskPoints});
@@ -36,6 +42,12 @@ export function auditEventBuyerSession(input:any){
  out.counts={candidates:out.results.length,entries:out.results.filter((r:any)=>r.entry).length,closed:out.results.filter((r:any)=>r.status==='OBSERVED_EXIT').length,unverified:out.results.filter((r:any)=>r.status==='UNVERIFIED').length,noCandidate:out.results.filter((r:any)=>r.status==='NO_CANDIDATE').length};
  const closed=out.results.filter((r:any)=>typeof r.sampledPremiumPoints==='number');
  out.sampled={wins:closed.filter((r:any)=>r.sampledPremiumPoints>0).length,losses:closed.filter((r:any)=>r.sampledPremiumPoints<0).length,flat:closed.filter((r:any)=>r.sampledPremiumPoints===0).length,meanR:closed.length?closed.reduce((a:number,r:any)=>a+r.sampledR,0)/closed.length:null};
+ const groups=new Map<string,any[]>();for(const r of out.timingResults){const key=[r.eventKey,r.symbol,r.strike,r.expiry].join('|');const a=groups.get(key)||[];a.push(r);groups.set(key,a);}
+ const matched=[...groups.values()].filter(a=>a.length===BUYER_TIMING_POLICIES.length&&new Set(a.map(r=>r.entryPolicy)).size===BUYER_TIMING_POLICIES.length&&a.every(r=>r.status==='OBSERVED_EXIT'&&typeof r.sampledR==='number'&&Number.isFinite(r.sampledR)));
+ out.timingComparison={matchedClosedEvents:matched.length,totalEventContracts:groups.size,policies:BUYER_TIMING_POLICIES.map(policy=>{
+  const a=out.timingResults.filter((r:any)=>r.entryPolicy===policy),c=a.filter((r:any)=>r.status==='OBSERVED_EXIT'&&Number.isFinite(r.sampledR)),m=matched.flat().filter(r=>r.entryPolicy===policy);
+  return {policy,candidates:a.length,entries:a.filter((r:any)=>r.entry).length,closed:c.length,unverified:a.filter((r:any)=>r.status==='UNVERIFIED').length,noCandidate:a.filter((r:any)=>r.status==='NO_CANDIDATE').length,meanSampledR:c.length?c.reduce((v:number,r:any)=>v+r.sampledR,0)/c.length:null,matchedMeanSampledR:m.length?m.reduce((v:number,r:any)=>v+r.sampledR,0)/m.length:null};
+ }),limitations:'Matched closed subset is conditional and may be biased; compare coverage and unmatched outcomes too. No fills, costs or portfolio returns.'};
  out.limitations=['Observed independent event candidates; overlapping signals are not portfolio trades.','Three-minute archives cannot establish complete exact-minute entry/holding paths.','No verified fills or historical costs; net P&L, profit factor and portfolio drawdown withheld.','Explicit expiry selection required; source provenance and selection timing must be independently audited.'];
  return out;
 }

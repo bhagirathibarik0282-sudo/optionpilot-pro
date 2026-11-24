@@ -61,9 +61,9 @@ try {
    await page.locator('#mb-chapter').selectOption('0',{timeout:10000});
    const watch=page.locator('#mb-live-watch');
    await watch.locator(':scope > summary').click();
-   await watch.getByLabel('Metrics').selectOption('spot');
+   await watch.locator('#mb-watch-metrics').selectOption('spot');
    assert.deepEqual(await watch.locator('thead th').allTextContents(),['IST','NIFTY','BANKNIFTY','SENSEX']);
-   await watch.getByLabel('Metrics').selectOption('custom');
+   await watch.locator('#mb-watch-metrics').selectOption('custom');
    await watch.getByLabel('Full CE OI',{exact:true}).check();
    assert.equal(await watch.getByLabel('Full CE OI',{exact:true}).isChecked(),true);
    await watch.locator('#mb-watch-slot').selectOption('1');

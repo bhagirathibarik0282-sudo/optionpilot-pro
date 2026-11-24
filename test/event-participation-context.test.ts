@@ -28,3 +28,14 @@ test('stale, future, duplicate and unverified evidence is not silently promoted'
  assert.equal(d.checkpoints.find(x=>x.offset===0)!.status,'GAP');
  assert.equal(eventParticipationContext(date,'BANKNIFTY',t(0),t(3),t(1),[],cash),null);
 });
+
+test('ten stored cash dates are supported; receipt-qualified totals fail closed without substituting older dates',()=>{
+ const history=Array.from({length:11},(_,i)=>{const d='2026-11-'+String(23-i).padStart(2,'0');return {date:d,fiiNetCrore:-100,diiNetCrore:120,fetchedAt:d+'T18:00:00+05:30'};});
+ const c=(rows:any[])=>eventParticipationContext(date,'NIFTY',t(0),t(0),t(3),[],{dailyHistoryState:'VERIFIED_STORED_EOD',dailyHistory:rows})!;
+ const r=c(history).cashWindows.find(w=>w.sessions===10)!;
+ assert.equal(r.available,10);assert.equal(r.fii,-1000);assert.equal(r.receiptFii,-1000);assert.equal(r.receiptDii,1200);
+ history[0].fetchedAt=t(1);
+ const late=c(history).cashWindows.find(w=>w.sessions===10)!;
+ assert.equal(late.fii,-1000);assert.equal(late.receiptQualified,9);assert.equal(late.receiptFii,null);
+ assert.equal(c(history.slice(0,9)).cashWindows.find(w=>w.sessions===10)!.fii,null);
+});

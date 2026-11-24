@@ -40,8 +40,17 @@ function eventParticipationContext(date:string,index:string,eventAt:string,store
  // Strictly previous dates only, retrospective context; never an entry-time fact.
  const daily=cash?.dailyHistoryState==='VERIFIED_STORED_EOD'&&Array.isArray(cash.dailyHistory)?cash.dailyHistory:[];
  const seen=new Map<string,number>();for(const r of daily)seen.set(r?.date,(seen.get(r?.date)||0)+1);
- const history=daily.filter(r=>validDate(r?.date)&&r.date<date&&seen.get(r.date)===1&&num(r.fiiNetCrore)!==null&&num(r.diiNetCrore)!==null).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
- const cashWindows=[1,3,5].map(n=>{const h=history.slice(0,n);const complete=h.length===n;const fii=complete?h.reduce((a,r)=>a+r.fiiNetCrore,0):null,dii=complete?h.reduce((a,r)=>a+r.diiNetCrore,0):null;return {sessions:n,dates:h.map(r=>r.date),available:h.length,fii,dii,combined:fii===null||dii===null?null:fii+dii};});
+ const history=daily.filter(r=>validDate(r?.date)&&r.date<date&&seen.get(r.date)===1&&num(r.fiiNetCrore)!==null&&num(r.diiNetCrore)!==null).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,10);
+ const knownAt=known;
+ const cashWindows=[1,3,5,10].map(n=>{
+  const h=history.slice(0,n),complete=h.length===n;
+  const fii=complete?h.reduce((a,r)=>a+r.fiiNetCrore,0):null,dii=complete?h.reduce((a,r)=>a+r.diiNetCrore,0):null;
+  // Never substitute older days for missing receipt evidence in a window.
+  // Date eligibility is separate from fetch-time eligibility.
+  const known=h.filter(r=>{const fetched=stamp(r.fetchedAt);return Number.isFinite(fetched)&&fetched>=Date.parse(r.date+'T15:30:00+05:30')&&fetched<=knownAt;});
+  const qualified=complete&&known.length===n;
+  return {sessions:n,dates:h.map(r=>r.date),available:h.length,fii,dii,combined:fii===null||dii===null?null:fii+dii,receiptQualified:known.length,receiptFii:qualified?fii:null,receiptDii:qualified?dii:null};
+ });
  return {index,date,checkpoints:rows,cashWindows,cashStatus:'PRIOR_STORED_DATES_ONLY_PUBLICATION_TIME_UNKNOWN',researchOnly:true,affectsExecution:false,affectsVerdict:false,affectsTelegram:false,officialWeight:null,indexContribution:null};
 }
  return {eventParticipationContext,EVENT_BANK_TEAM,EVENT_BROAD_TEAM};

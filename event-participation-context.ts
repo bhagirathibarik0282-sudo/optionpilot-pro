@@ -51,7 +51,26 @@ function eventParticipationContext(date:string,index:string,eventAt:string,store
   const qualified=complete&&known.length===n;
   return {sessions:n,dates:h.map(r=>r.date),available:h.length,fii,dii,combined:fii===null||dii===null?null:fii+dii,receiptQualified:known.length,receiptFii:qualified?fii:null,receiptDii:qualified?dii:null};
  });
- return {index,date,checkpoints:rows,cashWindows,cashStatus:'PRIOR_STORED_DATES_ONLY_PUBLICATION_TIME_UNKNOWN',researchOnly:true,affectsExecution:false,affectsVerdict:false,affectsTelegram:false,officialWeight:null,indexContribution:null};
+ const oiRaw=cash?.participantOiHistoryState==='STORED_OI_READBACK'&&Array.isArray(cash.participantOiHistory)?cash.participantOiHistory:[];
+ const oiDays=oiRaw.filter((r:any)=>validDate(r?.date)&&r.date<date).sort((a:any,b:any)=>b.date.localeCompare(a.date)).slice(0,11);
+ const groups=['FII','DII','PRO','CLIENT'],fields=['futureLong','futureShort','callLong','callShort','putLong','putShort'];
+ const eligible=(d:any)=>{
+  if(!d||d.complete!==true||oiDays.filter((r:any)=>r.date===d.date).length!==1||!Array.isArray(d.participants)||d.participants.length!==4)return null;
+  const entries=groups.map(participant=>{
+   const matches=d.participants.filter((r:any)=>r?.participant===participant);if(matches.length!==1)return null;
+   const p=matches[0],f=stamp(p.fetchedAt),u=stamp(p.updatedAt);
+   if(!(f>=Date.parse(d.date+'T15:30:00+05:30')&&u>=f&&u<=knownAt)||!fields.every(k=>Number.isSafeInteger(p[k])&&p[k]>=0))return null;
+   return {participant,futureLong:p.futureLong,futureShort:p.futureShort,callLong:p.callLong,callShort:p.callShort,putLong:p.putLong,putShort:p.putShort,futureNet:p.futureLong-p.futureShort,callNet:p.callLong-p.callShort,putNet:p.putLong-p.putShort};
+  });
+  return entries.every(Boolean)?entries:null;
+ };
+ const latest=oiDays[0],currentOi=eligible(latest);
+ const positionWindows=[1,3,5,10].map(n=>{
+  const prior=oiDays[n],base=eligible(prior);
+  return {sessions:n,date:prior?.date||null,changes:currentOi&&base?currentOi.map((p:any,i:number)=>({participant:p.participant,futureLong:p.futureLong-base[i]!.futureLong,futureShort:p.futureShort-base[i]!.futureShort,futureNet:p.futureNet-base[i]!.futureNet,callNet:p.callNet-base[i]!.callNet,putNet:p.putNet-base[i]!.putNet})):[]};
+ });
+ const participantOi={date:latest?.date||null,positions:currentOi||[],windows:positionWindows,availableDates:oiDays.length,scope:'NSE_AGGREGATE_INDEX_CONTRACTS',status:currentOi?'RECORDED_FETCH_AND_UPDATE_CUTOFF':'UNAVAILABLE'};
+ return {index,date,checkpoints:rows,cashWindows,participantOi,cashStatus:'PRIOR_STORED_DATES_ONLY_PUBLICATION_TIME_UNKNOWN',researchOnly:true,affectsExecution:false,affectsVerdict:false,affectsTelegram:false,officialWeight:null,indexContribution:null};
 }
  return {eventParticipationContext,EVENT_BANK_TEAM,EVENT_BROAD_TEAM};
 }

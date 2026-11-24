@@ -39,3 +39,12 @@ test('ten stored cash dates are supported; receipt-qualified totals fail closed 
  assert.equal(late.fii,-1000);assert.equal(late.receiptQualified,9);assert.equal(late.receiptFii,null);
  assert.equal(c(history.slice(0,9)).cashWindows.find(w=>w.sessions===10)!.fii,null);
 });
+
+test('prior participant OI requires all four categories and stored fetch/update clocks',()=>{
+ const day=(date:string,long:number)=>({date,complete:true,participants:['FII','DII','PRO','CLIENT'].map(participant=>({participant,fetchedAt:date+'T18:00:00+05:30',updatedAt:date+'T18:01:00+05:30',futureLong:long,futureShort:40,callLong:50,callShort:20,putLong:0,putShort:30}))});
+ const days=[day('2026-11-23',100),day('2026-11-20',90),day(date,999)];
+ const read=()=>eventParticipationContext(date,'NIFTY',t(0),t(0),t(3),[],{participantOiHistoryState:'STORED_OI_READBACK',participantOiHistory:days})!.participantOi;
+ let p=read();assert.equal(p.date,'2026-11-23');assert.equal(p.positions[0]?.futureNet,60);assert.equal(p.positions[0]?.putNet,-30);assert.equal(p.windows[0].changes[0]?.futureLong,10);assert.equal(p.windows[1].changes.length,0);
+ days[0].participants[0].updatedAt=t(1);assert.equal(read().positions.length,0);
+ days[0].participants[0].updatedAt='2026-11-23T18:01:00+05:30';days[0].participants.pop();assert.equal(read().positions.length,0);
+});

@@ -388,7 +388,7 @@ export function installMarketBook(api:any) {
    (date?date+' · ':'')+watchState+backfillStatus;
   const totalsStatus=!isShared&&totals&&date?(oiHistory?.error?' · Archived totals read failed':!oiHistory?.loadedAt?' · Loading archived totals':
    isReplay&&!multis.some(m=>m.oi?.size)?' · Archived Full CE/PE totals were not recorded':''):'';
-  const status=label+totalsStatus+(isShared?' · Full OI: source + storage time gated · ±7: exact 30-leg sample · sector cache withheld'+(oiHistory?.error?' · OI archive read failed':''):sector&&date?(sectorStatus?.error?' · Sector read failed':sectorStatus?.loadedAt?'':' · Loading sector quotes'):'')+(!metrics.length?' · Select a metric':'');
+  const status=label+totalsStatus+(isShared?' · Recorded row/marker cutoff (commit time unverified) · Full OI: source + storage time gated · ±7: exact 30-leg sample · sector cache withheld'+(oiHistory?.error?' · OI archive read failed':''):sector&&date?(sectorStatus?.error?' · Sector read failed':sectorStatus?.loadedAt?'':' · Loading sector quotes'):'')+(!metrics.length?' · Select a metric':'');
   if(watchStatus.textContent!==status)watchStatus.textContent=status;
   const head='<th scope="col">IST</th>'+(indexFields.length?indices.map(index=>'<th scope="col">'+index+'</th>').join(''):'')+
    (showVix?'<th scope="col">India VIX</th>':'')+(sector?'<th scope="col">Sector movers <small>vs previous close</small></th>':'');

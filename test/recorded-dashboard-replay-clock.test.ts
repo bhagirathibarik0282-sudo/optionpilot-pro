@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {projectDashboardReplay,replayWatchMinute,sharedFullOiRows,sharedBandOiRows} from '../recorded-dashboard-replay-clock.ts';
 const date='2026-11-20', t=(m:number)=>new Date(Date.parse(date+'T09:15:00+05:30')+m*60000).toISOString();
-const row=(m:number, extra:any={})=>({symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:t(m),ltp:100+m,...extra});
+const row=(m:number, extra:any={})=>({symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:t(m),backend_timestamp:t(m),created_at:t(m),truth_marker_created_at:t(m),quote_timestamp:t(m),ltp:100+m,...extra});
 function fixture(){
   const state={date,scope:'FULL',recordedDates:[date],stocks:{live:999},sectors:{future:999},cash:{future:999},ratings:[{future:999}],unknownLiveField:999};
-  const prior={...row(0),minute_bucket:'2026-11-19T10:00:00+05:30'};
+  const prior=Object.fromEntries(Object.entries(row(0)).map(([k,v])=>[['minute_bucket','backend_timestamp','created_at','truth_marker_created_at','quote_timestamp'].includes(k)?k:k,['minute_bucket','backend_timestamp','created_at','truth_marker_created_at','quote_timestamp'].includes(k)?'2026-11-19T10:00:00+05:30':v]));
   const frame={date,at:t(3),playing:true,timeline:[t(0),t(3),t(6)],current:{NIFTY:{market:[row(0),row(3),row(6)],options:[row(3),row(3,{symbol:'SENSEX'}),row(3,{truth_verdict:'PARTIAL'})],chain:[]}},history:{NIFTY:[{market:[prior,row(6)]}]}};
   return {state,frame};
 }
@@ -49,4 +49,22 @@ test('band totals are calculated from exactly 30 same-snapshot legs, never full 
  assert.equal(read(options.slice(1)),undefined);
  for(const change of [{snapshot_id:'X'},{quote_timestamp:t(1)},{quote_age_seconds:31},{oi:-1},{strike:99999},{atm_offset:null}])assert.equal(read([{...options[0],...change},...options.slice(1)]),undefined);
  assert.equal(read([options[1],...options.slice(1)]),undefined);
+});
+
+test('actual 20 Nov 09:20 market clocks: no early display, missing clocks fail closed',()=>{
+ const {state,frame}=fixture();
+ const sample=row(5,{backend_timestamp:'2026-11-20T03:50:55.862Z',created_at:'2026-11-20T03:52:01.326238Z',truth_marker_created_at:'2026-11-20T03:52:02Z'});
+ const timeline=[t(5),t(7),t(8)];
+ const read=(at:string,market:any[],options:any[]=[],chain:any[]=[])=>projectDashboardReplay(state,{...frame,at,timeline,current:{NIFTY:{market,options,chain}}}).current.NIFTY;
+ assert.equal(read(t(5),[sample]).market.length,0);
+ assert.equal(read(t(7),[sample]).market.length,0);
+ assert.equal(read(t(8),[sample]).market.length,1);
+ assert.equal(read(t(8),[{...sample,created_at:null}]).market.length,0);
+ assert.equal(read(t(8),[{...sample,truth_marker_created_at:undefined}]).market.length,0);
+ const option=row(5,{quote_timestamp:'2026-11-20T03:50:56Z',created_at:t(9),truth_marker_created_at:t(7)});
+ assert.equal(read(t(8),[sample],[option]).options.length,0);
+ const chain=row(5,{created_at:t(7),truth_marker_created_at:t(7),full_pcr_source:'Exact archived full-chain source',full_chain_oi_pcr:1.2,full_pcr_source_timestamp:'2026-11-20T03:50:55Z',full_pcr_recorded_at:t(9)});
+ assert.equal(read(t(8),[sample],[],[chain]).chain[0].full_chain_oi_pcr,null);
+ assert.equal(read(t(8),[sample],[],[{...chain,full_pcr_recorded_at:t(7)}]).chain[0].full_chain_oi_pcr,1.2);
+ assert.equal(chain.full_chain_oi_pcr,1.2);
 });

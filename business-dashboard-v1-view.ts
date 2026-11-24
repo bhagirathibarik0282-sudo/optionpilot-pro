@@ -87,7 +87,7 @@ export function resolveRecordedFullPcr(input: any): any[] {
     const expiries=Array.isArray(c?.market?.expiries)?c.market.expiries.filter((e:any)=>/current/i.test(String(e.expiry||''))):[];
     const raw=c?.market?.gapScore?.fullChainPcr;
     const valid=expiries.length===1&&/^\d{4}-\d{2}-\d{2}$/.test(day(r.expiry))&&day(expiries[0].expiryDate)===day(r.expiry)&&typeof raw==='number'&&Number.isFinite(raw)&&raw>=0;
-    return {...r,full_chain_oi_pcr:valid?Number(raw):null,full_pcr_source:valid?'Exact archived full-chain source':'Full-chain provenance unavailable; legacy band value excluded',full_pcr_source_timestamp:valid?c?.source_timestamp||null:null};
+    return {...r,full_chain_oi_pcr:valid?Number(raw):null,full_pcr_source:valid?'Exact archived full-chain source':'Full-chain provenance unavailable; legacy band value excluded',full_pcr_source_timestamp:valid?c?.source_timestamp||null:null,full_pcr_recorded_at:valid?c?.created_at||null:null};
   });
 }
 
@@ -107,7 +107,7 @@ export function resolveRecordedOptionPdc(input:any):any[]{
   const matches=Array.isArray(qs)?qs.filter((q:any)=>q?.strike===r.strike&&q.optionType===r.option_type&&day(q.expiryDate)===day(r.expiry)):[];
   const q=matches.length===1?matches[0]:null;
   if(!q||typeof q.pdc!=='number'||!Number.isFinite(q.pdc)||q.pdc<=0||q.lastPrice!==r.ltp||!Number.isFinite(stamp(q.quoteTimestamp))||stamp(q.quoteTimestamp)!==stamp(r.quote_timestamp))return r;
-  return {...r,pdc:q.pdc,pdc_source:'EXACT_ARCHIVED_KITE_OHLC_CLOSE'};
+  return {...r,pdc:q.pdc,pdc_source:'EXACT_ARCHIVED_KITE_OHLC_CLOSE',pdc_source_timestamp:c?.source_timestamp||null,pdc_recorded_at:c?.created_at||null};
  });
 }
 

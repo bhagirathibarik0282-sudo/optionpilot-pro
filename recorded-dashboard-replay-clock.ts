@@ -6,7 +6,7 @@
 export function projectDashboardReplay(state:any, frame:any, blocked=false) {
   const symbols=['NIFTY','SENSEX','BANKNIFTY'], kinds=['market','options','chain'];
   const validDate=(v:any)=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(Date.parse(v+'T00:00:00Z')).toISOString().slice(0,10)===v;
-  const stamp=(v:any)=>typeof v==='string'?Date.parse(v):NaN;
+  const stamp=(v:any)=>typeof v==='string'&&/(?:Z|[+-]\d{2}:\d{2})$/.test(v)?Date.parse(v):NaN;
   const day=(v:any)=>Number.isFinite(stamp(v))?new Date(stamp(v)+19800000).toISOString().slice(0,10):null;
   const date=validDate(state.loadingDate)&&state.archiveLoading?state.loadingDate:validDate(frame?.date)?frame.date:validDate(state.date)?state.date:'';
   const cutoff=stamp(frame?.at);
@@ -14,12 +14,33 @@ export function projectDashboardReplay(state:any, frame:any, blocked=false) {
   const ready=!blocked&&!state.archiveLoading&&date===state.date&&frame?.date===date&&Number.isFinite(cutoff)&&day(frame.at)===date&&timeline.some(t=>stamp(t)===cutoff);
   const rowValid=(r:any,s:string)=>r?.symbol===s&&r.truth_verdict==='TRUE'&&Number.isFinite(stamp(r.minute_bucket));
   const rows=(v:any)=>Array.isArray(v)?v:[];
+  // Recorded row and marker clocks are lower bounds on availability, not
+  // proof of transaction commit, exchange freshness or immutable history.
+  const known=(r:any,k:string)=>{
+    const bucket=stamp(r.minute_bucket),stored=stamp(r.created_at),marker=stamp(r.truth_marker_created_at);
+    if(!(bucket<=cutoff&&stored>=bucket&&stored<=cutoff&&marker>=bucket&&marker<=cutoff))return false;
+    if(k==='market'){const receipt=stamp(r.backend_timestamp);return receipt>=bucket&&receipt<=stored;}
+    if(k==='options'){const quote=stamp(r.quote_timestamp);return day(r.quote_timestamp)===day(r.minute_bucket)&&quote<=stored;}
+    return true;
+  };
+  const derivedKnown=(source:any,recorded:any,bucket:any)=>{
+    const t=stamp(source),r=stamp(recorded),b=stamp(bucket);
+    return t>=b&&t<b+60000&&r>=t&&r<=cutoff;
+  };
+  const sanitize=(r:any,k:string)=>{
+    if(k==='chain'&&r.full_pcr_source==='Exact archived full-chain source'&&!derivedKnown(r.full_pcr_source_timestamp,r.full_pcr_recorded_at,r.minute_bucket))
+      return {...r,full_chain_oi_pcr:null,full_pcr_source:'Archive source not yet available at cursor'};
+    if(k==='options'&&r.pdc_source==='EXACT_ARCHIVED_KITE_OHLC_CLOSE'&&!derivedKnown(r.pdc_source_timestamp,r.pdc_recorded_at,r.minute_bucket))
+      return {...r,pdc:null,pdc_source:'Archive source not yet available at cursor'};
+    return r;
+  };
+  const project=(v:any,s:string,prior=false)=>Object.fromEntries(kinds.map(k=>[k,rows(v?.[k]).filter((r:any)=>rowValid(r,s)&&(prior?day(r.minute_bucket)!==null&&String(day(r.minute_bucket))<date:day(r.minute_bucket)===date)&&known(r,k)).map((r:any)=>sanitize(r,k))]));
   const current:any={},history:any={},baseline:any={},health:any={};
   for(const s of symbols){
-    current[s]=Object.fromEntries(kinds.map(k=>[k,ready?rows(frame.current?.[s]?.[k]).filter((r:any)=>rowValid(r,s)&&day(r.minute_bucket)===date&&stamp(r.minute_bucket)<=cutoff):[]]));
-    history[s]=ready?rows(frame.history?.[s]).map((h:any)=>Object.fromEntries(kinds.map(k=>[k,rows(h?.[k]).filter((r:any)=>rowValid(r,s)&&day(r.minute_bucket)!==null&&String(day(r.minute_bucket))<date)]))):[];
+    current[s]=ready?project(frame.current?.[s],s):Object.fromEntries(kinds.map(k=>[k,[]]));
+    history[s]=ready?rows(frame.history?.[s]).map((h:any)=>project(h,s,true)):[];
     baseline[s]=null;
-    health[s]={state:ready?'REPLAY':'UNAVAILABLE',freshness:{state:ready?'RECORDED':'UNAVAILABLE',latestAt:ready?frame.at:null},message:ready?'Recorded playback; no live substitution':'Replay frame unavailable'};
+    health[s]={state:ready?'REPLAY':'UNAVAILABLE',freshness:{state:ready?'RECORDED':'UNAVAILABLE',latestAt:ready?frame.at:null},message:ready?'Recorded row/marker availability cutoff; commit time unverified; no live substitution':'Replay frame unavailable'};
   }
   // Explicit allowlist of the production dashboard state fields. Do not spread
   // live state or retrospective derived events into a historical frame.

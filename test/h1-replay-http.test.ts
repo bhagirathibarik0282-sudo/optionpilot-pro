@@ -84,7 +84,7 @@ test('replay freezes one latest-marker lookup for all normalized tables and expo
  const read=async(sql:string,params:unknown[])=>{calls.push({sql,params});return (sql.includes("kind = 'H1_TRUTH_MARKER'")?markers:sql.includes('jsonb_to_recordset')?[{symbol:'NIFTY',minute_bucket:markers[0].minute_bucket,truth_verdict:'STALE'}]:[]) as any;};
  const r=await runH1ReplayRead(request,read);assert.equal(r.ok,true);assert.equal(calls.filter(c=>c.sql.includes("kind = 'H1_TRUTH_MARKER'")).length,1);
  const tableCalls=calls.filter(c=>c.sql.includes('jsonb_to_recordset'));assert.equal(tableCalls.length,3);
- for(const c of tableCalls){assert.equal(c.params[0],'NIFTY');assert.equal(c.params[1],JSON.stringify(markers));assert.equal(c.params[2],'2026-10-23T09:15:00+05:30');assert.equal(c.params[3],'2026-10-23T09:15:00+05:30');assert(c.sql.includes('JOIN markers'));assert(c.sql.includes('minute_bucket <= $4::timestamptz'));}
+ for(const c of tableCalls){assert.equal(c.params[0],'NIFTY');assert.equal(c.params[1],JSON.stringify(markers));assert.equal(c.params[2],'2026-10-23T09:15:00+05:30');assert.equal(c.params[3],'2026-10-23T09:15:00+05:30');assert(c.sql.includes('JOIN markers'));assert.match(c.sql,/\.created_at, h\.created_at AS truth_marker_created_at/);assert(c.sql.includes('minute_bucket <= $4::timestamptz'));}
  assert(tableCalls.find(c=>c.sql.includes('option_snapshot_1m'))!.sql.includes('atm_offset BETWEEN -7 AND 7'));assert.equal(r.market?.[0].truth_verdict,'STALE');assert.equal(r.continuity?.truthCounts.STALE,1);assert.equal(r.counts?.markers,1);assert('markers' in r.queryTimingsMs!);
 });
 
@@ -246,7 +246,7 @@ async function replayReadHarness(missing = false, failGapRead = false) {
         calls.push(sql);
         if (sql.includes("SELECT 'market'::text AS source")) return failGapRead ? null : { rows: [{ source: 'option', minute_bucket: '2026-10-16T03:48:00.000Z', row_count: '12' }] };
         if (sql.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'")) return { rows: observed };
-        if (sql.includes('SELECT minute_bucket, truth_verdict FROM markers')) return { rows: missing ? observed : [...observed, { ...observed[0], minute_bucket: '2026-10-16T03:48:00.000Z' }] };
+        if (sql.includes('SELECT minute_bucket, truth_verdict, created_at FROM markers')) return { rows: missing ? observed : [...observed, { ...observed[0], minute_bucket: '2026-10-16T03:48:00.000Z' }] };
         return { rows: observed };
       },
     } : { standardIndexObservationClose: () => '15:30' },

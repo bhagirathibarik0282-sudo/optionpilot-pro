@@ -236,7 +236,7 @@ export function canonicalReplayReadSql(canonicalPcrOnly=false,paired=false,appli
     SELECT p."minuteBucket"::timestamptz AS minute_bucket,
       p.symbol AS symbol, p."snapshotId" AS snapshot_id,
       p."truthVerdict" AS truth_verdict, p."sourceTimestamp" AS source_timestamp,
-      p."calculationVersion" AS calculation_version,
+      p."calculationVersion" AS calculation_version, app_state_log.created_at AS created_at,
       ${clientOrder?'((EXTRACT(EPOCH FROM p."minuteBucket"::timestamptz)*1000000)::bigint)::text AS __h1_source_order_us,':''}
       ${canonicalPcrOnly?"payload->'market' AS raw_market":"payload->'market' AS market"}
     FROM app_state_log
@@ -250,7 +250,7 @@ export function canonicalReplayReadSql(canonicalPcrOnly=false,paired=false,appli
       AND ${archiveWindowSql('p."minuteBucket"',paired)}
     ${clientOrder?'':'ORDER BY p."minuteBucket"::timestamptz ASC'}
     ${canonicalPcrOnly?`) SELECT minute_bucket, symbol, snapshot_id, truth_verdict,
-      source_timestamp, calculation_version, ${canonicalPcrProjectionSql('raw_market')} AS market
+      source_timestamp, calculation_version, created_at, ${canonicalPcrProjectionSql('raw_market')} AS market
       FROM replay_archive ORDER BY minute_bucket ASC`:''}`;
 }
 
@@ -308,7 +308,7 @@ export async function runH1ReplayPairRead(requests:readonly [H1ReplayRequest,H1R
   const [a,b]=requests;
   if(a.symbol!==b.symbol||a.tradeDate===b.tradeDate)
     return Promise.all(requests.map(q=>runH1ReplayRead(q,read))) as Promise<[H1ReplayHttpResult,H1ReplayHttpResult]>;
-  const singleMarker=`${markerCte()} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`;
+  const singleMarker=`${markerCte()} SELECT minute_bucket, truth_verdict, created_at FROM markers ORDER BY minute_bucket ASC`;
   const singleCanonical=canonicalReplayReadSql(false,false,true);
   const params=[a.symbol,a.tradeDate,a.fromTime,a.toTime,b.tradeDate,b.fromTime,b.toTime];
   const pending=new Map<string,Promise<Record<string,unknown>[]>>();
@@ -320,7 +320,7 @@ export async function runH1ReplayPairRead(requests:readonly [H1ReplayRequest,H1R
   const forSession=(q:H1ReplayRequest):typeof rows=>async<T extends Record<string,unknown>>(sql:string,values:unknown[]):Promise<T[]>=>{
     if(sql!==singleMarker&&sql!==singleCanonical)return read<T>(sql,values);
     if(!pending.has(sql)){
-      const combined=sql===singleMarker?`${markerCte(true)} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`:canonicalReplayReadSql(false,true,true);
+      const combined=sql===singleMarker?`${markerCte(true)} SELECT minute_bucket, truth_verdict, created_at FROM markers ORDER BY minute_bucket ASC`:canonicalReplayReadSql(false,true,true);
       pending.set(sql,Promise.resolve().then(()=>read(combined,params)));
     }
     try{return (await pending.get(sql)!).filter(row=>belongs(row,q)) as T[];}
@@ -348,11 +348,11 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
   };
 
   try {
-    const markerRows = await timedRows<{ minute_bucket: unknown; truth_verdict: unknown }>("markers",
-      `${markerCte()} SELECT minute_bucket, truth_verdict FROM markers ORDER BY minute_bucket ASC`, params);
+    const markerRows = await timedRows<{ minute_bucket: unknown; truth_verdict: unknown; created_at?: unknown }>("markers",
+      `${markerCte()} SELECT minute_bucket, truth_verdict, created_at FROM markers ORDER BY minute_bucket ASC`, params);
     const cte = `WITH markers AS (
-      SELECT $1::text AS symbol, r.minute_bucket, r.truth_verdict
-      FROM jsonb_to_recordset($2::jsonb) AS r(minute_bucket timestamptz, truth_verdict text)
+      SELECT $1::text AS symbol, r.minute_bucket, r.truth_verdict, r.created_at
+      FROM jsonb_to_recordset($2::jsonb) AS r(minute_bucket timestamptz, truth_verdict text, created_at timestamptz)
     )`;
     const tableParams = [request.symbol, JSON.stringify(markerRows),
       request.tradeDate+'T'+request.fromTime+':00+05:30', request.tradeDate+'T'+request.toTime+':00+05:30'];
@@ -364,7 +364,7 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
     const [market, chain, options, canonicalRows] = await Promise.all([
       normalized("market", `${cte}
         SELECT
-          m.symbol, m.minute_bucket, h.truth_verdict,
+          m.symbol, m.minute_bucket, h.truth_verdict, m.created_at, h.created_at AS truth_marker_created_at,
           m.snapshot_id, m.exchange_timestamp, m.backend_timestamp, m.freshness_status,
           m.spot_ltp, m.spot_open, m.spot_high, m.spot_low, m.spot_prev_close,
           m.vwap, m.pdh, m.pdl, m.gap_percent,
@@ -376,7 +376,7 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
         ORDER BY m.minute_bucket ASC`, tableParams),
       normalized("chain", `${cte}
         SELECT
-          c.symbol, c.minute_bucket, h.truth_verdict,
+          c.symbol, c.minute_bucket, h.truth_verdict, c.created_at, h.created_at AS truth_marker_created_at,
           c.expiry, c.expiry_bucket, c.atm_strike,
           c.full_chain_oi_pcr, c.band7_oi_pcr, c.volume_pcr, c.max_pain,
           c.call_wall_strike, c.call_wall_oi, c.call_wall_strength, c.call_wall_distance, c.call_wall_migration,
@@ -389,7 +389,7 @@ export async function runH1ReplayRead(request: H1ReplayRequest, read: typeof row
         ORDER BY c.minute_bucket ASC, c.expiry ASC`, tableParams),
       normalized("options", `${cte}
         SELECT
-          o.symbol, o.minute_bucket, h.truth_verdict,
+          o.symbol, o.minute_bucket, h.truth_verdict, o.created_at, h.created_at AS truth_marker_created_at,
           o.snapshot_id, o.expiry, o.expiry_bucket, o.dte,
           o.strike, o.option_type, o.atm_offset, o.is_candidate, o.is_wall,
           o.ltp, o.bid, o.ask, o.spread, o.volume, o.oi, o.oi_change,

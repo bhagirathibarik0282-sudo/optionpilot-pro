@@ -476,7 +476,9 @@ test('Watch replay aligns indices, exposes a custom metric selection and preserv
  for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},offsetWidth:0});
  const custom=nodes.get('mb-watch-custom');
  let metrics=['spot','pcr','vix','ceOi','peOi','walls','levels','sector'];
- custom.querySelectorAll=()=>metrics.map(value=>({value}));
+ const checks=['spot','pcr','vix','ceOi','peOi','walls','levels','sector'].map(value=>({value,checked:true}));
+ custom.querySelectorAll=(selector:string)=>selector==='input[type="checkbox"]'?checks:metrics.map(value=>({value}));
+ const saved=new Map<string,string>();
  const other='BANKNIFTY',indices=['NIFTY',other,'SENSEX'];
  const state:any={date:tradeDate,recordedDates,current:{},history:{},baseline:{},health:{}};
  for(const [i,index] of indices.entries()){
@@ -484,7 +486,7 @@ test('Watch replay aligns indices, exposes a custom metric selection and preserv
   state.current[index]={market,chain:market.map(r=>({...r,expiry,full_chain_oi_pcr:1+i/10,full_pcr_source:i===2?'Unverified':'Exact archived full-chain source',call_wall_strike:r.spot_ltp===22000?22100:22200,put_wall_strike:21900})),options:[]};
  }
  const sectorAt=new Date(Date.parse(at(1))+10000).toISOString();
- const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math,AbortSignal,
+ const ctx:any={localStorage:{getItem:(k:string)=>saved.get(k)||null,setItem:(k:string,v:string)=>saved.set(k,v)},document:{getElementById:(id:string)=>nodes.get(id)},Date,Map,Set,Number,String,Array,Object,Math,AbortSignal,
   fetch:async(url:string)=>({ok:true,json:async()=>url.includes('/oi-history')?{date:tradeDate,rows:[{symbol:'NIFTY',sourceAt:at(3),expiry,pcr:0.5,ceOi:260,peOi:130,ceWall:22200,peWall:21900}]} : ({date:tradeDate,snapshots:[{source:'SERVER_BACKGROUND_KITE_QUOTES',tradingDate:tradeDate,timestamp:sectorAt,sectors:[{symbol:'NSE:BANK',name:'Bank',price:101,previousClose:100,exchangeTimestamp:tradeDate+' 09:16:00'}]}]})})};
  vm.createContext(ctx);vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)![1],ctx);
  ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>state,refresh(){},memory:async()=>{},setDate:(date:string,options:any)=>{ctx.selected=[date,options.fullSession];}};
@@ -507,4 +509,9 @@ test('Watch replay aligns indices, exposes a custom metric selection and preserv
  assert.match(body.innerHTML,/09:15.*09:16.*09:17.*15:30/);
  assert.doesNotMatch(head.innerHTML,/India VIX|Sector movers/);
  assert.match(body.innerHTML,/15:30<\/th>.*Gap/);
+ const chart=nodes.get('mb-watch-chart'),output=nodes.get('mb-watch-chart-output');nodes.get('mb-watch-chart-metric').value='spot';chart.open=true;chart.ontoggle();
+ assert.match(output.innerHTML,/3 \/ 376 minute samples/);assert.match(output.innerHTML,/BANKNIFTY.*2 \/ 376 minute samples/);assert.equal((output.innerHTML.match(/<path /g)||[]).length,2);
+ seek.value='0';seek.oninput();assert.doesNotMatch(output.innerHTML,/09:18 IST/);
+ nodes.get('mb-watch-slot').value='1';nodes.get('mb-watch-save').onclick();assert.equal(saved.get('optionpilot.watch.metrics.v1.1'),'["spot"]');
+ checks.forEach(c=>c.checked=true);nodes.get('mb-watch-load').onclick();assert.deepEqual(checks.filter(c=>c.checked).map(c=>c.value),['spot']);assert.match(nodes.get('mb-watch-pref-status').textContent,/Loaded set 1/);
 });

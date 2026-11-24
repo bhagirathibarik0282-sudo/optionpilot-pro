@@ -87,3 +87,14 @@ test('non-grid minute uses only exact three-minute endpoints and preserves cutof
  const calls:any[]=[];const http:any=await readSameDteHistory({symbol:s.symbol,date:s.date,expiry:s.expiry,strike:String(s.strike),side:s.side,time:'09:37'},async q=>{calls.push(q);return shifted(q.tradeDate);},async()=>({ok:true,dates:[]} as any));
  assert.equal(http.ok,true);assert.equal(calls[0].fromTime,'09:34');assert.equal(calls[0].toTime,'09:37');
 });
+
+test('as-of same-DTE comparison requires storage and truth-marker clocks for both endpoints',()=>{
+ const qualify=(r:any)=>{for(const rows of [r.market,r.options])for(const p of rows){const t=Date.parse(p.minute_bucket);p.created_at=new Date(t+90000).toISOString();p.truth_marker_created_at=new Date(t+100000).toISOString();}return r;};
+ const strict={...s,recordedAvailability:true};
+ assert.equal(compareSameDteHistory(strict,replay(),[]).ok,false);
+ const current=qualify(replay()),past=qualify(replay('2026-10-06'));
+ assert.equal(compareSameDteHistory({...strict,asOf:Date.parse('2026-10-13T09:37:00+05:30')},current,[past]).ok,false);
+ const r:any=compareSameDteHistory(strict,current,[past,replay('2026-09-29'),qualify(replay('2026-10-14'))]);
+ assert.equal(r.ok,true);assert.equal(r.availabilityMode,'RECORDED_ROW_AND_MARKER_CUTOFF');assert.equal(r.matches.length,1);assert.equal(r.matches[0].date,'2026-10-06');assert.equal(r.anchor.at.recordedAvailableAt,'2026-10-13T04:07:40.000Z');assert.equal(r.blocked.length,1);
+ past.options[1].created_at='2026-10-14T04:07:40Z';assert.equal((compareSameDteHistory(strict,current,[past]) as any).matches.length,0);
+});

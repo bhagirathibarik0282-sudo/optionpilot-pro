@@ -13,7 +13,7 @@ async function view(close='15:30'){
   fetch:async(url:string)=>{requests.push(url);if(url.endsWith('/dates'))return {ok:true,json:async()=>({ok:true,dates:['NIFTY','SENSEX','BANKNIFTY'].flatMap(symbol=>dates.map(tradeDate=>({symbol,tradeDate,markerCount:2})))})};
    const params=new URLSearchParams(url.split('?')[1]),date=params.get('date'),from=params.get('from'),to=params.get('to');
    const time=from==='09:15'?'09:15':to==='15:40'?close:null;
-   const row=time?{symbol:params.get('symbol')||'NIFTY',minute_bucket:date+'T'+time+':00+05:30',truth_verdict:'TRUE',snapshot_id:'snap_'+time,backend_timestamp:date+'T'+time+':24+05:30',spot_ltp:time==='09:15'?23000:23100,future_ltp:23120,india_vix:12}:null;
+   const row=time?{symbol:params.get('symbol')||'NIFTY',minute_bucket:date+'T'+time+':00+05:30',truth_verdict:'TRUE',snapshot_id:'snap_'+time,backend_timestamp:date+'T'+time+':24+05:30',created_at:date+'T'+(time==='09:15'?'09:17:00':time+':30')+'+05:30',truth_marker_created_at:date+'T'+(time==='09:15'?'09:17:00':time+':30')+'+05:30',spot_ltp:time==='09:15'?23000:23100,future_ltp:23120,india_vix:12}:null;
    const opts=row?['CE','PE'].map(option_type=>({...row,expiry:date!<'2026-10-30'?'2026-10-29':'2026-11-02',strike:23000,option_type,ltp:option_type==='CE'&&time!=='09:15'?170:100,quote_timestamp:date+'T'+time+':10+05:30',oi:'30000000',pdh:110,pdl:90})):[];
    const compact=(rows:any[])=>{const columns=Object.keys(rows[0]||{});return {columns,rows:rows.map(row=>columns.map(key=>row[key]))};};
    return {ok:true,json:async()=>({ok:true,market:compact(row?[row]:[]),options:compact(opts),chain:compact([])})};}};
@@ -113,4 +113,27 @@ test('ranked OI ladder uses same recorded clock, labels snapshot OI and handles 
  assert.match(panel.innerHTML,/09:15 baseline/);assert.match(panel.innerHTML,/exact comparisons/);
  h.elements.get('ar-oi-focus').value='SHED';h.elements.get('ar-oi-focus').onchange();assert.match(panel.innerHTML,/Top shedding/);
  assert.equal(h.requests.length,calls);h.elements.get('ar-reset').onclick();assert.doesNotMatch(panel.innerHTML,/15:30:10/);
+});
+
+test('off-hours as-of mode shares row availability cutoff and retains retrospective review separately',async()=>{
+ const h=await view(),n=(id:string)=>h.elements.get(id),calls=h.requests.length;
+ assert.match(n('ar-metrics').innerHTML,/23,100/);
+ n('ar-evidence-mode').value='AS_OF';n('ar-evidence-mode').onchange();
+ assert.match(n('ar-evidence-mode-note').textContent,/truth markers recorded by the cursor/);
+ assert.equal(n('ar-sixty').hidden,true);
+ assert.doesNotMatch(n('ar-metrics').innerHTML,/23,100/);
+ assert.match(n('ar-premium-output').innerHTML,/09:15 IST/);
+ assert.doesNotMatch(n('ar-premium-output').innerHTML,/15:30 IST · ₹170/);
+ assert.equal(h.events.filter(e=>e.type==='optionpilot:rag-replay-clock').at(-1).detail.active,true);
+ n('ar-reset').onclick();
+ assert.doesNotMatch(n('ar-metrics').innerHTML,/23,000/);
+ assert.doesNotMatch(n('ar-ladder').innerHTML,/data-ar-evidence=/);
+ assert.equal(h.events.filter(e=>e.type==='optionpilot:rag-replay-clock').at(-1).detail.at,'2026-10-30T03:45:00.000Z');
+ n('ar-next').onclick();
+ assert.doesNotMatch(n('ar-metrics').innerHTML,/23,100/);
+ n('ar-evidence-mode').value='RETROSPECTIVE';n('ar-evidence-mode').onchange();
+ assert.equal(n('ar-sixty').hidden,false);
+ assert.match(n('ar-metrics').innerHTML,/23,100/);
+ assert.equal(h.events.filter(e=>e.type==='optionpilot:rag-replay-clock').at(-1).detail.active,false);
+ assert.equal(h.requests.length,calls);
 });

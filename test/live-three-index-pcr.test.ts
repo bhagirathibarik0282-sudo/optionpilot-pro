@@ -271,3 +271,27 @@ test('Watch participation scopes quotes by index and uses recorded snapshots at 
  assert.match(strip.innerHTML,/09:15 IST.*HDFC Bank<\/span><strong data-move="down">-2\.00%/);
  assert.doesNotMatch(strip.innerHTML,/\+11\.00%/);
 });
+
+test('Shared Watch follows the actual recorder clock forward and backward; live events and missing frames cannot replace it',()=>{
+ const html=renderBusinessDashboardV1Html({} as any),nodes=new Map<string,any>(),handlers:any={};
+ for(const m of html.matchAll(/\bid="([^"]+)"/g))nodes.set(m[1],{value:'',innerHTML:'',textContent:'',classList:{add(){},remove(){},toggle(){}},setAttribute(){},getAttribute(){return null;},offsetWidth:0});
+ const ctx:any={document:{getElementById:(id:string)=>nodes.get(id)},window:{addEventListener:(name:string,fn:any)=>handlers[name]=fn,dispatchEvent(){}},CustomEvent:class{},setTimeout:()=>1,clearTimeout(){},Date,Map,Set,Number,String,Array,Object,Math};vm.createContext(ctx);
+ vm.runInContext([...html.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1],ctx);
+ const date='2026-10-16',at=(m:number)=>new Date(Date.parse(date+'T09:15:00+05:30')+m*60000).toISOString();
+ const market=[0,3,6].map(m=>({symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:at(m),spot_ltp:24000+m,india_vix:12}));
+ const data:any={date,recordedDates:[date],current:{NIFTY:{market,options:[],chain:[]}},history:{},baseline:{},health:{}};
+ ctx.api={derive:vm.runInContext('deriveMarketBook',ctx),getState:()=>data,refresh(){},memory:async()=>{}};
+ vm.runInContext('installMarketBook(api)',ctx);
+ const watch=nodes.get('mb-live-watch'),source=nodes.get('mb-watch-source'),body=nodes.get('mb-watch-body');
+ watch.open=true;nodes.get('mb-watch-index').value='NIFTY';nodes.get('mb-watch-metrics').value='spot';
+ source.value='Shared';source.onchange();
+ assert.match(body.innerHTML,/>09:15<\/th>/);assert.doesNotMatch(body.innerHTML,/>09:18<\/th>/);
+ assert.equal(nodes.get('mb-watch-seek').disabled,true);
+ nodes.get('rr-next').onclick();
+ assert.match(body.innerHTML,/>09:18<\/th>/);assert.doesNotMatch(body.innerHTML,/>09:21<\/th>/);
+ nodes.get('rr-prev').onclick();assert.doesNotMatch(body.innerHTML,/>09:18<\/th>/);
+ const before=body.innerHTML;handlers['optionpilot:live-context']({detail:withBand(fixture())});assert.equal(body.innerHTML,before);
+ data.archiveLoading=true;data.loadingDate='2026-10-19';watch.ontoggle();assert.equal(body.innerHTML,'');
+ data.archiveLoading=false;data.loadingDate=null;source.value='Replay';source.onchange();
+ assert.equal(nodes.get('mb-watch-seek').disabled,false);
+});

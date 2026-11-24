@@ -33,7 +33,7 @@ export function installRecordedReplay(api:any){
  function renderMinuteHistory(state:any){
   const panel=$('rr-minute-history'),table=$('rr-minute-table');
   if(!panel?.open||!table)return;
-  const records=state.current?.[symbol],key=[state.date,symbol,expiry,records?.market,records?.options,records?.chain];
+  const records=state.current?.[symbol],key=[state.date,symbol,expiry,records?.market,records?.options,records?.chain,state.replay?.at];
   if(key.every((value,i)=>value===minuteKey[i]))return;
   minuteKey=key;
   minuteRows=[];
@@ -107,15 +107,19 @@ export function installRecordedReplay(api:any){
  function render(force=false){
   const state=api.getState();if(session!==state.date){stop();session=state.date;cursor=null;expiry='';strike=undefined;selectionKey='';}
   const key=[state.date,...['NIFTY','SENSEX','BANKNIFTY'].flatMap(s=>[state.current?.[s],state.baseline?.[s],state.history?.[s]])];if(!force&&key.every((v,i)=>v===lastKey[i]))return;lastKey=key;
-  const scoped=scopeRecordedReplay(state,cursor);timeline=scoped.timeline;cursor=scoped.at;const i=timeline.indexOf(cursor||'');$('rr-seek').max=String(Math.max(0,timeline.length-1));$('rr-seek').value=String(Math.max(0,i));$('rr-seek').disabled=!timeline.length;$('rr-prev').disabled=i<=0;$('rr-next').disabled=i<0||i>=timeline.length-1;$('rr-play').disabled=timeline.length<2;
+  const rawScoped=scopeRecordedReplay(state,cursor);timeline=rawScoped.timeline;cursor=rawScoped.at;const i=timeline.indexOf(cursor||'');$('rr-seek').max=String(Math.max(0,timeline.length-1));$('rr-seek').value=String(Math.max(0,i));$('rr-seek').disabled=!timeline.length;$('rr-prev').disabled=i<=0;$('rr-next').disabled=i<0||i>=timeline.length-1;$('rr-play').disabled=timeline.length<2;
   $('rr-status').textContent=(state.date||'No session')+' · '+time(cursor)+' IST · '+(i+1)+' / '+timeline.length+' recorded steps · '+(playing?'Playing':'Paused')+' · choose session date in settings above';
-  lastPublished={...scoped,date:state.date,playing,speed:Number($('rr-speed').value||1),index:i};for(const listener of listeners)listener(lastPublished);
+  const frame={...rawScoped,date:state.date,playing,speed:Number($('rr-speed').value||1),index:i};
+  const strict=api.strictReplay?.()===true;
+  const projected=strict?api.projectReplay(state,frame):null;
+  const scoped=strict?{...rawScoped,current:projected.current,history:projected.history,at:projected.replay.at}:rawScoped;
+  lastPublished={...frame,...scoped,playing:strict?projected.replay.playing:playing};for(const listener of listeners)listener(lastPublished);
   if(embeddedActive&&!root.open)return;
   // Selector lists contain identities only; values/levels are always derived from scoped rows.
   const source=(state.current?.[symbol]?.options||[]).filter((r:any)=>r.truth_verdict==='TRUE'&&r.symbol===symbol&&Number.isFinite(Date.parse(r.minute_bucket))&&new Date(Date.parse(r.minute_bucket)+19800000).toISOString().slice(0,10)===state.date),ex=[...new Set<string>(source.map((r:any)=>String(r.expiry).slice(0,10)))].sort();
   if(!ex.includes(expiry))expiry=ex[0]||'';const strikes=[...new Set<number>(source.filter((r:any)=>String(r.expiry).slice(0,10)===expiry).map((r:any)=>Number(r.strike)).filter((v:number)=>Number.isFinite(v)&&v>0))].sort((a,b)=>a-b);if(!strikes.includes(strike!)){const spot=scoped.current[symbol].market.filter((r:any)=>r.spot_ltp!==null&&Number.isFinite(Number(r.spot_ltp))).sort((a:any,b:any)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket)).at(-1)?.spot_ltp;strike=spot===undefined?strikes[0]:strikes.reduce((best,k)=>Math.abs(k-Number(spot))<Math.abs(best-Number(spot))?k:best,strikes[0]);}
   const sk=JSON.stringify([symbol,ex,strikes]);if(sk!==selectionKey){$('rr-expiry').innerHTML=ex.map(v=>'<option>'+esc(v)+'</option>').join('');$('rr-strike').innerHTML=strikes.map(v=>'<option>'+v+'</option>').join('');selectionKey=sk;}$('rr-expiry').value=expiry;$('rr-strike').value=String(strike??'');
-  renderMinuteHistory(state);
+  renderMinuteHistory(projected||state);
   const recordedSide=$('rr-rag-side').value;
   const minute=cursor?new Date(Date.parse(cursor)+19800000).toISOString().slice(11,16):'';
   const regular3m=minute>='09:15'&&minute<='15:30'&&(Number(minute.slice(0,2))*60+Number(minute.slice(3))-555)%3===0;
@@ -123,10 +127,11 @@ export function installRecordedReplay(api:any){
     (scoped.current[symbol]?.options||[]).some((q:any)=>q.truth_verdict==='TRUE'&&q.symbol===symbol&&
        String(q.expiry).slice(0,10)===expiry&&Number(q.strike)===strike&&q.option_type===recordedSide&&
        Date.parse(q.minute_bucket)===Date.parse(cursor!));
-  const canOpen=!!state.date&&!!cursor&&regular3m&&exactQuote;
+  const canOpen=!!state.date&&!!scoped.at&&regular3m&&exactQuote;
   $('rr-rag-ladder').disabled=!canOpen;
   $('rr-rag-status').textContent=canOpen?'Exact saved '+symbol+' '+expiry+' '+strike+' '+recordedSide+' · '+minute+' IST · open retrospective read-only evidence':
    'Choose an exact TRUE 3-minute contract and saved timestamp. Missing or 1-minute-only buckets cannot be substituted.';
+  if(strict&&!scoped.at){$('rr-output').innerHTML='<p class="mb-empty">Shared replay cutoff unavailable; recorded values withheld.</p>';return;}
   if(!cursor){stop();$('rr-output').innerHTML='<p class="mb-empty">No TRUE recordings loaded. Choose a recorded session.</p>';return;}
   if($('rr-mode').value==='CANDLE'){$('rr-output').innerHTML='<p class="mb-empty">Candle · OHLC unavailable. Existing recordings contain sampled LTP, not interval Open / High / Low / Close. Select Line Graph to replay these recordings. PCR remains a line series.</p>';return;}
   const cards=['NIFTY','SENSEX','BANKNIFTY'].map(s=>{const m=api.derive({symbol:s,tradeDate:state.date,recordedDates:state.recordedDates,current:s===symbol?{...scoped.current[s],options:scoped.current[s].options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry&&Number(r.strike)===strike),chain:scoped.current[s].chain.filter((r:any)=>String(r.expiry).slice(0,10)===expiry)}:scoped.current[s],history:scoped.history[s],window:'3m',...(s===symbol?{expiry,oppositeExpiry:expiry,strike}:{})});
@@ -136,7 +141,7 @@ export function installRecordedReplay(api:any){
    const values=[['Spot',m.spot],['Full PCR',m.pcr],['VIX',m.vix]];
    let html='<article class="mb-box"><h3>'+s+(s==='BANKNIFTY'?' · monthly observation':'')+'</h3><div class="rr-values">'+values.map(([label,v]:any)=>'<div class="mb-reading-fact"><span>'+label+'</span><strong>'+exact(v)+'</strong><small>'+detail(v)+'</small></div>').join('')+'</div><p class="mb-note">PCR expiry '+esc(m.expiry||'Unavailable')+' · CE wall '+(m.callWall?.at&&Date.parse(m.callWall.at)===Date.parse(cursor!)?fmt(m.callWall.strike):'Unavailable at cursor')+' · PE wall '+(m.putWall?.at&&Date.parse(m.putWall.at)===Date.parse(cursor!)?fmt(m.putWall.strike):'Unavailable at cursor')+'</p><h4>Spot</h4>'+chart(m.spot.points,'#49f4ff',cursor!)+'<h4>Full PCR · separate scale</h4>'+chart(m.pcr.points,'#ffb58e',cursor!)+'<h4>India VIX</h4>'+chart(scoped.current[s].market.map((r:any)=>({at:r.minute_bucket,value:r.india_vix??null})),'#d8a6ff',cursor!)+'<p class="mb-note">Spot PDH / PDL '+fmt(m.spot.pdh)+' / '+fmt(m.spot.pdl)+' · Opening 15m sampled H/L '+fmt(m.spot.range?.high)+' / '+fmt(m.spot.range?.low)+'</p><p class="mb-note">Previous-session Fibonacci · '+fib(m.spot)+'</p>';
    if(s===symbol){html+='<p class="mb-note">Pinned '+esc(expiry)+' · strike '+esc(strike)+' · exact contracts only</p>';for(const [side,p] of [['CE',m.ce],['PE',m.pe]] as any){const identity=p.expiry===expiry&&p.strike===strike,atCursor=identity&&p.at&&Date.parse(p.at)===Date.parse(cursor!);html+='<h4>'+side+' ₹ '+(atCursor?fmt(p.value):'Unavailable at cursor')+'</h4><p class="mb-note">OI '+(atCursor?fmt(p.oi?.value):'Unavailable')+' · '+detail(p)+' · PDH '+(identity?fmt(p.pdh):'Unavailable')+' / PDL '+(identity?fmt(p.pdl):'Unavailable')+' · Opening 15m sampled H/L '+(identity?fmt(p.range?.high)+' / '+fmt(p.range?.low):'Unavailable')+'</p><p class="mb-note">Previous-session Fibonacci · '+(identity?fib(p):'Unavailable')+'</p>'+chart(identity?p.points:[],side==='CE'?'#70ff43':'#ff5369',cursor!);}}
-   return html+'</article>';});const premium=renderRecordedPremiumSession({symbol,date:state.date,cursor,strike,expiry,options:source,market:scoped.current[symbol].market,cadenceMinutes:state.date>='2026-10-19'?1:3,sessionEnd:standardIndexObservationClose(state.date),scope:$('rr-premium-scope').value||'ALL',interval:$('rr-premium-interval').value||1});$('rr-output').innerHTML='<section class="mb-box"><h3>Full-session premium · 09:15 to EOD</h3>'+premium+'</section>'+'<p class="mb-note" data-op-explanation>All three indices share the cursor. Missing endpoints stay unavailable; each chart breaks across missing observations. Expiry / strike lists are session identity metadata.</p><div class="mb-grid">'+cards.join('')+'</div>';
+   return html+'</article>';});const premium=renderRecordedPremiumSession({symbol,date:state.date,cursor,strike,expiry,options:strict?scoped.current[symbol].options:source,market:scoped.current[symbol].market,cadenceMinutes:state.date>='2026-10-19'?1:3,sessionEnd:standardIndexObservationClose(state.date),scope:$('rr-premium-scope').value||'ALL',interval:$('rr-premium-interval').value||1});$('rr-output').innerHTML='<section class="mb-box"><h3>Full-session premium · 09:15 to EOD</h3>'+premium+'</section>'+'<p class="mb-note" data-op-explanation>All three indices share the cursor. Missing endpoints stay unavailable; each chart breaks across missing observations. Expiry / strike lists are session identity metadata.</p><div class="mb-grid">'+cards.join('')+'</div>';
  }
  $('rr-play').onclick=()=>{if(playing){stop();render(true);return;}if(timeline.indexOf(cursor||'')>=timeline.length-1)cursor=timeline[0]||null;playing=true;$('rr-play').textContent='Pause';render(true);schedule();};
  $('rr-prev').onclick=()=>{stop();step(-1);};$('rr-next').onclick=()=>{stop();step(1);};$('rr-reset').onclick=()=>{stop();cursor=timeline[0]||null;render(true);};$('rr-seek').oninput=()=>{stop();cursor=timeline[Number($('rr-seek').value)]||null;render(true);};
@@ -147,6 +152,7 @@ export function installRecordedReplay(api:any){
    stop();
    const when=new Date(Date.parse(cursor)+19800000).toISOString().slice(11,16);
    const params=new URLSearchParams({symbol,date:stateDate(),expiry,strike:String(strike),side:$('rr-rag-side').value,time:when});
+   if(api.strictReplay?.()===true){window.dispatchEvent(new CustomEvent('optionpilot:rag-selection',{detail:{symbol,date:stateDate(),expiry,strike,side:$('rr-rag-side').value,time:when,lookback:3}}));return;}
    window.location.assign('/api/research/rag-event-context-ladder/view?'+params.toString());
  };
  function stateDate(){return api.getState()?.date||'';}
@@ -154,7 +160,7 @@ export function installRecordedReplay(api:any){
  $('rr-index').onchange=()=>{symbol=$('rr-index').value;expiry='';strike=undefined;render(true);};$('rr-expiry').onchange=()=>{expiry=$('rr-expiry').value;strike=undefined;render(true);};$('rr-strike').onchange=()=>{strike=Number($('rr-strike').value);render(true);};
  const minutePanel=$('rr-minute-history'),minuteTable=$('rr-minute-table');
  if(minutePanel&&minuteTable){
-  minutePanel.ontoggle=()=>renderMinuteHistory(api.getState());
+  minutePanel.ontoggle=()=>{if(api.strictReplay?.()===true)render(true);else renderMinuteHistory(api.getState());};
   minuteTable.onclick=(event:any)=>{
    const button=event.target.closest?.('[data-rr-minute]');
    const stamp=button&&minuteRows[Number(button.dataset.rrMinute)];

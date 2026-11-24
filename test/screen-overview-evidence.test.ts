@@ -24,8 +24,9 @@ function harness(width=1024) {
     querySelector: (selector: string) => selector === '.os-market-head' ? node({ textContent: selected }) :
       selector === '.os-price' ? node({ textContent: price }) : null,
   }) }));
+  const reference = node({ dataset: { recordedIndex: 'NIFTY', referenceFrom: '2026-10-27T06:03:00Z', referenceAt: '2026-10-27T06:06:00Z' } });
   nodes.set('mb-page', node({ querySelector: (selector: string) => selector.includes('Recorded notable events') ? events :
-    selector.includes('Recorder memory and replay') ? memory : null }));
+    selector.includes('Recorder memory and replay') ? memory : selector.includes('Three-index recorded overview') ? reference : null }));
   nodes.set('rd-shell',node({dataset:{stockScopes:JSON.stringify(KEY_STOCKS)}}));
   nodes.set('rd-page', node({ scrollHeight: 700 }));
   nodes.set('rd-viewport', node({ clientWidth: width, clientHeight: 800 }));
@@ -41,7 +42,7 @@ function harness(width=1024) {
   const installer = vm.runInNewContext(`(${installScreenOverview.toString()})`, context);
   const view = installer();
   return {
-    nodes, events, memory,
+    nodes, events, memory, reference,
     source(id:string,heads:string[],rows:string[][]){nodes.set(id,tableSource(heads,rows));view.refresh();},
     pcr(index:string,full:string,reportedValue:string|null,primaryOnly=false,sourceDate='',savedValue:string|null=null){
       const simple=(value:string)=>node({textContent:value});
@@ -306,4 +307,29 @@ test('vertical source PCR ladders preserve each index OI, changes and band witho
  const out=h.nodes.get('rd-pcr-table').innerHTML;
  assert.match(out,/data-rd-pcr-index="NIFTY"/);assert.match(out,/1.1/);assert.match(out,/10,000/);assert.match(out,/12,000/);assert.match(out,/\+100/);assert.match(out,/-200/);assert.match(out,/24,000 \/ 23,000/);
  assert.doesNotMatch(out,/90,000|81,000|999|888|<thead>/);
+});
+
+
+test('comparison reference retains full date and IST clocks without promising synchronized replay',()=>{
+ const h=harness(),output=h.nodes.get('rd-context-rows').innerHTML;
+ assert.match(output,/Comparison reference/);assert.match(output,/27 Oct 2026/);
+ assert.match(output,/11:33:00/);assert.match(output,/11:36:00/);
+ assert.match(output,/synchronized replay unavailable/);
+ h.select('SENSEX');assert.doesNotMatch(h.nodes.get('rd-context-rows').innerHTML,/11:36:00/);
+ assert.match(h.nodes.get('rd-context-rows').innerHTML,/Unavailable → Unavailable/);
+});
+test('missing or malformed reference endpoints are never replaced by headline clocks',()=>{
+ const h=harness();h.reference.dataset.referenceFrom='';h.reference.dataset.referenceAt='garbage';h.select('NIFTY');
+ assert.match(h.nodes.get('rd-context-rows').innerHTML,/Unavailable → Unavailable/);
+ assert.doesNotMatch(h.nodes.get('rd-context-rows').innerHTML,/11:36:00/);
+});
+test('recorded section clocks explain independent and retrospective evidence',()=>{
+ const h=harness();
+ assert.match(h.nodes.get('rd-levels-table').innerHTML,/simultaneous observations are unverified/);
+ assert.match(h.nodes.get('rd-premium-table').innerHTML,/missing clock stays unavailable/);
+ assert.match(h.nodes.get('rd-event-table').innerHTML,/not event-time knowledge/);
+ assert.match(h.nodes.get('rd-memory-table').innerHTML,/not a synchronized replay frame/);
+ h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.select('NIFTY');
+ assert.doesNotMatch(h.nodes.get('rd-context-rows').innerHTML,/Comparison reference/);
+ assert.doesNotMatch(h.nodes.get('rd-premium-table').innerHTML,/Source clocks/);
 });

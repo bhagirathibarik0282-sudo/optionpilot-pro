@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { H1ReplayHttpResult } from './h1-replay-http.js';
 import { resolveIndexExpiryClock } from './index-expiry-clock.js';
 
-export type SameDteSelection = { symbol:string; date:string; expiry:string; strike:number; side:'CE'|'PE'; timeIst:string; asOf:number };
+export type SameDteSelection = { symbol:string; date:string; expiry:string; strike:number; side:'CE'|'PE'; timeIst:string; asOf:number; recordedAvailability?:boolean };
 const n=(v:unknown)=> typeof v==='number'||typeof v==='string'&&v.trim()!=='' ? (Number.isFinite(Number(v))?Number(v):null):null;
 const ms=(v:unknown)=>v instanceof Date?v.getTime():Date.parse(String(v??''));
 const date=(v:unknown)=>{if(v instanceof Date)return Number.isFinite(v.getTime())?v.toISOString().slice(0,10):null;const raw=String(v??''),s=raw.slice(0,10),t=Date.parse(s+'T00:00:00Z');if(raw.length!==10&&(!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(raw)||!Number.isFinite(Date.parse(raw))))return null;return /^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(t)&&new Date(t).toISOString().slice(0,10)===s?s:null;};
@@ -20,7 +20,10 @@ function pair(replay:H1ReplayHttpResult,s:SameDteSelection,day:string,expiry:str
   if(!m||!q||m.truth_verdict!=='TRUE'||q.truth_verdict!=='TRUE'||!m.snapshot_id||m.snapshot_id!==q.snapshot_id)return null;
   const receipt=ms(m.backend_timestamp),quote=ms(q.quote_timestamp),price=n(q.ltp),spot=n(m.spot_ltp);
   if(!Number.isFinite(receipt)||!Number.isFinite(quote)||istDay(receipt)!==day||istDay(quote)!==day||receipt<t||receipt-t>30000||receipt-quote< -5000||receipt-quote>30000||Math.max(t,receipt,quote)>cutoff||price===null||price<=0||spot===null||spot<=0)return null;
-  return {bucketAt:new Date(t).toISOString(),receiptAt:new Date(receipt).toISOString(),quoteAt:new Date(quote).toISOString(),snapshotId:String(q.snapshot_id),price,spot};
+  const storageTimes=[m.created_at,m.truth_marker_created_at,q.created_at,q.truth_marker_created_at].map(ms);
+  const known=Math.max(t,receipt,quote,...storageTimes);
+  if(s.recordedAvailability&&(!storageTimes.every(v=>Number.isFinite(v)&&v>=t&&v<=cutoff)||storageTimes[0]<receipt||storageTimes[2]<quote||known>cutoff))return null;
+  return {bucketAt:new Date(t).toISOString(),receiptAt:new Date(receipt).toISOString(),quoteAt:new Date(quote).toISOString(),snapshotId:String(q.snapshot_id),price,spot,...(s.recordedAvailability?{recordedAvailableAt:new Date(known).toISOString()}: {})};
  });
  if(!points[0]||!points[1])return null;
  const [before,at]=points;
@@ -40,7 +43,7 @@ export function compareSameDteHistory(s:SameDteSelection,current:H1ReplayHttpRes
  if(minute<558||minute>930||Number(s.timeIst.slice(3))>59)return fail('EXACT_REGULAR_3M_PAIR_REQUIRED');
  const anchor=pair(current,s,s.date,s.expiry,s.strike,s.asOf);
  if(!anchor)return fail('ANCHOR_PAIR_UNAVAILABLE_AT_CUTOFF');
- const cutoff=Math.min(s.asOf,ms(anchor.at.receiptAt));
+ const cutoff=s.recordedAvailability?s.asOf:Math.min(s.asOf,ms(anchor.at.receiptAt));
  const groups=new Map<string,H1ReplayHttpResult[]>();
  for(const replay of history){const d=replay.request?.tradeDate;if(d&&date(d)&&d<s.date){const g=groups.get(d)??[];g.push(replay);groups.set(d,g);}}
  const matches: Array<NonNullable<ReturnType<typeof pair>>&{moneynessDifferenceBps:number}>=[],blocked:Array<{date:string;reason:string}>=[];
@@ -56,7 +59,7 @@ export function compareSameDteHistory(s:SameDteSelection,current:H1ReplayHttpRes
  }
  matches.sort((a,b)=>b.date.localeCompare(a.date));
  const evidence={anchor,matches};
- return {...base,ok:true,status:matches.length?'PARTIAL':'UNAVAILABLE',anchor,matches,blocked,cutoff:new Date(cutoff).toISOString(),
+ return {...base,ok:true,status:matches.length?'PARTIAL':'UNAVAILABLE',anchor,matches,blocked,cutoff:new Date(cutoff).toISOString(),...(s.recordedAvailability?{availabilityMode:'RECORDED_ROW_AND_MARKER_CUTOFF'}:{}),
   coverage:{suppliedPriorDays:groups.size,matchedDays:matches.length},
   selectionMethod:'ONE_CONTRACT_PER_DAY_CLOSEST_OBSERVED_STRIKE_TO_SPOT_RATIO; SAME_INDEX_SIDE_CALENDAR_DTE_IST_MINUTE_CLOSE_CLOCK',
   provenance:{selectedEvidenceSha256:createHash('sha256').update(JSON.stringify(evidence)).digest('hex')},

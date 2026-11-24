@@ -32,3 +32,12 @@ test('Watch OI history preserves source times, exposes only current date rows an
  assert.deepEqual(response,{date,rows:payload.rows});
  await assert.rejects(readDashboardWatchOi('2026-11-24',async()=>{throw Error('Unexpected query');},now),/INVALID_DATE/);
 });
+
+test('readback attaches valid storage timestamps without altering old payloads',async()=>{
+ const payload=dashboardWatchOiCycle(date,cycleAt,new Map([['NIFTY|'+expiry,snapshot]]))!;
+ const now=new Date(date+'T05:00:00Z'),recordedAt=date+'T03:45:22.000Z';
+ const response=await readDashboardWatchOi(date,async()=>({rows:[{payload,recorded_at:new Date(recordedAt)}]}),now);
+ assert.deepEqual(response.rows,[{...payload.rows[0],recordedAt}]);
+ const unqualified=await readDashboardWatchOi(date,async()=>({rows:[{payload,recorded_at:date+'T03:45:00Z'}]}),now);
+ assert.deepEqual(unqualified.rows,payload.rows);
+});

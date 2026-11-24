@@ -229,7 +229,7 @@ export function installDashboardWorkspace(api:any){
   if(label)label.textContent=typeof date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(date)?'Saved session · '+date+' · recorded data':'Saved session · unavailable';
  };
  const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
- const premium=installPremiumWorkspace({getState:api.getState,setDate:api.setDate,replay:api.replay});
+ const premium=installPremiumWorkspace({getState:api.getState,setDate:api.setDate,replay:api.replay,sharedReplayState:api.sharedReplayState});
  const resolveGroup=(page:number)=>groups[group].views.includes(page)?group:Math.max(0,groups.findIndex(g=>g.views.includes(page)));
  const draw=()=>{const page=api.page();group=resolveGroup(page);active=page;remembered[group]=page;
   $('market-book')?.setAttribute('data-main-chapter',String(group+1));researchScope();
@@ -509,6 +509,6 @@ export function installDashboardWorkspace(api:any){
   }).join('');
   setHtml($('op-workspace-ticker'),tickerHtml);
  }) as EventListener);
- return {render(){if(active!==api.page())draw();researchScope();oneShot?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
+ return {refreshSharedPremium(){premium?.refreshRecorded();},render(){if(active!==api.page())draw();researchScope();oneShot?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
 }
 

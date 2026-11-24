@@ -185,8 +185,61 @@ export async function runEodArchive(nowIso = new Date().toISOString()) {
   }
 }
 
+async function retryStoredArchives(dates: string[]) {
+  const today = resolveEodTradingDate(new Date().toISOString());
+  if (!dates.length || dates.some(date => !isWeekdayTradingCandidate(date) || date >= today)) {
+    throw new Error("EOD_STORED_RETRY_REQUIRES_PAST_WEEKDAY_DATES");
+  }
+
+  const pool = getPool();
+  let ok = true;
+  try {
+    for (const tradingDate of new Set(dates)) {
+      const client = await pool.connect();
+      const key = archiveKey(tradingDate);
+      try {
+        await client.query("SELECT pg_advisory_lock(hashtext($1))", [key]);
+        if (await alreadyDriveVerified(client, tradingDate)) {
+          console.log(`[EOD_ARCHIVE] already verified date=${tradingDate}`);
+          continue;
+        }
+
+        const { rows: [stored] } = await client.query<{ payload: object; record_count: string }>(`
+          SELECT p.payload, p.record_count
+          FROM eod_archive_payloads p JOIN eod_archive_runs r USING (trading_date, archive_key)
+          WHERE p.trading_date=$1::date AND p.archive_key=$2
+            AND p.payload->>'schemaVersion'='EOD_ARCHIVE_V2'
+            AND p.payload->>'tradingDate'=$1::text AND p.record_count>0
+            AND r.status IN ('POSTGRES_COMPLETED', 'DRIVE_FAILED')
+        `, [tradingDate, key]);
+        if (!stored) throw new Error("EOD_STORED_PAYLOAD_NOT_ELIGIBLE");
+
+        const drive = await uploadEodArchiveToDrive(tradingDate, JSON.stringify(stored.payload));
+        const receipt = await client.query(`
+          UPDATE eod_archive_runs SET status='DRIVE_VERIFIED', drive_file_id=$2, drive_verified_at=now(),
+            checksum_sha256=$3, archive_destination=$4, error=NULL, cleanup_allowed=true, updated_at=now()
+          WHERE trading_date=$1::date AND archive_key=$5
+        `, [tradingDate, drive.fileId, drive.checksumSha256, `GOOGLE_DRIVE:${drive.fileId}`, key]);
+        if (receipt.rowCount !== 1) throw new Error("EOD_STORED_RETRY_RECEIPT_MISSING");
+        console.log(`[EOD_ARCHIVE] stored archive verified date=${tradingDate} records=${stored.record_count} file=${drive.fileId}`);
+      } catch (err) {
+        ok = false;
+        console.error(`[EOD_ARCHIVE] stored retry failed date=${tradingDate} error=${err instanceof Error ? err.message : err}`);
+      } finally {
+        try { await client.query("SELECT pg_advisory_unlock(hashtext($1))", [key]); } catch {}
+        client.release();
+      }
+    }
+  } finally {
+    await pool.end();
+  }
+  return { ok };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runEodArchive().then((r) => {
+  const [mode, ...dates] = process.argv.slice(2);
+  const run = mode === "--retry-stored" ? retryStoredArchives(dates) : runEodArchive();
+  run.then((r) => {
     console.log(JSON.stringify(r));
     process.exit(r.ok ? 0 : 1);
   }).catch((err) => {

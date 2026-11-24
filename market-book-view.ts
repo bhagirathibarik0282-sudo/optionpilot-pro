@@ -1,3 +1,5 @@
+import { SHARED_EVENT_MEMORY_HTML, installSharedEventMemory, projectSharedEventMemory, buildSharedEventTimeline, buildSharedEventComparison } from './shared-event-memory-view.js';
+import { projectDashboardReplay, replayWatchMinute, sharedFullOiRows, sharedBandOiRows } from './recorded-dashboard-replay-clock.js';
 import { installOiWallReplay } from './oi-wall-replay.js';
 import { OI_WALL_STUDIO_HTML, OI_WALL_STUDIO_CSS, installOiWallStudio } from './oi-wall-studio.js';
 import { deriveLiveThreeIndexPcr, renderLiveThreeIndexPcr, LIVE_THREE_INDEX_PCR_CSS } from './live-three-index-pcr.js';
@@ -10,7 +12,7 @@ import { renderMarketBookReadingGuide, renderMarketBookLiveContext } from './mar
 import { RAG_CARD_HTML } from './rag-evidence-card.js';
 import { derivePremiumBreakConsensus } from './market-book-model.js';
 /** Book charts observe existing state; the separate RAG card performs manual read-only requests. */
-export const MARKET_BOOK_HTML = `<section id="market-book" aria-label="Market book">${WORKSPACE_NAV_HTML}<div class="mb-top"><div><span class="mb-kicker">OPTIONPILOT / RECORDED MARKET BOOK</span><h2>Context → change → confirmation</h2></div><button id="mb-legacy" type="button" aria-pressed="false">Show detailed terminal</button></div><details id="op-feed-detail" open><summary>LIVE · BANKNIFTY SHADOW PAPER + three-index feed</summary>${DASHBOARD_LIVE_HTML}</details><details id="mb-tools"><summary>Tools · session, replay &amp; evidence</summary><details id="mb-live-watch"><summary>Watch · Replay / Live</summary><div class="mb-controls"><label>Source<select id="mb-watch-source"><option>Replay</option><option>Live</option></select></label><label>Index<select id="mb-watch-index"><option value="ALL">All 3 indices</option><option>NIFTY</option><option>BANKNIFTY</option><option>SENSEX</option></select></label><label>Interval<select id="mb-watch-interval"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">60m</option></select></label><label>Metrics<select id="mb-watch-metrics"><option value="all">Spot + PCR + VIX</option><option value="spot">Spot</option><option value="pcr">Full OI PCR</option><option value="vix">India VIX</option><option value="spot,pcr">Spot + PCR</option><option value="spot,vix">Spot + VIX</option><option value="pcr,vix">PCR + VIX</option><option value="custom">Custom combination</option></select></label></div><fieldset id="mb-watch-custom" hidden><legend>Watch metrics</legend><label><input type="checkbox" value="spot" checked>Spot</label><label><input type="checkbox" value="pcr" checked>Full OI PCR</label><label><input type="checkbox" value="vix" checked>India VIX</label><label><input type="checkbox" value="ceOi">Full CE OI</label><label><input type="checkbox" value="peOi">Full PE OI</label><label><input type="checkbox" value="walls">CE / PE walls</label><label><input type="checkbox" value="levels">Spot PDH / PDL breaks</label><label><input type="checkbox" value="sector">Sector movers</label></fieldset><div class="mb-controls" id="mb-watch-replay"><label>Recorded date<input type="date" id="mb-watch-date"></label><button type="button" id="mb-watch-play">Play</button><label>Replay minute<input type="range" id="mb-watch-seek" min="0" max="375" value="0"></label></div><button type="button" id="mb-watch-retry" hidden>Reload recorded minutes</button><p id="mb-watch-status" role="status"></p><div id="mb-watch-participation" role="group" aria-label="Selected index participation" hidden></div><div class="mb-scroll mb-watch-scroll" tabindex="0" aria-label="Scroll minute observations"><table aria-label="Minute observations in IST"><thead><tr id="mb-watch-head"></tr></thead><tbody id="mb-watch-body"></tbody></table></div></details>${WORKSPACE_TICKER_HTML}${RAG_CARD_HTML}<details id="mb-settings"><summary>Session, expiry & strike settings</summary><div class="mb-controls"><label>Session date<input id="mb-date" type="date"></label><label>Window<select id="mb-window"><option value="1m">1 min</option><option value="3m">3 min</option><option value="5m">5 min</option><option value="6m">6 min</option><option value="15m">15 min</option><option value="30m">30 min</option><option value="60m">60 min</option><option value="1s">1 prior session</option><option value="3s">3 prior sessions</option><option value="5s">5 prior sessions</option><option value="9s">9 prior sessions</option></select></label><button id="mb-memory" type="button">Load earlier sessions · all 3</button><button id="mb-refresh" type="button">Refresh recorded data</button></div><div id="mb-selection" class="mb-controls mb-selection" aria-label="Pinned index, expiry and strike selectors"><label>Index<select id="mb-index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>CE expiry<select id="mb-expiry"></select></label><label>PE expiry<select id="mb-opposite"></select></label><label>Strike<select id="mb-strike"></select></label><label>Strike B<select id="mb-pinned-compare"></select></label></div></details><details id="mb-health-details"><summary>Data status</summary><p id="mb-health" role="status"></p></details>${RECORDED_REPLAY_HTML}</details><details id="mb-chapters"><summary>All chapters</summary><nav id="mb-nav" aria-label="Book chapters"></nav></details><div class="mb-turn"><button id="mb-prev" type="button" aria-label="Previous chapter">←</button><div class="mb-current-chapter"><span id="mb-page-count"></span><select id="mb-chapter" aria-label="Choose chapter"></select></div><span class="mb-detail-toolbar"><button id="mb-details-toggle" type="button" aria-expanded="false" aria-controls="mb-page mb-live-context op-premium-workspace">Details · Show</button></span><button id="mb-next" type="button" aria-label="Next chapter">→</button></div><p id="mb-scope" class="mb-scope" aria-live="polite"></p><details id="mb-live-context-shell" open><summary id="mb-live-title">Kite live values · Overview</summary><button id="mb-live-controls" type="button">Live expiry / strike &amp; charts</button><div id="mb-full-pcr-strip" hidden></div><div id="mb-future-metrics" class="mb-controls" role="group" aria-label="Futures live metric" hidden><button type="button" data-mb-future="ALL" aria-pressed="true">All</button><button type="button" data-mb-future="future" aria-pressed="false">LTP</button><button type="button" data-mb-future="futureOi" aria-pressed="false">OI</button><button type="button" data-mb-future="futureVolume" aria-pressed="false">Volume</button><button type="button" data-mb-future="basis" aria-pressed="false">Basis</button></div><div id="mb-live-context">Live data ଅପେକ୍ଷାରେ · recorded data ତଳେ ଅଲଗା</div></details>${PREMIUM_WORKSPACE_HTML}<div id="mb-load-status" role="status" aria-live="polite" hidden></div>${OI_WALL_STUDIO_HTML}<article id="mb-page" aria-live="polite"></article><p class="mb-foot" data-op-explanation>Read-only context. Neon green = synchronized CE-supporting change; neon red = synchronized PE-supporting change. Missing or conflicting evidence stays neutral. Premium blinking red/green describes that contract’s PDH/PDL behaviour; it is separate from index agreement. Stars describe observed agreement.</p><dialog id="mb-chart-dialog" aria-labelledby="mb-chart-title"><div class="mb-dialog-top"><h2 id="mb-chart-title">Premium chart</h2><button id="mb-chart-close" type="button">Close chart</button></div><div id="mb-chart-body"></div></dialog></section>`;
+export const MARKET_BOOK_HTML = `<section id="market-book" aria-label="Market book">${WORKSPACE_NAV_HTML}<div class="mb-top"><div><span class="mb-kicker">OPTIONPILOT / RECORDED MARKET BOOK</span><h2>Context → change → confirmation</h2></div><button id="mb-legacy" type="button" aria-pressed="false">Show detailed terminal</button></div><details id="op-feed-detail" open><summary>LIVE · BANKNIFTY SHADOW PAPER + three-index feed</summary>${DASHBOARD_LIVE_HTML}</details><details id="mb-tools"><summary>Tools · session, replay &amp; evidence</summary><details id="mb-live-watch"><summary>Watch · Replay / Live</summary><div class="mb-controls"><label>Source<select id="mb-watch-source"><option>Replay</option><option>Live</option><option value="Shared">Shared replay · recorder clock</option></select></label><label>Index<select id="mb-watch-index"><option value="ALL">All 3 indices</option><option>NIFTY</option><option>BANKNIFTY</option><option>SENSEX</option></select></label><label>Interval<select id="mb-watch-interval"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">60m</option></select></label><label>Metrics<select id="mb-watch-metrics"><option value="all">Spot + PCR + VIX</option><option value="spot">Spot</option><option value="pcr">Full OI PCR</option><option value="vix">India VIX</option><option value="spot,pcr">Spot + PCR</option><option value="spot,vix">Spot + VIX</option><option value="pcr,vix">PCR + VIX</option><option value="custom">Custom combination</option></select></label></div><fieldset id="mb-watch-custom" hidden><legend>Watch metrics</legend><label><input type="checkbox" value="spot" checked>Spot</label><label><input type="checkbox" value="pcr" checked>Full OI PCR</label><label><input type="checkbox" value="vix" checked>India VIX</label><label><input type="checkbox" value="ceOi">Full CE OI</label><label><input type="checkbox" value="peOi">Full PE OI</label><label><input type="checkbox" value="bandPcr">±7 PCR (shared replay)</label><label><input type="checkbox" value="bandCeOi">±7 CE OI (shared replay)</label><label><input type="checkbox" value="bandPeOi">±7 PE OI (shared replay)</label><label><input type="checkbox" value="walls">CE / PE walls</label><label><input type="checkbox" value="levels">Spot PDH / PDL breaks</label><label><input type="checkbox" value="sector">Sector movers</label><div class="mb-controls"><label>Saved set<select id="mb-watch-slot"><option value="1">Set 1</option><option value="2">Set 2</option><option value="3">Set 3</option></select></label><button type="button" id="mb-watch-save">Save</button><button type="button" id="mb-watch-load">Load</button></div><small id="mb-watch-pref-status" role="status"></small></fieldset><div class="mb-controls" id="mb-watch-replay"><label>Recorded date<input type="date" id="mb-watch-date"></label><button type="button" id="mb-watch-play">Play</button><label>Replay minute<input type="range" id="mb-watch-seek" min="0" max="375" value="0"></label></div><button type="button" id="mb-watch-retry" hidden>Reload recorded minutes</button><p id="mb-watch-status" role="status"></p><details id="mb-watch-chart"><summary>Individual metric chart</summary><div class="mb-controls"><label>Metric<select id="mb-watch-chart-metric"><option value="spot">Spot</option><option value="pcr">Full OI PCR</option><option value="vix">India VIX</option><option value="ceOi">Full CE OI</option><option value="peOi">Full PE OI</option><option value="bandPcr">±7 PCR</option><option value="bandCeOi">±7 CE OI</option><option value="bandPeOi">±7 PE OI</option><option value="ceWall">CE wall strike</option><option value="peWall">PE wall strike</option></select></label></div><div id="mb-watch-chart-output"></div></details><div id="mb-watch-participation" role="group" aria-label="Selected index participation" hidden></div><div class="mb-scroll mb-watch-scroll" tabindex="0" aria-label="Scroll minute observations"><table aria-label="Minute observations in IST"><thead><tr id="mb-watch-head"></tr></thead><tbody id="mb-watch-body"></tbody></table></div></details>${WORKSPACE_TICKER_HTML}${RAG_CARD_HTML}${SHARED_EVENT_MEMORY_HTML}<details id="mb-settings"><summary>Session, expiry & strike settings</summary><div class="mb-controls"><label>Session date<input id="mb-date" type="date"></label><label>Window<select id="mb-window"><option value="1m">1 min</option><option value="3m">3 min</option><option value="5m">5 min</option><option value="6m">6 min</option><option value="15m">15 min</option><option value="30m">30 min</option><option value="60m">60 min</option><option value="1s">1 prior session</option><option value="3s">3 prior sessions</option><option value="5s">5 prior sessions</option><option value="9s">9 prior sessions</option></select></label><button id="mb-memory" type="button">Load earlier sessions · all 3</button><button id="mb-refresh" type="button">Refresh recorded data</button></div><div id="mb-selection" class="mb-controls mb-selection" aria-label="Pinned index, expiry and strike selectors"><label>Index<select id="mb-index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>CE expiry<select id="mb-expiry"></select></label><label>PE expiry<select id="mb-opposite"></select></label><label>Strike<select id="mb-strike"></select></label><label>Strike B<select id="mb-pinned-compare"></select></label></div></details><details id="mb-health-details"><summary>Data status</summary><p id="mb-health" role="status"></p></details>${RECORDED_REPLAY_HTML}</details><details id="mb-chapters"><summary>All chapters</summary><nav id="mb-nav" aria-label="Book chapters"></nav></details><div class="mb-turn"><button id="mb-prev" type="button" aria-label="Previous chapter">←</button><div class="mb-current-chapter"><span id="mb-page-count"></span><select id="mb-chapter" aria-label="Choose chapter"></select></div><span class="mb-detail-toolbar"><button id="mb-details-toggle" type="button" aria-expanded="false" aria-controls="mb-page mb-live-context op-premium-workspace">Details · Show</button></span><button id="mb-next" type="button" aria-label="Next chapter">→</button></div><p id="mb-scope" class="mb-scope" aria-live="polite"></p><details id="mb-live-context-shell" open><summary id="mb-live-title">Kite live values · Overview</summary><button id="mb-live-controls" type="button">Live expiry / strike &amp; charts</button><div id="mb-full-pcr-strip" hidden></div><div id="mb-future-metrics" class="mb-controls" role="group" aria-label="Futures live metric" hidden><button type="button" data-mb-future="ALL" aria-pressed="true">All</button><button type="button" data-mb-future="future" aria-pressed="false">LTP</button><button type="button" data-mb-future="futureOi" aria-pressed="false">OI</button><button type="button" data-mb-future="futureVolume" aria-pressed="false">Volume</button><button type="button" data-mb-future="basis" aria-pressed="false">Basis</button></div><div id="mb-live-context">Live data ଅପେକ୍ଷାରେ · recorded data ତଳେ ଅଲଗା</div></details>${PREMIUM_WORKSPACE_HTML}<div id="mb-load-status" role="status" aria-live="polite" hidden></div>${OI_WALL_STUDIO_HTML}<article id="mb-page" aria-live="polite"></article><p class="mb-foot" data-op-explanation>Read-only context. Neon green = synchronized CE-supporting change; neon red = synchronized PE-supporting change. Missing or conflicting evidence stays neutral. Premium blinking red/green describes that contract’s PDH/PDL behaviour; it is separate from index agreement. Stars describe observed agreement.</p><dialog id="mb-chart-dialog" aria-labelledby="mb-chart-title"><div class="mb-dialog-top"><h2 id="mb-chart-title">Premium chart</h2><button id="mb-chart-close" type="button">Close chart</button></div><div id="mb-chart-body"></div></dialog></section>`;
 export const MARKET_BOOK_CSS = `
 .mb-research-section{min-width:0;margin:8px 0;border:1px solid #31546b;border-radius:10px;padding:8px}
 #market-book .mb-research-section h3{margin:0 0 6px;color:#79f8e9;font-size:18px}
@@ -128,7 +130,7 @@ export function installMarketBook(api:any) {
  const $=(id:string)=>document.getElementById(id) as any,root=$('market-book');if(!root)return null;
  root.setAttribute('data-op-details','hide');
  const detailsToggle=$('mb-details-toggle');if(detailsToggle)detailsToggle.onclick=()=>{const show=root.getAttribute('data-op-details')!=='show';root.setAttribute('data-op-details',show?'show':'hide');detailsToggle.setAttribute('aria-expanded',String(show));detailsToggle.textContent=show?'Details · Hide':'Details · Show';};
- const replay=installRecordedReplay(api);
+ const replay=installRecordedReplay({...api,strictReplay:()=>$('mb-watch-source')?.value==='Shared',projectReplay:projectDashboardReplay});
  const oiStudio=installOiWallStudio();
  const oiReplay=installOiWallReplay(api,replay);
  // Both sources share the same IST grid. Each metric requires evidence in that minute.
@@ -139,6 +141,22 @@ export function installMarketBook(api:any) {
  const watchGap=emptyWatchRow();
  const watchPanel=$('mb-live-watch'),watchIndex=$('mb-watch-index'),watchSource=$('mb-watch-source');
  const watchSeek=$('mb-watch-seek'),watchPlay=$('mb-watch-play'),watchRetry=$('mb-watch-retry'),watchDateInput=$('mb-watch-date');
+ let sharedWatchFrame:any=null,sharedWatchSelected=false;
+ const sharedWatch=()=>watchSource?.value==='Shared';
+ let sharedProjection:any=null,sharedProjectionKey:any[]=[],refreshSharedPremium=()=>{};
+ const watchStateAtCursor=()=>{
+  const state=api.getState();if(!sharedWatch())return state;
+  const key=[sharedWatchFrame,state.date,state.scope,state.archiveLoading,state.loadingDate,state.recordedDates];
+  if(!sharedProjection||key.some((v,i)=>v!==sharedProjectionKey[i])){sharedProjectionKey=key;sharedProjection=projectDashboardReplay(state,sharedWatchFrame);}
+  return sharedProjection;
+ };
+ const sharedEventMemory=installSharedEventMemory(()=>{const s=sharedWatch()?watchStateAtCursor():null;return {active:!!s,date:s?.date||'',at:s?.replay?.at||null};},projectSharedEventMemory,watchStateAtCursor,buildSharedEventTimeline,buildSharedEventComparison,undefined,()=>api.getState().cash,api.eventParticipationContext);
+ let lastRagClockKey='';
+ const publishRagClock=()=>{
+  const s=sharedWatch()?watchStateAtCursor():null,detail={active:!!s,date:s?.date||'',at:s?.replay?.at||null};
+  const key=JSON.stringify(detail);if(key===lastRagClockKey)return;lastRagClockKey=key;sharedEventMemory?.render();
+  if(typeof window!=='undefined'&&typeof CustomEvent!=='undefined')window.dispatchEvent(new CustomEvent('optionpilot:rag-replay-clock',{detail}));
+ };
  const watchBody=$('mb-watch-body'),watchStatus=$('mb-watch-status'),watchHead=$('mb-watch-head');
  const watchParticipation=$('mb-watch-participation');
  const broadWatchGroup=[
@@ -157,13 +175,21 @@ export function installMarketBook(api:any) {
  const backfill=new Map<string,WatchBackfill>();
  const archiveCache=new WeakMap<object,Map<string,Map<number,WatchRow>>>();
  const liveSectors=new Map<number,string>();
- const oiCache=new Map<string,{rows?:Map<string,Map<number,WatchRow>>,loadedAt?:number,error?:boolean}>();
+ const oiCache=new Map<string,{rows?:Map<string,Map<number,WatchRow>>,raw?:any[],loadedAt?:number,error?:boolean}>();
  const sectorCache=new Map<string,{rows?:Map<number,string>,snapshots?:any[],loadedAt?:number,error?:boolean}>();
  let watchLiveQuotes:any=null;
  const currentWatchSymbols=()=>watchSymbols.includes(watchIndex?.value)?[watchIndex.value]:watchSymbols;
+ const watchChart=$('mb-watch-chart'),watchChartMetric=$('mb-watch-chart-metric'),watchChartOutput=$('mb-watch-chart-output');
+ const allowedWatchMetrics=['spot','pcr','vix','ceOi','peOi','bandPcr','bandCeOi','bandPeOi','walls','levels','sector'];
+ const cleanMetrics=(v:any)=>Array.isArray(v)?allowedWatchMetrics.filter(k=>v.includes(k)):[];
  const selectedWatchMetrics=()=>watchMetrics?.value==='custom'
-  ?Array.from(watchCustom?.querySelectorAll?.('input:checked')??[],(input:any)=>input.value)
-  :!watchMetrics?.value||watchMetrics.value==='all'?['spot','pcr','vix']:watchMetrics.value.split(',');
+  ?cleanMetrics(Array.from(watchCustom?.querySelectorAll?.('input:checked')??[],(input:any)=>input.value))
+  :!watchMetrics?.value||watchMetrics.value==='all'?['spot','pcr','vix']:cleanMetrics(watchMetrics.value.split(','));
+ const requestedWatchMetrics=()=>[...new Set([...selectedWatchMetrics(),...(watchChart?.open&&watchChartMetric?.value?[['ceWall','peWall'].includes(watchChartMetric.value)?'walls':watchChartMetric.value]:[])])];
+ const prefStatus=(value:string)=>{const el=$('mb-watch-pref-status');if(el)el.textContent=value;};
+ const prefKey=()=>{const slot=$('mb-watch-slot')?.value;return ['1','2','3'].includes(slot)?'optionpilot.watch.metrics.v1.'+slot:null;};
+ if($('mb-watch-save'))$('mb-watch-save').onclick=()=>{const key=prefKey(),metrics=selectedWatchMetrics();if(!key||!metrics.length){prefStatus('Select at least one metric.');return;}try{localStorage.setItem(key,JSON.stringify(metrics));prefStatus('Saved set '+$('mb-watch-slot').value+' on this browser.');}catch{prefStatus('Browser storage unavailable.');}};
+ if($('mb-watch-load'))$('mb-watch-load').onclick=()=>{const key=prefKey();if(!key)return;try{const metrics=cleanMetrics(JSON.parse(localStorage.getItem(key)||'null'));if(!metrics.length){prefStatus('No saved set.');return;}for(const input of Array.from(watchCustom?.querySelectorAll?.('input[type="checkbox"]')??[]) as any[])input.checked=metrics.includes(input.value);watchMetrics.value='custom';prefStatus('Loaded set '+$('mb-watch-slot').value+'.');refreshWatch();}catch{prefStatus('Saved set unavailable.');}};
  const watchMinute=(i:number)=>String(Math.floor((i+watchOpen)/60)).padStart(2,'0')+':'+String((i+watchOpen)%60).padStart(2,'0');
  const watchIndexOf=(minute:string)=>Number(minute.slice(0,2))*60+Number(minute.slice(3))-watchOpen;
  const watchStamp=(time:number)=>Number.isFinite(time)?new Date(time+19800000).toISOString():'';
@@ -245,7 +271,7 @@ export function installMarketBook(api:any) {
   return new Map([...latest].map(([bucket,{value}])=>[bucket,value]));
  };
  const loadWatchSectors=(date:string,live:boolean,participation:boolean)=>{
-  if(!date||typeof fetch==='undefined'||(!participation&&!selectedWatchMetrics().includes('sector')))return;
+  if(!date||typeof fetch==='undefined'||(!participation&&!requestedWatchMetrics().includes('sector')))return;
   const saved=sectorCache.get(date);
   if(saved&&(!saved.loadedAt||!live||Date.now()-saved.loadedAt<180000))return;
   sectorCache.set(date,{rows:saved?.rows,snapshots:saved?.snapshots});
@@ -261,10 +287,10 @@ export function installMarketBook(api:any) {
  const wantsWatchTotals=(metrics:string[])=>metrics.includes('ceOi')||metrics.includes('peOi');
  const wantsWatchOi=(metrics:string[])=>wantsWatchTotals(metrics)||metrics.includes('pcr')||metrics.includes('walls');
  const loadWatchOi=(date:string,refresh:boolean)=>{
-  if(!date||typeof fetch==='undefined'||!wantsWatchOi(selectedWatchMetrics()))return;
+  if(!date||typeof fetch==='undefined'||!wantsWatchOi(requestedWatchMetrics()))return;
   const saved=oiCache.get(date);
   if(saved&&(!saved.loadedAt||!refresh||Date.now()-saved.loadedAt<180000))return;
-  oiCache.set(date,{rows:saved?.rows});
+  oiCache.set(date,{rows:saved?.rows,raw:saved?.raw});
   void fetch('/api/research/dashboard-watch/oi-history?date='+encodeURIComponent(date),{cache:'no-store',signal:AbortSignal.timeout(15000)})
    .then(async response=>{if(!response.ok)throw Error('OI history unavailable');return response.json();})
    .then(body=>{
@@ -277,8 +303,8 @@ export function installMarketBook(api:any) {
      byMinute.set(bucket,{...watchGap,expiry:row.expiry,pcr,ceOi,peOi,ceWall:watchValue(row.ceWall,Number.MIN_VALUE),peWall:watchValue(row.peWall,Number.MIN_VALUE)});
      rows.set(row.symbol,byMinute);
     }
-    oiCache.set(date,{rows,loadedAt:Date.now()});renderWatch();
-   }).catch(()=>{oiCache.set(date,{rows:saved?.rows,loadedAt:Date.now(),error:true});renderWatch();});
+    oiCache.set(date,{rows,raw:body.rows,loadedAt:Date.now()});renderWatch();
+   }).catch(()=>{oiCache.set(date,{rows:saved?.rows,raw:saved?.raw,loadedAt:Date.now(),error:true});renderWatch();});
  };
  const renderWatchParticipation=(date:string,index:string,isReplay:boolean,bucket:number)=>{
   if(!watchParticipation)return;
@@ -325,7 +351,7 @@ export function installMarketBook(api:any) {
  };
  const renderWatch=()=>{
   if(!watchPanel?.open||!watchBody||!watchStatus||!watchHead)return;
-  const isReplay=watchSource.value!=='Live',state=api.getState();
+  const isShared=sharedWatch(),isReplay=watchSource.value!=='Live',state=watchStateAtCursor();
   const date=isReplay?state.loadingDate||state.date:watchDate;
   if(isReplay&&watchDisplayDate!==date){watchDisplayDate=date;stopWatch();watchSeek.value='0';}
   if(watchDateInput){
@@ -334,7 +360,7 @@ export function installMarketBook(api:any) {
   }
   if(watchCustom)watchCustom.hidden=watchMetrics?.value!=='custom';
   const indices=currentWatchSymbols(),metrics=selectedWatchMetrics(),sector=metrics.includes('sector'),showVix=metrics.includes('vix');
-  const totals=wantsWatchTotals(metrics),oiHistory=wantsWatchOi(metrics)?oiCache.get(date):undefined;
+  const requested=requestedWatchMetrics(),totals=wantsWatchTotals(metrics),oiHistory=wantsWatchOi(requested)?oiCache.get(date):undefined;
   const indexFields=metrics.filter((field:string)=>field!=='vix'&&field!=='sector');
   const multis=indices.map(index=>{
    const saved=backfill.get(date+'|'+index);
@@ -344,27 +370,33 @@ export function installMarketBook(api:any) {
    const levelRows=!isReplay&&indexFields.includes('levels')?[...archive].filter(([,row])=>row.pdh!==null):[];
    const levelBucket=Math.max(-1,...levelRows.map(([bucket])=>bucket));
    const levels=levelBucket>=0&&new Set(levelRows.map(([,row])=>row.pdh+'|'+row.pdl)).size===1?{bucket:levelBucket,row:archive.get(levelBucket)!}:null;
-   return {index,saved,live,archive,levels,oi:oiHistory?.rows?.get(index)};
+   const selectedExpiry=isShared?[...new Set([...archive.values()].map(r=>r.expiry).filter(Boolean))].sort()[0]||'':'';
+   const full=isShared?sharedFullOiRows(oiHistory?.raw||[],date,index,selectedExpiry,state.replay?.at??null):new Map();
+   const band=isShared&&requested.some(field=>['bandPcr','bandCeOi','bandPeOi'].includes(field))?sharedBandOiRows(state.current?.[index],date,index,selectedExpiry,state.replay?.at??null):new Map();
+   return {index,saved,live,archive,levels,oi:isShared?undefined:oiHistory?.rows?.get(index),full,band};
   });
   const archiveEnd=Math.max(-1,...multis.flatMap(m=>[...m.archive.keys(),...(m.oi?.keys()??[])]));
   const today=watchStamp(Date.now()).slice(0,10);
   const replayEnd=archiveEnd>=0&&date<today&&!state.archiveLoading?watchClose:archiveEnd;
-  const end=isReplay?Math.min(Number(watchSeek.value),replayEnd):watchLatest;
-  renderWatchParticipation(date,indices.length===1?indices[0]:'',isReplay,end);
-  watchSeek.max=String(Math.max(0,replayEnd));
+  const sharedEnd=isShared?replayWatchMinute(date,state.replay?.at??null):null;
+  const end=isShared?(sharedEnd??-1):isReplay?Math.min(Number(watchSeek.value),replayEnd):watchLatest;
+  if(isShared){if(watchParticipation)watchParticipation.hidden=true;}else renderWatchParticipation(date,indices.length===1?indices[0]:'',isReplay,end);
+  watchSeek.max=String(Math.max(0,isShared?end:replayEnd));
+  if(isShared)watchSeek.value=String(Math.max(0,end));
   watchSeek.setAttribute('aria-valuetext',end>=0?watchMinute(end)+' IST':'No recorded minutes');
-  watchSeek.disabled=replayEnd<1;
-  watchPlay.disabled=replayEnd<1;
+  watchSeek.disabled=isShared||replayEnd<1;
+  watchPlay.disabled=isShared?state.replay?.timeline?.length<2:replayEnd<1;
+  if(isShared)watchPlay.textContent=state.replay?.playing?'Pause':'Play';
   $('mb-watch-replay').hidden=!isReplay;
   const errors=multis.filter(m=>m.saved?.error).map(m=>m.index);
   watchRetry.hidden=isReplay||errors.length===0;
   const backfillStatus=errors.length?' · Archive read failed for '+errors.join(', '):multis.some(m=>m.saved?.pending&&m.saved.through===undefined)?' · Loading earlier minutes':'';
-  const sectorStatus=sectorCache.get(date);
-  const label=isReplay?(end>=0?date+' · Recorded · '+watchMinute(end)+' IST':state.archiveLoading?'Loading recordings…':'Select a session with recorded minutes'):
+  const sectorStatus=isShared?undefined:sectorCache.get(date);
+  const label=isShared?(end>=0?date+' · Shared recorder clock · '+watchMinute(end)+' IST':'Shared recorder clock · exact minute unavailable'):isReplay?(end>=0?date+' · Recorded · '+watchMinute(end)+' IST':state.archiveLoading?'Loading recordings…':'Select a session with recorded minutes'):
    (date?date+' · ':'')+watchState+backfillStatus;
-  const totalsStatus=totals&&date?(oiHistory?.error?' · Archived totals read failed':!oiHistory?.loadedAt?' · Loading archived totals':
+  const totalsStatus=!isShared&&totals&&date?(oiHistory?.error?' · Archived totals read failed':!oiHistory?.loadedAt?' · Loading archived totals':
    isReplay&&!multis.some(m=>m.oi?.size)?' · Archived Full CE/PE totals were not recorded':''):'';
-  const status=label+totalsStatus+(sector&&date?(sectorStatus?.error?' · Sector read failed':sectorStatus?.loadedAt?'':' · Loading sector quotes'):'')+(!metrics.length?' · Select a metric':'');
+  const status=label+totalsStatus+(isShared?' · Recorded row/marker cutoff (commit time unverified) · Full OI: source + storage time gated · ±7: exact 30-leg sample · sector cache withheld'+(oiHistory?.error?' · OI archive read failed':''):sector&&date?(sectorStatus?.error?' · Sector read failed':sectorStatus?.loadedAt?'':' · Loading sector quotes'):'')+(!metrics.length?' · Select a metric':'');
   if(watchStatus.textContent!==status)watchStatus.textContent=status;
   const head='<th scope="col">IST</th>'+(indexFields.length?indices.map(index=>'<th scope="col">'+index+'</th>').join(''):'')+
    (showVix?'<th scope="col">India VIX</th>':'')+(sector?'<th scope="col">Sector movers <small>vs previous close</small></th>':'');
@@ -395,18 +427,23 @@ export function installMarketBook(api:any) {
     (previous.pdh===high&&previous.pdl===low||!!levelReference&&previous.pdh===null);
    const level=comparable?(values.spot!>high&&previous.spot!<=high?'↑ PDH '+high:
     values.spot!<low&&previous.spot!>=low?'↓ PDL '+low:'—'):'Gap';
+   const full=m.full.get(bucket),band=m.band.get(bucket);
    const fields:Record<string,string>={
     spot:renderMetric('Spot',format(values.spot,2),live?.spot!=null),
     pcr:reported?renderMetric('PCR',reported.value.toFixed(6)+' · '+reported.expiry,true)+
      '<small>Reported · mixed times</small>':
      renderMetric('PCR',format(values.pcr,6)+(values.pcr!==null&&values.expiry?' · '+values.expiry:''),live?.pcr!=null),
-    ceOi:renderMetric('CE OI',format(values.ceOi,0),live?.ceOi!=null),
-    peOi:renderMetric('PE OI',format(values.peOi,0),live?.peOi!=null),
+    ceOi:renderMetric(isShared?'Full CE OI':'CE OI',format(isShared?full?.ceOi??null:values.ceOi,0),live?.ceOi!=null),
+    peOi:renderMetric(isShared?'Full PE OI':'PE OI',format(isShared?full?.peOi??null:values.peOi,0),live?.peOi!=null),
+    bandPcr:renderMetric('±7 PCR',format(band?.pcr??null,6),false),
+    bandCeOi:renderMetric('±7 CE OI',format(band?.ceOi??null,0),false),
+    bandPeOi:renderMetric('±7 PE OI',format(band?.peOi??null,0),false),
     walls:renderMetric('CE wall',movement(values.ceWall,previous.ceWall),live?.ceWall!=null)+renderMetric('PE wall',movement(values.peWall,previous.peWall),live?.peWall!=null),
     levels:renderMetric('Spot break',level,live?.spot!=null),
    };
    const source=isReplay?'':live&&recorded?'Live / Recorded':live?'Live':recorded?'Recorded':'';
-   return '<td>'+mobileLabel(m.index)+indexFields.map((field:string)=>fields[field]??'').join('')+(source?'<small class="mb-note">'+source+'</small>':'')+'</td>';
+   const fullEvidence=full&&indexFields.some((field:string)=>['pcr','ceOi','peOi'].includes(field))?'<small>Full sample PCR '+format(full.pcr,6)+' · '+esc(full.expiry)+' · source '+watchStamp(watchTime(full.sourceAt)).slice(11,19)+' · stored '+watchStamp(watchTime(full.recordedAt)).slice(11,19)+' IST</small>':'';
+   return '<td>'+mobileLabel(m.index)+indexFields.map((field:string)=>fields[field]??'').join('')+fullEvidence+(source?'<small class="mb-note">'+source+'</small>':'')+'</td>';
   };
   const interval=Number($('mb-watch-interval')?.value)||1,rows:string[]=[];
   for(let first=0;metrics.length&&first<=end;first+=interval){
@@ -418,9 +455,35 @@ export function installMarketBook(api:any) {
   }
   const html=(isReplay?rows:rows.reverse()).join('');
   if(watchBody.innerHTML!==html)watchBody.innerHTML=html;
+  if(watchChart?.open&&watchChartOutput){
+   const field=watchChartMetric?.value||'spot';
+   const titles:Record<string,string>={spot:'Spot',pcr:'Full OI PCR',vix:'India VIX',ceOi:'Full CE OI',peOi:'Full PE OI',bandPcr:'±7 PCR',bandCeOi:'±7 CE OI',bandPeOi:'±7 PE OI',ceWall:'CE wall strike',peWall:'PE wall strike'};
+   const series=field==='vix'?[{index:'India VIX',read:(b:number)=>{const a=[...new Set(multis.map(m=>watchValues(m.archive,m.live,m.oi,b).vix).filter(x=>x!==null))];return a.length===1?a[0]:null;}}]:multis.map(m=>({index:m.index,read:(b:number)=>{
+    const values=watchValues(m.archive,m.live,m.oi,b);
+    const band=m.band.get(b),full=m.full.get(b);
+    if(field==='bandPcr')return band?.pcr??null;
+    if(field==='bandCeOi')return band?.ceOi??null;
+    if(field==='bandPeOi')return band?.peOi??null;
+    if(isShared&&(field==='ceOi'||field==='peOi'))return full?.[field]??null;
+    return ['spot','pcr','ceOi','peOi','ceWall','peWall'].includes(field)?(values as any)[field]??null:null;
+   }}));
+   const graph=(s:any)=>{
+    const points=Array.from({length:Math.max(0,end+1)},(_,b)=>({b,v:s.read(b)}));
+    const valid=points.filter(p=>typeof p.v==='number'&&Number.isFinite(p.v));
+    const title=esc(s.index+' · '+(titles[field]||'Metric'));
+    if(!valid.length)return '<p class="mb-note">'+title+' · No eligible samples through cursor.</p>';
+    const lo=Math.min(...valid.map(p=>p.v)),hi=Math.max(...valid.map(p=>p.v)),span=Math.max(1,hi-lo),x=(b:number)=>58+b/375*560,y=(v:number)=>130-(v-lo)/span*100;
+    let dots='',segments='',prior:any=null;
+    for(const p of points){if(typeof p.v!=='number'||!Number.isFinite(p.v)){prior=null;continue;}if(prior&&p.b-prior.b===1)segments+='<path d="M '+x(prior.b)+' '+y(prior.v)+' L '+x(p.b)+' '+y(p.v)+'"/>';dots+='<circle cx="'+x(p.b)+'" cy="'+y(p.v)+'" r="1.8"><title>'+watchMinute(p.b)+' IST · '+esc(String(p.v))+'</title></circle>';prior=p;}
+    return '<section class="mb-box"><strong>'+title+'</strong><p class="mb-note">'+valid.length+' / '+points.length+' minute samples through '+watchMinute(end)+' IST · gaps unfilled · independent scale</p><svg class="mb-chart" viewBox="0 0 650 155" role="img" aria-label="'+title+' minute chart"><g stroke="#49f4ff" fill="#49f4ff" stroke-width="1.5">'+segments+dots+'</g><g fill="currentColor" font-size="12"><text x="2" y="23">'+esc(String(Number(hi.toFixed(4))))+'</text><text x="2" y="130">'+esc(String(Number(lo.toFixed(4))))+'</text><text x="58" y="151">09:15</text><text x="570" y="151">15:30</text></g></svg></section>';
+   };
+   const chartHtml=series.map(graph).join('');
+   if(watchChartOutput.innerHTML!==chartHtml)watchChartOutput.innerHTML=chartHtml;
+  }
  };
  const refreshWatch=()=>{
   if(!watchPanel?.open)return;
+  if(sharedWatch()){const state=watchStateAtCursor();publishRagClock();if(state.replay?.at)loadWatchOi(state.date,false);renderWatch();return;}
   const isReplay=watchSource.value!=='Live',state=api.getState();
   const date=isReplay?state.loadingDate||state.date:watchDate;
   loadWatchSectors(date,!isReplay||date===watchStamp(Date.now()).slice(0,10),isReplay&&currentWatchSymbols().length===1);
@@ -449,7 +512,15 @@ export function installMarketBook(api:any) {
   renderWatch();
  };
  if(watchPanel)watchPanel.ontoggle=()=>{if(!watchPanel.open)stopWatch();refreshWatch();};
- if(watchSource)watchSource.onchange=()=>{stopWatch();refreshWatch();};
+ if(watchSource)watchSource.onchange=()=>{
+  stopWatch();
+  if(sharedWatch()){
+   sharedWatchSelected=true;
+   const tools=$('mb-tools'),panel=$('recorded-replay');if(tools)tools.open=true;if(panel)panel.open=true;
+   replay?.render(true);
+  }else if(sharedWatchSelected){sharedWatchSelected=false;replay?.stop();}
+  publishRagClock();refreshWatch();refreshSharedPremium();
+ };
  if(watchIndex)watchIndex.onchange=()=>{stopWatch();refreshWatch();};
  if(watchRetry)watchRetry.onclick=()=>{
   for(const index of currentWatchSymbols()){
@@ -459,11 +530,14 @@ export function installMarketBook(api:any) {
   refreshWatch();
  };
  if(watchDateInput)watchDateInput.onchange=()=>{if(watchDateInput.value){stopWatch();void api.setDate(watchDateInput.value,{fullSession:true});}};
- if(watchSeek)watchSeek.oninput=()=>{stopWatch();renderWatch();};
+ if(watchSeek)watchSeek.oninput=()=>{if(sharedWatch())return;stopWatch();renderWatch();};
  if($('mb-watch-interval'))$('mb-watch-interval').onchange=renderWatch;
  if(watchMetrics)watchMetrics.onchange=refreshWatch;
  if(watchCustom)watchCustom.onchange=refreshWatch;
+ if(watchChart)watchChart.ontoggle=refreshWatch;
+ if(watchChartMetric)watchChartMetric.onchange=refreshWatch;
  if(watchPlay)watchPlay.onclick=()=>{
+  if(sharedWatch()){replay?.playPause();return;}
   if(watchTimer!==null){stopWatch();return;}
   if(Number(watchSeek.value)>=Number(watchSeek.max))watchSeek.value='0';
   watchPlay.textContent='Pause';renderWatch();
@@ -475,6 +549,7 @@ export function installMarketBook(api:any) {
    const scroll=watchBody.closest?.('.mb-watch-scroll');if(scroll)scroll.scrollTop=scroll.scrollHeight;
   },500);
  };
+ replay?.subscribe((frame:any)=>{sharedWatchFrame=frame;if(sharedWatch()){publishRagClock();stopWatch();renderWatch();refreshSharedPremium();}});
  const recordWatch=(payload:any,canonical:any)=>{
   const snapshot=payload?.snapshot,serverAt=Date.parse(payload?.serverTime??''),asOf=Date.parse(snapshot?.asOf??'');
   const dateTime=watchStamp(serverAt),date=dateTime.slice(0,10),minute=dateTime.slice(11,16),bucket=watchIndexOf(minute);
@@ -965,7 +1040,7 @@ export function installMarketBook(api:any) {
   if(state.archiveLoading)html+='<p class="mb-replay-status" role="status">Loading saved history · latest returned observations first. Requested history is incomplete until loading finishes; missing intervals remain gaps.</p>';
   const chapterHeader=html;
   html+='<details class="mb-guide-shell" data-event-key="guide-'+page+'"><summary>ଏହି chapter କେମିତି ପଢ଼ିବି · source &amp; definitions</summary>'+renderMarketBookReadingGuide(m,state,page,win).replace(' data-op-explanation','')+'</details>';
-  if(page===0)html+='<section class="mb-overview" aria-label="Three-index recorded overview"><div class="ov-heading"><div><span>RECORDED MARKET SNAPSHOT</span><h3>ତିନି index · ଏକ ନଜରରେ</h3></div><p>'+esc(state.date||'Session unavailable')+' · '+esc(win)+'</p></div>'+researchTables(m)+researchParticipation(m)+researchEvents(m)+researchMemory(m)+'<details class="mb-event" data-event-key="research-overview-cards"><summary>Index cards · agreement &amp; source evidence</summary>'+three(summaryCard)+'</details></section>';
+  if(page===0)html+='<section class="mb-overview" data-recorded-index="'+esc(m.symbol)+'" data-reference-at="'+esc(m.spot.at||'')+'" data-reference-from="'+esc(m.spot.fromAt||'')+'" aria-label="Three-index recorded overview"><div class="ov-heading"><div><span>RECORDED MARKET SNAPSHOT</span><h3>ତିନି index · ଏକ ନଜରରେ</h3></div><p>'+esc(state.date||'Session unavailable')+' · '+esc(win)+'</p></div>'+researchTables(m)+researchParticipation(m)+researchEvents(m)+researchMemory(m)+'<details class="mb-event" data-event-key="research-overview-cards"><summary>Index cards · agreement &amp; source evidence</summary>'+three(summaryCard)+'</details></section>';
   if(page===1)html+=three((a:any)=>'<section class="mb-box mb-spot-card '+biasClass(a)+'"><div class="mb-contract-head"><h3>'+esc(a.symbol)+' · spot</h3><span class="mb-source-pill">RECORDED</span></div>'+metric(a.spot,'Spot · points')+levelStrip(a)+'<details class="mb-event" data-event-key="spot-pivots-'+esc(a.symbol)+'"><summary>Daily pivots · verified previous-session references</summary><div class="mb-glance-grid">'+glance('Pivot P',fmt(a.spot.pivot?.P))+glance('R1',fmt(a.spot.pivot?.R1))+glance('S1',fmt(a.spot.pivot?.S1))+'</div>'+note('Pivots appear only when the existing model has the required prior-session H/L/close.')+'</details>'+chart(a.spot,a.symbol+' spot')+rangeNote(a.spot)+'</section>');
   if(page===2){
    html+='<div class="mb-controls">'+selectFilter('mb-premium-view','Comparison view',[['PAIR','CE ↔ PE'],['STRIKE','Strike A/B'],['EXPIRY','Expiry comparison']],premiumView)+selectFilter('mb-primary-strike','Strike A',m.strikes.map((k:any)=>[String(k),String(k)]),String(strike??''))+(premiumView==='EXPIRY'?selectFilter('mb-expiry-scope','Expiry rows',[['ALL','First four recorded'],['PAIR','Selected expiry A/B']],expiryScope):selectFilter('mb-compare-strike','Compare strike B',[['','No comparison'],...m.strikes.filter((k:any)=>k!==strike).map((k:any)=>[String(k),String(k)])],compareStrike===null?'':String(compareStrike)))+'<button type="button" id="mb-nearest-strike" '+(m.spot.value===null||!m.strikes.length?'disabled':'')+'>Nearest recorded strike to spot</button></div>';
@@ -1036,6 +1111,6 @@ export function installMarketBook(api:any) {
  const previousPageChange=$('mb-page').onchange;
  $('mb-page').onchange=(e:any)=>{if(changeSpotSetting(e))return;if(e.target.id==='mb-board-month'){boardMonth=e.target.value;render();return;}if(e.target.id==='mb-board-strike'){boardStrikesByIndex[boardIndex]=Number(e.target.value);render();return;}previousPageChange(e);};
  $('mb-date').onchange=()=>api.setDate($('mb-date').value);$('mb-refresh').onclick=()=>api.refresh();$('mb-memory').onclick=async()=>{const b=$('mb-memory');b.disabled=true;b.textContent='Loading earlier recordings…';try{await api.memory(/^\d+s$/.test(win)?Number(win.slice(0,-1)):5);}finally{b.disabled=false;b.textContent='Load earlier sessions · all 3';render();}};
- $('mb-legacy').onclick=()=>{legacy=!legacy;$('observations-view').classList.toggle('mb-focus',!legacy);$('mb-legacy').setAttribute('aria-pressed',String(legacy));$('mb-legacy').textContent=legacy?'Hide detailed terminal':'Show detailed terminal';};$('observations-view').classList.add('mb-focus');const workspace=installDashboardWorkspace({chapters,turn,getModels:()=>models,page:()=>page,getState:api.getState,setDate:api.setDate,replay:api.replay,chooseResearchIndex:(next:string)=>{if(!['NIFTY','SENSEX','BANKNIFTY'].includes(next)||symbol===next)return;symbol=next;expiry='';opposite='';strike=undefined;compareStrike=null;render();}});render();return {render:()=>render(true),refreshHealth:()=>render()};
+ $('mb-legacy').onclick=()=>{legacy=!legacy;$('observations-view').classList.toggle('mb-focus',!legacy);$('mb-legacy').setAttribute('aria-pressed',String(legacy));$('mb-legacy').textContent=legacy?'Hide detailed terminal':'Show detailed terminal';};$('observations-view').classList.add('mb-focus');const workspace=installDashboardWorkspace({chapters,turn,getModels:()=>models,page:()=>page,getState:api.getState,setDate:api.setDate,replay:api.replay,sharedReplayState:()=>sharedWatch()?watchStateAtCursor():null,chooseResearchIndex:(next:string)=>{if(!['NIFTY','SENSEX','BANKNIFTY'].includes(next)||symbol===next)return;symbol=next;expiry='';opposite='';strike=undefined;compareStrike=null;render();}});refreshSharedPremium=()=>workspace?.refreshSharedPremium?.();render();return {render:()=>render(true),refreshHealth:()=>render()};
 }
 

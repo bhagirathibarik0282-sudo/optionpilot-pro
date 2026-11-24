@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   assertFiiDiiSessionNotBehindMarketSession,
   evaluateFiiDiiProductionReadiness,
+  projectParticipantOiHistory,
 } from "../canonical-fii-dii-production-readiness.ts";
 
 function row(date: string, fiiNet = -25, diiNet = 30) {
@@ -132,4 +133,12 @@ test("real zero institutional net stays zero in date-wise history", () => {
   const zero={...row("2026-10-22"),fii_buy:125,fii_net:0,dii_buy:120,dii_net:0};
   const out=evaluateFiiDiiProductionReadiness({expectedMarketSessionDate:"2026-10-22",storedRows:[zero]});
   assert.equal(out.dailyHistory[0].fiiNetCrore,0);assert.equal(out.dailyHistory[0].combinedNetCrore,0);
+});
+
+test('participant OI display accepts exact complete stored groups and rejects invalid counts and provenance',()=>{
+ const rows=['FII','DII','PRO','CLIENT'].map(participant=>({trade_date:'2026-11-23',participant,report_kind:'OI',source:'NSE_PARTICIPANT_OI',source_url:'https://nsearchives.nseindia.com/example.csv',fetched_at:'2026-11-23T18:00:00+05:30',updated_at:'2026-11-23T18:01:00+05:30',future_index_long:'100',future_index_short:'50',option_index_call_long:'0',option_index_call_short:'20',option_index_put_long:'30',option_index_put_short:'10'}));
+ const result=projectParticipantOiHistory(rows)[0];
+ assert.equal(result.complete,true);assert.equal(result.participants[0].futureLong,100);assert.equal(result.participants[0].callLong,0);
+ for(const bad of [{future_index_long:null},{future_index_long:'-1'},{source_url:'https://invalid.example/x'},{report_kind:'VOLUME'},{updated_at:'2026-11-23T17:00:00+05:30'}])assert.equal(projectParticipantOiHistory([{...rows[0],...bad},...rows.slice(1)])[0].complete,false);
+ assert.equal(projectParticipantOiHistory(rows.slice(1))[0].complete,false);assert.equal(projectParticipantOiHistory([...rows,rows[0]])[0].complete,false);
 });

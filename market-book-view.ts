@@ -151,7 +151,7 @@ export function installMarketBook(api:any) {
   if(!sharedProjection||key.some((v,i)=>v!==sharedProjectionKey[i])){sharedProjectionKey=key;sharedProjection=projectDashboardReplay(state,sharedWatchFrame);}
   return sharedProjection;
  };
- const sharedEventMemory=installSharedEventMemory(()=>{const s=sharedWatch()?watchStateAtCursor():null;return {active:!!s,date:s?.date||'',at:s?.replay?.at||null};},projectSharedEventMemory,watchStateAtCursor,buildSharedEventTimeline,buildSharedEventComparison,evaluateEventBuyerHypothesis);
+ const sharedEventMemory=installSharedEventMemory(()=>{const s=sharedWatch()?watchStateAtCursor():null;return {active:!!s,date:s?.date||'',at:s?.replay?.at||null};},projectSharedEventMemory,watchStateAtCursor,buildSharedEventTimeline,buildSharedEventComparison,evaluateEventBuyerHypothesis,()=>api.getState().cash);
  let lastRagClockKey='';
  const publishRagClock=()=>{
   const s=sharedWatch()?watchStateAtCursor():null,detail={active:!!s,date:s?.date||'',at:s?.replay?.at||null};

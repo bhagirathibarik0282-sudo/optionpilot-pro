@@ -25,7 +25,7 @@ test('missing and ambiguous fields never silently choose an index, date or side'
 });
 function browser(fetcher:(url:string)=>Promise<any>) {
  const nodes=new Map<string,any>();
- for(const id of ['form','kind','lookback','question','symbol','date','expiry','strike','side','time','asof','outcomes','search','extract','example','clear','status','result']){
+ for(const id of ['form','kind','lookback','question','symbol','date','expiry','strike','side','time','asof','outcomes','search','extract','example','clear','status','result','selection-summary','selection-details','now','after','history']){
   nodes.set('rag-'+id,{value:'',checked:false,disabled:false,innerHTML:'',textContent:'',listeners:{} as any,
     addEventListener(type:string,fn:Function){this.listeners[type]=fn;},reset(){for(const n of nodes.values()){n.value='';n.checked=false;}}});
  }
@@ -70,14 +70,14 @@ test('card is in production book and standalone route, without introducing an au
  const html=renderBusinessDashboardV1Html({} as any);assert.match(html,/id="rag-evidence-card"/);assert.match(html,/RAG evidence search/);assert.ok(html.includes(RAG_CARD_SCRIPT));
  assert.equal((html.match(/id="rag-evidence-card"/g)||[]).length,1);assert.ok(renderRagEvidencePage().includes('<details open id="rag-evidence-card"'));
  const app=new Hono();app.route('/api/research',researchRouter);const r=await app.request('/api/research/rag-event-evidence/view');assert.equal(r.status,200);assert.match(await r.text(),/id="rag-question"/);
- assert.ok(RAG_CARD_HTML.includes('step="180"'));
+ assert.ok(RAG_CARD_HTML.includes('step="60"'));
 });
 
 test('card Ask RAG submits snapshot identity once and invalidation removes old evidence',async()=>{
  const b=browser(async()=>{const res=success();const data=await res.json();return {...res,json:async()=>({...data,reference:null,mode:'READ_ONLY_RAG_PREMIUM_SNAPSHOT_V1'})};});
  b.events['optionpilot:rag-selection']({detail:{symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36',lookback:'15'}});await new Promise(resolve=>setImmediate(resolve));
  assert.equal(b.requests.length,1);const p=new URL(b.requests[0],'https://example.test').searchParams;assert.equal(p.get('kind'),'SNAPSHOT');assert.equal(p.get('lookback'),'15');assert.equal(p.get('time'),'09:36');assert.equal(b.node('outcomes').checked,false);
- assert.match(b.node('result').innerHTML,/reference ଅନୁପଲବ୍ଧ/);b.events['optionpilot:rag-invalidate']({});assert.equal(b.node('result').innerHTML,'');
+ assert.match(b.node('result').innerHTML,/reference ଅନୁପଲବ୍ଧ/);b.events['optionpilot:rag-invalidate']({});assert.equal(b.node('result').innerHTML,'');assert.equal(b.node('strike').value,'');b.node('now').onclick();await new Promise(resolve=>setImmediate(resolve));assert.equal(b.requests.length,1,'invalidated selection cannot request its old contract');
 });
 test('a new explicit card question supersedes an in-flight answer without a stale-result race',async()=>{
  const resolves:Function[]=[];const b=browser(()=>new Promise(r=>resolves.push(r)));const detail={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
@@ -123,4 +123,56 @@ test('source-backed response is rendered by the actual serialized card, with unk
  b.node('example').onclick();await b.submit();const html=b.node('result').innerHTML;
  assert.match(html,/Recorded premium response/);assert.match(html,/Calendar DTE 0/);assert.match(html,/&lt;img/);assert.doesNotMatch(html,/<img/);assert.match(html,/theoretical Delta/);assert.match(html,/11\.20/);assert.match(html,/expiry timestamp/);
  assert.equal(renderPremiumResponseEvidence(null),'');
+});
+
+test('snapshot and history use exact minutes while crossing events retain the three-minute grid',()=>{
+ const b=browser(async()=>success());
+ b.node('kind').value='SNAPSHOT';b.node('kind').listeners.change();assert.equal(b.node('time').step,'60');assert.equal(b.node('time').min,'09:15');
+ for(const kind of ['EVENT']){b.node('kind').value=kind;b.node('kind').listeners.change();assert.equal(b.node('time').step,'180');assert.equal(b.node('time').min,'09:18');}
+ b.node('kind').value='HISTORY';b.node('kind').listeners.change();assert.equal(b.node('time').step,'60');assert.equal(b.node('time').min,'09:18');
+ b.node('kind').value='SNAPSHOT';b.node('kind').listeners.change();assert.equal(b.node('time').step,'60');
+});
+
+test('one-click evidence actions preserve the selected row and request future outcomes only explicitly',async()=>{
+ const b=browser(async url=>url.includes('rag-same-dte-history')?historySuccess():success());
+ b.events['optionpilot:rag-selection']({detail:{symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:22300,side:'PE',time:'09:36'}});await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(b.node('selection-details').open,false);assert.match(b.node('selection-summary').textContent,/22300.*PE/);
+ b.node('after').onclick();await new Promise(resolve=>setImmediate(resolve));let p=new URL(b.requests.at(-1)!,'https://example.test').searchParams;assert.equal(p.get('includeOutcomes'),'true');assert.equal(p.get('strike'),'22300');
+ b.node('history').onclick();await new Promise(resolve=>setImmediate(resolve));assert.match(b.requests.at(-1)!,/rag-same-dte-history/);assert.equal(new URL(b.requests.at(-1)!,'https://example.test').searchParams.has('includeOutcomes'),false);
+ b.node('now').onclick();await new Promise(resolve=>setImmediate(resolve));assert.match(b.requests.at(-1)!,/rag-event-evidence/);assert.equal(new URL(b.requests.at(-1)!,'https://example.test').searchParams.has('includeOutcomes'),false);
+});
+
+test('invalid native selection opens manual details and explains the window without requesting',()=>{
+ const b=browser(async()=>success());b.node('form').checkValidity=()=>false;let reported=false;b.node('form').reportValidity=()=>{reported=true;assert.equal(b.node('selection-details').open,true);};
+ b.events['optionpilot:rag-selection']({detail:{symbol:'NIFTY',date:'2026-11-04',expiry:'2026-11-09',strike:23900,side:'CE',time:'15:40'}});
+ assert.equal(reported,true);assert.equal(b.requests.length,0);assert.match(b.node('status').textContent,/09:15–15:30/);
+});
+
+test('shared replay locks cutoff, blocks future or wrong-date requests, and invalidates late results',async()=>{
+ const b=browser(async()=>success()),detail={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
+ b.events['optionpilot:rag-replay-clock']({detail:{active:true,date:detail.date,at:'2026-10-13T04:09:00Z'}});
+ b.events['optionpilot:rag-selection']({detail});await new Promise(r=>setImmediate(r));
+ assert.equal(b.requests.length,1);const p=new URL(b.requests[0],'https://example.test').searchParams;assert.equal(p.get('asOf'),'2026-10-13T09:39:00');assert.equal(p.has('includeOutcomes'),false);
+ assert.equal(b.node('asof').disabled,true);assert.equal(b.node('result').innerHTML,'','unqualified response rejected');
+ b.node('asof').value='2026-10-13T15:30';b.node('outcomes').checked=true;await b.submit();
+ assert.equal(new URL(b.requests[1],'https://example.test').searchParams.get('asOf'),'2026-10-13T09:39:00');assert.equal(new URL(b.requests[1],'https://example.test').searchParams.has('includeOutcomes'),false);
+ b.node('after').onclick();assert.equal(b.requests.length,2);
+ b.events['optionpilot:rag-selection']({detail:{...detail,time:'09:42'}});await new Promise(r=>setImmediate(r));assert.equal(b.requests.length,2);
+ b.events['optionpilot:rag-selection']({detail:{...detail,date:'2026-10-12'}});await new Promise(r=>setImmediate(r));assert.equal(b.requests.length,2);
+ b.events['optionpilot:rag-replay-clock']({detail:{active:true,date:detail.date,at:null}});b.events['optionpilot:rag-selection']({detail});await new Promise(r=>setImmediate(r));assert.equal(b.requests.length,2);
+ b.events['optionpilot:rag-replay-clock']({detail:{active:false}});assert.equal(b.node('asof').disabled,false);
+});
+test('shared replay accepts qualified response and clears it on clock movement',async()=>{
+ const cutoff='2026-10-13T04:09:00Z',detail={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
+ const b=browser(async()=>{const res=success(),data:any=await res.json();data.cutoff=cutoff;data.event.timeIst='09:36';const point=data.beforeAndAt[1];point.bucketAt='2026-10-13T04:06:00Z';for(const q of Object.values(point.pair) as any[])q.receiptAt=point.receiptAt;return {...res,json:async()=>data};});
+ b.events['optionpilot:rag-replay-clock']({detail:{active:true,date:detail.date,at:cutoff}});b.events['optionpilot:rag-selection']({detail});await new Promise(r=>setImmediate(r));assert.match(b.node('result').innerHTML,/210\.65/);
+ b.events['optionpilot:rag-replay-clock']({detail:{active:true,date:detail.date,at:'2026-10-13T04:06:00Z'}});assert.equal(b.node('result').innerHTML,'');
+});
+
+test('shared replay allows bounded same-DTE query but rejects unqualified history response',async()=>{
+ const cutoff='2026-10-13T04:09:00Z',detail={symbol:'NIFTY',date:'2026-10-13',expiry:'2026-10-13',strike:'22300',side:'PE',time:'09:36'};
+ const b=browser(async()=>historySuccess());b.events['optionpilot:rag-replay-clock']({detail:{active:true,date:detail.date,at:cutoff}});
+ b.events['optionpilot:rag-selection']({detail});await new Promise(r=>setImmediate(r));
+ b.node('history').onclick();await new Promise(r=>setImmediate(r));
+ const u=new URL(b.requests.at(-1)!,'https://example.test');assert.equal(u.pathname,'/api/research/rag-same-dte-history');assert.equal(u.searchParams.get('availability'),'RECORDED');assert.equal(u.searchParams.get('asOf'),'2026-10-13T09:39:00');assert.equal(u.searchParams.has('includeOutcomes'),false);assert.equal(b.node('result').innerHTML,'');assert.match(b.node('status').textContent,/availability or identity not verified/);
 });

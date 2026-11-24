@@ -30,7 +30,13 @@ test('off-hours deploy has explicit maintenance health; app stays stopped', asyn
   assert.equal(instance.status().running, false);
   const health = await fetch(`${url}/health`); assert.equal(health.status, 200);
   assert.equal((await health.json()).mode, 'SUPERVISOR');
-  assert.equal((await fetch(url)).status, 503);
+  const archive=await fetch(url);assert.equal(archive.status, 200);
+  const html=await archive.text();assert.match(html,/id="op-recorded-mode"/);assert.match(html,/id="mb-live-watch" open/);assert.match(html,/id="mb-shared-memory"/);
+  const old=await fetch(url+'/recorded-dashboard');assert.equal(old.status,200);assert.match(await old.text(),/Saved sessions & Replay/);
+  assert.equal((await fetch(url+'/api/research/h1-replay?symbol=WRONG')).status,400);
+  assert.equal((await fetch(url+'/api/research/intraday-memory?date=invalid')).status,400);
+  assert.equal((await fetch(url+'/api/research/fii-dii/production-readiness',{method:'POST'})).status,405);
+  assert.equal(instance.status().running,false,'viewing recordings cannot start the market child');
   assert.equal((await fetch(`${url}/ops/runtime-window`, { method: 'POST', body: '{"minutes":30}' })).status, 401);
 });
 test('scheduled start proxies POST and cookies; closing waits for in-flight request and restarts next morning', async t => {
@@ -65,4 +71,31 @@ test('SSE stream cannot keep the app alive after operating hours', async t => {
   at('2026-10-28T10:45:00Z'); await instance.reconcile();
   assert.match(await response.text(), /data: ready/);
   await waitFor(() => !instance.status().running);
+});
+
+test('manual off-hours web control boots the real fixture, then safely stops it',async t=>{
+  const {instance,url}=await harness(t,'2026-10-28T15:00:00Z');
+  const logged=await fetch(url+'/ops/control/login',{method:'POST',headers:{'X-OptionPilot-Control':'1','Content-Type':'application/json'},body:JSON.stringify({token:'test-admin'})});
+  assert.equal(logged.status,200);
+  const cookie=logged.headers.get('set-cookie')!.split(';')[0];
+  const make=(route,body={})=>fetch(url+'/ops/control/'+route,{method:'POST',headers:{Cookie:cookie,'X-OptionPilot-Control':'1','Content-Type':'application/json'},body:JSON.stringify(body)});
+  assert.equal((await make('start',{minutes:15})).status,200);
+  await waitFor(()=>instance.status().ready);
+  assert.equal(instance.status().maintenance,true);
+  assert.equal((await make('stop')).status,200);
+  await waitFor(()=>!instance.status().running);
+  assert.equal(instance.status().maintenance,false);
+  assert.equal((await fetch(url+'/recorded-dashboard')).status,200);
+});
+
+test('historical RAG view and validation stay available off-hours without starting the market child',async t=>{
+ const {instance,url}=await harness(t,'2026-10-28T15:00:00Z');
+ const view=await fetch(url+'/api/research/rag-event-evidence/view');assert.equal(view.status,200);assert.match(await view.text(),/id="rag-evidence-card"/);
+ assert.equal((await fetch(url+'/api/research/rag-event-evidence?symbol=WRONG')).status,400);
+ assert.equal((await fetch(url+'/api/research/rag-not-allowlisted')).status,503);
+ assert.equal(instance.status().running,false);assert.equal(instance.status().maintenance,false);
+});
+test('scheduled RAG requests retain their original child routing',async t=>{
+ const {instance,url}=await harness(t,'2026-10-28T04:00:00Z');await waitFor(()=>instance.status().ready);
+ const r=await fetch(url+'/api/research/rag-event-evidence/view');assert.equal(r.status,200);assert.equal((await r.json()).method,'GET');
 });

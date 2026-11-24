@@ -1,0 +1,3 @@
+instrument_token,tradingsymbol,name,expiry,strike,tick_size,lot_size,instrument_type,exchange
+101,BANKNIFTY_TEST_CE,BANKNIFTY,2026-11-23,62000,0.05,30,CE,NFO
+102,BANKNIFTY_TEST_PE,BANKNIFTY,2026-11-23,62000,0.05,30,PE,NFO

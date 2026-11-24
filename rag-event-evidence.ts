@@ -39,7 +39,7 @@ export function parseRagEventRequest(q:Record<string,string|undefined>): {ok:tru
   const kind=q.kind??'EVENT';if(!['EVENT','SNAPSHOT'].includes(kind))return {ok:false,reason:'INVALID_EVIDENCE_KIND'};
   const lookback=Number(q.lookback??3);if(![1,3,5,6,15,30,45,75,125].includes(lookback))return {ok:false,reason:'INVALID_LOOKBACK'};
   const minutes=Number(time.slice(0,2))*60+Number(time.slice(3));
-  if(minutes<(kind==='SNAPSHOT'?555:558)||(minutes-555)%3!==0)return {ok:false,reason:'EVENT_REQUIRES_REGULAR_3M_PAIR'};
+  if(minutes<(kind==='SNAPSHOT'?555:558)||(kind==='EVENT'&&(minutes-555)%3!==0))return {ok:false,reason:'EVENT_REQUIRES_REGULAR_3M_PAIR'};
   if(q.includeOutcomes!==undefined&&!['true','false'].includes(q.includeOutcomes))return {ok:false,reason:'INVALID_OUTCOME_OPTION'};
   let asOf=Infinity;
   if(q.asOf!==undefined) {

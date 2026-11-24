@@ -1,0 +1,104 @@
+async function fetchOptionChainStats(
+  accessToken: string,
+  optionMap: Map<string, Instrument>,
+  atmStrike: number,
+  strikeStep: number,
+  optExchange: string,
+  bandSize = 7
+): Promise<OptionChainStats> {
+  const bandCeSymbols: string[] = [];
+  const bandPeSymbols: string[] = [];
+  // Per-strike lookup (strike -> {ceSymbol, peSymbol}) so we can build
+  // bandStrikes below without a second pass over optionMap.
+  const bandStrikeInfo: Array<{ strike: number; ceSymbol: string | null; peSymbol: string | null }> = [];
+
+  for (let i = -bandSize; i <= bandSize; i++) {
+    const strike = atmStrike + i * strikeStep;
+    const ce = optionMap.get(`${strike}_CE`);
+    const pe = optionMap.get(`${strike}_PE`);
+    const ceSymbol = ce ? `${optExchange}:${ce.tradingsymbol}` : null;
+    const peSymbol = pe ? `${optExchange}:${pe.tradingsymbol}` : null;
+    if (ceSymbol) bandCeSymbols.push(ceSymbol);
+    if (peSymbol) bandPeSymbols.push(peSymbol);
+    bandStrikeInfo.push({ strike, ceSymbol, peSymbol });
+  }
+
+  const allInstruments = Array.from(optionMap.values());
+  const allSymbols = allInstruments.map((inst) => `${optExchange}:${inst.tradingsymbol}`);
+  if (allSymbols.length === 0) return { oiPcr: null, volumePcr: null, maxPain: 0, fullChainPcr: null, atmCeLtp: null, atmCeOi: null, atmPeLtp: null, atmPeOi: null, bandStrikes: [] };
+
+  const quotes = await fetchKiteQuoteBatched(accessToken, allSymbols);
+  if (!quotes) return { oiPcr: null, volumePcr: null, maxPain: 0, fullChainPcr: null, atmCeLtp: null, atmCeOi: null, atmPeLtp: null, atmPeOi: null, bandStrikes: [] };
+
+  let totalCallOI = 0;
+  let totalPutOI = 0;
+  let totalCallVolume = 0;
+  let totalPutVolume = 0;
+  for (const s of bandCeSymbols) {
+    totalCallOI += quotes[s]?.oi || 0;
+    totalCallVolume += quotes[s]?.volume || 0;
+  }
+  for (const s of bandPeSymbols) {
+    totalPutOI += quotes[s]?.oi || 0;
+    totalPutVolume += quotes[s]?.volume || 0;
+  }
+
+  const bandStrikes = bandStrikeInfo.map(({ strike, ceSymbol, peSymbol }) => ({
+    strike,
+    ceOi: ceSymbol ? quotes[ceSymbol]?.oi ?? null : null,
+    ceLtp: ceSymbol ? quotes[ceSymbol]?.last_price ?? null : null,
+    peOi: peSymbol ? quotes[peSymbol]?.oi ?? null : null,
+    peLtp: peSymbol ? quotes[peSymbol]?.last_price ?? null : null,
+  }));
+
+  // Full-chain OI PCR: every strike on this expiry, not just the ATM band.
+  let fullChainCallOI = 0;
+  let fullChainPutOI = 0;
+  for (const inst of allInstruments) {
+    const q = quotes[`${optExchange}:${inst.tradingsymbol}`];
+    const oi = q?.oi || 0;
+    if (!oi) continue;
+    if (inst.instrument_type === "CE") fullChainCallOI += oi;
+    else if (inst.instrument_type === "PE") fullChainPutOI += oi;
+  }
+
+  const strikes = Array.from(new Set(allInstruments.map((inst) => inst.strike))).sort(
+    (a, b) => a - b
+  );
+  let maxPain = 0;
+  let minimumPayout = Number.POSITIVE_INFINITY;
+  for (const settlement of strikes) {
+    let payout = 0;
+    for (const inst of allInstruments) {
+      const quote = quotes[`${optExchange}:${inst.tradingsymbol}`];
+      const oi = quote?.oi || 0;
+      if (!oi) continue;
+      if (inst.instrument_type === "CE") {
+        payout += Math.max(0, settlement - inst.strike) * oi;
+      } else if (inst.instrument_type === "PE") {
+        payout += Math.max(0, inst.strike - settlement) * oi;
+      }
+    }
+    if (payout < minimumPayout) {
+      minimumPayout = payout;
+      maxPain = settlement;
+    }
+  }
+
+  const atmCeInst = optionMap.get(`${atmStrike}_CE`);
+  const atmPeInst = optionMap.get(`${atmStrike}_PE`);
+  const atmCeQuote = atmCeInst ? quotes[`${optExchange}:${atmCeInst.tradingsymbol}`] : null;
+  const atmPeQuote = atmPeInst ? quotes[`${optExchange}:${atmPeInst.tradingsymbol}`] : null;
+
+  return {
+    oiPcr: totalCallOI > 0 ? totalPutOI / totalCallOI : null,
+    volumePcr: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : null,
+    maxPain,
+    fullChainPcr: fullChainCallOI > 0 ? fullChainPutOI / fullChainCallOI : null,
+    atmCeLtp: atmCeQuote?.last_price ?? null,
+    atmCeOi: atmCeQuote?.oi ?? null,
+    atmPeLtp: atmPeQuote?.last_price ?? null,
+    atmPeOi: atmPeQuote?.oi ?? null,
+    bandStrikes,
+  };
+}

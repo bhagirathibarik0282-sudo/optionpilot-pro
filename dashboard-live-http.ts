@@ -1,10 +1,12 @@
 import type { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { readDashboardLiveSnapshot, dashboardLiveRevision, readDashboardPremiumSnapshot } from './dashboard-live-runtime.js';
+import { readDashboardLiveSnapshot, dashboardLiveRevision, readDashboardPremiumSnapshot, readDashboardPcrAudit } from './dashboard-live-runtime.js';
 import { LIVE_INDICES, type LiveSelection, type PremiumWatchFilter } from './dashboard-live-feed.js';
+import { readBnfShadowHostStatus } from './bnf-shadow-host-runtime.js';
+import {cleanBnfHealth} from './bnf-shadow-health.js';
 
 export const DASHBOARD_LIVE_FLUSH_MS=100;
-export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot,revision=dashboardLiveRevision){
+export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot,revision=dashboardLiveRevision,readAudit=readDashboardPcrAudit,readBnfStatus:()=>any=readBnfShadowHostStatus){
  let clients=0;
  const parse=(query:Record<string,string>)=>{
   const selection:LiveSelection={};
@@ -16,6 +18,36 @@ export function mountDashboardLiveRoutes(app:Hono,read=readDashboardLiveSnapshot
   }return selection;
  };
 
+ // Read-only paper status. No broker credentials, tradingsymbols, event payloads or order actions.
+ app.get('/dashboard-live/bnf-shadow',c=>{
+  c.header('Cache-Control','no-store');
+  const raw:any=readBnfStatus();
+  const ready=raw.phase==='READY'&&raw.childRunning===true&&raw.feedConnected===true;
+  const cnt=(x:any)=>Number.isSafeInteger(x)&&x>=0?x:null;
+  const counts=ready?(raw.sourceCounts||{}):{};
+  const leg=(x:any)=>{
+   if(!x||typeof x!=='object')return null;
+   return {state:typeof x.state==='string'?x.state:'UNKNOWN',requestedQty:cnt(x.requestedQty),filledQty:cnt(x.filledQty),exitedQty:cnt(x.exitedQty)};
+  };
+  return c.json({mode:'SHADOW',enabled:raw.enabled===true,phase:raw.phase||'UNKNOWN',reason:raw.reason||'UNVERIFIED',
+   lots:raw.lots===1||raw.lots===2?raw.lots:null,
+   workerRunning:raw.childRunning===true,feedConnected:raw.feedConnected===true,
+   replayCapture:raw.replayCapture?{mode:'BNF_SHADOW_REPLAY_V1',
+    state:raw.childRunning!==true&&raw.replayCapture.state==='RECORDING'?'STALE_OR_INTERRUPTED':
+     ['NOT_STARTED','RECORDING','SEALED','INCOMPLETE'].includes(raw.replayCapture.state)?raw.replayCapture.state:'INCOMPLETE',
+    recordsWritten:cnt(raw.replayCapture.recordsWritten),recordsDropped:cnt(raw.replayCapture.recordsDropped),completeSessionVerified:false}:null,
+   sourceCounts:{observations:cnt(counts.observations),signals:cnt(counts.signals),rejected:cnt(counts.rejected),warmup:cnt(counts.warmup)},
+   paper:ready&&raw.paper?{reportedAt:raw.paper.reportedAt||null,active:leg(raw.paper.active),lastResult:leg(raw.paper.lastResult)}:null,
+   workerEvidence:cleanBnfHealth({...raw.health,phase:raw.phase,reason:raw.reason,workerRunning:raw.childRunning,feedConnected:raw.feedConnected}),
+   brokerOrders:0,checkedAt:new Date().toISOString()});
+ });
+ app.get('/dashboard-live/pcr-audit',c=>{
+  c.header('Cache-Control','no-store');
+  const {symbol,expiry,strike}=c.req.query();
+  if(!(LIVE_INDICES as readonly string[]).includes(symbol)||!/^\d{4}-\d{2}-\d{2}$/.test(expiry||'')||!Number.isFinite(Date.parse(expiry+'T00:00:00Z'))||new Date(expiry+'T00:00:00Z').toISOString().slice(0,10)!==expiry||
+   strike!==undefined&&(!/^\d+(?:\.\d+)?$/.test(strike)||!Number.isFinite(Number(strike))||Number(strike)<=0))return c.json({ok:false,reason:'INVALID_PCR_AUDIT_SELECTION'},400);
+  return c.json(readAudit(symbol,expiry,strike===undefined?undefined:Number(strike)));
+ });
  app.get('/dashboard-live/premiums',c=>{
   c.header('Cache-Control','no-store');
   try{

@@ -1,0 +1,305 @@
+import {recordedOiRankFrame,deriveOiRankedLadder,renderOiRankedLadder,paintOiRankedLadder,OI_RANKED_LADDER_CSS} from './oi-ranked-ladder.js';
+import {renderRecordedPremiumSession} from './recorded-premium-session.js';
+import {RAG_CARD_HTML,RAG_CARD_CSS,RAG_CARD_SCRIPT} from './rag-evidence-card.js';
+import {scanRecordedSixtyPointMoves} from './recorded-sixty-point-finder.js';
+import { createRecordedPlayback, recordedFrame, recordedSession, mergeRecordedParts } from './recorded-playback.js';
+import { standardIndexObservationClose } from './index-observation-session.js';
+import { projectDashboardReplay } from './recorded-dashboard-replay-clock.js';
+
+export function renderRecordedDashboard(showShadowOffHours=false){return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OptionPilot · Recorded Replay</title><style>
+:root{font-family:system-ui,sans-serif;color:#17221d;background:#f3f6f3;color-scheme:light}*{box-sizing:border-box}body{margin:0}main{max-width:1180px;margin:auto;padding:14px}header,.controls,.metrics{display:flex;align-items:center;gap:8px;flex-wrap:wrap}header{justify-content:space-between}h1{font-size:23px;margin:5px 0}h2{font-size:17px;margin:0 0 8px}p{margin:8px 0;line-height:1.5}a{color:#075e40}.tag{font-size:12px;font-weight:750;letter-spacing:.05em;color:#075e40}.note{font-size:12px;color:#53625a}.panel{background:white;border:1px solid #d1dcd4;border-radius:10px;padding:12px;margin:10px 0}.notice{border-left:4px solid #008755;background:#e8f4ec;padding:10px;font-size:13px}button,select{font:inherit;min-height:40px;border:1px solid #b0c2b6;border-radius:6px;padding:7px 10px;background:#fff;color:#17221d}button{cursor:pointer}button.primary{background:#075e40;color:white;border-color:#075e40}button:disabled{opacity:.5;cursor:default}button[aria-pressed=true]{box-shadow:inset 0 0 0 2px #075e40}label{font-size:13px;display:flex;gap:5px;align-items:center}select[multiple]{min-width:180px;max-width:100%;width:100%}details summary{cursor:pointer;padding:5px;font-size:13px}input[type=range]{width:100%;min-height:38px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}.metric{border:1px solid #e1e8e2;padding:8px;border-radius:6px;min-width:0}.metric small{display:block;color:#53625a;font-size:11px}.metric strong{display:block;font-size:20px;overflow-wrap:anywhere}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}th,td{text-align:right;padding:8px;border-bottom:1px solid #e2e9e3}th{background:#eef3ee;font-size:12px}th:first-child,td:first-child{text-align:left}.up{color:#08723b}.down{color:#b62135}.pdh{color:#08723b}.pdl{color:#b62135}.pdc{color:#796000}.gap{color:#a53026;font-weight:650}.chart{width:100%;height:175px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}#error{color:#a51828;font-weight:650}#clock{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}#progress{min-height:18px}#queue{font-size:12px}.ar-evidence-mode-field{flex-wrap:wrap;max-width:100%;min-width:0}.ar-evidence-mode-field select{min-width:0;max-width:100%}@media(max-width:600px){main{padding:8px}h1{font-size:20px}.panel{padding:9px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.pair{grid-template-columns:1fr}button,select{font-size:13px}.controls{gap:6px}.metric strong{font-size:19px}}@media(prefers-reduced-motion:no-preference){.changed{animation:change .7s ease-out}@keyframes change{from{background:#d9f7e4}to{background:transparent}}}
+${RAG_CARD_CSS}
+${OI_RANKED_LADDER_CSS}</style></head><body><main><header><div><span class="tag">OPTIONPILOT / RECORDED DATA</span><h1>Saved sessions & Replay</h1></div><nav><a href="/banknifty-shadow">BANKNIFTY SHADOW journal</a> · <a href="#ar-oi-ranked">OI ranked ladder</a> · <a href="/ops/control">▶ Start / Stop</a> · <a href="/api/research/business-dashboard/view">Dashboard ↗</a></nav></header>
+<p class="notice">RECORDED · Read-only. Market collection keeps its 08:45–16:15 IST schedule. Replay uses saved samples, including after market close.</p>
+${showShadowOffHours?'<section id="ar-bnf-shadow" class="notice" role="status" aria-label="BANKNIFTY SHADOW PAPER after-hours status"><strong>BANKNIFTY · SHADOW PAPER</strong> · <strong>OFF HOURS</strong> (08:45–16:15 IST). Live worker state, paper signals, entries and exits are not verified outside the operating window. No broker orders or live worker are started by this recorded page.</section>':''}
+
+
+
+<section class="panel"><div class="controls"><label>Index <select id="ar-index"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><button id="ar-latest">Latest saved data</button><button id="ar-last1">▶ 1 day</button><button id="ar-last3">▶ Last 3 days</button><button id="ar-last5">▶ Last 5 days</button><button id="ar-all">▶ All recorded days</button></div><details><summary>Choose individual recorded days</summary><label for="ar-dates">Select dates; then Replay selected</label><select id="ar-dates" multiple size="5" aria-label="Recorded days"></select><button id="ar-selected" class="primary">▶ Replay selected</button></details><p id="queue">Loading recorded dates…</p><p id="progress" class="note" role="status"></p><p id="error" role="alert"></p></section>
+<section class="panel"><div class="controls"><button id="ar-play" class="primary" disabled>▶ Play</button><button id="ar-prev" disabled>← Record</button><button id="ar-next" disabled>Record →</button><button id="ar-reset" disabled>Reset day</button><label>Speed <select id="ar-speed"><option value="1">1×</option><option value="5">5×</option><option value="10">10×</option></select></label></div><input type="range" id="ar-seek" min="0" max="0" value="0" disabled aria-label="Replay recorded time"><label class="ar-evidence-mode-field">Evidence mode <select id="ar-evidence-mode"><option value="RETROSPECTIVE">Historical review</option><option value="AS_OF">As-of replay</option></select></label><p id="ar-evidence-mode-note" class="note">Historical review uses saved minute labels, not evidence availability at decision time.</p><p id="clock">No saved session loaded</p><p id="ar-coverage" class="note"></p></section>
+<section class="panel" id="ar-sixty"><h2>60-point option premium finder · recorded observations</h2><p class="note">Selected index · CE and PE · exact expiry and strike · observed same-day moves of ₹60+. Only archived ATM ±7 strikes; missing minutes and OHLC are not inferred. BANKNIFTY monthly = research only.</p><div class="controls"><button type="button" id="ar-60-week">Find this week</button><button type="button" id="ar-60-all">Find all recorded days</button><button type="button" id="ar-60-cancel" disabled>Cancel scan</button><label>Scan indices <select id="ar-60-index"><option value="CURRENT">Selected index</option><option value="ALL">All 3 indices</option></select></label><label>Side <select id="ar-60-side"><option value="BOTH">Both</option><option>CE</option><option>PE</option></select></label><label>Movement <select id="ar-60-direction"><option value="BOTH">Rise + fall</option><option value="RISE">Rise ≥₹60</option><option value="FALL">Fall ≥₹60</option></select></label></div><p id="ar-60-status" class="note" role="status" aria-live="polite">Choose a scan. This week uses trading dates in the current IST calendar week.</p><p id="ar-60-coverage" class="note"></p><div id="ar-60-results" class="scroll" aria-live="polite"></div><div class="controls"><button type="button" id="ar-60-prev" disabled>← Previous</button><span id="ar-60-pages" class="note"></span><button type="button" id="ar-60-next" disabled>Next →</button></div></section>
+<section class="panel"><h2>Spot · Futures · Positioning</h2><div id="ar-metrics" class="metrics"></div><div class="controls"><label>Contract <select id="ar-contract-mode"><option value="SESSION">Session ATM · reset each day</option><option value="PINNED">Same contract across days</option></select></label><label>Expiry <select id="ar-expiry" aria-label="Pinned exact expiry"></select></label><label>Strike <select id="ar-strike" aria-label="Pinned CE and PE strike"></select></label><button id="ar-atm">Pin ATM at cursor</button></div><p id="ar-contract" class="note"></p><div id="ar-charts"></div></section>
+<details class="panel" id="ar-minute-history"><summary>Minute history · OI, PCR and walls</summary><div id="ar-minute-table"></div></details><section class="panel" id="ar-oi-ranked"><h2>OI ranked ladder · CE / Strike / PE</h2><div class="controls"><label>Compare<select id="ar-oi-window"><option value="1">1m</option><option value="3" selected>3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="OPEN">From 09:15</option></select></label><label>Range<select id="ar-oi-band"><option value="3">ATM ±3</option><option value="5">ATM ±5</option><option value="7" selected>ATM ±7</option></select></label><label>Rank focus<select id="ar-oi-focus"><option value="TOTAL">Total OI</option><option value="ADD">OI Addition</option><option value="SHED">OI Shedding</option></select></label></div><p class="note">Selected expiry above · shared replay time · rank within eligible returned contracts, separately for CE and PE. No full-chain or buyer/seller claim.</p><button type="button" id="ar-oi-atm">Center ATM</button><div id="ar-oi-output"></div></section><section class="panel" id="ar-premium-session"><h2>Full-session premium · 09:15 to EOD</h2><div class="controls"><label>Expiries <select id="ar-premium-scope"><option value="ALL">All saved expiries · fixed strike</option><option value="SELECTED">Selected expiry</option></select></label><label>Sample display <select id="ar-premium-interval"><option value="1">1m</option><option value="3">3m</option><option value="5">5m</option><option value="15">15m</option><option value="30">30m</option><option value="60">60m</option></select></label></div><p class="note">Uses the expiry / strike selection above and the same replay clock. Point titles and observation tables show source times. No new broker/data requests.</p><div id="ar-premium-output"></div></section>
+<section class="panel"><h2>CE / PE ladder · ATM ±7 saved strikes</h2><p class="note">Exact replay timestamp only · PDH green / PDC yellow / PDL red · ΔOI uses the preceding saved bucket only when ≤3 minutes apart.</p><div id="ar-ladder" class="scroll"></div></section><footer class="note">1× = one recorded step / second. Gaps remain gaps; samples are not OHLC candles. Session ATM pins the opening saved contract separately each day. Choose Same contract to keep expiry / strike across days; missing contracts remain unavailable. BANKNIFTY is monthly research only. No orders or Telegram messages.</footer>
+${RAG_CARD_HTML}</main><script>const __name=(fn,_name)=>fn;const recordedOiRankFrame=${recordedOiRankFrame.toString()};const deriveOiRankedLadder=${deriveOiRankedLadder.toString()};const renderOiRankedLadder=${renderOiRankedLadder.toString()};const paintOiRankedLadder=${paintOiRankedLadder.toString()};const renderRecordedPremiumSession=${renderRecordedPremiumSession.toString()};const mergeRecordedParts=${mergeRecordedParts.toString()};const recordedSession=${recordedSession.toString()};const recordedFrame=${recordedFrame.toString()};const projectDashboardReplay=${projectDashboardReplay.toString()};const createRecordedPlayback=${createRecordedPlayback.toString()};const standardIndexObservationClose=${standardIndexObservationClose.toString()};const scanRecordedSixtyPointMoves=${scanRecordedSixtyPointMoves.toString()};(${installRecordedDashboard.toString()})();</script><script>${RAG_CARD_SCRIPT}</script></body></html>`;}
+
+export function installRecordedDashboard(){
+ const $=(id:string)=>document.getElementById(id) as any;
+ let evidenceScope='',publishedClock='';
+ const asOfMode=()=>$('ar-evidence-mode')?.value==='AS_OF';
+ const evidenceEvent=(type:string,detail?:any)=>{if(typeof CustomEvent==='function'&&typeof window.dispatchEvent==='function')window.dispatchEvent(new CustomEvent(type,{detail}));};
+ const invalidate=(scope:string)=>{if(scope!==evidenceScope){evidenceScope=scope;evidenceEvent('optionpilot:rag-invalidate');}};
+ let dates:string[]=[],dateRows:any[]=[],symbol='NIFTY',expiry='',strike:number|null=null,controller:any=null,latest:any=null,requestVersion=0,renderedDate='';
+ let oiRankCenter:number|null=null;
+ let scanAbort:AbortController|null=null,scanGeneration=0,scanHits:any[]=[],scanPage=0,scanDaysDone=0,scanCoverage:any=null;
+ const number=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
+ const fmt=(v:any)=>number(v)===null?'—':v.toLocaleString('en-IN',{maximumFractionDigits:2});
+ const esc=(v:any)=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
+ const clock=(at:string)=>new Date(at).toLocaleTimeString('en-GB',{timeZone:'Asia/Kolkata',hour12:false});
+ const controls=['ar-latest','ar-last1','ar-last3','ar-last5','ar-all','ar-selected'];
+ function available(){dates=[...new Set<string>(dateRows.filter(row=>row.symbol===symbol&&Number(row.markerCount)>0).map(row=>row.tradeDate))].sort();$('ar-dates').innerHTML=[...dates].reverse().map(date=>'<option value="'+date+'">'+date+'</option>').join('');for(const id of controls)$(id).disabled=!dates.length;$('queue').textContent=dates.length+' recorded days for '+symbol+(symbol==='BANKNIFTY'?' · monthly research':'')+'.';}
+ async function json(url:string,signal?:AbortSignal){
+  const timeout=new AbortController(),id=setTimeout(()=>timeout.abort(),65000);
+  const combined=signal?AbortSignal.any([signal,timeout.signal]):timeout.signal;
+  try{const response=await fetch(url,{signal:combined,cache:'no-store'}),result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||result.reason||'HTTP '+response.status);return result;}
+  catch(error:any){if(combined.aborted)throw new Error(signal?.aborted?'Playback cancelled.':'Saved-data request timed out. Retry this day.');throw error;}
+  finally{clearTimeout(id);}
+ }
+ async function load(date:string,signal:AbortSignal,index=symbol){
+  const parts:any[]=[],end=standardIndexObservationClose(date),minute=(v:string)=>Number(v.slice(0,2))*60+Number(v.slice(3)),text=(n:number)=>String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
+  const total=Math.ceil((minute(end)-555)/60);
+  for(let start=555,part=0;start<minute(end);start+=60){
+   if(signal.aborted)throw new Error('Playback cancelled.');
+   $('progress').textContent='Loading '+index+' · '+date+' · '+(++part)+' / '+total+' saved windows…';
+   const query=new URLSearchParams({symbol:index,date,from:text(start),to:text(Math.min(start+60,minute(end)))});
+   parts.push(await json('/api/research/recorded-dashboard/replay?'+query,signal));
+  }
+  const merged=mergeRecordedParts(parts);
+  $('progress').textContent='Loaded '+date+' · '+merged.market.length+' market / '+merged.options.length+' option / '+merged.chain.length+' chain rows.';
+  return recordedSession(merged,index,date);
+ }
+ function pin(frame:any,force=false){
+  const first=latest?.session,rows=force?frame.options:(first?.options||[]),at=force?frame.at:rows[0]?.minute_bucket;
+  const initial=rows.filter((r:any)=>r.minute_bucket===at),ex=[...new Set<string>(initial.map((r:any)=>String(r.expiry).slice(0,10)))].sort();
+  if(!expiry||force)expiry=ex[0]||'';
+  const strikes=[...new Set<number>(initial.filter((r:any)=>String(r.expiry).slice(0,10)===expiry).map((r:any)=>r.strike).filter((v:any)=>number(v)!==null))].sort((a,b)=>a-b);
+  const spot=(force?frame.market:(first?.market||[]).filter((r:any)=>r.minute_bucket===at))[0]?.spot_ltp;
+  if(strike===null||force)strike=strikes.length?strikes.reduce((best,k)=>number(spot)!==null&&Math.abs(k-spot)<Math.abs(best-spot)?k:best,strikes[0]):null;
+ }
+ function graph(rows:any[],field:string,title:string,color:string,at:string){
+  const points=rows.filter(r=>r.minute_bucket<=at).sort((a,b)=>a.minute_bucket.localeCompare(b.minute_bucket)),valid=points.filter(r=>number(r[field])!==null);
+  if(!valid.length)return '<p class="note">'+title+' · — at or before cursor</p>';
+  const lo=Math.min(...valid.map(r=>r[field])),hi=Math.max(...valid.map(r=>r[field])),start=Date.parse(latest.session.timeline[0]),end=Date.parse(at),span=Math.max(180000,end-start),y=(v:number)=>140-(v-lo)/Math.max(hi-lo,.01)*110,x=(t:string)=>60+(Date.parse(t)-start)/span*490;
+  let prev:any=null,lines='',dots='';for(const row of points){if(number(row[field])===null){prev=null;continue;}if(prev&&Date.parse(row.minute_bucket)-Date.parse(prev.minute_bucket)<=180000)lines+='<path d="M '+x(prev.minute_bucket)+' '+y(prev[field])+' L '+x(row.minute_bucket)+' '+y(row[field])+'"/>';dots+='<circle cx="'+x(row.minute_bucket)+'" cy="'+y(row[field])+'" r="2"/>';prev=row;}
+  return '<h2>'+esc(title)+'</h2><svg class="chart" viewBox="0 0 580 175" role="img" aria-label="'+esc(title)+' recorded sample graph"><g fill="'+color+'" stroke="'+color+'" stroke-width="2">'+lines+dots+'</g><g fill="#53625a" font-size="11"><text x="0" y="30">'+fmt(hi)+'</text><text x="0" y="145">'+fmt(lo)+'</text><text x="60" y="170">'+clock(latest.session.timeline[0])+'</text><text x="490" y="170">'+clock(at)+'</text></g></svg>';
+ }
+ let minuteKey:any[]=[],minuteRows:string[]=[];
+ function renderMinuteHistory(state:any){
+  const panel=$('ar-minute-history'),table=$('ar-minute-table');
+  if(!panel?.open||!table)return;
+  const records=state.session,date=records?.date,key=[records,symbol,expiry,state.loading,asOfMode()?state.frame?.at:null];
+  if(key.every((value,i)=>value===minuteKey[i]))return;
+  minuteKey=key;
+  minuteRows=[];
+  if(state.loading||!date||!expiry){table.textContent='Choose a recorded expiry.';return;}
+  const start=Date.parse(date+'T09:15:00+05:30'),end=Date.parse(date+'T'+standardIndexObservationClose(date)+':00+05:30');
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end<start){table.textContent='Recorded session times unavailable.';return;}
+  const cadence=date>='2026-10-19'?60000:180000;
+  const byMinute=(rows:any[],match:(r:any)=>boolean)=>{
+   const groups=new Map<number,any[]>();
+   for(const row of rows||[]){
+    const at=Date.parse(row.minute_bucket);
+    if(row.symbol!==symbol||at<start||at>end||!Number.isFinite(at)||!match(row))continue;
+    const group=groups.get(at)||[];group.push(row);groups.set(at,group);
+   }
+   return groups;
+  };
+  const chosen=(r:any)=>String(r.expiry).slice(0,10)===expiry;
+  const market=byMinute(records?.market,()=>true),chains=byMinute(records?.chain,chosen);
+  const options=byMinute(records?.options,r=>chosen(r)&&r.atm_offset!=null&&Math.abs(Number(r.atm_offset))<=7);
+  const exact=(rows:any[]|undefined)=>rows?.length===1&&rows[0].truth_verdict==='TRUE'?rows[0]:null;
+  const num=(v:any)=>v!=null&&v!==''&&Number.isFinite(Number(v))?Number(v):null;
+  const delta=(a:number|null,b:number|null)=>a===null||b===null?null:a-b;
+  const shown=(v:any)=>num(v)===null?'—':fmt(Number(v));
+  const frames=new Map<number,any>();
+  const observed=[...market.keys(),...chains.keys(),...options.keys()];
+  if(!observed.length){table.textContent='No saved minutes for this selection.';return;}
+  const last=Math.max(...observed);
+  const cursorByTime=new Map(records.timeline.map((value:string)=>[Date.parse(value),value]));
+  const body=[];
+  for(let at=start;at<=last;at+=cadence){
+   const m=exact(market.get(at)),c=exact(chains.get(at)),legs=options.get(at)||[];
+   const usable=legs.filter(r=>r.truth_verdict==='TRUE'&&r.snapshot_id!=null&&r.snapshot_id===m?.snapshot_id&&
+    (r.option_type==='CE'||r.option_type==='PE')&&(num(r.strike)??0)>0&&
+    Number.isSafeInteger(num(r.oi))&&(num(r.oi)??-1)>=0&&
+    Number.isFinite(Date.parse(r.quote_timestamp))&&num(r.quote_age_seconds)!==null&&
+    Number(r.quote_age_seconds)>=-5&&Number(r.quote_age_seconds)<=30);
+   const calls=usable.filter(r=>r.option_type==='CE'),puts=usable.filter(r=>r.option_type==='PE');
+   const strikes=new Set(calls.map(r=>Number(r.strike)));
+   const ids=legs.length===30&&calls.length===15&&puts.length===15&&strikes.size===15&&
+    new Set(puts.map(r=>Number(r.strike))).size===15&&puts.every(r=>strikes.has(Number(r.strike)))?
+    [...strikes].sort((a,b)=>a-b).join('|'):null;
+   const sum=(side:any[])=>ids===null?null:side.reduce((total,r)=>total+Number(r.oi),0);
+   const full=num(c?.full_chain_oi_pcr),band=num(c?.band7_oi_pcr),ce=sum(calls),pe=sum(puts);
+   const previous=frames.get(at-180000),sameBand=ids!==null&&ids===previous?.ids;
+   frames.set(at,{ids,full,fullSource:c?.full_pcr_source,band,ce,pe});
+   const prior=exact(market.get(at-cadence)),spot=num(m?.spot_ltp),before=num(prior?.spot_ltp);
+   const pdh=num(m?.pdh),pdl=num(m?.pdl);
+   const event=spot===null||before===null?'':pdh!==null&&pdh>0&&pdh===num(prior?.pdh)&&before<=pdh&&spot>pdh?'Spot above PDH':
+    pdl!==null&&pdl>0&&pdl===num(prior?.pdl)&&before>=pdl&&spot<pdl?'Spot below PDL':'';
+   const stamp=cursorByTime.get(at),index=minuteRows.length;
+   minuteRows.push(stamp||'');
+   const label=clock(new Date(at).toISOString()).slice(0,5),timeCell=stamp?'<button type="button" data-ar-minute="'+index+'">'+label+'</button>':label;
+   const previousChain=exact(chains.get(at-cadence));
+   const wall=(field:string)=>{
+    const value=num(c?.[field]),priorValue=num(previousChain?.[field]);
+    return priorValue!==null&&value!==null&&priorValue!==value?shown(priorValue)+' → '+shown(value):shown(value);
+   };
+   const quality=c||m?(ids?'30/30 OI':usable.length+'/'+legs.length+' eligible'):(market.has(at)||chains.has(at)||legs.length?'Partial':'Gap');
+   body.push('<tr><th scope="row">'+timeCell+'</th>'+[
+    shown(full),shown(band),shown(ce),shown(pe),
+    shown(previous&&c?.full_pcr_source&&c.full_pcr_source===previous.fullSource?delta(full,previous.full):null),
+    shown(sameBand?delta(band,previous.band):null),shown(sameBand?delta(ce,previous.ce):null),shown(sameBand?delta(pe,previous.pe):null),
+    wall('call_wall_strike'),wall('put_wall_strike'),event||'—',quality
+   ].map(value=>'<td>'+esc(value)+'</td>').join('')+'</tr>');
+  }
+  table.innerHTML='<p class="mb-note">'+esc(symbol+' · '+expiry)+' · '+(cadence/60000)+'m archive. Δ values compare exact 3m endpoints. Wall arrows and spot breaks show changes between consecutive saved samples.</p>'+
+   '<div style="overflow-x:auto"><table><caption>Recorded minute history</caption><thead><tr>'+[
+    'IST','Full PCR','±7 PCR','CE OI','PE OI','Δ Full PCR','Δ ±7 PCR','Δ CE OI','Δ PE OI','CE wall','PE wall','Spot PDH / PDL','OI coverage'
+   ].map(label=>'<th scope="col">'+label+'</th>').join('')+'</tr></thead><tbody>'+body.join('')+'</tbody></table></div>';
+ }
+ function render(rawState:any){
+  const strict=asOfMode(),rawSession=rawState.session,rawFrame=rawState.frame;
+  let state=rawState;
+  if(strict&&rawSession&&rawFrame?.at){
+   const date=rawSession.date,indexSymbol=rawSession.symbol;
+   const projection=projectDashboardReplay({date,scope:'CORE',recordedDates:dates,archiveLoading:rawState.loading},
+    {date,at:rawFrame.at,timeline:rawSession.timeline,current:{[indexSymbol]:rawSession},history:{},playing:rawState.playing});
+   const session={...rawSession,...projection.current[indexSymbol]};
+   const frame=recordedFrame(session,rawState.index);
+   state={...rawState,session,frame:projection.replay.at?frame:{...frame,at:null,market:[],options:[],chain:[]}};
+  }
+  latest=state;const frame=state.frame,session=state.session,at=frame.at;
+  $('ar-evidence-mode-note').textContent=strict?'As-of replay: only rows and truth markers recorded by the cursor. Database commit time remains unverified. Missing clocks mean unavailable. Full-session finder is separate historical review.':'Historical review uses saved minute labels, not evidence availability at decision time. Full-session finder is retrospective.';
+  $('ar-sixty').hidden=strict;
+  const clockDetail={active:strict,date:strict?(frame.date||''):'',at:strict?(at||null):null};
+  const clockKey=JSON.stringify(clockDetail);if(clockKey!==publishedClock){publishedClock=clockKey;evidenceEvent('optionpilot:rag-replay-clock',clockDetail);}
+  $('error').textContent=state.error;$('ar-play').textContent=state.playing?'Ⅱ Pause':'▶ Play';
+  $('ar-play').disabled=state.loading||!session?.timeline?.length;$('ar-prev').disabled=state.loading||!at||state.index===0;$('ar-next').disabled=state.loading||!at||(!state.playing&&state.index===session.timeline.length-1&&state.dayIndex===state.days.length-1);$('ar-reset').disabled=state.loading||!at;
+  $('ar-seek').disabled=state.loading||!at;$('ar-seek').max=String(Math.max(0,(session?.timeline?.length||1)-1));$('ar-seek').value=String(state.index);
+  if(state.days.length)$('queue').textContent='Day '+(state.dayIndex+1)+' / '+state.days.length+' · '+state.days.join(' → ');
+  $('clock').textContent=state.loading?'Loading recorded '+state.days[state.dayIndex]+'…':at?frame.date+' · '+clock(at)+' IST · '+(state.playing?'REPLAY':'SAVED / PAUSED'):'No TRUE saved samples loaded';
+  $('ar-coverage').innerHTML=at?(state.index+1)+' / '+session.timeline.length+' saved steps · '+session.cadenceMinutes+'m recorder cadence'+(frame.gapMinutes>session.cadenceMinutes?' · <span class="gap">Gap '+frame.gapMinutes+' minutes since previous step; no values filled</span>':''):'Missing data stays unavailable.';
+  if(!at){renderMinuteHistory(state);invalidate('empty|'+symbol);$('ar-metrics').innerHTML='';$('ar-charts').innerHTML='';$('ar-ladder').innerHTML='';$('ar-contract').textContent='';$('ar-premium-output').innerHTML='';$('ar-oi-output').innerHTML='';return;}
+  if(renderedDate!==frame.date){if($('ar-contract-mode').value!=='PINNED'){expiry='';strike=null;}renderedDate=frame.date;}
+  pin(frame);renderMinuteHistory(state);invalidate([symbol,frame.date,at,expiry,strike,state.loading].join('|'));
+  const ex=[...new Set<string>([expiry,...session.options.map((r:any)=>String(r.expiry).slice(0,10))])].filter(Boolean).sort();$('ar-expiry').innerHTML=ex.map(v=>'<option>'+esc(v)+'</option>').join('');$('ar-expiry').value=expiry;
+  const strikes=[...new Set<number>([strike,...session.options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry).map((r:any)=>r.strike)])].filter((v:any)=>number(v)!==null).sort((a:any,b:any)=>a-b);$('ar-strike').innerHTML=strikes.map(v=>'<option>'+v+'</option>').join('');$('ar-strike').value=String(strike);
+  const market=frame.market.length===1?frame.market[0]:{},chainRows=frame.chain.filter((r:any)=>String(r.expiry).slice(0,10)===expiry),chain=chainRows.length===1?chainRows[0]:{};
+  const metric=(label:string,value:any)=>'<div class="metric"><small>'+label+'</small><strong>'+fmt(value)+'</strong></div>';
+  $('ar-metrics').innerHTML=[['Spot',market.spot_ltp],['Future',market.future_ltp],['Basis',market.future_basis],['VIX',market.india_vix],['PDH',market.pdh],['PDC',market.spot_prev_close],['PDL',market.pdl],['Full PCR · pinned expiry',chain.full_chain_oi_pcr]].map(([label,v])=>metric(String(label),v)).join('');
+  $('ar-contract').textContent='Pinned '+symbol+' · '+expiry+' · '+strike+' CE / PE. '+(chain.full_pcr_source||'Full PCR provenance unavailable.')+' Walls CE '+fmt(chain.call_wall_strike)+' / PE '+fmt(chain.put_wall_strike)+'.';
+  const selected=(side:string)=>session.options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry&&r.strike===strike&&r.option_type===side);
+  $('ar-charts').innerHTML=graph(session.market,'spot_ltp','Spot · sampled line','#075e40',at)+'<div class="pair"><div>'+graph(selected('CE'),'ltp','Pinned CE premium','#08723b',at)+'</div><div>'+graph(selected('PE'),'ltp','Pinned PE premium','#b62135',at)+'</div></div>';
+  $('ar-premium-output').innerHTML=renderRecordedPremiumSession({...session,cursor:at,strike,expiry,scope:$('ar-premium-scope').value||'ALL',interval:$('ar-premium-interval').value||1,sessionEnd:standardIndexObservationClose(frame.date)});
+  const oiWindow=$('ar-oi-window').value||'3',oiPrevious=oiWindow==='OPEN'?frame.date+'T09:15:00+05:30':new Date(Date.parse(at)-Number(oiWindow)*60000).toISOString();
+  paintOiRankedLadder($('ar-oi-output'),renderOiRankedLadder(deriveOiRankedLadder(recordedOiRankFrame(session,at,expiry),recordedOiRankFrame(session,oiPrevious,expiry),{mode:'RECORDED',minutes:oiWindow}),{band:Number($('ar-oi-band').value)||7,focus:$('ar-oi-focus').value||'TOTAL',center:oiRankCenter}));
+  const nowRows=frame.options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry),levels=[...new Set<number>(session.options.filter((r:any)=>String(r.expiry).slice(0,10)===expiry).map((r:any)=>r.strike))].sort((a,b)=>a-b),spot=number(market.spot_ltp),center=spot===null?strike:levels.reduce((best,k)=>Math.abs(k-spot)<Math.abs(best-spot)?k:best,levels[0]);
+  const mid=levels.indexOf(center as number),band=mid<0?[]:levels.slice(Math.max(0,mid-7),mid+8),previous=state.index>0?session.timeline[state.index-1]:null;
+  const value=(k:number,side:string)=>{const matches=nowRows.filter((r:any)=>r.strike===k&&r.option_type===side);return matches.length===1?matches[0]:{};};
+  const cells=(r:any)=>{const old=previous&&frame.gapMinutes<=3?session.options.filter((q:any)=>q.minute_bucket===previous&&q.strike===r.strike&&q.option_type===r.option_type&&String(q.expiry).slice(0,10)===expiry):[],delta=old.length===1&&number(old[0].oi)!==null&&number(r.oi)!==null?r.oi-old[0].oi:null;
+   const event=number(r.ltp)!==null?(number(r.pdh)!==null&&r.ltp>r.pdh?'Above PDH':number(r.pdl)!==null&&r.ltp<r.pdl?'Below PDL':''):'';
+   return '<td>'+fmt(r.ltp)+(number(r.ltp)!==null&&r.ltp>0?(clock(at).slice(0,5)>='09:15'&&clock(at).slice(0,5)<='15:30'?'<button type="button" data-ar-evidence="'+r.strike+'|'+r.option_type+'" aria-label="Evidence '+r.strike+' '+r.option_type+'">Evidence</button>':'<small>Evidence 09:15–15:30 IST</small>'):'')+'</td><td>'+fmt(r.oi)+'</td><td class="'+(delta>0?'up changed':delta<0?'down changed':'')+'">'+(delta>0?'+':'')+fmt(delta)+'</td><td class="pdh">'+fmt(r.pdh)+'</td><td class="pdc">'+fmt(r.pdc)+'</td><td class="pdl">'+fmt(r.pdl)+'</td><td>'+event+'</td>';};
+  $('ar-ladder').innerHTML=band.length?'<table><thead><tr><th>Strike</th><th>CE ₹</th><th>CE OI</th><th>CE ΔOI</th><th>CE PDH</th><th>CE PDC</th><th>CE PDL</th><th>CE state</th><th>PE ₹</th><th>PE OI</th><th>PE ΔOI</th><th>PE PDH</th><th>PE PDC</th><th>PE PDL</th><th>PE state</th></tr></thead><tbody>'+band.map(k=>'<tr><th>'+fmt(k)+'</th>'+cells(value(k,'CE'))+cells(value(k,'PE'))+'</tr>').join('')+'</tbody></table>':'No saved strikes for this pinned expiry.';
+ }
+ $('ar-oi-output').onclick=(e:any)=>{const value=e.target.closest?.('[data-oir-strike]')?.dataset?.oirStrike;if(value!==undefined&&Number.isFinite(Number(value))){oiRankCenter=Number(value);render(controller.snapshot());}};
+ $('ar-oi-atm').onclick=()=>{oiRankCenter=null;render(controller.snapshot());};
+ for(const id of ['ar-oi-window','ar-oi-band','ar-oi-focus','ar-premium-scope','ar-premium-interval'])$(id).onchange=()=>render(controller.snapshot());
+ $('ar-ladder').onclick=(event:any)=>{
+  const key=event.target.closest?.('[data-ar-evidence]')?.dataset?.arEvidence;if(!key||latest?.loading)return;if(!latest?.frame?.at||clock(latest.frame.at).slice(0,5)<'09:15'||clock(latest.frame.at).slice(0,5)>'15:30')return;
+  const [raw,side]=key.split('|'),k=Number(raw),frame=latest?.frame;
+  if(!frame?.at||!['CE','PE'].includes(side)||!Number.isFinite(k))return;
+  const rows=frame.options.filter((r:any)=>r.symbol===symbol&&String(r.expiry).slice(0,10)===expiry&&r.strike===k&&r.option_type===side);
+  if(rows.length!==1||number(rows[0].ltp)===null||rows[0].ltp<=0)return;
+  controller.pause();evidenceEvent('optionpilot:rag-selection',{symbol,date:frame.date,expiry,strike:k,side,time:new Date(Date.parse(frame.at)+19800000).toISOString().slice(11,16),lookback:3});
+ };
+ controller=createRecordedPlayback({load,render,setTimeout:(fn:any,ms:number)=>setTimeout(fn,ms),clearTimeout:(id:any)=>clearTimeout(id)});
+ async function start(days:string[],play=true){stopScan();const version=++requestVersion;await controller.start(days,play);if(version===requestVersion&&!play){const state=controller.snapshot();if(state.session?.timeline.length){const optionTimes=new Set(state.session.options.map((r:any)=>r.minute_bucket));let index=state.session.timeline.length-1;for(let i=index;i>=0;i--)if(optionTimes.has(state.session.timeline[i])){index=i;break;}controller.seek(index);}}}
+
+ const stopScan=(clear=false)=>{
+  scanGeneration++;
+  if(scanAbort){scanAbort.abort();scanAbort=null;$('ar-60-status').textContent='Scan cancelled. Completed-day results remain visible.';}
+  $('ar-60-cancel').disabled=true;
+  $('ar-60-week').disabled=false;$('ar-60-all').disabled=false;
+  if(clear){scanHits=[];scanPage=0;scanCoverage=null;scanDaysDone=0;$('ar-60-results').innerHTML='';$('ar-60-coverage').textContent='';$('ar-60-status').textContent='Choose a scan for '+symbol+'.';}
+ };
+ function showScan(){
+  const side=$('ar-60-side').value,dir=$('ar-60-direction').value;
+  const selected=scanHits.filter(hit=>(side==='BOTH'||hit.side===side)&&(dir==='BOTH'||hit.direction===dir));
+  const pages=Math.max(1,Math.ceil(selected.length/50));scanPage=Math.min(scanPage,pages-1);
+  $('ar-60-prev').disabled=scanPage===0;$('ar-60-next').disabled=scanPage>=pages-1;
+  $('ar-60-pages').textContent=selected.length+' matches · page '+(scanPage+1)+' / '+pages;
+  const cover=scanCoverage;
+  $('ar-60-coverage').textContent=cover?scanDaysDone+' completed days · '+cover.eligibleRows+' eligible option samples · '+cover.rejectedRows+' excluded/ambiguous rows · '+cover.conflictedMinutes+' conflicting contract-minutes. Scope: saved ATM ±7 (CORE), not all strikes.':'';
+  if(!selected.length){$('ar-60-results').textContent=scanDaysDone?'No verified ≥₹60 move in the scanned saved ATM ±7 quotes. This does not prove other strikes or unrecorded intervals had none.':'No completed scan results.';return;}
+  const rows=selected.slice(scanPage*50,(scanPage+1)*50).map(hit=>{
+   const begin=clock(hit.fromAt).slice(0,5),end=clock(hit.toAt).slice(0,5),id=scanHits.indexOf(hit);
+   const evidence=end>='09:15'&&end<='15:30';
+   const window=hit.expiryWindow;
+   const comparison='<details><summary>Same strike · first ≥₹60 window</summary><p>'+clock(window.fromAt).slice(0,5)+' → '+clock(window.toAt).slice(0,5)+' IST · '+fmt(hit.strike)+' · observed endpoints; CORE expiries only</p>'+window.comparisons.map((r:any)=>'<p>'+esc(r.expiry)+' · DTE '+r.dte+' · '+r.side+': '+(r.points===null?'Missing eligible endpoint':'₹'+fmt(r.fromPrice)+' → ₹'+fmt(r.toPrice)+' · '+(r.points>=0?'+':'')+fmt(r.points)+' ('+fmt(r.percent)+'%)')+' · '+esc(r.status)+(r.status==='GAPPED'?' · continuity unproven':'')+'<br>Quote IST: '+(r.fromQuoteAt?clock(r.fromQuoteAt):'—')+' → '+(r.toQuoteAt?clock(r.toQuoteAt):'—')+' · receipt IST: '+(r.fromReceiptAt?clock(r.fromReceiptAt):'—')+' → '+(r.toReceiptAt?clock(r.toReceiptAt):'—')+'</p>').join('')+'</details>';
+   return '<tr><td>'+esc(hit.date)+'</td><td>'+esc(hit.symbol)+'</td><td>'+esc(hit.expiry)+'</td><td>'+fmt(hit.strike)+' '+esc(hit.side)+'</td><td class="'+(hit.direction==='RISE'?'up':'down')+'">'+(hit.direction==='RISE'?'+':'−')+'₹'+fmt(hit.points)+'</td><td>₹'+fmt(hit.fromPrice)+' → ₹'+fmt(hit.toPrice)+'</td><td>'+begin+' → '+end+' IST</td><td>'+clock(hit.firstThresholdAt).slice(0,5)+' IST (observed)</td><td>'+(hit.gapWarning?'<span class="gap">Gap '+fmt(hit.maxGapMinutes)+'m; crossing time uncertain</span>':'Recorded endpoints')+'</td><td>'+comparison+'</td><td>'+(evidence?'<button type="button" data-ar-sixty-evidence="'+id+'">Evidence</button>':'Evidence limited to 09:15–15:30')+'</td></tr>';
+  }).join('');
+  $('ar-60-results').innerHTML='<table><thead><tr><th>Date</th><th>Index</th><th>Expiry</th><th>Contract</th><th>Move</th><th>Saved premium</th><th>Start → End</th><th>First ≥₹60 observation</th><th>Continuity</th><th>Multi-DTE · same window</th><th>RAG</th></tr></thead><tbody>'+rows+'</tbody></table>';
+ }
+ async function findSixty(scope:'WEEK'|'ALL'){
+  if(asOfMode())return;
+  stopScan(true);controller.pause();
+  const token=++scanGeneration,abort=new AbortController();scanAbort=abort;
+  const istToday=new Date(Date.now()+19800000).toISOString().slice(0,10),weekday=new Date(istToday+'T00:00:00Z').getUTCDay();
+  const start=new Date(Date.parse(istToday+'T00:00:00Z')-((weekday+6)%7)*86400000).toISOString().slice(0,10);
+  const scanIndices=$('ar-60-index').value==='ALL'?['NIFTY','SENSEX','BANKNIFTY']:[symbol];
+  const selected=dateRows.filter(row=>scanIndices.includes(row.symbol)&&Number(row.markerCount)>0&&(scope==='ALL'||(row.tradeDate>=start&&row.tradeDate<=istToday)))
+   .map(row=>({date:row.tradeDate,index:row.symbol})).filter((v,i,a)=>a.findIndex(x=>x.index===v.index&&x.date===v.date)===i)
+   .sort((a,b)=>a.date.localeCompare(b.date)||scanIndices.indexOf(a.index)-scanIndices.indexOf(b.index));
+  const scanLabel=scanIndices.join(' + ');
+  scanCoverage={eligibleRows:0,rejectedRows:0,conflictedMinutes:0};scanDaysDone=0;
+  $('ar-60-week').disabled=true;$('ar-60-all').disabled=true;$('ar-60-cancel').disabled=false;
+  if(!selected.length){stopScan();$('ar-60-status').textContent='No saved '+scanLabel+' dates in '+(scope==='WEEK'?'the current IST week.':'this scope.');return;}
+  $('ar-60-status').textContent='Reading '+selected.length+' saved index-day session(s) for '+scanLabel+', one at a time; read-only archive.';
+  try{
+   for(const item of selected){
+    if(abort.signal.aborted||token!==scanGeneration)break;
+    $('ar-60-status').textContent='Scanning '+item.index+' '+item.date+' · session '+(scanDaysDone+1)+' / '+selected.length+'.';
+    const session=await load(item.date,abort.signal,item.index);
+    if(abort.signal.aborted||token!==scanGeneration)break;
+    const result=scanRecordedSixtyPointMoves(session,60);
+    scanHits.push(...result.events);
+    scanCoverage.eligibleRows+=result.coverage.eligibleRows;
+    scanCoverage.rejectedRows+=result.coverage.rejectedRows;
+    scanCoverage.conflictedMinutes+=result.coverage.conflictedMinutes;
+    scanDaysDone++;
+    scanHits.sort((a,b)=>b.date.localeCompare(a.date)||b.points-a.points||a.toAt.localeCompare(b.toAt));
+    showScan();
+   }
+   if(token===scanGeneration)$('ar-60-status').textContent='Completed '+scanDaysDone+' / '+selected.length+' '+scanLabel+' saved index-day sessions · '+scanHits.length+' distinct contract/direction observations ≥₹60. Maximum sampled rise/fall per contract and day; not an execution signal.';
+  }catch(error:any){
+   if(token===scanGeneration)$('ar-60-status').textContent='Scan INCOMPLETE after '+scanDaysDone+' days: '+(error?.message||'Archive read failed')+'. Saved results cover completed days only.';
+  }finally{
+   if(token===scanGeneration){scanAbort=null;$('ar-60-cancel').disabled=true;$('ar-60-week').disabled=false;$('ar-60-all').disabled=false;showScan();}
+  }
+ }
+ $('ar-60-week').onclick=()=>void findSixty('WEEK');
+ $('ar-60-all').onclick=()=>void findSixty('ALL');
+ $('ar-60-cancel').onclick=()=>stopScan();
+ $('ar-60-index').onchange=()=>stopScan(true);
+ $('ar-60-side').onchange=()=>{scanPage=0;showScan();};
+ $('ar-60-direction').onchange=()=>{scanPage=0;showScan();};
+ $('ar-60-prev').onclick=()=>{scanPage=Math.max(0,scanPage-1);showScan();};
+ $('ar-60-next').onclick=()=>{scanPage++;showScan();};
+ $('ar-60-results').onclick=(event:any)=>{
+  if(asOfMode())return;
+  const key=event.target.closest?.('[data-ar-sixty-evidence]')?.dataset?.arSixtyEvidence;
+  if(key===undefined)return;
+  const hit=scanHits[Number(key)];if(!hit)return;
+  const end=clock(hit.toAt).slice(0,5);
+  if(end<'09:15'||end>'15:30')return;
+  controller.pause();evidenceEvent('optionpilot:rag-selection',{symbol:hit.symbol,date:hit.date,expiry:hit.expiry,strike:hit.strike,side:hit.side,time:end,lookback:3});
+ };
+ for(const count of [1,3,5])$('ar-last'+count).onclick=()=>void start(dates.slice(-count));
+ $('ar-all').onclick=()=>void start(dates);$('ar-selected').onclick=()=>void start(Array.from($('ar-dates').selectedOptions).map((o:any)=>o.value));$('ar-latest').onclick=()=>void start(dates.slice(-1),false);
+ $('ar-evidence-mode').onchange=()=>{stopScan();controller.pause();};
+ $('ar-minute-history').ontoggle=()=>renderMinuteHistory(latest||controller.snapshot());
+ $('ar-minute-table').onclick=(event:any)=>{
+  const button=event.target.closest?.('[data-ar-minute]');
+  const stamp=button&&minuteRows[Number(button.dataset.arMinute)];
+  const state=controller.snapshot(),index=state.session?.timeline.indexOf(stamp)??-1;
+  if(!state.loading&&index>=0)controller.seek(index);
+ };
+ $('ar-play').onclick=()=>controller.toggle();$('ar-prev').onclick=()=>controller.seek(controller.snapshot().index-1);$('ar-next').onclick=()=>void controller.next();$('ar-reset').onclick=()=>controller.seek(0);$('ar-seek').oninput=()=>controller.seek(Number($('ar-seek').value));$('ar-speed').onchange=()=>controller.speed(Number($('ar-speed').value));
+ $('ar-index').onchange=()=>{controller.pause();stopScan(true);symbol=$('ar-index').value;expiry='';strike=null;available();void start(dates.slice(-1),false);};
+ $('ar-contract-mode').onchange=()=>{controller.pause();if($('ar-contract-mode').value!=='PINNED'){expiry='';strike=null;}render(controller.snapshot());};
+ $('ar-expiry').onchange=()=>{expiry=$('ar-expiry').value;strike=null;render(controller.snapshot());};$('ar-strike').onchange=()=>{strike=Number($('ar-strike').value);render(controller.snapshot());};$('ar-atm').onclick=()=>{pin(latest?.frame||controller.snapshot().frame,true);render(controller.snapshot());};
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)controller.pause();});window.addEventListener('pagehide',()=>controller.pause());
+ for(const id of controls)$(id).disabled=true;
+ json('/api/research/recorded-dashboard/dates').then(result=>{dateRows=result.dates||[];available();if(dates.length)void start(dates.slice(-1),false);else $('error').textContent='No recorded dates exist for this index.';}).catch(error=>{$('error').textContent=error.message;$('queue').textContent='Recorded dates unavailable. Reload to retry.';});
+}

@@ -1,0 +1,101 @@
+{
+  "status": "PARTIAL",
+  "scope": "4 Nov 2026, 11:45\u201312:45 IST only; available archived expiries only; stored PDL, no verified prior-day derivation",
+  "results": [
+    {
+      "symbol": "NIFTY",
+      "expiries": [
+        "2026-11-09",
+        "2026-11-17",
+        "2026-11-23"
+      ],
+      "minutes": 61,
+      "sides": {
+        "CE": {
+          "coverage": {
+            "unverifiedMinutes": 9,
+            "eligibleAdjacentMinutes": 52
+          },
+          "events": []
+        },
+        "PE": {
+          "coverage": {
+            "unverifiedMinutes": 7,
+            "eligibleAdjacentMinutes": 54,
+            "allBelowMinutes": 54
+          },
+          "events": []
+        }
+      },
+      "individualCrossings": []
+    },
+    {
+      "symbol": "SENSEX",
+      "expiries": [
+        "2026-11-05",
+        "2026-11-12",
+        "2026-11-19",
+        "2026-11-26"
+      ],
+      "minutes": 61,
+      "sides": {
+        "CE": {
+          "coverage": {
+            "unverifiedMinutes": 61
+          },
+          "events": []
+        },
+        "PE": {
+          "coverage": {
+            "unverifiedMinutes": 61
+          },
+          "events": []
+        }
+      },
+      "individualCrossings": []
+    },
+    {
+      "symbol": "BANKNIFTY",
+      "expiries": [
+        "2026-11-23",
+        "2026-12-29",
+        "2027-01-25"
+      ],
+      "minutes": 61,
+      "sides": {
+        "CE": {
+          "coverage": {
+            "unverifiedMinutes": 61
+          },
+          "events": []
+        },
+        "PE": {
+          "coverage": {
+            "unverifiedMinutes": 61
+          },
+          "events": []
+        }
+      },
+      "individualCrossings": [
+        {
+          "at": "2026-11-04T06:29:00.000Z",
+          "expiry": "2026-11-23",
+          "strike": 55500,
+          "side": "PE",
+          "pdl": 721.65,
+          "fromPrice": 728,
+          "eventPrice": 719.75
+        },
+        {
+          "at": "2026-11-04T06:48:00.000Z",
+          "expiry": "2026-11-23",
+          "strike": 55500,
+          "side": "PE",
+          "pdl": 721.65,
+          "fromPrice": 726.65,
+          "eventPrice": 713.4
+        }
+      ]
+    }
+  ]
+}

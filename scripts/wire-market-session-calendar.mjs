@@ -7,8 +7,10 @@ let server = fs.readFileSync(serverFile, "utf8");
 const original = server;
 
 function replaceOnce(source, from, to, label) {
+  // A replacement can contain its own anchor. Check for the complete
+  // installed block BEFORE counting anchors, or every restart inserts it again.
+  if (source.includes(to)) return source;
   const count = source.split(from).length - 1;
-  if (count === 0 && source.includes(to)) return source;
   if (count !== 1) throw new Error(`${label}: expected exactly 1 source occurrence, found ${count}`);
   return source.replace(from, to);
 }

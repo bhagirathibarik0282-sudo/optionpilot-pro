@@ -29,7 +29,7 @@ export function deriveRecordedPremiumResponse(replay:H1ReplayHttpResult,s:Premiu
   const block=(reason:string)=>({...base,status:'UNAVAILABLE',reason,before:null,current:null,change:null,evidenceSha256:null});
   if(!calendar(s.date)||!calendar(s.expiry)||dte===null||dte<0||!['NIFTY','SENSEX','BANKNIFTY'].includes(s.symbol)||!['CE','PE'].includes(s.side)||!Number.isFinite(s.strike)||s.strike<=0||!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.time)||!Number.isFinite(eventMs)||![1,3,5,6,15,30,45,75,125].includes(lookback)||!(s.asOf===Infinity||Number.isFinite(s.asOf)&&Number.isFinite(new Date(s.asOf).getTime())))return block('INVALID_RESPONSE_SELECTION');
   const minute=Number(s.time.slice(0,2))*60+Number(s.time.slice(3));
-  if(minute<555||minute>930||(minute-555)%3!==0)return block('OUTSIDE_RECORDED_SESSION');
+  if(minute<555||minute>930)return block('OUTSIDE_RECORDED_SESSION');
   if(!replay.ok||replay.request?.symbol!==s.symbol||replay.request.tradeDate!==s.date)return block('REPLAY_SOURCE_IDENTITY_MISMATCH');
   const unique=(rows:Record<string,unknown>[],fields:string[])=>{
     const groups=new Map(rows.map(r=>[JSON.stringify(fields.map(k=>r[k])),r]));

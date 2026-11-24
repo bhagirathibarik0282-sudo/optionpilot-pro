@@ -1,0 +1,146 @@
+{
+  "source": "Existing production SELECT-only recorded-dashboard/replay route",
+  "requestedWindowIst": "15:27-15:30",
+  "mode": "RECORDED_NOT_LIVE",
+  "sourceCompletenessLimit": "Normalized full-chain source does not independently prove complete fresh per-leg exchange packets",
+  "results": [
+    {
+      "date": "2026-10-15",
+      "symbol": "NIFTY",
+      "ok": true,
+      "rows": 6,
+      "pcrRows": 2,
+      "last": [
+        {
+          "minute_bucket": "2026-10-15T09:57:00.000Z",
+          "expiry": "2026-10-19T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.6201352882673503,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        },
+        {
+          "minute_bucket": "2026-10-15T10:00:00.000Z",
+          "expiry": "2026-10-19T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.6343079305675476,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-15",
+      "symbol": "SENSEX",
+      "ok": true,
+      "rows": 6,
+      "pcrRows": 2,
+      "last": [
+        {
+          "minute_bucket": "2026-10-15T09:57:00.000Z",
+          "expiry": "2026-10-15T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.306091383568522,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        },
+        {
+          "minute_bucket": "2026-10-15T10:00:00.000Z",
+          "expiry": "2026-10-15T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.417644515230187,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-15",
+      "symbol": "BANKNIFTY",
+      "ok": true,
+      "rows": 6,
+      "pcrRows": 2,
+      "last": [
+        {
+          "minute_bucket": "2026-10-15T09:57:00.000Z",
+          "expiry": "2026-10-27T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.0940343084017305,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        },
+        {
+          "minute_bucket": "2026-10-15T10:00:00.000Z",
+          "expiry": "2026-10-27T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.091960422322238,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-30",
+      "symbol": "NIFTY",
+      "ok": true,
+      "rows": 16,
+      "pcrRows": 4,
+      "last": [
+        {
+          "minute_bucket": "2026-10-30T09:59:00.000Z",
+          "expiry": "2026-11-03T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.5168813744358103,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        },
+        {
+          "minute_bucket": "2026-10-30T10:00:00.000Z",
+          "expiry": "2026-11-03T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.5233870583380815,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-30",
+      "symbol": "SENSEX",
+      "ok": true,
+      "rows": 16,
+      "pcrRows": 4,
+      "last": [
+        {
+          "minute_bucket": "2026-10-30T09:59:00.000Z",
+          "expiry": "2026-11-05T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.6745298031311096,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        },
+        {
+          "minute_bucket": "2026-10-30T10:00:00.000Z",
+          "expiry": "2026-11-05T00:00:00.000Z",
+          "full_chain_oi_pcr": 1.6745298031311096,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        }
+      ]
+    },
+    {
+      "date": "2026-10-30",
+      "symbol": "BANKNIFTY",
+      "ok": true,
+      "rows": 12,
+      "pcrRows": 4,
+      "last": [
+        {
+          "minute_bucket": "2026-10-30T09:59:00.000Z",
+          "expiry": "2026-11-23T00:00:00.000Z",
+          "full_chain_oi_pcr": 0.9580034118143992,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        },
+        {
+          "minute_bucket": "2026-10-30T10:00:00.000Z",
+          "expiry": "2026-11-23T00:00:00.000Z",
+          "full_chain_oi_pcr": 0.9552855696782534,
+          "full_pcr_source": "Normalized full-chain source",
+          "truth_verdict": "TRUE"
+        }
+      ]
+    }
+  ]
+}

@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { installScreenOverview } from '../screen-overview.js';
+import { KEY_STOCKS } from '../dashboard-background-quotes.js';
 
-function harness() {
+function harness(width=1024) {
   let selected = 'NIFTY', price = '100', validation = 'TRUE', recordedAt = '2026-10-27T06:06:00Z';
   const nodes = new Map<string, any>();
   const node = (extra: any = {}) => ({ textContent: '', innerHTML: '', dataset: {}, style: {},
@@ -26,8 +27,9 @@ function harness() {
   const reference = node({ dataset: { recordedIndex: 'NIFTY', referenceFrom: '2026-10-27T06:03:00Z', referenceAt: '2026-10-27T06:06:00Z' } });
   nodes.set('mb-page', node({ querySelector: (selector: string) => selector.includes('Recorded notable events') ? events :
     selector.includes('Recorder memory and replay') ? memory : selector.includes('Three-index recorded overview') ? reference : null }));
+  nodes.set('rd-shell',node({dataset:{stockScopes:JSON.stringify(KEY_STOCKS)}}));
   nodes.set('rd-page', node({ scrollHeight: 700 }));
-  nodes.set('rd-viewport', node({ clientWidth: 1024, clientHeight: 800 }));
+  nodes.set('rd-viewport', node({ clientWidth: width, clientHeight: 800 }));
   for (const id of ['rd-market-head','rd-market-levels','rd-market-metrics','rd-levels-table','rd-pcr-table',
     'rd-premium-table','rd-stock-table','rd-sector-table','rd-event-table','rd-memory-table','rd-context-rows',
     'rd-source','rd-fit-tools','rd-source-tables','rd-return','rd-settings','os-screen-close','os-screen-detail','os-screen-detail-body']) {
@@ -35,11 +37,32 @@ function harness() {
   }
   const context: any = { document: { getElementById: (id: string) => nodes.get(id),
     body: { dataset: {} }, createElement: () => node(), querySelectorAll: () => [], addEventListener() {} },
-    window: { addEventListener() {} }, MutationObserver: class { observe() {} },
+    window: { innerWidth:width,addEventListener() {} }, MutationObserver: class { observe() {} },
     __name: (fn: any) => fn, requestAnimationFrame: () => 1 };
   const installer = vm.runInNewContext(`(${installScreenOverview.toString()})`, context);
   const view = installer();
-  return { nodes, events, memory, reference, futures(heads:string[],rows:string[][]){nodes.set('os-future-response',tableSource(heads,rows));view.refresh();}, headline(value:string,status:string){price=value;validation=status;view.refresh();}, premium(heads:string[],rows:string[][]){nodes.set('os-premium-table',tableSource(heads,rows));view.refresh();}, select(symbol: string) { selected = symbol; view.refresh(); } };
+  return {
+    nodes, events, memory, reference,
+    source(id:string,heads:string[],rows:string[][]){nodes.set(id,tableSource(heads,rows));view.refresh();},
+    pcr(index:string,full:string,reportedValue:string|null,primaryOnly=false,sourceDate='',savedValue:string|null=null){
+      const simple=(value:string)=>node({textContent:value});
+      const reported=reportedValue===null?null:node({
+        querySelector:(selector:string)=>selector==='b'&&!primaryOnly?simple(reportedValue):null,
+        querySelectorAll:(selector:string)=>selector==='small'?[simple('288/288 contracts · 6 older than 30s'+(sourceDate?' · oldest '+sourceDate+' 15:30:00 IST':''))]:[],
+      });
+      const saved=savedValue===null?null:node({querySelector:(selector:string)=>selector==='strong'?simple(savedValue):null,querySelectorAll:()=>[simple('RECORDED · Full PCR'),simple('2026-10-27 · 11:36:00 IST')]});
+      const card=node({
+        querySelector:(selector:string)=>selector===':scope>strong'?simple(index):selector===':scope>b'?simple(full):selector==='.os-pcr-reported'?reported:selector==='.os-pcr-recorded'?saved:null,
+        querySelectorAll:(selector:string)=>selector===':scope>small'?[simple('OI 282/288 fresh · stale 6')]:[],
+      });
+      nodes.set('os-pcr-strip',node({querySelectorAll:(selector:string)=>selector==='.os-pcr'?[card]:[]}));
+      view.refresh();
+    },
+    futures(heads:string[],rows:string[][]){nodes.set('os-future-response',tableSource(heads,rows));view.refresh();},
+    headline(value:string,status:string){price=value;validation=status;view.refresh();},
+    premium(heads:string[],rows:string[][]){nodes.set('os-premium-table',tableSource(heads,rows));view.refresh();},
+    select(symbol: string) { selected = symbol; view.refresh(); },
+  };
 }
 
 test('changing selected index never exposes another index recorded events or memory', () => {
@@ -110,6 +133,180 @@ test('selected-index futures metrics never borrow a fixed row from another index
  h.select('BANKNIFTY');const metrics=h.nodes.get('rd-market-metrics').innerHTML;
  assert.match(metrics,/54392.6/);assert.match(metrics,/8.85/);assert.doesNotMatch(metrics,/22764.9/);
  assert.doesNotMatch(h.nodes.get('rd-levels-table').innerHTML,/>(?:NIFTY Spot|NIFTY Futures)</);
+});
+
+test('real live Fut-plus-expiry label supplies the headline FUT and Basis from its existing source table',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ h.futures(['Instrument','LTP','Day %','OI','Basis'],[
+  ['NIFTY Spot','23,260.35','0.9%','—','—'],
+  ['NIFTY Fut2026-11-23','23,326.5','0.98%','1,55,27,256','66.15'],
+  ['BANKNIFTY Fut2026-11-23','54,500','1%','100','120'],
+ ]);
+ h.select('NIFTY');const html=h.nodes.get('rd-market-metrics').innerHTML;
+ assert.match(html,/FUT<b>23,326.5<\/b>/);assert.match(html,/Basis<b>66.15<\/b>/);
+ assert.doesNotMatch(html,/54,500/);
+});
+
+test('ambiguous futures contracts, invalid expiry labels and other underlyings cannot fill headline metrics',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ for(const rows of [
+  [['NIFTY Fut2026-11-23','123','7'],['NIFTY Fut2026-12-29','456','8']],
+  [['NIFTY Fut2026-02-30','123','7']],
+  [['NIFTYNXT50 Fut2026-11-23','123','7']],
+  [['BANKNIFTY Fut2026-11-23','123','7']],
+ ]){h.futures(['Instrument','LTP','Basis'],rows);h.select('NIFTY');const html=h.nodes.get('rd-market-metrics').innerHTML;assert.match(html,/FUT<b>—<\/b>/);assert.match(html,/Basis<b>—<\/b>/);}
+});
+
+test('compact PCR table separates fresh, reported and band observations without fake columns',()=>{
+ const h=harness();
+ h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ h.source('os-wall-ladder',['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ'],[
+  ['NIFTY','— / 1.1234','20,000 Δ +150','25,000 Δ -70','23,000 / 22,800','1,000','—'],
+ ]);
+ h.pcr('NIFTY','—','1.0969');
+ const output=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(output,/<th>Full OI PCR<\/th>/);
+ assert.match(output,/<th>PCR source<\/th>/);
+ assert.match(output,/<th>ATM ±7 PCR<\/th>/);
+ assert.match(output,/<strong>1.0969<\/strong>/);assert.match(output,/REPORTED · MIXED SOURCE TIMES/);
+ assert.match(output,/1.1234/);
+ assert.match(output,/\+150/);
+ assert.match(output,/-70/);
+ assert.doesNotMatch(output,/<th>±5 PCR<\/th>|<th>±3 PCR<\/th>|<th>Trend<\/th>/);
+ h.pcr('NIFTY','1.0876',null);
+ const fresh=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(fresh,/1.0876/);
+ assert.doesNotMatch(fresh,/1.0969/);assert.match(fresh,/FRESH SNAPSHOT/);
+});
+
+test('recorded front PCR keeps the saved number and its recorded heading instead of claiming fresh',()=>{
+ const h=harness();h.pcr('NIFTY','0.8799 →',null);
+ const html=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(html,/<th>Recorded Full PCR<\/th>/);assert.doesNotMatch(html,/<th>Fresh Full PCR<\/th>/);
+ assert.match(html,/0.8799/);assert.match(h.nodes.get('rd-market-metrics').innerHTML,/Recorded Full/);
+ h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.pcr('NIFTY','—',null);
+ assert.match(h.nodes.get('rd-pcr-table').innerHTML,/<th>Full OI PCR<\/th>/);
+ assert.doesNotMatch(h.nodes.get('rd-pcr-table').innerHTML,/0.8799/);
+ h.pcr('NIFTY','— —',null);assert.doesNotMatch(h.nodes.get('rd-pcr-table').innerHTML,/FRESH SNAPSHOT/);
+});
+
+test('front source buttons reuse the existing source selector and do not load or invent data',()=>{
+ const h=harness(),seen:string[]=[],control:any={value:'AUTO',onchange:(e:any)=>seen.push(e.target.value)};
+ h.nodes.set('os-source',control);
+ for(const source of ['RECORDED','LIVE'])h.nodes.get('rd-fit-tools').onclick({target:{closest:(selector:string)=>selector==='[data-rd-source]'?{dataset:{rdSource:source}}:null}});
+ assert.deepEqual(seen,['RECORDED','LIVE']);assert.equal(control.value,'LIVE');
+});
+
+test('a reported primary PCR number projects once with its source and never claims fresh eligibility',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.pcr('NIFTY','1.2345','1.2345',true);
+ const html=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(html,/<strong>1.2345<\/strong>/);
+ const cells=[...html.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(m=>m[1]);
+ assert.match(cells[0],/1.2345/);assert.match(cells[1],/REPORTED · MIXED SOURCE TIMES/);
+ assert(!cells[1].includes('FRESH'),'reported observation cannot claim fresh eligibility');
+ assert.match(h.nodes.get('rd-market-metrics').innerHTML,/Reported Full/);
+});
+
+test('earlier-packet dates stay beside the reported number instead of only in an ellipsized source column',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.pcr('NIFTY','1.2345','1.2345',true,'2026-10-15');
+ for(const id of ['rd-market-metrics','rd-pcr-table']){
+  const html=h.nodes.get(id).innerHTML;
+  assert.match(html,/class="rd-pcr-mixed">EARLIER PACKETS<br>2026-10-15<\/small>/);
+ }
+});
+
+test('an admitted saved PCR in the source card reaches the front with its recorded clock, then revokes',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';h.pcr('NIFTY','—',null,false,'','0.8799');
+ for(const id of ['rd-pcr-table','rd-market-metrics']){const html=h.nodes.get(id).innerHTML;assert.match(html,/0.8799/);assert.match(html,/RECORDED/);assert.match(html,/11:36:00/);assert.doesNotMatch(html,/FRESH SNAPSHOT/);}
+ h.pcr('NIFTY','—',null);assert.doesNotMatch(h.nodes.get('rd-pcr-table').innerHTML,/0.8799/);
+});
+
+test('tracked participation rows do not pretend weights or index-point contributions exist',()=>{
+ const h=harness();
+ h.source('os-stock-ranks',['#','Stock','Weight %','Price','Day %','Contribution','Trend','Quote time · IST','RAG / similar event'],[
+  ['1','RELIANCE','—','₹ 1,200','+1.25%','—','▲','12:14:30','Unmatched'],
+ ]);
+ const output=h.nodes.get('rd-stock-table').innerHTML;
+ for(const label of ['Tracked stock','Price','Day %','Direction','Quote IST'])assert(output.includes('<th>'+label+'</th>'));
+ assert.match(output,/RELIANCE/);
+ assert.match(output,/12:14:30/);
+ assert.match(output,/Tracked watchlist quotes · unweighted ranking/);
+ assert.doesNotMatch(output,/<th>Weight %<\/th>|<th>Contribution<\/th>|<th>RAG<\/th>/);
+});
+
+test('live events project the four observed source columns only',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ h.source('os-events',['Time · IST','Index','Event','Verified observation'],[
+  ['12:14:30','NIFTY','ABOVE PDH','Spot 23,100 · exchange 12:14:30'],
+ ]);
+ const output=h.nodes.get('rd-event-table').innerHTML;
+ assert.match(output,/ABOVE PDH/);
+ assert.match(output,/Spot 23,100/);
+ assert.doesNotMatch(output,/<th>PCR<\/th>|<th>OI<\/th>|<th>RAG<\/th>|<th>Similar Event<\/th>/);
+});
+
+
+test('four focus chapters are reversible display filters over the same seven evidence tables',()=>{
+ const h=harness(),tabs=['MARKET','PREMIUM','POSITIONING','MEMORY','ALL'];
+ const source=h.nodes.get('rd-levels-table');
+ for(const tab of tabs){
+  h.nodes.get('rd-fit-tools').onclick({target:{closest:(selector:string)=>selector.startsWith('#rd-hub-tabs')?{dataset:{rdHub:tab}}:null}});
+  assert.equal(h.nodes.get('rd-page').dataset.rdHub,tab);
+  assert.equal(h.nodes.get('rd-levels-table'),source,'chapter changes must not replace source evidence nodes');
+ }
+ assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
+});
+
+test('read chapter is opt-in; All always resets to the known-good Fit page',()=>{
+ const h=harness(),tools=h.nodes.get('rd-fit-tools');
+ const send=(selector:string,value:string)=>tools.onclick({target:{closest:(query:string)=>query===selector?{dataset:selector.includes('rd-hub')?{rdHub:value}:{rdFit:value}}:null}});
+ send('#rd-hub-tabs [data-rd-hub]','MARKET');
+ send('[data-rd-fit]','READ');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'true');
+ assert.equal(h.nodes.get('rd-viewport').dataset.scale,'1');
+ send('#rd-hub-tabs [data-rd-hub]','ALL');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false');
+ assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
+ send('[data-rd-fit]','READ');
+ assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false','All cannot enter readable chapter mode');
+});
+
+test('mobile opens a readable Market chapter and automatically reads each selected chapter at scale one',()=>{
+ const h=harness(390),page=h.nodes.get('rd-page'),vp=h.nodes.get('rd-viewport'),tools=h.nodes.get('rd-fit-tools');
+ assert.equal(page.dataset.rdHub,'MARKET');assert.equal(page.dataset.rdRead,'true');assert.equal(vp.dataset.scale,'1');
+ for(const chapter of ['PREMIUM','POSITIONING','MEMORY','ALL','MARKET']){
+  tools.onclick({target:{closest:(q:string)=>q==='#rd-hub-tabs [data-rd-hub]'?{dataset:{rdHub:chapter}}:null}});
+  assert.equal(page.dataset.rdHub,chapter);assert.equal(page.dataset.rdRead,String(chapter!=='ALL'));
+  if(chapter!=='ALL')assert.equal(vp.dataset.scale,'1');
+ }
+});
+
+test('BANKNIFTY positioning filters the existing watchlist before taking five; sectors stay market-wide',()=>{
+ const h=harness(),heads=['#','Stock','Weight %','Price','Day %','Contribution','Trend','Quote time · IST'];
+ h.source('os-stock-ranks',heads,['TCS','INFY','HDFCBANK','KOTAKBANK','SBIN','ICICIBANK','AXISBANK'].map((name,i)=>[String(i+1),name,'—','100','1%','—','▲','12:14:30']));
+ h.select('BANKNIFTY');const html=h.nodes.get('rd-stock-table').innerHTML;
+ for(const name of ['HDFCBANK','KOTAKBANK','SBIN','ICICIBANK','AXISBANK'])assert.match(html,new RegExp(name));
+ assert.doesNotMatch(html,/TCS|INFY/);assert.match(html,/BANKNIFTY watchlist/);assert.match(html,/5\/5/);
+ h.select('SENSEX');const next=h.nodes.get('rd-stock-table').innerHTML;
+ assert.match(next,/TCS/);assert.match(next,/INFY/);assert.doesNotMatch(next,/KOTAKBANK|SBIN|AXISBANK/);
+ assert.match(h.nodes.get('rd-sector-table').innerHTML,/Market-wide/);
+});
+
+test('front premium keeps recorded reference and baseline clocks beside the live source',()=>{
+ const h=harness();h.premium(['Type','Strike','Expiry','LTP ₹','Status','Reference context'],[['CE','100','2026-10-27','120','LIVE','PDH/PDL recorded · exact contract · 1m saved 11:35:00']]);
+ const html=h.nodes.get('rd-premium-table').innerHTML;assert(html.includes('LIVE'));assert(html.includes('1m saved 11:35:00'));assert(html.includes('PDH/PDL recorded'));assert(h.nodes.get('rd-context-rows').innerHTML.includes('1/1 rows'));
+});
+
+test('vertical source PCR ladders preserve each index OI, changes and band without borrowing another index',()=>{
+ const h=harness();h.nodes.get('op-one-stop').dataset.osSource='LIVE';
+ const heads=['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI'];
+ const rows=[['NIFTY 2026-11-09','1.2 / 1.1','10,000 Δ +100','12,000 Δ -200','24,000 / 23,000','700'],['SENSEX 2026-11-05','0.9 / 0.8','90,000 Δ +999','81,000 Δ -888','77,000 / 76,000','800']];
+ const vertical={dataset:{osPcrHeads:JSON.stringify(heads)},querySelectorAll:()=>rows.map(row=>({querySelector:()=>({textContent:row[0]}),querySelectorAll:()=>row.slice(1).map(textContent=>({textContent}))}))};
+ h.nodes.set('os-wall-ladder',{dataset:{},querySelector:(q:string)=>q==='.os-pcr-vertical'?vertical:null});
+ h.pcr('NIFTY','1.2 ↑',null);
+ const out=h.nodes.get('rd-pcr-table').innerHTML;
+ assert.match(out,/data-rd-pcr-index="NIFTY"/);assert.match(out,/1.1/);assert.match(out,/10,000/);assert.match(out,/12,000/);assert.match(out,/\+100/);assert.match(out,/-200/);assert.match(out,/24,000 \/ 23,000/);
+ assert.doesNotMatch(out,/90,000|81,000|999|888|<thead>/);
 });
 
 

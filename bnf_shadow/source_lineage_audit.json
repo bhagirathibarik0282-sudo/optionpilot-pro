@@ -1,0 +1,82 @@
+{
+  "schema": "optionpilot_source_lineage_audit_v1",
+  "date_ist": "2026-11-18",
+  "repository": "bhagirathibarik0282-sudo/optionpilot-pro",
+  "status": "SOURCE_IDENTIFIED_PRODUCTION_ACTIVATION_PENDING",
+  "evidence": {
+    "server_blob_sha": "1b2b4e65138b0e28f514b379ebd78f9a718b378c",
+    "market_reference": {
+      "file": "server.ts",
+      "lines": [
+        6674,
+        6706,
+        6708
+      ],
+      "producer": "nearest index futures quote average_price",
+      "stored_generic_field": "market_snapshot_1m.vwap",
+      "meaning": "NEAR_FUTURES_AVERAGE_PRICE",
+      "not_proven": "spot-index VWAP",
+      "storage_adapter": "storage-v3-adapter.ts",
+      "storage_adapter_blob_sha": "89b235544a43836d58148fad568eced126030ceb",
+      "storage_adapter_lines": [
+        260,
+        265,
+        272
+      ]
+    },
+    "iv": {
+      "file": "server.ts",
+      "lines": [
+        5843,
+        5874,
+        5883,
+        5884,
+        5892,
+        6885,
+        6937
+      ],
+      "producer": "local Black-Scholes bisection on option LTP and index spot",
+      "units": "annualized percentage points",
+      "annual_rate_assumption": 0.1,
+      "dividend_yield_in_formula": 0,
+      "year_day_count": 365,
+      "iterations": 60,
+      "sigma_bracket": [
+        0.001,
+        5
+      ],
+      "expiry_clock": "daysToDerivativeExpiry -> resolveIndexExpiryClock for index symbols",
+      "not_broker_published": true,
+      "limitations": [
+        "No explicit arbitrage-bound or root-bracketing rejection in this legacy solver",
+        "No explicit repricing-residual rejection before returning a positive bracket endpoint",
+        "Model inputs use calculation time; archived source version alone does not prove per-input timestamp synchronization"
+      ]
+    }
+  },
+  "implementation_policy": {
+    "comparison": "LEGACY_SPOT_VS_NEAR_FUTURES_AVERAGE",
+    "rule_changed": false,
+    "reason": "Preserve supplied strategy semantics; identify the proxy explicitly rather than silently changing to a futures-vs-futures rule",
+    "new_depth_context_required_fields": {
+      "vwap_basis": "NEAR_FUTURES_AVERAGE_PRICE",
+      "comparison_policy": "LEGACY_SPOT_VS_NEAR_FUTURES_AVERAGE"
+    },
+    "market_cache": "Current registry SPOT plus uniquely nearest unexpired FUTURE; full packets and aware exchange clocks; <=5 seconds; connected-state revocation; no LTP fallback"
+  },
+  "iv_approval": {
+    "production_calculation_versions_approved": [],
+    "automatic_approval": false
+  },
+  "pending": [
+    "Review/validate live IV evidence before producing signals",
+    "Resolve stored-minute admission delay while keeping the 10-second signal-age rule",
+    "Explicit production host/worker binding and live SHADOW observation"
+  ],
+  "deployment": {
+    "merged": false,
+    "deployed": false,
+    "production_ddl": false,
+    "real_orders": 0
+  }
+}

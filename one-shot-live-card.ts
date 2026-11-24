@@ -272,6 +272,24 @@ body[data-op-workspace] #market-book{background:#03080c;border-color:#163a4e;bor
 @media(max-width:850px){#op-one-stop .os-terminal-head{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:600px){#market-book #op-one-stop.os-card{padding:0}#op-one-stop .os-market-head{font-size:17px}#op-one-stop .os-reference-indices{justify-content:stretch}#market-book #op-one-stop .os-reference-indices button{flex:1;min-width:0;padding:4px;min-height:40px}#market-book #op-one-stop .os-table :is(th,td){font-size:11px;padding:4px 5px}#op-one-stop .os-levels>span{display:block}#op-one-stop .os-rag-context{margin-bottom:4px}}
 @media(prefers-reduced-motion:reduce){#op-one-stop *{animation:none!important;transition:none!important}}
+
+#market-book #op-one-stop .os-pcr-vertical{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;max-width:100%;min-width:0}
+#market-book #op-one-stop .os-pcr-vertical table{display:table;width:100%;max-width:100%;min-width:0;table-layout:fixed;border-collapse:collapse;white-space:normal;border:1px solid #294d60;background:#06131e;font-family:system-ui,sans-serif}
+#market-book #op-one-stop .os-pcr-vertical caption{text-align:left;padding:10px;background:#0a2332;color:#7ee3f0;font-size:16px;font-weight:700;white-space:normal;overflow-wrap:anywhere}
+#market-book #op-one-stop .os-pcr-vertical :is(th,td){display:table-cell;grid-column:auto;width:auto;max-width:none;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;word-break:normal;padding:9px 10px;border-bottom:1px solid #254657;font:14px/1.5 system-ui,sans-serif;text-align:left;vertical-align:top}
+#market-book #op-one-stop .os-pcr-vertical th{width:38%;color:#b8ccda;font-weight:500}
+#market-book #op-one-stop .os-pcr-vertical td{color:#eaf5ff;font-variant-numeric:tabular-nums}
+#market-book #op-one-stop .os-pcr-vertical :is(td,caption) small{display:block;font-size:12px!important;white-space:normal;overflow-wrap:anywhere;color:#abc3d3;line-height:1.5}
+#market-book #op-one-stop .os-pcr-vertical tbody tr:first-child td{color:#7ee3f0;font-size:19px;font-weight:700}
+#market-book #op-one-stop .os-pcr-vertical tbody{display:table-row-group}
+#market-book #op-one-stop .os-pcr-vertical tr{display:table-row;margin:0;padding:0;border:0}
+#market-book #op-one-stop .os-pcr-vertical :is(th,td):before{display:none;content:none}
+
+#os-screen-detail-body #os-pcr-strip{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:8px}
+#os-screen-detail-body #os-pcr-strip .os-pcr{padding:10px;min-width:0}
+#os-screen-detail-body #os-pcr-strip .os-pcr small{font-size:12px!important;line-height:1.5;white-space:normal}
+#os-screen-detail-body:has(#os-walls){overflow-x:hidden}
+#os-screen-detail-body #os-walls,#os-screen-detail-body #os-wall-ladder{min-width:0;max-width:100%}
 `;
 
 export function installOneShotLiveCard(api:any){
@@ -290,29 +308,43 @@ export function installOneShotLiveCard(api:any){
  const tone=(v:any)=>n(v)===null?'':v>0?'os-up':v<0?'os-down':'';
  const badge=(text:string,cls='')=>'<span class="os-badge '+cls+'">'+esc(text)+'</span>';
  const table=(heads:string[],rows:string[][])=>'<div class="os-table-wrap"><table class="os-table"><thead><tr>'+heads.map(s=>'<th>'+esc(s)+'</th>').join('')+'</tr></thead><tbody>'+(rows.length?'':'<tr><td colspan="'+heads.length+'">Unavailable · verified source rows required</td></tr>')+rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
+ // Vertical presentation keeps the same already-qualified cells and their source clocks.
+ const pcrLadder=(heads:string[],rows:string[][])=>'<div class="os-pcr-vertical" data-os-pcr-heads="'+esc(JSON.stringify(heads))+'">'+rows.map(r=>'<table data-os-pcr-row><caption>'+r[0]+'</caption><tbody>'+heads.slice(1).map((h,i)=>'<tr><th>'+esc(h)+'</th><td>'+r[i+1]+'</td></tr>').join('')+'</tbody></table>').join('')+'</div>';
+
  let premiumExpiry='';
  let selected='NIFTY',dteMetric='day',minutes=3,sourceMode='AUTO',sideMode='BOTH',chartSeries='BOTH',chartCadence=180000,chartManual=false,chartAt=0,chartKey='',loadBusy=false,last:any=null,pcr:any=null,session='',lastPaint=0,paintedLive=false;
- const series=new Map<string,Array<{at:number;value:number}>>(),conflicts=new Map<string,number>(),pcrIds=new Map<string,string>(),previous=new Map<string,any>(),breaks=new Map<string,any>();
+ const series=new Map<string,Array<{at:number;value:number;received?:number}>>(),conflicts=new Map<string,number>(),pcrIds=new Map<string,string>(),previous=new Map<string,any>(),breaks=new Map<string,any>();
  const events:any[]=[];
  const valid=(d:any,q:any,role:string,symbol?:string)=>api.validQuote(d,q,role,symbol)&&Number.isInteger(q.identity?.token)&&q.identity.token>0&&
   (role!=='FUTURE'||/^\d{4}-\d{2}-\d{2}$/.test(q.identity?.expiry||'')&&Number.isFinite(Date.parse(q.identity.expiry+'T00:00:00Z'))&&new Date(q.identity.expiry+'T00:00:00Z').toISOString().slice(0,10)===q.identity.expiry&&q.identity.expiry>=d.snapshot.tradeDate);
  const change=(d:any,q:any,role:string,symbol?:string)=>valid(d,q,role,symbol)&&positive(q.pdc)!==null?(q.price/q.pdc-1)*100:null;
  const indexRow=(d:any,symbol:string)=>{const rows=(d?.snapshot?.indices||[]).filter((a:any)=>a.symbol===symbol);return rows.length===1?rows[0]:null;};
- const sample=(key:string,at:number,value:any)=>{
+ const sample=(key:string,at:number,value:any,received?:number)=>{
   if(n(value)===null||!Number.isFinite(at))return;
   const rejected=conflicts.get(key);if(rejected!==undefined){if(at<=rejected)return;conflicts.delete(key);}
   let rows=series.get(key)||[],prior=rows.at(-1);
-  if(prior&&at===prior.at){if(value!==prior.value){series.delete(key);conflicts.set(key,at);if(conflicts.size>48)conflicts.delete(conflicts.keys().next().value!);}return;}
+  if(prior&&at===prior.at){
+   // Exchange timestamps have second precision. A later validated receipt may
+   // contain another legitimate tick in that same second; retain the latest.
+   if(Number.isFinite(received)&&Number.isFinite(prior.received)&&received!>prior.received!){prior.value=value;prior.received=received;return;}
+   if(Number.isFinite(received)&&Number.isFinite(prior.received)&&received!<prior.received!)return;
+   if(value!==prior.value){series.delete(key);conflicts.set(key,at);if(conflicts.size>48)conflicts.delete(conflicts.keys().next().value!);}return;
+  }
   if(prior&&at<prior.at)return;
   if(prior&&at-prior.at>(key.endsWith('|PCR')?210000:35000))rows=[];
   if(rows.length&&at-rows.at(-1)!.at<10000)return;
-  rows.push({at,value});if(rows.length>600)rows.splice(0,rows.length-600);series.set(key,rows);
+  rows.push({at,value,...(Number.isFinite(received)?{received}:{})});if(rows.length>600)rows.splice(0,rows.length-600);series.set(key,rows);
   if(series.size>48)series.delete(series.keys().next().value!);
  };
  const refs=(d:any,symbol:string,q:any)=>{
   const m=api.getModels?.()?.[symbol],at=Date.parse(m?.spot?.at||'');
   const ready=api.getState?.()?.date===d?.snapshot?.tradeDate&&m?.tradeDate===d?.snapshot?.tradeDate&&day(at)===d?.snapshot?.tradeDate&&at<=Date.parse(q?.observedAt||'');
-  const pdh=ready?positive(m.spot.pdh):null,pdl=ready?positive(m.spot.pdl):null;
+  let pdh=ready?positive(m.spot.pdh):null,pdl=ready?positive(m.spot.pdl):null;
+  if(pdh===null&&pdl===null){
+   const state=api.getState?.(),rows=state?.date===d?.snapshot?.tradeDate?(state.current?.[symbol]?.market||[]).filter((r:any)=>r.symbol===symbol&&r.truth_verdict==='TRUE'&&day(Date.parse(r.minute_bucket))===d.snapshot.tradeDate&&Date.parse(r.minute_bucket)<=Date.parse(q?.observedAt||'')):[];
+   const level=(key:string)=>{const values=rows.map((r:any)=>positive(r[key])).filter((v:any)=>v!==null);return values.length&&values.every((v:any)=>v===values[0])?values[0]:null;};
+   pdh=level('pdh');pdl=level('pdl');
+  }
   const opening=ready?m.spotPcr?.opening?.spot:null;
   const opened=opening?.complete===true&&positive(opening.high)!==null&&positive(opening.low)!==null&&opening.high>=opening.low&&
    opening.at===new Date(d.snapshot.tradeDate+'T09:30:00+05:30').toISOString()&&opening.fromAt===new Date(d.snapshot.tradeDate+'T09:15:00+05:30').toISOString()&&Date.parse(opening.at)<=Date.parse(q.observedAt);
@@ -373,10 +405,38 @@ export function installOneShotLiveCard(api:any){
   const dates=[...new Set<string>(rows.map(r=>r.expiry))];
   return [''].concat(dates).map(date=>'<button type="button" data-os-expiry="'+esc(date)+'" aria-pressed="'+(premiumExpiry===date)+'">'+esc(date||'All expiries')+'</button>').join('');
  };
- const premiumTable=(d:any,rows:any[])=>table(['Type','Strike','Expiry','LTP ₹','Day %','OI','PDH','PDC','PDL','Source time · IST','Day Δ ₹','OI Δ','Vol','Spread','IV','Delta','1m Δ ₹','3m Δ ₹','15m Δ ₹','Status'],rows.filter(r=>!premiumExpiry||r.expiry===premiumExpiry).flatMap(r=>['CE','PE'].filter(side=>sideMode==='BOTH'||sideMode===side).map(side=>{
+ // Reuse loaded recorder history; no extra request and no browser warm-up requirement.
+ const savedOptions=new WeakMap<object,Map<string,any[]>>();
+ const savedEndpoint=(d:any,q:any,m:number,field:'ltp'|'oi')=>{
+  const state=api.getState?.(),e=q?.identity,rows=state?.current?.[selected]?.options;
+  if(!d||state?.date!==d.snapshot.tradeDate||!e||!Array.isArray(rows))return null;
+  let index=savedOptions.get(rows);if(!index){index=new Map();for(const r of rows){const key=[r.symbol,String(r.expiry).slice(0,10),r.strike,r.option_type].join('|');const values=index.get(key)||[];values.push(r);index.set(key,values);}savedOptions.set(rows,index);}
+  const target=Date.parse(q.observedAt)-m*60000;
+  const candidates=(index.get([e.symbol,e.expiry,e.strike,e.side].join('|'))||[]).filter(r=>{
+   const at=Date.parse(r.quote_timestamp||''),bucket=Date.parse(r.minute_bucket||'');
+   return r.truth_verdict==='TRUE'&&!String(r.validation_status||'').startsWith('DIAGNOSTIC')&&
+    day(at)===d.snapshot.tradeDate&&day(bucket)===d.snapshot.tradeDate&&bucket<=Date.parse(q.observedAt)&&
+    n(r.quote_age_seconds)!==null&&r.quote_age_seconds>=0&&r.quote_age_seconds<=30&&
+    at>=bucket-30000&&at<bucket+60000&&at<=target&&target-at<=15000;
+  });
+  if(!candidates.length)return null;
+  const at=Math.max(...candidates.map(r=>Date.parse(r.quote_timestamp))),same=candidates.filter(r=>Date.parse(r.quote_timestamp)===at);
+  const values=same.map(r=>field==='oi'?recordedCount(r.oi):positive(r.ltp));
+  return values.every(v=>v!==null&&v===values[0])?{at,value:values[0],source:'saved'}:null;
+ };
+ const premiumTable=(d:any,rows:any[])=>table(['Type','Strike','Expiry','LTP ₹','Day %','OI','PDH','PDC','PDL','Source time · IST','Day Δ ₹','OI Δ','Vol','Spread','IV','Delta','1m Δ ₹','3m Δ ₹','15m Δ ₹','Status','Level position','Reference context'],rows.filter(r=>!premiumExpiry||r.expiry===premiumExpiry).flatMap(r=>['CE','PE'].filter(side=>sideMode==='BOTH'||sideMode===side).map(side=>{
   const q=r[side.toLowerCase()],ok=!!d&&valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side;
-  return [side,fmt(r.strike,0),esc(r.expiry),fmt(ok?q.price:null),'<span class="'+tone(ok?change(d,q,'OPTION',selected):null)+'">'+pct(ok?change(d,q,'OPTION',selected):null)+'</span>',fmt(ok&&n(q.oi)!==null&&q.oi>=0?q.oi:null,0),'—',fmt(ok?positive(q.pdc):null),'—',ok?time(q.observedAt):'Unavailable',fmt(ok&&positive(q.pdc)!==null?q.price-q.pdc:null),'—',fmt(ok&&n(q.volume)!==null&&q.volume>=0?q.volume:null,0),fmt(ok&&positive(q.ask)!==null&&positive(q.bid)!==null&&q.ask>=q.bid?q.ask-q.bid:null),'—','—',...[1,3,15].map(m=>{const base=ok?endpoint(selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side,Date.parse(q.observedAt)-m*60000):null;return fmt(base?q.price-base.value:null);}),ok?'LIVE':'UNAVAILABLE'];
+  const ref=ok?api.getOptionReference?.(selected,r.expiry,r.strike,side,d.snapshot.tradeDate,q.observedAt):null;
+  const key=ok?selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side:'';
+  const details:string[]=[];
+  const changes=[1,3,15].map(m=>{const base=ok?endpoint(key,Date.parse(q.observedAt)-m*60000)||savedEndpoint(d,q,m,'ltp'):null;if(base)details.push(m+'m '+('source' in base?'saved ':'live ')+time(base.at));return fmt(base?q.price-base.value:null);});
+  const oiBase=ok?endpoint(key+'|OI',Date.parse(q.observedAt)-minutes*60000)||savedEndpoint(d,q,minutes,'oi'):null;
+  if(oiBase)details.push('OI '+minutes+'m '+('source' in oiBase?'saved ':'live ')+time(oiBase.at));
+  if(positive(ref?.pdh)!==null||positive(ref?.pdl)!==null)details.push('PDH/PDL recorded · exact contract');
+  const position=!ok?'—':positive(ref?.pdh)!==null&&q.price>ref.pdh?'Above PDH':positive(ref?.pdl)!==null&&q.price<ref.pdl?'Below PDL':positive(ref?.pdh)!==null&&positive(ref?.pdl)!==null?'Inside PDH/PDL':'—';
+  return [side,fmt(r.strike,0),esc(r.expiry),fmt(ok?q.price:null),'<span class="'+tone(ok?change(d,q,'OPTION',selected):null)+'">'+pct(ok?change(d,q,'OPTION',selected):null)+'</span>',fmt(ok&&n(q.oi)!==null&&q.oi>=0?q.oi:null,0),fmt(ok?positive(ref?.pdh):null),fmt(ok?positive(q.pdc):null),fmt(ok?positive(ref?.pdl):null),ok?time(q.observedAt):'Unavailable',fmt(ok&&positive(q.pdc)!==null?q.price-q.pdc:null),fmt(ok&&n(q.oi)!==null&&q.oi>=0&&oiBase?q.oi-oiBase.value:null,0),fmt(ok&&n(q.volume)!==null&&q.volume>=0?q.volume:null,0),fmt(ok&&positive(q.ask)!==null&&positive(q.bid)!==null&&q.ask>=q.bid?q.ask-q.bid:null),'—','—',...changes,ok?'LIVE':'UNAVAILABLE',position,esc(details.join(' · ')||'Exact recorded references / window endpoints unavailable')];
  })))+(rows.length?'':empty('No verified exact-contract premiums. Open Data to choose a saved session.'));
+
  const renderDte=(d:any,rows:any[])=>{
   write('os-premium-expiries',expiryTabs(rows));
   write('os-premium-table',premiumTable(d,rows));
@@ -454,11 +514,11 @@ export function installOneShotLiveCard(api:any){
   renderedRecordedKey=paintKey;recordedHtml.clear();const put=(id:string,html:string)=>{recordedHtml.set(id,html);write(id,html);};
   const view=recordedData(),rows=view.rows,date=view.date;
   put('os-premium-expiries',expiryTabs(rows));
-  put('os-premium-table',table(['Type','Strike','Expiry','LTP ₹',dteMetric==='day'?'Day %':'Window %','PDH','PDC','PDL','Saved time · IST','Quote time · IST','Day Δ ₹','Level position','Status','1m Δ ₹','3m Δ ₹','15m Δ ₹','OI','Spread','OI Δ'],rows.filter(r=>!premiumExpiry||r.expiry===premiumExpiry).flatMap(r=>['CE','PE'].filter(side=>sideMode==='BOTH'||sideMode===side).map(side=>{
+  put('os-premium-table',table(['Type','Strike','Expiry','LTP ₹',dteMetric==='day'?'Day %':'Window %','PDH','PDC','PDL','Saved time · IST','Quote time · IST','Day Δ ₹','Level position','Status','1m Δ ₹','3m Δ ₹','15m Δ ₹','OI','Spread','OI Δ','Evidence'],rows.filter(r=>!premiumExpiry||r.expiry===premiumExpiry).flatMap(r=>['CE','PE'].filter(side=>sideMode==='BOTH'||sideMode===side).map(side=>{
    const q=r[side.toLowerCase()],ok=q?.state==='RECORDED';
    const matched=r.ce?.state==='RECORDED'&&r.pe?.state==='RECORDED'&&r.ce.at===r.pe.at&&r.ce.fromAt&&r.ce.fromAt===r.pe.fromAt;
    const value=ok&&(dteMetric==='day'||matched)?q.change:null;
-   return [side,fmt(r.strike,0),esc(r.expiry),fmt(ok?q.price:null),'<span class="'+tone(value)+'">'+pct(value)+'</span>',fmt(ok?q.pdh:null),fmt(ok?q.pdc:null),fmt(ok?q.pdl:null),time(r.at),ok&&q.quoteAt?time(q.quoteAt):'Unavailable',fmt(ok&&positive(q.pdc)!==null?q.price-q.pdc:null),!ok?'—':positive(q.pdh)!==null&&q.price>q.pdh?'Above PDH':positive(q.pdl)!==null&&q.price<q.pdl?'Below PDL':positive(q.pdh)!==null&&positive(q.pdl)!==null?'Inside PDH/PDL':'—',ok?'RECORDED':'UNAVAILABLE',...[1,3,15].map(m=>{const target=Date.parse(q?.at||'')-m*60000,points=(q?.points||[]).filter((p:any)=>Date.parse(p.at)===target&&positive(p.value)!==null);return fmt(ok&&points.length===1?q.price-points[0].value:null);}),fmt(ok?q.oi:null,0),fmt(ok&&n(q.bid)!==null&&q.bid>=0&&n(q.ask)!==null&&q.ask>=q.bid?q.ask-q.bid:null),(()=>{const baseline=(state?.current?.[selected]?.options||[]).filter((x:any)=>x.symbol===selected&&String(x.expiry).slice(0,10)===r.expiry&&x.strike===r.strike&&x.option_type===side&&Date.parse(x.minute_bucket)===Date.parse(q?.at||'')-minutes*60000);const b=baseline.length===1&&baseline[0].truth_verdict==='TRUE'?baseline[0]:null;return fmt(ok&&n(q.oi)!==null&&q.oi>=0&&recordedCount(b?.oi)!==null?q.oi-recordedCount(b.oi):null,0);})()];
+   return [side,fmt(r.strike,0),esc(r.expiry),fmt(ok?q.price:null),'<span class="'+tone(value)+'">'+pct(value)+'</span>',fmt(ok?q.pdh:null),fmt(ok?q.pdc:null),fmt(ok?q.pdl:null),time(r.at),ok&&q.quoteAt?time(q.quoteAt):'Unavailable',fmt(ok&&positive(q.pdc)!==null?q.price-q.pdc:null),!ok?'—':positive(q.pdh)!==null&&q.price>q.pdh?'Above PDH':positive(q.pdl)!==null&&q.price<q.pdl?'Below PDL':positive(q.pdh)!==null&&positive(q.pdl)!==null?'Inside PDH/PDL':'—',ok?'RECORDED':'UNAVAILABLE',...[1,3,15].map(m=>{const target=Date.parse(q?.at||'')-m*60000,points=(q?.points||[]).filter((p:any)=>Date.parse(p.at)===target&&positive(p.value)!==null);return fmt(ok&&points.length===1?q.price-points[0].value:null);}),fmt(ok?q.oi:null,0),fmt(ok&&n(q.bid)!==null&&q.bid>=0&&n(q.ask)!==null&&q.ask>=q.bid?q.ask-q.bid:null),(()=>{const baseline=(state?.current?.[selected]?.options||[]).filter((x:any)=>x.symbol===selected&&String(x.expiry).slice(0,10)===r.expiry&&x.strike===r.strike&&x.option_type===side&&Date.parse(x.minute_bucket)===Date.parse(q?.at||'')-minutes*60000);const b=baseline.length===1&&baseline[0].truth_verdict==='TRUE'?baseline[0]:null;return fmt(ok&&n(q.oi)!==null&&q.oi>=0&&recordedCount(b?.oi)!==null?q.oi-recordedCount(b.oi):null,0);})(),ok?(time(r.at).slice(0,5)>='09:15'&&time(r.at).slice(0,5)<='15:30'?'<button type="button" data-os-evidence="'+esc(JSON.stringify({symbol:selected,date,expiry:r.expiry,strike:r.strike,side,time:time(r.at).slice(0,5),lookback:minutes}))+'">Evidence</button>':'Evidence 09:15–15:30 IST'):'—'];
   })))+(rows.length?'':empty('No loaded recorded premiums · Open Data to choose a saved session.')));
   put('os-dte-context',esc(selected+' · RECORDED · '+(date||'no session loaded')+(selected==='BANKNIFTY'?' · monthly observation':'')));
   put('os-expiry-clock',rows.length?'Recorded expiry · '+esc(rows[0].expiry)+' · '+Math.round((Date.parse(rows[0].expiry+'T00:00:00Z')-Date.parse(date+'T00:00:00Z'))/86400000)+' calendar days as of '+esc(date)+'<small>Historical session clock · exact expiry-end timestamp unavailable.</small>':'Expiry clock · load a recorded session with verified contract inventory');
@@ -489,7 +549,7 @@ export function installOneShotLiveCard(api:any){
    [esc(selected)+' Futures',fmt(positive(q?.future_ltp)),pct(positive(before?.future_ltp)!==null&&positive(q?.future_ltp)!==null?(q.future_ltp/before.future_ltp-1)*100:null),'—','—','—','—','—',fmt(recordedCount(q?.future_oi),0),fmt(n(q?.future_basis)),q?time(q.minute_bucket):'Unavailable',fmt(delta('future_ltp')),fmt(delta('future_oi'),0)]
   ])+'<small class="os-subline">RECORDED · '+esc(date||'no session')+' · '+minutes+'m window · futures expiry continuity unverified · recorded buckets, not live quote times</small>');
   put('os-vix-value','<small class="os-subline">RECORDED · '+esc(date||'no session')+' · '+(q?time(q.minute_bucket)+' IST':'unavailable')+'</small><div class="os-vix-number">'+fmt(positive(q?.india_vix))+'</div>');
-  put('os-wall-ladder',table(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ','PCR time · IST'],symbols.map(symbol=>{
+  put('os-wall-ladder',pcrLadder(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI','PCR Δ','PCR time · IST'],symbols.map(symbol=>{
    const r=saved?.rows?.find((x:any)=>x.symbol===symbol),source=(all?.current?.[symbol]?.chain||[]).filter((x:any)=>x.symbol===symbol&&String(x.expiry).slice(0,10)===r?.expiry&&day(Date.parse(x.minute_bucket))===date);
    const exact=(at:number)=>{const xs=source.filter((x:any)=>Date.parse(x.minute_bucket)===at);return xs.length===1&&xs[0].truth_verdict==='TRUE'&&/^(Exact archived full-chain source|Normalized full-chain source)$/.test(xs[0].full_pcr_source||'')?xs[0]:null;};
    const c=r?.current?exact(r.current.checked):null,b=c?exact(r.current.checked-minutes*60000):null;
@@ -515,20 +575,20 @@ export function installOneShotLiveCard(api:any){
   $('os-reference-indices')?.querySelectorAll?.('[data-os-select]').forEach((b:any)=>b.setAttribute('aria-pressed',String(b.dataset.osSelect===selected)));
   const live=api.validEnvelope(payload),d=live?payload:null,key=live?d.snapshot.runtimeId+'|'+d.snapshot.tradeDate:'';last=payload;
   if(live&&paintedLive&&key===session&&!force&&Date.now()-lastPaint<500)return;lastPaint=Date.now();paintedLive=live;
-  if(key!==session){session=key;series.clear();conflicts.clear();pcrIds.clear();previous.clear();breaks.clear();events.length=0;pcr=null;}
+  if(live&&key!==session){session=key;series.clear();conflicts.clear();pcrIds.clear();previous.clear();breaks.clear();events.length=0;pcr=null;}
   pcr=api.derivePcr(d,pcr,Date.now());
   const groups=live&&Array.isArray(d.snapshot.atmExpiryLadder)?d.snapshot.atmExpiryLadder:[];
   const matching=groups.filter((g:any)=>g.symbol===selected),group=matching.length===1?matching[0]:null;
   const optionRows=group&&valid(d,group.spot,'SPOT',selected)&&Array.isArray(group.rows)?group.rows.filter((r:any)=>/^\d{4}-\d{2}-\d{2}$/.test(r?.expiry||'')&&Number.isFinite(Date.parse(r.expiry+'T00:00:00Z'))&&new Date(r.expiry+'T00:00:00Z').toISOString().slice(0,10)===r.expiry&&r.expiry>=d.snapshot.tradeDate&&positive(r.strike)!==null&&group.rows.filter((x:any)=>x?.expiry===r.expiry).length===1).sort((a:any,b:any)=>a.expiry.localeCompare(b.expiry)).slice(0,4):[];
   if(live){
    for(const symbol of symbols){const a=indexRow(d,symbol);if(!a)continue;
-    observe(d,a);if(valid(d,a.spot,'SPOT',symbol))sample(symbol+'|SPOT',Date.parse(a.spot.observedAt),a.spot.price);else series.delete(symbol+'|SPOT');
-    if(valid(d,a.future,'FUTURE',symbol))sample(symbol+'|FUTURE|'+a.future.identity.token+'|'+a.future.identity.expiry,Date.parse(a.future.observedAt),a.future.price);
+    observe(d,a);if(valid(d,a.spot,'SPOT',symbol))sample(symbol+'|SPOT',Date.parse(a.spot.observedAt),a.spot.price,Date.parse(a.spot.receivedAt));else series.delete(symbol+'|SPOT');
+    if(valid(d,a.future,'FUTURE',symbol))sample(symbol+'|FUTURE|'+a.future.identity.token+'|'+a.future.identity.expiry,Date.parse(a.future.observedAt),a.future.price,Date.parse(a.future.receivedAt));
     const r=pcr.rows.find((x:any)=>x.symbol===symbol),identity=r?.current?r.expiry+'|'+r.current.period:'';
     if(pcrIds.get(symbol)!==identity){series.delete(symbol+'|PCR');conflicts.delete(symbol+'|PCR');pcrIds.set(symbol,identity);}
     if(r?.current)sample(symbol+'|PCR',r.current.checked,r.value);else series.delete(symbol+'|PCR');
    }
-   for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side)sample(selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side,Date.parse(q.observedAt),q.price);}
+   for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side){const key=selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side;sample(key,Date.parse(q.observedAt),q.price,Date.parse(q.receivedAt));if(n(q.oi)!==null&&q.oi>=0)sample(key+'|OI',Date.parse(q.observedAt),q.oi,Date.parse(q.receivedAt));}}
   }
   renderDte(d,optionRows);
   const useRecorded=sourceMode==='RECORDED'||sourceMode==='AUTO'&&payload?.connectionState==='MARKET_CLOSED';
@@ -552,8 +612,8 @@ export function installOneShotLiveCard(api:any){
    const c=r?.coverageInfo,coverage=r?.current?'OI '+r.current.expected+'/'+r.current.expected+' verified':c&&c.fresh+c.stale+c.missing+c.invalid===c.expected?'OI '+c.fresh+'/'+c.expected+' fresh · stale '+c.stale+' · missing '+c.missing+' · invalid '+c.invalid:'';
    const saved=recorded?.rows.find((x:any)=>x.symbol===symbol&&x.expiry===r?.expiry&&x.current&&n(x.value)!==null);
    const savedHtml=r?.value===null&&saved?'<div class="os-pcr-recorded"><small>RECORDED · Full PCR</small><strong>'+saved.value.toFixed(4)+'</strong><small>'+esc(recordedState.date)+' · '+time(saved.current.checked)+' IST</small><small>Expiry '+esc(saved.expiry)+' · saved full-chain source</small></div>':'';
-   const reported=r?.reportedPcr,reportedHtml=reported&&!r?.current?'<div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small><b>'+reported.value.toFixed(4)+'</b><small>'+reported.reported+'/'+reported.expected+' contracts · '+reported.olderThan30s+' older than 30s</small><small>Source '+time(reported.sourceMinAt)+' → '+time(reported.sourceMaxAt)+' IST · checked '+time(reported.checkedAt)+' IST</small><small>Latest reported OI · no fresh alignment</small></div>':'';
-   return '<div class="os-pcr" data-pcr-index="'+symbol+'"><strong>'+symbol+(symbol==='BANKNIFTY'?' · M':'')+'</strong><small>'+ (r?.current?'LIVE · Full OI PCR':'UNAVAILABLE · Fresh Full PCR')+'</small><b>'+ (n(r?.value)!==null?r.value.toFixed(4):'—')+' <span class="'+colour+'" aria-label="PCR '+direction.toLowerCase()+'">'+arrow+'</span></b><small>Expiry '+esc(r?.expiry||'unavailable')+'</small><small>ATM ±7 band: '+fmt(r?.bandValue,4)+(r?.bandCheckedAt?' · 30/30 verified · '+time(r.bandCheckedAt)+' IST':'')+'</small><small>'+esc(r?.current?'Checked '+time(r.current.checked)+' IST · '+r.current.period/60000+'m snapshots':r?.pcrStatus?.replaceAll('_',' ')||'UNAVAILABLE')+'</small>'+(coverage?'<small>'+esc(coverage)+(c&&!r?.current?' · checked '+time(c.checked)+' IST':'')+'</small>':'')+'<small>'+esc(r?.baseline?'Compared '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':r?.current?'Arrow: waiting for comparable snapshot':'Full expiry OI not verified')+'</small>'+reportedHtml+savedHtml+'</div>';
+   const reported=r?.reportedPcr,reportedHtml=reported&&!r?.current?'<div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small>'+(reported.sourceNote?'<small>'+esc(reported.sourceNote)+'</small>':'')+'<small>'+reported.reported+'/'+reported.expected+' contracts · '+reported.olderThan30s+' older than 30s</small><small>Source '+time(reported.sourceMinAt)+' → '+time(reported.sourceMaxAt)+' IST · checked '+time(reported.checkedAt)+' IST</small><small>Latest reported OI · no fresh alignment</small></div>':'';
+   return '<div class="os-pcr" data-pcr-index="'+symbol+'"><strong>'+symbol+(symbol==='BANKNIFTY'?' · M':'')+'</strong><small>'+ (r?.current?'LIVE · Full OI PCR':reported?'Full OI PCR · '+reported.displayLabel:'UNAVAILABLE · Fresh Full PCR')+'</small><b>'+ (n(r?.value??reported?.value)!==null?(r?.value??reported.value).toFixed(4):'—')+' <span class="'+colour+'" aria-label="PCR '+direction.toLowerCase()+'">'+arrow+'</span></b><small>Expiry '+esc(r?.expiry||'unavailable')+'</small><small>ATM ±7 band: '+fmt(r?.bandValue,4)+(r?.bandCheckedAt?' · 30/30 verified · '+time(r.bandCheckedAt)+' IST':'')+'</small><small>'+esc(r?.current?'Checked '+time(r.current.checked)+' IST · '+r.current.period/60000+'m snapshots':r?.pcrStatus?.replaceAll('_',' ')||'UNAVAILABLE')+'</small>'+(coverage?'<small>'+esc(coverage)+(c&&!r?.current?' · checked '+time(c.checked)+' IST':'')+'</small>':'')+'<small>'+esc(r?.baseline?'Compared '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':r?.current?'Arrow: waiting for comparable snapshot':'Full expiry OI not verified')+'</small>'+reportedHtml+savedHtml+'</div>';
   }).join(''));
   const v=live?d.snapshot.vix:null,vo=live&&valid(d,v,'VIX');
   write('os-vix-value','<small class="os-subline">INDIA VIX · '+(vo?time(v.observedAt)+' IST':'SOURCE UNAVAILABLE')+'</small><div class="os-vix-number">'+fmt(vo?v.price:null)+'</div><span class="'+tone(vo?change(d,v,'VIX'):null)+'">'+pct(vo?change(d,v,'VIX'):null)+' vs previous close</span>');
@@ -569,10 +629,10 @@ export function installOneShotLiveCard(api:any){
   write('os-dte-alignment',sideSummary('CE')+sideSummary('PE')+'<small class="os-subline">'+esc(selected)+' · day returns vs each contract previous close · timestamps within 5s · no cross-contract trade score</small>');
   write('os-events',(triple?badge('🚨 3-index same-side '+aligned[0].label,'os-alert'):'')+(events.length?table(['Time · IST','Index','Event','Verified observation'],events.slice(0,8).map(e=>[time(e.at),esc(e.symbol),esc(e.label),esc(e.detail)])):table(['Time · IST','Index','Event','Verified observation'],[])+empty(live?'No verified level crossing observed in this browser session.':'Market closed / disconnected · live events cleared; use recorded research for saved events.')));
   write('os-future-response',allFutureLevels(d)+(live?'<details class="os-source"><summary>Same-contract futures / premium response</summary>'+response(d,indexRow(d,selected),optionRows)+'</details>':empty('Fresh futures and premium observations required · no stale comparison.')));
-  write('os-wall-ladder',table(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI'],symbols.map(symbol=>{
+  write('os-wall-ladder',pcrLadder(['Index / expiry','Full PCR / band','CE OI / Δ','PE OI / Δ','CE / PE wall','Fresh futures OI'],symbols.map(symbol=>{
    const r=pcr.rows.find((x:any)=>x.symbol===symbol),a=live?indexRow(d,symbol):null,raw=r?.current?d?.pcrDisplay?.[symbol]:null,cw=raw?.callWall,pw=raw?.putWall;
    const delta=(key:string)=>r?.current&&r?.baseline?r.current[key]-r.baseline[key]:null;
-   const oi=(key:string)=>fmt(r?.current?.[key],0)+'<small>Δ '+(delta(key)>0?'+':'')+fmt(delta(key),0)+(r?.baseline?' · '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':' · baseline pending')+'</small>';
+   const oi=(key:string)=>fmt(r?.current?.[key]??r?.reportedPcr?.[key],0)+'<small>Δ '+(delta(key)>0?'+':'')+fmt(delta(key),0)+(r?.current?(r?.baseline?' · '+time(r.baseline.checked)+' → '+time(r.current.checked)+' IST':' · baseline pending'):r?.reportedPcr?' · REPORTED · mixed source times · '+esc(r.reportedPcr.displayLabel)+(r.reportedPcr.sourceNote?' · '+esc(r.reportedPcr.sourceNote):''):' · unavailable')+'</small>';
    return [esc(symbol)+'<small>'+esc(r?.expiry||'—')+'</small>',fmt(r?.value,4)+' / '+fmt(r?.bandValue,4),oi('ceTotal'),oi('peTotal'),fmt(positive(cw?.strike),0)+' / '+fmt(positive(pw?.strike),0)+'<small>OI '+fmt(positive(cw?.oi),0)+' / '+fmt(positive(pw?.oi),0)+'</small>',fmt(a&&valid(d,a.future,'FUTURE',symbol)&&n(a.future.oi)!==null&&a.future.oi>=0?a.future.oi:null,0)];
   })));
 

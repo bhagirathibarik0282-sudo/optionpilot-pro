@@ -50,7 +50,7 @@ test('duplicate aliases accept identical relevant fields and quarantine conflict
 test('recomputed DTE ignores absent metadata but rejects inconsistent metadata',()=>{
  const f=fixture();delete quote(f).dte;assert.equal(deriveRecordedPremiumResponse(f,selection()).clock.calendarDte,0);
  quote(f).dte=1;assert.equal(deriveRecordedPremiumResponse(f,selection()).reason,'STORED_DTE_MISMATCH');
- for(const s of [{expiry:'2026-02-30'},{expiry:'2026-10-12'},{date:'2026-02-30'},{time:'09:37'},{asOf:NaN},{asOf:Number.MAX_SAFE_INTEGER},{lookback:2}])assert.equal(deriveRecordedPremiumResponse(fixture(),selection(s as any)).status,'UNAVAILABLE');
+ for(const s of [{expiry:'2026-02-30'},{expiry:'2026-10-12'},{date:'2026-02-30'},{time:'09:14'},{asOf:NaN},{asOf:Number.MAX_SAFE_INTEGER},{lookback:2}])assert.equal(deriveRecordedPremiumResponse(fixture(),selection(s as any)).status,'UNAVAILABLE');
 });
 test('missing/stale/future spot timestamps withhold spot calculations but retain accepted option prices',()=>{
  for(const value of [null,0]){const f=fixture();f.market![1].spot_ltp=value;const r=deriveRecordedPremiumResponse(f,selection());assert.equal(r.current!.price,32);assert.equal(r.current!.spotIntrinsicProxy,null);assert.equal(r.change!.spot,null);assert.equal(r.status,'PARTIAL');}

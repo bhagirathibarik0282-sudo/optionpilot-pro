@@ -5,10 +5,16 @@ import {once} from 'node:events';
 import {mkdir} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
+import {renderRagEvidencePage} from '../rag-evidence-card.js';
+import {renderRecordedDashboard} from '../recorded-dashboard-view.js';
 
 const html=renderBusinessDashboardV1Html({} as any);
 assert(html.includes('id="os-market-radar"'));
+const ragRequests:string[]=[];
 const server=createServer((req,res)=>{
+ if(req.url==='/archive-test'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(renderRecordedDashboard());return;}
+ if(req.url==='/rag-test'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(renderRagEvidencePage());return;}
+ if(req.url?.startsWith('/api/research/rag-'))ragRequests.push(req.url);
  if(req.url==='/'){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end(html);return;}
  res.writeHead(503,{'Content-Type':'application/json','Cache-Control':'no-store'});
  res.end(JSON.stringify({ok:false,reason:'ISOLATED_UI_NO_MARKET_DATA'}));
@@ -29,9 +35,59 @@ try{
    const response=await page.goto(base,{waitUntil:'domcontentloaded',timeout:20000});
    assert.equal(response?.status(),200);
    await page.locator('#rd-shell').waitFor({state:'visible',timeout:15000});
+   await page.locator('#rd-source-tabs [data-rd-source="RECORDED"]').click();
+   assert.equal(await page.locator('#op-one-stop').getAttribute('data-os-source'),'RECORDED');
+   await page.locator('#rd-source-tabs [data-rd-source="LIVE"]').click();
+   assert.equal(await page.locator('#op-one-stop').getAttribute('data-os-source'),'LIVE');
+   if(width<=600){
+    assert.equal(await page.locator('#rd-page').getAttribute('data-rd-hub'),'MARKET',name+' opens a readable chapter automatically');
+    assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1');
+   }
+   await page.locator('#rd-hub-tabs [data-rd-hub="ALL"]').click();
    const screen=await page.evaluate(()=>{const page=document.getElementById('rd-page')!,viewport=document.getElementById('rd-viewport')!,p=page.getBoundingClientRect(),v=viewport.getBoundingClientRect();return {height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,page:{left:p.left,right:p.right,top:p.top,bottom:p.bottom},viewport:{left:v.left,right:v.right,top:v.top,bottom:v.bottom},sections:document.querySelectorAll('#rd-page .rd-section').length,probability:/probability/i.test(page.textContent||'')};});
    assert.equal(screen.sections,7,name+' must show all seven full table sections');
+   // Optional focus chapters must not remove any of the seven original source-backed sections.
+   for(const [hub,sections] of [
+    ['MARKET',['rd-levels','rd-pcr']],
+    ['PREMIUM',['rd-premium']],
+    ['POSITIONING',['rd-stocks','rd-sectors']],
+    ['MEMORY',['rd-events','rd-memory']],
+    ['ALL',['rd-levels','rd-pcr','rd-premium','rd-stocks','rd-sectors','rd-events','rd-memory']],
+   ] as const){
+    await page.locator('#rd-hub-tabs button[data-rd-hub="'+hub+'"]').click();
+    assert.equal(await page.locator('#rd-page').getAttribute('data-rd-hub'),hub);
+    const visible=await page.locator('#rd-page .rd-section:visible').evaluateAll(nodes=>nodes.map(n=>n.id));
+    assert.deepEqual(visible,[...sections],name+' focus chapter '+hub+' has exact source-backed panels');
+    assert.equal(await page.locator('#rd-page .rd-section').count(),7,name+' focus must not delete evidence sections');
+    if(width<=600&&hub!=='ALL'){
+     assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1',name+' '+hub+' auto read scale');
+     assert.equal(await page.locator('#rd-page').getAttribute('data-rd-read'),'true');
+     const font=await page.locator('#rd-page .rd-section:visible th').first().evaluate(el=>parseFloat(getComputedStyle(el).fontSize));
+     assert(font>=13,name+' '+hub+' readable table font');
+     if(hub==='POSITIONING')await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-positioning-chapter.png',fullPage:false});
+    }
+   }
    assert.equal(screen.probability,false,'the probability factor must be absent');
+   if(width<=600){
+    await page.locator('#rd-hub-tabs [data-rd-hub="MARKET"]').click();
+    const reading=await page.evaluate(()=>{
+     const vp=document.getElementById('rd-viewport')!,page=document.getElementById('rd-page')!,table=document.getElementById('rd-levels-table')!;
+     return {scale:vp.dataset.scale,mode:page.dataset.rdRead,pageWidth:page.getBoundingClientRect().width,viewportWidth:vp.clientWidth,
+       tableScroll:table.scrollWidth>table.clientWidth,font:parseFloat(getComputedStyle(table.querySelector('td')||table.querySelector('th')!).fontSize)};
+    });
+    assert.equal(reading.scale,'1',name+' Read chapter must preserve 1:1 text sizing');
+    assert.equal(reading.mode,'true');
+    assert(reading.pageWidth<=reading.viewportWidth+2,name+' Read chapter must not overflow horizontal page');
+    assert(reading.font>=13,name+' Read chapter table text must remain readable');
+    assert.equal(await page.locator('#rd-navigation').isVisible(),false,name+' focus read hides redundant main navigation');
+    assert.equal(await page.locator('#rd-parameters').isVisible(),false,name+' detail evidence stays available through panel links');
+    assert.equal(await page.locator('#rd-context-rows>div:visible').count(),2,name+' read shows concise source coverage');
+    assert.equal(await page.locator('#rd-page .op-recorder-group').isVisible(),false,name+' replay remains in toolbar; recorder does not crowd read mode');
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-read-chapter.png',fullPage:false,timeout:15000});
+    await page.locator('#rd-hub-tabs [data-rd-hub="ALL"]').click();
+    assert.equal(await page.locator('#rd-page').getAttribute('data-rd-read'),'false');
+    assert.equal(await page.locator('#rd-fit-tools [data-rd-fit="PAGE"]').getAttribute('aria-pressed'),'true');
+   }
    assert(screen.scroll<=screen.height+2,name+' Fit page must not require document scrolling: '+JSON.stringify(screen));
    assert(screen.scrollWidth<=screen.width+2,name+' no horizontal document scroll');
    assert(screen.page.left>=screen.viewport.left-1&&screen.page.right<=screen.viewport.right+1&&screen.page.top>=screen.viewport.top-1&&screen.page.bottom<=screen.viewport.bottom+1,name+' the complete reference page must fit: '+JSON.stringify(screen));
@@ -46,12 +102,26 @@ try{
     document.getElementById('os-pcr-strip')!.innerHTML='<div class="os-pcr"><strong>NIFTY</strong><small>UNAVAILABLE · Fresh Full PCR</small><b>—</b><small>Expiry 2026-10-27</small><small>ATM ±7 band: 1.1043 · 30/30 verified</small><small>OI 282/288 fresh · stale 6 · missing 0 · invalid 0</small><div class="os-pcr-reported"><small>Full-chain reported PCR · MIXED SOURCE TIMES</small><b>1.0969</b><small>288/288 contracts · 6 older than 30s</small><small>Source 11:04:26 → 11:05:37 IST · checked 11:05:37 IST</small></div></div>';
     document.getElementById('os-wall-ladder')!.innerHTML='<table><tbody><tr><td>NIFTY</td><td>— / 1.1043</td><td>—</td><td>—</td></tr></tbody></table>';
    });
-   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
+   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('1.0969'));
    const pcrText=await page.locator('#rd-pcr-table').innerText();
    for(const label of ['MIXED SOURCE TIMES','288/288 contracts','stale 6','11:04:26','1.1043'])assert(pcrText.includes(label),name+' PCR provenance '+label);
    assert((await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'));
+   // Earlier-session provenance must survive the same compact projection.
+   await page.evaluate(()=>{const card=document.querySelector('#os-pcr-strip .os-pcr-reported')!;card.insertAdjacentHTML('beforeend','<small>Last reported · earlier packets · 1 prior-session · oldest 2026-10-26 15:30:00 IST · current-session OI unproven</small>');});
+   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('oldest 2026-10-26 15:30:00 IST'));
+   assert((await page.locator('#rd-pcr-table').innerText()).includes('current-session OI unproven'));
+   const ageBadge=page.locator('#rd-market-metrics .rd-pcr-mixed');
+   await ageBadge.filter({hasText:'2026-10-26'}).waitFor({state:'visible'});
+   assert((await ageBadge.innerText()).includes('EARLIER PACKETS'));
+   assert(await ageBadge.evaluate((el:any)=>el.scrollWidth<=el.clientWidth+1),'source-date badge must not be clipped');
+   // The current card has one primary reported number; no duplicate value in Sources.
+   await page.evaluate(()=>{const card=document.querySelector('#os-pcr-strip .os-pcr')!,reported=card.querySelector('.os-pcr-reported b')!;card.querySelector(':scope>b')!.textContent=reported.textContent;reported.remove();});
+   await page.waitForFunction(()=>document.getElementById('rd-pcr-table')?.textContent?.includes('1.0969'));
+   assert((await page.locator('#rd-pcr-table [data-rd-pcr-index="NIFTY"] tr').filter({has:page.locator('th').filter({hasText:/^Full OI PCR$/})}).locator('td').innerText()).includes('1.0969'),'reported value occupies primary Full OI PCR');
+   assert((await page.locator('#rd-pcr-table [data-rd-pcr-index="NIFTY"] tr').filter({has:page.locator('th').filter({hasText:/^PCR source$/})}).locator('td').innerText()).includes('EARLIER PACKETS'),'primary number retains earlier-packet source');
+   await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-offline-reported-pcr.png',fullPage:true});
    await page.evaluate(()=>{for(const [id,html] of Object.entries((window as any).__pcrRestore))document.getElementById(id)!.innerHTML=html as string;delete (window as any).__pcrRestore;});
-   await page.waitForFunction(()=>!document.getElementById('rd-pcr-table')?.textContent?.includes('Reported 1.0969'));
+   await page.waitForFunction(()=>!document.getElementById('rd-pcr-table')?.textContent?.includes('1.0969'));
    assert(!(await page.locator('#rd-market-metrics').innerText()).includes('Reported Full'),'revoked reported observation must disappear');
    // Offline DOM projection fixtures, restored before capturing the absence-only page.
    await page.evaluate(()=>{
@@ -71,13 +141,23 @@ try{
    assert.equal(await page.locator('#rd-premium-table tbody tr').first().locator('td').nth(9).innerText(),'10');
    assert((await page.locator('#rd-context-rows').innerText()).includes('4/4 displayed expiries'));
    assert((await page.locator('#rd-context-rows').innerText()).includes('8/8 rows'));
-   assert((await page.locator('#rd-event-table').innerText()).includes('23050 CE BELOW PDL'));
+   const eventDiagnostics=await page.locator('#rd-event-table').evaluate(el=>({html:el.innerHTML.slice(0,350),raw:(el.textContent||'').slice(0,350),visible:(el as HTMLElement).innerText.slice(0,350),panelDisplay:getComputedStyle(el.closest('.rd-section')!).display,tableDisplay:getComputedStyle(el).display,hub:document.getElementById('rd-page')!.dataset.rdHub,read:document.getElementById('rd-page')!.dataset.rdRead,osSource:document.getElementById('op-one-stop')!.dataset.osSource,recordedSection:document.querySelector('.mb-research-section[aria-label="Recorded notable events"]')?.textContent?.slice(0,160),mbPresent:!!document.getElementById('mb-page')}));
+   if(eventDiagnostics.osSource==='RECORDED')assert(eventDiagnostics.visible.includes('23050 CE BELOW PDL'),name+' same-source recorded event must be visible '+JSON.stringify(eventDiagnostics));
+   else{
+    assert.equal(eventDiagnostics.osSource,'LIVE',name+' source must be LIVE or RECORDED');
+    assert(!eventDiagnostics.visible.includes('23050 CE BELOW PDL'),name+' revoked recorded event must not leak into LIVE view');
+   }
    const eventBounds=await page.locator('#rd-event-table th:last-child').evaluate((el:any)=>({right:el.getBoundingClientRect().right,limit:el.closest('.rd-section').getBoundingClientRect().right}));assert(eventBounds.right<=eventBounds.limit+1,name+' populated event columns must remain inside the page');
+   // Reproduce the actual live renderer's Fut<small>expiry</small> identity.
+   await page.evaluate(()=>{document.getElementById('op-one-stop')!.dataset.osSource='LIVE';document.querySelector('#os-future-response tbody tr:nth-child(2) td')!.innerHTML='NIFTY Fut<small>2026-11-23</small>';});
+   await page.waitForFunction(()=>document.getElementById('rd-market-metrics')?.textContent?.includes('FUT111')&&document.getElementById('rd-market-metrics')?.textContent?.includes('Basis10'));
    await page.evaluate(()=>{const restore=(window as any).__projectionRestore;for(const [id,html] of Object.entries(restore.html))document.getElementById(id)!.innerHTML=html as string;document.getElementById('op-one-stop')!.dataset.osSource=restore.source;delete (window as any).__projectionRestore;});
    await page.waitForFunction(()=>document.querySelectorAll('#rd-premium-table tbody tr').length!==8);
    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-reference-data-page.png',fullPage:false,timeout:15000});
-   await page.locator('[data-rd-fit="ACTUAL"]').click();assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1');
-   await page.locator('[data-rd-fit="PAGE"]').click();
+   if(width>600){
+    await page.locator('[data-rd-fit="ACTUAL"]').click();assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1');
+    await page.locator('[data-rd-fit="PAGE"]').click();
+   }
    const levels=await page.locator('#os-futures').elementHandle();
    await page.locator('[data-rd-open="os-futures"]').first().click();
    assert.equal(await page.locator('#os-screen-detail').evaluate((el:any)=>el.open),true);
@@ -85,9 +165,24 @@ try{
    assert.equal(await levels?.evaluate((el:any)=>el===document.getElementById('os-futures')),true,'detail must preserve the same source DOM node');
    await page.locator('#os-screen-close').click();
    assert.equal(await page.locator('#os-dashboard #os-futures').count(),1,'closing restores the original source panel');
+   assert.equal(await page.locator('#rd-pcr-table .rd-pcr-ladder table').count(),3,'all three indices have vertical front ladders');
+   assert(await page.locator('#rd-pcr-table').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'PCR front has no horizontal scroll');
    await page.locator('[data-rd-open="os-walls"]').first().click();
    assert.equal(await page.locator('#os-screen-detail-body>#os-pcr-strip').count(),1,'PCR detail must preserve primary recorded/live PCR evidence');
    assert.equal(await page.locator('#os-screen-detail-body>#os-walls').count(),1);
+   assert.equal(await page.locator('#os-wall-ladder .os-pcr-vertical table').count(),3);
+   assert.equal(await page.locator('#os-wall-ladder thead').count(),0,'wide PCR header rows removed');
+   assert(await page.locator('#os-screen-detail-body').evaluate(el=>el.scrollWidth<=el.clientWidth+1),'PCR popup has no horizontal scroll');
+   for(const table of await page.locator('#os-wall-ladder .os-pcr-vertical table').all()){
+    assert(await table.evaluate(el=>el.scrollWidth<=el.clientWidth+1),'PCR index ladder fits its width');
+    assert.equal(await table.locator('td').first().evaluate(el=>getComputedStyle(el).display),'table-cell','metric and value stay in two columns');
+   }
+   if(width<=390){
+    assert.equal(await page.locator('#os-pcr-strip').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),1,'popup PCR summaries stack vertically');
+    await page.locator('#os-wall-ladder .os-pcr-vertical table').first().scrollIntoViewIfNeeded();
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-page2-vertical-pcr.png',fullPage:true});
+   }
+
    await page.locator('#os-screen-close').click();
    assert.equal(await page.locator('#os-dashboard #os-pcr-strip').count(),1);
    await page.locator('#op-research-open-data').click();
@@ -117,7 +212,10 @@ try{
    assert.equal(data.duplicateLogo,'none',name+' must have one actual brand header');
    assert(data.pcrSourceFont<=11,name+' legacy mobile font rules must not inflate source labels: '+JSON.stringify(data));
    if(width===1024)await page.screenshot({path:'pr800-mobile-ui-artifacts/reference-no-market-data.png',fullPage:true,timeout:15000});
-   if(width===1024)assert(data.memory<1536,'seven primary sections must fit the reference-height reading flow: '+JSON.stringify(data));
+   // Vertical ladders deliberately use more height; require reachability, not shrinking seven sections into one screen.
+   await page.locator('#os-memory').scrollIntoViewIfNeeded();
+   assert(await page.locator('#os-memory').isVisible(),name+' memory stays reachable by vertical scroll');
+   assert(await page.locator('#os-wall-ladder').evaluate(el=>el.scrollWidth<=el.clientWidth+1),name+' source PCR ladder never needs horizontal scroll');
    assert(data.scrollWidth<=data.viewport+5,name+' page overflow: '+JSON.stringify(data));
    if(width<=600){
     assert.equal(data.mobileHero,'none','mobile hero must not displace market data');
@@ -131,6 +229,33 @@ try{
    assert.equal(await page.locator('#recorded-replay').evaluate((el:any)=>el.open),true);
    await page.locator('#mb-chapter').selectOption('0',{timeout:10000});
    assert.deepEqual(errors,[],name+' JS runtime errors');
+   if(name==='mobile'){
+    // Exercise native time-input validity, which serialized DOM mocks cannot enforce.
+    await page.goto(base+'/rag-test',{waitUntil:'domcontentloaded'});
+    await page.locator('#rag-symbol').selectOption('NIFTY');await page.locator('#rag-date').fill('2026-11-04');
+    await page.locator('#rag-expiry').fill('2026-11-09');await page.locator('#rag-strike').fill('23900');await page.locator('#rag-side').selectOption('CE');
+    await page.locator('#rag-time').fill('14:31');
+    assert.equal(await page.locator('#rag-time').evaluate((el:any)=>el.validity.stepMismatch),false);
+    const count=ragRequests.length;await page.locator('#rag-search').click();
+    await page.waitForFunction(()=>document.getElementById('rag-status')?.textContent?.includes('ISOLATED_UI_NO_MARKET_DATA'));
+    assert.equal(ragRequests.length,count+1);assert.equal(new URL(ragRequests.at(-1)!,base).searchParams.get('time'),'14:31');
+    for(const kind of ['EVENT']){
+     await page.locator('#rag-kind').selectOption(kind);await page.locator('#rag-time').fill('14:31');
+     assert.equal(await page.locator('#rag-time').evaluate((el:any)=>el.validity.stepMismatch),true,kind+' preserves native 3m input guard');
+     await page.locator('#rag-search').click();assert.equal(ragRequests.length,count+1);
+    }
+    await page.locator('#rag-kind').selectOption('SNAPSHOT');assert.equal(await page.locator('#rag-time').getAttribute('step'),'60');
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/mobile-rag-minute-input.png',fullPage:true});
+    await page.goto(base+'/archive-test',{waitUntil:'domcontentloaded'});
+    const archiveCount=ragRequests.length;await page.locator('#rag-evidence-card > summary').click();assert.equal(ragRequests.length,archiveCount,'opening archive evidence makes no RAG request');
+    await page.locator('#rag-symbol').selectOption('NIFTY');await page.locator('#rag-date').fill('2026-11-04');await page.locator('#rag-expiry').fill('2026-11-09');
+    await page.locator('#rag-strike').fill('23900');await page.locator('#rag-side').selectOption('CE');await page.locator('#rag-time').fill('14:31');
+    assert.equal(await page.locator('#rag-time').evaluate((el:any)=>el.validity.stepMismatch),false);await page.locator('#rag-search').click();
+    await page.waitForFunction(()=>document.getElementById('rag-status')?.textContent?.includes('ISOLATED_UI_NO_MARKET_DATA'));
+    assert.equal(ragRequests.length,archiveCount+1);assert.equal(new URL(page.url()).pathname,'/archive-test','evidence remains inside the recorded dashboard');
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/mobile-archive-rag-minute-input.png',fullPage:true});
+    assert.deepEqual(errors,[],name+' RAG JS runtime errors');
+   }
    console.log('PR800_'+name.toUpperCase()+'_PASS '+JSON.stringify(data));
   }finally{await context.close();}
  }

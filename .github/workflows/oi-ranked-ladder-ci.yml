@@ -1,0 +1,41 @@
+name: OI Ranked Ladder CI
+on:
+  pull_request:
+    paths:
+      - 'oi-ranked-ladder.ts'
+      - 'oi-wall-studio.ts'
+      - 'oi-wall-replay.ts'
+      - 'recorded-dashboard-view.ts'
+      - 'business-dashboard-v1-view.ts'
+      - 'test/oi-*.test.ts'
+      - 'scripts/oi-ranked-ladder-smoke.ts'
+      - '.github/workflows/oi-ranked-ladder-ci.yml'
+permissions:
+  contents: read
+jobs:
+  ranked-ladder:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      DATABASE_URL: ''
+      KITE_API_KEY: ''
+      KITE_API_SECRET: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: NODE_ENV=test node --import tsx --test test/oi-ranked-ladder.test.ts test/oi-wall-studio.test.ts test/oi-wall-replay.test.ts test/recorded-dashboard-view.test.ts test/recorded-dashboard-http.test.ts test/recorded-replay-view.test.ts
+      - run: node scripts/optionpilot-guardrail-check.mjs
+      - run: npm install --no-save --ignore-scripts --no-audit --no-fund playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - name: Live and recorded ladder browser acceptance
+        run: node --import tsx scripts/oi-ranked-ladder-smoke.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oi-ranked-ladder-synthetic-mobile
+          path: oi-ranked-ladder-artifacts/
+          retention-days: 3

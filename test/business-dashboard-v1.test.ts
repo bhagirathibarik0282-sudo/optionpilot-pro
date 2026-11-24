@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { canonicalBusinessRuntimeRegistry } from "../canonical-business-runtime-registry.js";
 import { buildBusinessDashboardV1 } from "../business-dashboard-v1.js";
-import { deriveObservationData, renderBusinessDashboardV1Html } from "../business-dashboard-v1-view.js";
+import { deriveObservationData, deriveRecordedVixPcrRows, renderBusinessDashboardV1Html } from "../business-dashboard-v1-view.js";
 import { readFileSync } from "node:fs";
+import { installScreenOverview } from "../screen-overview.js";
 
 test("dashboard fails softly to WAIT without inventing a candidate", () => {
   canonicalBusinessRuntimeRegistry.clear();
@@ -143,7 +144,9 @@ test("observation terminal exposes compact views, bounded replay loading and exp
   assert.match(html, /getReplay\(s\+' session'/);
   assert.match(html, /sameScope&&oldData\[s\]/);
   assert.match(html, /CORE covers recorded ATM ±7/);
-  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  // Scripts contain future dynamic card templates; count only IDs in the actual HTML DOM.
+  const markup = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  const ids = [...markup.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length);
 });
 
@@ -172,4 +175,66 @@ test('swing premium requires same exact contract; null and zero bases stay unava
  assert.equal(d.contracts[0].swingPct,100);
  assert.equal(deriveObservationData({options:[a]},{options:[{...a,strike:23400,ltp:10}]}).contracts[0].swingPct,null);
  assert.equal(deriveObservationData({options:[a]},{options:[{...a,ltp:0}]}).contracts[0].swingPct,null);
+});
+
+test("recorded PCR and VIX require the same adjacent minute and exact expiry", () => {
+  const at = (minute: number) => new Date(Date.UTC(2026, 10, 16, 3, 45 + minute)).toISOString();
+  const expiry = "2026-11-17";
+  const market = [14.2, 14.1, 14.3, 14.2].map((india_vix, minute) => ({
+    symbol: "NIFTY", minute_bucket: at(minute), india_vix, truth_verdict: "TRUE",
+  }));
+  const chain = (symbol: string, minute: number, value: number, overrides = {}) => ({
+    symbol, minute_bucket: at(minute), full_chain_oi_pcr: value, expiry,
+    truth_verdict: "TRUE", full_pcr_source: "Normalized full-chain source", ...overrides,
+  });
+  const rows = deriveRecordedVixPcrRows(["NIFTY", "SENSEX", "BANKNIFTY"], {
+    NIFTY: { market, chain: [
+      chain("NIFTY", 0, 1.2), chain("NIFTY", 1, 1.3),
+      chain("NIFTY", 2, 1.4, { expiry: "2026-11-24" }), chain("NIFTY", 3, 1.5),
+    ] },
+    SENSEX: { chain: [chain("SENSEX", 1, 0.8), chain("SENSEX", 2, 0.7)] },
+    BANKNIFTY: { chain: [
+      chain("BANKNIFTY", 0, 1.2, { full_pcr_source: "Source provenance unverified" }),
+      chain("BANKNIFTY", 1, 1.3), chain("BANKNIFTY", 1, 1.4),
+    ] },
+  }, { NIFTY: expiry, SENSEX: expiry, BANKNIFTY: expiry });
+  const [minute3, minute2, minute1, minute0] = rows;
+  assert.equal(minute1.indices[0].alignment, "CE aligned");
+  assert.equal(minute2.indices[1].alignment, "PE aligned");
+  assert.equal(minute3.indices[0].delta, null);
+  assert.equal(minute2.indices[0].value, null);
+  assert.equal(minute1.indices[2].value, null);
+  assert.equal(minute0.indices[2].value, null);
+});
+
+
+test("existing dashboard contains one live BANKNIFTY SHADOW card and its browser PCR helper", () => {
+ const html=renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY"));
+ const markup=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+ assert.equal((markup.match(/id="dashboard-live"/g)||[]).length,1);
+ assert.equal((markup.match(/id="op-bnf-shadow"/g)||[]).length,1);
+ assert.match(html, /BANKNIFTY · SHADOW PAPER/);
+ assert.match(html, /const deriveLiveThreeIndexPcr=/);
+ assert.match(html, /\/api\/research\/dashboard-live\/bnf-shadow/);
+ const index=markup.indexOf('id="op-bnf-shadow"');
+ assert.ok(index>markup.indexOf('id="observations-view"'));
+ assert.ok(index<markup.indexOf('id="op-workspace-advanced"'));
+});
+
+test("full-screen DATA DASHBOARD displays existing BANKNIFTY SHADOW worker status", () => {
+ const html=renderBusinessDashboardV1Html(buildBusinessDashboardV1("NIFTY"));
+ const markup=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+ assert.equal((markup.match(/id="rd-bnf-shadow"/g)||[]).length,1);
+ assert.equal((markup.match(/id="rd-bnf-shadow-state"/g)||[]).length,1);
+ assert.equal((markup.match(/id="rd-bnf-shadow-evidence"/g)||[]).length,1);
+ assert.equal((markup.match(/id="op-bnf-shadow"/g)||[]).length,1);
+ assert.ok(markup.indexOf('id="rd-bnf-shadow"')<markup.indexOf('id="rd-viewport"'));
+ const installer=installScreenOverview.toString();
+ assert.match(installer, /Worker status unavailable/);
+ assert.match(installer, /paper trades not verified/);
+ assert.match(installer, /op-bnf-shadow-state/);
+ assert.match(installer, /rd-bnf-shadow-state/);
+ assert.match(installer, /op-bnf-shadow-evidence/);
+ assert.match(installer, /rd-bnf-shadow-evidence/);
+ assert.equal((html.match(/\/api\/research\/dashboard-live\/bnf-shadow/g)||[]).length,1);
 });

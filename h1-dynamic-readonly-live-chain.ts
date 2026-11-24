@@ -5,6 +5,7 @@ import { H1LiveExactReadOnlyWebSocketService } from "./h1-live-exact-readonly-we
 import { buildH1SelectorCanonicalValidationHandoffV1 } from "./h1-selector-canonical-validation-handoff-v1.js";
 import { KiteImmediateTokenRegistry, type KiteImmediateTokenEntry } from "./kite-immediate-token-registry.js";
 import { resolveKiteAuthoritySession } from "./kite-session-authority.js";
+import { prepareBnfShadowHostRuntime } from "./bnf-shadow-host-runtime.js";
 import { installSweetSpotLiveObserver } from "./sweet-spot-live-observer-v1.js";
 
 export interface H1DynamicReadOnlyLiveStartResult {
@@ -73,7 +74,11 @@ export async function startH1DynamicReadOnlyLiveChain(asOfDate:string, enabled:b
         })}`);
       }
     }
+    const bnfHost=await prepareBnfShadowHostRuntime(readiness.registry.entries(),asOfDate,apiKey,authority.session.accessToken);
     const service=new H1LiveExactReadOnlyWebSocketService({
+      bnfReferenceTokens:bnfHost?.referenceTokens,
+      onBnfShadowPackets:bnfHost?.onPackets,
+      onBnfShadowState:bnfHost?.onState,
       readiness,
       apiKey,
       accessToken:authority.session.accessToken,

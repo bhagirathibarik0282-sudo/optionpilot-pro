@@ -113,18 +113,21 @@ export async function getIntradayObservationMemory(requestedDate?: string, symbo
   const dates = await dbQuerySafe<{ date: string }>("SELECT DISTINCT payload->>'tradeDate' AS date FROM app_state_log WHERE kind IN ($1,$2) ORDER BY date DESC LIMIT 30", [EVENT_KIND,RECEIPT_KIND]);
   if (!dates) throw new Error('MEMORY_READ_FAILED');
   const tradeDate = requestedDate ?? dates.rows[0]?.date ?? indianTradingDateAt(new Date());
-  const q = await dbQuerySafe<{ payload: ObservationEvent }>("SELECT payload FROM app_state_log WHERE kind=$1 AND payload->>'tradeDate'=$2 AND ($3::text IS NULL OR payload->>'symbol'=$3) ORDER BY payload->>'at' DESC, id DESC LIMIT 1000", [EVENT_KIND, tradeDate, symbol ?? null]);
+  const q = await dbQuerySafe<{ payload: ObservationEvent; recorded_at: Date|string }>("SELECT payload,created_at AS recorded_at FROM app_state_log WHERE kind=$1 AND payload->>'tradeDate'=$2 AND ($3::text IS NULL OR payload->>'symbol'=$3) ORDER BY payload->>'at' DESC, id DESC LIMIT 1000", [EVENT_KIND, tradeDate, symbol ?? null]);
   if (!q) throw new Error('MEMORY_READ_FAILED');
   const es = q.rows.map(r => r.payload), keys = es.map(e => e.memoryKey);
-  const r = await dbQuerySafe<{ payload: ObservationResponse }>("SELECT payload FROM app_state_log WHERE kind=$1 AND payload->>'eventKey'=ANY($2::text[]) ORDER BY id", [RESPONSE_KIND, keys]);
+  const r = await dbQuerySafe<{ payload: ObservationResponse; recorded_at: Date|string }>("SELECT payload,created_at AS recorded_at FROM app_state_log WHERE kind=$1 AND payload->>'eventKey'=ANY($2::text[]) ORDER BY id", [RESPONSE_KIND, keys]);
   if (!r) throw new Error('MEMORY_READ_FAILED');
   const rs = r.rows.map(r => r.payload);
+  // Additive readback metadata: no change to the persisted memory or capture.
+  const storedAt=(v:Date|string)=>{const t=v instanceof Date?v.getTime():typeof v==='string'&&/(?:Z|[+-]\d{2}:\d{2})$/.test(v)?Date.parse(v):NaN;return Number.isFinite(t)?new Date(t).toISOString():null;};
+  const availability={events:Object.fromEntries(q.rows.map(x=>[x.payload.memoryKey,storedAt(x.recorded_at)])),responses:Object.fromEntries(r.rows.map(x=>[x.payload.memoryKey,storedAt(x.recorded_at)]))};
   const receipt=await dbQuerySafe<{payload:unknown}>("SELECT payload FROM app_state_log WHERE kind=$1 AND payload->>'tradeDate'=$2 LIMIT 1",[RECEIPT_KIND,tradeDate]);
   if (!receipt) throw new Error('MEMORY_RECEIPT_READ_FAILED');
   return { ok: true, mode: 'READ_ONLY_INTRADAY_OBSERVATION_MEMORY_V1', source: 'POSTGRES_APP_STATE_LOG', generatedAt: new Date().toISOString(), tradeDate,
     coverageReceipt:receipt.rows[0]?.payload??null, availableDates: dates.rows.map(r => r.date), runtime: intradayMemoryRuntimeStatus(), readLimitEvents: 1000,
     summary: { loadedEvents: es.length, qualifiedResponses: rs.filter(r => r.status === 'QUALIFIED').length, missingResponses: rs.filter(r => r.status === 'MISSING').length,
       responseRecords: rs.length, pendingResponseSlots: Math.max(0, es.length * 3 - rs.length) },
-    events: es, responses: rs, affectsVerdict: false, affectsTelegram: false, affectsExecution: false,
+    events: es, responses: rs, availability, affectsVerdict: false, affectsTelegram: false, affectsExecution: false,
     methodology: 'Observed sampled intervals; same expiry/strike CE+PE at exact follow-up timestamps. No nearest quote, no gap filling, no causal or trading-profit claim.' };
 }

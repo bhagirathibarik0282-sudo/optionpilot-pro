@@ -47,3 +47,53 @@ test("startup wiring owns calendar, market-open and closed-truth integration", a
   assert.match(source, /INDIAN_EQUITY_TRADING_HOLIDAYS_2026/);
   assert.match(source, /market_closed_/);
 });
+
+
+test("calendar startup wiring is unchanged after repeated starts", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+
+  const scriptPath = fileURLToPath(new URL("../scripts/wire-market-session-calendar.mjs", import.meta.url));
+  const script = await readFile(scriptPath, "utf8");
+  const oldClockMatch = script.match(/const oldClockBlock = \x60([\s\S]*?)\x60;\nconst newClockBlock/);
+  assert.ok(oldClockMatch, "expected original clock fixture in the wire script");
+  const truthAnchor = [
+    "  fields.optionsPE = atmPe",
+    "    ? classifyTruthField(atmPe.quoteTimestamp, TRUTH_THRESHOLDS_MS.options)",
+    '    : { verdict: "INVALID", ageMs: null, reason: "no_pe_leg" };',
+  ].join("\n");
+  const pristine = [
+    'import { shouldRefreshCandidateSnapshot } from "./candidate-snapshot-freshness.js";',
+    "function computeTruthReport(m: IndexMetrics | undefined): TruthReport {",
+    truthAnchor,
+    "}",
+    oldClockMatch[1],
+    'app.get("/api/holidays", (c) => {',
+    "  return c.json([]);",
+    "});",
+  ].join("\n");
+  const dir = await mkdtemp(join(tmpdir(), "optionpilot-calendar-wire-"));
+  const serverPath = join(dir, "server.ts");
+
+  try {
+    await writeFile(serverPath, pristine, "utf8");
+    let expected = "";
+    for (let run = 0; run < 3; run++) {
+      const args = run === 2 ? [scriptPath, "--check"] : [scriptPath];
+      const result = spawnSync(process.execPath, args, { cwd: dir, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      const wired = await readFile(serverPath, "utf8");
+      if (run === 0) {
+        expected = wired;
+        assert.equal(wired.split("const calendarPhase = indianEquityMarketPhaseAt(now);").length - 1, 1);
+      } else {
+        assert.equal(wired, expected, "restarts and check mode must not modify wired source");
+      }
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

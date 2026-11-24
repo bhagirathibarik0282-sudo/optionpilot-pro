@@ -233,3 +233,85 @@ test('reported PCR refuses incomplete identities, previous-session quotes and fa
  fail=true;await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr,null);
  now+=60000;fail=false;await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr?.value,2);
 });
+
+
+// Production diagnostic acceptance: expired outer OI must be classified without inventing a ratio.
+test('reported PCR diagnostics distinguish previous-session timestamp from a same-session old quote',async()=>{
+ const oldSource=quotes();oldSource['NFO:OPTIONPE'].timestamp='2026-10-15 15:30:00';
+ const blocked=measurePcrSnapshot(entries,oldSource,date,at);
+ assert.equal(blocked.fullPcr,null);assert.equal(blocked.reportedPcr,null);
+ assert.equal(blocked.reportedDiagnostic.reason,'PRIOR_SESSION_TIMESTAMP');
+ assert.equal(blocked.reportedDiagnostic.identity,'NFO:OPTIONPE');
+ assert.deepEqual(blocked.reportedSourceCounts,{sameSession:1,priorSession:1,preOpen:0,invalidTimestamp:0});
+ const mixed=quotes();mixed['NFO:OPTIONPE'].timestamp='2026-10-16 09:58:00';
+ const valid=measurePcrSnapshot(entries,mixed,date,at);
+ assert.equal(valid.fullPcr,null);assert.equal(valid.reportedPcr?.value,2);
+ assert.equal(valid.reportedDiagnostic.reason,'COMPLETE_REPORTED');
+ assert.deepEqual(valid.reportedSourceCounts,{sameSession:2,priorSession:0,preOpen:0,invalidTimestamp:0});
+ let now=at;const diagnostics:any[]=[];
+ const sampler=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{
+  now:()=>now,active:()=>true,wait:async()=>{},fetchQuotes:async()=>oldSource,onDiagnostic:x=>diagnostics.push(x)
+ });
+ await sampler.tick();
+ assert.equal(diagnostics[0].rows[0].reported.reason,'PRIOR_SESSION_TIMESTAMP');
+ assert.equal(diagnostics[0].rows[0].reported.state,'BLOCKED');
+ assert(!JSON.stringify(diagnostics).includes('Authorization'));
+ assert.equal(sampler.read('NIFTY','2026-10-19')?.reportedPcr,null);
+});
+
+test('one complete broker request retains explicitly dated last-known OI without qualifying fresh or same-session PCR',async()=>{
+ const {deriveLiveThreeIndexPcr}=await import('../live-three-index-pcr.js');
+ const {derivePremiumPcrPanel}=await import('../premium-pcr-panel.js');
+ for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){
+  const {es,qs,spot}=wideChain();for(const e of es)e.symbol=symbol as any;spot.identity.symbol=symbol;
+  qs[es[0].exchange+':'+es[0].label].timestamp='2026-10-15 15:30:00';
+  const raw={...measurePcrSnapshot(es,qs,date,at,at,spot),fetchState:'OK'};
+  assert.equal(raw.fullPcr,null);assert.equal(raw.reportedPcr,null);
+  assert.equal(raw.lastReportedPcr?.value,7100/4100);
+  assert.equal(raw.lastReportedPcr?.priorSession,1);assert.equal(raw.lastReportedPcr?.preOpen,0);
+  assert.equal(raw.lastReportedPcr?.reported,82);assert.equal(raw.lastReportedPcr?.basis,'LAST_REPORTED_WITH_EARLIER_PACKETS');
+  const payload:any={connected:true,source:'KITE_WEBSOCKET_FULL',serverTime:new Date(at).toISOString(),snapshot:{runtimeId:'test',tradeDate:date,asOf:new Date(at).toISOString(),indices:[{symbol,expiry:'2026-10-19',expiries:['2026-10-19'],spot,pcrSnapshot:raw}]}};
+  const view=deriveLiveThreeIndexPcr(payload),row:any=view.rows.find(r=>r.symbol===symbol);
+  assert.equal(row.reportedPcr.value,7100/4100);assert.equal(row.value,null);assert.equal(row.direction,'WAIT');assert.equal(view.alignment,'WAIT');
+  assert(row.reportedPcr.sourceNote.includes('1 prior-session'));assert(row.reportedPcr.sourceNote.includes('2026-10-15 15:30:00 IST'));
+  assert.equal(row.bandValue,3,'independent fresh band is preserved');
+  const panel=derivePremiumPcrPanel(payload,view).rows.find((r:any)=>r.symbol===symbol)!;
+  assert.equal(panel.current,null);assert.equal(panel.reported.value,7100/4100);assert.equal(panel.status,'Last reported · earlier packets');
+  assert.equal(panel.delta,null);assert.equal(panel.oiDelta,null);assert.equal(panel.samples.length,0);
+  const last=(p:any)=>deriveLiveThreeIndexPcr(p).rows.find(r=>r.symbol===symbol) as any;
+  for(const mutate of [(p:any)=>p.connected=false,(p:any)=>p.snapshot.runtimeId='',(p:any)=>p.snapshot.indices[0].expiry='2026-11-19',(p:any)=>p.snapshot.indices[0].pcrSnapshot.fetchState='RATE_LIMITED',(p:any)=>p.snapshot.indices[0].pcrSnapshot.checkedAt=new Date(at-90001).toISOString(),(p:any)=>p.snapshot.indices[0].pcrSnapshot.lastReportedPcr.checkedAt=new Date(at-1).toISOString(),(p:any)=>p.snapshot.indices[0].pcrSnapshot.lastReportedPcr.sessionDate='2026-10-15',(p:any)=>p.snapshot.indices[0].pcrSnapshot.lastReportedPcr.value=999,(p:any)=>p.snapshot.indices[0].pcrSnapshot.lastReportedPcr.priorSession=0,(p:any)=>p.snapshot.indices[0].pcrSnapshot.lastReportedPcr.priorSession=83,(p:any)=>p.snapshot.indices[0].pcrSnapshot.coverage.missing=1,(p:any)=>p.snapshot.indices[0].pcrSnapshot.lastReportedPcr.sourceMaxAt=new Date(at+5001).toISOString()]){
+   const bad=structuredClone(payload);mutate(bad);assert.equal(last(bad).reportedPcr,null);
+  }
+ }
+});
+
+test('last-reported context never borrows missing or invalid OI and revokes on failed attempts, expiry and session changes',async()=>{
+ const old=quotes();old['NFO:OPTIONPE'].timestamp='2026-10-15 15:30:00';
+ for(const mutate of [(q:any)=>delete q['NFO:OPTIONPE'],(q:any)=>q['NFO:OPTIONPE'].oi=null,(q:any)=>q['NFO:OPTIONPE'].oi=-1,(q:any)=>q['NFO:OPTIONPE'].oi='200',(q:any)=>q['NFO:OPTIONPE'].instrument_token=123,(q:any)=>q['NFO:OPTIONPE'].timestamp='invalid',(q:any)=>q['NFO:OPTIONPE'].timestamp=new Date(at+5001).toISOString(),(q:any)=>q['NFO:OPTIONCE'].oi=0]){
+  const bad=structuredClone(old);mutate(bad);assert.equal(measurePcrSnapshot(entries,bad,date,at).lastReportedPcr,null);
+ }
+ assert.equal(measurePcrSnapshot([...entries,entries[0]],old,date,at).lastReportedPcr,null);
+ assert.equal(measurePcrSnapshot(entries,old,date,at+86400000).lastReportedPcr,null);
+ const zero=structuredClone(old);zero['NFO:OPTIONPE'].oi=0;assert.equal(measurePcrSnapshot(entries,zero,date,at).lastReportedPcr?.value,0);
+ let now=at,fail=false;const sampler=new DashboardPcrSampler({entries,date,missing:[],omittedExpiries:[]},{now:()=>now,active:()=>true,wait:async()=>{},fetchQuotes:async()=>{if(fail)throw Error('PCR_QUOTE_HTTP_429');return old;}});
+ await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.lastReportedPcr?.value,2);
+ now+=90001;assert.equal(sampler.read('NIFTY','2026-10-19')?.lastReportedPcr,null);
+ fail=true;await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.lastReportedPcr,null);
+ now+=60000;fail=false;await sampler.tick();assert.equal(sampler.read('NIFTY','2026-10-19')?.lastReportedPcr?.value,2);
+ now+=86400000;assert.equal(sampler.read('NIFTY','2026-10-19')?.lastReportedPcr,null);
+});
+
+test('pre-open packets cannot qualify fresh full PCR even within thirty seconds of the open',()=>{
+ const now=Date.parse(date+'T09:15:01+05:30'),q=quotes();for(const quote of Object.values(q))quote.timestamp=date+' 09:14:59';
+ const raw=measurePcrSnapshot(entries,q,date,now);
+ assert.equal(raw.fullPcr,null);assert.equal(raw.reportedPcr,null);assert.equal(raw.lastReportedPcr?.preOpen,2);
+ assert.equal(raw.lastReportedPcr?.olderThan30s,0);assert.equal(raw.reportedSourceCounts.preOpen,2);assert.equal(raw.reportedSourceCounts.priorSession,0);
+});
+
+test('epoch-zero and unknown exchange clocks cannot be presented as dated last-reported evidence',()=>{
+ for(const timestamp of ['1970-01-01T00:00:00.000Z','1970-01-01 00:00:00','invalid']){
+  const q=quotes();q['NFO:OPTIONPE'].timestamp=timestamp;const raw=measurePcrSnapshot(entries,q,date,at);
+  assert.equal(raw.fullPcr,null);assert.equal(raw.reportedPcr,null);assert.equal(raw.lastReportedPcr,null);
+  assert.equal(raw.reportedDiagnostic.reason,'INVALID_EXCHANGE_TIMESTAMP');
+ }
+});

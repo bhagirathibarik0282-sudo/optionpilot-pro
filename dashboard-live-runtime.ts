@@ -1,5 +1,10 @@
 import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
-import { DashboardLiveStore, buildDashboardLiveInventory, type LiveSelection, type PremiumWatchFilter } from './dashboard-live-feed.js';
+import { deriveRestOiBandEvidence } from './dashboard-oi-rest-band-evidence.js';
+import { tickTelegramLadderShadow } from './telegram-ladder-shadow-host.js';
+import { createParticipationMinuteRecorder } from './participation-minute-recorder.js';
+import { dbSaveParticipationMinuteOnce, dbSaveResearchMemoryOnce } from './db.js';
+import { dashboardWatchOiCycle } from './dashboard-watch-oi.js';
+import { DashboardLiveStore, buildDashboardLiveInventory, type LiveSelection, type PremiumWatchFilter, type LiveIndex } from './dashboard-live-feed.js';
 import { fetchH1KiteLiveInstrumentMaster } from './h1-kite-live-instrument-master-adapter.js';
 import { subscribeKiteAuthoritySessionPersisted } from './kite-session-authority.js';
 import { resolveVerifiedKiteAuthoritySession, readKiteBrokerSessionCheck, markKiteBrokerSessionRejected } from './kite-broker-session-guard.js';
@@ -15,6 +20,7 @@ let timer:ReturnType<typeof setInterval>|null=null;
 let preflightAt=0;
 let sessionRefreshQueued=false;
 let sessionCheckLog='';
+const participationRecorder=createParticipationMinuteRecorder(dbSaveParticipationMinuteOnce);
 function noteSessionCheck(){const value=JSON.stringify(readKiteBrokerSessionCheck());if(value!==sessionCheckLog){sessionCheckLog=value;console.info('[DASHBOARD_LIVE_SESSION_CHECK] '+value);}}
 const enabled=()=>process.env[DASHBOARD_LIVE_ENV]?.trim().toLowerCase()==='true';
 function stop(next:string){generation++;socket?.disconnect();socket=null;store=null;pcrSampler=null;credential=null;state=next;}
@@ -57,6 +63,9 @@ export async function reconcileDashboardLiveRuntime(force=false){
     if(response.status===401||response.status===403){markKiteBrokerSessionRejected(apiKey,sessionToken);if(attempt===generation)stop('KITE_SESSION_REQUIRED');}
     if(!response.ok)throw Error('PCR_QUOTE_HTTP_'+response.status);const body=await response.json() as any;
     if(body?.status!=='success'||!body.data||typeof body.data!=='object'||Array.isArray(body.data))throw Error('PCR_QUOTE_INVALID_RESPONSE');return body.data;
+   },onCycle:(date,cycleAt,results)=>{
+    const payload=dashboardWatchOiCycle(date,cycleAt,results);
+    if(payload)void dbSaveResearchMemoryOnce(payload).catch(()=>console.warn('[DASHBOARD_WATCH_OI] SAVE_FAILED'));
    },onDiagnostic:summary=>console.info('[DASHBOARD_LIVE_PCR_DIAGNOSTIC] '+JSON.stringify(summary))
   });
   socket.connect();
@@ -64,7 +73,12 @@ export async function reconcileDashboardLiveRuntime(force=false){
 }
 export function startDashboardLiveRuntime(){
  if(timer||process.env.NODE_ENV==='test')return;
- timer=setInterval(()=>{void reconcileDashboardLiveRuntime();void pcrSampler?.tick();},5000);timer.unref();
+ timer=setInterval(()=>{void reconcileDashboardLiveRuntime();void pcrSampler?.tick();
+  void tickTelegramLadderShadow().catch(()=>console.warn('[TELEGRAM_LADDER_SHADOW] TICK_FAILED'));
+  if(isIndianEquityMarketOpenAt(new Date()))void participationRecorder.capture(readDashboardLiveSnapshot).then(result=>{
+   if(result==='FAILED')console.warn('[PARTICIPATION_MINUTE] SAVE_FAILED_RETRY_NEXT_TICK');
+  });
+ },5000);timer.unref();
  subscribeKiteAuthoritySessionPersisted(()=>{stop('RECONNECTING');if(busy)sessionRefreshQueued=true;else void reconcileDashboardLiveRuntime(true);});
  void reconcileDashboardLiveRuntime(true);
 }
@@ -79,6 +93,16 @@ export function readDashboardLiveSnapshot(selection:LiveSelection={}){
 
 /** Cheap dirty check: no full-chain projection until a tick/state changes or heartbeat is due. */
 export function dashboardLiveRevision(){return state+':'+(store?.runtimeId||'none')+':'+(store?.revision()||0)+':'+(pcrSampler?.version()||0);}
+
+/** Read the existing REST attempt only. No broker request or fresh-data promotion. */
+export function readDashboardPcrAudit(symbol:string,expiry:string,focusStrike?:number){
+ const now=Date.now(),connected=enabled()&&state==='OPEN'&&isIndianEquityMarketOpenAt(new Date(now));
+ const sessionMatches=store?.inventory.date===indianTradingDateAt(new Date(now));
+ const audit=connected&&sessionMatches?pcrSampler?.readAudit(symbol,expiry)??null:null;
+ const wsAudit=connected&&sessionMatches&&typeof store?.auditOiBand==='function'?store.auditOiBand(symbol as LiveIndex,expiry,now,focusStrike):null;
+ return {readOnly:true,extraBrokerRequests:0,connected,connectionState:state,serverTime:new Date(now).toISOString(),
+  audit,wsAudit,restOiBand:wsAudit&&audit?deriveRestOiBandEvidence(wsAudit,audit,now):null};
+}
 
 /** Display-only view of the same socket cache; disconnection revokes all values. */
 export function readDashboardPremiumSnapshot(filter:PremiumWatchFilter={}){

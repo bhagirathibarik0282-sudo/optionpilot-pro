@@ -30,7 +30,7 @@ function harness(){
  el('os-chart-cadence').onchange({target:{value:'0'}});
  el('os-window').onclick({target:{closest:()=>({dataset:{osWindow:'1'}})}});
  const send=(p:any)=>listeners['optionpilot:live-context']({detail:p});
- return {el,payload,send,writes,chosen,loadArgs:()=>loadArgs,opened:()=>opened,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
+ return {el,payload,send,writes,chosen,models,loadArgs:()=>loadArgs,opened:()=>opened,setSaved(value:any){saved=value;},advance(ms:number){now+=ms;},newCycle(){cycle=now;},stamp};
 }
 
 test('production HTML mounts the real new design once, with ten categories and existing real controls',()=>{
@@ -416,9 +416,31 @@ test('reported full-chain PCR stays labelled apart from fresh values, charts and
   a.pcrSnapshot=raw;delete p.pcrDisplay[a.symbol];
  }
  h.send(p);const html=h.el('os-pcr-strip').innerHTML;
+ const totals=h.el('os-wall-ladder').innerHTML;
+ assert.equal((totals.match(/10,000<small>/g)||[]).length,3,'reported CE totals must reach front-table source');
+ assert.equal((totals.match(/13,333<small>/g)||[]).length,3,'reported PE totals must reach front-table source');
+ assert(totals.includes('REPORTED · mixed source times'));
  assert.equal((html.match(/Full-chain reported PCR/g)||[]).length,3);assert.equal((html.match(/1.3333/g)||[]).length,3);
+ for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){const primary=html.split('data-pcr-index="'+symbol+'"')[1].split('<div class="os-pcr-reported"')[0];assert.match(primary,/<b>1\.3333 <span/,'reported value must occupy the primary Full PCR number, not leave a large dash');}
  assert(html.includes('4/4 contracts · 2 older than 30s'));assert(html.includes('Source 09:40:00 → 09:45:00 IST'));
  assert(!html.includes('LIVE · Full OI PCR'));assert(!h.el('os-wall-ladder').innerHTML.includes('1.3333'));assert(!h.el('os-pulse-chart').innerHTML.includes('1.3333'));
+ for(const a of p.snapshot.indices){a.pcrSnapshot.reportedPcr.peTotal=0;a.pcrSnapshot.reportedPcr.value=0;}
+ h.advance(501);h.send(p);assert(h.el('os-pcr-strip').innerHTML.includes('0.0000'));assert.equal((h.el('os-wall-ladder').innerHTML.match(/<td>0<small>/g)||[]).length,3,'real zero PE total remains visible');
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-pcr-strip').innerHTML.includes('1.3333'));assert(!h.el('os-wall-ladder').innerHTML.includes('13,333'));assert(!h.el('os-wall-ladder').innerHTML.includes('10,000'));
+});
+
+test('last-reported full PCR displays its earlier source date for all indices and never enters fresh charts',()=>{
+ const h=harness(),p=h.payload();
+ for(const a of p.snapshot.indices){
+  const raw:any=structuredClone(p.pcrDisplay[a.symbol]);Object.assign(raw,{state:'INCOMPLETE',fetchState:'OK',reason:'STALE_OI_TIMESTAMPS'});
+  Object.assign(raw.coverage,{complete:false,freshOi:3,stale:1,missing:0,invalid:0});
+  raw.lastReportedPcr={basis:'LAST_REPORTED_WITH_EARLIER_PACKETS',sessionDate:'2026-10-19',priorSession:1,preOpen:0,symbol:a.symbol,expiry:a.expiry,value:1.3333,ceTotal:10000,peTotal:13333,expected:4,reported:4,olderThan30s:1,sourceMinAt:'2026-10-16T10:00:00Z',sourceMaxAt:raw.checkedAt,checkedAt:raw.checkedAt};
+  a.pcrSnapshot=raw;delete p.pcrDisplay[a.symbol];
+ }
+ h.send(p);const html=h.el('os-pcr-strip').innerHTML;
+ assert.equal((html.match(/1\.3333/g)||[]).length,3);assert.equal((html.match(/Last reported · earlier packets/g)||[]).length,3);
+ assert.equal((html.match(/oldest 2026-10-16 15:30:00 IST/g)||[]).length,3);
+ assert(!html.includes('LIVE · Full OI PCR'));assert(!h.el('os-pulse-chart').innerHTML.includes('1.3333'));
  h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-pcr-strip').innerHTML.includes('1.3333'));
 });
 
@@ -527,4 +549,76 @@ test('recorded radar exposes latest-row validation and source bucket without fil
  const card=h.el('os-market-radar').innerHTML.split('data-os-index="SENSEX"')[1].split('</button>')[0];
  assert.match(card,/data-recorded-validation="PARTIAL"/);assert.match(card,/data-recorded-at="2026-10-19T04:15:00.000Z"/);
  assert.match(card,/class="os-price">—/);assert.doesNotMatch(card,/class="os-price">101/);
+});
+
+function savedLiveReferences(patch:any={}){
+ const date='2026-10-19',expiry='2026-10-22';
+ return {date,current:{NIFTY:{options:[1,3,15].map((m,i)=>({symbol:'NIFTY',expiry,strike:100,option_type:'CE',truth_verdict:'TRUE',minute_bucket:new Date(Date.parse(date+'T04:15:00Z')-m*60000).toISOString(),quote_timestamp:new Date(Date.parse(date+'T04:15:00Z')-m*60000).toISOString(),quote_age_seconds:0,validation_status:'RESEARCH_ELIGIBLE',ltp:110-i*10,oi:String(900-i*100),pdh:155,pdl:75,...patch}))}}};
+}
+const premiumCells=(h:any)=>h.el('os-premium-table').innerHTML.split('<tbody>')[1].split('<tr>')[1].split('</tr>')[0].split(/<td[^>]*>/).slice(1).map((x:string)=>x.split('</td>')[0]);
+test('live premium projects existing exact recorded references and quote-timed saved baselines immediately',()=>{
+ const h=harness();h.setSaved(savedLiveReferences());h.send(h.payload());const c=premiumCells(h);
+ assert.equal(c[6],'155');assert.equal(c[8],'75');assert.equal(c[11],'100');
+ assert.deepEqual(c.slice(16,19),['10','20','30']);assert.equal(c[20],'Inside PDH/PDL');
+ assert(h.el('os-premium-table').innerHTML.includes('1m saved 09:44:00'));
+ h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-premium-table').innerHTML.includes('>155<'));
+});
+test('saved premium fallback rejects wrong session, contract, stale or future source and conflicting endpoints',()=>{
+ for(const patch of [{symbol:'SENSEX'},{expiry:'2026-10-29'},{strike:105},{option_type:'PE'},{truth_verdict:'FALSE'},
+  {quote_age_seconds:31},{validation_status:'DIAGNOSTIC_STALE_PREMIUM'},{quote_timestamp:'2026-10-19T04:16:00Z'}]){
+  const h=harness();h.setSaved(savedLiveReferences(patch));h.send(h.payload());assert.deepEqual(premiumCells(h).slice(16,19),['—','—','—'],JSON.stringify(patch));
+ }
+ const h=harness(),s=savedLiveReferences();s.date='2026-10-16';h.setSaved(s);h.send(h.payload());assert.equal(premiumCells(h)[6],'—');
+ const conflict=harness(),bad=savedLiveReferences();bad.current.NIFTY.options.push({...bad.current.NIFTY.options[0],ltp:999,oi:'999'});conflict.setSaved(bad);conflict.send(conflict.payload());assert.equal(premiumCells(conflict)[16],'—');assert.equal(premiumCells(conflict)[11],'—');
+});
+test('premium reference conflicts stay missing and zero OI is a usable saved count',()=>{
+ const h=harness(),s=savedLiveReferences();s.current.NIFTY.options[0].oi='0';s.current.NIFTY.options[1].pdh=156;h.setSaved(s);h.send(h.payload());const c=premiumCells(h);assert.equal(c[6],'—');assert.equal(c[8],'75');assert.equal(c[11],'1,000');
+});
+
+test('spot levels use exact same-session recorder rows while derived book models are still loading',()=>{
+ const h=harness();h.models.NIFTY.spot={pdh:null,pdl:null,at:null} as any;
+ h.setSaved({date:'2026-10-19',current:{NIFTY:{market:[{symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:'2026-10-19T04:14:00Z',pdh:155,pdl:75}]}}});h.send(h.payload());
+ assert(h.el('os-future-response').innerHTML.includes('>155<'));
+ h.setSaved({date:'2026-10-16',current:{NIFTY:{market:[{symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:'2026-10-16T04:14:00Z',pdh:155,pdl:75}]}}});h.advance(600);h.send(h.payload());
+ assert(!h.el('os-future-response').innerHTML.includes('>155<'));
+});
+
+test('distinct packet receipts within one exchange second retain live minute history',()=>{
+ const h=harness();
+ for(let i=0;i<=6;i++){
+  if(i)h.advance(9400);const first=h.payload(),at=h.stamp();first.snapshot.atmExpiryLadder[0].rows[0].ce.price=120+i;h.send(first);
+  h.advance(600);const second=h.payload(),q=second.snapshot.atmExpiryLadder[0].rows[0].ce;q.observedAt=at;q.price=121+i;h.send(second);
+ }
+ assert.equal(premiumCells(h)[16],'6','latest distinct packet replaces that second’s observation, preserving older baselines');
+});
+test('conflicting values for the same exchange and receipt clocks still revoke history',()=>{
+ const h=harness();
+ for(let i=0;i<=6;i++){
+  if(i)h.advance(9400);const first=h.payload(),at=h.stamp();first.snapshot.atmExpiryLadder[0].rows[0].ce.price=120+i;h.send(first);
+  h.advance(600);const second=h.payload(),q=second.snapshot.atmExpiryLadder[0].rows[0].ce;q.observedAt=at;q.receivedAt=at;q.price=121+i;h.send(second);
+ }
+ assert.equal(premiumCells(h)[16],'—');
+});
+
+test('transient missing frames revoke current values but retain valid same-runtime historical endpoints',()=>{
+ const h=harness();h.send(h.payload());
+ for(let i=1;i<=6;i++){
+  h.advance(10000);if(i%2===0){h.send(null);assert(!h.el('os-premium-table').innerHTML.includes('>120<'));}
+  const p=h.payload();p.snapshot.atmExpiryLadder[0].rows[0].ce.price=120+i;h.send(p);
+ }
+ assert.equal(premiumCells(h)[16],'6');
+ h.advance(600);const changed=h.payload();changed.snapshot.runtimeId='replacement-runtime';h.send(changed);assert.equal(premiumCells(h)[16],'—');
+});
+
+test('recorded premium Evidence retains its exact saved bucket and identity',()=>{
+ const h=harness();h.setSaved(recordedSession());h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
+ const html=h.el('os-premium-table').innerHTML;const encoded=html.match(/data-os-evidence="([^"]+)"/)?.[1];assert.ok(encoded);
+ const d=JSON.parse(encoded.replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&'));
+ assert.deepEqual(d,{symbol:'NIFTY',date:'2026-10-19',expiry:'2026-10-22',strike:100,side:'CE',time:'09:45',lookback:1});
+ assert.match(html,/<td>RECORDED<\/td>/,'status remains a plain coverage field');
+});
+
+test('reference premium keeps an out-of-window recorded price but offers no dead evidence button',()=>{
+ const h=harness(),saved=recordedSession();h.advance(6*3600000);for(const group of Object.values(saved.current))for(const rows of [group.market,group.options,group.chain])for(const row of rows)row.minute_bucket=row.minute_bucket.replace('04:14:00','10:09:00').replace('04:15:00','10:10:00');
+ h.setSaved(saved);h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});const html=h.el('os-premium-table').innerHTML;assert.doesNotMatch(html,/data-os-evidence=/);assert.match(html,/Evidence 09:15–15:30 IST/);assert.match(html,/>121</);
 });

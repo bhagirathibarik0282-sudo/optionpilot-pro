@@ -54,10 +54,34 @@ function mapStoredHistory(rows: StoredCashRow[]): { history: FiiDiiDailyRow[]; b
   return { history, blockers: [...new Set(blockers)] };
 }
 
+/** Bounded official OI readback. Complete four-category day or explicit gap.
+ * No per-index attribution, position linkage, trading bias or write authority. */
+export function projectParticipantOiHistory(rows:Record<string,unknown>[]){
+ const categories=['FII','DII','PRO','CLIENT'];
+ const fields=['future_index_long','future_index_short','option_index_call_long','option_index_call_short','option_index_put_long','option_index_put_short'];
+ const validDate=(v:any)=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
+ const iso=(v:any)=>{const t=v instanceof Date?v.getTime():typeof v==='string'?Date.parse(v):NaN;return Number.isFinite(t)?new Date(t).toISOString():null;};
+ const count=(v:any)=>{if(typeof v!=='number'&&!(typeof v==='string'&&/^\d+$/.test(v)))return null;const n=Number(v);return Number.isSafeInteger(n)&&n>=0?n:null;};
+ const groups=new Map<string,Record<string,unknown>[]>();
+ for(const r of rows){if(!validDate(r.trade_date))continue;const d=String(r.trade_date),g=groups.get(d)||[];g.push(r);groups.set(d,g);}
+ return [...groups.entries()].sort((a,b)=>b[0].localeCompare(a[0])).slice(0,20).map(([date,group])=>{
+  const participants=categories.map(participant=>{
+   const matches=group.filter(r=>r.participant===participant);if(matches.length!==1)return null;
+   const r=matches[0],fetchedAt=iso(r.fetched_at),updatedAt=iso(r.updated_at);
+   let source=false;try{const u=new URL(String(r.source_url));source=u.protocol==='https:'&&(u.hostname==='nseindia.com'||u.hostname.endsWith('.nseindia.com'));}catch{}
+   const values=fields.map(k=>count(r[k]));
+   if(!source||r.source!=='NSE_PARTICIPANT_OI'||r.report_kind!=='OI'||!fetchedAt||!updatedAt||Date.parse(updatedAt)<Date.parse(fetchedAt)||Date.parse(fetchedAt)<Date.parse(date+'T15:30:00+05:30')||values.some(v=>v===null))return null;
+   return {participant,fetchedAt,updatedAt,sourceUrl:String(r.source_url),futureLong:values[0]!,futureShort:values[1]!,callLong:values[2]!,callShort:values[3]!,putLong:values[4]!,putShort:values[5]!};
+  });
+  return {date,complete:group.length===4&&participants.every(Boolean),participants:group.length===4&&participants.every(Boolean)?participants.filter(p=>p!==null):[]};
+ });
+}
+
 export function evaluateFiiDiiProductionReadiness(input: {
   expectedMarketSessionDate: string;
   storedRows: StoredCashRow[];
   participantSnapshot?: ParticipantDbSnapshot;
+  participantOiRows?: Record<string,unknown>[];
 }) {
   const mapped = mapStoredHistory(input.storedRows);
   const latestStoredSessionDate = input.storedRows.at(-1)?.trade_date ?? null;
@@ -132,6 +156,8 @@ export function evaluateFiiDiiProductionReadiness(input: {
     warnings: view?.warnings ?? [],
     blockers: [...new Set(blockers)],
     participantDbReadback,
+    participantOiHistory: projectParticipantOiHistory(input.participantOiRows??[]),
+    participantOiHistoryState: input.participantOiRows===undefined?'UNAVAILABLE' as const:'STORED_OI_READBACK' as const,
     source: "OFFICIAL_NSE" as const,
     sourceMode: "PRODUCTION_DB_READBACK" as const,
     semantics: "PREVIOUS_SESSION_CONTEXT_ONLY_NO_DIRECTION_TRUTH" as const,
@@ -181,10 +207,27 @@ export async function getFiiDiiProductionReadiness() {
       LIMIT 1
     `);
 
+    // Independent optional SELECT: failure must not erase existing cash history.
+    let participantOiRows:Record<string,unknown>[]|undefined;
+    try{
+      const oi=await pool.query(`
+        SELECT trade_date::text,report_kind,participant,source,source_url,fetched_at,updated_at,
+               future_index_long,future_index_short,option_index_call_long,option_index_call_short,
+               option_index_put_long,option_index_put_short
+        FROM nse_participant_derivatives_daily
+        WHERE report_kind='OI' AND trade_date IN (
+          SELECT DISTINCT trade_date FROM nse_participant_derivatives_daily
+          WHERE report_kind='OI' ORDER BY trade_date DESC LIMIT 20
+        )
+        ORDER BY trade_date DESC,participant ASC LIMIT 80
+      `);
+      participantOiRows=oi.rows;
+    }catch{/* Optional history remains unavailable. */}
     const latestObserved = latestParticipant.rows[0];
     return evaluateFiiDiiProductionReadiness({
       expectedMarketSessionDate,
       storedRows,
+      participantOiRows,
       participantSnapshot: {
         latestObservedTradeDate: latestObserved?.trade_date ?? null,
         latestObservedRowCount: Number(latestObserved?.row_count ?? 0),

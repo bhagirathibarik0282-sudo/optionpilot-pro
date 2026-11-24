@@ -94,7 +94,8 @@ test('global statistics and optional panels start behind drawers rather than ext
   assert(!new RegExp('<details id="'+id+'"[^>]*\\bopen\\b').test(h.html));
  }
  assert(h.html.indexOf('id="op-workspace-advanced"')<h.html.indexOf('<section id="statistical-overview"'));
- assert(h.html.indexOf('id="mb-tools"')<h.html.indexOf('<details id="op-feed-detail"'));
+ assert(h.html.indexOf('<details id="op-feed-detail"')<h.html.indexOf('id="mb-tools"'),'existing live headline remains before optional tools');
+ const off=renderBusinessDashboardV1Html(null,true);assert.match(off,/<details id="op-feed-detail">/);assert.match(off,/<details id="mb-tools" open>/);assert.match(off,/<details id="mb-live-watch" open>/);
  assert(h.html.indexOf('id="mb-tools"')<h.html.indexOf('id="op-workspace-ticker"'));
  assert(!h.html.includes('Clarity in every move'));
  for(const id of ['op-feed-detail','dashboard-live','op-workspace-ticker','statistical-overview','mb-tools'])assert.equal((h.html.match(new RegExp('id="'+id+'"','g'))||[]).length,1);

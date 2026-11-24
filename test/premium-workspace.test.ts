@@ -223,7 +223,7 @@ test('PR2 coalesces unchanged ladder DOM redraw while retaining 1s REST polling 
  assert.match(code,/live=payload;liveReceived=Date\.now\(\)/);
  assert.match(code,/if\(!payload\.connected\)history\.clear\(\);draw\(\)/);
  assert.match(code,/if\(visible&&cfg\.source==='LIVE'&&live\?\.connected&&!premiumLiveClock/);
- assert.match(code,/if\(!visible\|\|cfg\.source!=='LIVE'\|\|document\.hidden\|\|busy\)return/);
+ assert.match(code,/if\(sharedState\(\)\|\|!visible\|\|cfg\.source!=='LIVE'\|\|document\.hidden\|\|busy\)return/);
  assert.match(code,/if\(deltaMode\(\)\)\{q\.set\('side','BOTH'\);q\.set\('modelDelta','1'\)/);
  const connected={connected:true,serverTime:'2026-10-19T04:00:00.000Z',snapshot:{tradeDate:'2026-10-19'}};
  assert.equal(premiumLiveClock(connected,2999).valid,true);

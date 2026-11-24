@@ -26,12 +26,14 @@ export function canonicalQueryFixtures(){
     ...[null,false,4,[],{},'NIFTY'].map(x=>row(x))];
 }
 export function withCanonicalFixture(sql:string){
-  const query=sql.replace('FROM app_state_log','FROM fixture_source');
+  const query=sql.replace('FROM app_state_log','FROM fixture_source AS app_state_log');
   return `WITH fixture_source AS (
-    SELECT r.kind,r.payload FROM jsonb_to_recordset($5::jsonb) AS r(kind text,payload jsonb)
+    SELECT r.kind,r.payload,r.created_at FROM jsonb_to_recordset($5::jsonb) AS r(kind text,payload jsonb,created_at timestamptz)
   ) SELECT * FROM (${query}) AS result`;
 }
 const normalize=(rows:any[])=>rows.map(r=>JSON.stringify(r)).sort();
+const withoutStorage=(rows:any[])=>rows.map(({created_at,...r})=>r);
+const assertStorage=(rows:any[],expected:string|null)=>{for(const row of rows){assert.ok(Object.hasOwn(row,'created_at'));assert.equal(row.created_at===null?null:new Date(row.created_at).toISOString(),expected);}};
 test('application ordering equals PostgreSQL timestamp order through microseconds and offsets',
  {skip:!process.env.TEST_REPLAY_DATABASE_URL},async()=>{
  const client=new pg.Client({connectionString:process.env.TEST_REPLAY_DATABASE_URL});await client.connect();
@@ -49,7 +51,7 @@ test('application ordering equals PostgreSQL timestamp order through microsecond
      assert.doesNotMatch(sql,/ORDER BY/);
      return (await client.query(withCanonicalFixture(sql),[...values,JSON.stringify(fixtures)])).rows as any;
    });
-   assert.equal(result.ok,true);assert.deepEqual(result.canonical,original);
+   assert.equal(result.ok,true);assertStorage(result.canonical??[],null);assert.deepEqual(withoutStorage(result.canonical??[]),original);
    assert.deepEqual(result.canonical?.map(r=>r.snapshot_id),['earlier','earlier','later','end']);
    assert(result.canonical?.every(r=>!('__h1_source_order_us' in r)));
  }finally{await client.end();}
@@ -67,7 +69,9 @@ test('raw-symbol pushdown preserves complete paired rows and matches the propose
    const captured=JSON.parse(readFileSync(new URL('../docs/audits/pr799-paired-query-plan-20261025.json',import.meta.url),'utf8'));
    const baseline=captured.queries.find((q:any)=>q.kind==='canonical');
    const before=baseline.sql.replace('FROM app_state_log','FROM h1_lookup_compat');
-   const after=canonicalReplayReadSql(false,true).replace('FROM app_state_log','FROM h1_lookup_compat');
+   const afterWithStorage=canonicalReplayReadSql(false,true).replace('FROM app_state_log','FROM h1_lookup_compat AS app_state_log');
+   assertStorage((await client.query(afterWithStorage,baseline.params)).rows,'2026-10-25T00:00:00.000Z');
+   const after=afterWithStorage.replace('app_state_log.created_at AS created_at,','');
    const differences=await client.query(`WITH old_rows AS (${before}),new_rows AS (${after})
      SELECT COUNT(*)::integer AS n FROM (
        (SELECT * FROM old_rows EXCEPT ALL SELECT * FROM new_rows)
@@ -100,7 +104,7 @@ test('candidate has one metadata decoder and preserves raw market, filters and a
   assert.equal((sql.match(/jsonb_to_record\(/g)||[]).length,1);
   assert.match(sql,/payload->'market' AS market/);
   assert.match(sql,/p\."minuteBucket"::timestamptz/);
-  assert.doesNotMatch(sql,/created_at|DISTINCT|LIMIT/i);
+  assert.match(sql,/app_state_log\.created_at AS created_at/);assert.doesNotMatch(sql,/DISTINCT|LIMIT|created_at\s*(?:[<>]=?|=)/i);
 });
 test('PostgreSQL paired archive scans equal independent sessions, including latest markers and duplicate offsets',
  {skip:!process.env.TEST_REPLAY_DATABASE_URL},async()=>{
@@ -126,7 +130,7 @@ test('PostgreSQL paired archive scans equal independent sessions, including late
      scans++;const fixtureParam=params.length+1;
      const query=`WITH fixture_source AS (SELECT r.kind,r.payload,r.created_at
        FROM jsonb_to_recordset($${fixtureParam}::jsonb) AS r(kind text,payload jsonb,created_at timestamptz))
-       SELECT * FROM (${sql.replace('FROM app_state_log','FROM fixture_source')}) AS archive_result`;
+       SELECT * FROM (${sql.replace('FROM app_state_log','FROM fixture_source AS app_state_log')}) AS archive_result`;
      return (await client.query(query,[...params,input])).rows as any;
    };
    const independent=await Promise.all(requests.map(q=>runH1ReplayRead(q,read)));
@@ -154,14 +158,14 @@ test('PostgreSQL candidate equals frozen legacy SQL across duplicates, offsets, 
     const params=['NIFTY','2026-10-19','10:45','10:45',JSON.stringify(canonicalQueryFixtures())];
     const old=await client.query(withCanonicalFixture(legacyCanonicalSql),params);
     const candidate=await client.query(withCanonicalFixture(canonicalReplayReadSql()),params);
-    assert.ok(old.rows.length>=10);assert.deepEqual(normalize(candidate.rows),normalize(old.rows));
+    assert.ok(old.rows.length>=10);assertStorage(candidate.rows,'2026-10-25T00:00:00.000Z');assert.deepEqual(normalize(withoutStorage(candidate.rows)),normalize(old.rows));
     const priorProjected=`WITH replay_archive AS MATERIALIZED (${legacyCanonicalSql})
       SELECT minute_bucket,symbol,snapshot_id,truth_verdict,source_timestamp,calculation_version,
       ${canonicalPcrProjectionSql('raw_market')} AS market FROM replay_archive ORDER BY minute_bucket`;
     const legacyProjection=priorProjected.replace("payload->'market' AS market","payload->'market' AS raw_market");
     const a=await client.query(withCanonicalFixture(legacyProjection),params);
     const b=await client.query(withCanonicalFixture(canonicalReplayReadSql(true)),params);
-    assert.deepEqual(normalize(b.rows),normalize(a.rows));
+    assertStorage(b.rows,'2026-10-25T00:00:00.000Z');assert.deepEqual(normalize(withoutStorage(b.rows)),normalize(a.rows));
     // Malformed source timestamps remain errors, never fabricated empty rows.
     const malformed=JSON.stringify([{kind:'H1_CANONICAL_MARKET_ARCHIVE',
       payload:{symbol:'NIFTY',minuteBucket:'not-a-timestamp',market:{}}}]);

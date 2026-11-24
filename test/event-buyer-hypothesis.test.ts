@@ -23,3 +23,18 @@ test('missing expiry, conflict, missing PCR, gaps and late event never authorize
  assert.equal(run(4,[near,far],path,t(2)).entry.at,t(3));
  assert.equal(run(2).exit,null);
 });
+
+test('entry timing variants are causal, distinct, and fail closed on missing evidence',()=>{
+ const samples=[pair(1,95),pair(2,105),pair(3,115),pair(4,120),pair(5,125),pair(6,130)];
+ const runPolicy=(policy:any,cursor=6,known=t(0),rows:any[]=samples)=>evaluate({date,replay:{active:true,at:t(cursor)}},event,known,[near,far],(_s:any,_e:any,_k:any,offsets:number[])=>rows.filter(r=>offsets.includes(r.offset)),policy)[0];
+ assert.equal(runPolicy('FIRST_KNOWN_SAMPLE').entry.at,t(1));
+ assert.equal(runPolicy('EVENT_PLUS_3').entry.at,t(3));
+ assert.equal(runPolicy('EVENT_PLUS_5').entry.at,t(5));
+ assert.equal(runPolicy('FIRST_BREAK_WITHIN_5').entry.at,t(2));
+ assert.equal(runPolicy('EVENT_PLUS_3',2).status,'WAIT_FOR_SAMPLE');
+ assert.equal(runPolicy('EVENT_PLUS_3',6,t(3)).entry,null);
+ assert.equal(runPolicy('FIRST_BREAK_WITHIN_5',6,t(0),samples.slice(1)).status,'UNVERIFIED');
+ assert.equal(runPolicy('EVENT_PLUS_5',6,t(0),samples.map(r=>r.offset===2?pair(2,105,110):r)).entry,null);
+ assert.equal(runPolicy('FIRST_BREAK_WITHIN_5',6,t(0),samples.map(r=>pair(r.offset,95))).entry,null);
+ assert.equal(runPolicy('FIRST_KNOWN_SAMPLE').netPnl,null);
+});

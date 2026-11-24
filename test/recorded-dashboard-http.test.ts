@@ -12,7 +12,7 @@ async function serve(t:any,dependencies:any={},shouldRun=false){
  return 'http://127.0.0.1:'+(server.address() as any).port;
 }
 test('unified terminal and legacy saved viewer work at their existing addresses after close',async t=>{
- const url=await serve(t);for(const path of ['/','/recorded-dashboard','/api/research/business-dashboard/view']){const r=await fetch(url+path);assert.equal(r.status,200);assert.equal(r.headers.get('x-optionpilot-mode'),'RECORDED_READ_ONLY');const html=await r.text();assert.match(html,/All recorded days/);if(path!=='/recorded-dashboard'){assert.match(html,/id="op-recorded-mode"/);assert.match(html,/id="mb-live-watch" open/);assert.match(html,/id="mb-watch-chart"/);assert.match(html,/id="mb-shared-memory"/);assert.match(html,/const recordedOnly=true/);}}
+ const url=await serve(t);for(const path of ['/','/recorded-dashboard','/api/research/business-dashboard/view']){const r=await fetch(url+path);assert.equal(r.status,200);assert.equal(r.headers.get('x-optionpilot-mode'),'RECORDED_READ_ONLY');const html=await r.text();assert.match(html,/All recorded days/);if(path!=='/recorded-dashboard'){assert.match(html,/id="op-recorded-mode"/);assert.match(html,/id="mb-live-watch" open/);assert.match(html,/id="mb-watch-chart"/);assert.match(html,/id="mb-shared-memory"/);assert.match(html,/const recordedOnly=!!document\.getElementById/);for(const [,script] of html.matchAll(/<script>([\s\S]*?)<\/script>/g))assert.doesNotThrow(()=>new Function(script));}}
  assert.equal((await fetch(url+'/api/orders')).status,404);
 });
 test('every archive route rejects writes and a 60+ minute request never queries storage',async t=>{

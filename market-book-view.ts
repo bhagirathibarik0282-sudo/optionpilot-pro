@@ -1,3 +1,4 @@
+import { evaluateEventBuyerHypothesis } from './event-buyer-hypothesis.js';
 import { SHARED_EVENT_MEMORY_HTML, installSharedEventMemory, projectSharedEventMemory, buildSharedEventTimeline, buildSharedEventComparison } from './shared-event-memory-view.js';
 import { projectDashboardReplay, replayWatchMinute, sharedFullOiRows, sharedBandOiRows } from './recorded-dashboard-replay-clock.js';
 import { installOiWallReplay } from './oi-wall-replay.js';
@@ -150,7 +151,7 @@ export function installMarketBook(api:any) {
   if(!sharedProjection||key.some((v,i)=>v!==sharedProjectionKey[i])){sharedProjectionKey=key;sharedProjection=projectDashboardReplay(state,sharedWatchFrame);}
   return sharedProjection;
  };
- const sharedEventMemory=installSharedEventMemory(()=>{const s=sharedWatch()?watchStateAtCursor():null;return {active:!!s,date:s?.date||'',at:s?.replay?.at||null};},projectSharedEventMemory,watchStateAtCursor,buildSharedEventTimeline,buildSharedEventComparison);
+ const sharedEventMemory=installSharedEventMemory(()=>{const s=sharedWatch()?watchStateAtCursor():null;return {active:!!s,date:s?.date||'',at:s?.replay?.at||null};},projectSharedEventMemory,watchStateAtCursor,buildSharedEventTimeline,buildSharedEventComparison,evaluateEventBuyerHypothesis);
  let lastRagClockKey='';
  const publishRagClock=()=>{
   const s=sharedWatch()?watchStateAtCursor():null,detail={active:!!s,date:s?.date||'',at:s?.replay?.at||null};

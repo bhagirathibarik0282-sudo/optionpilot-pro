@@ -466,6 +466,7 @@ test('reference selector updates the actual recorded event and memory source wit
  ctx.chooseResearchIndex('SENSEX');
  assert.match(nodes.get('mb-page').innerHTML,/data-recorded-index="SENSEX" aria-label="Recorded notable events"/);
  assert.match(nodes.get('mb-page').innerHTML,/data-recorded-index="SENSEX" aria-label="Recorder memory and replay"/);
+ assert.match(nodes.get('mb-page').innerHTML,new RegExp('data-recorded-index="SENSEX" data-reference-at="'+at(18)+'" data-reference-from="'+at(15)+'"'));
  const memory=nodes.get('mb-page').innerHTML.match(/aria-label="Recorder memory and replay">([\s\S]*?)<\/section>/)![1];
  assert.match(memory,/Spot · SENSEX/);assert.doesNotMatch(memory,/Spot · NIFTY/);
  ctx.chooseResearchIndex('NOT_AN_INDEX');assert.equal(nodes.get('mb-index').value,'SENSEX');assert.equal(requests,0);

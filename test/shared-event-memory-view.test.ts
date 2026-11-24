@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const date='2026-11-24',t=(m:number)=>new Date(Date.parse(date+'T09:15:00+05:30')+m*60000).toISOString();
 const safety={affectsVerdict:false,affectsTelegram:false,affectsExecution:false};
 const e={...safety,version:'INTRADAY_NOTABLE_EVENT_V1',memoryKey:'E',tradeDate:date,symbol:'NIFTY',expiry:'2026-11-26',strike:25500,at:t(3),facts:[{field:'CE PDL',from:t(0),before:110,after:90}],pair:{ce:{at:t(3),quoteAt:t(3),ltp:90},pe:{at:t(3),quoteAt:t(3),ltp:100}}};
-const r={...safety,version:'INTRADAY_PREMIUM_RESPONSE_V1',memoryKey:'R',eventKey:'E',tradeDate:date,symbol:e.symbol,expiry:e.expiry,strike:e.strike,eventAt:e.at,targetAt:t(6),minutes:3,status:'QUALIFIED',pair:{ce:null,pe:null},ceReturnPct:-10,peReturnPct:15};
+const r={...safety,version:'INTRADAY_PREMIUM_RESPONSE_V1',memoryKey:'R',eventKey:'E',tradeDate:date,symbol:e.symbol,expiry:e.expiry,strike:e.strike,eventAt:e.at,targetAt:t(6),minutes:3,status:'QUALIFIED',pair:{ce:{at:t(6),quoteAt:t(6),ltp:81},pe:{at:t(6),quoteAt:t(6),ltp:115}},ceReturnPct:-10,peReturnPct:15,straddleReturnPct:3.16};
 const body={ok:true,tradeDate:date,events:[e],responses:[r],availability:{events:{E:t(4)},responses:{R:t(7)}},readLimitEvents:1000};
 test('event and response require both observation and storage cutoff; backwards seek removes future memory',()=>{
  assert.equal(projectSharedEventMemory(body,date,t(3)).events.length,0);
@@ -18,6 +18,7 @@ test('event and response require both observation and storage cutoff; backwards 
  assert.equal(projectSharedEventMemory({...body,availability:null},date,t(7)).events.length,0);
  assert.equal(projectSharedEventMemory({...body,events:[e,e]},date,t(7)).events.length,0);
  assert.equal(projectSharedEventMemory({...body,responses:[{...r,strike:25400}]},date,t(7)).responses.length,0);
+ assert.equal(projectSharedEventMemory({...body,responses:[{...r,pair:{ce:null,pe:null}}]},date,t(7)).responses.length,0);
  assert.equal(projectSharedEventMemory({...body,responses:[{...r,targetAt:t(9)}]},date,t(12)).responses.length,0);
 });
 test('dashboard contains one embedded memory panel and serializable helpers',()=>{

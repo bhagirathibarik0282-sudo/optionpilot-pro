@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {projectSharedEventMemory,installSharedEventMemory} from '../shared-event-memory-view.js';
+import {projectSharedEventMemory,installSharedEventMemory,buildSharedEventTimeline} from '../shared-event-memory-view.js';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 import vm from 'node:vm';
 const date='2026-11-24',t=(m:number)=>new Date(Date.parse(date+'T09:15:00+05:30')+m*60000).toISOString();
@@ -28,11 +28,25 @@ test('dashboard contains one embedded memory panel and serializable helpers',()=
 test('manual saved memory load only; seek uses cached data and date change clears it',async()=>{
  const nodes=new Map(['','-load','-status','-results','-index'].map(id=>['mb-shared-memory'+id,{innerHTML:'',textContent:'',value:'ALL'}]));
  let c={active:true,date,at:t(4)},calls=0;
- const ctx=vm.createContext({document:{getElementById:(id:string)=>nodes.get(id)},fetch:async()=>{calls++;return {ok:true,json:async()=>body}},AbortController,Date,Map,Set,Number,JSON});
+ const ctx=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id)},fetch:async()=>{calls++;return {ok:true,json:async()=>body}},AbortController,Date,Map,Set,Number,JSON});
  vm.runInContext('globalThis.install='+installSharedEventMemory.toString()+';globalThis.project='+projectSharedEventMemory.toString(),ctx);
  const ui=ctx.install(()=>c,ctx.project);assert.equal(calls,0);await (nodes.get('mb-shared-memory-load') as any).onclick();assert.equal(calls,1);
  assert.match(nodes.get('mb-shared-memory-results')!.innerHTML,/25500/);assert.doesNotMatch(nodes.get('mb-shared-memory-results')!.innerHTML,/15\.00/);
  c={...c,at:t(7)};ui.render();assert.match(nodes.get('mb-shared-memory-results')!.innerHTML,/15\.00/);assert.equal(calls,1);
  c={...c,at:t(3)};ui.render();assert.doesNotMatch(nodes.get('mb-shared-memory-results')!.innerHTML,/25500/);
  c={...c,date:'2026-11-23'};ui.render();assert.equal(nodes.get('mb-shared-memory-results')!.innerHTML,'');
+});
+
+test('event timeline freezes before/event at event storage time and keeps future outcomes blank',()=>{
+ const event={...e,at:t(3)},market=(m:number,receipt=t(m))=>({symbol:'NIFTY',minute_bucket:t(m),backend_timestamp:receipt,snapshot_id:'s'+m,truth_verdict:'TRUE',spot_ltp:25000+m,india_vix:12});
+ const leg=(m:number,side:string,extra:any={})=>({symbol:'NIFTY',expiry:event.expiry,strike:event.strike,option_type:side,minute_bucket:t(m),snapshot_id:'s'+m,truth_verdict:'TRUE',ltp:100+m,oi:1000,quote_timestamp:t(m),quote_age_seconds:0,...extra});
+ const state={date,replay:{active:true,at:t(7)},current:{NIFTY:{market:[market(0),market(3),market(6),market(8)],options:[leg(0,'CE'),leg(0,'PE'),leg(3,'CE'),leg(3,'PE'),leg(6,'CE'),leg(6,'PE'),leg(8,'CE'),leg(8,'PE')],chain:[]}}};
+ const read=(s:any)=>buildSharedEventTimeline(s,event,t(4)),rows=read(state);
+ assert.equal(rows.find(r=>r.offset===0).ce.price,103);assert.equal(rows.find(r=>r.offset===3).pe.price,106);
+ assert.equal(rows.find(r=>r.offset===5).status,'FUTURE');assert.equal(rows.find(r=>r.offset===5).ce,null);
+ assert.equal(rows.find(r=>r.offset===0).fullPcr,null);
+ const late={...state,current:{NIFTY:{...state.current.NIFTY,market:[market(3,t(5))]}}};assert.equal(read(late).find(r=>r.offset===0).status,'GAP');
+ const duplicate={...state,current:{NIFTY:{...state.current.NIFTY,options:[...state.current.NIFTY.options,leg(3,'CE')]}}};assert.equal(read(duplicate).find(r=>r.offset===0).ce,null);
+ assert.deepEqual(read({...state,replay:{active:true,at:t(3)}}),[]);
+ assert.equal(read(state).find(r=>r.offset===-15).status,'OUTSIDE_SESSION');
 });

@@ -40,19 +40,21 @@ export function buildSharedEventTimeline(state:any,event:any,eventStoredAt:strin
   const row:any={offset,phase:offset<0?'BEFORE':offset===0?'EVENT':'AFTER',at:new Date(t).toISOString(),status:'GAP',spot:null,vix:null,futures:null,pdh:null,pdl:null,ce:null,pe:null,fullPcr:null,ceWall:null,peWall:null};
   if(t<open||t>close){row.status='OUTSIDE_SESSION';return row;}
   if(t>cutoff){row.status='FUTURE';return row;}
+  const storedBy=(r:any)=>{const stored=stamp(r?.created_at),marker=stamp(r?.truth_marker_created_at);return stored>=t&&stored<=limit&&marker>=t&&marker<=limit;};
   const m=one(group(data.market||[],t,()=>true)),receipt=stamp(m?.backend_timestamp);
-  if(!m||!m.snapshot_id||!(receipt>=t&&receipt<t+60000&&receipt<=limit))return row;
+  if(!m||!m.snapshot_id||!storedBy(m)||!(receipt>=t&&receipt<t+60000&&receipt<=limit&&receipt<=stamp(m.created_at)))return row;
   for(const [field,source] of [['spot','spot_ltp'],['vix','india_vix'],['futures','future_ltp'],['pdh','pdh'],['pdl','pdl']])row[field]=number(m[source]);
   for(const side of ['CE','PE']){
    const q=one(group(data.options||[],t,r=>String(r.expiry).slice(0,10)===event.expiry&&number(r.strike)===event.strike&&r.option_type===side));
    const quoteAt=stamp(q?.quote_timestamp),age=number(q?.quote_age_seconds),price=number(q?.ltp);
-   if(q&&q.snapshot_id===m.snapshot_id&&price!==null&&price>0&&age!==null&&age>=0&&age<=30&&quoteAt>=open&&quoteAt<=receipt&&quoteAt<=limit&&receipt-quoteAt<=30000)
+   if(q&&storedBy(q)&&quoteAt<=stamp(q.created_at)&&q.snapshot_id===m.snapshot_id&&price!==null&&price>0&&age!==null&&age>=0&&age<=30&&quoteAt>=open&&quoteAt<=receipt&&quoteAt<=limit&&receipt-quoteAt<=30000)
     row[side.toLowerCase()]={price,oi:number(q.oi),pdh:number(q.pdh),pdl:number(q.pdl),quoteAt:q.quote_timestamp};
   }
   const c=one(group(data.chain||[],t,r=>String(r.expiry).slice(0,10)===event.expiry));
   // Chain without its own source timestamp/snapshot linkage remains a gap.
   const source=stamp(c?.source_timestamp);
-  if(c&&c.snapshot_id===m.snapshot_id&&source>=t&&source<=receipt&&source<=limit&&['Exact archived full-chain source','Normalized full-chain source'].includes(c.full_pcr_source)){
+  if(c&&storedBy(c)&&c.snapshot_id===m.snapshot_id&&source>=t&&source<=receipt&&source<=limit&&source<=stamp(c.created_at)&&['Exact archived full-chain source','Normalized full-chain source'].includes(c.full_pcr_source)&&
+   (c.full_pcr_source!=='Exact archived full-chain source'||(stamp(c.full_pcr_source_timestamp)>=t&&stamp(c.full_pcr_source_timestamp)<t+60000&&stamp(c.full_pcr_recorded_at)>=stamp(c.full_pcr_source_timestamp)&&stamp(c.full_pcr_recorded_at)<=limit))){
    row.fullPcr=number(c.full_chain_oi_pcr);row.fullPcrSource=c.full_pcr_source;row.ceWall=number(c.call_wall_strike);row.peWall=number(c.put_wall_strike);
   }
   row.status=row.ce&&row.pe?'PAIR_OBSERVED':'PARTIAL';return row;

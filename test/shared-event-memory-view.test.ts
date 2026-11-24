@@ -38,8 +38,8 @@ test('manual saved memory load only; seek uses cached data and date change clear
 });
 
 test('event timeline freezes before/event at event storage time and keeps future outcomes blank',()=>{
- const event={...e,at:t(3)},market=(m:number,receipt=t(m))=>({symbol:'NIFTY',minute_bucket:t(m),backend_timestamp:receipt,snapshot_id:'s'+m,truth_verdict:'TRUE',spot_ltp:25000+m,india_vix:12});
- const leg=(m:number,side:string,extra:any={})=>({symbol:'NIFTY',expiry:event.expiry,strike:event.strike,option_type:side,minute_bucket:t(m),snapshot_id:'s'+m,truth_verdict:'TRUE',ltp:100+m,oi:1000,quote_timestamp:t(m),quote_age_seconds:0,...extra});
+ const event={...e,at:t(3)},market=(m:number,receipt=t(m))=>({symbol:'NIFTY',minute_bucket:t(m),created_at:receipt,truth_marker_created_at:receipt,backend_timestamp:receipt,snapshot_id:'s'+m,truth_verdict:'TRUE',spot_ltp:25000+m,india_vix:12});
+ const leg=(m:number,side:string,extra:any={})=>({symbol:'NIFTY',expiry:event.expiry,strike:event.strike,option_type:side,minute_bucket:t(m),created_at:t(m),truth_marker_created_at:t(m),snapshot_id:'s'+m,truth_verdict:'TRUE',ltp:100+m,oi:1000,quote_timestamp:t(m),quote_age_seconds:0,...extra});
  const state={date,replay:{active:true,at:t(7)},current:{NIFTY:{market:[market(0),market(3),market(6),market(8)],options:[leg(0,'CE'),leg(0,'PE'),leg(3,'CE'),leg(3,'PE'),leg(6,'CE'),leg(6,'PE'),leg(8,'CE'),leg(8,'PE')],chain:[]}}};
  const read=(s:any)=>buildSharedEventTimeline(s,event,t(4)),rows=read(state);
  assert.equal(rows.find(r=>r.offset===0).ce.price,103);assert.equal(rows.find(r=>r.offset===3).pe.price,106);
@@ -52,8 +52,8 @@ test('event timeline freezes before/event at event storage time and keeps future
 });
 
 test('comparison keeps two fixed strikes and two exact expiries separate, without substituting missing legs',()=>{
- const date=e.tradeDate,second='2026-12-03',market=[0,3,6].map(m=>({symbol:e.symbol,minute_bucket:t(m),backend_timestamp:t(m),snapshot_id:'s'+m,truth_verdict:'TRUE'}));
- const options=[e.expiry,second].flatMap(exp=>[25500,25400].flatMap(strike=>[0,3,6].flatMap(m=>['CE','PE'].filter(side=>!(exp===second&&strike===25400&&side==='PE')).map(side=>({symbol:e.symbol,expiry:exp,strike,option_type:side,minute_bucket:t(m),snapshot_id:'s'+m,truth_verdict:'TRUE',ltp:side==='CE'?(m===0?110:90):100,pdl:100,quote_timestamp:t(m),quote_age_seconds:0})))));
+ const date=e.tradeDate,second='2026-12-03',market=[0,3,6].map(m=>({symbol:e.symbol,minute_bucket:t(m),created_at:t(m),truth_marker_created_at:t(m),backend_timestamp:t(m),snapshot_id:'s'+m,truth_verdict:'TRUE'}));
+ const options=[e.expiry,second].flatMap(exp=>[25500,25400].flatMap(strike=>[0,3,6].flatMap(m=>['CE','PE'].filter(side=>!(exp===second&&strike===25400&&side==='PE')).map(side=>({symbol:e.symbol,expiry:exp,strike,option_type:side,minute_bucket:t(m),created_at:t(m),truth_marker_created_at:t(m),snapshot_id:'s'+m,truth_verdict:'TRUE',ltp:side==='CE'?(m===0?110:90):100,pdl:100,quote_timestamp:t(m),quote_age_seconds:0})))));
  const state={date,replay:{active:true,at:t(7)},current:{NIFTY:{market,options,chain:[]}}};
  const compare=(strike:any,expiry:any)=>buildSharedEventComparison(state,e,t(4),strike,expiry,buildSharedEventTimeline);
  const pairs=compare(25400,second);assert.equal(pairs.length,4);
@@ -89,3 +89,13 @@ test('generated browser script contains an executable participation projector an
  c={...c,at:t(3)};ui.render();
  assert.doesNotMatch(nodes.get('mb-shared-memory-context')!.innerHTML,/100\.00/);
 });
+
+ test('event freeze rejects rows saved after event even when present by master cursor',()=>{
+ const event={...e,at:t(3)},m={symbol:e.symbol,minute_bucket:t(3),truth_verdict:'TRUE',snapshot_id:'s',backend_timestamp:t(3),created_at:t(3),truth_marker_created_at:t(3),spot_ltp:25000};
+ const q=(side:string)=>({...m,expiry:e.expiry,strike:e.strike,option_type:side,quote_timestamp:t(3),quote_age_seconds:0,ltp:100});
+ const state={date,replay:{active:true,at:t(7)},current:{NIFTY:{market:[m],options:[q('CE'),{...q('PE'),created_at:t(5)}],chain:[]}}};
+ const eventRow=()=>buildSharedEventTimeline(state,event,t(4)).find(r=>r.offset===0);
+ assert.equal(eventRow().ce.price,100);assert.equal(eventRow().pe,null);
+ state.current.NIFTY.market[0]={...m,truth_marker_created_at:t(5)};assert.equal(eventRow().spot,null);
+ state.current.NIFTY.market[0]={...m,created_at:undefined};assert.equal(eventRow().status,'GAP');
+ });

@@ -13,14 +13,15 @@ function harness(saved:any=null,nowMs?:number){
  let stored=saved?JSON.stringify(saved):null;const requests:string[]=[];let livePayload:any=null;
  const nodes=new Map<string,any>(),events:any[]=[],timers:Function[]=[],calls:any[]=[],listeners:any={};
  for(const [,id] of PREMIUM_WORKSPACE_HTML.matchAll(/id="([^"]+)"/g))nodes.set(id,{id,innerHTML:'',textContent:'',value:'',disabled:false,hidden:false,options:[],scrollLeft:0,querySelectorAll:()=>[],scrollIntoView(){},setAttribute(){}});
+ let shared:any=null;
  let state:any={date:'2026-10-17',scope:'CORE',recordedDates:['2026-10-12','2026-10-13','2026-10-16'],current:{},baseline:{},loading:false};
  const row=(t:string,ltp:number,option_type='CE')=>({symbol:'NIFTY',expiry:'2026-10-19',strike:22000,option_type,minute_bucket:'2026-10-13T'+t+':00.000Z',quote_timestamp:'2026-10-13T'+t+':22.000Z',truth_verdict:'TRUE',ltp,pdh:110,pdl:90,oi:200,pdc:100,day_high:120,day_low:80});
  const data={market:[{minute_bucket:'2026-10-13T04:00:00.000Z',spot_ltp:22000}],options:[row('04:00',100),row('04:03',105),row('04:06',111),row('04:00',150,'PE'),row('04:03',145,'PE'),row('04:06',140,'PE')]};
- const api={getState:()=>state,setDate:async(date:string,options:any)=>{calls.push({date,options});state={...state,date,scope:options.scope,current:date==='2026-10-13'?{NIFTY:data}:{}};}};
+ const api={getState:()=>state,sharedReplayState:()=>shared,setDate:async(date:string,options:any)=>{calls.push({date,options});state={...state,date,scope:options.scope,current:date==='2026-10-13'?{NIFTY:data}:{}};}};
  const context=vm.createContext({__name:(fn:Function)=>fn,document:{getElementById:(id:string)=>nodes.get(id),querySelectorAll:()=>[],activeElement:null,hidden:false,addEventListener(){}},window:{addEventListener(name:string,fn:Function){listeners[name]=fn;},dispatchEvent:(event:any)=>{events.push(event);}},localStorage:{getItem:()=>stored,setItem(_key:string,value:string){stored=value;}},Date:nowMs===undefined?Date:FixtureDate,AbortController,URLSearchParams,CustomEvent:class{constructor(public type:string,public init:any={}){}get detail(){return this.init.detail;}},setInterval:(fn:Function)=>{timers.push(fn);return timers.length;},clearInterval(){},setTimeout,clearTimeout,fetch:async(url:string)=>{requests.push(url);return {ok:true,json:async()=>({connected:false,serverTime:new Date().toISOString(),snapshot:null})};},installMarketInvestigation,derivePremiumDeltaPair,derivePremiumWorkspace,premiumLiveClock,projectLivePremiumQuote,derivePremiumLiveContext,deriveLiveThreeIndexPcr,deriveRecordedThreeIndexPcr,derivePremiumPcrPanel,api});
  vm.runInContext('globalThis.view=('+installPremiumWorkspace.toString()+')(api);',context);
  const node=(id:string)=>nodes.get(id),click=(id:string,dataset:any={})=>node('op-premium-workspace').onclick({target:{closest:()=>({id,dataset})}}),change=(id:string,value:string)=>node('op-premium-workspace').onchange({target:{id,value}});
- return {emitContext:(payload:any)=>listeners['optionpilot:live-context']?.({detail:payload}),respond:(payload:any)=>{livePayload=payload;context.fetch=async(url:string)=>{requests.push(url);return {ok:true,json:async()=>structuredClone(livePayload)};};},focus:(id:string)=>context.document.activeElement=node(id),node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
+ return {setShared:(value:any)=>{shared=value;context.view.refreshRecorded();},emitContext:(payload:any)=>listeners['optionpilot:live-context']?.({detail:payload}),respond:(payload:any)=>{livePayload=payload;context.fetch=async(url:string)=>{requests.push(url);return {ok:true,json:async()=>structuredClone(livePayload)};};},focus:(id:string)=>context.document.activeElement=node(id),node,events,timers,calls,requests,stored:()=>JSON.parse(stored||'{}'),click,change,view:context.view,state:()=>state};
 }
 const settle=async()=>{await Promise.resolve();await Promise.resolve();};
 function reportedPcrFixture(){
@@ -313,4 +314,19 @@ test('strike PCR is separate from Full PCR and refuses asynchronous recorded leg
  assert.match(h.node('pw-results').innerHTML,/separate from Full PCR">PCR 1/);
  h.state().current.NIFTY.options=h.state().current.NIFTY.options.filter((r:any)=>!(r.option_type==='PE'&&r.minute_bucket.endsWith('04:06:00.000Z')));
  h.change('pw-minutes','3');assert.match(h.node('pw-results').innerHTML,/separate from Full PCR">PCR —/);
+});
+
+test('shared premium follows recorder cursor, disables independent playback and withholds future rows and RAG outcomes',async()=>{
+ const h=harness();h.view.setVisible(true);h.click('',{pwSource:'RECORDED'});await settle();h.change('pw-date','2026-10-13');await settle();
+ const state=h.state(),times=['04:00','04:03','04:06'].map(x=>'2026-10-13T'+x+':00.000Z'),key='NIFTY|2026-10-19|22000|CE';
+ const at=(i:number)=>({...state,current:{NIFTY:{...state.current.NIFTY,options:state.current.NIFTY.options.filter((r:any)=>r.minute_bucket<=times[i])}},replay:{active:true,at:times[i],timeline:times,playing:false}});
+ h.setShared(at(1));assert.match(h.node('pw-status').textContent,/SHARED REPLAY.*09:33/);assert.equal(h.node('pw-play').disabled,true);assert.equal(h.node('pw-at').disabled,true);
+ h.click('',{pwRecords:key});assert.match(h.node('pw-records').innerHTML,/2 source rows/);assert.doesNotMatch(h.node('pw-records').innerHTML,/09:36:00/);
+ const requests=h.requests.length,calls=h.calls.length;
+ h.click('pw-play');h.change('pw-at',times[2]);h.click('',{pwSource:'LIVE'});h.timers[0]();await settle();
+ assert.match(h.node('pw-status').textContent,/09:33/);assert.equal(h.requests.length,requests);assert.equal(h.calls.length,calls);
+ const count=h.events.filter((e:any)=>e.type==='optionpilot:rag-selection').length;h.click('',{pwRag:key});assert.equal(h.events.filter((e:any)=>e.type==='optionpilot:rag-selection').length,count);
+ h.setShared(at(0));h.click('',{pwRecords:key});assert.match(h.node('pw-records').innerHTML,/1 source rows/);
+ h.setShared(at(2));assert.match(h.node('pw-status').textContent,/09:36/);
+ h.setShared(null);assert.doesNotMatch(h.node('pw-status').textContent,/SHARED REPLAY/);assert.equal(h.node('pw-play').disabled,false);
 });

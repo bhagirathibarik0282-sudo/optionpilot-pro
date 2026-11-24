@@ -142,7 +142,13 @@ export function installMarketBook(api:any) {
  const watchSeek=$('mb-watch-seek'),watchPlay=$('mb-watch-play'),watchRetry=$('mb-watch-retry'),watchDateInput=$('mb-watch-date');
  let sharedWatchFrame:any=null,sharedWatchSelected=false;
  const sharedWatch=()=>watchSource?.value==='Shared';
- const watchStateAtCursor=()=>sharedWatch()?projectDashboardReplay(api.getState(),sharedWatchFrame):api.getState();
+ let sharedProjection:any=null,sharedProjectionKey:any[]=[],refreshSharedPremium=()=>{};
+ const watchStateAtCursor=()=>{
+  const state=api.getState();if(!sharedWatch())return state;
+  const key=[sharedWatchFrame,state.date,state.scope,state.archiveLoading,state.loadingDate,state.recordedDates];
+  if(!sharedProjection||key.some((v,i)=>v!==sharedProjectionKey[i])){sharedProjectionKey=key;sharedProjection=projectDashboardReplay(state,sharedWatchFrame);}
+  return sharedProjection;
+ };
  const watchBody=$('mb-watch-body'),watchStatus=$('mb-watch-status'),watchHead=$('mb-watch-head');
  const watchParticipation=$('mb-watch-participation');
  const broadWatchGroup=[
@@ -464,7 +470,7 @@ export function installMarketBook(api:any) {
    const tools=$('mb-tools'),panel=$('recorded-replay');if(tools)tools.open=true;if(panel)panel.open=true;
    replay?.render(true);
   }else if(sharedWatchSelected){sharedWatchSelected=false;replay?.stop();}
-  refreshWatch();
+  refreshWatch();refreshSharedPremium();
  };
  if(watchIndex)watchIndex.onchange=()=>{stopWatch();refreshWatch();};
  if(watchRetry)watchRetry.onclick=()=>{
@@ -492,7 +498,7 @@ export function installMarketBook(api:any) {
    const scroll=watchBody.closest?.('.mb-watch-scroll');if(scroll)scroll.scrollTop=scroll.scrollHeight;
   },500);
  };
- replay?.subscribe((frame:any)=>{sharedWatchFrame=frame;if(sharedWatch()){stopWatch();renderWatch();}});
+ replay?.subscribe((frame:any)=>{sharedWatchFrame=frame;if(sharedWatch()){stopWatch();renderWatch();refreshSharedPremium();}});
  const recordWatch=(payload:any,canonical:any)=>{
   const snapshot=payload?.snapshot,serverAt=Date.parse(payload?.serverTime??''),asOf=Date.parse(snapshot?.asOf??'');
   const dateTime=watchStamp(serverAt),date=dateTime.slice(0,10),minute=dateTime.slice(11,16),bucket=watchIndexOf(minute);
@@ -1054,6 +1060,6 @@ export function installMarketBook(api:any) {
  const previousPageChange=$('mb-page').onchange;
  $('mb-page').onchange=(e:any)=>{if(changeSpotSetting(e))return;if(e.target.id==='mb-board-month'){boardMonth=e.target.value;render();return;}if(e.target.id==='mb-board-strike'){boardStrikesByIndex[boardIndex]=Number(e.target.value);render();return;}previousPageChange(e);};
  $('mb-date').onchange=()=>api.setDate($('mb-date').value);$('mb-refresh').onclick=()=>api.refresh();$('mb-memory').onclick=async()=>{const b=$('mb-memory');b.disabled=true;b.textContent='Loading earlier recordings…';try{await api.memory(/^\d+s$/.test(win)?Number(win.slice(0,-1)):5);}finally{b.disabled=false;b.textContent='Load earlier sessions · all 3';render();}};
- $('mb-legacy').onclick=()=>{legacy=!legacy;$('observations-view').classList.toggle('mb-focus',!legacy);$('mb-legacy').setAttribute('aria-pressed',String(legacy));$('mb-legacy').textContent=legacy?'Hide detailed terminal':'Show detailed terminal';};$('observations-view').classList.add('mb-focus');const workspace=installDashboardWorkspace({chapters,turn,getModels:()=>models,page:()=>page,getState:api.getState,setDate:api.setDate,replay:api.replay,chooseResearchIndex:(next:string)=>{if(!['NIFTY','SENSEX','BANKNIFTY'].includes(next)||symbol===next)return;symbol=next;expiry='';opposite='';strike=undefined;compareStrike=null;render();}});render();return {render:()=>render(true),refreshHealth:()=>render()};
+ $('mb-legacy').onclick=()=>{legacy=!legacy;$('observations-view').classList.toggle('mb-focus',!legacy);$('mb-legacy').setAttribute('aria-pressed',String(legacy));$('mb-legacy').textContent=legacy?'Hide detailed terminal':'Show detailed terminal';};$('observations-view').classList.add('mb-focus');const workspace=installDashboardWorkspace({chapters,turn,getModels:()=>models,page:()=>page,getState:api.getState,setDate:api.setDate,replay:api.replay,sharedReplayState:()=>sharedWatch()?watchStateAtCursor():null,chooseResearchIndex:(next:string)=>{if(!['NIFTY','SENSEX','BANKNIFTY'].includes(next)||symbol===next)return;symbol=next;expiry='';opposite='';strike=undefined;compareStrike=null;render();}});refreshSharedPremium=()=>workspace?.refreshSharedPremium?.();render();return {render:()=>render(true),refreshHealth:()=>render()};
 }
 

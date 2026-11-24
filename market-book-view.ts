@@ -130,7 +130,7 @@ export function installMarketBook(api:any) {
  const $=(id:string)=>document.getElementById(id) as any,root=$('market-book');if(!root)return null;
  root.setAttribute('data-op-details','hide');
  const detailsToggle=$('mb-details-toggle');if(detailsToggle)detailsToggle.onclick=()=>{const show=root.getAttribute('data-op-details')!=='show';root.setAttribute('data-op-details',show?'show':'hide');detailsToggle.setAttribute('aria-expanded',String(show));detailsToggle.textContent=show?'Details · Hide':'Details · Show';};
- const replay=installRecordedReplay(api);
+ const replay=installRecordedReplay({...api,strictReplay:()=>$('mb-watch-source')?.value==='Shared',projectReplay:projectDashboardReplay});
  const oiStudio=installOiWallStudio();
  const oiReplay=installOiWallReplay(api,replay);
  // Both sources share the same IST grid. Each metric requires evidence in that minute.

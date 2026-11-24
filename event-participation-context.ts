@@ -1,6 +1,7 @@
 /** Research-only participation context. No weighted score, causal or execution claim. */
-export const EVENT_BANK_TEAM=['HDFCBANK','ICICIBANK','NIFTY PSU BANK'] as const;
-export const EVENT_BROAD_TEAM=['HDFCBANK','RELIANCE','NIFTY IT','NIFTY SMLCAP 100','NIFTY MIDCAP 100'] as const;
+export function createEventParticipationContext(){
+ const EVENT_BANK_TEAM=['HDFCBANK','ICICIBANK','NIFTY PSU BANK'] as const;
+const EVENT_BROAD_TEAM=['HDFCBANK','RELIANCE','NIFTY IT','NIFTY SMLCAP 100','NIFTY MIDCAP 100'] as const;
 const extra=['AXISBANK','KOTAKBANK','SBIN'];
 const labels:Record<string,string>={HDFCBANK:'HDFC Bank',ICICIBANK:'ICICI Bank','NIFTY PSU BANK':'PSU Bank',RELIANCE:'Reliance','NIFTY IT':'Nifty IT','NIFTY SMLCAP 100':'Smallcap 100','NIFTY MIDCAP 100':'Midcap 100',AXISBANK:'Axis Bank',KOTAKBANK:'Kotak Bank',SBIN:'SBI'};
 const sector=(s:string)=>s.startsWith('NIFTY ');
@@ -9,7 +10,7 @@ const num=(v:any)=>typeof v==='number'&&Number.isFinite(v)?v:null;
 const validDate=(s:any)=>typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s)&&Number.isFinite(Date.parse(s+'T00:00:00Z'))&&new Date(Date.parse(s+'T00:00:00Z')).toISOString().slice(0,10)===s;
 const istDate=(n:number)=>Number.isFinite(n)?new Date(n+19800000).toISOString().slice(0,10):'';
 const alignment=(a:any[])=>{const valid=a.filter(x=>x.dayPct!==null);return {up:valid.filter(x=>x.dayPct>0).length,down:valid.filter(x=>x.dayPct<0).length,flat:valid.filter(x=>x.dayPct===0).length,available:valid.length,required:a.length,state:valid.length!==a.length?'INCOMPLETE':valid.every(x=>x.dayPct>0)?'ALIGNED_UP':valid.every(x=>x.dayPct<0)?'ALIGNED_DOWN':valid.every(x=>x.dayPct===0)?'FLAT':'MIXED'};};
-export function eventParticipationContext(date:string,index:string,eventAt:string,storedAt:string,cursorAt:string,snapshots:any[],cash:any){
+function eventParticipationContext(date:string,index:string,eventAt:string,storedAt:string,cursorAt:string,snapshots:any[],cash:any){
  const at=stamp(eventAt),known=stamp(storedAt),cursor=stamp(cursorAt),open=Date.parse(date+'T09:15:00+05:30'),close=Date.parse(date+'T15:30:00+05:30');
  if(!validDate(date)||!['NIFTY','SENSEX','BANKNIFTY'].includes(index)||!(at>=open&&known>=at&&cursor>=known&&cursor<=close))return null;
  const order=[...new Set<string>(index==='BANKNIFTY'?[...EVENT_BANK_TEAM,...extra,...EVENT_BROAD_TEAM]:[...EVENT_BROAD_TEAM,...EVENT_BANK_TEAM])];
@@ -43,3 +44,6 @@ export function eventParticipationContext(date:string,index:string,eventAt:strin
  const cashWindows=[1,3,5].map(n=>{const h=history.slice(0,n);const complete=h.length===n;const fii=complete?h.reduce((a,r)=>a+r.fiiNetCrore,0):null,dii=complete?h.reduce((a,r)=>a+r.diiNetCrore,0):null;return {sessions:n,dates:h.map(r=>r.date),available:h.length,fii,dii,combined:fii===null||dii===null?null:fii+dii};});
  return {index,date,checkpoints:rows,cashWindows,cashStatus:'PRIOR_STORED_DATES_ONLY_PUBLICATION_TIME_UNKNOWN',researchOnly:true,affectsExecution:false,affectsVerdict:false,affectsTelegram:false,officialWeight:null,indexContribution:null};
 }
+ return {eventParticipationContext,EVENT_BANK_TEAM,EVENT_BROAD_TEAM};
+}
+export const {eventParticipationContext,EVENT_BANK_TEAM,EVENT_BROAD_TEAM}=createEventParticipationContext();

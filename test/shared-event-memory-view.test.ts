@@ -64,3 +64,22 @@ test('comparison keeps two fixed strikes and two exact expiries separate, withou
  assert.equal(compare(25500,e.expiry).length,1);assert.equal(compare('25400.5','2026-11-31').length,1);
  assert.equal(compare('', '2026-11-23').length,1);
 });
+
+test('generated browser script contains an executable participation projector and keeps buyer rules off the dashboard',async()=>{
+ const html=renderBusinessDashboardV1Html({} as any);
+ const script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]).find(s=>s.includes('const eventParticipationContext='));
+ assert.ok(script);
+ assert.doesNotMatch(html,/id="mb-shared-memory-buyer"/);
+ const nodes=new Map(['','-load','-status','-results','-index','-context','-context-load','-event','-timeline'].map(id=>['mb-shared-memory'+id,{innerHTML:'',textContent:'',value:'ALL'}]));
+ let c={active:true,date,at:t(7)},calls=0;
+ const ctx=vm.createContext({document:{getElementById:(id:string)=>nodes.get(id)},fetch:async()=>{calls++;return {ok:true,json:async()=>body}},AbortController,Date,Map,Set,Number,JSON});
+ vm.runInContext(script!,ctx);
+ const install=vm.runInContext('installSharedEventMemory',ctx),project=vm.runInContext('projectSharedEventMemory',ctx),participation=vm.runInContext('eventParticipationContext',ctx);
+ const ui=install(()=>c,project,()=>({date,replay:{active:true,at:c.at},current:{}}),()=>[],undefined,undefined,()=>({dailyHistoryState:'VERIFIED_STORED_EOD',dailyHistory:[{date:'2026-11-23',fiiNetCrore:100,diiNetCrore:-20}]}),participation);
+ await (nodes.get('mb-shared-memory-load') as any).onclick();
+ assert.equal(calls,1);
+ assert.match(nodes.get('mb-shared-memory-context')!.innerHTML,/HDFC Bank/);
+ assert.match(nodes.get('mb-shared-memory-context')!.innerHTML,/100\.00/);
+ c={...c,at:t(3)};ui.render();
+ assert.doesNotMatch(nodes.get('mb-shared-memory-context')!.innerHTML,/100\.00/);
+});

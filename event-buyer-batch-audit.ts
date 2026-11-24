@@ -1,3 +1,4 @@
+import {eventParticipationContext} from './event-participation-context.js';
 import {projectSharedEventMemory,buildSharedEventTimeline,buildSharedEventComparison} from './shared-event-memory-view.js';
 import {evaluateEventBuyerHypothesis,BUYER_TIMING_POLICIES} from './event-buyer-hypothesis.js';
 /** Offline read-only batch evaluator. One explicit preselected expiry pair per
@@ -7,7 +8,7 @@ export function auditEventBuyerSession(input:any){
  const date=input?.date,symbol=input?.symbol,expiries=input?.expiries,raw=input?.recorded,memory=input?.memory;
  const validDate=(x:any)=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x+'T00:00:00Z'))&&new Date(Date.parse(x+'T00:00:00Z')).toISOString().slice(0,10)===x;
  const valid=validDate(date)&&['NIFTY','SENSEX','BANKNIFTY'].includes(symbol)&&Array.isArray(expiries)&&expiries.length===2&&expiries.every((x:any)=>validDate(x)&&x>=date)&&expiries[0]<expiries[1];
- const out:any={date,symbol,expiries,status:'UNAVAILABLE',expectedMinutes:376,trueMarketMinutes:0,eligibleSavedEvents:0,excludedSavedEvents:null,results:[],timingResults:[],timingComparison:null,netPnl:null,profitFactor:null,portfolioDrawdown:null,verifiedFills:0};
+ const out:any={date,symbol,expiries,status:'UNAVAILABLE',expectedMinutes:376,trueMarketMinutes:0,eligibleSavedEvents:0,excludedSavedEvents:null,results:[],timingResults:[],timingComparison:null,participationContext:[],netPnl:null,profitFactor:null,portfolioDrawdown:null,verifiedFills:0};
  if(!valid){out.reason='INVALID_PRESELECTED_EXPIRIES_OR_IDENTITY';return out;}
  if(raw?.ok!==true||raw.request?.symbol!==symbol||raw.request?.tradeDate!==date||!Array.isArray(raw.market)||!Array.isArray(raw.options)||!Array.isArray(raw.chain)||memory?.ok!==true||memory.tradeDate!==date||!memory.availability||!Array.isArray(memory.events)||!Array.isArray(memory.responses)){out.reason='RAW_REPLAY_OR_MEMORY_UNAVAILABLE';return out;}
  const open=Date.parse(date+'T09:15:00+05:30'),close=Date.parse(date+'T15:30:00+05:30');
@@ -27,6 +28,7 @@ export function auditEventBuyerSession(input:any){
   const known=memory.availability.events[original.memoryKey],event={...original,expiry:expiries[0]};
   // Expiry pair is supplied externally before outcome evaluation. Never pick
   // the better-performing expiry or substitute a nearby strike.
+  out.participationContext.push({eventKey:original.memoryKey,strike:original.strike,...eventParticipationContext(date,symbol,original.at,known,state.replay.at,input.participation?.date===date?input.participation.snapshots:[],input.cash)});
   const pairs=buildSharedEventComparison(state,event,known,null,expiries[1],buildSharedEventTimeline);
   for(const policy of BUYER_TIMING_POLICIES){
    for(const r of evaluateEventBuyerHypothesis(state,event,known,pairs,buildSharedEventTimeline,policy)){

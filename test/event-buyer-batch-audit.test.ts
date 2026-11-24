@@ -7,7 +7,7 @@ test('partial three-minute archive and missing memory availability remain explic
  const market=Array.from({length:126},(_,i)=>({symbol,minute_bucket:t(i*3),truth_verdict:'TRUE'}));
  const recorded={ok:true,request:{symbol,tradeDate:date},market,options:[],chain:[]};
  const memory={ok:true,tradeDate:date,events:[],responses:[],availability:{events:{},responses:{}}};
- const r=auditEventBuyerSession({date,symbol,expiries,recorded,memory});assert.equal(r.trueMarketMinutes,126);assert.equal(r.status,'PARTIAL_MARKET_GRID');assert.equal(r.sampled.meanR,null);assert.equal(r.netPnl,null);
+ const r=auditEventBuyerSession({date,symbol,expiries,recorded,memory});assert.equal(r.trueMarketMinutes,126);assert.equal(r.status,'PARTIAL_MARKET_GRID');assert.equal(r.sampled.meanR,null);assert.equal(r.netPnl,null);assert.equal(r.timingComparison.matchedClosedEvents,0);assert.equal(r.timingComparison.policies.length,4);assert.ok(r.timingComparison.policies.every((p:any)=>p.meanSampledR===null&&p.matchedMeanSampledR===null));
  assert.equal(auditEventBuyerSession({date,symbol,expiries,recorded,memory:{...memory,availability:null}}).status,'UNAVAILABLE');
  assert.equal(auditEventBuyerSession({date,symbol,expiries:[expiries[0],expiries[0]],recorded,memory}).status,'UNAVAILABLE');
 });

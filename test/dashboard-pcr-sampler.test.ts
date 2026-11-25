@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {DashboardPcrSampler,measurePcrSnapshot,quoteTime,summarizePcrReceiptAge,partitionPcrQuoteKeys,PCR_MAX_QUERY_CHARS} from '../dashboard-pcr-sampler.js';
+import {DashboardPcrSampler,measurePcrSnapshot,quoteTime,summarizePcrReceiptAge,selectNearestPcrEntries,partitionPcrQuoteKeys,PCR_MAX_QUERY_CHARS} from '../dashboard-pcr-sampler.js';
 import type {LiveEntry} from '../dashboard-live-feed.js';
 const date='2026-10-16',at=Date.parse('2026-10-16T04:30:00Z');
 const entries:LiveEntry[]=['CE','PE'].map((side,i)=>({token:10+i,exchange:'NFO',label:'OPTION'+side,role:'OPTION',symbol:'NIFTY',expiry:'2026-10-19',strike:23000,side:side as 'CE'|'PE'}));
@@ -321,4 +321,37 @@ test('receipt-age telemetry distinguishes already-old packets from collection ag
  const rows=[row(45000,10000),row(35000,10000),row(10000,1000),row(3600000,1000),{...row(10000,1000),oi:null},row(-10000,0)];
  const r=summarizePcrReceiptAge(rows,date,new Date(at).toISOString());
  assert.deepEqual(r,{rows:6,unusable:1,priorOrPreOpen:1,futureOrClockInvalid:1,oldAtReceipt:1,agedDuringCollection:1,freshAtCompletion:1,maxReceiptToCompletionMs:10000});
+});
+
+test('nearest priority samples each complete nearest chain every cycle and all expiries every third cycle without reusing deferred PCR',async()=>{
+ const symbols=['NIFTY','SENSEX','BANKNIFTY'] as const;
+ const all:LiveEntry[]=symbols.flatMap((symbol,j)=>['2026-10-19','2026-10-27'].flatMap((expiry,k)=>entries.map((e,i)=>({...e,symbol,expiry,token:100+j*4+k*2+i,label:'P'+j+'E'+k+'O'+i}))));
+ const nearest=selectNearestPcrEntries(all);
+ assert.equal(nearest.length,6);assert.equal(new Set(nearest.map(e=>e.symbol)).size,3);
+ assert(nearest.every(e=>e.expiry==='2026-10-19'));
+ assert.deepEqual(selectNearestPcrEntries([...all].reverse()).map(e=>e.token).sort(),nearest.map(e=>e.token).sort());
+ let now=at,fail=false;const requested:string[][]=[],logs:any[]=[],histories:string[][]=[];
+ const byKey=new Map(all.map(e=>[e.exchange+':'+e.label,e]));
+ const sampler=new DashboardPcrSampler({date,entries:all,missing:[],omittedExpiries:[]},{
+  nearestPriority:true,now:()=>now,active:()=>true,wait:async()=>{},
+  fetchQuotes:async keys=>{requested.push(keys);if(fail)throw Error('PCR_QUOTE_HTTP_429');
+   return Object.fromEntries(keys.map(key=>{const e=byKey.get(key)!;return [key,{instrument_token:e.token,oi:e.side==='CE'?100:200,timestamp:new Date(now).toISOString()}];}));},
+  onDiagnostic:summary=>logs.push(summary),onCycle:(_date,_cycle,results)=>histories.push([...results.keys()])
+ });
+ for(let i=0;i<4;i++){
+  await sampler.tick();
+  for(const symbol of symbols){
+   assert.equal(sampler.read(symbol,'2026-10-19')?.fullPcr,2);
+   assert.equal(sampler.read(symbol,'2026-10-27')?.fullPcr,i===2?2:undefined);
+   assert.equal(Boolean(sampler.readAudit(symbol,'2026-10-27')),i===2);
+  }
+  now+=60000;
+ }
+ assert.deepEqual(requested.map(keys=>keys.length),[6,6,12,6]);
+ assert.deepEqual(histories.map(keys=>keys.length),[3,3,6,3]);
+ assert(logs.some(x=>x.scope==='NEAREST_EXPIRIES'&&x.deferredExpiries.length===3));
+ assert(logs.some(x=>x.scope==='ALL_EXPIRIES'&&x.deferredExpiries.length===0));
+ fail=true;await sampler.tick();
+ for(const symbol of symbols){assert.equal(sampler.read(symbol,'2026-10-19')?.fullPcr,null);assert.equal(sampler.readAudit(symbol,'2026-10-19'),null);assert.equal(sampler.read(symbol,'2026-10-27'),null);}
+ assert.equal(all.length,12,'inventory is not truncated or mutated');
 });

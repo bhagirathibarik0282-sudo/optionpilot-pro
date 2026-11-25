@@ -33,6 +33,22 @@ export function quoteTime(value:unknown):number {
  const at=/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)?value.replace(' ','T')+'+05:30':value;
  return /(?:Z|[+-]\d{2}:\d{2})$/.test(at)?Date.parse(at):NaN;
 }
+/** Timing telemetry only: classify each cached contract against the expiry completion clock. */
+export function summarizePcrReceiptAge(rows:ReadonlyArray<{token:number;responseToken:number|null;oi:number|null;sourceAt:string|null;batchReceivedAt:string|null}>,date:string,checkedAt:string){
+ const end=quoteTime(checkedAt),open=Date.parse(date+'T09:15:00+05:30');
+ const result={rows:rows.length,unusable:0,priorOrPreOpen:0,futureOrClockInvalid:0,oldAtReceipt:0,agedDuringCollection:0,freshAtCompletion:0,maxReceiptToCompletionMs:0};
+ for(const row of rows){
+  const source=quoteTime(row.sourceAt),receipt=quoteTime(row.batchReceivedAt);
+  if(row.responseToken!==row.token||!finite(row.oi)||row.oi!<0||!Number.isFinite(source)||!Number.isFinite(receipt)||!Number.isFinite(end)){result.unusable++;continue;}
+  if(source<open){result.priorOrPreOpen++;continue;}
+  if(day(source)!==date||receipt>end||source-receipt>5000||source-end>5000){result.futureOrClockInvalid++;continue;}
+  result.maxReceiptToCompletionMs=Math.max(result.maxReceiptToCompletionMs,end-receipt);
+  if(receipt-source>30000)result.oldAtReceipt++;
+  else if(end-source>30000)result.agedDuringCollection++;
+  else result.freshAtCompletion++;
+ }
+ return result;
+}
 /** Reported OI uses only complete exact identities from one REST attempt.
  * Mixed exchange times remain explicit; diagnostics never authorize fresh PCR. */
 export type ReportedPcrDiagnostic={reason:string;identity:string|null};
@@ -183,7 +199,7 @@ export class DashboardPcrSampler {
     }
     this.revision++;
     try{this.deps.onCycle?.(this.inventory.date,new Date(now).toISOString(),this.results);}catch{/* A history sink cannot block the sampler. */}
-    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
+    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,receiptAge:q.fetchState==='OK'?summarizePcrReceiptAge(this.auditRows.get(identity)??[],this.inventory.date,q.checkedAt):null,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
     const signature=JSON.stringify(rows);
     if(signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){
      this.lastDiagnostic=signature;this.lastDiagnosticAt=at;

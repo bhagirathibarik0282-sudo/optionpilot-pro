@@ -17,34 +17,43 @@ class LiveSignalProducer:
         self.day = None
         self.counts = {'observations': 0, 'signals': 0, 'rejected': 0, 'warmup': 0}
         self.last_reason = 'WARMUP'
+        self.rejection_counts = {key: 0 for key in ["rejected_contract_identity","rejected_contract_verification","rejected_atm_selection","rejected_expiry_clock","rejected_oi","rejected_spot_clock","rejected_iv","rejected_history_candidate"]}
 
     def reset(self):
         self.history.clear(); self.last_reason = 'SOURCE_RESET_WARMUP'
 
     def status(self):
-        return {**self.counts, 'reason': self.last_reason, 'contracts': len(self.history),
+        return {**self.counts, **self.rejection_counts, 'reason': self.last_reason, 'contracts': len(self.history),
                 'retained_observations': sum(len(h) for h in self.history.values()),
                 'max_contracts': 32, 'max_observations_per_contract': 256}
 
     def observe(self, event, tick, now):
         now = timestamp(now)
         if self.day != now.date(): self.history.clear(); self.day = now.date()
+        stage = 'rejected_contract_identity'
         try:
             contract = self.master.records[event['tradingsymbol']]
+            stage = 'rejected_contract_verification'
             self.master.verify(contract, now)
+            stage = 'rejected_atm_selection'
             self.master.verify_selection(contract, tick.spot_ltp, now)
+            stage = 'rejected_expiry_clock'
             clock = event.get('signal_source')
             if type(clock) is not dict or clock.get('expiry_clock_source') != 'INDEX_EXPIRY_CLOCK':
                 raise ValueError('EXPIRY_CLOCK_EVIDENCE_MISSING')
             expiry = timestamp(clock['expiry_ts'])
             if expiry.date() != contract.expiry_date: raise ValueError('EXPIRY_IDENTITY_MISMATCH')
+            stage = 'rejected_oi'
             oi = integer(event['packet'].get('oi'), 'oi', 0)
+            stage = 'rejected_spot_clock'
             asof = tick.exchange_ts
             context = event['market_context']
             spot_ts = timestamp(context['spot_ts'])
             if spot_ts.date() != asof.date() or not 0 <= (asof-spot_ts).total_seconds() <= 2:
                 raise ValueError('OPTION_SPOT_NOT_SYNCHRONIZED')
+            stage = 'rejected_iv'
             iv = solve_iv(contract.option_type, tick.ltp, tick.spot_ltp, contract.strike, asof, expiry)
+            stage = 'rejected_history_candidate'
             row = {'asof': asof, 'expiry': expiry, 'premium': tick.ltp, 'spot': tick.spot_ltp,
                    'spot_ts': spot_ts, 'iv': iv, 'oi': oi, 'vwap': tick.vwap}
             # Expire old observations against the actual consumer clock.
@@ -78,7 +87,8 @@ class LiveSignalProducer:
                 self.counts['warmup'] += 1
             return events
         except (ValueError, KeyError, TypeError, AttributeError, OverflowError):
-            self.counts['rejected'] += 1; self.last_reason = 'SOURCE_EVIDENCE_REJECTED'
+            self.counts['rejected'] += 1; self.rejection_counts[stage] += 1
+            self.last_reason = 'SOURCE_EVIDENCE_REJECTED'
             return []
 
     def _candidate(self, contract, asof, now):

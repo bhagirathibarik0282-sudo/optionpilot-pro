@@ -3,6 +3,8 @@ export function createEventParticipationContext(){
  const EVENT_BANK_TEAM=['HDFCBANK','ICICIBANK','NIFTY PSU BANK'] as const;
 const EVENT_BROAD_TEAM=['HDFCBANK','RELIANCE','NIFTY IT','NIFTY SMLCAP 100','NIFTY MIDCAP 100'] as const;
 const extra=['AXISBANK','KOTAKBANK','SBIN'];
+const bankPrimary=[...EVENT_BANK_TEAM,'AXISBANK','KOTAKBANK'];
+const broadPrimary=[...EVENT_BROAD_TEAM,'ICICIBANK'];
 const labels:Record<string,string>={HDFCBANK:'HDFC Bank',ICICIBANK:'ICICI Bank','NIFTY PSU BANK':'PSU Bank',RELIANCE:'Reliance','NIFTY IT':'Nifty IT','NIFTY SMLCAP 100':'Smallcap 100','NIFTY MIDCAP 100':'Midcap 100',AXISBANK:'Axis Bank',KOTAKBANK:'Kotak Bank',SBIN:'SBI'};
 const sector=(s:string)=>s.startsWith('NIFTY ');
 const stamp=(v:any)=>typeof v==='string'&&/(?:Z|[+-]\d{2}:\d{2})$/.test(v)?Date.parse(v):NaN;
@@ -13,7 +15,7 @@ const alignment=(a:any[])=>{const valid=a.filter(x=>x.dayPct!==null);return {up:
 function eventParticipationContext(date:string,index:string,eventAt:string,storedAt:string,cursorAt:string,snapshots:any[],cash:any){
  const at=stamp(eventAt),known=stamp(storedAt),cursor=stamp(cursorAt),open=Date.parse(date+'T09:15:00+05:30'),close=Date.parse(date+'T15:30:00+05:30');
  if(!validDate(date)||!['NIFTY','SENSEX','BANKNIFTY'].includes(index)||!(at>=open&&known>=at&&cursor>=known&&cursor<=close))return null;
- const order=[...new Set<string>(index==='BANKNIFTY'?[...EVENT_BANK_TEAM,...extra,...EVENT_BROAD_TEAM]:[...EVENT_BROAD_TEAM,...EVENT_BANK_TEAM])];
+ const order=[...new Set<string>(index==='BANKNIFTY'?[...EVENT_BANK_TEAM,...extra,...EVENT_BROAD_TEAM]:[...broadPrimary,...EVENT_BANK_TEAM])];
  const source=(Array.isArray(snapshots)?snapshots:[]).filter(s=>s?.source==='SERVER_BACKGROUND_KITE_QUOTES'&&s.tradingDate===date&&istDate(stamp(s.timestamp))===date&&stamp(s.timestamp)>=open&&stamp(s.timestamp)<=close);
  const counts=new Map<number,number>();for(const s of source){const t=stamp(s.timestamp);counts.set(t,(counts.get(t)||0)+1);}
  const checkpoints=[-15,-5,-3,0,1,3,5,15,30].map(offset=>{
@@ -32,7 +34,7 @@ function eventParticipationContext(date:string,index:string,eventAt:string,store
    const pct=valid?(p!/c!-1)*100:null;
    return {symbol,label:labels[symbol],role:sector(symbol)?'SECTOR_PROXY':'STOCK',dayPct:num(pct),price:valid?p:null,quoteAt:valid?q.exchangeTimestamp:null};
   });
-  return {offset,at:new Date(target).toISOString(),receiptAt:snap?snap.timestamp:null,status:target>cursor?'FUTURE':snap?'AS_OF_SNAPSHOT':'GAP',moves,banks:alignment(moves.filter(x=>(EVENT_BANK_TEAM as readonly string[]).includes(x.symbol))),broad:alignment(moves.filter(x=>(EVENT_BROAD_TEAM as readonly string[]).includes(x.symbol)))};
+  return {offset,at:new Date(target).toISOString(),receiptAt:snap?snap.timestamp:null,status:target>cursor?'FUTURE':snap?'AS_OF_SNAPSHOT':'GAP',moves,banks:alignment(moves.filter(x=>(EVENT_BANK_TEAM as readonly string[]).includes(x.symbol))),broad:alignment(moves.filter(x=>(EVENT_BROAD_TEAM as readonly string[]).includes(x.symbol))),bankPrimary:alignment(moves.filter(x=>bankPrimary.includes(x.symbol))),broadPrimary:alignment(moves.filter(x=>broadPrimary.includes(x.symbol)))};
  });
  const baseline=checkpoints.find(x=>x.offset===-3);
  const rows=checkpoints.map(row=>({...row,moves:row.moves.map(m=>{const b=baseline?.moves.find(x=>x.symbol===m.symbol);return {...m,deltaFromBeforePct:m.price!==null&&b?.price!=null&&row.offset>=0&&row.receiptAt!==baseline?.receiptAt?num((m.price/b.price-1)*100):null};})}));

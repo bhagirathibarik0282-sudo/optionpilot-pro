@@ -11,6 +11,8 @@ test('priority groups share HDFC without duplicate display; previous cash exclud
  assert.deepEqual(e.moves.slice(0,3).map(x=>x.symbol),['HDFCBANK','ICICIBANK','NIFTY PSU BANK']);
  assert.equal(e.moves.filter(x=>x.symbol==='HDFCBANK').length,1);
  assert.equal(e.banks.state,'ALIGNED_UP');assert.equal(e.broad.state,'ALIGNED_UP');
+ assert.equal(e.bankPrimary.required,5);assert.equal(e.bankPrimary.state,'INCOMPLETE');
+ assert.equal(e.broadPrimary.required,6);assert.equal(e.broadPrimary.state,'ALIGNED_UP');
  assert.ok(Math.abs(e.moves[0].deltaFromBeforePct!-(102/101-1)*100)<1e-9);
  assert.equal(c.checkpoints.find(x=>x.offset===5)!.status,'FUTURE');
  assert.equal(c.cashWindows[0].fii,-200);assert.equal(c.cashWindows[1].fii,null);

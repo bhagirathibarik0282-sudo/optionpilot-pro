@@ -19,6 +19,11 @@ test('priority groups share HDFC without duplicate display; previous cash exclud
  assert.equal(c.affectsExecution,false);assert.equal(c.officialWeight,null);
  const n=eventParticipationContext(date,'NIFTY',t(0),t(0),t(3),[snap(0)],cash)!;
  assert.deepEqual(n.checkpoints.find(x=>x.offset===0)!.moves.slice(0,5).map(x=>x.symbol),['HDFCBANK','RELIANCE','NIFTY IT','NIFTY SMLCAP 100','NIFTY MIDCAP 100']);
+ const broadEvent=n.checkpoints.find(x=>x.offset===0)!;
+ assert.equal(broadEvent.bankPrimary.required,5);
+ assert.equal(broadEvent.bankPrimary.available,3);
+ assert.equal(broadEvent.bankPrimary.state,'INCOMPLETE');
+ assert.equal(broadEvent.broadPrimary.required,6);
 });
 test('stale, future, duplicate and unverified evidence is not silently promoted',()=>{
  const stale=snap(0);stale.stocks.BANKNIFTY[0].exchangeTimestamp=t(-1);

@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {DashboardPcrSampler,measurePcrSnapshot,quoteTime,summarizePcrReceiptAge,selectNearestPcrEntries,partitionPcrQuoteKeys,PCR_MAX_QUERY_CHARS} from '../dashboard-pcr-sampler.js';
+import {DashboardPcrSampler,measurePcrSnapshot,quoteTime,summarizePcrReceiptAge,summarizePcrAgeThresholds,selectNearestPcrEntries,partitionPcrQuoteKeys,PCR_MAX_QUERY_CHARS} from '../dashboard-pcr-sampler.js';
 import type {LiveEntry} from '../dashboard-live-feed.js';
 const date='2026-10-16',at=Date.parse('2026-10-16T04:30:00Z');
 const entries:LiveEntry[]=['CE','PE'].map((side,i)=>({token:10+i,exchange:'NFO',label:'OPTION'+side,role:'OPTION',symbol:'NIFTY',expiry:'2026-10-19',strike:23000,side:side as 'CE'|'PE'}));
@@ -354,4 +354,37 @@ test('nearest priority samples each complete nearest chain every cycle and all e
  fail=true;await sampler.tick();
  for(const symbol of symbols){assert.equal(sampler.read(symbol,'2026-10-19')?.fullPcr,null);assert.equal(sampler.readAudit(symbol,'2026-10-19'),null);assert.equal(sampler.read(symbol,'2026-10-27'),null);}
  assert.equal(all.length,12,'inventory is not truncated or mutated');
+});
+
+test('PCR age sensitivity uses the exact same full chain and preserves skew, session, identity and denominator gates',()=>{
+ const reported={expected:2,reported:2,value:2,ceTotal:100,peTotal:200};
+ const rows=(ages:number[])=>ages.map((age,i)=>({token:i+1,responseToken:i+1,oi:i?200:100,sourceAt:new Date(at-age*1000).toISOString()}));
+ const inspect=(ages:number[],r:typeof reported|null=reported)=>summarizePcrAgeThresholds(rows(ages),date,new Date(at).toISOString(),2,r);
+ for(const [ages,passes] of [[[20,30],[true,true,true]],[[30,31],[false,true,true]],[[44,45],[false,true,true]],[[45,46],[false,false,true]],[[54,55],[false,false,true]],[[55,56],[false,false,false]],[[10,45],[false,false,false]],[[ -6,20],[false,false,false]]] as [number[],boolean[]][]){
+  const audit=inspect(ages);
+  assert.deepEqual(audit.thresholds.map(x=>x.complete),passes);
+  assert.deepEqual(audit.thresholds.map(x=>x.pcr),passes.map(pass=>pass?2:null));
+ }
+ assert(inspect([10,10],null).thresholds.every(x=>!x.complete));
+ assert(inspect([10,10],{...reported,ceTotal:0}).thresholds.every(x=>!x.complete));
+ const wrong=rows([10,10]);wrong[0].responseToken=999;
+ assert(summarizePcrAgeThresholds(wrong,date,new Date(at).toISOString(),2,reported).thresholds.every(x=>!x.complete));
+ const prior=rows([10,10]);prior[0].sourceAt='2026-10-15T04:30:00Z';
+ assert(summarizePcrAgeThresholds(prior,date,new Date(at).toISOString(),2,reported).thresholds.every(x=>!x.complete));
+ assert(summarizePcrAgeThresholds(rows([10]),date,new Date(at).toISOString(),2,reported).thresholds.every(x=>!x.complete));
+});
+test('research age variants cannot promote production 30-second PCR or trigger a new broker request',async()=>{
+ let calls=0;const diagnostics:any[]=[];
+ const q=quotes();for(const x of Object.values(q))x.timestamp=new Date(at-40_000).toISOString();
+ const sampler=new DashboardPcrSampler({date,entries,missing:[],omittedExpiries:[]},{
+  nearestPriority:true,now:()=>at,active:()=>true,wait:async()=>{},
+  fetchQuotes:async()=>{calls++;return q;},onDiagnostic:x=>diagnostics.push(x)
+ });
+ await sampler.tick();
+ assert.equal(calls,1);
+ assert.equal(sampler.read('NIFTY','2026-10-19')?.fullPcr,null);
+ assert.equal(sampler.read('NIFTY','2026-10-19')?.state,'INCOMPLETE');
+ assert.deepEqual(diagnostics[0].rows[0].ageThresholdAudit.thresholds.map((x:any)=>x.complete),[false,true,true]);
+ assert.equal(diagnostics[0].rows[0].ageThresholdAudit.researchOnly,true);
+ assert(!('ageThresholdAudit' in sampler.read('NIFTY','2026-10-19')!));
 });

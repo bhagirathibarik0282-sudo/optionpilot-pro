@@ -252,15 +252,16 @@ test('Watch participation scopes quotes by index and uses recorded snapshots at 
   breadth('NIFTY MIDCAP 100','SECTOR',103,iso(start-31000)),
  ];
  handlers['optionpilot:live-context']({detail:p});
- assert.match(strip.innerHTML,/6 ↑ · 0 ↓ · Aligned up/);
- assert.match(strip.innerHTML,/PSU Bank.*HDFC Bank.*ICICI Bank.*Axis Bank.*Kotak Bank.*SBI/);
- assert.doesNotMatch(strip.innerHTML,/Reliance|Nifty IT/);
+ assert.match(strip.innerHTML,/5 ↑ · 0 ↓ · Aligned up/);
+ assert.match(strip.innerHTML,/PSU Bank.*HDFC Bank.*ICICI Bank.*Axis Bank.*Kotak Bank/);
+ assert.doesNotMatch(strip.innerHTML,/Reliance|Nifty IT|SBI/);
  for(const symbol of ['NIFTY','SENSEX']){
   index.value=symbol;index.onchange();
-  assert.match(strip.innerHTML,/2 ↑ · 1 ↓ · 1 ↔ · 4\/5 quotes/);
+  assert.match(strip.innerHTML,/3 ↑ · 1 ↓ · 1 ↔ · 5\/6 quotes/);
   assert.match(strip.innerHTML,/Reliance<\/span><strong data-move="down">-2\.00%/);
   assert.match(strip.innerHTML,/Midcap 100<\/span><strong data-move="missing">—/);
-  assert.doesNotMatch(strip.innerHTML,/Aligned|ICICI Bank/);
+  assert.doesNotMatch(strip.innerHTML,/Aligned/);
+  assert.match(strip.innerHTML,/ICICI Bank<\/span><strong data-move="up">\+3\.00%/);
  }
  index.value='ALL';index.onchange();assert.equal(strip.hidden,true);
  index.value='NIFTY';index.onchange();

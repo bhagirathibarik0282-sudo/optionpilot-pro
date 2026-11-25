@@ -143,7 +143,7 @@ export function createBnfShadowHost(config:any,deps:any={}) {
           health.lastReportAt=new Date(now()).toISOString();publish();
         }
         if(value.status==='SHADOW_SOURCE_STATUS'){
-          const counts:any={};for(const key of ['observations','signals','rejected','warmup','contracts','retained_observations'])if(Number.isSafeInteger(value[key])&&value[key]>=0)counts[key]=value[key];
+          const counts:any={};for(const key of ['observations','signals','rejected','warmup','contracts','retained_observations','rejected_contract_identity','rejected_contract_verification','rejected_atm_selection','rejected_expiry_clock','rejected_oi','rejected_spot_clock','rejected_iv','rejected_history_candidate'])if(Number.isSafeInteger(value[key])&&value[key]>=0)counts[key]=value[key];
           state.sourceCounts=counts;
           health.lastReportedCounts={...counts};
           const allowed=['WARMUP','SOURCE_RESET_WARMUP','SIGNAL_EVIDENCE_READY','SOURCE_EVIDENCE_REJECTED','DUPLICATE_OR_OUT_OF_ORDER','CROSS_SESSION_BASELINE','OPPOSITE_CONTRACT_MISSING','EXACT_180S_PAIR_WARMUP','EXPIRY_CLOCK_CHANGED','QUAD_ALIGN_NOT_QUALIFIED'];

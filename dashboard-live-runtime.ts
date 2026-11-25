@@ -54,6 +54,7 @@ export async function reconcileDashboardLiveRuntime(force=false){
    onState:next=>{if(attempt===generation)state=next;}});
   const sessionToken=credential;
   pcrSampler=new DashboardPcrSampler(inventory,{
+   nearestPriority:true,
    now:()=>Date.now(),active:()=>attempt===generation&&enabled()&&state==='OPEN'&&isIndianEquityMarketOpenAt(new Date()),
    wait:ms=>new Promise(resolve=>setTimeout(resolve,ms)),
    readSpot:symbol=>target.spotQuote(symbol,Date.now()),

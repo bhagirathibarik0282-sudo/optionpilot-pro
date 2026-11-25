@@ -34,7 +34,7 @@ function eventParticipationContext(date:string,index:string,eventAt:string,store
    const pct=valid?(p!/c!-1)*100:null;
    return {symbol,label:labels[symbol],role:sector(symbol)?'SECTOR_PROXY':'STOCK',dayPct:num(pct),price:valid?p:null,quoteAt:valid?q.exchangeTimestamp:null};
   });
-  return {offset,at:new Date(target).toISOString(),receiptAt:snap?snap.timestamp:null,status:target>cursor?'FUTURE':snap?'AS_OF_SNAPSHOT':'GAP',moves,banks:alignment(moves.filter(x=>(EVENT_BANK_TEAM as readonly string[]).includes(x.symbol))),broad:alignment(moves.filter(x=>(EVENT_BROAD_TEAM as readonly string[]).includes(x.symbol))),bankPrimary:alignment(moves.filter(x=>bankPrimary.includes(x.symbol))),broadPrimary:alignment(moves.filter(x=>broadPrimary.includes(x.symbol)))};
+  return {offset,at:new Date(target).toISOString(),receiptAt:snap?snap.timestamp:null,status:target>cursor?'FUTURE':snap?'AS_OF_SNAPSHOT':'GAP',moves,banks:alignment(moves.filter(x=>(EVENT_BANK_TEAM as readonly string[]).includes(x.symbol))),broad:alignment(moves.filter(x=>(EVENT_BROAD_TEAM as readonly string[]).includes(x.symbol))),bankPrimary:alignment(bankPrimary.map(symbol=>moves.find(x=>x.symbol===symbol)??{dayPct:null})),broadPrimary:alignment(broadPrimary.map(symbol=>moves.find(x=>x.symbol===symbol)??{dayPct:null}))};
  });
  const baseline=checkpoints.find(x=>x.offset===-3);
  const rows=checkpoints.map(row=>({...row,moves:row.moves.map(m=>{const b=baseline?.moves.find(x=>x.symbol===m.symbol);return {...m,deltaFromBeforePct:m.price!==null&&b?.price!=null&&row.offset>=0&&row.receiptAt!==baseline?.receiptAt?num((m.price/b.price-1)*100):null};})}));

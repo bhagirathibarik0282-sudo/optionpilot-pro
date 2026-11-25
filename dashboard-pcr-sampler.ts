@@ -56,6 +56,35 @@ export function summarizePcrReceiptAge(rows:ReadonlyArray<{token:number;response
  }
  return result;
 }
+/** Read-only sensitivity audit. Reported PCR has already validated full inventory, identity,
+ * session, OI and denominator. Only source-age tolerance varies; never publishes a trading result. */
+export function summarizePcrAgeThresholds(
+ rows:ReadonlyArray<{token:number;responseToken:number|null;oi:number|null;sourceAt:string|null}>,
+ date:string,checkedAt:string,expected:number,
+ reported:{expected:number;reported:number;value:number;ceTotal:number;peTotal:number}|null,
+){
+ const end=quoteTime(checkedAt),open=Date.parse(date+'T09:15:00+05:30');
+ const times:number[]=[];let unusable=0,wrongSession=0,future=0;
+ for(const row of rows){
+  const source=quoteTime(row.sourceAt);
+  if(row.responseToken!==row.token||!finite(row.oi)||row.oi!<0||!Number.isFinite(source)||!Number.isFinite(end)){unusable++;continue;}
+  if(day(source)!==date||source<open){wrongSession++;continue;}
+  if(source-end>5000){future++;continue;}
+  times.push(source);
+ }
+ const skew=times.length?Math.max(...times)-Math.min(...times):null;
+ const exact=!!reported&&expected>0&&rows.length===expected&&reported.expected===expected&&reported.reported===expected&&
+  Number.isFinite(end)&&day(end)===date&&times.length===expected&&skew!==null&&skew<=30000&&
+  finite(reported.ceTotal)&&reported.ceTotal>0&&finite(reported.peTotal)&&reported.peTotal>=0&&
+  finite(reported.value)&&Math.abs(reported.value-reported.peTotal/reported.ceTotal)<=Math.max(1,reported.value)*1e-12;
+ return {researchOnly:true,expected,unusable,wrongSession,future,sourceSkewMs:skew,
+  thresholds:[30,45,55].map(maxAgeSec=>{
+   const fresh=times.filter(source=>end-source<=maxAgeSec*1000).length;
+   const complete=exact&&fresh===expected;
+   return {maxAgeSec,fresh,unqualified:expected-fresh,complete,pcr:complete?reported!.value:null};
+  })
+ };
+}
 /** Reported OI uses only complete exact identities from one REST attempt.
  * Mixed exchange times remain explicit; diagnostics never authorize fresh PCR. */
 export type ReportedPcrDiagnostic={reason:string;identity:string|null};
@@ -213,10 +242,10 @@ export class DashboardPcrSampler {
     }
     this.revision++;
     try{this.deps.onCycle?.(this.inventory.date,new Date(now).toISOString(),this.results);}catch{/* A history sink cannot block the sampler. */}
-    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,receiptAge:q.fetchState==='OK'?summarizePcrReceiptAge(this.auditRows.get(identity)??[],this.inventory.date,q.checkedAt):null,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
+    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,ageThresholdAudit:q.fetchState==='OK'?summarizePcrAgeThresholds(this.auditRows.get(identity)??[],this.inventory.date,q.checkedAt,q.coverage.expected,q.reportedPcr):null,receiptAge:q.fetchState==='OK'?summarizePcrReceiptAge(this.auditRows.get(identity)??[],this.inventory.date,q.checkedAt):null,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
     const scope=fullScan?'ALL_EXPIRIES':'NEAREST_EXPIRIES';
     const signature=JSON.stringify({scope,deferredExpiries,rows});
-    if(signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){
+    if(this.deps.nearestPriority||signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){
      this.lastDiagnostic=signature;this.lastDiagnosticAt=at;
      try{this.deps.onDiagnostic?.({checkedAt:new Date(at).toISOString(),scope,deferredExpiries,batchesRequested,batchesCompleted,rows});}catch{/* A log sink must not break quote collection. */}
     }

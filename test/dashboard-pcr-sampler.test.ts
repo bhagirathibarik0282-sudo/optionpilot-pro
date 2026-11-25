@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {DashboardPcrSampler,measurePcrSnapshot,quoteTime,partitionPcrQuoteKeys,PCR_MAX_QUERY_CHARS} from '../dashboard-pcr-sampler.js';
+import {DashboardPcrSampler,measurePcrSnapshot,quoteTime,summarizePcrReceiptAge,partitionPcrQuoteKeys,PCR_MAX_QUERY_CHARS} from '../dashboard-pcr-sampler.js';
 import type {LiveEntry} from '../dashboard-live-feed.js';
 const date='2026-10-16',at=Date.parse('2026-10-16T04:30:00Z');
 const entries:LiveEntry[]=['CE','PE'].map((side,i)=>({token:10+i,exchange:'NFO',label:'OPTION'+side,role:'OPTION',symbol:'NIFTY',expiry:'2026-10-19',strike:23000,side:side as 'CE'|'PE'}));
@@ -314,4 +314,11 @@ test('epoch-zero and unknown exchange clocks cannot be presented as dated last-r
   assert.equal(raw.fullPcr,null);assert.equal(raw.reportedPcr,null);assert.equal(raw.lastReportedPcr,null);
   assert.equal(raw.reportedDiagnostic.reason,'INVALID_EXCHANGE_TIMESTAMP');
  }
+});
+
+test('receipt-age telemetry distinguishes already-old packets from collection aging without changing freshness',()=>{
+ const row=(age:number,delay:number)=>({token:10,responseToken:10,oi:100,sourceAt:new Date(at-age).toISOString(),batchReceivedAt:new Date(at-delay).toISOString()});
+ const rows=[row(45000,10000),row(35000,10000),row(10000,1000),row(3600000,1000),{...row(10000,1000),oi:null},row(-10000,0)];
+ const r=summarizePcrReceiptAge(rows,date,new Date(at).toISOString());
+ assert.deepEqual(r,{rows:6,unusable:1,priorOrPreOpen:1,futureOrClockInvalid:1,oldAtReceipt:1,agedDuringCollection:1,freshAtCompletion:1,maxReceiptToCompletionMs:10000});
 });

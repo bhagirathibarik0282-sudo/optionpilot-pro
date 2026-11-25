@@ -1,6 +1,13 @@
 import type { LiveEntry, LiveInventory } from './dashboard-live-feed.js';
 
 export const PCR_REFRESH_MS = 60_000;
+export const PCR_SECONDARY_EVERY_CYCLES = 3;
+/** Select the complete nearest available expiry per index; never truncate its contracts. */
+export function selectNearestPcrEntries(entries:LiveEntry[]):LiveEntry[]{
+ const nearest=new Map<string,string>();
+ for(const e of entries){if(e.role!=='OPTION'||!e.symbol||!e.expiry)continue;const prior=nearest.get(e.symbol);if(!prior||e.expiry<prior)nearest.set(e.symbol,e.expiry);}
+ return entries.filter(e=>e.role==='OPTION'&&!!e.symbol&&e.expiry===nearest.get(e.symbol));
+}
 // Broker /quote accepts <=500 instruments, but long exchange:symbol values can exceed
 // the HTTP request-target limit much earlier. Leave headroom for base URL and proxies.
 export const PCR_MAX_QUOTE_KEYS = 500;
@@ -32,6 +39,51 @@ export function quoteTime(value:unknown):number {
  if(typeof value !== 'string')return NaN;
  const at=/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value)?value.replace(' ','T')+'+05:30':value;
  return /(?:Z|[+-]\d{2}:\d{2})$/.test(at)?Date.parse(at):NaN;
+}
+/** Timing telemetry only: classify each cached contract against the expiry completion clock. */
+export function summarizePcrReceiptAge(rows:ReadonlyArray<{token:number;responseToken:number|null;oi:number|null;sourceAt:string|null;batchReceivedAt:string|null}>,date:string,checkedAt:string){
+ const end=quoteTime(checkedAt),open=Date.parse(date+'T09:15:00+05:30');
+ const result={rows:rows.length,unusable:0,priorOrPreOpen:0,futureOrClockInvalid:0,oldAtReceipt:0,agedDuringCollection:0,freshAtCompletion:0,maxReceiptToCompletionMs:0};
+ for(const row of rows){
+  const source=quoteTime(row.sourceAt),receipt=quoteTime(row.batchReceivedAt);
+  if(row.responseToken!==row.token||!finite(row.oi)||row.oi!<0||!Number.isFinite(source)||!Number.isFinite(receipt)||!Number.isFinite(end)){result.unusable++;continue;}
+  if(source<open){result.priorOrPreOpen++;continue;}
+  if(day(source)!==date||receipt>end||source-receipt>5000||source-end>5000){result.futureOrClockInvalid++;continue;}
+  result.maxReceiptToCompletionMs=Math.max(result.maxReceiptToCompletionMs,end-receipt);
+  if(receipt-source>30000)result.oldAtReceipt++;
+  else if(end-source>30000)result.agedDuringCollection++;
+  else result.freshAtCompletion++;
+ }
+ return result;
+}
+/** Read-only sensitivity audit. Reported PCR has already validated full inventory, identity,
+ * session, OI and denominator. Only source-age tolerance varies; never publishes a trading result. */
+export function summarizePcrAgeThresholds(
+ rows:ReadonlyArray<{token:number;responseToken:number|null;oi:number|null;sourceAt:string|null}>,
+ date:string,checkedAt:string,expected:number,
+ reported:{expected:number;reported:number;value:number;ceTotal:number;peTotal:number}|null,
+){
+ const end=quoteTime(checkedAt),open=Date.parse(date+'T09:15:00+05:30');
+ const times:number[]=[];let unusable=0,wrongSession=0,future=0;
+ for(const row of rows){
+  const source=quoteTime(row.sourceAt);
+  if(row.responseToken!==row.token||!finite(row.oi)||row.oi!<0||!Number.isFinite(source)||!Number.isFinite(end)){unusable++;continue;}
+  if(day(source)!==date||source<open){wrongSession++;continue;}
+  if(source-end>5000){future++;continue;}
+  times.push(source);
+ }
+ const skew=times.length?Math.max(...times)-Math.min(...times):null;
+ const exact=!!reported&&expected>0&&rows.length===expected&&reported.expected===expected&&reported.reported===expected&&
+  Number.isFinite(end)&&day(end)===date&&times.length===expected&&skew!==null&&skew<=30000&&
+  finite(reported.ceTotal)&&reported.ceTotal>0&&finite(reported.peTotal)&&reported.peTotal>=0&&
+  finite(reported.value)&&Math.abs(reported.value-reported.peTotal/reported.ceTotal)<=Math.max(1,reported.value)*1e-12;
+ return {researchOnly:true,expected,unusable,wrongSession,future,sourceSkewMs:skew,
+  thresholds:[30,45,55].map(maxAgeSec=>{
+   const fresh=times.filter(source=>end-source<=maxAgeSec*1000).length;
+   const complete=exact&&fresh===expected;
+   return {maxAgeSec,fresh,unqualified:expected-fresh,complete,pcr:complete?reported!.value:null};
+  })
+ };
 }
 /** Reported OI uses only complete exact identities from one REST attempt.
  * Mixed exchange times remain explicit; diagnostics never authorize fresh PCR. */
@@ -121,12 +173,17 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
 export class DashboardPcrSampler {
  private lastDiagnostic='';private lastDiagnosticAt=0;
  private auditRows=new Map<string,Array<{symbol:string|undefined;expiry:string|undefined;strike:number|undefined;side:string|undefined;token:number;responseToken:number|null;key:string;oi:number|null;sourceAt:string|null;batchReceivedAt:string|null}>>();
- private busy=false;private due=0;private revision=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string;batchesRequested:number;batchesCompleted:number}>();
- constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;readSpot?(symbol:string):any;onDiagnostic?(summary:any):void;onCycle?(date:string,cycleAt:string,results:ReadonlyMap<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string}>):void}){}
+ private busy=false;private due=0;private revision=0;private cycleNumber=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string;batchesRequested:number;batchesCompleted:number}>();
+ constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;nearestPriority?:boolean;readSpot?(symbol:string):any;onDiagnostic?(summary:any):void;onCycle?(date:string,cycleAt:string,results:ReadonlyMap<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string}>):void}){}
  async tick(){
   const now=this.deps.now();if(this.busy||now<this.due||!this.deps.active()||day(now)!==this.inventory.date)return;
   this.busy=true;this.due=now+PCR_REFRESH_MS;
-  const entries=this.inventory.entries.filter(e=>e.role==='OPTION'),quotes:Record<string,any>={};
+  const allEntries=this.inventory.entries.filter(e=>e.role==='OPTION');
+  // All subscriptions and other recorders are unchanged. Only the REST PCR sampler cadence changes.
+  const fullScan=!this.deps.nearestPriority||++this.cycleNumber%PCR_SECONDARY_EVERY_CYCLES===0;
+  const entries=fullScan?allEntries:selectNearestPcrEntries(allEntries),quotes:Record<string,any>={};
+  const sampledGroups=new Set(entries.map(e=>e.symbol+'|'+e.expiry));
+  const deferredExpiries=[...new Set(allEntries.map(e=>e.symbol+'|'+e.expiry))].filter(key=>!sampledGroups.has(key));
   let fetchState='OK',batchesRequested=0,batchesCompleted=0;
   const batchReceivedAt=new Map<string,number>();
   const completedAt=new Map<string,number>(),completedSpot=new Map<string,any>();
@@ -160,7 +217,9 @@ export class DashboardPcrSampler {
    // Fail closed on partial REST cycles. The following regular cycle is the retry.
   }finally{
    if(this.deps.active()){
-    const keys=[...new Set(entries.map(e=>e.symbol+'|'+e.expiry))],at=this.deps.now();
+    const keys=[...sampledGroups],at=this.deps.now();
+    // A deferred expiry is not a new observation. Clear both cached result and audit rows.
+    for(const key of deferredExpiries){this.results.delete(key);this.auditRows.delete(key);}
     for(const key of keys){
      const group=entries.filter(e=>e.symbol+'|'+e.expiry===key);let spot:any=completedSpot.get(key)??null;
      if(!completedAt.has(key))try{spot=this.deps.readSpot?.(group[0].symbol!);}catch{/* Missing cache reference only withholds band PCR. */}
@@ -183,11 +242,12 @@ export class DashboardPcrSampler {
     }
     this.revision++;
     try{this.deps.onCycle?.(this.inventory.date,new Date(now).toISOString(),this.results);}catch{/* A history sink cannot block the sampler. */}
-    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
-    const signature=JSON.stringify(rows);
-    if(signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){
+    const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,ageThresholdAudit:q.fetchState==='OK'?summarizePcrAgeThresholds(this.auditRows.get(identity)??[],this.inventory.date,q.checkedAt,q.coverage.expected,q.reportedPcr):null,receiptAge:q.fetchState==='OK'?summarizePcrReceiptAge(this.auditRows.get(identity)??[],this.inventory.date,q.checkedAt):null,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
+    const scope=fullScan?'ALL_EXPIRIES':'NEAREST_EXPIRIES';
+    const signature=JSON.stringify({scope,deferredExpiries,rows});
+    if(this.deps.nearestPriority||signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){
      this.lastDiagnostic=signature;this.lastDiagnosticAt=at;
-     try{this.deps.onDiagnostic?.({checkedAt:new Date(at).toISOString(),batchesRequested,batchesCompleted,rows});}catch{/* A log sink must not break quote collection. */}
+     try{this.deps.onDiagnostic?.({checkedAt:new Date(at).toISOString(),scope,deferredExpiries,batchesRequested,batchesCompleted,rows});}catch{/* A log sink must not break quote collection. */}
     }
    }
    this.busy=false;

@@ -75,12 +75,26 @@ class LiveSignalTests(unittest.TestCase):
             else:del e[key]
             self.assertEqual(self.send(e),[])
         self.assertEqual(self.producer.status()['retained_observations'],0)
+        status=self.producer.status()
+        self.assertEqual(status['rejected_oi'],1)
+        self.assertEqual(status['rejected_expiry_clock'],1)
+        self.assertEqual(status['rejected'],2)
 
     def test_future_spot_at_option_clock_cannot_create_iv(self):
         e=event_at(C,NOW);e['receive_ts']=(NOW+timedelta(seconds=1)).isoformat()
         e['market_context']['spot_ts']=e['receive_ts']
         self.assertEqual(self.send(e,NOW+timedelta(seconds=1)),[])
         self.assertEqual(self.producer.status()['retained_observations'],0)
+        self.assertEqual(self.producer.status()['rejected_spot_clock'],1)
+
+    def test_iv_rejection_stage_does_not_expose_exception(self):
+        from unittest.mock import patch
+        with patch('bnf_shadow.live_signal_source.solve_iv', side_effect=ValueError('private diagnostic detail')):
+            self.assertEqual(self.send(event_at(C,NOW)),[])
+        status=self.producer.status()
+        self.assertEqual(status['rejected_iv'],1)
+        self.assertEqual(status['observations'],0)
+        self.assertNotIn('private diagnostic detail',json.dumps(status))
 
     def test_duplicate_or_out_of_order_quote_cannot_replace_first_observation(self):
         self.send(event_at(C,NOW,oi=1000));self.send(event_at(C,NOW,oi=999))

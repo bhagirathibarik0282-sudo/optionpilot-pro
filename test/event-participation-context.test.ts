@@ -11,12 +11,19 @@ test('priority groups share HDFC without duplicate display; previous cash exclud
  assert.deepEqual(e.moves.slice(0,3).map(x=>x.symbol),['HDFCBANK','ICICIBANK','NIFTY PSU BANK']);
  assert.equal(e.moves.filter(x=>x.symbol==='HDFCBANK').length,1);
  assert.equal(e.banks.state,'ALIGNED_UP');assert.equal(e.broad.state,'ALIGNED_UP');
+ assert.equal(e.bankPrimary.required,5);assert.equal(e.bankPrimary.state,'INCOMPLETE');
+ assert.equal(e.broadPrimary.required,6);assert.equal(e.broadPrimary.state,'ALIGNED_UP');
  assert.ok(Math.abs(e.moves[0].deltaFromBeforePct!-(102/101-1)*100)<1e-9);
  assert.equal(c.checkpoints.find(x=>x.offset===5)!.status,'FUTURE');
  assert.equal(c.cashWindows[0].fii,-200);assert.equal(c.cashWindows[1].fii,null);
  assert.equal(c.affectsExecution,false);assert.equal(c.officialWeight,null);
  const n=eventParticipationContext(date,'NIFTY',t(0),t(0),t(3),[snap(0)],cash)!;
  assert.deepEqual(n.checkpoints.find(x=>x.offset===0)!.moves.slice(0,5).map(x=>x.symbol),['HDFCBANK','RELIANCE','NIFTY IT','NIFTY SMLCAP 100','NIFTY MIDCAP 100']);
+ const broadEvent=n.checkpoints.find(x=>x.offset===0)!;
+ assert.equal(broadEvent.bankPrimary.required,5);
+ assert.equal(broadEvent.bankPrimary.available,3);
+ assert.equal(broadEvent.bankPrimary.state,'INCOMPLETE');
+ assert.equal(broadEvent.broadPrimary.required,6);
 });
 test('stale, future, duplicate and unverified evidence is not silently promoted',()=>{
  const stale=snap(0);stale.stocks.BANKNIFTY[0].exchangeTimestamp=t(-1);

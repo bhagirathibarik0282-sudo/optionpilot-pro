@@ -160,13 +160,13 @@ export function installMarketBook(api:any) {
  const watchBody=$('mb-watch-body'),watchStatus=$('mb-watch-status'),watchHead=$('mb-watch-head');
  const watchParticipation=$('mb-watch-participation');
  const broadWatchGroup=[
-  ['HDFC Bank','HDFCBANK','STOCK'],['Reliance','RELIANCE','STOCK'],['Nifty IT','NIFTY IT','SECTOR'],
+  ['HDFC Bank','HDFCBANK','STOCK'],['ICICI Bank','ICICIBANK','STOCK'],['Reliance','RELIANCE','STOCK'],['Nifty IT','NIFTY IT','SECTOR'],
   ['Smallcap 100','NIFTY SMLCAP 100','SECTOR'],['Midcap 100','NIFTY MIDCAP 100','SECTOR'],
  ];
  const watchGroups:Record<string,string[][]>={
   NIFTY:broadWatchGroup,SENSEX:broadWatchGroup,
   BANKNIFTY:[['PSU Bank','NIFTY PSU BANK','SECTOR'],['HDFC Bank','HDFCBANK','STOCK'],['ICICI Bank','ICICIBANK','STOCK'],
-   ['Axis Bank','AXISBANK','STOCK'],['Kotak Bank','KOTAKBANK','STOCK'],['SBI','SBIN','STOCK']],
+   ['Axis Bank','AXISBANK','STOCK'],['Kotak Bank','KOTAKBANK','STOCK']],
  };
  const watchMetrics=$('mb-watch-metrics'),watchCustom=$('mb-watch-custom');
  const watchHistory=new Map<string,Map<string,WatchRow>>();

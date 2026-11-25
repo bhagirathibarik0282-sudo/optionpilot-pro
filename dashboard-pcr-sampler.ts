@@ -1,6 +1,13 @@
 import type { LiveEntry, LiveInventory } from './dashboard-live-feed.js';
 
 export const PCR_REFRESH_MS = 60_000;
+export const PCR_SECONDARY_EVERY_CYCLES = 3;
+/** Select the complete nearest available expiry per index; never truncate its contracts. */
+export function selectNearestPcrEntries(entries:LiveEntry[]):LiveEntry[]{
+ const nearest=new Map<string,string>();
+ for(const e of entries){if(e.role!=='OPTION'||!e.symbol||!e.expiry)continue;const prior=nearest.get(e.symbol);if(!prior||e.expiry<prior)nearest.set(e.symbol,e.expiry);}
+ return entries.filter(e=>e.role==='OPTION'&&!!e.symbol&&e.expiry===nearest.get(e.symbol));
+}
 // Broker /quote accepts <=500 instruments, but long exchange:symbol values can exceed
 // the HTTP request-target limit much earlier. Leave headroom for base URL and proxies.
 export const PCR_MAX_QUOTE_KEYS = 500;
@@ -137,12 +144,17 @@ export function measurePcrSnapshot(entries:LiveEntry[],quotes:Record<string,any>
 export class DashboardPcrSampler {
  private lastDiagnostic='';private lastDiagnosticAt=0;
  private auditRows=new Map<string,Array<{symbol:string|undefined;expiry:string|undefined;strike:number|undefined;side:string|undefined;token:number;responseToken:number|null;key:string;oi:number|null;sourceAt:string|null;batchReceivedAt:string|null}>>();
- private busy=false;private due=0;private revision=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string;batchesRequested:number;batchesCompleted:number}>();
- constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;readSpot?(symbol:string):any;onDiagnostic?(summary:any):void;onCycle?(date:string,cycleAt:string,results:ReadonlyMap<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string}>):void}){}
+ private busy=false;private due=0;private revision=0;private cycleNumber=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string;batchesRequested:number;batchesCompleted:number}>();
+ constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;nearestPriority?:boolean;readSpot?(symbol:string):any;onDiagnostic?(summary:any):void;onCycle?(date:string,cycleAt:string,results:ReadonlyMap<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string}>):void}){}
  async tick(){
   const now=this.deps.now();if(this.busy||now<this.due||!this.deps.active()||day(now)!==this.inventory.date)return;
   this.busy=true;this.due=now+PCR_REFRESH_MS;
-  const entries=this.inventory.entries.filter(e=>e.role==='OPTION'),quotes:Record<string,any>={};
+  const allEntries=this.inventory.entries.filter(e=>e.role==='OPTION');
+  // All subscriptions and other recorders are unchanged. Only the REST PCR sampler cadence changes.
+  const fullScan=!this.deps.nearestPriority||++this.cycleNumber%PCR_SECONDARY_EVERY_CYCLES===0;
+  const entries=fullScan?allEntries:selectNearestPcrEntries(allEntries),quotes:Record<string,any>={};
+  const sampledGroups=new Set(entries.map(e=>e.symbol+'|'+e.expiry));
+  const deferredExpiries=[...new Set(allEntries.map(e=>e.symbol+'|'+e.expiry))].filter(key=>!sampledGroups.has(key));
   let fetchState='OK',batchesRequested=0,batchesCompleted=0;
   const batchReceivedAt=new Map<string,number>();
   const completedAt=new Map<string,number>(),completedSpot=new Map<string,any>();
@@ -176,7 +188,9 @@ export class DashboardPcrSampler {
    // Fail closed on partial REST cycles. The following regular cycle is the retry.
   }finally{
    if(this.deps.active()){
-    const keys=[...new Set(entries.map(e=>e.symbol+'|'+e.expiry))],at=this.deps.now();
+    const keys=[...sampledGroups],at=this.deps.now();
+    // A deferred expiry is not a new observation. Clear both cached result and audit rows.
+    for(const key of deferredExpiries){this.results.delete(key);this.auditRows.delete(key);}
     for(const key of keys){
      const group=entries.filter(e=>e.symbol+'|'+e.expiry===key);let spot:any=completedSpot.get(key)??null;
      if(!completedAt.has(key))try{spot=this.deps.readSpot?.(group[0].symbol!);}catch{/* Missing cache reference only withholds band PCR. */}
@@ -200,10 +214,11 @@ export class DashboardPcrSampler {
     this.revision++;
     try{this.deps.onCycle?.(this.inventory.date,new Date(now).toISOString(),this.results);}catch{/* A history sink cannot block the sampler. */}
     const rows=[...this.results].map(([identity,q])=>({identity,state:q.state,reason:q.reason,fetchState:q.fetchState,coverage:q.coverage,receiptAge:q.fetchState==='OK'?summarizePcrReceiptAge(this.auditRows.get(identity)??[],this.inventory.date,q.checkedAt):null,unavailable:q.unavailable.slice(0,2),reported:{state:q.fetchState==='OK'&&q.reportedPcr?'COMPLETE':'BLOCKED',reason:q.fetchState==='OK'?q.reportedDiagnostic.reason:q.fetchState,firstRejectingIdentity:q.fetchState==='OK'?q.reportedDiagnostic.identity:null,sessionTimes:q.reportedSourceCounts},lastReported:q.lastReportedPcr?{state:'EARLIER_PACKETS',priorSession:q.lastReportedPcr.priorSession,preOpen:q.lastReportedPcr.preOpen,sourceMinAt:q.lastReportedPcr.sourceMinAt,sourceMaxAt:q.lastReportedPcr.sourceMaxAt}:null}));
-    const signature=JSON.stringify(rows);
+    const scope=fullScan?'ALL_EXPIRIES':'NEAREST_EXPIRIES';
+    const signature=JSON.stringify({scope,deferredExpiries,rows});
     if(signature!==this.lastDiagnostic||at-this.lastDiagnosticAt>=300000){
      this.lastDiagnostic=signature;this.lastDiagnosticAt=at;
-     try{this.deps.onDiagnostic?.({checkedAt:new Date(at).toISOString(),batchesRequested,batchesCompleted,rows});}catch{/* A log sink must not break quote collection. */}
+     try{this.deps.onDiagnostic?.({checkedAt:new Date(at).toISOString(),scope,deferredExpiries,batchesRequested,batchesCompleted,rows});}catch{/* A log sink must not break quote collection. */}
     }
    }
    this.busy=false;

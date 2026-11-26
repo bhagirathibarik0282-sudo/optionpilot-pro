@@ -43,6 +43,15 @@ try{
     assert.equal(await page.locator('#rd-page').getAttribute('data-rd-hub'),'MARKET',name+' opens a readable chapter automatically');
     assert.equal(await page.locator('#rd-viewport').getAttribute('data-scale'),'1');
    }
+   if(width>600){
+    assert.equal(await page.locator('[data-rd-fit="WIDTH"]').getAttribute('aria-pressed'),'true',name+' desktop starts in readable Fit width');
+    const layout=await page.evaluate(()=>{const vp=document.getElementById('rd-viewport')!,p=document.getElementById('rd-page')!,r=p.getBoundingClientRect();return {width:r.width,available:vp.clientWidth,scale:Number(vp.dataset.scale),overflow:getComputedStyle(vp).overflowY};});
+    assert(Math.abs(layout.width-layout.available)<=2,name+' default uses full available width');
+    assert(layout.scale>=width/1024-.05,name+' default must not shrink to fit page height');
+    assert.equal(layout.overflow,'auto',name+' vertical scrolling remains available');
+    await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-default-fit-width.png',fullPage:false,timeout:15000});
+    await page.locator('[data-rd-fit="PAGE"]').click();
+   }
    await page.locator('#rd-hub-tabs [data-rd-hub="ALL"]').click();
    const screen=await page.evaluate(()=>{const page=document.getElementById('rd-page')!,viewport=document.getElementById('rd-viewport')!,p=page.getBoundingClientRect(),v=viewport.getBoundingClientRect();return {height:innerHeight,scroll:document.documentElement.scrollHeight,width:innerWidth,scrollWidth:document.documentElement.scrollWidth,page:{left:p.left,right:p.right,top:p.top,bottom:p.bottom},viewport:{left:v.left,right:v.right,top:v.top,bottom:v.bottom},sections:document.querySelectorAll('#rd-page .rd-section').length,probability:/probability/i.test(page.textContent||'')};});
    assert.equal(screen.sections,7,name+' must show all seven full table sections');

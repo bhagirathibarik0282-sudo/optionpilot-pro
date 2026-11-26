@@ -21,6 +21,7 @@ export function comparePcrCaches(entries:LiveEntry[],rest:Row[],ws:Row[],date:st
   const q=r&&w?(w.at>r.at?w:r):(r||w)!;times.push(q.at);if(e.side==='CE')ce+=q.oi;else pe+=q.oi;
  }
  const skew=times.length?Math.max(...times)-Math.min(...times):null;
- const complete=identityOk&&rest.length===entries.length&&rm.size===entries.length&&times.length===entries.length&&sameTimestampConflict===0&&skew!==null&&skew<=30000&&Number.isFinite(ce)&&ce>0&&Number.isFinite(pe)&&entries.some(e=>e.side==='PE');
+ const exactRestMembership=rest.length===entries.length&&rm.size===entries.length&&entries.every(e=>{const r=rm.get(e.token)?.[0];return r?.responseToken===e.token&&r.symbol===e.symbol&&r.expiry===e.expiry&&r.strike===e.strike&&r.side===e.side;});
+ const complete=identityOk&&exactRestMembership&&times.length===entries.length&&sameTimestampConflict===0&&skew!==null&&skew<=30000&&Number.isFinite(ce)&&ce>0&&Number.isFinite(pe)&&entries.some(e=>e.side==='PE');
  return {researchOnly:true,expected:entries.length,restFresh:both+restOnly,wsFresh:both+wsOnly,both,restOnly,wsOnly,neither,sameTimestampConflict,differentTimestampOi,hybridFresh:times.length,sourceSkewMs:skew,complete,pcr:complete?pe/ce:null};
 }

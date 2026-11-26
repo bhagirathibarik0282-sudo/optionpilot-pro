@@ -1,3 +1,4 @@
+import { recordedNearFuturesVwap } from './futures-vwap-acceptance.js';
 import { openingGapPercent } from "./market-snapshot-semantics.js";
 import { premiumRecordStatus, sourceQuoteAgeSeconds } from "./h1-premium-record-quality.js";
 import {
@@ -43,6 +44,7 @@ export interface H1ExpiryInput {
 }
 
 export interface H1FuturesInput {
+  tradingsymbol?: string | null;
   label: "Near" | "Next" | "Far";
   expiry: string;
   ltp: number;
@@ -60,6 +62,7 @@ export interface H1IndexInput {
   spot: number;
   atmStrike: number;
   vwap: number;
+  vwapSource?: string | null;
   pdh: number;
   pdl: number;
   pdcClose: number;
@@ -283,7 +286,8 @@ export async function recordH1Snapshot(request: H1RecordRequest): Promise<void> 
       pdl: finiteOrNull(market.pdl),
       gapPercent: openingGapPercent(market.dayOpen, market.pdcClose),
       futureLtp: near ? finiteOrNull(near.ltp) : null,
-      futureVwap: null,
+      futureVwap: request.truthVerdict === "TRUE" && market.timestamp
+        ? recordedNearFuturesVwap(market.vwap, market.vwapSource, near, market.timestamp) : null,
       futureOi: near ? finiteOrNull(near.oi) : null,
       futureOiChange: null, // never synthesize a delta without a verified prior observation
       futureVolume: near ? finiteOrNull(near.volume) : null,

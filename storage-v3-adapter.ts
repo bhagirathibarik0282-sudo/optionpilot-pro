@@ -1,3 +1,4 @@
+import { recordedNearFuturesVwap } from './futures-vwap-acceptance.js';
 import { persistStorageV3Minute, minuteBucketUtcIso, type StorageV3Symbol, type StorageV3WriteResult } from "./storage-v3-writer.js";
 import type { MarketSnapshot1mRow, OptionSnapshot1mRow, ChainState1mRow } from "./db.js";
 import { openingGapPercent } from "./market-snapshot-semantics.js";
@@ -34,6 +35,8 @@ type ExpiryLike = {
 };
 
 type FutureLike = {
+  label?: string;
+  tradingsymbol?: string | null;
   ltp?: Numeric;
   oi?: Numeric;
   volume?: Numeric;
@@ -49,6 +52,7 @@ export type ExistingMarketSnapshotLike = {
   dayLow?: Numeric;
   pdcClose?: Numeric;
   vwap?: Numeric;
+  vwapSource?: string | null;
   pdh?: Numeric;
   pdl?: Numeric;
   vix?: Numeric;
@@ -262,7 +266,8 @@ export async function persistStorageV3FromExistingSnapshot(
     pdl: finite(market.pdl),
     gapPercent: openingGapPercent(market.dayOpen, pdc),
     futureLtp: finite(future?.ltp),
-    futureVwap: null,
+    futureVwap: market.timestamp
+      ? recordedNearFuturesVwap(finite(market.vwap), market.vwapSource, future ? { ...future, ltp: finite(future.ltp) } : undefined, market.timestamp) : null,
     futureOi: finite(future?.oi),
     futureOiChange: null,
     futureVolume: finite(future?.volume),

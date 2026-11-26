@@ -54,11 +54,21 @@ export async function reconcileDashboardLiveRuntime(force=false){
    onTicks:(ticks,receivedAt)=>{if(attempt===generation)target.ingest(ticks,receivedAt);},
    onState:next=>{if(attempt===generation)state=next;}});
   const sessionToken=credential;
+  const nearestResearch=new Set(['NIFTY','SENSEX','BANKNIFTY'].flatMap(symbol=>{
+   const expiry=inventory.entries.filter(e=>e.role==='OPTION'&&e.symbol===symbol&&e.expiry).map(e=>e.expiry!).sort()[0];
+   return expiry?[symbol+'|'+expiry]:[];
+  }));
+  const frozenResearch=new Map<string,{cycleAt:string;checkedAt:number;rows:ReturnType<DashboardLiveStore['readPcrResearchRows']>}>();
   pcrSampler=new DashboardPcrSampler(inventory,{
    nearestPriority:true,
    now:()=>Date.now(),active:()=>attempt===generation&&enabled()&&state==='OPEN'&&isIndianEquityMarketOpenAt(new Date()),
    wait:ms=>new Promise(resolve=>setTimeout(resolve,ms)),
    readSpot:symbol=>target.spotQuote(symbol,Date.now()),
+   onExpiryComplete:(identity,cycleAt,checkedAt)=>{
+    if(attempt!==generation||state!=='OPEN'||!nearestResearch.has(identity))return;
+    const [symbol,expiry]=identity.split('|');
+    frozenResearch.set(identity,{cycleAt,checkedAt,rows:target.readPcrResearchRows(symbol,expiry)});
+   },
    fetchQuotes:async keys=>{
     const params=new URLSearchParams();for(const key of keys)params.append('i',key);
     const response=await fetch('https://api.kite.trade/quote?'+params,{headers:{'X-Kite-Version':'3',Authorization:'token '+apiKey+':'+sessionToken},signal:AbortSignal.timeout(8000)});
@@ -79,12 +89,13 @@ export async function reconcileDashboardLiveRuntime(force=false){
        if(!expiry)continue;
        const rest=pcrSampler.readAudit(symbol,expiry);
        if(!rest||rest.cycleStartedAt!==cycleAt){rows.push({identity:symbol+'|'+expiry,state:'REST_AUDIT_UNAVAILABLE'});continue;}
-       const group=options.filter(e=>e.expiry===expiry);
-       rows.push({identity:symbol+'|'+expiry,restCheckedAt:rest.checkedAt,...comparePcrCaches(group,rest.rows,target.readPcrResearchRows(symbol,expiry),date,now)});
+       const identity=symbol+'|'+expiry,group=options.filter(e=>e.expiry===expiry),frozen=frozenResearch.get(identity);
+       if(!frozen||frozen.cycleAt!==cycleAt||frozen.checkedAt!==Date.parse(rest.checkedAt)){rows.push({identity,state:'EXPIRY_CLOCK_EVIDENCE_UNAVAILABLE'});continue;}
+       rows.push({identity,restCheckedAt:rest.checkedAt,comparisonAt:new Date(frozen.checkedAt).toISOString(),comparisonDelayMs:now-frozen.checkedAt,...comparePcrCaches(group,rest.rows,frozen.rows,date,frozen.checkedAt)});
       }
       console.info('[DASHBOARD_PCR_HYBRID_RESEARCH] '+JSON.stringify({checkedAt:new Date(now).toISOString(),cycleAt,researchOnly:true,extraBrokerRequests:0,rows}));
      }
-    }catch{/* Research telemetry must never interfere with the live recorder. */}
+    }catch{/* Research telemetry must never interfere with the live recorder. */}finally{frozenResearch.clear();}
    },onDiagnostic:summary=>console.info('[DASHBOARD_LIVE_PCR_DIAGNOSTIC] '+JSON.stringify(summary))
   });
   socket.connect();

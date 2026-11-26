@@ -2,6 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';import { runInNewContext } from 'node:vm';import { transformSync } from 'esbuild';
 import { isIndianEquityMarketOpenAt,indianTradingDateAt,indianEquityMarketPhaseAt } from '../market-session-calendar.js';
 import { createParticipationMinuteRecorder } from '../participation-minute-recorder.js';
+import { createKiteQuoteLimiter } from '../kite-quote-request.js';
 const source=readFileSync(new URL('../dashboard-live-runtime.ts',import.meta.url),'utf8').replace(/^import .*$/gm,'').replace(/^export /gm,'');
 const code=transformSync(source,{loader:'ts'}).code;
 function harness(at='2026-10-19T04:00:00Z'){
@@ -11,6 +12,7 @@ function harness(at='2026-10-19T04:00:00Z'){
  class Socket{lastActivityAt=now;disconnected=false;constructor(public config:any){sockets.push(this);}connect(){this.config.onState('OPEN');}disconnect(){this.disconnected=true;}}
  class Sampler{constructor(_inventory:any,public deps:any){samplers.push(this);}read(){return null;}readAudit(){return {fixture:true};}tick(){}version(){return 0;}}
  const context:any={Date:Clock,process:{env:{DASHBOARD_LIVE_ENABLED:'true',KITE_API_KEY:'fixture',NODE_ENV:'production'}},
+  requestKiteQuote:createKiteQuoteLimiter({now:Clock.now,wait:async ms=>{now+=ms;}}),
   DashboardLiveStore:Store,KiteWebSocketTransport:Socket,DashboardPcrSampler:Sampler,QUOTE_SYMBOLS:[],
   createParticipationMinuteRecorder,tickTelegramLadderShadow:async()=>{},dbSaveParticipationMinuteOnce:async()=>{throw Error('Unexpected participation DB write in recovery tests');},
   buildDashboardLiveInventory:()=>({date:indianTradingDateAt(new Clock()),entries:[{token:1}]}),

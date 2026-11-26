@@ -104,12 +104,35 @@ body{font-size:18px}main,#observations-view{width:100%;max-width:none;margin:0;p
 #mb-watch-custom{margin:8px 0;padding:8px;border:1px solid #425252;border-radius:8px}
 #mb-watch-custom label{display:inline-flex;align-items:center;gap:4px;margin:2px 8px 4px 0}
 #market-book #mb-watch-custom input{width:auto;min-width:0;min-height:24px;margin:0}
-@media(max-width:480px){#mb-live-watch .mb-controls{grid-template-columns:repeat(2,minmax(0,1fr))}#market-book .mb-watch-scroll th,#market-book .mb-watch-scroll td{padding-inline:4px}}
-#market-book .mb-watch-scroll{max-height:24rem;overflow:auto}
-#market-book .mb-watch-scroll th,#market-book .mb-watch-scroll td{white-space:nowrap;vertical-align:top}
-#market-book .mb-watch-scroll thead th{position:sticky;top:0;z-index:1;background:#172335}
-#market-book .mb-watch-scroll td small{display:block}
+#os-screen-detail #mb-live-watch>summary{display:none}
+#mb-live-watch .mb-watch-scroll{max-height:24rem;overflow:auto}
+#mb-live-watch .mb-watch-scroll table{width:100%;font-family:system-ui,sans-serif;font-variant-numeric:tabular-nums}
+#mb-live-watch .mb-watch-scroll :is(th,td){white-space:normal;vertical-align:top}
+#mb-live-watch .mb-watch-scroll thead th{position:sticky;top:0;z-index:1;background:#172335}
+#market-book #mb-live-watch .mb-watch-scroll td small{display:block;font-size:15px!important;line-height:1.25!important;color:#d5e4ed}
+#market-book #mb-live-watch .mb-watch-scroll small.mb-watch-metric{font-size:16px!important;font-weight:650;color:#f1f8fc}
+body[data-op-reading=large] #market-book #mb-live-watch .mb-watch-scroll td small{font-size:18px!important}
+#mb-live-watch .mb-watch-expiry{display:inline-block;white-space:nowrap;color:#c0d5e0;font-size:.94em;font-weight:500}
+#mb-live-watch .mb-watch-scroll .mb-watch-delta{font-weight:650}
+#market-book #mb-live-watch .mb-watch-scroll td .mb-watch-delta[data-move=up]{color:#8df2b3}
+#market-book #mb-live-watch .mb-watch-scroll td .mb-watch-delta[data-move=down]{color:#ff9baa}
 .mb-watch-mobile-label{display:none}
+@media(max-width:800px),(pointer:coarse){
+ #mb-live-watch .mb-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 8px;margin:6px 0}
+ #mb-live-watch .mb-controls label{font-size:15px;line-height:1.25}
+ #mb-live-watch .mb-controls label,#mb-live-watch .mb-controls :is(select,input){min-width:0;width:100%}
+ #mb-live-watch .mb-controls select{font-size:16px;min-height:44px;margin:0}
+ #mb-live-watch #mb-watch-status{margin:6px 0;font-size:15px;line-height:1.35;overflow-wrap:anywhere}
+ #mb-live-watch .mb-watch-scroll{max-height:min(60dvh,32rem);padding:0}
+ #mb-live-watch .mb-watch-scroll :is(table,tbody){display:block;width:100%;min-width:0;border-spacing:0}
+ #mb-live-watch .mb-watch-scroll thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ #mb-live-watch .mb-watch-scroll tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;padding:0;margin:0 0 6px;border:1px solid #354d60;border-radius:8px;background:#253a4a;overflow:hidden}
+ #mb-live-watch .mb-watch-scroll tbody :is(th,td){display:block;min-width:0;width:auto;margin:0;border:0;white-space:normal;text-align:left;overflow-wrap:anywhere}
+ #mb-live-watch .mb-watch-scroll tbody th{grid-column:1/-1;padding:3px 8px;background:#19374a;color:#c2edf5;font-size:16px;font-weight:700}
+ #mb-live-watch .mb-watch-scroll tbody td{padding:5px 8px;background:#0b1a28}
+ #mb-live-watch .mb-watch-scroll tbody td:last-child:nth-of-type(odd){grid-column:1/-1}
+ #mb-live-watch .mb-watch-mobile-label{display:block;color:#9ee4ef;font-size:15px;line-height:1.25;margin:0 0 2px}
+}
 #mb-watch-participation:not([hidden]){margin:6px 0 8px;font-size:.84rem}
 #mb-watch-participation .mb-watch-breadth{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;column-gap:8px;color:#b9cedb;margin-bottom:4px}
 #mb-watch-participation .mb-watch-instruments{display:flex;flex-wrap:wrap;gap:3px}
@@ -122,7 +145,6 @@ body{font-size:18px}main,#observations-view{width:100%;max-width:none;margin:0;p
 @media(max-width:540px){
  #mb-watch-participation .mb-watch-instrument{flex-basis:97px;padding:3px 5px;font-size:.76rem}
 }
-@media(max-width:800px),(pointer:coarse){.mb-watch-mobile-label{display:block;color:#8fe2ef;margin-bottom:3px}}
 #market-book .mb-vix-layout{max-width:100%;min-width:0}
 `;
 
@@ -406,15 +428,25 @@ export function installMarketBook(api:any) {
   const isLoadingMinute=(saved:WatchBackfill|undefined,bucket:number)=>
    !isReplay&&!!saved?.pending&&!saved.error&&saved.through===undefined&&bucket<(saved.loadedFrom??watchLatest);
   const compact=indexFields.length===1&&indexFields[0]==='spot';
-  const cell=(m:typeof multis[number],bucket:number)=>{
+  const delta=(current:number|null,prior:number|null,decimals:number,priorBucket:number)=>{
+   if(current===null||prior===null||priorBucket<0)return '';
+   const change=Number((current-prior).toFixed(decimals));
+   if(!change)return '';
+   const up=change>0,description=(up?'Up':'Down')+' vs '+watchMinute(priorBucket)+' IST';
+   return '<small class="mb-watch-delta" data-move="'+(up?'up':'down')+'" title="'+description+'">'+
+    (up?'↑ +':'↓ −')+Math.abs(change).toFixed(decimals)+'</small>';
+  };
+  const cell=(m:typeof multis[number],bucket:number,priorBucket:number)=>{
    const values=watchValues(m.archive,m.live,m.oi,bucket),previous=watchValues(m.archive,m.live,m.oi,bucket-1);
+   const comparison=priorBucket===bucket-1?previous:watchValues(m.archive,m.live,m.oi,priorBucket);
+   const sameExpiry=!!values.expiry&&values.expiry===comparison.expiry;
    const live=m.live?.get(watchMinute(bucket)),recorded=m.archive.get(bucket)??m.oi?.get(bucket);
    const reported=values.pcr===null?live?.reported:undefined;
    const pending=isLoadingMinute(m.saved,bucket);
-   const renderMetric=(label:string,value:string,fromLive:boolean)=>{
+   const renderMetric=(label:string,value:string,fromLive:boolean,expiry?:string|null)=>{
     const source=isReplay||value==='Gap'?'':fromLive?' · Live':' · Recorded';
     if(value==='Gap'&&pending)value='Loading…';
-    return '<small title="'+label+source+'">'+(compact?'':label+' ')+value+'</small>';
+    return '<small title="'+label+source+'"'+(value==='Gap'||value==='Loading…'?'':' class="mb-watch-metric"')+'>'+(compact?'':label+' ')+value+(expiry?' <span class="mb-watch-expiry">· '+esc(expiry)+'</span>':'')+'</small>';
    };
    const movement=(current:number|null,prior:number|null)=>{
     const same=values.expiry&&previous.expiry===values.expiry;
@@ -429,10 +461,10 @@ export function installMarketBook(api:any) {
     values.spot!<low&&previous.spot!>=low?'↓ PDL '+low:'—'):'Gap';
    const full=m.full.get(bucket),band=m.band.get(bucket);
    const fields:Record<string,string>={
-    spot:renderMetric('Spot',format(values.spot,2),live?.spot!=null),
-    pcr:reported?renderMetric('PCR',reported.value.toFixed(6)+' · '+reported.expiry,true)+
+    spot:renderMetric('Spot',format(values.spot,2),live?.spot!=null)+delta(values.spot,comparison.spot,2,priorBucket),
+    pcr:reported?renderMetric('PCR',reported.value.toFixed(6),true,reported.expiry)+
      '<small>Reported · mixed times</small>':
-     renderMetric('PCR',format(values.pcr,6)+(values.pcr!==null&&values.expiry?' · '+values.expiry:''),live?.pcr!=null),
+     renderMetric('PCR',format(values.pcr,6),live?.pcr!=null,values.pcr===null?null:values.expiry)+(sameExpiry?delta(values.pcr,comparison.pcr,4,priorBucket):''),
     ceOi:renderMetric(isShared?'Full CE OI':'CE OI',format(isShared?full?.ceOi??null:values.ceOi,0),live?.ceOi!=null),
     peOi:renderMetric(isShared?'Full PE OI':'PE OI',format(isShared?full?.peOi??null:values.peOi,0),live?.peOi!=null),
     bandPcr:renderMetric('±7 PCR',format(band?.pcr??null,6),false),
@@ -441,16 +473,18 @@ export function installMarketBook(api:any) {
     walls:renderMetric('CE wall',movement(values.ceWall,previous.ceWall),live?.ceWall!=null)+renderMetric('PE wall',movement(values.peWall,previous.peWall),live?.peWall!=null),
     levels:renderMetric('Spot break',level,live?.spot!=null),
    };
-   const source=isReplay?'':live&&recorded?'Live / Recorded':live?'Live':recorded?'Recorded':'';
+   const source=isReplay||!recorded?'':live?'Live / Recorded':'Recorded';
    const fullEvidence=full&&indexFields.some((field:string)=>['pcr','ceOi','peOi'].includes(field))?'<small>Full sample PCR '+format(full.pcr,6)+' · '+esc(full.expiry)+' · source '+watchStamp(watchTime(full.sourceAt)).slice(11,19)+' · stored '+watchStamp(watchTime(full.recordedAt)).slice(11,19)+' IST</small>':'';
    return '<td>'+mobileLabel(m.index)+indexFields.map((field:string)=>fields[field]??'').join('')+fullEvidence+(source?'<small class="mb-note">'+source+'</small>':'')+'</td>';
   };
+  const vixAt=(b:number)=>[...new Set(multis.map(m=>watchValues(m.archive,m.live,m.oi,b).vix).filter(value=>value!==null))];
   const interval=Number($('mb-watch-interval')?.value)||1,rows:string[]=[];
   for(let first=0;metrics.length&&first<=end;first+=interval){
    const bucket=Math.min(first+interval-1,end),minute=watchMinute(bucket);
-   const vix=showVix?[...new Set(multis.map(m=>watchValues(m.archive,m.live,m.oi,bucket).vix).filter(value=>value!==null))]:[];
-   rows.push('<tr><th scope="row">'+minute+'</th>'+(indexFields.length?multis.map(m=>cell(m,bucket)).join(''):'')+
-    (showVix?'<td>'+mobileLabel('India VIX')+(vix.length===1?format(vix[0],2):vix.length?'Mismatch':multis.some(m=>isLoadingMinute(m.saved,bucket))?'Loading…':'Gap')+'</td>':'')+
+   const priorBucket=first-1;
+   const vix=showVix?vixAt(bucket):[],priorVix=showVix&&priorBucket>=0?vixAt(priorBucket):[];
+   rows.push('<tr><th scope="row">'+minute+'</th>'+(indexFields.length?multis.map(m=>cell(m,bucket,priorBucket)).join(''):'')+
+    (showVix?'<td>'+mobileLabel('India VIX')+(vix.length===1?'<small class="mb-watch-metric">'+format(vix[0],2)+'</small>'+delta(vix[0],priorVix.length===1?priorVix[0]:null,2,priorBucket):vix.length?'Mismatch':multis.some(m=>isLoadingMinute(m.saved,bucket))?'Loading…':'Gap')+'</td>':'')+
     (sector?'<td>'+mobileLabel('Sector movers')+esc((isReplay?undefined:liveSectors.get(bucket))??sectorStatus?.rows?.get(bucket)??'Gap')+'</td>':'')+'</tr>');
   }
   const html=(isReplay?rows:rows.reverse()).join('');

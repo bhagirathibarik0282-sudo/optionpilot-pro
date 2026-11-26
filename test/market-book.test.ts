@@ -500,6 +500,8 @@ test('Watch replay aligns indices, exposes a custom metric selection and preserv
  seek.value='1';seek.oninput();await new Promise(resolve=>setImmediate(resolve));
  const row=body.innerHTML.split('09:16')[1];
  assert.match(row,/22010\.00.*PCR 1\.000000.*CE OI Gap.*PE OI Gap.*22100 → 22200.*↑ PDH 22005/);
+ assert.match(row,/data-move="up" title="Up vs 09:15 IST">↑ [+]10[.]00/);
+ assert.equal((row.match(/mb-watch-delta/g)||[]).length,2,'a missing comparison does not create a move');
  assert.match(row,/Spot Gap.*42010\.00.*PCR Gap.*14\.00.*Bank \+1\.00%/);
  assert.doesNotMatch(body.innerHTML,/09:17/);
  seek.value='3';seek.oninput();

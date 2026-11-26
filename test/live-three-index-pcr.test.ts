@@ -96,7 +96,7 @@ test('actual serialized live event updates all three PCR values and revokes them
  nodes.get('mb-watch-metrics').value='pcr';
  watch.ontoggle();
  assert.match(watchHead.innerHTML,/>NIFTY<.*>BANKNIFTY<.*>SENSEX</);
- assert.match(watchBody.innerHTML,/<th scope="row">09:31<\/th>.*?PCR 1\.100000 · 2026-10-20.*?PCR 1\.500000.*?PCR 1\.300000/);
+ assert.match(watchBody.innerHTML,/<th scope="row">09:31<\/th>.*?PCR 1\.100000 <span class="mb-watch-expiry">· 2026-10-20.*?PCR 1\.500000.*?PCR 1\.300000/);
 
  const later=fixture(120000);
  later.pcrDisplay.NIFTY.sourceMinAt=iso(start+119000);

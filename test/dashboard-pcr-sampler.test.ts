@@ -388,3 +388,19 @@ test('research age variants cannot promote production 30-second PCR or trigger a
  assert.equal(diagnostics[0].rows[0].ageThresholdAudit.researchOnly,true);
  assert(!('ageThresholdAudit' in sampler.read('NIFTY','2026-10-19')!));
 });
+
+test('expiry research observer freezes early completion without publishing a failed cycle',async()=>{
+ const first=entries.map(e=>({...e,expiry:'2026-10-19'}));
+ const second:LiveEntry[]=Array.from({length:500},(_,i)=>({...entries[i%2],token:100+i,label:'LONGOPTION'+i,expiry:'2026-10-27',strike:24000+Math.floor(i/2)}));
+ const all=[...first,...second];let now=at,calls=0,fail=false;
+ const events:Array<{identity:string;cycleAt:string;checkedAt:number}>=[];const cycles:any[]=[];
+ const sampler=new DashboardPcrSampler({date,entries:all,missing:[],omittedExpiries:[]},{
+  now:()=>now,active:()=>true,wait:async ms=>{now+=ms;},
+  fetchQuotes:async keys=>{calls++;now+=2000;if(fail&&calls===2)throw Error('PCR_QUOTE_HTTP_429');return Object.fromEntries(keys.map(k=>{const e=all.find(e=>e.exchange+':'+e.label===k)!;return [k,{instrument_token:e.token,oi:100,timestamp:new Date(now).toISOString()}];}));},
+  onExpiryComplete:(identity,cycleAt,checkedAt)=>{events.push({identity,cycleAt,checkedAt});if(identity.endsWith('2026-10-27'))throw Error('research sink');},
+  onCycle:(_date,_cycle,results)=>cycles.push({at:now,states:[...results.values()].map(r=>r.fetchState)})
+ });
+ await sampler.tick();assert(calls>1);assert.equal(events.length,2);assert.equal(events[0].identity,'NIFTY|2026-10-19');assert(events[0].checkedAt<cycles[0].at);assert.equal(events[0].cycleAt,new Date(at).toISOString());assert(cycles[0].states.every((s:string)=>s==='OK'));
+ now=at+60000;calls=0;fail=true;events.length=0;await sampler.tick();
+ assert.equal(events.length,1);assert.equal(events[0].cycleAt,new Date(at+60000).toISOString());assert(cycles[1].states.every((s:string)=>s==='RATE_LIMITED'));assert.equal(sampler.readAudit('NIFTY','2026-10-19'),null);
+});

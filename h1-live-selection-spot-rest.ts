@@ -1,3 +1,4 @@
+import { requestKiteQuote } from './kite-quote-request.js';
 import type { KiteInstrumentMasterRow } from "./kite-immediate-registry-builder.js";
 import type { RecorderSymbol } from "./option-recorder-shadow.js";
 
@@ -73,10 +74,12 @@ export async function fetchH1LiveSelectionSpots(request: H1LiveSelectionSpotRequ
   for (const x of selected) params.append("i", x.key);
   let response: Response;
   try {
-    response = await (request.fetchImpl ?? fetch)(`https://api.kite.trade/quote?${params.toString()}`, {
+    const send = () => (request.fetchImpl ?? fetch)(`https://api.kite.trade/quote?${params.toString()}`, {
       method:"GET",
       headers:{ "X-Kite-Version":"3", Authorization:`token ${apiKey}:${accessToken}`, Accept:"application/json" },
+      signal: AbortSignal.timeout(8000),
     });
+    response = await (request.fetchImpl ? send() : requestKiteQuote(send));
   } catch {
     return base(false, [], ["KITE_SELECTION_SPOT_FETCH_FAILED"]);
   }

@@ -292,12 +292,26 @@ export function installMarketBook(api:any) {
   }
   return new Map([...latest].map(([bucket,{value}])=>[bucket,value]));
  };
+ // The archive shares its two read slots with replay windows. Respect its retry
+ // interval for short bursts while keeping the same overall request deadline.
+ const fetchWatchHistory=async (url:string)=>{
+  const signal=AbortSignal.timeout(15000);
+  for(let attempt=0;;attempt++){
+   const response=await fetch(url,{cache:'no-store',signal});
+   if(response.status!==429||attempt===3)return response;
+   const hint=response.headers.get('Retry-After');
+   if(!hint||!/^\d+$/.test(hint)||Number(hint)>5)return response;
+   await response.body?.cancel().catch(()=>{});
+   await new Promise<void>(resolve=>setTimeout(resolve,Math.max(2,Number(hint))*1000));
+   signal.throwIfAborted();
+  }
+ };
  const loadWatchSectors=(date:string,live:boolean,participation:boolean)=>{
   if(!date||typeof fetch==='undefined'||(!participation&&!requestedWatchMetrics().includes('sector')))return;
   const saved=sectorCache.get(date);
   if(saved&&(!saved.loadedAt||!live||Date.now()-saved.loadedAt<180000))return;
   sectorCache.set(date,{rows:saved?.rows,snapshots:saved?.snapshots});
-  void fetch('/api/research/background-quotes/history?date='+encodeURIComponent(date),{cache:'no-store',signal:AbortSignal.timeout(15000)})
+  void fetchWatchHistory('/api/research/background-quotes/history?date='+encodeURIComponent(date))
    .then(async response=>{if(!response.ok)throw Error('Sector history unavailable');return response.json();})
    .then(body=>{
     if(body.date!==date||!Array.isArray(body.snapshots)||body.snapshots.length>256)throw Error('Invalid sector history');
@@ -313,7 +327,7 @@ export function installMarketBook(api:any) {
   const saved=oiCache.get(date);
   if(saved&&(!saved.loadedAt||!refresh||Date.now()-saved.loadedAt<180000))return;
   oiCache.set(date,{rows:saved?.rows,raw:saved?.raw});
-  void fetch('/api/research/dashboard-watch/oi-history?date='+encodeURIComponent(date),{cache:'no-store',signal:AbortSignal.timeout(15000)})
+  void fetchWatchHistory('/api/research/dashboard-watch/oi-history?date='+encodeURIComponent(date))
    .then(async response=>{if(!response.ok)throw Error('OI history unavailable');return response.json();})
    .then(body=>{
     if(body.date!==date||!Array.isArray(body.rows)||body.rows.length>1128)throw Error('Invalid OI history');
@@ -653,7 +667,7 @@ export function installMarketBook(api:any) {
   const requested=api.getState().date,requestedAsOf=models[symbol]?.spot?.at;
   if(typeof fetch==='undefined'||(quoteHistory.loading&&quoteHistory.date===requested)||!/^\d{4}-\d{2}-\d{2}$/.test(requested))return;
   const generation=++historyGeneration;quoteHistory={date:requested,snapshots:[],loading:true,error:false,truncated:false};render();
-  try{const response=await fetch('/api/research/background-quotes/history?date='+encodeURIComponent(requested),{cache:'no-store',signal:AbortSignal.timeout(15000)});if(!response.ok)throw new Error('unavailable');const body=await response.json();if(body.date!==requested||!Array.isArray(body.snapshots)||body.snapshots.length>256)throw new Error('invalid');if(generation===historyGeneration&&api.getState().date===requested)quoteHistory={...body,loading:false,error:false,loadedAt:Date.now(),asOf:requestedAsOf};}
+  try{const response=await fetchWatchHistory('/api/research/background-quotes/history?date='+encodeURIComponent(requested));if(!response.ok)throw new Error('unavailable');const body=await response.json();if(body.date!==requested||!Array.isArray(body.snapshots)||body.snapshots.length>256)throw new Error('invalid');if(generation===historyGeneration&&api.getState().date===requested)quoteHistory={...body,loading:false,error:false,loadedAt:Date.now(),asOf:requestedAsOf};}
   catch{if(generation===historyGeneration)quoteHistory={date:requested,snapshots:[],loading:false,error:true,truncated:false,loadedAt:Date.now(),asOf:requestedAsOf};}
   finally{if(generation===historyGeneration){quoteHistory.loading=false;render();}}
  };

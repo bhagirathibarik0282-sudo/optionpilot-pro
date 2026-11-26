@@ -6,6 +6,11 @@ on:
       - 'dashboard-pcr-hybrid-research.ts'
       - 'test/dashboard-pcr-hybrid-research.test.ts'
       - 'dashboard-pcr-sampler.ts'
+      - 'kite-quote-request.ts'
+      - 'test/kite-quote-request.test.ts'
+      - 'dashboard-background-quotes-runtime.ts'
+      - 'h1-live-selection-spot-rest.ts'
+      - 'market-book-view.ts'
       - 'test/dashboard-pcr-sampler.test.ts'
       - 'live-three-index-pcr.ts'
       - 'test/live-three-index-pcr.test.ts'
@@ -42,5 +47,5 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/dashboard-pcr-sampler.test.ts test/live-three-index-pcr.test.ts test/premium-pcr-panel.test.ts test/premium-recorded-workspace.test.ts test/one-shot-live-card.test.ts test/screen-overview-evidence.test.ts test/dashboard-live-view.test.ts test/dashboard-live-recovery.test.ts test/dashboard-live-feed.test.ts test/full-pcr-availability.test.ts test/pcr-historical-parity.test.ts test/pcr-contract-audit.test.ts test/dashboard-pcr-hybrid-research.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/kite-quote-request.test.ts test/dashboard-pcr-sampler.test.ts test/live-three-index-pcr.test.ts test/premium-pcr-panel.test.ts test/premium-recorded-workspace.test.ts test/one-shot-live-card.test.ts test/screen-overview-evidence.test.ts test/dashboard-live-view.test.ts test/dashboard-live-recovery.test.ts test/dashboard-live-feed.test.ts test/full-pcr-availability.test.ts test/pcr-historical-parity.test.ts test/pcr-contract-audit.test.ts test/dashboard-pcr-hybrid-research.test.ts
       - run: node scripts/optionpilot-guardrail-check.mjs

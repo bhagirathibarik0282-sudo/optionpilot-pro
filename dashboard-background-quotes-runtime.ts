@@ -1,3 +1,4 @@
+import { requestKiteQuote } from './kite-quote-request.js';
 import { dbQuerySafe } from './db.js';
 import { resolveKiteAuthoritySession } from './kite-session-authority.js';
 import { DashboardBackgroundQuoteCollector, backgroundQuoteFreshness, coalesceBackgroundQuoteReads, type BackgroundQuotes, type QuoteMap } from './dashboard-background-quotes.js';
@@ -11,8 +12,11 @@ const collector = new DashboardBackgroundQuoteCollector({
     if (!apiKey) throw new Error('KITE_NOT_CONFIGURED');
     const url = new URL('https://api.kite.trade/quote');
     symbols.forEach(symbol => url.searchParams.append('i', symbol));
-    const response = await fetch(url, { headers: { 'X-Kite-Version': '3', Authorization: `token ${apiKey}:${token}` }, signal: AbortSignal.timeout(15_000) });
-    if (!response.ok) throw new Error('QUOTE_REQUEST_FAILED');
+    const response = await requestKiteQuote(() => fetch(url, { headers: { 'X-Kite-Version': '3', Authorization: `token ${apiKey}:${token}` }, signal: AbortSignal.timeout(15_000) }));
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error('QUOTE_REQUEST_FAILED');
+    }
     const body = await response.json() as { status?: string; data?: QuoteMap };
     if (body.status !== 'success' || !body.data || typeof body.data !== 'object') throw new Error('QUOTE_RESPONSE_INVALID');
     return body.data;

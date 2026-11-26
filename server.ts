@@ -1,3 +1,4 @@
+import { requestKiteQuote } from './kite-quote-request.js';
 import { runScheduledMarketRefresh, scheduledMarketRefreshAllowed } from "./scheduled-market-refresh.js";
 import { findOrCreateArchiveDriveFolder } from './drive-archive-folder.js';
 import { checkDriveFilePermission } from './drive-permission-check.js';
@@ -5463,16 +5464,7 @@ function findOptionInstrument(
   return null;
 }
 
-// Fetch quote data from Kite using /quote endpoint
-// BUGFIX (2026-08-08, per user-supplied Haiku Verdict integration doc,
-// Step 1): Kite returns HTTP 429 ("Too many requests") when many
-// separate quote calls (spot, futures, options per expiry, per index —
-// 8+ call sites across NIFTY/BANKNIFTY/SENSEX) fire in quick succession
-// during one refresh cycle. Previously there was no retry, so a 429 on
-// any one call silently nulled that data slice (OI PCR, Volume PCR,
-// Max Pain, etc. intermittently going null, matching the reported
-// symptom). Now retries up to 2 times with a short backoff specifically
-// on 429, per the document's own "batch + 250ms delay + retry x2" spec.
+// All Kite REST quote starts, including retries, use the process-wide rate limit.
 async function fetchKiteQuote(
   accessToken: string,
   symbols: string[],
@@ -5488,24 +5480,19 @@ async function fetchKiteQuote(
 
     const url = `${KITE_API_BASE}/quote?${params.toString()}`;
 
-    const response = await fetch(url, {
+    const response = await requestKiteQuote(() => fetch(url, {
       method: "GET",
       headers: {
         "X-Kite-Version": "3",
         Authorization: `token ${KITE_API_KEY}:${accessToken}`,
       },
-    });
+      signal: AbortSignal.timeout(8000),
+    }), () => !isKiteBrokerSessionRejected(KITE_API_KEY, accessToken));
 
-    // Bug fix (2026-08-10, user-reported, verified against a full-day
-    // archive: SENSEX futures_ltp/futures_oi were blank in 21.4% of
-    // today's snapshots vs 0% for NIFTY/BankNifty). Root cause: this
-    // only retried on 429 -- any 5xx or network-level failure on the
-    // small, separate SENSEX futures quote call failed immediately
-    // with no retry, unlike the option-chain batching path which
-    // already had this resilience. Now retries 429 AND 5xx the same way.
-    if ((response.status === 429 || response.status >= 500) && retriesLeft > 0) {
-      const delayMs = 250 * (3 - retriesLeft); // 250ms, then 500ms
+    if (response.status >= 500 && retriesLeft > 0) {
+      const delayMs = 250 * (3 - retriesLeft);
       console.warn(`[KITE] HTTP ${response.status}, retrying in ${delayMs}ms (${retriesLeft} attempt(s) left) for ${symbols.length} symbols`);
+      await response.body?.cancel().catch(() => {});
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       return fetchKiteQuote(accessToken, symbols, retriesLeft - 1);
     }
@@ -5530,10 +5517,11 @@ async function fetchKiteQuote(
     console.error("[KITE] Quote returned non-success status", data);
     return null;
   } catch (err) {
-    // Same bug fix: network-level failures (timeout, connection reset,
-    // DNS blip) previously failed immediately too -- these are exactly
-    // the kind of transient error the archived data pointed to. Retry
-    // with the same backoff as the 429/5xx path above.
+    const message = err instanceof Error ? err.message : '';
+    if (message === 'KITE_QUOTE_QUEUE_FULL' || message === 'KITE_QUOTE_REQUEST_EXPIRED') {
+      console.warn('[KITE] Quote unavailable: ' + message);
+      return null;
+    }
     if (retriesLeft > 0) {
       const delayMs = 250 * (3 - retriesLeft);
       console.warn(`[KITE] Quote fetch threw (${err instanceof Error ? err.message : err}), retrying in ${delayMs}ms (${retriesLeft} attempt(s) left) for ${symbols.length} symbols`);
@@ -5552,7 +5540,6 @@ async function fetchKiteQuoteBatched(
 ): Promise<Record<string, any> | null> {
   const merged: Record<string, any> = {};
   for (let i = 0; i < symbols.length; i += batchSize) {
-    if (i > 0) await new Promise((resolve) => setTimeout(resolve, 250)); // spacing between batches, per Step 1 spec
     const quotes = await fetchKiteQuote(accessToken, symbols.slice(i, i + batchSize));
     if (!quotes) return null;
     Object.assign(merged, quotes);

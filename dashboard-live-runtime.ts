@@ -1,3 +1,4 @@
+import { requestKiteQuote } from './kite-quote-request.js';
 import { comparePcrCaches } from './dashboard-pcr-hybrid-research.js';
 import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
 import { deriveRestOiBandEvidence } from './dashboard-oi-rest-band-evidence.js';
@@ -71,9 +72,10 @@ export async function reconcileDashboardLiveRuntime(force=false){
    },
    fetchQuotes:async keys=>{
     const params=new URLSearchParams();for(const key of keys)params.append('i',key);
-    const response=await fetch('https://api.kite.trade/quote?'+params,{headers:{'X-Kite-Version':'3',Authorization:'token '+apiKey+':'+sessionToken},signal:AbortSignal.timeout(8000)});
+    const response=await requestKiteQuote(() => fetch('https://api.kite.trade/quote?'+params,{headers:{'X-Kite-Version':'3',Authorization:'token '+apiKey+':'+sessionToken},signal:AbortSignal.timeout(8000)}),
+     () => attempt===generation&&enabled()&&state==='OPEN'&&isIndianEquityMarketOpenAt(new Date()));
     if(response.status===401||response.status===403){markKiteBrokerSessionRejected(apiKey,sessionToken);if(attempt===generation)stop('KITE_SESSION_REQUIRED');}
-    if(!response.ok)throw Error('PCR_QUOTE_HTTP_'+response.status);const body=await response.json() as any;
+    if(!response.ok){await response.body?.cancel().catch(()=>{});throw Error('PCR_QUOTE_HTTP_'+response.status);}const body=await response.json() as any;
     if(body?.status!=='success'||!body.data||typeof body.data!=='object'||Array.isArray(body.data))throw Error('PCR_QUOTE_INVALID_RESPONSE');return body.data;
    },onCycle:(date,cycleAt,results)=>{
     const payload=dashboardWatchOiCycle(date,cycleAt,results);

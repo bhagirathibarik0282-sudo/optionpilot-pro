@@ -141,7 +141,35 @@ export function installRecordedReplay(api:any){
    const values=[['Spot',m.spot],['Full PCR',m.pcr],['VIX',m.vix]];
    let html='<article class="mb-box"><h3>'+s+(s==='BANKNIFTY'?' · monthly observation':'')+'</h3><div class="rr-values">'+values.map(([label,v]:any)=>'<div class="mb-reading-fact"><span>'+label+'</span><strong>'+exact(v)+'</strong><small>'+detail(v)+'</small></div>').join('')+'</div><p class="mb-note">PCR expiry '+esc(m.expiry||'Unavailable')+' · CE wall '+(m.callWall?.at&&Date.parse(m.callWall.at)===Date.parse(cursor!)?fmt(m.callWall.strike):'Unavailable at cursor')+' · PE wall '+(m.putWall?.at&&Date.parse(m.putWall.at)===Date.parse(cursor!)?fmt(m.putWall.strike):'Unavailable at cursor')+'</p><h4>Spot</h4>'+chart(m.spot.points,'#49f4ff',cursor!)+'<h4>Full PCR · separate scale</h4>'+chart(m.pcr.points,'#ffb58e',cursor!)+'<h4>India VIX</h4>'+chart(scoped.current[s].market.map((r:any)=>({at:r.minute_bucket,value:r.india_vix??null})),'#d8a6ff',cursor!)+'<p class="mb-note">Spot PDH / PDL '+fmt(m.spot.pdh)+' / '+fmt(m.spot.pdl)+' · Opening 15m sampled H/L '+fmt(m.spot.range?.high)+' / '+fmt(m.spot.range?.low)+'</p><p class="mb-note">Previous-session Fibonacci · '+fib(m.spot)+'</p>';
    if(s===symbol){html+='<p class="mb-note">Pinned '+esc(expiry)+' · strike '+esc(strike)+' · exact contracts only</p>';for(const [side,p] of [['CE',m.ce],['PE',m.pe]] as any){const identity=p.expiry===expiry&&p.strike===strike,atCursor=identity&&p.at&&Date.parse(p.at)===Date.parse(cursor!);html+='<h4>'+side+' ₹ '+(atCursor?fmt(p.value):'Unavailable at cursor')+'</h4><p class="mb-note">OI '+(atCursor?fmt(p.oi?.value):'Unavailable')+' · '+detail(p)+' · PDH '+(identity?fmt(p.pdh):'Unavailable')+' / PDL '+(identity?fmt(p.pdl):'Unavailable')+' · Opening 15m sampled H/L '+(identity?fmt(p.range?.high)+' / '+fmt(p.range?.low):'Unavailable')+'</p><p class="mb-note">Previous-session Fibonacci · '+(identity?fib(p):'Unavailable')+'</p>'+chart(identity?p.points:[],side==='CE'?'#70ff43':'#ff5369',cursor!);}}
-   return html+'</article>';});const premium=renderRecordedPremiumSession({symbol,date:state.date,cursor,strike,expiry,options:strict?scoped.current[symbol].options:source,market:scoped.current[symbol].market,cadenceMinutes:state.date>='2026-10-19'?1:3,sessionEnd:standardIndexObservationClose(state.date),scope:$('rr-premium-scope').value||'ALL',interval:$('rr-premium-interval').value||1});$('rr-output').innerHTML='<section class="mb-box"><h3>Full-session premium · 09:15 to EOD</h3>'+premium+'</section>'+'<p class="mb-note" data-op-explanation>All three indices share the cursor. Missing endpoints stay unavailable; each chart breaks across missing observations. Expiry / strike lists are session identity metadata.</p><div class="mb-grid">'+cards.join('')+'</div>';
+   return html+'</article>';});const trendEvidence=['NIFTY','SENSEX','BANKNIFTY'].map(s=>{
+   const at=Date.parse(cursor!);
+   const rows=(scoped.current[s]?.market||[]).filter((r:any)=>r.symbol===s&&r.truth_verdict==='TRUE'&&Date.parse(r.minute_bucket)===at);
+   const row=rows.length===1?rows[0]:null;
+   const n=(v:any)=>v!=null&&v!==''&&Number.isFinite(Number(v))?Number(v):null;
+   const spot=n(row?.spot_ltp),pdh=n(row?.pdh),pdl=n(row?.pdl);
+   const regime=spot===null||pdh===null||pdl===null||pdl<=0||pdh<=pdl?'Unavailable':spot>pdh?'Above PDH':spot<pdl?'Below PDL':'Inside previous-day range';
+   const chains=(scoped.current[s]?.chain||[]).filter((q:any)=>q.symbol===s&&q.truth_verdict==='TRUE'&&Date.parse(q.minute_bucket)===at);
+   const chosen=s===symbol?chains.filter((q:any)=>String(q.expiry).slice(0,10)===expiry):[];
+   const chain=chosen.length===1?chosen[0]:null;
+   const show=(v:any)=>n(v)===null?'Unavailable':fmt(n(v));
+   const future=n(row?.future_ltp),vwap=n(row?.future_vwap);
+   const basis=future!==null&&future>0&&vwap!==null&&vwap>0?future-vwap:null;
+   const premium=(side:string,when:number)=>{
+    if(s!==symbol||!expiry||!Number.isFinite(strike))return null;
+    const quotes=(scoped.current[s]?.options||[]).filter((q:any)=>q.symbol===s&&q.truth_verdict==='TRUE'&&String(q.expiry).slice(0,10)===expiry&&Number(q.strike)===strike&&q.option_type===side&&Date.parse(q.minute_bucket)===when);
+    const quote=quotes.length===1?quotes[0]:null;
+    const age=n(quote?.quote_age_seconds),stamp=Date.parse(quote?.quote_timestamp);
+    const eligible=quote?.validation_status==='RESEARCH_ELIGIBLE'&&age!==null&&age>=0&&age<=30&&Number.isFinite(stamp)&&new Date(stamp+19800000).toISOString().slice(0,10)===state.date;
+    const price=eligible?n(quote.ltp):null;
+    return price!==null&&price>0?price:null;
+   };
+   const ce=premium('CE',at),pe=premium('PE',at),cePrev=premium('CE',at-180000),pePrev=premium('PE',at-180000);
+   const ceDelta=ce===null||cePrev===null?null:ce-cePrev,peDelta=pe===null||pePrev===null?null:pe-pePrev;
+   const alignment='Not certified';
+   return '<tr><th scope="row">'+s+'</th>'+[show(spot),regime,show(chain?.full_chain_oi_pcr),show(chain?.band7_oi_pcr),show(chain?.call_wall_strike),show(chain?.put_wall_strike),show(basis),show(ceDelta),show(peDelta),alignment].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>';
+  }).join('');
+  const trendPanel='<section class="mb-box" id="rr-trend-evidence"><h3>Trend Catcher · recorded evidence</h3><p class="mb-note">Exact cursor · '+esc(time(cursor))+' IST · Range and positioning context; premium changes use the selected exact contract and exact 3m endpoints. Recorded futures VWAP is not independently source-certified here. Trend confirmation remains disabled pending source certification; recorded values are descriptive only.</p><div style="overflow-x:auto"><table><thead><tr><th>Index</th><th>Spot</th><th>PDH / PDL context</th><th>Full PCR</th><th>±7 PCR</th><th>CE wall</th><th>PE wall</th><th>Futures − recorded VWAP</th><th>CE Δ 3m</th><th>PE Δ 3m</th><th>Alignment evidence</th></tr></thead><tbody>'+trendEvidence+'</tbody></table></div></section>';
+  const premium=renderRecordedPremiumSession({symbol,date:state.date,cursor,strike,expiry,options:strict?scoped.current[symbol].options:source,market:scoped.current[symbol].market,cadenceMinutes:state.date>='2026-10-19'?1:3,sessionEnd:standardIndexObservationClose(state.date),scope:$('rr-premium-scope').value||'ALL',interval:$('rr-premium-interval').value||1});$('rr-output').innerHTML=trendPanel+'<section class="mb-box"><h3>Full-session premium · 09:15 to EOD</h3>'+premium+'</section>'+'<p class="mb-note" data-op-explanation>All three indices share the cursor. Missing endpoints stay unavailable; each chart breaks across missing observations. Expiry / strike lists are session identity metadata.</p><div class="mb-grid">'+cards.join('')+'</div>';
  }
  $('rr-play').onclick=()=>{if(playing){stop();render(true);return;}if(timeline.indexOf(cursor||'')>=timeline.length-1)cursor=timeline[0]||null;playing=true;$('rr-play').textContent='Pause';render(true);schedule();};
  $('rr-prev').onclick=()=>{stop();step(-1);};$('rr-next').onclick=()=>{stop();step(1);};$('rr-reset').onclick=()=>{stop();cursor=timeline[0]||null;render(true);};$('rr-seek').oninput=()=>{stop();cursor=timeline[Number($('rr-seek').value)]||null;render(true);};

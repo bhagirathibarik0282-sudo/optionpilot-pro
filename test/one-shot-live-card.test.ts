@@ -231,7 +231,7 @@ test('all three PCR cards distinguish complete full ratio, band and comparable a
  let html=h.el('os-pcr-strip').innerHTML;
  for(const symbol of ['NIFTY','SENSEX','BANKNIFTY'])assert(html.includes('data-pcr-index="'+symbol+'"'));
  assert.equal((html.match(/1\.2000/g)||[]).length,3);
- assert(html.includes('ATM ±7 band: —'));assert(html.includes('waiting for comparable snapshot'));
+ assert(html.includes('ATM ±7 PCR · 30s <strong>—</strong> · unavailable'));assert(html.includes('waiting for comparable snapshot'));
  h.advance(60000);h.newCycle();const p=h.payload();
  p.pcrDisplay.NIFTY.peTotal=130;p.pcrDisplay.NIFTY.fullPcr=1.3;
  p.pcrDisplay.SENSEX.peTotal=110;p.pcrDisplay.SENSEX.fullPcr=1.1;
@@ -416,6 +416,7 @@ test('reported full-chain PCR stays labelled apart from fresh values, charts and
   a.pcrSnapshot=raw;delete p.pcrDisplay[a.symbol];
  }
  h.send(p);const html=h.el('os-pcr-strip').innerHTML;
+ assert.equal((html.match(/30s Full PCR unavailable/g)||[]).length,3);
  const totals=h.el('os-wall-ladder').innerHTML;
  assert.equal((totals.match(/10,000<small>/g)||[]).length,3,'reported CE totals must reach front-table source');
  assert.equal((totals.match(/13,333<small>/g)||[]).length,3,'reported PE totals must reach front-table source');
@@ -427,6 +428,20 @@ test('reported full-chain PCR stays labelled apart from fresh values, charts and
  for(const a of p.snapshot.indices){a.pcrSnapshot.reportedPcr.peTotal=0;a.pcrSnapshot.reportedPcr.value=0;}
  h.advance(501);h.send(p);assert(h.el('os-pcr-strip').innerHTML.includes('0.0000'));assert.equal((h.el('os-wall-ladder').innerHTML.match(/<td>0<small>/g)||[]).length,3,'real zero PE total remains visible');
  h.send({connected:false,connectionState:'DISCONNECTED',snapshot:null});assert(!h.el('os-pcr-strip').innerHTML.includes('1.3333'));assert(!h.el('os-wall-ladder').innerHTML.includes('13,333'));assert(!h.el('os-wall-ladder').innerHTML.includes('10,000'));
+});
+
+test('verified ATM band stays visible when outer contracts block Full PCR',()=>{
+ const h=harness(),p=h.payload();
+ for(const a of p.snapshot.indices){
+  const raw:any=structuredClone(p.pcrDisplay[a.symbol]);
+  Object.assign(raw,{state:'INCOMPLETE',fetchState:'OK',reason:'STALE_OI_TIMESTAMPS',fullPcr:null});
+  Object.assign(raw.coverage,{complete:false,expected:32,freshOi:30,stale:2,missing:0,invalid:0});
+  raw.bandPcr={state:'COMPLETE',value:0.75,halfWidth:7,strikeCount:15,expected:30,freshOi:30,anchorStrike:24000,fromStrike:23650,toStrike:24350,ceTotal:200,peTotal:150,sourceMinAt:raw.checkedAt,sourceMaxAt:raw.checkedAt,anchorAt:raw.checkedAt};
+  a.pcrSnapshot=raw;delete p.pcrDisplay[a.symbol];
+ }
+ h.send(p);const html=h.el('os-pcr-strip').innerHTML;
+ assert.equal((html.match(/ATM ±7 PCR · 30s <strong>0[.]75<[/]strong> · 30[/]30 verified/g)||[]).length,3);
+ assert.equal((html.match(/UNAVAILABLE · Fresh Full PCR/g)||[]).length,3);
 });
 
 test('last-reported full PCR displays its earlier source date for all indices and never enters fresh charts',()=>{

@@ -188,7 +188,7 @@ test('a failed later quote batch revokes earlier completed PCR rather than commi
 });
 
 test('fresh 30-leg band survives stale outer OI; every inner identity and source clock remains mandatory',async()=>{
- const {deriveLiveThreeIndexPcr}=await import('../live-three-index-pcr.js');
+ const {deriveLiveThreeIndexPcr,renderLiveThreeIndexPcr}=await import('../live-three-index-pcr.js');
  const {es,qs,spot}=wideChain();qs[es[0].exchange+':'+es[0].label].timestamp=new Date(at-120000).toISOString();
  const measured=measurePcrSnapshot(es,qs,date,at,at,spot);
  assert.equal(measured.state,'INCOMPLETE');assert.equal(measured.fullPcr,null);assert.equal(measured.bandPcr.value,3);
@@ -196,6 +196,16 @@ test('fresh 30-leg band survives stale outer OI; every inner identity and source
  const read=(p:any)=>deriveLiveThreeIndexPcr(p).rows[0];
  assert.equal(read(payload).value,null);assert.equal(read(payload).bandValue,3);assert.equal(read(payload).direction,'WAIT');assert.equal(read(payload).current,null);
  for(const mutate of [(p:any)=>p.connected=false,(p:any)=>p.snapshot.indices[0].pcrSnapshot.fetchState='RATE_LIMITED',(p:any)=>p.snapshot.indices[0].pcrSnapshot.bandPcr.value=5,(p:any)=>p.snapshot.indices[0].pcrSnapshot.bandPcr.sourceMinAt=new Date(at-31000).toISOString(),(p:any)=>p.snapshot.indices[0].expiry='wrong',(p:any)=>p.snapshot.asOf=new Date(at-5000).toISOString()]){const p=structuredClone(payload);mutate(p);assert.equal(read(p).bandValue,null);}
+ const markup=renderLiveThreeIndexPcr(deriveLiveThreeIndexPcr(payload));
+ assert.match(markup,/data-pcr-metric="full"><strong>—<\/strong>/);
+ assert.match(markup,/data-pcr-metric="band"><strong>3\.0000<\/strong>/);
+ assert.match(markup,/30\/30 verified · 10:00:00 IST/);
+ const wrongExpiry=structuredClone(payload);
+ wrongExpiry.snapshot.indices[0].pcrSnapshot.expiry='2026-10-27';
+ assert.equal(read(wrongExpiry).bandValue,null);
+ const unstableAnchor=structuredClone(payload);
+ unstableAnchor.snapshot.indices[0].pcrSnapshot.bandPcr.anchorAt=new Date(at+5001).toISOString();
+ assert.equal(read(unstableAnchor).bandValue,null);
  const inner=es.find(e=>e.strike===23000&&e.side==='PE')!;
  for(const patch of [{timestamp:new Date(at-31000).toISOString()},{instrument_token:999},{oi:null}]){const bad=structuredClone(qs);Object.assign(bad[inner.exchange+':'+inner.label],patch);assert.equal(measurePcrSnapshot(es,bad,date,at,at,spot).bandPcr.value,null);}
  const bad=structuredClone(qs);delete bad[inner.exchange+':'+inner.label];assert.equal(measurePcrSnapshot(es,bad,date,at,at,spot).bandPcr.value,null);

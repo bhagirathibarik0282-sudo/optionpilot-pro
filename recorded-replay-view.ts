@@ -148,9 +148,13 @@ export function installRecordedReplay(api:any){
    const n=(v:any)=>v!=null&&v!==''&&Number.isFinite(Number(v))?Number(v):null;
    const spot=n(row?.spot_ltp),pdh=n(row?.pdh),pdl=n(row?.pdl);
    const regime=spot===null||pdh===null||pdl===null||pdl<=0||pdh<=pdl?'Unavailable':spot>pdh?'Above PDH':spot<pdl?'Below PDL':'Inside previous-day range';
-   return '<tr><th scope="row">'+s+'</th><td>'+esc(spot===null?'Unavailable':fmt(spot))+'</td><td>'+esc(regime)+'</td></tr>';
+   const chains=(scoped.current[s]?.chain||[]).filter((q:any)=>q.symbol===s&&q.truth_verdict==='TRUE'&&Date.parse(q.minute_bucket)===at);
+   const chosen=s===symbol?chains.filter((q:any)=>String(q.expiry).slice(0,10)===expiry):[];
+   const chain=chosen.length===1?chosen[0]:null;
+   const show=(v:any)=>n(v)===null?'Unavailable':fmt(n(v));
+   return '<tr><th scope="row">'+s+'</th>'+[show(spot),regime,show(chain?.full_chain_oi_pcr),show(chain?.band7_oi_pcr),show(chain?.call_wall_strike),show(chain?.put_wall_strike)].map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>';
   }).join('');
-  const trendPanel='<section class="mb-box" id="rr-trend-evidence"><h3>Trend Catcher · recorded evidence</h3><p class="mb-note">Exact cursor · '+esc(time(cursor))+' IST · range context only, not a confirmed trend or trade signal.</p><div style="overflow-x:auto"><table><thead><tr><th>Index</th><th>Spot</th><th>PDH / PDL context</th></tr></thead><tbody>'+trendEvidence+'</tbody></table></div></section>';
+  const trendPanel='<section class="mb-box" id="rr-trend-evidence"><h3>Trend Catcher · recorded evidence</h3><p class="mb-note">Exact cursor · '+esc(time(cursor))+' IST · range context and selected index/expiry positioning only, not a confirmed trend or trade signal.</p><div style="overflow-x:auto"><table><thead><tr><th>Index</th><th>Spot</th><th>PDH / PDL context</th><th>Full PCR</th><th>±7 PCR</th><th>CE wall</th><th>PE wall</th></tr></thead><tbody>'+trendEvidence+'</tbody></table></div></section>';
   const premium=renderRecordedPremiumSession({symbol,date:state.date,cursor,strike,expiry,options:strict?scoped.current[symbol].options:source,market:scoped.current[symbol].market,cadenceMinutes:state.date>='2026-10-19'?1:3,sessionEnd:standardIndexObservationClose(state.date),scope:$('rr-premium-scope').value||'ALL',interval:$('rr-premium-interval').value||1});$('rr-output').innerHTML=trendPanel+'<section class="mb-box"><h3>Full-session premium · 09:15 to EOD</h3>'+premium+'</section>'+'<p class="mb-note" data-op-explanation>All three indices share the cursor. Missing endpoints stay unavailable; each chart breaks across missing observations. Expiry / strike lists are session identity metadata.</p><div class="mb-grid">'+cards.join('')+'</div>';
  }
  $('rr-play').onclick=()=>{if(playing){stop();render(true);return;}if(timeline.indexOf(cursor||'')>=timeline.length-1)cursor=timeline[0]||null;playing=true;$('rr-play').textContent='Pause';render(true);schedule();};

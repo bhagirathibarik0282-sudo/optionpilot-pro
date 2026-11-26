@@ -591,8 +591,8 @@ export function installOneShotLiveCard(api:any){
    for(const r of optionRows)for(const side of ['CE','PE']){const q=r[side.toLowerCase()];if(valid(d,q,'OPTION',selected)&&q.identity.expiry===r.expiry&&q.identity.strike===r.strike&&q.identity.side===side){const key=selected+'|OPTION|'+q.identity.token+'|'+r.expiry+'|'+r.strike+'|'+side;sample(key,Date.parse(q.observedAt),q.price,Date.parse(q.receivedAt));if(n(q.oi)!==null&&q.oi>=0)sample(key+'|OI',Date.parse(q.observedAt),q.oi,Date.parse(q.receivedAt));}}
   }
   renderDte(d,optionRows);
-  const useRecorded=sourceMode==='RECORDED'||sourceMode==='AUTO'&&payload?.connectionState==='MARKET_CLOSED';
   const savedState=api.getState?.();
+  const useRecorded=sourceMode==='RECORDED'||sourceMode==='AUTO'&&(savedState?.recordedOnly===true||payload?.connectionState==='MARKET_CLOSED');
   if($('os-recorded-date')&&document.activeElement!==$('os-recorded-date')&&!loadBusy&&savedState?.date)$('os-recorded-date').value=savedState.date;
   write('os-reading-status',useRecorded?'RECORDED · '+esc(savedState?.date||'load a session')+(savedState?.loading?' · LOADING HISTORY':'')+' · radar / ladder / PCR / chart use saved observations. Other panels retain LIVE source gates.':live?'LIVE · fresh Kite observations · four-expiry workspace V2':'LIVE unavailable · '+esc(payload?.connectionState||'connecting')+' · choose Recorded for saved observations.');
   write('os-market-radar',symbols.map((symbol,i)=>{const a=live?indexRow(d,symbol):null,q=a?.spot,f=a?.future,ok=a&&valid(d,q,'SPOT',symbol),fo=a&&valid(d,f,'FUTURE',symbol),r=ok?refs(d,symbol,q):{pdh:null,pdl:null,pdc:null},v=pcr.rows.find((x:any)=>x.symbol===symbol),c=ok?change(d,q,'SPOT',symbol):null,e=breaks.get(symbol);

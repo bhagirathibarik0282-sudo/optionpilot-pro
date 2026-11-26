@@ -45,6 +45,7 @@ try {
    await watchDialog.locator('#os-screen-close').click();
    assert.equal(await watchDialog.isVisible(),false);
    assert.equal(await watchEntry.evaluate(el=>document.activeElement===el),true);
+   await page.locator('#ip-details').click();
    await page.locator('#rd-source-tables').click();
    await page.locator('#op-research-open-data').click({timeout:10000});
    assert.equal(await page.locator('#mb-tools').evaluate((n:any)=>n.open),true);

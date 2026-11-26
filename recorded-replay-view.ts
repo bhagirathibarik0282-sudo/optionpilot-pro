@@ -157,7 +157,10 @@ export function installRecordedReplay(api:any){
    const premium=(side:string,when:number)=>{
     if(s!==symbol||!expiry||!Number.isFinite(strike))return null;
     const quotes=(scoped.current[s]?.options||[]).filter((q:any)=>q.symbol===s&&q.truth_verdict==='TRUE'&&String(q.expiry).slice(0,10)===expiry&&Number(q.strike)===strike&&q.option_type===side&&Date.parse(q.minute_bucket)===when);
-    const price=quotes.length===1?n(quotes[0].ltp):null;
+    const quote=quotes.length===1?quotes[0]:null;
+    const age=n(quote?.quote_age_seconds),stamp=Date.parse(quote?.quote_timestamp);
+    const eligible=quote?.validation_status==='RESEARCH_ELIGIBLE'&&age!==null&&age>=0&&age<=30&&Number.isFinite(stamp)&&new Date(stamp+19800000).toISOString().slice(0,10)===state.date;
+    const price=eligible?n(quote.ltp):null;
     return price!==null&&price>0?price:null;
    };
    const ce=premium('CE',at),pe=premium('PE',at),cePrev=premium('CE',at-180000),pePrev=premium('PE',at-180000);

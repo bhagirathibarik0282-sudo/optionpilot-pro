@@ -20,14 +20,39 @@ export function adaptEventBuyerEod(eod:any,symbol:string,replay?:any){
  for(const p of responses)if(duplicate.has(p.version+'|'+p.memoryKey))delete availability.responses[p.memoryKey];
  const memory={ok:true,tradeDate:date,events,responses,availability};
  const validReplay=replay?.ok===true&&replay.request?.symbol===symbol&&replay.request?.tradeDate===date&&['market','options','chain'].every(k=>Array.isArray(replay[k]));
- const key=(r:any,kind:string)=>[r.symbol,stamp(r.minute_bucket),...(kind==='market'?[]:kind==='options'?[r.expiry,r.strike,r.option_type]:[r.expiry])].join('|');
- const same=(a:any,b:any,fields:string[])=>fields.every(f=>['backend_timestamp','quote_timestamp'].includes(f)?Number.isFinite(stamp(a[f]))&&stamp(a[f])===stamp(b[f]):a[f]===b[f]);
+ // The archive exports SQL DATE and BIGINT as JSON dates and numbers.
+ // The independent replay serializes SQL DATE at UTC midnight and BIGINT as text.
+ const expiryKey=(value:unknown)=>{
+  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}(?:T00:00:00(?:\.0+)?(?:Z|\+00:00))?$/.test(value))return null;
+  const date=value.slice(0,10),time=Date.parse(date+'T00:00:00Z');
+  return Number.isFinite(time)&&new Date(time).toISOString().slice(0,10)===date?date:null;
+ };
+ const oiKey=(value:unknown)=>{
+  if(typeof value==='number'&&Number.isSafeInteger(value)&&value>=0)return String(value);
+  return typeof value==='string'&&/^(0|[1-9]\d*)$/.test(value)?value:null;
+ };
+ const key=(r:any,kind:string)=>{
+  const minute=stamp(r.minute_bucket);
+  if(!Number.isFinite(minute))return null;
+  if(kind==='market')return JSON.stringify([r.symbol,minute]);
+  const expiry=expiryKey(r.expiry);
+  if(!expiry)return null;
+  return JSON.stringify([r.symbol,minute,expiry,...(kind==='options'?[r.strike,r.option_type]:[])]);
+ };
+ const same=(a:any,b:any,fields:string[])=>fields.every(f=>{
+  if(f==='oi'){
+   const count=oiKey(a[f]);
+   return count!==null?count===oiKey(b[f]):a[f]==null&&a[f]===b[f];
+  }
+  if(f==='backend_timestamp'||f==='quote_timestamp')return Number.isFinite(stamp(a[f]))&&stamp(a[f])===stamp(b[f]);
+  return a[f]===b[f];
+ });
  const match=(original:any[],kind:string,fields:string[])=>{
-  const index=new Map<string,any[]>();for(const r of original){const k=key(r,kind),a=index.get(k)||[];a.push(r);index.set(k,a);}
-  const refs=new Map<string,any[]>();if(validReplay)for(const r of replay[kind]){const k=key(r,kind),a=refs.get(k)||[];a.push(r);refs.set(k,a);}
-  return original.map(r=>{const k=key(r,kind),a=index.get(k),b=refs.get(k),v=b?.[0];
+  const index=new Map<string,any[]>();for(const r of original){const k=key(r,kind);if(k===null)continue;const a=index.get(k)||[];a.push(r);index.set(k,a);}
+  const refs=new Map<string,any[]>();if(validReplay)for(const r of replay[kind]){const k=key(r,kind);if(k===null)continue;const a=refs.get(k)||[];a.push(r);refs.set(k,a);}
+  return original.map(r=>{const k=key(r,kind),a=k===null?undefined:index.get(k),b=k===null?undefined:refs.get(k),v=b?.[0];
    const verified=a?.length===1&&b?.length===1&&v.truth_verdict==='TRUE'&&same(r,v,fields);
-   return {...r,truth_verdict:verified?'TRUE':'UNKNOWN',...(kind==='chain'?{full_pcr_source:verified&&typeof v.snapshot_id==='string'&&Number.isFinite(stamp(v.source_timestamp))&&['Exact archived full-chain source','Normalized full-chain source'].includes(v.full_pcr_source)?v.full_pcr_source:null,snapshot_id:verified?v.snapshot_id??null:null,source_timestamp:verified?v.source_timestamp??null:null}:{} )};
+   return {...r,truth_verdict:verified?'TRUE':'UNKNOWN',truth_marker_created_at:verified&&Number.isFinite(stamp(v.truth_marker_created_at))?v.truth_marker_created_at:null,...(kind==='chain'?{full_pcr_source:verified&&typeof v.snapshot_id==='string'&&Number.isFinite(stamp(v.source_timestamp))&&['Exact archived full-chain source','Normalized full-chain source'].includes(v.full_pcr_source)?v.full_pcr_source:null,snapshot_id:verified?v.snapshot_id??null:null,source_timestamp:verified?v.source_timestamp??null:null}:{} )};
   });
  };
  const m=match(market,'market',['snapshot_id','backend_timestamp','spot_ltp','india_vix','calculation_version']);

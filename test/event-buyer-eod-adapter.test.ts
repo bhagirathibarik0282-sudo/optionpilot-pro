@@ -11,3 +11,14 @@ const replay={ok:true,request:{symbol,tradeDate:date},market:[{...m,truth_verdic
 test('EOD alone never promotes freshness or validation to recorder truth',()=>{const a=adaptEventBuyerEod(eod,symbol);assert.equal(a.recorded.ok,false);assert.equal(a.coverage.qualifiedMarketRows,0);assert.equal(a.memory.availability.events.E,new Date(at).toISOString());assert.equal(a.recorded.chain[0].full_pcr_source,null);});
 test('exact independent replay joins only matching rows, chain provenance stays missing',()=>{const a=adaptEventBuyerEod(eod,symbol,replay);assert.equal(a.coverage.qualifiedMarketRows,1);assert.equal(a.coverage.qualifiedOptionRows,1);assert.equal(a.coverage.explicitChainProvenance,0);assert.equal(adaptEventBuyerEod(eod,symbol,{...replay,options:[{...replay.options[0],ltp:101}]}).coverage.qualifiedOptionRows,0);assert.equal(adaptEventBuyerEod(eod,symbol,{...replay,market:[...replay.market,...replay.market]}).coverage.qualifiedMarketRows,0);});
 test('duplicate memory cannot supply storage provenance',()=>{const a=adaptEventBuyerEod({...eod,researchMemories:[...eod.researchMemories,...eod.researchMemories]},symbol);assert.equal(a.memory.availability.events.E,undefined);});
+
+test('matching SQL DATE and BIGINT serialized differently yields the same exact option identity',()=>{
+ const ref={...replay.options[0],expiry:o.expiry+'T00:00:00.000Z',oi:String(o.oi),truth_marker_created_at:at};
+ const inspect=(options:typeof ref[])=>adaptEventBuyerEod(eod,symbol,{...replay,options});
+ const result=inspect([ref]);
+ assert.equal(result.coverage.qualifiedOptionRows,1);
+ assert.equal(result.recorded.options[0].truth_marker_created_at,at);
+ assert.equal(inspect([{...ref,oi:'1001'}]).coverage.qualifiedOptionRows,0);
+ assert.equal(inspect([{...ref,expiry:o.expiry+'T01:00:00.000Z'}]).coverage.qualifiedOptionRows,0);
+ assert.equal(inspect([ref,{...ref,expiry:o.expiry}]).coverage.qualifiedOptionRows,0);
+});

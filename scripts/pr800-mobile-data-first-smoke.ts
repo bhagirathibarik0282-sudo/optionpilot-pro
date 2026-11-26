@@ -35,6 +35,19 @@ try{
    const response=await page.goto(base,{waitUntil:'domcontentloaded',timeout:20000});
    assert.equal(response?.status(),200);
    await page.locator('#rd-shell').waitFor({state:'visible',timeout:15000});
+   await page.locator('#ip-reference').waitFor({state:'visible',timeout:15000});
+   assert.equal(await page.locator('#ip-kpis .ip-tile').count(),5);
+   assert.equal(await page.locator('#ip-reference .ip-main > .ip-row').first().locator(':scope > .ip-panel').count(),3,'primary row contains three panels');
+   assert.equal(await page.locator('#ip-reference .ip-main > .ip-row').nth(1).locator(':scope > .ip-panel').count(),2,'lower research row contains two panels');
+   if(width>1150){
+    const bounds=await page.locator('#ip-reference .ip-main > .ip-row').first().locator(':scope > .ip-panel').evaluateAll(nodes=>nodes.map(n=>{const b=n.getBoundingClientRect();return {x:b.x,y:b.y,w:b.width};}));
+    assert(bounds[0].x<bounds[1].x&&bounds[1].x<bounds[2].x&&bounds.every(b=>Math.abs(b.y-bounds[0].y)<2),'desktop three-column placement');
+    assert(bounds[1].w>bounds[0].w*2&&bounds[1].w>bounds[2].w*2,'original wide center ladder');
+   }
+   assert.equal(await page.locator('#ip-reference').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(244, 247, 250)');
+   await page.locator('#ip-rank').click();await page.locator('#ip-strike').click();assert.equal(await page.locator('#ip-strike').getAttribute('aria-pressed'),'true');
+   await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-institutional-reference.png',fullPage:false,timeout:15000});
+   await page.locator('#ip-details').click();
    await page.locator('#rd-source-tabs [data-rd-source="RECORDED"]').click();
    assert.equal(await page.locator('#op-one-stop').getAttribute('data-os-source'),'RECORDED');
    await page.locator('#rd-source-tabs [data-rd-source="LIVE"]').click();

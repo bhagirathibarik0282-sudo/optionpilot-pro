@@ -60,6 +60,7 @@ try{
   const invalidCount=requests.length;await page.locator('#rag-now').click();assert.equal(requests.length,invalidCount);assert.equal(await page.locator('#rag-selection-details').getAttribute('open'),'');assert.match(await page.locator('#rag-status').innerText(),/09:15–15:30/);
   await page.locator('#rag-time').fill('09:15');await page.locator('#rag-selection-details > summary').click();await page.locator('#rag-history').click();assert.equal(requests.length,invalidCount);assert.equal(await page.locator('#rag-selection-details').getAttribute('open'),'');
   await page.goto(base+'/front',{waitUntil:'domcontentloaded'});await page.locator('#rd-shell').waitFor({state:'visible'});
+  await page.locator('#ip-details').click();
   await page.locator('#rd-source-tabs [data-rd-source="RECORDED"]').click();
   await page.evaluate(()=>{
    const target=document.getElementById('os-premium-table')!;

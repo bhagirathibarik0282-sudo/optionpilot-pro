@@ -34,6 +34,7 @@ try {
    await page.locator('#op-command-chapters [data-op-group]').first().waitFor({timeout:15000,state:'attached'});
    assert.equal(await page.locator('#op-command-chapters [data-op-group]').count(),6);
    assert.equal(await page.locator('#mb-chapter option').count(),6);
+   await page.locator('#ip-details').click();
    const watchEntry=page.getByRole('button',{name:'Watch · Live / Replay',exact:true});
    await watchEntry.click();
    const watchDialog=page.locator('#os-screen-detail');

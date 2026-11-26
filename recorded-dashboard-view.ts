@@ -41,7 +41,16 @@ export function installRecordedDashboard(){
  async function json(url:string,signal?:AbortSignal){
   const timeout=new AbortController(),id=setTimeout(()=>timeout.abort(),65000);
   const combined=signal?AbortSignal.any([signal,timeout.signal]):timeout.signal;
-  try{const response=await fetch(url,{signal:combined,cache:'no-store'}),result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||result.reason||'HTTP '+response.status);return result;}
+  try{for(let attempt=0;;attempt++){
+   const response=await fetch(url,{signal:combined,cache:'no-store'}),result=await response.json();
+   if(response.status===429&&result.error==='ARCHIVE_BUSY_RETRY'&&attempt<10){
+    const delay=Math.min(5000,Math.max(2000,(Number(response.headers.get('Retry-After'))||2)*1000));
+    await new Promise(resolve=>setTimeout(resolve,delay));
+    if(combined.aborted)throw new Error('Cancelled');
+    continue;
+   }
+   if(!response.ok||!result.ok)throw new Error(result.error||result.reason||'HTTP '+response.status);return result;
+  }}
   catch(error:any){if(combined.aborted)throw new Error(signal?.aborted?'Playback cancelled.':'Saved-data request timed out. Retry this day.');throw error;}
   finally{clearTimeout(id);}
  }

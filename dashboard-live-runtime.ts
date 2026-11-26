@@ -1,3 +1,4 @@
+import { comparePcrCaches } from './dashboard-pcr-hybrid-research.js';
 import { DashboardPcrSampler } from './dashboard-pcr-sampler.js';
 import { deriveRestOiBandEvidence } from './dashboard-oi-rest-band-evidence.js';
 import { tickTelegramLadderShadow } from './telegram-ladder-shadow-host.js';
@@ -67,6 +68,23 @@ export async function reconcileDashboardLiveRuntime(force=false){
    },onCycle:(date,cycleAt,results)=>{
     const payload=dashboardWatchOiCycle(date,cycleAt,results);
     if(payload)void dbSaveResearchMemoryOnce(payload).catch(()=>console.warn('[DASHBOARD_WATCH_OI] SAVE_FAILED'));
+    // Research-only comparison uses the existing cycle and socket cache. Isolate failures from recording.
+    try{
+     const now=Date.now();
+     if(attempt===generation&&state==='OPEN'&&pcrSampler){
+      const rows=[];
+      for(const symbol of ['NIFTY','SENSEX','BANKNIFTY']){
+       const options=inventory.entries.filter(e=>e.role==='OPTION'&&e.symbol===symbol);
+       const expiry=[...new Set(options.map(e=>e.expiry).filter((v):v is string=>!!v))].sort()[0];
+       if(!expiry)continue;
+       const rest=pcrSampler.readAudit(symbol,expiry);
+       if(!rest||rest.cycleStartedAt!==cycleAt){rows.push({identity:symbol+'|'+expiry,state:'REST_AUDIT_UNAVAILABLE'});continue;}
+       const group=options.filter(e=>e.expiry===expiry);
+       rows.push({identity:symbol+'|'+expiry,restCheckedAt:rest.checkedAt,...comparePcrCaches(group,rest.rows,target.readPcrResearchRows(symbol,expiry),date,now)});
+      }
+      console.info('[DASHBOARD_PCR_HYBRID_RESEARCH] '+JSON.stringify({checkedAt:new Date(now).toISOString(),cycleAt,researchOnly:true,extraBrokerRequests:0,rows}));
+     }
+    }catch{/* Research telemetry must never interfere with the live recorder. */}
    },onDiagnostic:summary=>console.info('[DASHBOARD_LIVE_PCR_DIAGNOSTIC] '+JSON.stringify(summary))
   });
   socket.connect();

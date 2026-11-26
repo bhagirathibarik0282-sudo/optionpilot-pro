@@ -1,7 +1,7 @@
 name: Recorded dashboard and multi-day replay
 on:
   pull_request:
-    paths: ['event-*.ts', 'shared-event-memory-view.ts', 'market-book-view.ts', 'test/event-*.test.ts', 'recorded-*.ts', 'pr799-recorder-preview.ts', 'business-dashboard-v1-view.ts', 'scripts/optionpilot-service-supervisor.mjs', 'test/recorded-*.test.ts', 'test/runtime-supervisor.test.ts', '.github/workflows/recorded-dashboard-replay-ci.yml']
+    paths: ['futures-vwap-acceptance.ts', 'h1-recorder-adapter.ts', 'h1-runtime-bridge.ts', 'storage-v3-adapter.ts', 'test/futures-vwap-acceptance.test.ts', 'event-*.ts', 'shared-event-memory-view.ts', 'market-book-view.ts', 'test/event-*.test.ts', 'recorded-*.ts', 'pr799-recorder-preview.ts', 'business-dashboard-v1-view.ts', 'scripts/optionpilot-service-supervisor.mjs', 'test/recorded-*.test.ts', 'test/runtime-supervisor.test.ts', '.github/workflows/recorded-dashboard-replay-ci.yml']
 permissions:
   contents: read
 jobs:
@@ -14,5 +14,5 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: NODE_ENV=test node --import tsx --test test/canonical-fii-dii-production-readiness.test.ts test/event-participation-context.test.ts test/event-buyer-eod-adapter.test.ts test/event-buyer-batch-audit.test.ts test/event-buyer-hypothesis.test.ts test/shared-event-memory-view.test.ts test/recorded-dashboard-replay-clock.test.ts test/dashboard-watch-oi.test.ts test/live-three-index-pcr.test.ts test/premium-recorded-workspace.test.ts test/recorded-premium-session.test.ts test/recorded-playback.test.ts test/recorded-dashboard-http.test.ts test/recorded-dashboard-view.test.ts test/recorded-sixty-point-finder.test.ts test/recorded-replay-view.test.ts test/runtime-supervisor.test.ts test/runtime-operating-window.test.ts test/runtime-io-tracker.test.ts
+      - run: NODE_ENV=test node --import tsx --test test/futures-vwap-acceptance.test.ts test/h1-runtime-bridge.test.ts test/canonical-fii-dii-production-readiness.test.ts test/event-participation-context.test.ts test/event-buyer-eod-adapter.test.ts test/event-buyer-batch-audit.test.ts test/event-buyer-hypothesis.test.ts test/shared-event-memory-view.test.ts test/recorded-dashboard-replay-clock.test.ts test/dashboard-watch-oi.test.ts test/live-three-index-pcr.test.ts test/premium-recorded-workspace.test.ts test/recorded-premium-session.test.ts test/recorded-playback.test.ts test/recorded-dashboard-http.test.ts test/recorded-dashboard-view.test.ts test/recorded-sixty-point-finder.test.ts test/recorded-replay-view.test.ts test/runtime-supervisor.test.ts test/runtime-operating-window.test.ts test/runtime-io-tracker.test.ts
       - run: node scripts/optionpilot-guardrail-check.mjs

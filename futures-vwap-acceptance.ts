@@ -1,3 +1,5 @@
+import { indianTradingDateAt, isIndianEquityMarketOpenAt } from './market-session-calendar.js';
+
 export type DirectionalOptionSide = "CE" | "PE";
 
 export interface FuturesVwapObservation {
@@ -33,6 +35,23 @@ export interface FuturesVwapAcceptanceResult {
 
 function positiveFinite(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/** Recorder projection of the existing, exact near-futures quote. */
+export function recordedNearFuturesVwap(
+  value: number | null | undefined,
+  source: string | null | undefined,
+  future: { tradingsymbol?: string | null; label?: string; ltp?: number | null; quoteTimestamp?: string | null } | undefined,
+  receivedAt: string,
+): number | null {
+  if (future?.label !== "Near" || !future.tradingsymbol || source !== `${future.tradingsymbol} traded VWAP`
+      || !positiveFinite(value) || !positiveFinite(future.ltp)
+      || !future.quoteTimestamp || !/(?:Z|[+-]\d{2}:\d{2})$/.test(future.quoteTimestamp)) return null;
+  const received = new Date(receivedAt), quote = new Date(future.quoteTimestamp);
+  const age = received.getTime() - quote.getTime();
+  if (!Number.isFinite(age) || age < 0 || age > 30_000 || !isIndianEquityMarketOpenAt(quote)
+      || indianTradingDateAt(quote) !== indianTradingDateAt(received)) return null;
+  return value;
 }
 
 function directionalHold(side: DirectionalOptionSide, value: number, reference: number): boolean {

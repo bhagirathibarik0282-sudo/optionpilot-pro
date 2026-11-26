@@ -132,6 +132,7 @@ function normalizeFuture(raw: unknown): any | null {
   if (label !== "Near" && label !== "Next" && label !== "Far") return null;
   return {
     label,
+    tradingsymbol: text(raw.tradingsymbol),
     expiry: text(raw.expiry) ?? "",
     ltp: finiteOrMissing(raw.ltp),
     oi: nullableFinite(raw.oi),
@@ -160,6 +161,7 @@ function normalizeIndex(raw: UnknownRecord): H1IndexInput | null {
     spot,
     atmStrike,
     vwap: finiteOrMissing(raw.vwap),
+    vwapSource: validTimestamp(raw.timestamp) ? text(raw.vwapSource) : null,
     pdh: finiteOrMissing(raw.pdh),
     pdl: finiteOrMissing(raw.pdl),
     pdcClose: finiteOrMissing(raw.pdcClose),

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateFuturesVwapAcceptance } from "../futures-vwap-acceptance.js";
+import { evaluateFuturesVwapAcceptance, recordedNearFuturesVwap } from "../futures-vwap-acceptance.js";
 
 const bullish = {
   side: "CE" as const, spot: 25030, dailyPivot: 25000, futuresLtp: 25140, futuresVwap: 25100,
@@ -37,4 +37,17 @@ test("does not let positive futures basis fake spot acceptance", () => {
 test("requires the configured number of valid observations", () => {
   const result = evaluateFuturesVwapAcceptance({ ...bullish, recentObservations: [{ spot: 25010, futuresLtp: 25110 }] });
   assert.equal(result.priceStructureAccepted, false);
+});
+
+test("archives only the named near futures VWAP from a fresh, in-session quote", () => {
+  const source = "NIFTY26NOVFUT traded VWAP";
+  const receivedAt = "2026-11-26T04:10:25.000Z";
+  const near = { label: "Near", tradingsymbol: "NIFTY26NOVFUT", ltp: 25140, quoteTimestamp: "2026-11-26T04:10:00.000Z" };
+  assert.equal(recordedNearFuturesVwap(25100, source, near, receivedAt), 25100);
+  assert.equal(recordedNearFuturesVwap(25100, source, { ...near, label: "Next" }, receivedAt), null);
+  assert.equal(recordedNearFuturesVwap(25100, "NIFTY27JANFUT traded VWAP", near, receivedAt), null);
+  assert.equal(recordedNearFuturesVwap(25100, source, { ...near, quoteTimestamp: "2026-11-26T04:09:54.999Z" }, receivedAt), null);
+  assert.equal(recordedNearFuturesVwap(25100, source, { ...near, quoteTimestamp: "2026-11-26T04:10:26.000Z" }, receivedAt), null);
+  assert.equal(recordedNearFuturesVwap(25100, source, { ...near, quoteTimestamp: "2026-11-25T04:10:00.000Z" }, receivedAt), null);
+  assert.equal(recordedNearFuturesVwap(0, source, near, receivedAt), null);
 });

@@ -4,6 +4,7 @@ on:
     paths:
       - 'scripts/pr799-browser-ui-smoke.ts'
       - 'business-dashboard-v1-view.ts'
+      - 'institutional-reference.ts'
       - 'market-book-view.ts'
       - 'dashboard-workspace-view.ts'
       - '.github/workflows/pr799-browser-ui-ci.yml'

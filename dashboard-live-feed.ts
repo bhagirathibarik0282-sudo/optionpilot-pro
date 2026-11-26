@@ -64,6 +64,13 @@ export class DashboardLiveStore {
    this.ticks.set(p.instrumentToken,{packet:p,price:price!==null&&price>0?price:null,oi:oi!==null&&oi>=0?oi:null,volume:volume!==null&&volume>=0?volume:null,bid:bid!==null&&bid>0?bid:null,ask:ask!==null&&ask>0?ask:null,close:number(p.close),observedAt:p.exchangeTimestamp||null,receivedAt,mode:p.mode});this.sequence++;
   }
  }
+ /** Read only exact option cache evidence for the research comparator. */
+ readPcrResearchRows(symbol:string,expiry:string){
+  return this.inventory.entries.filter(e=>e.role==='OPTION'&&e.symbol===symbol&&e.expiry===expiry).map(e=>{
+   const t=this.ticks.get(e.token);
+   return {token:e.token,responseToken:t?.packet.instrumentToken??null,symbol:e.symbol,expiry:e.expiry,strike:e.strike,side:e.side,oi:t?.oi??null,sourceAt:t?.observedAt??null,batchReceivedAt:t?.receivedAt??null};
+  });
+ }
  revision(){return this.sequence;}
  /** Exact packet adapter reused for seller research; never infers depth from LTP. */
  sellerLeg(token:number,quantity:number){

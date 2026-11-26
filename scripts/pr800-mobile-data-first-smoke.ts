@@ -35,6 +35,13 @@ try{
    const response=await page.goto(base,{waitUntil:'domcontentloaded',timeout:20000});
    assert.equal(response?.status(),200);
    await page.locator('#rd-shell').waitFor({state:'visible',timeout:15000});
+   await page.locator('#ip-reference').waitFor({state:'visible',timeout:15000});
+   assert.equal(await page.locator('#ip-kpis .ip-tile').count(),5);
+   assert.equal(await page.locator('#ip-reference .ip-row .ip-panel').count(),3);
+   assert.equal(await page.locator('#ip-reference').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(244, 247, 250)');
+   await page.locator('#ip-rank').click();await page.locator('#ip-strike').click();assert.equal(await page.locator('#ip-strike').getAttribute('aria-pressed'),'true');
+   await page.screenshot({path:'pr800-mobile-ui-artifacts/'+name+'-institutional-reference.png',fullPage:false,timeout:15000});
+   await page.locator('#ip-details').click();
    await page.locator('#rd-source-tabs [data-rd-source="RECORDED"]').click();
    assert.equal(await page.locator('#op-one-stop').getAttribute('data-os-source'),'RECORDED');
    await page.locator('#rd-source-tabs [data-rd-source="LIVE"]').click();

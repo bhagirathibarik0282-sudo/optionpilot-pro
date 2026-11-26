@@ -257,8 +257,10 @@ test('four focus chapters are reversible display filters over the same seven evi
  assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
 });
 
-test('read chapter is opt-in; All always resets to the known-good Fit page',()=>{
+test('desktop defaults to full width; read chapter is opt-in and All restores width',()=>{
  const h=harness(),tools=h.nodes.get('rd-fit-tools');
+ assert.equal(h.nodes.get('rd-viewport').dataset.scale,'1');
+ assert.equal(h.nodes.get('rd-viewport').style.overflow,'auto');
  const send=(selector:string,value:string)=>tools.onclick({target:{closest:(query:string)=>query===selector?{dataset:selector.includes('rd-hub')?{rdHub:value}:{rdFit:value}}:null}});
  send('#rd-hub-tabs [data-rd-hub]','MARKET');
  send('[data-rd-fit]','READ');
@@ -267,6 +269,7 @@ test('read chapter is opt-in; All always resets to the known-good Fit page',()=>
  send('#rd-hub-tabs [data-rd-hub]','ALL');
  assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false');
  assert.equal(h.nodes.get('rd-page').dataset.rdHub,'ALL');
+ assert.equal(h.nodes.get('rd-viewport').style.overflow,'auto');
  send('[data-rd-fit]','READ');
  assert.equal(h.nodes.get('rd-page').dataset.rdRead,'false','All cannot enter readable chapter mode');
 });

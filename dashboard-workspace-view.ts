@@ -1,4 +1,7 @@
 import { SCREEN_OVERVIEW_CSS, installScreenOverview } from './screen-overview.js';
+import { installInstitutionalReference } from './institutional-reference.js';
+import { recordedOiRankFrame, deriveOiRankedLadder } from './oi-ranked-ladder.js';
+import { deriveOiStudioSnapshot } from './oi-wall-studio.js';
 import { REFERENCE_TERMINAL_CSS } from './reference-terminal-style.js';
 import { renderOneShotCard, ONE_SHOT_CSS, installOneShotLiveCard } from './one-shot-live-card.js';
 import { installPremiumWorkspace } from './premium-workspace-view.js';
@@ -418,15 +421,16 @@ export function installDashboardWorkspace(api:any){
   derivePcr:deriveLiveThreeIndexPcr,deriveRecordedPcr:typeof deriveRecordedThreeIndexPcr==='function'?deriveRecordedThreeIndexPcr:undefined,chooseIndex:(symbol:string)=>{api.chooseResearchIndex?.(symbol);atmSelected=symbol;$('op-atm-index').value=symbol;paintAtm(atmLast);}
  }):null;
  if(typeof installScreenOverview==='function')installScreenOverview();
+ const institutional=typeof installInstitutionalReference==='function'&&api.referenceReplay?installInstitutionalReference(api,{validEnvelope:freshEnvelope,validQuote:freshQuote,recordedRank:recordedOiRankFrame,deriveRank:deriveOiRankedLadder,liveRank:deriveOiStudioSnapshot}):null;
  // PR3: reuse the strict three-index full-PCR verifier; render from the existing stream only.
  const paintOne=(d:any)=>{
   if(!oneStatus||!oneRows)return;
   const connected=freshEnvelope(d);oneState=String(d?.connectionState||'');
   paintAtm(connected?d:null); // stale source revokes ATM and summary together
   const snap=d?.snapshot;
-  if(!connected){oneShot?.update(d);const closed=oneState==='MARKET_CLOSED';setText(oneStatus,closed?'MARKET CLOSED · Open recorded ladder for saved observations':'LIVE unavailable · '+String(d?.connectionState||'stale source'));
+  if(!connected){oneShot?.update(d);institutional?.updateLive(d);const closed=oneState==='MARKET_CLOSED';setText(oneStatus,closed?'MARKET CLOSED · Open recorded ladder for saved observations':'LIVE unavailable · '+String(d?.connectionState||'stale source'));
    setHtml(oneRows,closed?'<tr><td colspan="8">Market closed · saved observations are available through Open recorded ladder.</td></tr>':'<tr><td colspan="8">No fresh verified Kite snapshot · values withheld</td></tr>');oneLast=0;return;}
-  if(Date.now()-oneLast<500)return;oneLast=Date.now();oneShot?.update(d);
+  if(Date.now()-oneLast<500)return;oneLast=Date.now();oneShot?.update(d);institutional?.updateLive(d);
   const finite=(v:any)=>typeof v==='number'&&Number.isFinite(v);
   const verified=(q:any,role:string,symbol?:string,expiry?:string,side?:string,strike?:number)=>
    freshQuote(d,q,role,symbol,expiry,side,strike);
@@ -509,6 +513,6 @@ export function installDashboardWorkspace(api:any){
   }).join('');
   setHtml($('op-workspace-ticker'),tickerHtml);
  }) as EventListener);
- return {refreshSharedPremium(){premium?.refreshRecorded();},render(){if(active!==api.page())draw();researchScope();oneShot?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
+ return {refreshSharedPremium(){premium?.refreshRecorded();},render(){if(active!==api.page())draw();researchScope();oneShot?.refresh();institutional?.refresh();const on=api.page()===7;premium?.setVisible(on);if($('op-premium-workspace'))$('mb-page').hidden=on;premium?.refreshRecorded();}};
 }
 

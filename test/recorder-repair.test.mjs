@@ -30,13 +30,21 @@ test('invalid/missing source and identity cannot qualify',()=>{
  assert.equal(premiumRecordStatus({...leg,verdict:'PARTIAL'}),'DIAGNOSTIC_PARTIAL');
 });
 test('actual H1 writer keeps raw stale leg but changes only its option quality',async()=>{
- const options=[],chains=[];
+ const options=[],chains=[],markets=[];
  const c=vm.createContext({console,premiumRecordStatus,sourceQuoteAgeSeconds,
-  openingGapPercent:()=>null,dbInsert:async()=>{},dbUpsertMarketSnapshot1m:async()=>{},
+  openingGapPercent:()=>null,dbInsert:async()=>{},dbUpsertMarketSnapshot1m:async r=>markets.push(r),
   dbUpsertOptionSnapshot1m:async r=>options.push(r),dbUpsertChainState1m:async r=>chains.push(r),
- });vm.runInContext(moduleCode('h1-recorder-adapter.ts'),c);
+ });
+ vm.runInContext(moduleCode('market-session-calendar.ts'),c);
+ vm.runInContext(moduleCode('futures-vwap-acceptance.ts'),c);
+ vm.runInContext(moduleCode('h1-recorder-adapter.ts'),c);
  const captured=JSON.parse(readFileSync(new URL('./fixtures/replay-NIFTY.json',import.meta.url),'utf8')).canonical.at(-1).market;
  const market=structuredClone(captured);
+ const near=market.futuresContracts.find(future=>future.label==='Near');
+ assert.ok(near?.tradingsymbol);
+ near.quoteTimestamp=new Date(Date.parse(market.timestamp)-1000).toISOString();
+ market.vwapSource=near.tradingsymbol+' traded VWAP';
+ market.vwap=near.ltp;
  market.expiries=market.expiries.map(e=>({...e,expiryDate:new Date(e.expiryDate)}));
  const selected=market.expiries[0].ceStrikes.find(r=>r.isAtm)||market.expiries[0].ceStrikes[0];
  selected.quoteTimestamp='1970-01-01T00:00:00Z';const originalPrice=selected.lastPrice;
@@ -44,6 +52,7 @@ test('actual H1 writer keeps raw stale leg but changes only its option quality',
  const row=options.find(r=>r.strike===selected.strike&&r.optionType==='CE'&&r.expiry===selected.expiryDate);
  assert.ok(row);assert.equal(row.ltp,originalPrice);assert.equal(row.quoteTimestamp,selected.quoteTimestamp);
  assert.equal(row.validationStatus,'DIAGNOSTIC_OTHER_SESSION');assert.ok(chains.length>0);
+ assert.equal(markets[0]?.futureVwap,near.ltp);
 });
 test('actual live participation capture preserves all stocks/sectors without credentials',()=>{
  const p=participationMinute(raw,at);assert.ok(p);assert.equal(p.rows.length,16);

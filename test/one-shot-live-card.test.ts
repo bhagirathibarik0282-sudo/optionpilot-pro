@@ -320,6 +320,17 @@ test('closed market opens four recorded slots with exact saved prices and three 
  assert(h.el('os-expiry-clock').innerHTML.includes('3 calendar days as of 2026-10-19'));
 });
 
+test('off-hours server mode selects saved data without waiting for a live stream',()=>{
+ const h=harness();h.setSaved({...recordedSession(),recordedOnly:true});
+ h.send({connected:false,connectionState:'CONNECTING',snapshot:null});
+ assert.equal(h.el('op-one-stop').dataset.osSource,'RECORDED');
+ assert(h.el('os-dte-radar').innerHTML.includes('>121</b>'));
+ h.el('os-source').onchange({target:{value:'LIVE'}});
+ assert.equal(h.el('op-one-stop').dataset.osSource,'LIVE');
+ assert(!h.el('os-dte-radar').innerHTML.includes('>121</b>'));
+ h.el('os-source').onchange({target:{value:'AUTO'}});
+ assert.equal(h.el('op-one-stop').dataset.osSource,'RECORDED');
+});
 test('Live only refuses recorded substitution and changing back restores recorded panels',()=>{
  const h=harness();h.setSaved(recordedSession());h.send({connected:false,connectionState:'MARKET_CLOSED',snapshot:null});
  h.el('os-source').onchange({target:{value:'LIVE'}});

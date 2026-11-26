@@ -32,11 +32,27 @@ test('new replay endpoint preserves exact request and repairs full-PCR provenanc
 test('query failure reports missing storage rather than an empty successful session',async t=>{
  const url=await serve(t,{dates:async()=>({ok:false,dates:[],reason:'QUERY_FAILED'})});const r=await fetch(url+'/api/research/recorded-dashboard/dates');assert.equal(r.status,503);assert.equal((await r.json()).reason,'QUERY_FAILED');
 });
-test('archive concurrency is bounded; existing in-flight reads finish normally',async t=>{
- const releases:any[]=[];const url=await serve(t,{dates:()=>new Promise(resolve=>releases.push(()=>resolve({ok:true,dates:[]})))});
- const a=fetch(url+'/api/research/recorded-dashboard/dates'),b=fetch(url+'/api/research/recorded-dashboard/dates');
- while(releases.length<2)await new Promise(resolve=>setTimeout(resolve,5));
- assert.equal((await fetch(url+'/api/research/recorded-dashboard/dates')).status,429);releases.forEach(release=>release());assert.equal((await a).status,200);assert.equal((await b).status,200);
+test('date discovery survives two busy archive slots, coalesces aliases and caches successful results',async t=>{
+ const releases:(()=>void)[]=[];let dateReads=0;
+ const url=await serve(t,{
+  replay:(request:any)=>new Promise(resolve=>releases.push(()=>resolve({ok:true,request,market:[],options:[],chain:[],canonical:[]}))),
+  dates:async()=>{dateReads++;return {ok:true,dates:[{symbol:'NIFTY',tradeDate:'2026-10-30',markerCount:375}]};}
+ });
+ const path='/api/research/recorded-dashboard/replay?symbol=NIFTY&date=2026-10-30&from=09:15&to=10:15';
+ const a=fetch(url+path),b=fetch(url+path.replace('NIFTY','SENSEX'));
+ try{
+  while(releases.length<2)await new Promise(resolve=>setTimeout(resolve,5));
+  const busy=await fetch(url+path.replace('NIFTY','BANKNIFTY'));assert.equal(busy.status,429);assert.equal(busy.headers.get('retry-after'),'2');
+  const [first,second]=await Promise.all([fetch(url+'/api/research/recorded-dashboard/dates'),fetch(url+'/api/research/h1-theory-dates')]);
+  assert.equal(first.status,200);assert.equal(second.status,200);assert.deepEqual(await first.json(),await second.json());assert.equal(dateReads,1);
+  assert.equal((await fetch(url+'/api/research/recorded-dashboard/dates')).status,200);assert.equal(dateReads,1);
+ }finally{releases.forEach(release=>release());await Promise.all([a,b]);}
+ assert.equal((await a).status,200);assert.equal((await b).status,200);
+});
+test('date discovery never caches a failed query',async t=>{
+ let reads=0;const url=await serve(t,{dates:async()=>++reads===1?{ok:false,dates:[],reason:'QUERY_FAILED'}:{ok:true,dates:[]}});
+ assert.equal((await fetch(url+'/api/research/recorded-dashboard/dates')).status,503);
+ assert.equal((await fetch(url+'/api/research/recorded-dashboard/dates')).status,200);assert.equal(reads,2);
 });
 test('standalone browser script parses and exposes the requested queue controls',()=>{
  const html=renderRecordedDashboard();for(const [,script] of html.matchAll(/<script>([\s\S]*?)<\/script>/g))assert.doesNotThrow(()=>new Function(script));assert.match(html,/id="ar-last3"/);assert.match(html,/id="ar-last5"/);assert.match(html,/id="ar-all"/);

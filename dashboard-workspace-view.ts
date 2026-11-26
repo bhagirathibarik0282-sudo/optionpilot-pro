@@ -124,7 +124,7 @@ body[data-op-workspace] #op-atm-modes button{font-size:12px;min-height:39px;padd
  #op-one-stop tbody tr>th{grid-column:1/-1;border:0;padding:3px 4px;font-size:14px;color:#bcfff0}
  #op-one-stop tbody tr>td{min-width:0;border:0;padding:4px 3px;font-size:13px;line-height:1.3;overflow-wrap:anywhere}
  #op-one-stop tbody tr>td:before{content:attr(data-metric);display:block;font-size:10px;color:#9ed5da;font-weight:700}
- #op-one-stop tbody tr>td:not([data-metric]){grid-column:1/-1}
+ #op-one-stop tbody tr>td:not([data-metric]):where(:not(#mb-live-watch *)){grid-column:1/-1}
  #market-book #op-one-stop .op-one-scroll :is(th,td){white-space:normal;overflow-wrap:anywhere}
  #market-book #op-one-stop .op-one-scroll td[colspan]{font-family:system-ui,sans-serif;max-width:100%}
  #op-summary-panel,.op-one-scroll{min-width:0;max-width:100%}

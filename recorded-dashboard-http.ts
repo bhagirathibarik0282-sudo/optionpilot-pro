@@ -27,6 +27,17 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
  const quoteHistory=dependencies.quoteHistory||((date:string)=>readBackgroundQuoteHistory(date,dbQuerySafe));
  const memory=dependencies.memory||getIntradayObservationMemory,cash=dependencies.cash||runFiiDiiProductionReadinessHttp;
  let active=0;
+ // One shared, short-lived successful date index; independent of replay slots.
+ let dateCache:{value:any;expires:number}|undefined;
+ let dateFlight:Promise<any>|undefined;
+ function readDateIndex(){
+  if(dateCache&&Date.now()<dateCache.expires)return Promise.resolve(dateCache.value);
+  if(!dateFlight){dateFlight=Promise.resolve().then(()=>dates()).then(result=>{
+   if(result.ok)dateCache={value:result,expires:Date.now()+15000};
+   return result;
+  }).finally(()=>{dateFlight=undefined;});}
+  return dateFlight;
+ }
  return async function handle(request:any,response:any,status:any) {
   const url=new URL(request.url||'/','http://localhost'),path=url.pathname;
   const shadowPage=path==='/banknifty-shadow';
@@ -55,6 +66,10 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
   if(unified)return send(200,renderBusinessDashboardV1Html(null,true),true);
   if(view)return send(200,renderRecordedDashboard(status?.shouldRun===false),true);
   if(ragView)return send(200,renderRagEvidencePage(),true);
+  if(dateRoute||unifiedRoute&&path==='/api/research/h1-theory-dates'){
+   try{const result=await readDateIndex();return send(result.ok?200:503,result);}
+   catch{return send(503,{ok:false,error:'RECORDED_STORAGE_UNAVAILABLE'});}
+  }
   if(active>=2){response.setHeader('Retry-After','2');return send(429,{ok:false,error:'ARCHIVE_BUSY_RETRY'});}
   // SELECT-only independent journal; no data derives from market snapshots or scaled 2-lot P&L.
 
@@ -72,7 +87,6 @@ export function createRecordedDashboardHandler(dependencies:any={}) {
     return send(result.ok?200:503,report);
    }
    if(timelineRoute){const result=await timeline(url.searchParams.get('date'));return send(result.ok?200:503,result);}
-   if(dateRoute||unifiedRoute&&path==='/api/research/h1-theory-dates'){const result=await dates();return send(result.ok?200:503,result);}
    if(unifiedRoute&&path==='/api/research/fii-dii/production-readiness'){const result=await cash();return send(result.status,result.body);}
    if(unifiedRoute&&path!=='/api/research/h1-replay'){
     const date=url.searchParams.get('date')||'',symbol=url.searchParams.get('symbol');

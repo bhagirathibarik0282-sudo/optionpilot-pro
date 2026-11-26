@@ -138,3 +138,15 @@ test('natural page scrolling does not attempt to reposition a nested ranked ladd
  assert.equal(newScroll.scrollTop,0);
  assert.equal(repositioned,false);
 });
+
+test('rank pairing uses independent CE and PE ranks, preserves ties and never invents cross-strike PCR',()=>{
+ const m=deriveOiRankedLadder(snapshot(3,[150,250,300]),snapshot(0),{mode:'RECORDED',minutes:3});
+ const html=renderOiRankedLadder(m,{band:3}),rank=html.split('<template data-oir-rank-template>')[1].split('</template>')[0];
+ const first=rank.match(/<tr data-oir-row="rank-1-0"[\s\S]*?<\/tr>/)![0];
+ assert.match(first,/CE 24,050/);assert.match(first,/PE 23,950/);assert.doesNotMatch(first,/Strike PE OI ÷ CE OI/);
+ const tied=deriveOiRankedLadder(snapshot(3,[200,200,0]),snapshot(0),{mode:'RECORDED',minutes:3});
+ const t=renderOiRankedLadder(tied,{band:3}).split('<template data-oir-rank-template>')[1];
+ assert.match(t,/rank-1-1/);assert.match(t,/Shared rank/);assert.match(t,/data-oir-rank-row="2"><td><span class="oir-muted">CE unavailable/);
+ const add=renderOiRankedLadder(m,{focus:'ADD'}).split('<template data-oir-rank-template>')[1];assert.match(add,/OI addition/);assert.match(add,/rank-1-0/);
+ const missing=renderOiRankedLadder(deriveOiRankedLadder(snapshot(3),null,{mode:'RECORDED'}),{focus:'ADD'}).split('<template data-oir-rank-template>')[1];assert.match(missing,/No qualifying ranks/);
+});

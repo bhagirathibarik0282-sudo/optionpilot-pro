@@ -174,7 +174,7 @@ export class DashboardPcrSampler {
  private lastDiagnostic='';private lastDiagnosticAt=0;
  private auditRows=new Map<string,Array<{symbol:string|undefined;expiry:string|undefined;strike:number|undefined;side:string|undefined;token:number;responseToken:number|null;key:string;oi:number|null;sourceAt:string|null;batchReceivedAt:string|null}>>();
  private busy=false;private due=0;private revision=0;private cycleNumber=0;private results=new Map<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string;batchesRequested:number;batchesCompleted:number}>();
- constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;nearestPriority?:boolean;readSpot?(symbol:string):any;onDiagnostic?(summary:any):void;onCycle?(date:string,cycleAt:string,results:ReadonlyMap<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string}>):void}){}
+ constructor(readonly inventory:LiveInventory,private deps:{now():number;active():boolean;fetchQuotes(keys:string[]):Promise<Record<string,any>>;wait(ms:number):Promise<void>;nearestPriority?:boolean;readSpot?(symbol:string):any;onExpiryComplete?(identity:string,cycleAt:string,checkedAt:number):void;onDiagnostic?(summary:any):void;onCycle?(date:string,cycleAt:string,results:ReadonlyMap<string,ReturnType<typeof measurePcrSnapshot>&{fetchState:string}>):void}){}
  async tick(){
   const now=this.deps.now();if(this.busy||now<this.due||!this.deps.active()||day(now)!==this.inventory.date)return;
   this.busy=true;this.due=now+PCR_REFRESH_MS;
@@ -205,6 +205,7 @@ export class DashboardPcrSampler {
     batchesCompleted++;
     for(const [group,last] of lastBatch)if(last===i){
      completedAt.set(group,this.deps.now());
+     try{this.deps.onExpiryComplete?.(group,new Date(now).toISOString(),completedAt.get(group)!);}catch{/* Research observer cannot interrupt quote collection. */}
      try{completedSpot.set(group,this.deps.readSpot?.(group.split('|')[0]));}catch{/* Band stays unavailable without matching spot. */}
     }
    }

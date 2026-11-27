@@ -3,10 +3,25 @@ import {standardIndexObservationClose} from './index-observation-session.js';
 /** Read-only playback of existing recorder rows. No broker requests or persistence. */
 export function scopeRecordedReplay(state:any, cursor:any) {
  const kinds=['market','options','chain'], symbols=['NIFTY','SENSEX','BANKNIFTY'];
- const valid=(r:any)=>r.truth_verdict==='TRUE'&&Number.isFinite(Date.parse(r.minute_bucket))&&new Date(Date.parse(r.minute_bucket)+19800000).toISOString().slice(0,10)===state.date;
- const timeline=[...new Set<string>(symbols.flatMap(s=>kinds.flatMap(k=>(state.current?.[s]?.[k]||[]).filter((r:any)=>r.symbol===s&&valid(r)).map((r:any)=>r.minute_bucket))))].sort((a,b)=>Date.parse(a)-Date.parse(b));
- const at=timeline.includes(cursor)?cursor:timeline[0]||null, current:any={};
- for(const s of symbols){current[s]={};for(const k of kinds)current[s][k]=(state.current?.[s]?.[k]||[]).filter((r:any)=>r.symbol===s&&valid(r)&&at&&Date.parse(r.minute_bucket)<=Date.parse(at));}
+ // All contracts in a saved minute share the same bucket timestamp.
+ const clocks=new Map<string,{ms:number;date:string|null}>();
+ const clock=(value:string)=>{
+  let parsed=clocks.get(value);
+  if(!parsed){
+   const ms=Date.parse(value);
+   parsed={ms,date:Number.isFinite(ms)?new Date(ms+19800000).toISOString().slice(0,10):null};
+   clocks.set(value,parsed);
+  }
+  return parsed;
+ };
+ const valid=(r:any)=>r.truth_verdict==='TRUE'&&Number.isFinite(clock(r.minute_bucket).ms)&&clock(r.minute_bucket).date===state.date;
+ const buckets=new Set<string>();
+ for(const s of symbols)for(const k of kinds)for(const r of state.current?.[s]?.[k]||[]){
+  if(r.symbol===s&&valid(r))buckets.add(r.minute_bucket);
+ }
+ const timeline=[...buckets].sort((a,b)=>clock(a).ms-clock(b).ms);
+ const at=buckets.has(cursor)?cursor:timeline[0]||null,cutoff=at?clock(at).ms:NaN,current:any={};
+ for(const s of symbols){current[s]={};for(const k of kinds)current[s][k]=(state.current?.[s]?.[k]||[]).filter((r:any)=>r.symbol===s&&valid(r)&&clock(r.minute_bucket).ms<=cutoff);}
  // Only prior sessions can supply reference levels. Never pass same-day future rows in history.
  const history:any={};for(const s of symbols)history[s]=[state.baseline?.[s]||{},...(state.history?.[s]||[])].map((h:any)=>Object.fromEntries(kinds.map(k=>[k,(h[k]||[]).filter((r:any)=>r.truth_verdict==='TRUE'&&r.symbol===s&&Number.isFinite(Date.parse(r.minute_bucket))&&new Date(Date.parse(r.minute_bucket)+19800000).toISOString().slice(0,10)<state.date)])));
  return {timeline,at,current,history};
@@ -114,7 +129,7 @@ export function installRecordedReplay(api:any){
   const projected=strict?api.projectReplay(state,frame):null;
   const scoped=strict?{...rawScoped,current:projected.current,history:projected.history,at:projected.replay.at}:rawScoped;
   lastPublished={...frame,...scoped,playing:strict?projected.replay.playing:playing};for(const listener of listeners)listener(lastPublished);
-  if(embeddedActive&&!root.open)return;
+  if(!root.open)return;
   // Selector lists contain identities only; values/levels are always derived from scoped rows.
   const source=(state.current?.[symbol]?.options||[]).filter((r:any)=>r.truth_verdict==='TRUE'&&r.symbol===symbol&&Number.isFinite(Date.parse(r.minute_bucket))&&new Date(Date.parse(r.minute_bucket)+19800000).toISOString().slice(0,10)===state.date),ex=[...new Set<string>(source.map((r:any)=>String(r.expiry).slice(0,10)))].sort();
   if(!ex.includes(expiry))expiry=ex[0]||'';const strikes=[...new Set<number>(source.filter((r:any)=>String(r.expiry).slice(0,10)===expiry).map((r:any)=>Number(r.strike)).filter((v:number)=>Number.isFinite(v)&&v>0))].sort((a,b)=>a-b);if(!strikes.includes(strike!)){const spot=scoped.current[symbol].market.filter((r:any)=>r.spot_ltp!==null&&Number.isFinite(Number(r.spot_ltp))).sort((a:any,b:any)=>Date.parse(a.minute_bucket)-Date.parse(b.minute_bucket)).at(-1)?.spot_ltp;strike=spot===undefined?strikes[0]:strikes.reduce((best,k)=>Math.abs(k-Number(spot))<Math.abs(best-Number(spot))?k:best,strikes[0]);}

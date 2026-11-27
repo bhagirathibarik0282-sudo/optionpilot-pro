@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { installInstitutionalReference } from '../institutional-reference.js';
 import { renderRecordedDashboard } from '../recorded-dashboard-view.js';
 
 async function until(check:()=>boolean){for(let i=0;i<50;i++){if(check())return;await new Promise(resolve=>setImmediate(resolve));}throw new Error('VIEW_WAIT_TIMEOUT');}
@@ -136,4 +137,56 @@ test('off-hours as-of mode shares row availability cutoff and retains retrospect
  assert.match(n('ar-metrics').innerHTML,/23,100/);
  assert.equal(h.events.filter(e=>e.type==='optionpilot:rag-replay-clock').at(-1).detail.active,false);
  assert.equal(h.requests.length,calls);
+});
+
+test('institutional replay keeps the selected expiry pinned across missing buckets',()=>{
+ const elements=new Map<string,any>();
+ const createElement=()=>({
+  dataset:{},value:'',innerHTML:'',append(){},appendChild(){},setAttribute(){},querySelectorAll(){return [];},
+ });
+ const getElementById=(id:string)=>{
+  if(!elements.has(id))elements.set(id,createElement());
+  return elements.get(id);
+ };
+ const date='2026-11-26',nearest='2026-12-01',later='2026-12-08';
+ const timeline=['03:45','03:46','03:47','03:48'].map(time=>date+'T'+time+':00Z');
+ const market=timeline.slice(0,3).map((at,index)=>({
+  symbol:'NIFTY',truth_verdict:'TRUE',minute_bucket:at,created_at:at,
+  truth_marker_created_at:at,snapshot_id:'snapshot-'+index,spot_ltp:26000,
+ }));
+ const chain=[
+  {...market[0],expiry:nearest,full_chain_oi_pcr:0.8},
+  {...market[1],expiry:nearest,full_chain_oi_pcr:0.9},
+  {...market[1],expiry:later,full_chain_oi_pcr:1.3},
+  {...market[2],expiry:nearest,full_chain_oi_pcr:1.01},
+  {...market[2],expiry:later+'T00:00:00.000Z',full_chain_oi_pcr:1.52},
+ ];
+ let publish:(frame:any)=>void=()=>{};
+ const api={
+  getState:()=>({date,recordedDates:[date],recordedOnly:true,current:{NIFTY:{market,chain}}}),
+  referenceReplay:{
+   subscribe(fn:(frame:any)=>void){publish=fn;fn({date,timeline});},
+   setEmbeddedActive(){},
+   step(){publish({date,timeline,at:timeline[1],index:1});},
+  },
+ };
+ const install=vm.runInNewContext('('+installInstitutionalReference.toString()+')',{
+  document:{createElement,getElementById},__name:(fn:any)=>fn,
+ });
+ install(api,{recordedRank(){return {};},deriveRank(){return {rows:[]};}});
+ const select=getElementById('ip-expiry-select'),kpis=getElementById('ip-kpis');
+ assert.match(kpis.innerHTML,/1\.010/);
+ select.value=later;
+ select.onchange();
+ assert.match(kpis.innerHTML,/1\.520/);
+ getElementById('ip-prev').onclick();
+ assert.equal(select.value,later);
+ assert.match(select.innerHTML,/2026-12-08 · no row at cursor/);
+ assert.doesNotMatch(kpis.innerHTML,/1\.520|0\.800/);
+ select.value='';
+ select.onchange();
+ assert.match(kpis.innerHTML,/0\.800/);
+ assert.doesNotMatch(select.innerHTML,/2026-12-08/);
+ getElementById('ip-live').onclick();
+ assert.equal(getElementById('ip-recorded-expiry').hidden,true);
 });

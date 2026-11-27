@@ -139,7 +139,7 @@ test('off-hours as-of mode shares row availability cutoff and retains retrospect
  assert.equal(h.requests.length,calls);
 });
 
-test('institutional replay keeps the selected expiry pinned across missing buckets',()=>{
+test('institutional dashboard shows loaded windows and keeps the selected expiry pinned in replay',()=>{
  const elements=new Map<string,any>();
  const createElement=()=>({
   dataset:{},value:'',innerHTML:'',append(){},appendChild(){},setAttribute(){},querySelectorAll(){return [];},
@@ -162,8 +162,10 @@ test('institutional replay keeps the selected expiry pinned across missing bucke
   {...market[2],expiry:later+'T00:00:00.000Z',full_chain_oi_pcr:1.52},
  ];
  let publish:(frame:any)=>void=()=>{};
+ let archiveLoading=false,selectedDate=date;
  const api={
-  getState:()=>({date,recordedDates:[date],recordedOnly:true,current:{NIFTY:{market,chain}}}),
+  getState:()=>({date:selectedDate,recordedDates:[date],recordedOnly:true,archiveLoading,current:{NIFTY:{market,chain}},
+   health:{NIFTY:{message:'Loading saved history 1/4 windows'}}}),
   referenceReplay:{
    subscribe(fn:(frame:any)=>void){publish=fn;fn({date,timeline});},
    setEmbeddedActive(){},
@@ -173,9 +175,24 @@ test('institutional replay keeps the selected expiry pinned across missing bucke
  const install=vm.runInNewContext('('+installInstitutionalReference.toString()+')',{
   document:{createElement,getElementById},__name:(fn:any)=>fn,
  });
- install(api,{recordedRank(){return {};},deriveRank(){return {rows:[]};}});
+ const view=install(api,{recordedRank(){return {};},deriveRank(){return {rows:[]};}});
  const select=getElementById('ip-expiry-select'),kpis=getElementById('ip-kpis');
  assert.match(kpis.innerHTML,/1\.010/);
+ archiveLoading=true;
+ view.refresh();
+ assert.match(kpis.innerHTML,/1\.010/);
+ assert.match(getElementById('ip-status').innerHTML,/LOADING HISTORY/);
+ assert.match(getElementById('ip-date-note').innerHTML,/1\/4 windows/);
+ assert.equal(getElementById('ip-prev').disabled,true);
+ assert.equal(select.disabled,false);
+ selectedDate='2026-11-25';
+ view.refresh();
+ assert.doesNotMatch(kpis.innerHTML,/1\.010/);
+ assert.equal(select.disabled,true);
+ selectedDate=date;
+ archiveLoading=false;
+ view.refresh();
+ assert.equal(getElementById('ip-prev').disabled,false);
  select.value=later;
  select.onchange();
  assert.match(kpis.innerHTML,/1\.520/);

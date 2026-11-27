@@ -108,6 +108,31 @@ async function rows<T extends Record<string, unknown>>(sql: string, params: unkn
   return result.rows;
 }
 
+// Replay requests share the five-connection application pool with recorder and live reads.
+export function limitH1ReplayReads(read: typeof rows): typeof rows {
+  const waiters: Array<() => void> = [];
+  let active = 0;
+
+  return async <T extends Record<string, unknown>>(sql: string, params: unknown[]): Promise<T[]> => {
+    if (active < 2) {
+      active++;
+    } else {
+      if (waiters.length >= 24) throw new Error("H1_REPLAY_READ_QUEUE_FULL");
+      await new Promise<void>(resolve => waiters.push(resolve));
+    }
+
+    try {
+      return await read<T>(sql, params);
+    } finally {
+      const next = waiters.shift();
+      if (next) next();
+      else active--;
+    }
+  };
+}
+
+const readReplayRows = limitH1ReplayReads(rows);
+
 export interface H1ReplayContinuity {
   cadenceMinutes: 1 | 3;
   expectedBuckets: number;
@@ -295,7 +320,7 @@ export async function runH1ReplayHttp(request: H1ReplayRequest, canonicalPcrOnly
     };
   }
 
-  return runH1ReplayRead(request, rows, canonicalPcrOnly);
+  return runH1ReplayRead(request, readReplayRows, canonicalPcrOnly);
 }
 
 /** Two different sessions of the same index share only their archive scans.
@@ -331,7 +356,7 @@ export async function runH1ReplayPairRead(requests:readonly [H1ReplayRequest,H1R
 
 export async function runH1ReplayPairHttp(requests:readonly [H1ReplayRequest,H1ReplayRequest]):Promise<[H1ReplayHttpResult,H1ReplayHttpResult]> {
   if(!dbIsConfigured())return Promise.all(requests.map(q=>runH1ReplayHttp(q))) as Promise<[H1ReplayHttpResult,H1ReplayHttpResult]>;
-  return runH1ReplayPairRead(requests,rows);
+  return runH1ReplayPairRead(requests,readReplayRows);
 }
 
 /** One truth-marker read per request, frozen for all three normalized tables.

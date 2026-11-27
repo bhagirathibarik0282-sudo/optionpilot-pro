@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildH1ReplayContinuity, buildH1ReplayMarkerGapEvidence, parseH1ReplayRequest, runH1ReplayRead, runH1ReplayPairRead } from "../h1-replay-http.js";
+import { buildH1ReplayContinuity, buildH1ReplayMarkerGapEvidence, limitH1ReplayReads, parseH1ReplayRequest, runH1ReplayRead, runH1ReplayPairRead } from "../h1-replay-http.js";
 
 test('raw canonical read avoids wide database sort and retains exact microsecond row order privately',async()=>{
  const request={symbol:'NIFTY',tradeDate:'2026-10-19',fromTime:'10:45',toTime:'10:45',scope:'FULL'} as const;
@@ -285,4 +285,37 @@ test('required raw gap read failure remains fail closed', async () => {
 test('only the explicit dashboard projection changes the canonical SQL; default research remains raw',async()=>{
  const request={symbol:'NIFTY',tradeDate:'2026-10-23',fromTime:'09:15',toTime:'09:15',scope:'CORE'} as const;
  for(const projected of [false,true]){const sqls:string[]=[];const r=await runH1ReplayRead(request,async(sql:string)=>{sqls.push(sql);return [] as any;},projected);assert.equal(r.ok,true);const canonical=sqls.find(s=>s.includes("kind = 'H1_CANONICAL_MARKET_ARCHIVE'"))!;assert.equal(canonical.includes('jsonb_array_elements'),projected);assert.equal(canonical.includes('AS MATERIALIZED'),projected);if(!projected)assert(canonical.includes("payload->'market' AS market"));}
+});
+
+test("replay SQL shares two slots and drains queued reads after a failure", async () => {
+  const started: string[] = [];
+  const finish = new Map<string, (error?: Error) => void>();
+  const read = limitH1ReplayReads(async (sql: string) => {
+    started.push(sql);
+    await new Promise<void>((resolve, reject) => {
+      finish.set(sql, error => error ? reject(error) : resolve());
+    });
+    return [];
+  });
+
+  const jobs = Array.from({ length: 26 }, (_, i) => read(String(i), []));
+  const failed = assert.rejects(jobs[0], /database busy/);
+  await assert.rejects(read("overflow", []), /H1_REPLAY_READ_QUEUE_FULL/);
+  assert.deepEqual(started, ["0", "1"]);
+  finish.get("0")!(new Error("database busy"));
+  await failed;
+  assert.deepEqual(started, ["0", "1", "2"]);
+
+  // Keeping query 1 active makes FIFO handoff and the two-query limit observable.
+  for (let i = 2; i < jobs.length; i++) {
+    assert.equal(started.length, i + 1);
+    assert.equal(started[i], String(i));
+    finish.get(String(i))!();
+    await jobs[i];
+  }
+  finish.get("1")!();
+  await jobs[1];
+  const recovered = read("recovered", []);
+  finish.get("recovered")!();
+  assert.deepEqual(await recovered, []);
 });

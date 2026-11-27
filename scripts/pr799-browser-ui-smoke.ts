@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
-import {mkdir} from 'node:fs/promises';
+import {mkdir,readFile} from 'node:fs/promises';
 import {chromium} from 'playwright';
 import {renderBusinessDashboardV1Html} from '../business-dashboard-v1-view.js';
 
@@ -47,7 +47,22 @@ try {
    assert.match(copiedLayout,/<style>.*#ip-reference/);
    assert.match(copiedLayout,/Institutional Analytics/);
    assert.doesNotMatch(copiedLayout,/<script|id="ip-copy-html"/i);
+   const [manualDownload]=await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button',{name:'Download HTML instead',exact:true}).click(),
+   ]);
+   assert.equal(manualDownload.suggestedFilename(),'OptionPilot_Dashboard_Layout.html');
+   assert.equal(await readFile(await manualDownload.path(),'utf8'),copiedLayout);
    await page.locator('#ip-copy-dialog').getByRole('button',{name:'Close'}).click();
+   const [directDownload]=await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button',{name:'Download HTML',exact:true}).click(),
+   ]);
+   assert.equal(directDownload.suggestedFilename(),'OptionPilot_Dashboard_Layout.html');
+   const downloadedLayout=await readFile(await directDownload.path(),'utf8');
+   assert.match(downloadedLayout,/^<!doctype html>.*Institutional Analytics/s);
+   assert.doesNotMatch(downloadedLayout,/<script|id="ip-download-html"/i);
+
    await page.locator('#ip-details').click();
    const watchEntry=page.getByRole('button',{name:'Watch · Live / Replay',exact:true});
    await watchEntry.click();

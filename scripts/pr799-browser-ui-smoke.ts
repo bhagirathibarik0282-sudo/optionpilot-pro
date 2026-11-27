@@ -34,6 +34,20 @@ try {
    await page.locator('#op-command-chapters [data-op-group]').first().waitFor({timeout:15000,state:'attached'});
    assert.equal(await page.locator('#op-command-chapters [data-op-group]').count(),6);
    assert.equal(await page.locator('#mb-chapter option').count(),6);
+   // Exercise the manual-copy fallback on both viewport sizes.
+   await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', {
+    configurable:true,
+    value:{writeText:async()=>{throw new Error('Clipboard permission denied');}},
+   }));
+   await page.getByRole('button',{name:'Copy dashboard HTML'}).click();
+   const htmlCode=page.getByRole('textbox',{name:'Dashboard HTML'});
+   await htmlCode.waitFor({state:'visible'});
+   const copiedLayout=await htmlCode.inputValue();
+   assert.match(copiedLayout,/^<!doctype html>/);
+   assert.match(copiedLayout,/<style>.*#ip-reference/);
+   assert.match(copiedLayout,/Institutional Analytics/);
+   assert.doesNotMatch(copiedLayout,/<script|id="ip-copy-html"/i);
+   await page.locator('#ip-copy-dialog').getByRole('button',{name:'Close'}).click();
    await page.locator('#ip-details').click();
    const watchEntry=page.getByRole('button',{name:'Watch · Live / Replay',exact:true});
    await watchEntry.click();

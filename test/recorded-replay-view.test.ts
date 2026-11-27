@@ -54,3 +54,17 @@ test('shared master controls and OI subscribers use the same storage-cutoff proj
  assert.doesNotMatch(h.nodes.get('rr-minute-table').innerHTML,/9\.877/);
  assert.equal(state.current.NIFTY.options.filter((r:any)=>r.ltp===87654).length,2);
 });
+
+test('closing the replay drawer defers its charts but still publishes exact frames',()=>{
+ const h=harness(),root=h.nodes.get('recorded-replay'),output=h.nodes.get('rr-output');
+ const timestamps:string[]=[];
+ h.instance.subscribe((frame:any)=>timestamps.push(frame.at));
+ root.open=false;
+ output.innerHTML='previous chart';
+ h.instance.seek(2);
+ assert.equal(output.innerHTML,'previous chart');
+ assert.equal(timestamps.at(-1),at(6));
+ root.open=true;
+ root.ontoggle();
+ assert.match(output.innerHTML,/23,006/);
+});

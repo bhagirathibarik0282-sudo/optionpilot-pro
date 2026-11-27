@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 import { canonicalBusinessRuntimeRegistry } from "../canonical-business-runtime-registry.js";
 import { buildBusinessDashboardV1 } from "../business-dashboard-v1.js";
 import { deriveObservationData, deriveRecordedVixPcrRows, renderBusinessDashboardV1Html } from "../business-dashboard-v1-view.js";
@@ -237,4 +238,39 @@ test("full-screen DATA DASHBOARD displays existing BANKNIFTY SHADOW worker statu
  assert.match(installer, /op-bnf-shadow-evidence/);
  assert.match(installer, /rd-bnf-shadow-evidence/);
  assert.equal((html.match(/\/api\/research\/dashboard-live\/bnf-shadow/g)||[]).length,1);
+});
+
+test("archive refresh skips closed raw tables and hidden terminal graphs", () => {
+  const html = renderBusinessDashboardV1Html({});
+  const start = html.indexOf("function detailedTerminalVisible()");
+  const end = html.indexOf("function renderRawArchive()", start);
+  assert.ok(start >= 0 && end > start);
+  const calls: string[] = [];
+  const legacy = { visible: false };
+  const raw = { open: false };
+  const exportButton = { disabled: true };
+  const elements: Record<string, unknown> = {
+    "observations-view": { classList: { contains: () => !legacy.visible } },
+    "annex-raw": raw,
+    export: exportButton,
+  };
+  const context = {
+    $: (id: string) => elements[id],
+    data: { NIFTY: { market: [{}] } },
+    renderAllIndexGraphs: () => calls.push("graphs"),
+    renderRawArchive: () => calls.push("raw"),
+    renderSessionSummary: () => calls.push("summary"),
+  };
+
+  const render = vm.runInNewContext(html.slice(start, end) + "\nrender", context);
+  render();
+  assert.deepEqual(calls.splice(0), ["summary"]);
+  assert.equal(exportButton.disabled, false);
+  raw.open = true;
+  render();
+  assert.deepEqual(calls.splice(0), ["raw", "summary"]);
+  raw.open = false;
+  legacy.visible = true;
+  render();
+  assert.deepEqual(calls, ["graphs", "summary"]);
 });

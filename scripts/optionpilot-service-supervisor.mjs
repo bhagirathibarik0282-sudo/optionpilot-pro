@@ -124,6 +124,21 @@ const server = http.createServer(async (request, response) => {
   }
   if (await controlPanel(request, response)) return;
   const path = new URL(request.url || '/', 'http://localhost').pathname;
+  // Isolated v5 display-only page. No archive data embedded, no runtime activation.
+  if (path === '/quant-v5' || path === '/quant-v5/') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return reply(response, 405, { error: 'METHOD_NOT_ALLOWED' });
+    try {
+      const html = readFileSync(new URL('../dashboard-v5-preview.html', import.meta.url), 'utf8');
+      response.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+      });
+      response.end(request.method === 'HEAD' ? undefined : html);
+    } catch { reply(response, 503, { error: 'V5_PREVIEW_UNAVAILABLE' }); }
+    return;
+  }
   if (path === '/ops/runtime-status') return reply(response, 200, status());
   if (path === '/ops/runtime-window') {
     if (request.method !== 'POST') return reply(response, 405, { error: 'POST_REQUIRED' });
